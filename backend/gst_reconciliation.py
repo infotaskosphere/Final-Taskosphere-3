@@ -1285,6 +1285,60 @@ async def save_trade_names_batch(body: TradeNamesBatchBody, current_user: User =
     return {"ok": True, "count": len(entries)}
 
 
+# ─── UPDATE SESSION METADATA ─────────────────────────────────────────────────
+
+class SessionUpdateBody(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    period:       Optional[str]          = None
+    client_id:    Optional[str]          = None
+    client_name:  Optional[str]          = None
+    client_gstin: Optional[str]          = None
+    company:      Optional[Dict[str,Any]]= None
+    portal_filename: Optional[str]       = None
+    books_filename:  Optional[str]       = None
+
+
+@router.patch("/history/{session_id}")
+async def update_session(session_id: str, body: SessionUpdateBody,
+                         current_user: User = Depends(get_current_user)):
+    """Update editable metadata on an existing reconciliation session.
+    Allowed fields: period, client_id, client_name, client_gstin, company,
+                    portal_filename, books_filename.
+    The full_result (invoice data) is never mutated here."""
+    doc = await db.gst_reconciliation_sessions.find_one(
+        {"id": session_id}, {"_id": 0, "created_by": 1}
+    )
+    if not doc:
+        raise HTTPException(404, "Session not found")
+
+    # If client_id provided and name/gstin are missing, auto-fill from client record
+    client_name  = body.client_name
+    client_gstin = body.client_gstin
+    if body.client_id and (not client_name or not client_gstin):
+        cdoc = await db.clients.find_one(
+            {"id": body.client_id}, {"_id": 0, "company_name": 1, "gstin": 1}
+        )
+        if cdoc:
+            client_name  = client_name  or cdoc.get("company_name", "")
+            client_gstin = client_gstin or cdoc.get("gstin", "")
+
+    updates: Dict[str, Any] = {"updated_at": _now(), "updated_by": current_user.id,
+                                "updated_by_name": getattr(current_user, "full_name", "")}
+    if body.period       is not None: updates["period"]           = body.period
+    if body.client_id    is not None: updates["client_id"]        = body.client_id
+    if client_name       is not None: updates["client_name"]      = client_name
+    if client_gstin      is not None: updates["client_gstin"]     = client_gstin
+    if body.company      is not None: updates["company"]          = body.company
+    if body.portal_filename is not None: updates["portal_filename"] = body.portal_filename
+    if body.books_filename  is not None: updates["books_filename"]  = body.books_filename
+
+    await db.gst_reconciliation_sessions.update_one({"id": session_id}, {"$set": updates})
+    await _log_audit("update_session", current_user,
+                     {"session_id": session_id, "fields": list(updates.keys())})
+    return {"ok": True, "session_id": session_id,
+            "client_name": client_name, "client_gstin": client_gstin}
+
+
 # ─── AUDIT LOG (NEW) ──────────────────────────────────────────────────────────
 
 @router.get("/audit-log")
@@ -1295,6 +1349,107 @@ async def get_audit_log(skip:int=Query(0,ge=0), limit:int=Query(50,ge=1,le=200),
     logs  = await db.gst_audit_logs.find({},{"_id":0}).sort("timestamp",-1).skip(skip).limit(limit).to_list(limit)
     total = await db.gst_audit_logs.count_documents({})
     return {"logs":logs,"total":total}
+
+
+# ─── CLIENTS SUMMARY ─────────────────────────────────────────────────────────
+
+@router.get("/clients-summary")
+async def clients_summary(current_user: User = Depends(get_current_user)):
+    """Return all unique clients that have reconciliation sessions, with aggregated stats.
+    Groups by (client_id OR client_name) so unnamed sessions still appear.
+    Returns: list of {client_id, client_name, client_gstin, session_count,
+                       last_period, last_date, total_matched, total_books_only,
+                       total_portal_only, total_mismatch}."""
+    sessions = await db.gst_reconciliation_sessions.find(
+        {"type": {"$exists": False}},
+        {"_id": 0, "id": 1, "client_id": 1, "client_name": 1, "client_gstin": 1,
+         "period": 1, "created_at": 1, "summary": 1, "company": 1}
+    ).sort("created_at", -1).to_list(5000)
+
+    groups: Dict[str, Dict[str, Any]] = {}
+    for s in sessions:
+        # Group key: prefer client_id, fall back to normalised name, then "unknown"
+        gkey = s.get("client_id") or (s.get("client_name") or "").strip().lower() or "unknown"
+        sm   = s.get("summary") or {}
+        if gkey not in groups:
+            co = s.get("company") or {}
+            groups[gkey] = {
+                "client_id":    s.get("client_id")   or "",
+                "client_name":  s.get("client_name") or co.get("name") or "Unknown Client",
+                "client_gstin": s.get("client_gstin") or co.get("gstin") or "",
+                "session_count":      0,
+                "last_period":        None,
+                "last_date":          None,
+                "total_matched":      0,
+                "total_books_only":   0,
+                "total_portal_only":  0,
+                "total_mismatch":     0,
+                "total_matched_value":0.0,
+                "sessions":           [],
+            }
+        g = groups[gkey]
+        g["session_count"]      += 1
+        g["total_matched"]      += sm.get("matched_count", 0) or 0
+        g["total_books_only"]   += sm.get("books_only_count", 0) or 0
+        g["total_portal_only"]  += sm.get("portal_only_count", 0) or 0
+        g["total_mismatch"]     += sm.get("mismatch_count", 0) or 0
+        g["total_matched_value"]+= sm.get("matched_value", 0.0) or 0.0
+        if g["last_date"] is None:
+            g["last_period"] = s.get("period") or ""
+            g["last_date"]   = s.get("created_at")
+        g["sessions"].append({
+            "id":           s["id"],
+            "period":       s.get("period") or "",
+            "created_at":   s.get("created_at"),
+            "matched":      sm.get("matched_count", 0) or 0,
+            "mismatch":     sm.get("mismatch_count", 0) or 0,
+            "portal_only":  sm.get("portal_only_count", 0) or 0,
+            "books_only":   sm.get("books_only_count", 0) or 0,
+            "matched_value":sm.get("matched_value", 0.0) or 0.0,
+            "books_only_value": sm.get("books_only_value", 0.0) or 0.0,
+        })
+
+    result = sorted(groups.values(), key=lambda x: x["last_date"] or "", reverse=True)
+    # Remove sessions list from top-level (available via history endpoint)
+    for g in result:
+        del g["sessions"]
+    return {"clients": result, "total": len(result)}
+
+
+@router.get("/client-sessions/{client_key}")
+async def client_sessions(client_key: str, current_user: User = Depends(get_current_user)):
+    """Return all sessions for a specific client (by client_id or normalised name key).
+    Sessions are returned sorted by created_at desc so newest month is first."""
+    import urllib.parse
+    decoded = urllib.parse.unquote(client_key)
+    # Try client_id first, then name match
+    query: Dict[str, Any] = {"type": {"$exists": False}}
+    # If the key looks like a UUID, match by client_id; otherwise match by name
+    import re as _re
+    if _re.match(r'^[0-9a-f-]{8,}$', decoded, _re.I):
+        query["client_id"] = decoded
+    else:
+        name_lower = decoded.lower()
+        all_sessions = await db.gst_reconciliation_sessions.find(
+            {"type": {"$exists": False}},
+            {"_id": 0, "id": 1, "client_id": 1, "client_name": 1, "client_gstin": 1,
+             "period": 1, "created_at": 1, "summary": 1, "company": 1,
+             "portal_filename": 1, "books_filename": 1, "created_by_name": 1}
+        ).sort("created_at", -1).to_list(500)
+        matched = [
+            s for s in all_sessions
+            if (s.get("client_name") or "").strip().lower() == name_lower
+            or (s.get("client_id") or "") == decoded
+        ]
+        return {"sessions": matched, "total": len(matched)}
+
+    docs = await db.gst_reconciliation_sessions.find(
+        query,
+        {"_id": 0, "id": 1, "client_id": 1, "client_name": 1, "client_gstin": 1,
+         "period": 1, "created_at": 1, "summary": 1, "company": 1,
+         "portal_filename": 1, "books_filename": 1, "created_by_name": 1}
+    ).sort("created_at", -1).to_list(500)
+    return {"sessions": docs, "total": len(docs)}
 
 
 # ─── DASHBOARD SUMMARY (NEW) ──────────────────────────────────────────────────
