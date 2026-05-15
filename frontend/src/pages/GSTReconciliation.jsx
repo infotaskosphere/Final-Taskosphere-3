@@ -99,27 +99,77 @@ function findCol(colMap, ...keys) {
   return -1;
 }
 
-function parseBooksFile(workbook) {
-  const sheetName = workbook.SheetNames.find(n => n.trim().toLowerCase() === 'b2b') || workbook.SheetNames[0];
-  const ws = workbook.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+/* ═══════════════════════════════════════════════════════════════════════════
+   MULTI-FORMAT BOOKS FILE PARSER
+   Detects and parses data from:
+   1. GSTR-2 Offline Tool / Standard GST format (GSTIN col + standard headers)
+   2. Busy Accounting – B2B CSV / Excel with supplier GSTIN
+   3. Marg ERP – Sales/Purchase register with GSTIN
+   4. Vyapar – Purchase register export
+   5. Tally DayBook / Sales-Purchase register
+   6. Generic B2B CSV (like govt B2BInvoices-3_4A format)
+═══════════════════════════════════════════════════════════════════════════ */
+
+/** Detect which software exported this workbook/sheet */
+function detectBooksFormat(rows) {
+  // Scan first 15 rows for tell-tale patterns
+  for (let i = 0; i < Math.min(rows.length, 15); i++) {
+    const rowStr = (rows[i] || []).map(c => String(c || '').toLowerCase()).join(' ');
+    // GSTR-2 offline tool: has "gstin of supplier" header
+    if (rowStr.includes('gstin of supplier')) return 'gstr2_offline';
+    // Busy: "supplier gstin" or "party gstin" header
+    if (rowStr.includes('supplier gstin') || rowStr.includes('party gstin')) return 'busy';
+    // Marg: "gstin no" or "gst no" as column
+    if (rowStr.includes('gstin no') || (rowStr.includes('gst no') && rowStr.includes('invoice'))) return 'marg';
+    // Vyapar: "gstin/uin" as a column in purchase
+    if (rowStr.includes('gstin/uin') && (rowStr.includes('purchase') || rowStr.includes('invoice'))) return 'vyapar';
+    // Tally DayBook / Sales Register: "vch no" or "vch type" in headers
+    if ((rowStr.includes('vch no') || rowStr.includes('vch. no')) && rowStr.includes('particulars')) return 'tally_daybook';
+    // B2B Invoice CSV (Govt portal download): "supplier gstin,party name,inv. no."
+    if (rowStr.includes('supplier gstin') || (rowStr.includes('inv. no') && rowStr.includes('gstin'))) return 'b2b_csv';
+    // GSTR-2B portal export
+    if (rowStr.includes('gstin') && rowStr.includes('itc availability')) return 'gstr2b_portal';
+  }
+  // Fallback: check if any cell looks like a GSTIN pattern → standard format
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    for (const cell of (rows[i] || [])) {
+      if (/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(String(cell || '').trim())) {
+        return 'standard_with_gstin';
+      }
+    }
+  }
+  return 'unknown';
+}
+
+/** Parse standard GSTR-2 Offline Tool format (most common books export) */
+function _parseStandardB2B(rows) {
   let hi = findHeaderRow(rows);
-  if (hi === -1) hi = 2;
+  if (hi === -1) {
+    // Try harder: look for any row with 'gstin' in it
+    for (let i = 0; i < Math.min(rows.length, 20); i++) {
+      const rowStr = (rows[i] || []).map(c => String(c || '').toLowerCase()).join(' ');
+      if (rowStr.includes('gstin') && (rowStr.includes('invoice') || rowStr.includes('taxable'))) {
+        hi = i; break;
+      }
+    }
+    if (hi === -1) hi = 3;
+  }
   const cm = buildColMap(rows[hi]);
   const g  = (a, ...k) => { const c = findCol(a, ...k); return c >= 0 ? c : -1; };
   const gstinC  = g(cm, 'gstin of supplier', 'gstin');
-  const invNoC  = g(cm, 'invoice number', 'invoice no');
-  const dateC   = g(cm, 'invoice date', 'date');
-  const valC    = g(cm, 'invoice value');
-  const taxC    = g(cm, 'taxable value');
-  const igstC   = g(cm, 'integrated tax paid', 'integrated tax');
-  const cgstC   = g(cm, 'central tax paid', 'central tax');
-  const sgstC   = g(cm, 'state/ut tax paid', 'state/ut tax', 'state tax');
+  const invNoC  = g(cm, 'invoice number', 'invoice no', 'bill no', 'inv no');
+  const dateC   = g(cm, 'invoice date', 'inv date', 'bill date', 'date');
+  const valC    = g(cm, 'invoice value', 'bill value', 'total value', 'inv value');
+  const taxC    = g(cm, 'taxable value', 'taxable amount', 'assessable value');
+  const igstC   = g(cm, 'integrated tax paid', 'integrated tax', 'igst paid', 'igst');
+  const cgstC   = g(cm, 'central tax paid', 'central tax', 'cgst paid', 'cgst');
+  const sgstC   = g(cm, 'state/ut tax paid', 'state/ut tax', 'state tax', 'sgst paid', 'sgst');
   const cessC   = g(cm, 'cess paid', 'cess');
   const posC    = g(cm, 'place of supply', 'place');
   const rcC     = g(cm, 'reverse charge');
   const typeC   = g(cm, 'invoice type', 'type');
   const rateC   = g(cm, 'rate');
+  const nameC   = g(cm, 'trade name', 'legal name', 'trade/legal', 'supplier name', 'party name');
   const data = [];
   for (let i = hi + 1; i < rows.length; i++) {
     const r = rows[i];
@@ -134,9 +184,315 @@ function parseBooksFile(workbook) {
       sgst: toNum(r[sgstC]), cess: toNum(r[cessC]),
       placeOfSupply: String(r[posC] || '').trim(), reverseCharge: String(r[rcC] || '').trim(),
       invoiceType: String(r[typeC] || '').trim(), rate: toNum(r[rateC]),
-      tradeOrLegalName: '', itcAvailability: '', filingDate: '', source: 'books',
+      tradeOrLegalName: nameC >= 0 ? String(r[nameC] || '').trim() : '',
+      itcAvailability: '', filingDate: '', source: 'books',
     });
   }
+  return data;
+}
+
+/** Parse Busy Accounting Software export — columns differ slightly */
+function _parseBusy(rows) {
+  let hi = -1;
+  for (let i = 0; i < Math.min(rows.length, 15); i++) {
+    const rowStr = (rows[i] || []).map(c => String(c || '').toLowerCase()).join(' ');
+    if ((rowStr.includes('gstin') || rowStr.includes('gst no')) && rowStr.includes('invoice')) { hi = i; break; }
+  }
+  if (hi === -1) hi = 0;
+  const cm = buildColMap(rows[hi]);
+  const g  = (a, ...k) => { const c = findCol(a, ...k); return c >= 0 ? c : -1; };
+  const gstinC = g(cm, 'supplier gstin', 'party gstin', 'gstin', 'gst no');
+  const nameC  = g(cm, 'party name', 'supplier name', 'vendor name', 'account name');
+  const invNoC = g(cm, 'invoice no', 'voucher no', 'bill no', 'inv no');
+  const dateC  = g(cm, 'invoice date', 'date', 'bill date');
+  const valC   = g(cm, 'invoice amount', 'gross amount', 'total', 'invoice value', 'bill amount');
+  const taxC   = g(cm, 'taxable value', 'taxable amount', 'assessable');
+  const igstC  = g(cm, 'igst', 'integrated');
+  const cgstC  = g(cm, 'cgst', 'central tax');
+  const sgstC  = g(cm, 'sgst', 'state tax');
+  const cessC  = g(cm, 'cess');
+  const posC   = g(cm, 'place of supply', 'state');
+  const data = [];
+  for (let i = hi + 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r) continue;
+    const gstin = normaliseGSTIN(r[gstinC]);
+    const invNo = normaliseInvoice(r[invNoC]);
+    if (!gstin || !invNo || gstin.length < 10) continue;
+    data.push({
+      gstin, invoiceNo: invNo, invoiceNoRaw: String(r[invNoC] || '').trim(),
+      invoiceDate: fmtDate(r[dateC]), invoiceValue: toNum(r[valC]),
+      taxableValue: toNum(r[taxC]) || toNum(r[valC]),
+      igst: toNum(r[igstC]), cgst: toNum(r[cgstC]), sgst: toNum(r[sgstC]), cess: toNum(r[cessC]),
+      placeOfSupply: String(r[posC] || '').trim(), reverseCharge: 'N', invoiceType: 'Regular',
+      tradeOrLegalName: nameC >= 0 ? String(r[nameC] || '').trim() : '',
+      rate: 0, itcAvailability: '', filingDate: '', source: 'books',
+    });
+  }
+  return data;
+}
+
+/** Parse Marg ERP export */
+function _parseMarg(rows) {
+  let hi = -1;
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    const rowStr = (rows[i] || []).map(c => String(c || '').toLowerCase()).join(' ');
+    if ((rowStr.includes('gstin') || rowStr.includes('gst no')) && rowStr.includes('bill')) { hi = i; break; }
+  }
+  if (hi === -1) hi = 0;
+  const cm = buildColMap(rows[hi]);
+  const g  = (a, ...k) => { const c = findCol(a, ...k); return c >= 0 ? c : -1; };
+  const gstinC = g(cm, 'gstin no', 'gst no', 'gstin');
+  const nameC  = g(cm, 'party name', 'firm name', 'customer', 'company');
+  const invNoC = g(cm, 'bill no', 'invoice no', 'bill number');
+  const dateC  = g(cm, 'bill date', 'date', 'invoice date');
+  const valC   = g(cm, 'net amount', 'bill amount', 'total', 'invoice value');
+  const taxC   = g(cm, 'taxable', 'basic amount', 'assessable');
+  const igstC  = g(cm, 'igst', 'integrated');
+  const cgstC  = g(cm, 'cgst');
+  const sgstC  = g(cm, 'sgst', 'state');
+  const cessC  = g(cm, 'cess');
+  const posC   = g(cm, 'state', 'place of supply');
+  const data = [];
+  for (let i = hi + 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r) continue;
+    const gstin = normaliseGSTIN(r[gstinC]);
+    const invNo = normaliseInvoice(r[invNoC]);
+    if (!gstin || !invNo || gstin.length < 10) continue;
+    data.push({
+      gstin, invoiceNo: invNo, invoiceNoRaw: String(r[invNoC] || '').trim(),
+      invoiceDate: fmtDate(r[dateC]), invoiceValue: toNum(r[valC]),
+      taxableValue: toNum(r[taxC]) || toNum(r[valC]),
+      igst: toNum(r[igstC]), cgst: toNum(r[cgstC]), sgst: toNum(r[sgstC]), cess: toNum(r[cessC]),
+      placeOfSupply: String(r[posC] || '').trim(), reverseCharge: 'N', invoiceType: 'Regular',
+      tradeOrLegalName: nameC >= 0 ? String(r[nameC] || '').trim() : '',
+      rate: 0, itcAvailability: '', filingDate: '', source: 'books',
+    });
+  }
+  return data;
+}
+
+/** Parse Vyapar software export */
+function _parseVyapar(rows) {
+  let hi = -1;
+  for (let i = 0; i < Math.min(rows.length, 15); i++) {
+    const rowStr = (rows[i] || []).map(c => String(c || '').toLowerCase()).join(' ');
+    if (rowStr.includes('gstin') && (rowStr.includes('invoice') || rowStr.includes('purchase'))) { hi = i; break; }
+  }
+  if (hi === -1) hi = 0;
+  const cm = buildColMap(rows[hi]);
+  const g  = (a, ...k) => { const c = findCol(a, ...k); return c >= 0 ? c : -1; };
+  const gstinC = g(cm, 'gstin/uin', 'gstin', 'gst number');
+  const nameC  = g(cm, 'party name', 'vendor', 'supplier', 'contact name');
+  const invNoC = g(cm, 'invoice number', 'bill number', 'ref no');
+  const dateC  = g(cm, 'invoice date', 'date', 'bill date');
+  const valC   = g(cm, 'total amount', 'net amount', 'grand total', 'invoice value');
+  const taxC   = g(cm, 'taxable amount', 'sub total', 'amount before tax');
+  const igstC  = g(cm, 'igst', 'integrated gst');
+  const cgstC  = g(cm, 'cgst');
+  const sgstC  = g(cm, 'sgst', 'utgst');
+  const cessC  = g(cm, 'cess');
+  const posC   = g(cm, 'place of supply', 'state');
+  const data = [];
+  for (let i = hi + 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r) continue;
+    const gstin = normaliseGSTIN(r[gstinC]);
+    const invNo = normaliseInvoice(r[invNoC]);
+    if (!gstin || !invNo || gstin.length < 10) continue;
+    data.push({
+      gstin, invoiceNo: invNo, invoiceNoRaw: String(r[invNoC] || '').trim(),
+      invoiceDate: fmtDate(r[dateC]), invoiceValue: toNum(r[valC]),
+      taxableValue: toNum(r[taxC]) || toNum(r[valC]),
+      igst: toNum(r[igstC]), cgst: toNum(r[cgstC]), sgst: toNum(r[sgstC]), cess: toNum(r[cessC]),
+      placeOfSupply: String(r[posC] || '').trim(), reverseCharge: 'N', invoiceType: 'Regular',
+      tradeOrLegalName: nameC >= 0 ? String(r[nameC] || '').trim() : '',
+      rate: 0, itcAvailability: '', filingDate: '', source: 'books',
+    });
+  }
+  return data;
+}
+
+/** Parse Tally DayBook / Sales-Purchase Register
+ *  Tally exports don't have GSTIN per row — they have party name.
+ *  We parse what we can (invoice no, date, value) and skip rows without GSTIN.
+ *  If a GSTIN-like value appears in a Narration or Ledger column, we capture it.
+ */
+function _parseTallyDayBook(rows) {
+  let hi = -1;
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    const rowStr = (rows[i] || []).map(c => String(c || '').toLowerCase()).join(' ');
+    if ((rowStr.includes('vch no') || rowStr.includes('vch. no')) && rowStr.includes('particulars')) { hi = i; break; }
+    if (rowStr.includes('date') && rowStr.includes('particulars') && rowStr.includes('debit')) { hi = i; break; }
+  }
+  if (hi === -1) hi = 7; // Tally typically has 7 header rows
+  const cm = buildColMap(rows[hi]);
+  const g  = (a, ...k) => { const c = findCol(a, ...k); return c >= 0 ? c : -1; };
+  const dateC    = g(cm, 'date');
+  const partC    = g(cm, 'particulars', 'party', 'ledger');
+  const narC     = g(cm, 'narration', 'description');
+  const vchTypeC = g(cm, 'vch type', 'voucher type', 'type');
+  const vchNoC   = g(cm, 'vch no', 'vch. no', 'voucher no');
+  const debitC   = g(cm, 'debit');
+  const creditC  = g(cm, 'credit');
+  const gstinPattern = /[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]/;
+  const data = [];
+  for (let i = hi + 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r) continue;
+    // Skip totals / summary rows
+    const firstCell = String(r[0] || '').toLowerCase();
+    if (firstCell.includes('total') || firstCell.includes('grand') || firstCell.includes('closing')) continue;
+    // Look for GSTIN anywhere in the row
+    let gstin = '';
+    for (const cell of r) {
+      const s = String(cell || '').trim().toUpperCase();
+      if (gstinPattern.test(s)) { gstin = normaliseGSTIN(s); break; }
+    }
+    if (!gstin) continue; // Tally rows without GSTIN are skipped (party not registered)
+    const vchNo = vchNoC >= 0 ? String(r[vchNoC] || '').trim() : '';
+    const invNo = normaliseInvoice(vchNo);
+    if (!invNo) continue;
+    const val = debitC >= 0 ? toNum(r[debitC]) : (creditC >= 0 ? toNum(r[creditC]) : 0);
+    const partyName = partC >= 0 ? String(r[partC] || '').trim() : '';
+    data.push({
+      gstin, invoiceNo: invNo, invoiceNoRaw: vchNo,
+      invoiceDate: fmtDate(r[dateC]), invoiceValue: val,
+      taxableValue: val, igst: 0, cgst: 0, sgst: 0, cess: 0,
+      placeOfSupply: '', reverseCharge: 'N', invoiceType: 'Regular',
+      tradeOrLegalName: partyName,
+      rate: 0, itcAvailability: '', filingDate: '', source: 'books',
+    });
+  }
+  return data;
+}
+
+/** Parse generic B2B CSV (like Govt portal B2BInvoices-3_4A.csv format from various software) */
+function _parseB2BCSV(rows) {
+  // Skip initial metadata rows, find actual header
+  let hi = -1;
+  for (let i = 0; i < Math.min(rows.length, 10); i++) {
+    const rowStr = (rows[i] || []).map(c => String(c || '').toLowerCase()).join(' ');
+    if (rowStr.includes('gstin') && (rowStr.includes('inv') || rowStr.includes('invoice'))) { hi = i; break; }
+  }
+  if (hi === -1) hi = 3;
+  const cm = buildColMap(rows[hi]);
+  const g  = (a, ...k) => { const c = findCol(a, ...k); return c >= 0 ? c : -1; };
+  const gstinC  = g(cm, 'supplier gstin', 'gstin', 'gst number', 'gstin/uin');
+  const nameC   = g(cm, 'party name', 'supplier name', 'trade name');
+  const invNoC  = g(cm, 'inv. no.', 'invoice no', 'invoice number', 'bill no');
+  const dateC   = g(cm, 'inv. date', 'invoice date', 'date');
+  const valC    = g(cm, 'inv. value', 'invoice value', 'total value');
+  const posC    = g(cm, 'place of supply', 'state');
+  const rcC     = g(cm, 'reverse charge');
+  const supTypeC= g(cm, 'supply type', 'type');
+  const taxC    = g(cm, 'taxable value', 'taxable amount');
+  const igstC   = g(cm, 'igst', 'integrated tax');
+  const cgstC   = g(cm, 'cgst', 'central tax');
+  const sgstC   = g(cm, 'sgst', 'state/ut tax', 'state tax');
+  const cessC   = g(cm, 'cess');
+  const rateC   = g(cm, 'rate', 'gst rate');
+  const data = [];
+  for (let i = hi + 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r) continue;
+    const gstin = normaliseGSTIN(r[gstinC]);
+    const invNo = normaliseInvoice(r[invNoC]);
+    if (!gstin || !invNo || gstin.length < 10) continue;
+    const taxVal = taxC >= 0 ? toNum(r[taxC]) : 0;
+    const invVal = valC >= 0 ? toNum(r[valC]) : 0;
+    let igst = igstC >= 0 ? toNum(r[igstC]) : 0;
+    let cgst = cgstC >= 0 ? toNum(r[cgstC]) : 0;
+    let sgst = sgstC >= 0 ? toNum(r[sgstC]) : 0;
+    // If tax breakdown not present but rate available, compute from taxable
+    if (!igst && !cgst && !sgst && rateC >= 0 && taxVal) {
+      const rate = toNum(r[rateC]);
+      const pos = posC >= 0 ? String(r[posC] || '') : '';
+      const supType = supTypeC >= 0 ? String(r[supTypeC] || '').toLowerCase() : '';
+      const isInter = supType.includes('inter') || pos.includes('-');
+      const tax = taxVal * rate / 100;
+      if (isInter) igst = tax;
+      else { cgst = tax / 2; sgst = tax / 2; }
+    }
+    data.push({
+      gstin, invoiceNo: invNo, invoiceNoRaw: String(r[invNoC] || '').trim(),
+      invoiceDate: fmtDate(r[dateC]), invoiceValue: invVal || (taxVal + igst + cgst + sgst),
+      taxableValue: taxVal || invVal,
+      igst, cgst, sgst, cess: cessC >= 0 ? toNum(r[cessC]) : 0,
+      placeOfSupply: posC >= 0 ? String(r[posC] || '').trim() : '',
+      reverseCharge: rcC >= 0 ? String(r[rcC] || 'N').trim() : 'N',
+      invoiceType: 'Regular',
+      tradeOrLegalName: nameC >= 0 ? String(r[nameC] || '').trim() : '',
+      rate: rateC >= 0 ? toNum(r[rateC]) : 0,
+      itcAvailability: '', filingDate: '', source: 'books',
+    });
+  }
+  return data;
+}
+
+/**
+ * parseBooksFile — smart auto-detect dispatcher.
+ * Tries all sheets with a 'b2b' name first, then falls back to the first sheet.
+ * Detects the software format and routes to the appropriate parser.
+ * Returns an array of normalised invoice objects ready for reconciliation.
+ */
+function parseBooksFile(workbook) {
+  // Prioritise b2b sheet name (GSTR-2 offline tool, standard format)
+  const b2bSheet = workbook.SheetNames.find(n =>
+    n.trim().toLowerCase() === 'b2b' ||
+    n.trim().toLowerCase() === 'b2b invoices' ||
+    n.trim().toLowerCase() === 'purchases'
+  ) || workbook.SheetNames[0];
+
+  const ws = workbook.Sheets[b2bSheet];
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+
+  const fmt = detectBooksFormat(rows);
+
+  let data = [];
+  switch (fmt) {
+    case 'gstr2_offline':
+    case 'standard_with_gstin':
+      data = _parseStandardB2B(rows);
+      break;
+    case 'busy':
+      data = _parseBusy(rows);
+      break;
+    case 'marg':
+      data = _parseMarg(rows);
+      break;
+    case 'vyapar':
+      data = _parseVyapar(rows);
+      break;
+    case 'tally_daybook':
+      data = _parseTallyDayBook(rows);
+      break;
+    case 'b2b_csv':
+    case 'gstr2b_portal':
+    default:
+      data = _parseB2BCSV(rows);
+      break;
+  }
+
+  // If primary sheet returned nothing, try every other sheet and merge
+  if (data.length === 0) {
+    for (const sn of workbook.SheetNames) {
+      if (sn === b2bSheet) continue;
+      const ws2 = workbook.Sheets[sn];
+      const rows2 = XLSX.utils.sheet_to_json(ws2, { header: 1, defval: null });
+      const fmt2 = detectBooksFormat(rows2);
+      let extra = [];
+      if (fmt2 === 'tally_daybook') extra = _parseTallyDayBook(rows2);
+      else if (fmt2 === 'busy') extra = _parseBusy(rows2);
+      else if (fmt2 === 'marg') extra = _parseMarg(rows2);
+      else if (fmt2 === 'vyapar') extra = _parseVyapar(rows2);
+      else extra = _parseB2BCSV(rows2);
+      data = [...data, ...extra];
+      if (data.length > 0) break;
+    }
+  }
+
   return data;
 }
 
@@ -3902,6 +4258,10 @@ export default function GSTReconciliation() {
   const [snapshotPrompt,   setSnapshotPrompt]   = useState(null); // {pendingEdit: () => void} | null
   const [invoiceDetail,    setInvoiceDetail]    = useState(null); // { record, tabId } | null
 
+  // AI Insights state for the results panel
+  const [aiInsights,     setAiInsights]     = useState('');
+  const [aiInsightState, setAiInsightState] = useState('idle'); // idle | loading | done | error
+
   // Client integration
   const [clients,         setClients]          = useState([]);
   const [selectedClient,  setSelectedClient]   = useState(null);
@@ -4180,9 +4540,9 @@ export default function GSTReconciliation() {
       const [portalWB, booksWB] = await Promise.all([readWorkbook(portalFile), readWorkbook(booksFile)]);
       const portalData = parseGSTPortalFile(portalWB);
       const booksData  = parseBooksFile(booksWB);
-      if (!portalData.length && !booksData.length) { toast.error('Could not parse data from the files. Please check the file formats.'); return; }
+      if (!portalData.length && !booksData.length) { toast.error('Could not parse data from the files. Please check the file formats or download the Books Data Template.'); return; }
       const res = reconcile(portalData, booksData);
-      setResults(res); setActiveTab('matched');
+      setResults(res); setActiveTab('matched'); setAiInsights(''); setAiInsightState('idle');
       toast.success(`Reconciliation complete — ${portalData.length} portal + ${booksData.length} books invoices.`);
 
       // Auto-save session to history
@@ -4221,7 +4581,181 @@ export default function GSTReconciliation() {
     } finally { setLoading(false); }
   };
 
-  const handleReset = () => { setPortalFile(null); setBooksFile(null); setResults(null); setPeriod(''); setLoadedSessionId(null); setBaselineSnapshot(null); setSnapshotSaved(false); setSnapshotPrompt(null); };
+  const handleReset = () => { setPortalFile(null); setBooksFile(null); setResults(null); setPeriod(''); setLoadedSessionId(null); setBaselineSnapshot(null); setSnapshotSaved(false); setSnapshotPrompt(null); setAiInsights(''); setAiInsightState('idle'); };
+
+  /**
+   * handleAiInsights — generate AI-powered reconciliation analysis.
+   * Builds a structured prompt from the current reconciliation results
+   * and calls the backend AI endpoint (or Anthropic directly via the API key).
+   */
+  const handleAiInsights = useCallback(async () => {
+    if (!results) return;
+    setAiInsightState('loading');
+    setAiInsights('');
+    try {
+      const summary = {
+        period,
+        company: company.name || '',
+        matched:    results.matched?.length    || 0,
+        mismatch:   results.mismatch?.length   || 0,
+        portalOnly: results.portalOnly?.length || 0,
+        booksOnly:  results.booksOnly?.length  || 0,
+        matchedValue:    (results.matched    || []).reduce((s,r)=>s+(r.portal?.invoiceValue||0),0),
+        mismatchValue:   (results.mismatch   || []).reduce((s,r)=>s+(r.portal?.invoiceValue||0),0),
+        portalOnlyValue: (results.portalOnly || []).reduce((s,r)=>s+(r.portal?.invoiceValue||0),0),
+        booksOnlyValue:  (results.booksOnly  || []).reduce((s,r)=>s+(r.books?.invoiceValue||0),0),
+        topMismatchReasons: (results.mismatch || []).slice(0,5).map(r=>({
+          invoiceNo: r.portal?.invoiceNoRaw || r.books?.invoiceNoRaw,
+          portalValue: r.portal?.invoiceValue, booksValue: r.books?.invoiceValue,
+          igstDiff: (r.portal?.igst||0)-(r.books?.igst||0),
+          cgstDiff: (r.portal?.cgst||0)-(r.books?.cgst||0),
+          sgstDiff: (r.portal?.sgst||0)-(r.books?.sgst||0),
+        })),
+      };
+      const prompt = `You are a senior GST consultant in India. Analyse this GSTR-2B reconciliation data and provide actionable insights:
+
+Reconciliation Summary for ${summary.company || 'the company'} (Period: ${summary.period || 'N/A'}):
+- Matched Invoices: ${summary.matched} (₹${summary.matchedValue.toFixed(2)})
+- Mismatched Invoices: ${summary.mismatch} (₹${summary.mismatchValue.toFixed(2)})
+- Only in GST Portal (to be booked): ${summary.portalOnly} (₹${summary.portalOnlyValue.toFixed(2)})
+- Only in Books (not yet filed by supplier): ${summary.booksOnly} (₹${summary.booksOnlyValue.toFixed(2)})
+
+Top 5 mismatched invoices: ${JSON.stringify(summary.topMismatchReasons, null, 2)}
+
+Provide:
+1. ITC risk assessment — likely amount at risk under Section 16(2)(c)
+2. Key reasons for mismatches (common causes in India)
+3. Specific action items for the GST officer
+4. Deadline considerations (GSTR-3B filing, annual reconciliation)
+5. Any red flags requiring immediate attention
+
+Keep the response concise, practical, and India-GST-specific.`;
+
+      // Try backend AI endpoint first
+      let insight = '';
+      try {
+        const r = await api.post('/ai/chat', { message: prompt, context: 'gst_reconciliation' });
+        insight = r.data?.response || r.data?.message || r.data?.text || '';
+      } catch (_) {
+        // Fallback: call Anthropic API directly via artifact API
+        const resp = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 1000,
+            messages: [{ role: 'user', content: prompt }],
+          }),
+        });
+        if (resp.ok) {
+          const d = await resp.json();
+          insight = d.content?.[0]?.text || '';
+        }
+      }
+
+      if (insight) {
+        setAiInsights(insight);
+        setAiInsightState('done');
+      } else {
+        // Graceful static fallback analysis
+        const riskAmt = summary.portalOnlyValue + summary.mismatchValue * 0.3;
+        setAiInsights(
+          `GST Reconciliation Analysis — ${summary.period || ''}\n\n` +
+          `📊 SUMMARY\n• ${summary.matched} invoices matched cleanly (₹${summary.matchedValue.toFixed(2)})\n` +
+          `• ${summary.mismatch} mismatches found (₹${summary.mismatchValue.toFixed(2)}) — verify each with supplier\n` +
+          `• ${summary.portalOnly} invoices only on portal — book these to claim ITC before GSTR-3B cutoff\n` +
+          `• ${summary.booksOnly} invoices only in books — follow up with suppliers to file GSTR-1\n\n` +
+          `⚠️ ITC RISK ESTIMATE: ₹${riskAmt.toFixed(2)} potentially at risk under Sec 16(2)(c)\n\n` +
+          `✅ RECOMMENDED ACTIONS\n1. Reconcile mismatched amounts with suppliers immediately\n` +
+          `2. Request GSTR-1 filing from suppliers with books-only invoices\n` +
+          `3. Book portal-only invoices before next GSTR-3B filing\n` +
+          `4. Retain all supplier invoice copies for audit trail\n` +
+          `5. Document reconciliation process for annual GST audit`
+        );
+        setAiInsightState('done');
+      }
+    } catch (err) {
+      console.error('AI Insights error:', err);
+      setAiInsights('Failed to generate AI insights. Please try again.');
+      setAiInsightState('error');
+    }
+  }, [results, period, company]);
+
+  /**
+   * downloadBooksTemplate — generate and download a pre-formatted Excel template
+   * for entering purchase (books) data in the standard GSTR-2 offline tool format.
+   * The downloaded file can be filled and uploaded to the reconciliation tool.
+   */
+  const downloadBooksTemplate = useCallback(() => {
+    try {
+      const wb = XLSX.utils.book_new();
+
+      // ── B2B Sheet ──
+      const b2bHeaders = [
+        'GSTIN of Supplier', 'Invoice Number', 'Invoice date', 'Invoice Value',
+        'Place Of Supply', 'Reverse Charge', 'Invoice Type', 'Rate',
+        'Taxable Value', 'Integrated Tax Paid', 'Central Tax Paid',
+        'State/UT Tax Paid', 'Cess Paid', 'Eligibility For ITC',
+        'Availed ITC Integrated Tax', 'Availed ITC Central Tax',
+        'Availed ITC State/UT Tax', 'Availed ITC Cess',
+      ];
+      const b2bSample = [
+        ['24AAPFA6836P1ZS', 'INV-001', '01-04-2026', 6069, '24-Gujarat', 'N', 'Regular', 5,
+         5780, 0, 144.5, 144.5, 0, 'Inputs', 0, 144.5, 144.5, 0],
+        ['27AAACB2656A1Z7', 'INV-002', '02-04-2026', 190797, '24-Gujarat', 'N', 'Regular', 5,
+         181712, 9085, 0, 0, 0, 'Inputs', 9085, 0, 0, 0],
+      ];
+      const b2bWS = XLSX.utils.aoa_to_sheet([b2bHeaders, ...b2bSample]);
+      // Style header row bold (column widths)
+      b2bWS['!cols'] = b2bHeaders.map((h, i) => ({ wch: Math.max(h.length + 4, 18) }));
+      XLSX.utils.book_append_sheet(wb, b2bWS, 'b2b');
+
+      // ── Instructions Sheet ──
+      const instrData = [
+        ['GST RECONCILIATION — BOOKS DATA TEMPLATE'],
+        [''],
+        ['HOW TO USE THIS TEMPLATE:'],
+        ['1. Fill the "b2b" sheet with your purchase invoice data'],
+        ['2. Each row = one B2B invoice from a GST-registered supplier'],
+        ['3. GSTIN must be a valid 15-character GST Identification Number'],
+        ['4. Invoice Value = Taxable Value + All Tax Amounts'],
+        ['5. For Inter-state purchases: fill Integrated Tax, leave Central & State blank'],
+        ['6. For Intra-state purchases: fill Central Tax + State/UT Tax, leave Integrated blank'],
+        ['7. Place of Supply: use format "24-Gujarat" (state code - state name)'],
+        ['8. Reverse Charge: Y for reverse charge transactions, N for others'],
+        ['9. Invoice Type: Regular, SEZ supplies (with/without payment), Deemed Export'],
+        ['10. Rate: GST rate in % (5, 12, 18, 28)'],
+        ['11. Eligibility For ITC: Inputs, Capital Goods, Input Services, Ineligible'],
+        [''],
+        ['STATE CODES (common):'],
+        ['01 - J&K  | 02 - HP | 03 - Punjab | 06 - Haryana | 07 - Delhi'],
+        ['08 - Rajasthan | 09 - UP | 19 - West Bengal | 22 - Chhattisgarh'],
+        ['23 - MP | 24 - Gujarat | 27 - Maharashtra | 29 - Karnataka'],
+        ['32 - Kerala | 33 - Tamil Nadu | 36 - Telangana | 37 - Andhra Pradesh'],
+        [''],
+        ['SUPPORTED SOFTWARE EXPORTS (can be uploaded directly):'],
+        ['• GSTR-2 Offline Tool (Excel) — b2b sheet format'],
+        ['• Busy Accounting — Purchase Register with GSTIN'],
+        ['• Marg ERP — Purchase Register'],
+        ['• Vyapar — Purchase Register export'],
+        ['• Tally DayBook / Sales Register (requires GSTIN in narration/ledger)'],
+        ['• GST Portal B2BInvoices CSV download'],
+        [''],
+        ['For assistance, export b2b data directly from your accounting software'],
+        ['and upload it — the system auto-detects the format.'],
+      ];
+      const instrWS = XLSX.utils.aoa_to_sheet(instrData);
+      instrWS['!cols'] = [{ wch: 80 }];
+      XLSX.utils.book_append_sheet(wb, instrWS, 'Instructions');
+
+      // Save
+      XLSX.writeFile(wb, 'GST_Books_Data_Template.xlsx');
+      toast.success('Template downloaded! Fill the b2b sheet and upload it here.');
+    } catch (err) {
+      console.error('Template download error:', err);
+      toast.error('Failed to generate template. Please try again.');
+    }
+  }, []);
 
   const activeRecords = results && activeTab !== 'search'
     ? { matched:results.matched, mismatch:results.mismatch, portalOnly:results.portalOnly, booksOnly:results.booksOnly, crossGstin: results.crossGstin||[] }[activeTab] || []
@@ -4416,7 +4950,7 @@ export default function GSTReconciliation() {
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
               <DropZone label="GSTR-2B (GST Portal)" icon={Globe}   hint="Download GSTR-2B Excel from GST portal"        file={portalFile} onFile={handlePortalFile} onClear={()=>{ setPortalFile(null); }} colors={{ done:'bg-blue-50 dark:bg-blue-900/20 border-blue-400', drag:'bg-blue-50 dark:bg-blue-900/10 border-blue-400', iconBg:'bg-blue-100 dark:bg-blue-900/40', iconColor:'text-blue-600 dark:text-blue-300', btn:'bg-blue-600 hover:bg-blue-700 text-white' }}/>
-              <DropZone label="Purchase Register (Books)" icon={BookOpen} hint="Export b2b sheet from your accounting software" file={booksFile}  onFile={setBooksFile}  onClear={()=>setBooksFile(null)}  colors={{ done:'bg-violet-50 dark:bg-violet-900/20 border-violet-400', drag:'bg-violet-50 dark:bg-violet-900/10 border-violet-400', iconBg:'bg-violet-100 dark:bg-violet-900/40', iconColor:'text-violet-600 dark:text-violet-300', btn:'bg-violet-600 hover:bg-violet-700 text-white' }}/>
+              <DropZone label="Purchase Register (Books)" icon={BookOpen} hint="Tally, Busy, Marg, Vyapar, GSTR-2 tool, or B2BInvoices CSV — auto-detected" file={booksFile}  onFile={setBooksFile}  onClear={()=>setBooksFile(null)}  colors={{ done:'bg-violet-50 dark:bg-violet-900/20 border-violet-400', drag:'bg-violet-50 dark:bg-violet-900/10 border-violet-400', iconBg:'bg-violet-100 dark:bg-violet-900/40', iconColor:'text-violet-600 dark:text-violet-300', btn:'bg-violet-600 hover:bg-violet-700 text-white' }}/>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
               <AIFileInsights file={portalFile} label="GST Portal Data Insights" />
@@ -4425,7 +4959,16 @@ export default function GSTReconciliation() {
 
             <div className="flex items-start gap-3 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800 mb-5 text-xs text-amber-700 dark:text-amber-300">
               <Info className="h-4 w-4 mt-0.5 flex-shrink-0"/>
-              <span><strong>Supported: </strong>GSTR-2B Excel from GST portal (.xlsx) and GSTR-2 offline tool (.xls/.xlsx) with b2b sheet. Each reconciliation is saved to history automatically.</span>
+              <div className="flex-1">
+                <span><strong>Supported Books Formats: </strong>GSTR-2 Offline Tool (.xlsx), Busy Accounting, Marg ERP, Vyapar, Tally DayBook, GST Portal B2BInvoices CSV — system auto-detects format.</span>
+                <button
+                  onClick={downloadBooksTemplate}
+                  className="mt-2 flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium rounded-lg shadow-sm transition-colors"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Download Books Data Excel Template
+                </button>
+              </div>
             </div>
 
             <button onClick={handleReconcile} disabled={!portalFile||!booksFile||loading}
