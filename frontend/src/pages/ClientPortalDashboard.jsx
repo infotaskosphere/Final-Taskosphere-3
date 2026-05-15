@@ -430,17 +430,225 @@ function DriveTab({ user }) {
 
 // ── Messages Tab (Client side) ────────────────────────────────────────────
 const MSG_TYPE_META = {
-  dsc_expiry:       { label: "DSC Expiry Alert",      icon: "🔐", bg: "bg-red-50",    border: "border-red-200",    badge: "bg-red-100 text-red-700" },
-  compliance_due:   { label: "Compliance Due",         icon: "📋", bg: "bg-orange-50", border: "border-orange-200", badge: "bg-orange-100 text-orange-700" },
-  invoice_reminder: { label: "Invoice Reminder",       icon: "🧾", bg: "bg-blue-50",   border: "border-blue-200",   badge: "bg-blue-100 text-blue-700" },
-  general:          { label: "Message",                icon: "💬", bg: "bg-gray-50",   border: "border-gray-200",   badge: "bg-gray-100 text-gray-600" },
-  custom:           { label: "Notice",                 icon: "📢", bg: "bg-purple-50", border: "border-purple-200", badge: "bg-purple-100 text-purple-700" },
+  dsc_expiry:       { label: "DSC Expiry Alert",  icon: "🔐", headerBg: "bg-red-600",    lightBg: "bg-red-50",    border: "border-red-200",    badge: "bg-red-100 text-red-700" },
+  compliance_due:   { label: "Compliance Due",    icon: "📋", headerBg: "bg-orange-500", lightBg: "bg-orange-50", border: "border-orange-200", badge: "bg-orange-100 text-orange-700" },
+  invoice_reminder: { label: "Invoice Reminder",  icon: "🧾", headerBg: "bg-blue-600",   lightBg: "bg-blue-50",   border: "border-blue-200",   badge: "bg-blue-100 text-blue-700" },
+  general:          { label: "Message",           icon: "💬", headerBg: "bg-slate-600",  lightBg: "bg-white",     border: "border-gray-200",   badge: "bg-gray-100 text-gray-600" },
+  custom:           { label: "Notice",            icon: "📢", headerBg: "bg-purple-600", lightBg: "bg-purple-50", border: "border-purple-200", badge: "bg-purple-100 text-purple-700" },
 };
+
+const QUICK_REPLIES = [
+  "Noted, thank you.",
+  "Will share with the team.",
+  "Acknowledged. We will act on this.",
+  "Please send us the details.",
+  "We will arrange the documents shortly.",
+  "Understood. We will follow up.",
+];
+
+function MessageCard({ msg, onRead, onReplySuccess }) {
+  const [expanded, setExpanded] = useState(false);
+  const [replyOpen, setReplyOpen] = useState(false);
+  const [replyText, setReplyText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [replies, setReplies] = useState(msg.replies || []);
+
+  const typeKey = msg.message_type || "general";
+  const meta = MSG_TYPE_META[typeKey] || MSG_TYPE_META.general;
+
+  const handleToggle = async () => {
+    const next = !expanded;
+    setExpanded(next);
+    if (next && !msg.is_read) {
+      onRead && await onRead(msg.id);
+    }
+  };
+
+  const sendReply = async (text) => {
+    const replyBody = text || replyText.trim();
+    if (!replyBody) return;
+    setSending(true);
+    try {
+      const res = await portalApi().post(`/client-portal/my-messages/${msg.id}/reply`, { body: replyBody });
+      const newReply = { body: replyBody, created_at: new Date().toISOString(), from_client: true };
+      setReplies(prev => [...prev, newReply]);
+      setReplyText("");
+      setReplyOpen(false);
+      setSent(true);
+      setTimeout(() => setSent(false), 3000);
+      onReplySuccess && onReplySuccess();
+    } catch {
+      // silent — show nothing
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const fmtDate = (d) => {
+    if (!d) return "";
+    try {
+      return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    } catch { return d; }
+  };
+
+  // Render body with line breaks preserved
+  const renderBody = (text) =>
+    text ? text.split("\n").map((line, i) => (
+      <span key={i}>{line}{i < text.split("\n").length - 1 && <br />}</span>
+    )) : null;
+
+  return (
+    <div className={`rounded-2xl border overflow-hidden shadow-sm transition-all ${meta.border} ${!msg.is_read ? "ring-2 ring-blue-300 ring-offset-1" : ""}`}>
+
+      {/* ── Coloured header bar ── */}
+      <div className={`${meta.headerBg} px-4 py-3 flex items-center justify-between`}>
+        <div className="flex items-center gap-2">
+          <span className="text-lg">{meta.icon}</span>
+          <span className="text-white text-xs font-bold uppercase tracking-wide">{meta.label}</span>
+          {!msg.is_read && (
+            <span className="bg-white text-blue-700 text-[9px] font-extrabold px-2 py-0.5 rounded-full animate-pulse">NEW</span>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-white/70 text-[11px]">
+            {msg.created_at ? new Date(msg.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : ""}
+          </span>
+          <button
+            onClick={handleToggle}
+            className="text-white/80 hover:text-white text-xs font-medium transition"
+          >
+            {expanded ? "▲ Collapse" : "▼ Read"}
+          </button>
+        </div>
+      </div>
+
+      {/* ── Message body ── */}
+      <div className={`${meta.lightBg} px-5 pt-4 pb-2`}>
+        {/* Subject */}
+        <p className={`text-sm font-bold text-gray-900 mb-3 ${!msg.is_read ? "text-blue-900" : ""}`}>
+          {msg.subject || "(no subject)"}
+        </p>
+
+        {/* Preview or full body */}
+        {!expanded ? (
+          <p className="text-xs text-gray-500 leading-relaxed line-clamp-2 mb-3">
+            {msg.body}
+          </p>
+        ) : (
+          <>
+            {/* Full formatted body */}
+            <div className="text-sm text-gray-700 leading-7 whitespace-pre-wrap bg-white border border-gray-100 rounded-xl px-4 py-4 mb-4 shadow-inner font-[system-ui]">
+              {renderBody(msg.body)}
+            </div>
+
+            {/* Sender + time */}
+            <div className="flex items-center justify-between text-xs text-gray-400 mb-4">
+              <span>From: <span className="font-semibold text-gray-600">{msg.from_user_name || "Your CA/CS Team"}</span></span>
+              <span>{fmtDate(msg.created_at)}</span>
+            </div>
+
+            {/* Previous replies */}
+            {replies.length > 0 && (
+              <div className="space-y-2 mb-4">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Replies</p>
+                {replies.map((r, i) => (
+                  <div key={i} className={`flex ${r.from_client ? "justify-end" : "justify-start"}`}>
+                    <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-xs leading-relaxed shadow-sm ${
+                      r.from_client
+                        ? "bg-blue-600 text-white rounded-br-sm"
+                        : "bg-gray-100 text-gray-700 rounded-bl-sm"
+                    }`}>
+                      {r.body}
+                      <p className={`text-[9px] mt-1 ${r.from_client ? "text-blue-200" : "text-gray-400"}`}>
+                        {r.created_at ? new Date(r.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Sent confirmation */}
+            {sent && (
+              <div className="flex items-center gap-2 text-emerald-600 text-xs font-semibold bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 mb-3">
+                ✅ Reply sent successfully
+              </div>
+            )}
+
+            {/* Quick replies */}
+            {!replyOpen && (
+              <div className="mb-3">
+                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Quick Reply</p>
+                <div className="flex flex-wrap gap-2">
+                  {QUICK_REPLIES.map((qr) => (
+                    <button
+                      key={qr}
+                      onClick={(e) => { e.stopPropagation(); sendReply(qr); }}
+                      disabled={sending}
+                      className="text-xs px-3 py-1.5 rounded-full border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:border-blue-400 transition font-medium disabled:opacity-50"
+                    >
+                      {qr}
+                    </button>
+                  ))}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setReplyOpen(true); }}
+                    className="text-xs px-3 py-1.5 rounded-full border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition font-medium"
+                  >
+                    ✏️ Custom reply…
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Custom reply textarea */}
+            {replyOpen && (
+              <div className="mb-3 space-y-2" onClick={(e) => e.stopPropagation()}>
+                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Write a reply</p>
+                <textarea
+                  value={replyText}
+                  onChange={(e) => setReplyText(e.target.value)}
+                  rows={3}
+                  placeholder="Type your reply here…"
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none bg-white"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => sendReply()}
+                    disabled={sending || !replyText.trim()}
+                    className="px-4 py-1.5 rounded-xl bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-50 transition"
+                  >
+                    {sending ? "Sending…" : "Send Reply"}
+                  </button>
+                  <button
+                    onClick={() => { setReplyOpen(false); setReplyText(""); }}
+                    className="px-4 py-1.5 rounded-xl border border-gray-200 text-gray-500 text-xs hover:bg-gray-50 transition"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* ── Footer tap hint ── */}
+      {!expanded && (
+        <button
+          onClick={handleToggle}
+          className={`w-full text-center text-[11px] font-semibold py-2 ${meta.lightBg} text-blue-500 hover:text-blue-700 border-t ${meta.border} transition`}
+        >
+          Tap to read full message ↓
+        </button>
+      )}
+    </div>
+  );
+}
 
 function MessagesTab({ onUnreadChange }) {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [expandedId, setExpandedId] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -458,15 +666,15 @@ function MessagesTab({ onUnreadChange }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const handleExpand = async (msg) => {
-    setExpandedId(prev => (prev === msg.id ? null : msg.id));
-    if (!msg.is_read) {
-      try {
-        await portalApi().put(`/client-portal/my-messages/${msg.id}/read`);
-        setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, is_read: true } : m));
-        onUnreadChange && onUnreadChange(messages.filter(m => !m.is_read && m.id !== msg.id).length);
-      } catch { /* silent */ }
-    }
+  const handleRead = async (msgId) => {
+    try {
+      await portalApi().put(`/client-portal/my-messages/${msgId}/read`);
+      setMessages(prev => {
+        const updated = prev.map(m => m.id === msgId ? { ...m, is_read: true } : m);
+        onUnreadChange && onUnreadChange(updated.filter(m => !m.is_read).length);
+        return updated;
+      });
+    } catch { /* silent */ }
   };
 
   const unreadCount = messages.filter(m => !m.is_read).length;
@@ -478,64 +686,27 @@ function MessagesTab({ onUnreadChange }) {
           <div className="w-7 h-7 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
         </div>
       ) : messages.length === 0 ? (
-        <div className="text-center py-10">
-          <div className="text-4xl mb-3">💬</div>
-          <p className="text-gray-500 text-sm font-medium">No messages yet</p>
-          <p className="text-gray-400 text-xs mt-1">Your firm will send important updates here.</p>
+        <div className="text-center py-12">
+          <div className="text-5xl mb-3">💬</div>
+          <p className="text-gray-600 text-sm font-semibold">No messages yet</p>
+          <p className="text-gray-400 text-xs mt-1">Your firm will send important updates, alerts, and notices here.</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {unreadCount > 0 && (
-            <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 rounded-xl border border-blue-100 text-xs text-blue-700 font-medium">
-              <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse inline-block" />
-              {unreadCount} unread message{unreadCount > 1 ? "s" : ""}
+            <div className="flex items-center gap-2 px-4 py-2.5 bg-blue-50 rounded-xl border border-blue-200 text-sm text-blue-700 font-semibold">
+              <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse inline-block" />
+              {unreadCount} unread message{unreadCount > 1 ? "s" : ""} — tap to open
             </div>
           )}
-          {messages.map((msg) => {
-            const typeKey = msg.message_type || "general";
-            const meta = MSG_TYPE_META[typeKey] || MSG_TYPE_META.general;
-            const isExpanded = expandedId === msg.id;
-            return (
-              <div
-                key={msg.id}
-                className={`rounded-xl border transition-all cursor-pointer ${meta.bg} ${meta.border} ${!msg.is_read ? "shadow-sm" : ""}`}
-                onClick={() => handleExpand(msg)}
-              >
-                <div className="flex items-start gap-3 p-4">
-                  <span className="text-xl flex-shrink-0 mt-0.5">{meta.icon}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap mb-0.5">
-                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${meta.badge}`}>
-                        {meta.label}
-                      </span>
-                      {!msg.is_read && (
-                        <span className="text-[10px] font-bold text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">NEW</span>
-                      )}
-                      <span className="text-[10px] text-gray-400 ml-auto">
-                        {msg.created_at ? new Date(msg.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : ""}
-                      </span>
-                    </div>
-                    <p className={`text-sm font-semibold text-gray-800 ${!msg.is_read ? "font-bold" : ""}`}>
-                      {msg.subject || "(no subject)"}
-                    </p>
-                    <p className={`text-xs text-gray-500 mt-0.5 ${isExpanded ? "" : "line-clamp-2"}`}>
-                      {msg.body}
-                    </p>
-                    {!isExpanded && msg.body && msg.body.length > 120 && (
-                      <p className="text-xs text-blue-500 mt-1 font-medium">Tap to read more ↓</p>
-                    )}
-                    {isExpanded && (
-                      <div className="mt-3 pt-3 border-t border-gray-200/60">
-                        <p className="text-xs text-gray-400">
-                          From: <span className="font-medium text-gray-600">{msg.from_user_name || "Team"}</span>
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+          {messages.map((msg) => (
+            <MessageCard
+              key={msg.id}
+              msg={msg}
+              onRead={handleRead}
+              onReplySuccess={load}
+            />
+          ))}
         </div>
       )}
     </Section>
