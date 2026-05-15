@@ -12,7 +12,7 @@ import {
   Phone, Mail, Calendar, ChevronRight, ScanSearch,
   Filter, Tag, ArrowUpDown, ChevronsUpDown,
   History, Clock, Trash2, ChevronDown, User, Loader2, FolderOpen, Edit3,
-  MessageSquare, Sparkles, Layers,
+  MessageSquare, Sparkles, Layers, Plus, BarChart3, TrendingUp, ShieldCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
@@ -5201,8 +5201,9 @@ const EMPTY_COMPANY = {
 };
 
 export default function GSTReconciliation() {
-  const [pageView,        setPageView]        = useState('new');   // 'new' | 'history' | 'clients'
+  const [pageView,        setPageView]        = useState('new');   // 'new' | 'history' | 'clients' | 'session'
   const [clientDetail,    setClientDetail]    = useState(null);   // null | {client_id,client_name,client_gstin,...}
+  const [sessions,        setSessions]        = useState([]);     // list of saved sessions for "New Session" tab
   const [portalFile,      setPortalFile]       = useState(null);
   const [booksFile,       setBooksFile]        = useState(null);
   const [period,          setPeriod]           = useState('');
@@ -5623,6 +5624,29 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
 
   const handleReset = () => { setPortalFile(null); setBooksFile(null); setResults(null); setPeriod(''); setLoadedSessionId(null); setBaselineSnapshot(null); setSnapshotSaved(false); setSnapshotPrompt(null); };
 
+  // New Session: save current session (if any) then reset for a fresh start
+  const handleNewSession = useCallback(() => {
+    if (results) {
+      const snapshot = {
+        id: Date.now(),
+        period,
+        companyName: company.name || 'Untitled',
+        matched: results.matched?.length || 0,
+        mismatch: results.mismatch?.length || 0,
+        portalOnly: results.portalOnly?.length || 0,
+        booksOnly: results.booksOnly?.length || 0,
+        savedAt: new Date().toLocaleString(),
+      };
+      setSessions(prev => [snapshot, ...prev]);
+      toast.success('Current session saved. Starting a new session.');
+    }
+    handleReset();
+    setPageView('new');
+    setCompany(EMPTY_COMPANY);
+    setClientDetail(null);
+    setSelectedClient(null);
+  }, [results, period, company]);
+
   const activeRecords = results && activeTab !== 'search'
     ? { matched:results.matched, mismatch:results.mismatch, portalOnly:results.portalOnly, booksOnly:results.booksOnly, crossGstin: results.crossGstin||[] }[activeTab] || []
     : [];
@@ -5632,19 +5656,63 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 p-4 md:p-6">
       <div className="max-w-7xl mx-auto">
 
-        {/* ── Header ── */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-indigo-600 shadow-sm">
-              <ArrowLeftRight className="h-5 w-5 text-white"/>
+        {/* ── Dashboard-Style Banner ── */}
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-2xl mb-5 overflow-hidden shadow-md"
+          style={{ background: 'linear-gradient(135deg, #1e3a5f 0%, #1F6FB2 60%, #2563eb 100%)' }}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-5">
+            <div className="flex items-center gap-4">
+              <div className="p-3 rounded-xl bg-white/15 backdrop-blur-sm flex-shrink-0">
+                <ArrowLeftRight className="h-6 w-6 text-white"/>
+              </div>
+              <div>
+                <p className="text-white/70 text-xs font-medium uppercase tracking-wider mb-0.5">Compliance</p>
+                <h1 className="text-xl font-bold text-white leading-tight">GST Reconciliation</h1>
+                <p className="text-white/65 text-xs mt-0.5">Reconcile GSTR-2B (GST Portal) with Purchase Register (Books of Account)</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-lg font-bold text-slate-800 dark:text-slate-100 leading-tight">GST Reconciliation</h1>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Reconcile GSTR-2B (GST Portal) with Purchase Register (Books of Account)</p>
-            </div>
+            {/* Metric tiles — shown once results are loaded */}
+            {results ? (
+              <div className="flex flex-wrap gap-3 sm:gap-4">
+                {[
+                  { label: 'Matched', value: results.matched?.length || 0, icon: CheckCircle2, color: 'text-emerald-300', bg: 'bg-emerald-500/20' },
+                  { label: 'Mismatch', value: results.mismatch?.length || 0, icon: AlertTriangle, color: 'text-amber-300', bg: 'bg-amber-500/20' },
+                  { label: 'Portal Only', value: results.portalOnly?.length || 0, icon: Globe, color: 'text-sky-300', bg: 'bg-sky-500/20' },
+                  { label: 'Books Only', value: results.booksOnly?.length || 0, icon: BookOpen, color: 'text-violet-300', bg: 'bg-violet-500/20' },
+                ].map(m => (
+                  <div key={m.label} className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl ${m.bg} border border-white/10`}>
+                    <m.icon className={`h-4 w-4 ${m.color} flex-shrink-0`} />
+                    <div>
+                      <p className="text-white font-bold text-lg leading-none">{m.value}</p>
+                      <p className={`text-[10px] font-medium mt-0.5 ${m.color}`}>{m.label}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-3">
+                {[
+                  { label: 'Total Sessions', value: sessions.length, icon: BarChart3, color: 'text-blue-200', bg: 'bg-white/10' },
+                  { label: 'Quick Start', value: '+ New', icon: Plus, color: 'text-green-200', bg: 'bg-white/10', onClick: () => setPageView('new') },
+                ].map(m => (
+                  <div key={m.label} onClick={m.onClick}
+                    className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl ${m.bg} border border-white/10 ${m.onClick ? 'cursor-pointer hover:bg-white/20 transition-colors' : ''}`}>
+                    <m.icon className={`h-4 w-4 ${m.color} flex-shrink-0`} />
+                    <div>
+                      <p className="text-white font-bold text-lg leading-none">{m.value}</p>
+                      <p className={`text-[10px] font-medium mt-0.5 ${m.color}`}>{m.label}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
+          {/* Export buttons strip when results exist */}
           {results && (
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 px-5 py-3 bg-black/20 border-t border-white/10">
               <button onClick={()=>exportPDF(results, company, period, manualTradeNames, invoiceComments)} className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-medium rounded-lg shadow-sm transition-colors">
                 <FileText className="h-3.5 w-3.5"/> PDF
               </button>
@@ -5654,32 +5722,44 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
               <button onClick={()=>exportExcel(results, company, period, manualTradeNames, invoiceComments)} className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg shadow-sm transition-colors">
                 <FileSpreadsheet className="h-3.5 w-3.5"/> Excel
               </button>
-              <button onClick={handleReset} className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+              <button onClick={handleNewSession} className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-white/15 hover:bg-white/25 text-white text-xs font-medium rounded-lg border border-white/20 transition-colors">
+                <Plus className="h-3.5 w-3.5"/> New Session
+              </button>
+              <button onClick={handleReset} className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-medium rounded-lg border border-white/10 transition-colors">
                 <RefreshCw className="h-3.5 w-3.5"/> Reset
               </button>
             </div>
           )}
-        </div>
+        </motion.div>
 
         {/* ── Page View Switcher ── */}
         {!results && (
-          <div className="flex gap-1 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl mb-5 w-fit p-1">
+          <div className="flex flex-wrap gap-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl mb-5 w-fit p-1 shadow-sm">
             {[
               { id: 'new',     label: 'New Reconciliation', icon: ArrowLeftRight },
               { id: 'clients', label: 'Clients',            icon: Building2 },
               { id: 'history', label: 'History',            icon: History },
+              { id: 'session', label: 'New Session',        icon: Plus },
             ].map(v => (
               <button
                 key={v.id}
-                onClick={() => { setPageView(v.id); setClientDetail(null); }}
+                onClick={() => {
+                  if (v.id === 'session') { handleNewSession(); return; }
+                  setPageView(v.id); setClientDetail(null);
+                }}
                 className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                  pageView === v.id
-                    ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm'
+                  v.id === 'session'
+                    ? 'bg-indigo-600 text-white shadow-sm hover:bg-indigo-700'
+                    : pageView === v.id
+                    ? 'bg-indigo-50 dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm border border-indigo-100 dark:border-slate-600'
                     : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
                 }`}
               >
                 <v.icon className="h-3.5 w-3.5" />
                 {v.label}
+                {v.id === 'session' && sessions.length > 0 && (
+                  <span className="ml-1 bg-white/20 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{sessions.length}</span>
+                )}
               </button>
             ))}
           </div>
