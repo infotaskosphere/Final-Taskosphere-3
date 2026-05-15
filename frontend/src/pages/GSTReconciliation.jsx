@@ -2383,8 +2383,10 @@ const TradeNameCell = React.memo(({ gstin, manualTradeNames, onSave }) => {
   const [busy,   setBusy]   = useState(false);
   const inputRef = useRef(null);
 
-  // When popover opens: pre-fill draft and auto-fetch from GST portal
-  const handleOpen = async () => {
+  // When popover opens: pre-fill draft and auto-fetch from GST portal.
+  // stopPropagation prevents the row-level onClick (invoice detail modal) from firing.
+  const handleOpen = async (e) => {
+    e?.stopPropagation();
     setDraft(current);
     setOpen(true);
     setTimeout(() => inputRef.current?.focus(), 50);
@@ -2399,20 +2401,22 @@ const TradeNameCell = React.memo(({ gstin, manualTradeNames, onSave }) => {
     }
   };
 
-  const handleSave = () => {
+  const handleSave = (e) => {
+    e?.stopPropagation();
     const trimmed = draft.trim();
     if (trimmed) onSave(gstin, trimmed);
     setOpen(false);
   };
 
   const handleKeyDown = (e) => {
+    e.stopPropagation(); // prevent row clicks while typing
     if (e.key === 'Enter') { e.preventDefault(); handleSave(); }
     if (e.key === 'Escape') setOpen(false);
   };
 
   if (!open) {
     return current ? (
-      <span className="flex items-center gap-1 group min-w-0">
+      <span className="flex items-center gap-1 group min-w-0" onClick={e => e.stopPropagation()}>
         <span className="truncate text-slate-700 dark:text-slate-200 text-sm max-w-[140px]" title={current}>{current}</span>
         <button
           onClick={handleOpen}
@@ -2435,7 +2439,7 @@ const TradeNameCell = React.memo(({ gstin, manualTradeNames, onSave }) => {
   }
 
   return (
-    <div className="flex flex-col gap-1 min-w-[180px]">
+    <div className="flex flex-col gap-1 min-w-[180px]" onClick={e => e.stopPropagation()}>
       <div className="flex items-center gap-1">
         <div className="relative flex-1">
           <input
@@ -2459,7 +2463,7 @@ const TradeNameCell = React.memo(({ gstin, manualTradeNames, onSave }) => {
           <CheckCircle2 className="h-3.5 w-3.5"/>
         </button>
         <button
-          onClick={() => setOpen(false)}
+          onClick={e => { e.stopPropagation(); setOpen(false); }}
           title="Cancel (Esc)"
           className="flex-shrink-0 p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-400 hover:text-slate-600 transition-colors"
         >
@@ -2485,17 +2489,18 @@ const CommentCell = React.memo(({ rowKey, comments, onSave }) => {
   const [draft,  setDraft] = useState(current);
   const inputRef = useRef(null);
 
-  const handleOpen  = () => { setDraft(current); setOpen(true); setTimeout(() => inputRef.current?.focus(), 50); };
-  const handleSave  = () => { onSave(rowKey, draft); setOpen(false); };
-  const handleClear = () => { onSave(rowKey, ''); setOpen(false); };
+  const handleOpen  = (e) => { e?.stopPropagation(); setDraft(current); setOpen(true); setTimeout(() => inputRef.current?.focus(), 50); };
+  const handleSave  = (e) => { e?.stopPropagation(); onSave(rowKey, draft); setOpen(false); };
+  const handleClear = (e) => { e?.stopPropagation(); onSave(rowKey, ''); setOpen(false); };
   const handleKey   = e => {
+    e.stopPropagation();
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSave(); }
     if (e.key === 'Escape') setOpen(false);
   };
 
   if (!open) {
     return current ? (
-      <span className="flex items-center gap-1 group min-w-0 max-w-[120px]">
+      <span className="flex items-center gap-1 group min-w-0 max-w-[120px]" onClick={e => e.stopPropagation()}>
         <MessageSquare className="h-3 w-3 text-amber-500 flex-shrink-0"/>
         <span className="truncate text-amber-700 dark:text-amber-300 text-[10px] italic" title={current}>{current}</span>
         <button onClick={handleOpen} title="Edit comment"
@@ -2512,7 +2517,7 @@ const CommentCell = React.memo(({ rowKey, comments, onSave }) => {
   }
 
   return (
-    <div className="flex flex-col gap-1 min-w-[160px] z-10 relative">
+    <div className="flex flex-col gap-1 min-w-[160px] z-10 relative" onClick={e => e.stopPropagation()}>
       <textarea
         ref={inputRef}
         value={draft}
@@ -2527,7 +2532,7 @@ const CommentCell = React.memo(({ rowKey, comments, onSave }) => {
           className="flex-1 py-0.5 rounded bg-amber-500 hover:bg-amber-600 text-white text-[9px] font-bold transition-colors">Save</button>
         <button onClick={handleClear}
           className="py-0.5 px-1.5 rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-[9px] text-slate-400 transition-colors">Clear</button>
-        <button onClick={() => setOpen(false)}
+        <button onClick={e => { e.stopPropagation(); setOpen(false); }}
           className="p-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-400 transition-colors">
           <X className="h-3 w-3"/>
         </button>
