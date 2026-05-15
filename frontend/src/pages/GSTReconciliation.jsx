@@ -4842,7 +4842,7 @@ const SideBySideCompare = ({ portalOnly, booksOnly, onConfirmMatch, onClose }) =
 /* ═══════════════════════════════════════════════════════════════════════════
    CLIENT DETAIL VIEW — month-wise session history for one client
 ═══════════════════════════════════════════════════════════════════════════ */
-const ClientDetailView = ({ clientKey, clientName, clientGstin, onOpenSession, onBack, clients }) => {
+const ClientDetailView = ({ clientKey, clientName, clientGstin, onOpenSession, onNewSession, onBack, clients }) => {
   const [sessions,  setSessions]  = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [opening,   setOpening]   = useState(null);
@@ -4976,22 +4976,34 @@ const ClientDetailView = ({ clientKey, clientName, clientGstin, onOpenSession, o
                   )}
                 </div>
                 {/* Actions */}
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  {/* New Session — green, same shape as Open */}
+                  <button
+                    onClick={() => onNewSession?.({ clientName, clientGstin })}
+                    title="Start a new reconciliation for this company"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:hover:bg-emerald-900/50 text-emerald-600 dark:text-emerald-300 text-xs font-semibold border border-emerald-200 dark:border-emerald-800 transition-colors">
+                    <Plus className="h-3.5 w-3.5"/>
+                    New Session
+                  </button>
+                  {/* Open — indigo */}
                   <button
                     onClick={() => handleOpen(s.id)} disabled={opening === s.id}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 text-xs font-semibold border border-indigo-200 dark:border-indigo-800 transition-colors">
                     {opening === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin"/> : <FolderOpen className="h-3.5 w-3.5"/>}
                     Open
                   </button>
+                  {/* Edit — amber icon only */}
                   <button
                     onClick={() => setEditing({ session: s })}
                     title="Edit details"
-                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/20 text-slate-400 hover:text-amber-600 transition-colors border border-transparent hover:border-amber-200">
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 dark:bg-amber-900/30 dark:hover:bg-amber-900/50 text-amber-600 dark:text-amber-300 text-xs font-semibold border border-amber-200 dark:border-amber-800 transition-colors">
                     <Edit3 className="h-3.5 w-3.5"/>
                   </button>
+                  {/* Delete — rose icon only */}
                   <button
                     onClick={() => handleDelete(s.id)} disabled={deleting === s.id}
-                    className="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20 text-slate-300 hover:text-rose-500 transition-colors">
+                    title="Delete this session"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-900/30 dark:hover:bg-rose-900/50 text-rose-500 dark:text-rose-400 text-xs font-semibold border border-rose-200 dark:border-rose-800 transition-colors">
                     {deleting === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin"/> : <Trash2 className="h-3.5 w-3.5"/>}
                   </button>
                 </div>
@@ -5810,6 +5822,13 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
                   })
                   .catch(() => {});
                 toast.success('Reconciliation loaded — fully editable.');
+              }}
+              onNewSession={({ clientName: cn, clientGstin: cg } = {}) => {
+                handleReset();
+                setCompany(prev => ({ ...EMPTY_COMPANY, name: cn || '', gstin: cg || '' }));
+                setClientDetail(null);
+                setPageView('new');
+                toast.success(`Starting new session for ${cn || 'this client'}.`);
               }}
             />
           </div>
