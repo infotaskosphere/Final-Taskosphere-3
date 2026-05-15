@@ -1,3 +1,10 @@
+// ── ClientPortalDashboard.jsx ─────────────────────────────────────────────
+// Enhanced with:
+//   • Messages tab (client receives messages from admin — DSC, compliance, etc.)
+//   • Unread message badge on tab
+//   • Section significance tooltips (Documents, Tasks, Invoices, Compliance)
+//   • Mark-as-read on expand
+// ─────────────────────────────────────────────────────────────────────────
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
@@ -155,7 +162,39 @@ function DownloadBtn({ file }) {
   );
 }
 
+// ── Section significance descriptions ────────────────────────────────────
+const SECTION_SIGNIFICANCE = {
+  "Tasks": "Shows all active tasks assigned to you by our team — including pending actions, document submissions, approvals, and follow-ups you need to be aware of.",
+  "Documents": "Contains all your important documents tracked by our firm — such as registration certificates, PAN, DSC expiry, licenses, and compliance-related documents with their status and expiry dates.",
+  "Invoices": "All fee invoices raised by our firm for professional services rendered. You can view invoice amounts, dates, payment status, and outstanding balances.",
+  "Compliance": "Tracks all statutory compliance filings applicable to you — GST returns, ITR, ROC filings, TDS, etc. — with due dates and filing status so you never miss a deadline.",
+  "My Drive": "Securely access files and folders shared with you by our team — reports, workings, certificates, correspondence, and other documents stored in your dedicated Drive folder.",
+  "Messages": "Direct messages from our team — important alerts such as DSC expiry notices, compliance reminders, invoice communications, and any other updates regarding your account.",
+};
+
+function InfoTooltip({ text }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative inline-block">
+      <button
+        onMouseEnter={() => setShow(true)}
+        onMouseLeave={() => setShow(false)}
+        onClick={() => setShow(v => !v)}
+        className="ml-1 w-4 h-4 rounded-full bg-gray-200 text-gray-500 text-[10px] flex items-center justify-center hover:bg-blue-100 hover:text-blue-600 transition"
+        title="What is this?"
+      >i</button>
+      {show && (
+        <div className="absolute z-50 left-5 top-0 w-64 bg-gray-900 text-white text-xs rounded-xl p-3 shadow-xl leading-relaxed pointer-events-none">
+          {text}
+          <div className="absolute left-[-5px] top-3 w-2.5 h-2.5 bg-gray-900 rotate-45" />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Section({ title, icon, children, count }) {
+  const significance = SECTION_SIGNIFICANCE[title];
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
       <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
@@ -167,6 +206,7 @@ function Section({ title, icon, children, count }) {
               {count}
             </span>
           )}
+          {significance && <InfoTooltip text={significance} />}
         </div>
       </div>
       <div className="p-6">{children}</div>
@@ -388,11 +428,127 @@ function DriveTab({ user }) {
   );
 }
 
+// ── Messages Tab (Client side) ────────────────────────────────────────────
+const MSG_TYPE_META = {
+  dsc_expiry:       { label: "DSC Expiry Alert",      icon: "🔐", bg: "bg-red-50",    border: "border-red-200",    badge: "bg-red-100 text-red-700" },
+  compliance_due:   { label: "Compliance Due",         icon: "📋", bg: "bg-orange-50", border: "border-orange-200", badge: "bg-orange-100 text-orange-700" },
+  invoice_reminder: { label: "Invoice Reminder",       icon: "🧾", bg: "bg-blue-50",   border: "border-blue-200",   badge: "bg-blue-100 text-blue-700" },
+  general:          { label: "Message",                icon: "💬", bg: "bg-gray-50",   border: "border-gray-200",   badge: "bg-gray-100 text-gray-600" },
+  custom:           { label: "Notice",                 icon: "📢", bg: "bg-purple-50", border: "border-purple-200", badge: "bg-purple-100 text-purple-700" },
+};
+
+function MessagesTab({ onUnreadChange }) {
+  const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedId, setExpandedId] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await portalApi().get("/client-portal/my-messages");
+      const msgs = Array.isArray(res.data) ? res.data : [];
+      setMessages(msgs);
+      onUnreadChange && onUnreadChange(msgs.filter(m => !m.is_read).length);
+    } catch {
+      setMessages([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [onUnreadChange]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleExpand = async (msg) => {
+    setExpandedId(prev => (prev === msg.id ? null : msg.id));
+    if (!msg.is_read) {
+      try {
+        await portalApi().put(`/client-portal/my-messages/${msg.id}/read`);
+        setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, is_read: true } : m));
+        onUnreadChange && onUnreadChange(messages.filter(m => !m.is_read && m.id !== msg.id).length);
+      } catch { /* silent */ }
+    }
+  };
+
+  const unreadCount = messages.filter(m => !m.is_read).length;
+
+  return (
+    <Section title="Messages" icon="💬" count={messages.length}>
+      {loading ? (
+        <div className="flex justify-center py-10">
+          <div className="w-7 h-7 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+        </div>
+      ) : messages.length === 0 ? (
+        <div className="text-center py-10">
+          <div className="text-4xl mb-3">💬</div>
+          <p className="text-gray-500 text-sm font-medium">No messages yet</p>
+          <p className="text-gray-400 text-xs mt-1">Your firm will send important updates here.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {unreadCount > 0 && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 rounded-xl border border-blue-100 text-xs text-blue-700 font-medium">
+              <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse inline-block" />
+              {unreadCount} unread message{unreadCount > 1 ? "s" : ""}
+            </div>
+          )}
+          {messages.map((msg) => {
+            const typeKey = msg.message_type || "general";
+            const meta = MSG_TYPE_META[typeKey] || MSG_TYPE_META.general;
+            const isExpanded = expandedId === msg.id;
+            return (
+              <div
+                key={msg.id}
+                className={`rounded-xl border transition-all cursor-pointer ${meta.bg} ${meta.border} ${!msg.is_read ? "shadow-sm" : ""}`}
+                onClick={() => handleExpand(msg)}
+              >
+                <div className="flex items-start gap-3 p-4">
+                  <span className="text-xl flex-shrink-0 mt-0.5">{meta.icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${meta.badge}`}>
+                        {meta.label}
+                      </span>
+                      {!msg.is_read && (
+                        <span className="text-[10px] font-bold text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">NEW</span>
+                      )}
+                      <span className="text-[10px] text-gray-400 ml-auto">
+                        {msg.created_at ? new Date(msg.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : ""}
+                      </span>
+                    </div>
+                    <p className={`text-sm font-semibold text-gray-800 ${!msg.is_read ? "font-bold" : ""}`}>
+                      {msg.subject || "(no subject)"}
+                    </p>
+                    <p className={`text-xs text-gray-500 mt-0.5 ${isExpanded ? "" : "line-clamp-2"}`}>
+                      {msg.body}
+                    </p>
+                    {!isExpanded && msg.body && msg.body.length > 120 && (
+                      <p className="text-xs text-blue-500 mt-1 font-medium">Tap to read more ↓</p>
+                    )}
+                    {isExpanded && (
+                      <div className="mt-3 pt-3 border-t border-gray-200/60">
+                        <p className="text-xs text-gray-400">
+                          From: <span className="font-medium text-gray-600">{msg.from_user_name || "Team"}</span>
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+
 export default function ClientPortalDashboard() {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState("drive");
   const [data, setData] = useState({ tasks: [], documents: [], invoices: [], compliance: [] });
+  const [unreadMessages, setUnreadMessages] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -479,6 +635,7 @@ export default function ClientPortalDashboard() {
     user.can_view_invoices   && { id: "invoices",   label: "Invoices",   icon: "🧾" },
     user.can_view_compliance && { id: "compliance", label: "Compliance", icon: "📋" },
     user.google_drive_folder_id && { id: "drive",  label: "My Drive",   icon: "☁️" },
+    { id: "messages", label: "Messages", icon: "💬", badge: unreadMessages },
   ].filter(Boolean);
   if (!tabs.find(t => t.id === "drive")) tabs.push({ id: "drive", label: "My Drive", icon: "☁️" });
 
@@ -556,6 +713,11 @@ export default function ClientPortalDashboard() {
               }`}
             >
               <span>{t.icon}</span> {t.label}
+              {t.badge > 0 && (
+                <span className="ml-1 bg-red-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                  {t.badge}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -687,6 +849,10 @@ export default function ClientPortalDashboard() {
                   </div>
                 )}
               </Section>
+            )}
+
+            {activeTab === "messages" && (
+              <MessagesTab onUnreadChange={setUnreadMessages} />
             )}
           </>
         )}
