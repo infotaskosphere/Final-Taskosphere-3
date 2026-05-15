@@ -1147,6 +1147,10 @@ async def get_my_messages(current_client=Depends(get_current_portal_client)):
     docs = await db.portal_messages.find(
         {"to_portal_user_id": current_client["id"]}, {"_id": 0}
     ).sort("created_at", -1).to_list(100)
+    # Ensure replies field always exists
+    for doc in docs:
+        if "replies" not in doc:
+            doc["replies"] = []
     return docs
 
 @router.put("/my-messages/{msg_id}/read")
@@ -1157,6 +1161,39 @@ async def mark_message_read(msg_id: str, current_client=Depends(get_current_port
         {"$set": {"is_read": True, "read_at": datetime.now(timezone.utc).isoformat()}},
     )
     return {"ok": True}
+
+class ClientReplyPayload(BaseModel):
+    body: str
+
+@router.post("/my-messages/{msg_id}/reply")
+async def reply_to_message(
+    msg_id: str,
+    payload: ClientReplyPayload,
+    current_client=Depends(get_current_portal_client),
+):
+    """Client: send a reply to a message from the firm."""
+    body = (payload.body or "").strip()
+    if not body:
+        raise HTTPException(400, "Reply body is required")
+
+    reply = {
+        "body": body,
+        "from_client": True,
+        "from_display_name": current_client.get("display_name") or current_client.get("portal_username"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    # Append reply to the message document
+    result = await db.portal_messages.update_one(
+        {"id": msg_id, "to_portal_user_id": current_client["id"]},
+        {
+            "$push": {"replies": reply},
+            "$set": {"has_reply": True, "last_reply_at": reply["created_at"]},
+        },
+    )
+    if result.matched_count == 0:
+        raise HTTPException(404, "Message not found")
+    return {"ok": True, "reply": reply}
+
 
 @router.delete("/messages/{msg_id}")
 async def delete_portal_message(msg_id: str, current_user: User = Depends(get_current_user)):
