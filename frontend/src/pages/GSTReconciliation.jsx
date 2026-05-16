@@ -6,13 +6,7 @@ import { saveAs } from 'file-saver';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '@/lib/api';
 import {
-  Upload, CheckCircle2, AlertTriangle, Download, Search, ArrowLeft,
-  RefreshCw, ArrowLeftRight, Info, X, Globe, BookOpen,
-  FileText, FileSpreadsheet, Building2, Hash, MapPin,
-  Phone, Mail, Calendar, ChevronRight, ScanSearch,
-  Filter, Tag, ArrowUpDown, ChevronsUpDown,
-  History, Clock, Trash2, ChevronDown, User, Loader2, FolderOpen, Edit3,
-  MessageSquare, Sparkles, Layers, Plus, BarChart3, TrendingUp, ShieldCheck,
+  Upload, CheckCircle2, AlertTriangle, Download, Search, ArrowLeft, RefreshCw, ArrowLeftRight, Info, X, Globe, BookOpen, FileText, FileSpreadsheet, Building2, Hash, MapPin, Phone, Mail, Calendar, ChevronRight, ScanSearch, Filter, Tag, ArrowUpDown, ChevronsUpDown, History, Clock, Trash2, ChevronDown, User, Loader2, FolderOpen, Edit3, MessageSquare, Sparkles, Layers, Plus, BarChart3, TrendingUp, ShieldCheck, Save
 } from 'lucide-react';
 import { toast } from 'sonner';
 import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
@@ -924,6 +918,52 @@ function normaliseDateStr(raw) {
   return s;
 }
 
+
+/** Returns all plausible ISO-date interpretations of a raw value.
+ *  Used by dateMatches() to compare dates across files that may use different
+ *  formats (e.g. Portal DD/MM/YYYY vs Books MM/DD/YY vs YYYY-MM-DD vs "10 Apr 2026").
+ */
+function dateCandidates(raw) {
+  if (!raw) return [];
+  const s = String(raw).trim();
+  if (!s) return [];
+  const out = new Set();
+  const base = normaliseDateStr(s);
+  if (base && /^\d{4}-\d{2}-\d{2}$/.test(base)) out.add(base);
+
+  // Numeric DD?-MM?-YY(YY) — add both DMY and MDY interpretations when both are valid
+  const m = s.match(/^(\d{1,2})[-\/.\s](\d{1,2})[-\/.\s](\d{2,4})$/);
+  if (m) {
+    const [, a, b, y] = m;
+    const yyyy = y.length <= 2 ? `20${y}` : y;
+    const ai = parseInt(a, 10), bi = parseInt(b, 10);
+    if (ai >= 1 && ai <= 12 && bi >= 1 && bi <= 31)
+      out.add(`${yyyy}-${a.padStart(2,'0')}-${b.padStart(2,'0')}`); // MDY
+    if (bi >= 1 && bi <= 12 && ai >= 1 && ai <= 31)
+      out.add(`${yyyy}-${b.padStart(2,'0')}-${a.padStart(2,'0')}`); // DMY
+  }
+  // YYYY-?-? (could be YYYY-MM-DD or YYYY-DD-MM)
+  const y4 = s.match(/^(\d{4})[-\/.\s](\d{1,2})[-\/.\s](\d{1,2})$/);
+  if (y4) {
+    const [, y, a, b] = y4;
+    const ai = parseInt(a, 10), bi = parseInt(b, 10);
+    if (ai >= 1 && ai <= 12 && bi >= 1 && bi <= 31)
+      out.add(`${y}-${a.padStart(2,'0')}-${b.padStart(2,'0')}`);
+    if (bi >= 1 && bi <= 12 && ai >= 1 && ai <= 31)
+      out.add(`${y}-${b.padStart(2,'0')}-${a.padStart(2,'0')}`);
+  }
+  return [...out];
+}
+
+/** True if two raw date strings can plausibly represent the same calendar date
+ *  under any common Indian / ISO / US / word-month format. */
+function dateMatches(a, b) {
+  if (!a || !b) return true; // missing data — don't penalise
+  const A = dateCandidates(a), B = dateCandidates(b);
+  if (!A.length || !B.length) return String(a).trim() === String(b).trim();
+  return A.some(x => B.includes(x));
+}
+
 /**
  * Smart tolerance v2 — ₹1.01 floor, 0.1% of value, but CAPPED at ₹50.
  * The cap prevents false matches on large invoices (e.g., ₹10L invoice:
@@ -985,7 +1025,7 @@ function detectMismatchReason(p, b) {
 
   const pDate    = normaliseDateStr(p.invoiceDate);
   const bDate    = normaliseDateStr(b.invoiceDate);
-  const dateDiff = pDate && bDate && pDate !== bDate;
+  const dateDiff = pDate && bDate && !dateMatches(p.invoiceDate, b.invoiceDate);
 
   const pRate    = _impliedRate(p);
   const bRate    = _impliedRate(b);
@@ -1222,7 +1262,7 @@ function isPrefixOnlyMismatch(p, b) {
   if (hasTax && Math.abs(p.taxableValue - b.taxableValue) > tol) return false;
   // Date: normalise before comparing
   const pd = normaliseDateStr(p.invoiceDate), bd = normaliseDateStr(b.invoiceDate);
-  if (pd && bd && pd !== bd) return false;
+  if (pd && bd && !dateMatches(p.invoiceDate, b.invoiceDate)) return false;
   const ps1 = (p.placeOfSupply||'').trim().toUpperCase().replace(/^\d{1,2}-/, '');
   const ps2 = (b.placeOfSupply||'').trim().toUpperCase().replace(/^\d{1,2}-/, '');
   if (ps1 && ps2 && ps1 !== ps2) return false;
@@ -1248,7 +1288,7 @@ function countMismatchFields(p, b) {
       Math.abs(p.taxableValue - b.taxableValue) > tol)  fields.push('Taxable Value');
   // Dates: normalise before comparing
   const pd = normaliseDateStr(p.invoiceDate), bd = normaliseDateStr(b.invoiceDate);
-  if (pd && bd && pd !== bd)                             fields.push('Invoice Date');
+  if (pd && bd && !dateMatches(p.invoiceDate, b.invoiceDate)) fields.push('Invoice Date');
   const ps = (p.placeOfSupply||'').trim().toUpperCase().replace(/^\d+-/,'');
   const bs = (b.placeOfSupply||'').trim().toUpperCase().replace(/^\d+-/,'');
   if (ps && bs && ps !== bs)                             fields.push('Place of Supply');
@@ -1364,7 +1404,7 @@ function reconcile(portalData, booksData) {
       const taxD = Math.abs((po.portal.igst+po.portal.cgst+po.portal.sgst) -
                              (bo.books.igst+bo.books.cgst+bo.books.sgst));
       const pd = normaliseDateStr(po.portal.invoiceDate), bd = normaliseDateStr(bo.books.invoiceDate);
-      const dateMatch = pd && bd && pd === bd;
+      const dateMatch = pd && bd && dateMatches(po.portal.invoiceDate, bo.books.invoiceDate);
       const taxMatch  = taxD <= tol;
       if (!dateMatch && !taxMatch) continue;
       // Pick the closest value match
@@ -1502,7 +1542,7 @@ function reconcile(portalData, booksData) {
           // Date must also match as a tie-breaker for safety
           const pd = normaliseDateStr(po.portal.invoiceDate);
           const bd = normaliseDateStr(bo.books.invoiceDate);
-          if (pd && bd && pd !== bd) continue;
+          if (pd && bd && !dateMatches(po.portal.invoiceDate, bo.books.invoiceDate)) continue;
           const score = taxD * 10 + 1000;               // penalty for no invoice-no match
           if (score < bestScore) { bestMatch = bo; bestScore = score; }
         }
@@ -3763,7 +3803,7 @@ const CheckOneTab = ({ records }) => {
               const n = (page-1)*PAGE_SIZE + idx + 1;
               const valMatch  = Math.abs((p?.invoiceValue||0) - (b?.invoiceValue||0)) <= TOLERANCE;
               const taxMatch  = Math.abs(((p?.igst||0)+(p?.cgst||0)+(p?.sgst||0)) - ((b?.igst||0)+(b?.cgst||0)+(b?.sgst||0))) <= TOLERANCE;
-              const dateMatch = !p?.invoiceDate || !b?.invoiceDate || p.invoiceDate === b.invoiceDate;
+              const dateMatch = !p?.invoiceDate || !b?.invoiceDate || dateMatches(p.invoiceDate, b.invoiceDate);
               const rowBg     = r.allOtherMatch
                 ? 'bg-emerald-50/60 dark:bg-emerald-900/10'
                 : 'bg-rose-50/60 dark:bg-rose-900/10';
@@ -4065,8 +4105,7 @@ const CrossGstinTable = ({ records, manualTradeNames, onSaveTradeName, comments,
               const bName = b?.tradeOrLegalName || manualTradeNames?.[b?.gstin] || '—';
               const rowKey = r.key || `cg_${idx}`;
               const valDiff  = Math.abs((p?.invoiceValue||0) - (b?.invoiceValue||0));
-              const dateDiff = p?.invoiceDate && b?.invoiceDate &&
-                               normaliseDateStr(p.invoiceDate) !== normaliseDateStr(b.invoiceDate);
+              const dateDiff = p?.invoiceDate && b?.invoiceDate && !dateMatches(p.invoiceDate, b.invoiceDate);
               return (
                 <tr key={idx}
                   className="border-b border-orange-100 dark:border-orange-900/30 hover:bg-orange-50/40 dark:hover:bg-orange-900/10 cursor-pointer transition-colors"
@@ -6467,6 +6506,52 @@ export default function GSTReconciliation() {
     } finally { setLoading(false); }
   };
 
+  // Update Session: when an opened-from-history session has been edited,
+  // overwrite the original saved snapshot with the current results so the
+  // latest edit becomes the canonical version (no separate baseline copy).
+  const [updatingSession, setUpdatingSession] = useState(false);
+  const handleUpdateSession = useCallback(async () => {
+    if (!loadedSessionId || !results) {
+      toast.info('No opened session to update.');
+      return;
+    }
+    setUpdatingSession(true);
+    try {
+      const summary = {
+        total_portal:      (results.matched?.length||0)+(results.mismatch?.length||0)+(results.portalOnly?.length||0),
+        total_books:       (results.matched?.length||0)+(results.mismatch?.length||0)+(results.booksOnly?.length||0),
+        matched_count:     results.matched?.length     || 0,
+        mismatch_count:    results.mismatch?.length    || 0,
+        portal_only_count: results.portalOnly?.length  || 0,
+        books_only_count:  results.booksOnly?.length   || 0,
+        matched_value:     sumVal(results.matched    || [], 'portal'),
+        mismatch_value:    sumVal(results.mismatch   || [], 'portal'),
+        portal_only_value: sumVal(results.portalOnly || [], 'portal'),
+        books_only_value:  sumVal(results.booksOnly  || [], 'books'),
+        updated_at_client: new Date().toISOString(),
+      };
+      await api.patch(`/gst-reconciliation/history/${loadedSessionId}`, {
+        period:       period || undefined,
+        client_id:    selectedClient?.id || undefined,
+        client_name:  company.name || undefined,
+        client_gstin: company.gstin || undefined,
+        company,
+        summary,
+        full_result: results,
+      });
+      // Latest edit is now the canonical snapshot — no baseline auto-save needed.
+      setBaselineSnapshot(null);
+      setSnapshotSaved(true);
+      setSnapshotPrompt(null);
+      toast.success('Session updated — latest edits saved as the final snapshot.');
+    } catch (e) {
+      console.error(e);
+      toast.error('Failed to update session. Please try again.');
+    } finally {
+      setUpdatingSession(false);
+    }
+  }, [loadedSessionId, results, period, selectedClient, company]);
+
   // New Session: save current session (if any) then reset for a fresh start.
   // We intentionally preserve selectedClient so the next session auto-links
   // to the same client (preventing duplicate client cards in the Clients view).
@@ -6561,7 +6646,19 @@ export default function GSTReconciliation() {
               <button onClick={()=>exportExcel(results, company, period, manualTradeNames, invoiceComments)} className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg shadow-sm transition-colors">
                 <FileSpreadsheet className="h-3.5 w-3.5"/> Excel
               </button>
-              <button onClick={handleNewSession} className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-white/15 hover:bg-white/25 text-white text-xs font-medium rounded-lg border border-white/20 transition-colors">
+              {loadedSessionId && (
+                <button
+                  onClick={handleUpdateSession}
+                  disabled={updatingSession}
+                  title="Overwrite the original saved snapshot with the current (edited) results"
+                  className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg shadow-sm border border-emerald-400/40 transition-colors"
+                >
+                  {updatingSession
+                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin"/> Updating…</>
+                    : <><Save className="h-3.5 w-3.5"/> Update</>}
+                </button>
+              )}
+              <button onClick={handleNewSession} className={`${loadedSessionId ? '' : 'ml-auto '}flex items-center gap-1.5 px-3 py-1.5 bg-white/15 hover:bg-white/25 text-white text-xs font-medium rounded-lg border border-white/20 transition-colors`}>
                 <Plus className="h-3.5 w-3.5"/> New Session
               </button>
               <button onClick={handleReset} className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-medium rounded-lg border border-white/10 transition-colors">
