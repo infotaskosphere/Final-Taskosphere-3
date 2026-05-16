@@ -1481,7 +1481,7 @@ async def dashboard_summary(current_user: User=Depends(get_current_user)):
 
 
 
-# ─── AI INSIGHTS ENDPOINT (Gemini) ────────────────────────────────────────────
+# ─── AI INSIGHTS ENDPOINT (Grok / xAI) ───────────────────────────────────────
 
 class AIInsightBody(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -1502,25 +1502,27 @@ async def generate_ai_insights(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Send reconciliation summary to Gemini and get back:
+    Send reconciliation summary to Grok (xAI) and get back:
       - Executive summary
       - Key risk areas
       - Recommended actions
       - ITC impact analysis
     """
     import os
-    gemini_key = os.environ.get("GEMINI_API_KEY", "")
-    if not gemini_key:
+    grok_key = os.environ.get("GROK_API_KEY", "")
+    if not grok_key:
         raise HTTPException(
             status_code=500,
-            detail="GEMINI_API_KEY is not configured on the server."
+            detail="GROK_API_KEY is not configured on the server."
         )
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(
+            api_key=grok_key,
+            base_url="https://api.x.ai/v1",
+        )
     except ImportError:
-        raise HTTPException(status_code=500, detail="google-generativeai package not installed.")
+        raise HTTPException(status_code=500, detail="openai package not installed.")
 
     # Build top mismatches text
     mismatch_text = ""
@@ -1575,18 +1577,22 @@ Keep the response clear, professional, and actionable. Use Indian GST terminolog
 """
 
     try:
-        response = await model.generate_content_async(prompt)
+        completion = await client.chat.completions.create(
+            model="grok-3-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+        )
         return {
-            "insights": response.text,
+            "insights": completion.choices[0].message.content,
             "period": body.period,
             "generated_at": _now().isoformat(),
         }
     except Exception as e:
         error_msg = str(e)
-        if "429" in error_msg or "quota" in error_msg.lower():
+        if "429" in error_msg or "quota" in error_msg.lower() or "rate" in error_msg.lower():
             raise HTTPException(
                 status_code=429,
-                detail="Gemini quota exceeded. Please wait a moment and try again."
+                detail="Grok API rate limit reached. Please wait a moment and try again."
             )
         raise HTTPException(status_code=422, detail=f"AI analysis failed: {error_msg}")
 
