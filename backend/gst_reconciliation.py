@@ -1509,17 +1509,17 @@ async def generate_ai_insights(
       - ITC impact analysis
     """
     import os
-    grok_key = os.environ.get("GROK_API_KEY", "")
-    if not grok_key:
+    groq_key = os.environ.get("GROQ_API_KEY", "")
+    if not groq_key:
         raise HTTPException(
             status_code=500,
-            detail="GROK_API_KEY is not configured on the server."
+            detail="GROQ_API_KEY is not configured on the server."
         )
     try:
         from openai import AsyncOpenAI
         client = AsyncOpenAI(
-            api_key=grok_key,
-            base_url="https://api.x.ai/v1",
+            api_key=groq_key,
+            base_url="https://api.groq.com/openai/v1",
         )
     except ImportError:
         raise HTTPException(status_code=500, detail="openai package not installed.")
@@ -1578,7 +1578,7 @@ Keep the response clear, professional, and actionable. Use Indian GST terminolog
 
     try:
         completion = await client.chat.completions.create(
-            model="grok-3-mini",
+            model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
         )
