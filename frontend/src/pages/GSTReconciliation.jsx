@@ -6,7 +6,7 @@ import { saveAs } from 'file-saver';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '@/lib/api';
 import {
-  Upload, CheckCircle2, AlertTriangle, Download, Search,
+  Upload, CheckCircle2, AlertTriangle, Download, Search, ArrowLeft,
   RefreshCw, ArrowLeftRight, Info, X, Globe, BookOpen,
   FileText, FileSpreadsheet, Building2, Hash, MapPin,
   Phone, Mail, Calendar, ChevronRight, ScanSearch,
@@ -112,6 +112,7 @@ function toNum(val) {
   if (isNaN(n)) return 0;
   return isNeg ? -n : n;
 }
+const MONTH_ABBR = { jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12' };
 function fmtDate(val) {
   if (!val) return '';
   if (typeof val === 'number') {
@@ -121,6 +122,15 @@ function fmtDate(val) {
     } catch (_) {}
   }
   const s = String(val).trim();
+  // "7-Apr-26" / "07-Apr-2026" / "7 Apr 26" style (books often record this way)
+  const ma = s.match(/^(\d{1,2})[-\s]([A-Za-z]{3})[-\s](\d{2,4})$/);
+  if (ma) {
+    const mo = MONTH_ABBR[ma[2].toLowerCase()];
+    if (mo) {
+      const y = ma[3].length === 2 ? `20${ma[3]}` : ma[3];
+      return `${ma[1].padStart(2,'0')}/${mo}/${y}`;
+    }
+  }
   // Normalise YYYY-MM-DD → DD/MM/YYYY
   const m1 = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
   if (m1) return `${m1[3].padStart(2,'0')}/${m1[2].padStart(2,'0')}/${m1[1]}`;
@@ -833,6 +843,16 @@ function normaliseDateStr(raw) {
   if (!s || s === '0' || s === 'undefined') return '';
   // Already ISO
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // "7-Apr-26" / "07-Apr-2026" / "7 Apr 26" — books often record month as abbreviation
+  const ma = s.match(/^(\d{1,2})[-\s]([A-Za-z]{3})[-\s](\d{2,4})$/);
+  if (ma) {
+    const MMAP = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
+    const mo = MMAP[ma[2].toLowerCase()];
+    if (mo) {
+      const y = ma[3].length === 2 ? `20${ma[3]}` : ma[3];
+      return `${y}-${String(mo).padStart(2,'0')}-${ma[1].padStart(2,'0')}`;
+    }
+  }
   // DD/MM/YYYY or DD-MM-YYYY (Indian standard)
   const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
   if (dmy) {
@@ -3137,8 +3157,16 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames
                         {inv?.tradeOrLegalName || manualTradeNames?.[inv?.gstin] || '—'}
                       </td>
                   }
-                  <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-200">
-                    {isPrefixRow ? (
+                  <td className={`${tabId==='mismatch'?'px-2 py-1.5':'px-3 py-2'} font-medium text-slate-700 dark:text-slate-200`}>
+                    {tabId === 'mismatch' ? (
+                      <span className="flex flex-col gap-0.5">
+                        <span className="text-blue-600 dark:text-blue-400 text-[10px] font-mono leading-tight">{r.portal?.invoiceNoRaw || '—'}</span>
+                        <span className="text-violet-600 dark:text-violet-400 text-[10px] font-mono leading-tight">{r.books?.invoiceNoRaw || '—'}</span>
+                        {isPrefixRow && <span className="text-[8px] text-yellow-600 dark:text-yellow-400 font-semibold">prefix differs</span>}
+                        {r.normalizedMatch && !isPrefixRow && <span className="text-[8px] text-indigo-500 dark:text-indigo-400 font-semibold">auto-matched ✓</span>}
+                        {r.manualMatch && <span className="text-[8px] text-indigo-500 dark:text-indigo-400 font-semibold">✓ Manual</span>}
+                      </span>
+                    ) : isPrefixRow ? (
                       <span className="flex flex-col gap-0.5">
                         <span className="text-blue-600 dark:text-blue-400 text-[10px] font-mono">{r.portal?.invoiceNoRaw}</span>
                         <span className="text-violet-600 dark:text-violet-400 text-[10px] font-mono">{r.books?.invoiceNoRaw}</span>
@@ -3173,29 +3201,28 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames
                     <td className="px-2 py-1.5 text-right text-slate-500 whitespace-nowrap">₹{fmt(r.portal.igst+r.portal.cgst+r.portal.sgst)}</td>
                     <td className="px-2 py-1.5 text-right text-slate-500 whitespace-nowrap">₹{fmt(r.books.igst+r.books.cgst+r.books.sgst)}</td>
                     <td className={`px-2 py-1.5 text-right font-bold whitespace-nowrap ${r.taxDiff>0?'text-blue-600':'text-rose-600'}`}>{r.taxDiff>0?'+':''}{fmt(r.taxDiff)}</td>
-                    <td className="px-2 py-1.5 min-w-0 max-w-[200px]">
-                      {/* Severity badge */}
-                      {r.severity && (
-                        <span className={`inline-block mb-0.5 px-1 py-0.5 rounded text-[8px] font-bold whitespace-nowrap mr-0.5
-                          ${r.severity==='high'   ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'
-                          : r.severity==='medium' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
-                          :                         'bg-slate-100 text-slate-500 dark:bg-slate-700'}`}>
-                          {r.severity==='high' ? '⚠ HIGH' : r.severity==='medium' ? '~ MED' : '↓ LOW'}
-                        </span>
-                      )}
-                      {/* Mismatch field tags */}
-                      <div className="flex flex-wrap gap-0.5 mb-0.5">
+                    <td className="px-2 py-1.5 min-w-0">
+                      {/* All badges on ONE line */}
+                      <div className="flex flex-wrap items-center gap-0.5">
+                        {r.severity && (
+                          <span className={`px-1 py-px rounded text-[8px] font-bold whitespace-nowrap
+                            ${r.severity==='high'   ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'
+                            : r.severity==='medium' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+                            :                         'bg-slate-100 text-slate-500 dark:bg-slate-700'}`}>
+                            {r.severity==='high' ? '⚠ HIGH' : r.severity==='medium' ? '~ MED' : '↓ LOW'}
+                          </span>
+                        )}
                         {(r.mismatchFields||[]).map(f => (
-                          <span key={f} className="inline-block px-1 py-px rounded text-[8px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 whitespace-nowrap">{f}</span>
+                          <span key={f} className="px-1 py-px rounded text-[8px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 whitespace-nowrap">{f}</span>
                         ))}
                         {r.rcMismatch && (
-                          <span className="inline-block px-1 py-px rounded text-[8px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300 whitespace-nowrap">RCM flag</span>
+                          <span className="px-1 py-px rounded text-[8px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300 whitespace-nowrap">RCM flag</span>
                         )}
                         {r.valueGstinMatch && (
-                          <span className="inline-block px-1 py-px rounded text-[8px] font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 whitespace-nowrap">Val-match</span>
+                          <span className="px-1 py-px rounded text-[8px] font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 whitespace-nowrap">Val-match</span>
                         )}
                       </div>
-                      {/* Human-readable reason */}
+                      {/* Reason + action below badges */}
                       {r.mismatchReason && (
                         <p className="text-[9px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug break-words">{r.mismatchReason}</p>
                       )}
@@ -3221,19 +3248,19 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames
                   </>}
                   {/* Per-row Matching / Not Matching status toggle */}
                   {(tabId === 'mismatch' || tabId === 'portalOnly' || tabId === 'booksOnly') && (
-                    <td className="px-2 py-2 text-center" onClick={e => e.stopPropagation()}>
-                      <div className="flex items-center justify-center gap-1">
+                    <td className="px-1 py-1.5 text-center" onClick={e => e.stopPropagation()}>
+                      <div className="flex flex-col items-center gap-0.5">
                         {onMarkMatched ? (
                           <button
                             onClick={() => onMarkMatched(r)}
                             title="Mark as matched"
-                            className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-600 border border-emerald-200 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/40 dark:text-emerald-400 dark:border-emerald-800 transition-colors whitespace-nowrap"
+                            className="flex items-center justify-center gap-0.5 w-full px-1 py-0.5 rounded text-[9px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-600 border border-emerald-200 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/40 dark:text-emerald-400 dark:border-emerald-800 transition-colors whitespace-nowrap"
                           >
-                            <CheckCircle2 className="h-2.5 w-2.5 flex-shrink-0"/> Match
+                            <CheckCircle2 className="h-2 w-2 flex-shrink-0"/> Match
                           </button>
                         ) : null}
-                        <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-500 border border-rose-200 dark:bg-rose-900/20 dark:text-rose-400 dark:border-rose-800 whitespace-nowrap">
-                          <X className="h-2.5 w-2.5 flex-shrink-0"/> No
+                        <span className="flex items-center justify-center gap-0.5 w-full px-1 py-0.5 rounded text-[9px] font-bold bg-rose-50 text-rose-500 border border-rose-200 dark:bg-rose-900/20 dark:text-rose-400 dark:border-rose-800 whitespace-nowrap">
+                          <X className="h-2 w-2 flex-shrink-0"/> No
                         </span>
                       </div>
                     </td>
@@ -6185,6 +6212,14 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
           {/* Export buttons strip when results exist */}
           {results && (
             <div className="flex flex-wrap items-center gap-2 px-5 py-3 bg-black/20 border-t border-white/10">
+              {/* Back navigation */}
+              <button onClick={() => { setResults(null); setPageView('clients'); setClientDetail(null); }} className="flex items-center gap-1.5 px-3 py-1.5 bg-white/15 hover:bg-white/25 text-white text-xs font-medium rounded-lg border border-white/20 transition-colors">
+                <ArrowLeft className="h-3.5 w-3.5"/> Clients
+              </button>
+              <button onClick={() => { setResults(null); setPageView('history'); }} className="flex items-center gap-1.5 px-3 py-1.5 bg-white/15 hover:bg-white/25 text-white text-xs font-medium rounded-lg border border-white/20 transition-colors">
+                <ArrowLeft className="h-3.5 w-3.5"/> History
+              </button>
+              <span className="w-px h-5 bg-white/20"/>
               <button onClick={()=>exportPDF(results, company, period, manualTradeNames, invoiceComments)} className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-medium rounded-lg shadow-sm transition-colors">
                 <FileText className="h-3.5 w-3.5"/> PDF
               </button>
@@ -6739,6 +6774,19 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
                       className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-violet-600 hover:bg-violet-700 text-white transition-colors shadow-sm">
                       <ArrowLeftRight className="h-3.5 w-3.5"/> Compare P vs B
                     </button>
+                    {portalFile && booksFile && (
+                      <button
+                        onClick={handleReconcile}
+                        disabled={loading}
+                        title="Re-reconcile the same uploaded files without uploading again"
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white transition-colors shadow-sm"
+                      >
+                        {loading
+                          ? <><div className="h-3 w-3 border-2 border-white/40 border-t-white rounded-full animate-spin flex-shrink-0"/>Re-checking…</>
+                          : <><RefreshCw className="h-3.5 w-3.5 flex-shrink-0"/>Roc Again</>
+                        }
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div className="p-4">
