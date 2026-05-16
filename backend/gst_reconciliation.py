@@ -1298,6 +1298,10 @@ class SessionUpdateBody(BaseModel):
     company:      Optional[Dict[str,Any]]= None
     portal_filename: Optional[str]       = None
     books_filename:  Optional[str]       = None
+    # NEW: allow the frontend "Update" button to overwrite the saved snapshot
+    # with the latest edited reconciliation result.
+    summary:      Optional[Dict[str,Any]]= None
+    full_result:  Optional[Dict[str,Any]]= None
 
 
 @router.patch("/history/{session_id}")
@@ -1333,6 +1337,8 @@ async def update_session(session_id: str, body: SessionUpdateBody,
     if body.company      is not None: updates["company"]          = body.company
     if body.portal_filename is not None: updates["portal_filename"] = body.portal_filename
     if body.books_filename  is not None: updates["books_filename"]  = body.books_filename
+    if body.summary         is not None: updates["summary"]         = body.summary
+    if body.full_result     is not None: updates["full_result"]     = body.full_result
 
     await db.gst_reconciliation_sessions.update_one({"id": session_id}, {"$set": updates})
     await _log_audit("update_session", current_user,
