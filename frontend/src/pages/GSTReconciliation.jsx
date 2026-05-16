@@ -1705,7 +1705,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
       lineWidth: 0.25,
     },
     alternateRowStyles: { fillColor: LGRAY },
-    margin: { left: ML, right: MR, top: 5, bottom: 10 },
+    margin: { left: ML, right: MR, top: 22, bottom: 12 },
     tableWidth: TW,            // ← always fills exactly 277 mm
     showHead: 'everyPage',
     rowPageBreak: 'avoid',
@@ -1778,7 +1778,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
   autoTable(doc, {
     ...BASE,
     startY: tableY,
-    head: [['Category', 'Count', 'Invoice Value (₹)', 'Taxable Value (₹)', 'IGST (₹)', 'CGST (₹)', 'SGST (₹)', 'Total Tax (₹)']],
+    head: [['Category', 'Count', 'Invoice Value (Rs)', 'Taxable Value (Rs)', 'IGST (Rs)', 'CGST (Rs)', 'SGST (Rs)', 'Total Tax (₹)']],
     body: [
       ['Matched',
         results.matched.length,
@@ -1844,7 +1844,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
     autoTable(doc, {
       ...BASE,
       startY: y,
-      head: [['#', 'GSTIN', 'Party Name', 'Invoice No', 'Date', 'Value (₹)', 'Taxable (₹)', 'IGST', 'CGST', 'SGST', 'Place of Supply', 'ITC']],
+      head: [['#', 'GSTIN', 'Party Name', 'Invoice No', 'Date', 'Value (Rs)', 'Taxable (Rs)', 'IGST', 'CGST', 'SGST', 'Place of Supply', 'ITC']],
       body: results.portalOnly.map((r, i) => {
         const inv = r.portal;
         return [
@@ -1913,7 +1913,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
     autoTable(doc, {
       ...BASE,
       startY: y,
-      head: [['#', 'GSTIN', 'Party Name', 'Invoice No', 'Date', 'Value (₹)', 'Taxable (₹)', 'IGST', 'CGST', 'SGST', 'Place of Supply']],
+      head: [['#', 'GSTIN', 'Party Name', 'Invoice No', 'Date', 'Value (Rs)', 'Taxable (Rs)', 'IGST', 'CGST', 'SGST', 'Place of Supply']],
       body: results.booksOnly.map((r, i) => {
         const inv    = r.books;
         const bgstin = (inv?.gstin || '').toUpperCase();
@@ -1964,7 +1964,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
     autoTable(doc, {
       ...BASE,
       startY: y,
-      head: [['#', 'GSTIN', 'Party Name', 'Invoice No', 'Date', 'Portal ₹', 'Books ₹', 'Diff ₹', 'P.Tax ₹', 'B.Tax ₹', 'Tax Δ ₹', 'Mismatch Reason & Suggested Action']],
+      head: [['#', 'GSTIN', 'Party Name', 'Invoice No', 'Date', 'Portal Rs', 'Books Rs', 'Diff Rs', 'P.Tax Rs', 'B.Tax Rs', 'Tax Diff', 'Reason & Suggested Action']],
       body: results.mismatch.map((r, i) => {
         const pTax   = (r.portal?.igst || 0) + (r.portal?.cgst || 0) + (r.portal?.sgst || 0);
         const bTax   = (r.books?.igst  || 0) + (r.books?.cgst  || 0) + (r.books?.sgst  || 0);
@@ -2002,7 +2002,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
         8:  { cellWidth: 16, halign: 'right'  },
         9:  { cellWidth: 16, halign: 'right'  },
         10: { cellWidth: 16, halign: 'right'  },
-        11: { cellWidth: 75, halign: 'left', fontSize: 7, overflow: 'linebreak' },
+        11: { halign: 'left', fontSize: 6.5, overflow: 'linebreak' },
       },
       didParseCell(data) {
         if (data.section !== 'body') return;
@@ -2035,7 +2035,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
     autoTable(doc, {
       ...BASE,
       startY: y,
-      head: [['#', 'GSTIN', 'Party Name', 'Invoice No', 'Date', 'Value (₹)', 'Taxable (₹)', 'IGST', 'CGST', 'SGST', 'Cess']],
+      head: [['#', 'GSTIN', 'Party Name', 'Invoice No', 'Date', 'Value (Rs)', 'Taxable (Rs)', 'IGST', 'CGST', 'SGST', 'Cess']],
       body: results.matched.map((r, i) => [
         i + 1,
         r.portal?.gstin || '—',
@@ -2510,7 +2510,7 @@ function exportExcel(results, company, period, manualTradeNames = {}, invoiceCom
     ['Address', company.address || '', 'Phone', company.phone || '', 'Email', company.email || '', '', ''],
     ['Generated', new Date().toLocaleDateString('en-IN'), '', '', '', '', '', ''],
     [],
-    ['Category', 'Count', 'Invoice Value (₹)', 'Taxable Value (₹)', 'IGST (₹)', 'CGST (₹)', 'SGST (₹)', 'Total Tax (₹)'],
+    ['Category', 'Count', 'Invoice Value (Rs)', 'Taxable Value (Rs)', 'IGST (Rs)', 'CGST (Rs)', 'SGST (Rs)', 'Total Tax (₹)'],
     [
       'Matched',
       results.matched.length,
@@ -2583,7 +2583,7 @@ function exportExcel(results, company, period, manualTradeNames = {}, invoiceCom
     '', '',
   ];
   addSheet('Matched', [
-    ['#', 'GSTIN', 'Party Name', 'Invoice No', 'Invoice Date', 'Invoice Value (₹)', 'Taxable Value (₹)', 'IGST (₹)', 'CGST (₹)', 'SGST (₹)', 'Cess (₹)', 'Notes'],
+    ['#', 'GSTIN', 'Party Name', 'Invoice No', 'Invoice Date', 'Invoice Value (Rs)', 'Taxable Value (Rs)', 'IGST (Rs)', 'CGST (Rs)', 'SGST (Rs)', 'Cess (Rs)', 'Notes'],
     ...matchedRows,
     [],
     matchedTotal,
@@ -2619,7 +2619,7 @@ function exportExcel(results, company, period, manualTradeNames = {}, invoiceCom
     '', '', '',
   ];
   addSheet('In Portal Only', [
-    ['#', 'GSTIN', 'Party Name', 'Invoice No', 'Invoice Date', 'Invoice Value (₹)', 'Taxable Value (₹)', 'IGST (₹)', 'CGST (₹)', 'SGST (₹)', 'Place of Supply', 'ITC Availability', 'Notes'],
+    ['#', 'GSTIN', 'Party Name', 'Invoice No', 'Invoice Date', 'Invoice Value (Rs)', 'Taxable Value (Rs)', 'IGST (Rs)', 'CGST (Rs)', 'SGST (Rs)', 'Place of Supply', 'ITC Availability', 'Notes'],
     ...portalRows,
     [],
     portalTotal,
@@ -2659,7 +2659,7 @@ function exportExcel(results, company, period, manualTradeNames = {}, invoiceCom
     '', '', '', '',
   ];
   addSheet('In Books Only', [
-    ['#', 'GSTIN', 'Party Name', 'Invoice No', 'Invoice Date', 'Invoice Value (₹)', 'Taxable Value (₹)', 'IGST (₹)', 'CGST (₹)', 'SGST (₹)', 'Cess (₹)', 'Place of Supply', 'Invoice Type', 'GST Rate (%)', 'Notes'],
+    ['#', 'GSTIN', 'Party Name', 'Invoice No', 'Invoice Date', 'Invoice Value (Rs)', 'Taxable Value (Rs)', 'IGST (Rs)', 'CGST (Rs)', 'SGST (Rs)', 'Cess (Rs)', 'Place of Supply', 'Invoice Type', 'GST Rate (%)', 'Notes'],
     ...booksRows,
     [],
     booksTotal,
@@ -2697,7 +2697,7 @@ function exportExcel(results, company, period, manualTradeNames = {}, invoiceCom
     '',
   ];
   addSheet('Mismatch', [
-    ['#', 'GSTIN', 'Party Name', 'Invoice No', 'Invoice Date', 'Portal Value (₹)', 'Books Value (₹)', 'Value Diff (₹)', 'Portal Tax (₹)', 'Books Tax (₹)', 'Tax Diff (₹)', 'Notes'],
+    ['#', 'GSTIN', 'Party Name', 'Invoice No', 'Invoice Date', 'Portal Value (Rs)', 'Books Value (Rs)', 'Value Diff (Rs)', 'Portal Tax (Rs)', 'Books Tax (Rs)', 'Tax Diff (Rs)', 'Notes'],
     ...mismatchRows,
     [],
     mismatchTotal,
@@ -2726,7 +2726,7 @@ function exportExcel(results, company, period, manualTradeNames = {}, invoiceCom
     ];
   });
   addSheet('Mismatch Detail', [
-    ['#', 'GSTIN', 'Party Name', 'Invoice No', 'Invoice Date', 'Portal Value (₹)', 'Books Value (₹)', 'Value Diff (₹)', 'Portal Tax (₹)', 'Books Tax (₹)', 'Tax Diff (₹)', 'Severity', 'Root Cause', 'Recommended Action'],
+    ['#', 'GSTIN', 'Party Name', 'Invoice No', 'Invoice Date', 'Portal Value (Rs)', 'Books Value (Rs)', 'Value Diff (Rs)', 'Portal Tax (Rs)', 'Books Tax (Rs)', 'Tax Diff (Rs)', 'Severity', 'Root Cause', 'Recommended Action'],
     ...mismatchDetailRows,
   ], [4, 18, 26, 16, 12, 18, 18, 14, 14, 14, 14, 10, 40, 40]);
 
@@ -2789,7 +2789,7 @@ function exportExcel(results, company, period, manualTradeNames = {}, invoiceCom
     [`VENDOR ACTION REQUIRED LIST — ${company.name || ''} | Period: ${period || ''}`],
     [`Generated: ${new Date().toLocaleDateString('en-IN')}`],
     [],
-    ['GSTIN', 'Vendor Name', 'Invoice No', 'Invoice Date', 'Invoice Value (₹)', 'ITC Impact (₹)', 'Issue Category', 'Severity', 'Root Cause', 'Recommended Action', 'Follow-Up Status'],
+    ['GSTIN', 'Vendor Name', 'Invoice No', 'Invoice Date', 'Invoice Value (Rs)', 'ITC Impact (₹)', 'Issue Category', 'Severity', 'Root Cause', 'Recommended Action', 'Follow-Up Status'],
     ...actionRows,
     [],
     ['VENDOR SUMMARY'],
