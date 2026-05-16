@@ -1367,9 +1367,21 @@ async def clients_summary(current_user: User = Depends(get_current_user)):
     ).sort("created_at", -1).to_list(5000)
 
     groups: Dict[str, Dict[str, Any]] = {}
+    # Build a reverse index: gstin → gkey, so sessions without client_id but with
+    # the same GSTIN are folded into an already-created group (prevents duplication
+    # when different users start sessions for the same client).
+    gstin_to_gkey: Dict[str, str] = {}
     for s in sessions:
-        # Group key: prefer client_id, fall back to normalised name, then "unknown"
-        gkey = s.get("client_id") or (s.get("client_name") or "").strip().lower() or "unknown"
+        # Group key: prefer client_id, fall back to GSTIN (normalised), then name, then "unknown"
+        s_gstin = (s.get("client_gstin") or "").strip().upper()
+        raw_gkey = s.get("client_id") or s_gstin or (s.get("client_name") or "").strip().lower() or "unknown"
+        # If this session has no client_id but its GSTIN already maps to a group, use that group
+        if not s.get("client_id") and s_gstin and s_gstin in gstin_to_gkey:
+            gkey = gstin_to_gkey[s_gstin]
+        else:
+            gkey = raw_gkey
+            if s_gstin and s_gstin not in gstin_to_gkey:
+                gstin_to_gkey[s_gstin] = gkey
         sm   = s.get("summary") or {}
         if gkey not in groups:
             co = s.get("company") or {}
