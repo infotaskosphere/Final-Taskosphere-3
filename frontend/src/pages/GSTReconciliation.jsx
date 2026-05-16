@@ -1604,8 +1604,8 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
   // ── Page geometry ──────────────────────────────────────────────────────
   const W  = doc.internal.pageSize.getWidth();   // 297 mm
   const H  = doc.internal.pageSize.getHeight();  // 210 mm
-  const ML = 10, MR = 10;
-  const TW = W - ML - MR;                        // 277 mm usable
+  const ML = 13, MR = 13;
+  const TW = W - ML - MR;                        // 271 mm usable
 
   // ── Brand palette ──────────────────────────────────────────────────────
   const BRAND  = [13,  59, 102];
@@ -1822,7 +1822,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
       4: { cellWidth: 28, halign: 'right'  },
       5: { cellWidth: 28, halign: 'right'  },
       6: { cellWidth: 28, halign: 'right'  },
-      7: { cellWidth: 55, halign: 'right'  },
+      7: { cellWidth: 49, halign: 'right'  },
     },
   });
 
@@ -1866,7 +1866,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
       columnStyles: {
         0:  { cellWidth:  8, halign: 'center' },
         1:  { cellWidth: 36, halign: 'left'   },
-        2:  { cellWidth: 38, halign: 'left'   },
+        2:  { cellWidth: 35, halign: 'left'   },
         3:  { cellWidth: 26, halign: 'left'   },
         4:  { cellWidth: 20, halign: 'center' },
         5:  { cellWidth: 26, halign: 'right'  },
@@ -1875,7 +1875,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
         8:  { cellWidth: 18, halign: 'right'  },
         9:  { cellWidth: 18, halign: 'right'  },
         10: { cellWidth: 24, halign: 'left'   },
-        11: { cellWidth: 23, halign: 'center' },
+        11: { cellWidth: 20, halign: 'center' },
       },
     });
   }
@@ -1935,7 +1935,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
       columnStyles: {
         0:  { cellWidth:  8, halign: 'center' },
         1:  { cellWidth: 36, halign: 'left'   },
-        2:  { cellWidth: 42, halign: 'left'   },
+        2:  { cellWidth: 38, halign: 'left'   },
         3:  { cellWidth: 28, halign: 'left'   },
         4:  { cellWidth: 20, halign: 'center' },
         5:  { cellWidth: 28, halign: 'right'  },
@@ -1943,7 +1943,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
         7:  { cellWidth: 20, halign: 'right'  },
         8:  { cellWidth: 20, halign: 'right'  },
         9:  { cellWidth: 20, halign: 'right'  },
-        10: { cellWidth: 31, halign: 'left'   },
+        10: { cellWidth: 29, halign: 'left'   },
       },
     });
   }
@@ -2019,8 +2019,95 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
     });
   }
 
+
   /* ─────────────────────────────────────────────────────────────────────
-     PAGE 5 — MATCHED INVOICES
+     PAGE 5 — GSTIN CONFLICT
+     Cols 0-8: 8+30+30+26+22+18+22+22+18 = 196; col 9 auto fills 75mm
+  ───────────────────────────────────────────────────────────────────── */
+  const ORANGE = [194, 65, 12];
+  if ((results.crossGstin || []).length > 0) {
+    doc.addPage('landscape');
+    let y = addPageHeader(ORANGE, 'GSTIN Conflict');
+    y = sectionHeading(
+      y,
+      'GSTIN Conflict — Same invoice & value found in BOTH Portal and Books under DIFFERENT GSTINs. Verify GSTIN with vendor.',
+      ORANGE, results.crossGstin.length,
+      results.crossGstin.reduce((s, r) => s + (r.portal?.portal?.invoiceValue || 0), 0)
+    );
+
+    // Critical warning banner
+    doc.setFillColor(255, 237, 213);
+    doc.setDrawColor(...ORANGE);
+    doc.setLineWidth(0.3);
+    doc.roundedRect(ML, y, TW, 8, 1, 1, 'FD');
+    doc.setLineWidth(0.15);
+    doc.setTextColor(...ORANGE);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.text(
+      '[!] CRITICAL: ITC claim may be INVALID if the wrong GSTIN is in books. ' +
+      'Verify each pair with vendor and correct books before filing GSTR-3B.',
+      ML + 3, y + 5.2
+    );
+    doc.setTextColor(...DGRAY);
+    y += 11;
+
+    autoTable(doc, {
+      ...BASE,
+      startY: y,
+      head: [['#', 'Portal GSTIN', 'Books GSTIN', 'Party Name', 'Invoice No', 'Date', 'Portal Rs', 'Books Rs', 'Val Diff', 'Notes & Action']],
+      body: results.crossGstin.map((r, i) => {
+        const p = r.portal?.portal || r.portal || {};
+        const b = r.books?.books   || r.books  || {};
+        const pTax = (p.igst || 0) + (p.cgst || 0) + (p.sgst || 0);
+        const bTax = (b.igst || 0) + (b.cgst || 0) + (b.sgst || 0);
+        const vDiff = (r.valueDiff || 0);
+        const note  = r.valuesIdentical
+          ? 'Values identical - likely same bill under wrong GSTIN. >> Verify GSTIN with vendor.'
+          : `Values differ by Rs.${fmt(vDiff)}. Tax: Portal Rs.${fmt(pTax)} vs Books Rs.${fmt(bTax)}. >> Confirm correct GSTIN and update books.`;
+        return [
+          i + 1,
+          r.portalGstin || p.gstin || '—',
+          r.booksGstin  || b.gstin || '—',
+          p.tradeOrLegalName || manualTradeNames?.[r.portalGstin] || manualTradeNames?.[r.booksGstin] || '—',
+          p.invoiceNoRaw || '—',
+          p.invoiceDate  || '—',
+          fmt(p.invoiceValue || 0),
+          fmt(b.invoiceValue || 0),
+          (vDiff === 0 ? '0.00' : fmt(vDiff)),
+          note,
+        ];
+      }),
+      headStyles: { ...BASE.headStyles, fillColor: ORANGE },
+      columnStyles: {
+        0: { cellWidth:  8, halign: 'center' },
+        1: { cellWidth: 30, halign: 'left',   fontSize: 6.5 },
+        2: { cellWidth: 30, halign: 'left',   fontSize: 6.5 },
+        3: { cellWidth: 26, halign: 'left'   },
+        4: { cellWidth: 22, halign: 'left'   },
+        5: { cellWidth: 18, halign: 'center' },
+        6: { cellWidth: 22, halign: 'right'  },
+        7: { cellWidth: 22, halign: 'right'  },
+        8: { cellWidth: 18, halign: 'right'  },
+        9: { minCellWidth: 55, halign: 'left', fontSize: 6.5, overflow: 'linebreak' },
+      },
+      didParseCell(data) {
+        if (data.section !== 'body') return;
+        // Highlight GSTIN cells to make the difference obvious
+        if (data.column.index === 1) {
+          data.cell.styles.textColor  = BLUE;
+          data.cell.styles.fontStyle  = 'bold';
+        }
+        if (data.column.index === 2) {
+          data.cell.styles.textColor  = ORANGE;
+          data.cell.styles.fontStyle  = 'bold';
+        }
+      },
+    });
+  }
+
+  /* ─────────────────────────────────────────────────────────────────────
+     PAGE 6 — MATCHED INVOICES
      Col widths: 8+36+42+28+20+28+24+20+20+20+31 = 277 ✓
   ───────────────────────────────────────────────────────────────────── */
   if (results.matched.length > 0) {
@@ -2053,7 +2140,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
       columnStyles: {
         0:  { cellWidth:  8, halign: 'center' },
         1:  { cellWidth: 36, halign: 'left'   },
-        2:  { cellWidth: 42, halign: 'left'   },
+        2:  { cellWidth: 38, halign: 'left'   },
         3:  { cellWidth: 28, halign: 'left'   },
         4:  { cellWidth: 20, halign: 'center' },
         5:  { cellWidth: 28, halign: 'right'  },
@@ -2061,7 +2148,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
         7:  { cellWidth: 20, halign: 'right'  },
         8:  { cellWidth: 20, halign: 'right'  },
         9:  { cellWidth: 20, halign: 'right'  },
-        10: { cellWidth: 31, halign: 'right'  },
+        10: { cellWidth: 29, halign: 'right'  },
       },
     });
   }
@@ -5761,6 +5848,7 @@ export default function GSTReconciliation() {
   const [sessions,        setSessions]        = useState([]);     // list of saved sessions for "New Session" tab
   const [portalFile,      setPortalFile]       = useState(null);
   const [booksFile,       setBooksFile]        = useState(null);
+  const [lastParsedData,  setLastParsedData]   = useState(null); // cached portal+books arrays for Reco Again
   const [period,          setPeriod]           = useState('');
   const [company,         setCompany]          = useState(EMPTY_COMPANY);
   const [loading,         setLoading]          = useState(false);
@@ -6139,6 +6227,7 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
       const [portalWB, booksWB] = await Promise.all([readWorkbook(portalFile), readWorkbook(booksFile)]);
       const portalData = parseGSTPortalFile(portalWB);
       const booksData  = parseBooksFile(booksWB, booksFile?.name || '');
+      setLastParsedData({ portalData, booksData }); // cache for Reco Again
       if (!portalData.length && !booksData.length) { toast.error('Could not parse data from the files. Please check the file formats.'); return; }
       const res = reconcile(portalData, booksData);
       setResults(res);
@@ -6183,7 +6272,37 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
     } finally { setLoading(false); }
   };
 
-  const handleReset = () => { setPortalFile(null); setBooksFile(null); setResults(null); setPeriod(''); setLoadedSessionId(null); setBaselineSnapshot(null); setSnapshotSaved(false); setSnapshotPrompt(null); };
+  const handleReset = () => { setPortalFile(null); setBooksFile(null); setResults(null); setPeriod(''); setLoadedSessionId(null); setBaselineSnapshot(null); setSnapshotSaved(false); setSnapshotPrompt(null); setLastParsedData(null); };
+
+  // Re-run reconciliation on the last parsed data (or re-parse files if still available)
+  const handleReReconcile = async () => {
+    if (!lastParsedData && !portalFile && !booksFile) {
+      toast.info('No recent data in memory. Please upload files again.');
+      setResults(null); setPageView('new');
+      return;
+    }
+    setLoading(true); setResults(null);
+    try {
+      let portalData, booksData;
+      if (lastParsedData) {
+        portalData = lastParsedData.portalData;
+        booksData  = lastParsedData.booksData;
+      } else {
+        const [portalWB, booksWB] = await Promise.all([readWorkbook(portalFile), readWorkbook(booksFile)]);
+        portalData = parseGSTPortalFile(portalWB);
+        booksData  = parseBooksFile(booksWB, booksFile?.name || '');
+        setLastParsedData({ portalData, booksData });
+      }
+      if (!portalData.length && !booksData.length) { toast.error('No data found.'); return; }
+      const res = reconcile(portalData, booksData);
+      setResults(res);
+      const defaultTab = res.mismatch?.length ? 'mismatch' : res.portalOnly?.length ? 'portalOnly' : res.booksOnly?.length ? 'booksOnly' : 'matched';
+      setActiveTab(defaultTab);
+      toast.success('Re-reconciliation complete.');
+    } catch (err) {
+      console.error(err); toast.error(`Failed: ${err.message}`);
+    } finally { setLoading(false); }
+  };
 
   // New Session: save current session (if any) then reset for a fresh start.
   // We intentionally preserve selectedClient so the next session auto-links
@@ -6825,15 +6944,7 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
                       <ArrowLeftRight className="h-3.5 w-3.5"/> Compare P vs B
                     </button>
                     <button
-                      onClick={() => {
-                        if (!portalFile || !booksFile) {
-                          toast.info('Files not in memory — please upload files again to re-reconcile.');
-                          setResults(null);
-                          setPageView('new');
-                          return;
-                        }
-                        handleReconcile();
-                      }}
+                      onClick={handleReReconcile}
                       disabled={loading}
                       title={portalFile && booksFile ? 'Re-run reconciliation on the same uploaded files' : 'Re-upload files to use this'}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white transition-colors shadow-sm"
