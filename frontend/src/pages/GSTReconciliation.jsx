@@ -2002,7 +2002,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
         8:  { cellWidth: 16, halign: 'right'  },
         9:  { cellWidth: 16, halign: 'right'  },
         10: { cellWidth: 16, halign: 'right'  },
-        11: { minCellWidth: 55, halign: 'left', fontSize: 6.5, overflow: 'linebreak' },
+        11: { cellWidth: 69, halign: 'left', fontSize: 6.5, overflow: 'linebreak' },
       },
       didParseCell(data) {
         if (data.section !== 'body') return;
@@ -5894,9 +5894,9 @@ export default function GSTReconciliation() {
     setAiInsightState('loading');
     setAiInsights('');
     try {
-      const geminiKey = process.env.REACT_APP_GEMINI_API_KEY || '';
-      if (!geminiKey) {
-        setAiInsights('AI Insights require a REACT_APP_GEMINI_API_KEY environment variable. Add it to your .env file and restart.');
+      const grokKey = process.env.REACT_APP_GROK_API_KEY || '';
+      if (!grokKey) {
+        setAiInsights('AI Insights require a REACT_APP_GROK_API_KEY environment variable. Add it to your .env file and restart.');
         setAiInsightState('error');
         return;
       }
@@ -5928,16 +5928,23 @@ Data: ${JSON.stringify(summary, null, 2)}
 Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
 
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
+        'https://api.x.ai/v1/chat/completions',
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${grokKey}`,
+          },
+          body: JSON.stringify({
+            model: 'grok-3-mini',
+            messages: [{ role: 'user', content: prompt }],
+            temperature: 0.3,
+          }),
         }
       );
-      if (!res.ok) throw new Error(`Gemini API error: ${res.status}`);
+      if (!res.ok) throw new Error(`Grok API error: ${res.status}`);
       const data = await res.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No insights generated.';
+      const text = data.choices?.[0]?.message?.content || 'No insights generated.';
       setAiInsights(text);
       setAiInsightState('done');
     } catch (e) {
@@ -6845,7 +6852,7 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
                 {aiInsightState === 'loading' && (
                   <div className="flex items-center gap-3 p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl border border-indigo-200 dark:border-indigo-800 text-sm text-indigo-600 dark:text-indigo-300">
                     <div className="h-4 w-4 border-2 border-indigo-400 border-t-indigo-600 rounded-full animate-spin" />
-                    Gemini AI is analysing your reconciliation data…
+                    Grok AI is analysing your reconciliation data…
                   </div>
                 )}
                 {(aiInsightState === 'done' || aiInsightState === 'error') && (
