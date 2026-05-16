@@ -1991,18 +1991,18 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
       }),
       headStyles: { ...BASE.headStyles, fillColor: AMBER },
       columnStyles: {
-        0:  { cellWidth:  8, halign: 'center' },
-        1:  { cellWidth: 26, halign: 'left'   },
-        2:  { cellWidth: 28, halign: 'left'   },
-        3:  { cellWidth: 20, halign: 'left'   },
-        4:  { cellWidth: 16, halign: 'center' },
-        5:  { cellWidth: 20, halign: 'right'  },
-        6:  { cellWidth: 20, halign: 'right'  },
-        7:  { cellWidth: 16, halign: 'right'  },
-        8:  { cellWidth: 16, halign: 'right'  },
-        9:  { cellWidth: 16, halign: 'right'  },
-        10: { cellWidth: 16, halign: 'right'  },
-        11: { cellWidth: 69, halign: 'left', fontSize: 6.5, overflow: 'linebreak' },
+        0:  { cellWidth:  6, halign: 'center', fontSize: 6.5 },
+        1:  { cellWidth: 24, halign: 'left',   fontSize: 6   },
+        2:  { cellWidth: 24, halign: 'left'   },
+        3:  { cellWidth: 18, halign: 'left'   },
+        4:  { cellWidth: 15, halign: 'center' },
+        5:  { cellWidth: 18, halign: 'right'  },
+        6:  { cellWidth: 18, halign: 'right'  },
+        7:  { cellWidth: 14, halign: 'right'  },
+        8:  { cellWidth: 14, halign: 'right'  },
+        9:  { cellWidth: 14, halign: 'right'  },
+        10: { cellWidth: 14, halign: 'right'  },
+        11: { cellWidth: 92, halign: 'left',   fontSize: 6.5, overflow: 'linebreak', cellPadding: { top: 2, bottom: 2, left: 2, right: 2 } },
       },
       didParseCell(data) {
         if (data.section !== 'body') return;
@@ -5894,58 +5894,61 @@ export default function GSTReconciliation() {
     setAiInsightState('loading');
     setAiInsights('');
     try {
-      const grokKey = process.env.REACT_APP_GROK_API_KEY || '';
-      if (!grokKey) {
-        setAiInsights('AI Insights require a REACT_APP_GROK_API_KEY environment variable. Add it to your .env file and restart.');
-        setAiInsightState('error');
-        return;
-      }
-      const summary = {
-        matched:    results.matched?.length   || 0,
-        mismatch:   results.mismatch?.length  || 0,
-        portalOnly: results.portalOnly?.length || 0,
-        booksOnly:  results.booksOnly?.length  || 0,
-        matchedValue:   sumVal(results.matched   || [], 'portal'),
-        mismatchValue:  sumVal(results.mismatch  || [], 'portal'),
-        portalOnlyValue:sumVal(results.portalOnly|| [], 'portal'),
-        booksOnlyValue: sumVal(results.booksOnly || [], 'books'),
-        topMismatches: (results.mismatch || []).slice(0, 5).map(r => ({
-          gstin: r.portal?.gstin, invNo: r.portal?.invoiceNoRaw,
-          valueDiff: r.valueDiff, taxDiff: r.taxDiff,
-          reason: r.mismatchReason, severity: r.severity,
-        })),
-        company: company.name || '', period, gstin: company.gstin || '',
-      };
-      const prompt = `You are a senior Indian GST consultant. Analyse this GSTR-2B reconciliation result and provide a concise, professional summary in 4-6 bullet points covering:
-1. Overall reconciliation health and match rate
-2. Key ITC risk areas and amounts
-3. Specific issues driving mismatches (with reasons if available)
-4. Recommended immediate actions (prioritised by financial impact)
-5. Any compliance risks to flag
+      const token = localStorage.getItem('token') || '';
+      const matched    = results.matched    || [];
+      const mismatch   = results.mismatch   || [];
+      const portalOnly = results.portalOnly || [];
+      const booksOnly  = results.booksOnly  || [];
 
-Data: ${JSON.stringify(summary, null, 2)}
-
-Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
-
-      const res = await fetch(
-        'https://api.x.ai/v1/chat/completions',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${grokKey}`,
+      const body = {
+        summary: {
+          total_portal:      matched.length + mismatch.length + portalOnly.length,
+          total_books:       matched.length + mismatch.length + booksOnly.length,
+          matched_count:     matched.length,
+          matched_value:     sumVal(matched,    'portal'),
+          mismatch_value:    sumVal(mismatch,   'portal'),
+          portal_only_value: sumVal(portalOnly, 'portal'),
+          books_only_value:  sumVal(booksOnly,  'books'),
+          fuzzy_matched_count: 0,
+          duplicate_portal: 0,
+          duplicate_books:  0,
+        },
+        mismatch_count:     mismatch.length,
+        portal_only_count:  portalOnly.length,
+        books_only_count:   booksOnly.length,
+        high_risk_vendors:  0,
+        itc_eligible_total: sumVal(matched,    'portal'),
+        itc_at_risk_total:  sumVal(booksOnly,  'books'),
+        period,
+        top_mismatches: mismatch.slice(0, 5).map(r => ({
+          portal: {
+            gstin:            r.portal?.gstin,
+            invoice_no_raw:   r.portal?.invoiceNoRaw,
+            invoice_value:    r.portal?.invoiceValue || 0,
           },
-          body: JSON.stringify({
-            model: 'grok-3-mini',
-            messages: [{ role: 'user', content: prompt }],
-            temperature: 0.3,
-          }),
-        }
-      );
-      if (!res.ok) throw new Error(`Grok API error: ${res.status}`);
+          books: {
+            invoice_value:    r.books?.invoiceValue || 0,
+          },
+          mismatch_reason:  r.mismatchReason || '',
+          value_diff:       r.valueDiff || 0,
+          tax_diff:         r.taxDiff   || 0,
+        })),
+      };
+
+      const res = await fetch('/api/gst-reconciliation/ai-insights', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Server error: ${res.status}`);
+      }
       const data = await res.json();
-      const text = data.choices?.[0]?.message?.content || 'No insights generated.';
-      setAiInsights(text);
+      setAiInsights(data.insights || 'No insights generated.');
       setAiInsightState('done');
     } catch (e) {
       setAiInsights(`Failed to generate insights: ${e.message}`);
