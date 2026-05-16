@@ -2710,6 +2710,8 @@ const CommentCell = React.memo(({ rowKey, comments, onSave }) => {
   );
 });
 
+const GSTIN_CELL_CLASS = 'min-w-[140px] whitespace-nowrap overflow-hidden text-ellipsis font-mono text-[11px]';
+
 const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames, onSaveTradeName, comments, onSaveComment, onRowClick }) => {
   const [search, setSearch] = useState('');
   const [page, setPage]     = useState(1);
@@ -2818,7 +2820,7 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames
                   onClick={() => onRowClick && onRowClick(r)}
                   className={`border-b border-slate-100 dark:border-slate-700/50 ${onRowClick ? 'cursor-pointer' : ''} ${isPrefixRow ? 'bg-yellow-50 dark:bg-yellow-900/20 hover:bg-yellow-100 dark:hover:bg-yellow-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'}`}>
                   <td className="px-3 py-2 text-slate-400">{n}</td>
-                  <td className="px-3 py-2 font-mono text-[11px] text-slate-600 dark:text-slate-300">{inv?.gstin}</td>
+                  <td className={`px-3 py-2 ${GSTIN_CELL_CLASS} text-slate-600 dark:text-slate-300`}>{inv?.gstin}</td>
                   {tabId === 'booksOnly'
                     ? <td className="px-3 py-2 min-w-[160px]">
                         <TradeNameCell
@@ -3147,7 +3149,7 @@ const CheckOneTab = ({ records }) => {
               return (
                 <tr key={r.key||idx} className={`border-b border-slate-100 dark:border-slate-700/50 ${rowBg}`}>
                   <td className="px-3 py-2 text-slate-400">{n}</td>
-                  <td className="px-3 py-2 font-mono text-[11px] text-slate-600 dark:text-slate-300">{p?.gstin}</td>
+                  <td className={`px-3 py-2 ${GSTIN_CELL_CLASS} text-slate-600 dark:text-slate-300`}>{p?.gstin}</td>
                   <td className="px-3 py-2 text-slate-700 dark:text-slate-200 max-w-[120px] truncate" title={p?.tradeOrLegalName}>{p?.tradeOrLegalName||'—'}</td>
                   <td className="px-3 py-2 font-mono font-semibold text-blue-600 dark:text-blue-400">{p?.invoiceNoRaw}</td>
                   <td className="px-3 py-2 font-mono font-semibold text-violet-600 dark:text-violet-400">{b?.invoiceNoRaw}</td>
@@ -3928,7 +3930,7 @@ const GlobalSearchTab = ({ results }) => {
                         <span className="ml-1 text-[9px] font-bold text-red-600">⚡GSTIN≠</span>
                       )}
                     </td>
-                    <td className="px-3 py-2.5 font-mono text-[11px] text-slate-600 dark:text-slate-300">
+                    <td className={`px-3 py-2.5 ${GSTIN_CELL_CLASS} text-slate-600 dark:text-slate-300`}>
                       {highlight(r.gstin, query)}
                       {r.booksGstin && r.booksGstin !== r.gstin && (
                         <div className="text-[9px] text-violet-500 font-semibold">Books: {r.booksGstin}</div>
@@ -4657,7 +4659,7 @@ const ITCDetailModal = ({ type, results, onClose }) => {
               ) : filtered.map((inv, i) => (
                 <tr key={i} className={`border-b border-slate-100 dark:border-slate-700/50 ${c.row} transition-colors`}>
                   <td className="px-4 py-2 text-slate-400">{i + 1}</td>
-                  <td className="px-4 py-2 font-mono text-[11px] text-slate-600 dark:text-slate-300">{inv.gstin}</td>
+                  <td className={`px-4 py-2 ${GSTIN_CELL_CLASS} text-slate-600 dark:text-slate-300`}>{inv.gstin}</td>
                   {type !== 'atRisk' && <td className="px-4 py-2 text-slate-700 dark:text-slate-200 max-w-[140px] truncate" title={inv.partyName}>{inv.partyName}</td>}
                   <td className="px-4 py-2 font-medium text-slate-700 dark:text-slate-200">{inv.invoiceNo}</td>
                   <td className="px-4 py-2 text-slate-500 whitespace-nowrap">{inv.date}</td>
