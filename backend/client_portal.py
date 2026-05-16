@@ -1224,6 +1224,10 @@ async def create_individual_folder(
     if subfolders is None:
         subfolders = await _resolve_subfolders()
 
+    from backend.invoicing import _get_drive_service, _drive_configured
+    if not _drive_configured():
+        raise HTTPException(503, "Google Drive not configured.")
+
     loop = asyncio.get_event_loop()
     try:
         service = _get_drive_service()
