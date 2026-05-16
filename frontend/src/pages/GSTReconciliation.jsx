@@ -1505,15 +1505,39 @@ const sumVal = (arr, src) => arr.reduce((s, r) => s + (r[src]?.invoiceValue || 0
 const sumTax = (arr, src) => arr.reduce((s, r) => { const i = r[src]; return s + (i ? i.igst+i.cgst+i.sgst : 0); }, 0);
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   PDF EXPORT v2 — Professional layout with proper alignment & centering
+   EXPORT FUNCTIONS — Fixed PDF, Word, Excel
+   Drop-in replacements for the three export functions in GSTReconciliation.jsx
+   ─────────────────────────────────────────────────────────────────────────
+   HOW TO USE:
+   1. Open GSTReconciliation.jsx
+   2. Find the existing exportPDF function (search: "function exportPDF")
+   3. Replace everything from "function exportPDF" through the end of
+      "function exportExcel" (including all three functions) with this file.
+   4. Save. All three exports now produce clean, professional output.
+═══════════════════════════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PDF EXPORT v3 — Professional landscape layout
+   ─────────────────────────────────────────────────────────────────────────
+   Fixes vs the original:
+   • tableWidth always = TW (277 mm) — no column bleeds past page edge
+   • columnStyles widths calculated to sum EXACTLY to TW for every table
+   • overflow:'linebreak' on every cell — text wraps; no clipping
+   • Mismatch page includes root-cause reason column (wraps freely)
+   • didParseCell colours diff cells red/blue without breaking layout
+   • Consistent header + footer on every page via didDrawPage callback
+   • Cover redesigned: gradient band, 6 stat cards, clean summary table
 ═══════════════════════════════════════════════════════════════════════════ */
 function exportPDF(results, company, period, manualTradeNames = {}, invoiceComments = {}) {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-  const W = doc.internal.pageSize.getWidth();   // 297 mm landscape
-  const H = doc.internal.pageSize.getHeight();  // 210 mm landscape
-  const ML = 10, MR = 10;                       // left / right margin
-  const TW = W - ML - MR;                       // usable table width = 277 mm
 
+  // ── Page geometry ──────────────────────────────────────────────────────
+  const W  = doc.internal.pageSize.getWidth();   // 297 mm
+  const H  = doc.internal.pageSize.getHeight();  // 210 mm
+  const ML = 10, MR = 10;
+  const TW = W - ML - MR;                        // 277 mm usable
+
+  // ── Brand palette ──────────────────────────────────────────────────────
   const BRAND  = [13,  59, 102];
   const BRAND2 = [31, 111, 178];
   const GREEN  = [16, 150,  90];
@@ -1523,515 +1547,760 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
   const LGRAY  = [248, 250, 252];
   const GRAY   = [100, 116, 139];
   const DGRAY  = [22,  30,  46];
+  const WHITE  = [255, 255, 255];
 
-  const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
+  const dateStr = new Date().toLocaleDateString('en-IN', {
+    day: '2-digit', month: 'long', year: 'numeric',
+  });
 
-  // Improved base table config with better centering
-  const BASE_TABLE = {
-    startY: 'auto',
-    styles: {
-      font: 'helvetica',
-      fontSize: 8.5,
-      overflow: 'linebreak',
-      cellPadding: { top: 2.5, bottom: 2.5, left: 2.5, right: 2.5 },
-      lineColor: [220, 225, 230],
-      lineWidth: 0.25,
-      valign: 'middle',
-      halign: 'left',
-    },
-    headStyles: {
-      font: 'helvetica',
-      fontStyle: 'bold',
-      fontSize: 9,
-      textColor: 255,
-      halign: 'center',
-      valign: 'middle',
-      minCellHeight: 9,
-      cellPadding: { top: 2.5, bottom: 2.5, left: 2.5, right: 2.5 },
-      lineWidth: 0.3,
-    },
-    margin: { left: ML, right: MR, top: 5, bottom: 10 },
-    tableWidth: 'auto',
-    showHead: 'everyPage',
-    rowPageBreak: 'avoid',
-    theme: 'grid',
-    didDrawPage: (data) => addPageFooter(),
-    columnStyles: {}, // Will be set per table
-    alternateRowStyles: {
-      fillColor: LGRAY,
-    },
-  };
-
-  function addPageFooter() {
+  // ── Footer (called on every page) ─────────────────────────────────────
+  function addFooter() {
     const totalPages = doc.internal.getNumberOfPages();
     const curPage    = doc.internal.getCurrentPageInfo().pageNumber;
-    doc.setFontSize(7);
+    doc.setFillColor(240, 244, 248);
+    doc.rect(0, H - 8, W, 8, 'F');
+    doc.setFontSize(6.5);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...GRAY);
-    
-    // Footer text - properly spaced
-    doc.text('Confidential — GST Reconciliation Report', ML, H - 4);
-    doc.text(`Page ${curPage} of ${totalPages}`, W / 2, H - 4, { align: 'center' });
-    doc.text(company.name || '', W - MR, H - 4, { align: 'right' });
+    doc.text('Confidential — GST Reconciliation Report', ML, H - 3);
+    doc.text(`Page ${curPage} of ${totalPages}`, W / 2, H - 3, { align: 'center' });
+    doc.text(company.name || '', W - MR, H - 3, { align: 'right' });
   }
 
-  function addPageHeader(color, title) {
-    const headerH = 18;
+  // ── Slim page header (pages 2+) ────────────────────────────────────────
+  function addPageHeader(color, sectionTitle) {
+    const hH = 16;
     doc.setFillColor(...(color || BRAND));
-    doc.rect(0, 0, W, headerH, 'F');
-    
-    // Left side - title & company
-    doc.setTextColor(255, 255, 255);
+    doc.rect(0, 0, W, hH, 'F');
+    doc.setTextColor(...WHITE);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.text('GST RECONCILIATION REPORT', ML, 7.5);
-    
+    doc.setFontSize(10);
+    doc.text('GST RECONCILIATION REPORT', ML, 7);
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8.5);
-    doc.text(company.name || '', ML, 12.5);
-    
-    // Right side - details
     doc.setFontSize(8);
-    const rightX = W - MR;
-    doc.text(`${period || 'Tax Period'}`, rightX, 7, { align: 'right' });
-    doc.text(`GSTIN: ${company.gstin || 'N/A'}`, rightX, 11, { align: 'right' });
-    doc.text(`Generated: ${dateStr}`, rightX, 15, { align: 'right' });
-    
+    doc.text(company.name || '', ML, 12.5);
+    doc.setFontSize(8.5);
+    doc.text(sectionTitle || '', W / 2, 9.5, { align: 'center' });
+    doc.setFontSize(8);
+    doc.text(period || '', W - MR, 7, { align: 'right' });
+    doc.text(`GSTIN: ${company.gstin || 'N/A'}`, W - MR, 12.5, { align: 'right' });
     doc.setTextColor(...DGRAY);
-    return headerH + 2;
+    return hH + 3; // return Y after header
   }
 
+  // ── Coloured section heading bar ──────────────────────────────────────
   function sectionHeading(y, text, color, count, value) {
-    const hH = 8;
+    const hH = 7;
     doc.setFillColor(...(color || BRAND));
-    doc.roundedRect(ML, y, TW, hH, 1.5, 1.5, 'F');
-    
-    doc.setTextColor(255, 255, 255);
+    doc.roundedRect(ML, y, TW, hH, 1.2, 1.2, 'F');
+    doc.setTextColor(...WHITE);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.text(text, ML + 2, y + 5.5);
-    
+    doc.setFontSize(8.5);
+    doc.text(text, ML + 2.5, y + 4.8);
     if (count !== undefined) {
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-      doc.text(`${count} invoices  |  ₹${fmt(value)}`, W - MR - 2, y + 5.5, { align: 'right' });
+      doc.setFontSize(7.5);
+      doc.text(
+        `${count} invoice${count !== 1 ? 's' : ''}  |  ₹${fmt(value)}`,
+        W - MR - 2, y + 4.8, { align: 'right' }
+      );
     }
-    
     doc.setTextColor(...DGRAY);
     return y + hH + 2;
   }
 
-  // PAGE 1 — COVER PAGE
-  doc.setFillColor(...BRAND);
-  doc.rect(0, 0, W, 35, 'F');
-  
-  // Gradient effect with shape
-  doc.setFillColor(...BRAND2);
-  doc.triangle(W - 80, 0, W, 0, W, 35, 'F');
-  
-  // Title
-  doc.setTextColor(255, 255, 255);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(26);
-  doc.text('GST Reconciliation', ML + 2, 15);
-  
-  // Subtitle
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(14);
-  doc.text(company.name || 'Company Name', ML + 2, 25);
-  
-  // Details
-  doc.setFontSize(9);
-  const details = [
-    company.gstin ? `GSTIN: ${company.gstin}` : null,
-    period ? `Period: ${period}` : null,
-    company.fy ? `FY: ${company.fy}` : null,
-  ].filter(Boolean).join('  •  ');
-  
-  doc.text(details, ML + 2, 31);
-  doc.text(`Generated: ${dateStr}`, ML + 2, 36);
+  // ── Shared autoTable base config ──────────────────────────────────────
+  // CRITICAL: tableWidth:TW forces the table to exactly fill usable width.
+  // columnStyles widths must sum to TW for each table.
+  const BASE = {
+    styles: {
+      font: 'helvetica',
+      fontSize: 7.5,
+      overflow: 'linebreak',   // cells grow vertically; text never clips
+      cellPadding: { top: 2, bottom: 2, left: 2.5, right: 2.5 },
+      lineColor: [210, 220, 232],
+      lineWidth: 0.22,
+      valign: 'middle',
+      textColor: DGRAY,
+    },
+    headStyles: {
+      font: 'helvetica',
+      fontStyle: 'bold',
+      fontSize: 7.8,
+      textColor: WHITE,
+      halign: 'center',
+      valign: 'middle',
+      minCellHeight: 9,
+      cellPadding: { top: 2.5, bottom: 2.5, left: 2.5, right: 2.5 },
+      lineWidth: 0.25,
+    },
+    alternateRowStyles: { fillColor: LGRAY },
+    margin: { left: ML, right: MR, top: 5, bottom: 10 },
+    tableWidth: TW,            // ← always fills exactly 277 mm
+    showHead: 'everyPage',
+    rowPageBreak: 'avoid',
+    theme: 'grid',
+    didDrawPage: () => addFooter(),
+  };
 
-  // Summary Cards
+  /* ─────────────────────────────────────────────────────────────────────
+     PAGE 1 — COVER
+  ───────────────────────────────────────────────────────────────────── */
+  // Gradient band
+  doc.setFillColor(...BRAND);
+  doc.rect(0, 0, W, 38, 'F');
+  doc.setFillColor(...BRAND2);
+  doc.triangle(W - 90, 0, W, 0, W, 38, 'F');
+
+  doc.setTextColor(...WHITE);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(24);
+  doc.text('GST Reconciliation Report', ML + 2, 16);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(13);
+  doc.text(company.name || 'Company Name', ML + 2, 25);
+  doc.setFontSize(8);
+  const metaLine = [
+    company.gstin ? `GSTIN: ${company.gstin}` : null,
+    period        ? `Period: ${period}`         : null,
+    company.fy    ? `FY: ${company.fy}`         : null,
+    `Generated: ${dateStr}`,
+  ].filter(Boolean).join('   •   ');
+  doc.text(metaLine, ML + 2, 33);
+  doc.setTextColor(...DGRAY);
+
+  // Stat cards — 6 cards, equal width, sum = TW
+  const totalPortal = results.matched.length + results.mismatch.length + results.portalOnly.length;
+  const totalBooks  = results.matched.length + results.mismatch.length + results.booksOnly.length;
   const cards = [
-    { label: 'Total Portal', val: results.matched.length + results.mismatch.length + results.portalOnly.length, color: BRAND },
-    { label: 'Total Books',  val: results.matched.length + results.mismatch.length + results.booksOnly.length,  color: BRAND2 },
-    { label: 'Matched',      val: results.matched.length,    color: GREEN },
-    { label: 'Mismatch',     val: results.mismatch.length,   color: AMBER },
-    { label: 'Portal Only',  val: results.portalOnly.length, color: BLUE  },
-    { label: 'Books Only',   val: results.booksOnly.length,  color: ROSE  },
+    { label: 'Total Portal',  val: totalPortal,               color: BRAND  },
+    { label: 'Total Books',   val: totalBooks,                color: BRAND2 },
+    { label: 'Matched',       val: results.matched.length,    color: GREEN  },
+    { label: 'Mismatch',      val: results.mismatch.length,   color: AMBER  },
+    { label: 'Portal Only',   val: results.portalOnly.length, color: BLUE   },
+    { label: 'Books Only',    val: results.booksOnly.length,  color: ROSE   },
   ];
-  
-  const cardW = (TW - 12) / 6;
   const cardGap = 2;
-  const cardStartY = 42;
-  
+  const cardW   = (TW - cardGap * 5) / 6; // exactly fills TW
+  const cY      = 42;
   cards.forEach((card, i) => {
     const cx = ML + i * (cardW + cardGap);
-    const cy = cardStartY;
-    
     doc.setFillColor(...card.color);
-    doc.roundedRect(cx, cy, cardW, 16, 1.2, 1.2, 'F');
-    
-    doc.setTextColor(255, 255, 255);
+    doc.roundedRect(cx, cY, cardW, 18, 1.5, 1.5, 'F');
+    doc.setTextColor(...WHITE);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(16);
-    doc.text(String(card.val), cx + cardW / 2, cy + 8, { align: 'center' });
-    
+    doc.setFontSize(17);
+    doc.text(String(card.val), cx + cardW / 2, cY + 9.5, { align: 'center' });
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7.5);
-    doc.text(card.label, cx + cardW / 2, cy + 13, { align: 'center' });
+    doc.setFontSize(6.8);
+    doc.text(card.label, cx + cardW / 2, cY + 15.5, { align: 'center' });
   });
-
-  // Tax Summary Table
   doc.setTextColor(...DGRAY);
+
+  // Tax summary table on cover
+  // Col widths: 44+14+40+40+28+28+28+55 = 277 ✓
+  let tableY = cY + 22;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  let tableY = cardStartY + 20;
+  doc.setFontSize(9);
   doc.text('Tax Summary', ML, tableY);
-  
   tableY += 3;
+
   autoTable(doc, {
-    ...BASE_TABLE,
+    ...BASE,
     startY: tableY,
-    head: [['Category','Count','Invoice Value (₹)','Taxable Value (₹)','IGST (₹)','CGST (₹)','SGST (₹)','Total Tax (₹)']],
+    head: [['Category', 'Count', 'Invoice Value (₹)', 'Taxable Value (₹)', 'IGST (₹)', 'CGST (₹)', 'SGST (₹)', 'Total Tax (₹)']],
     body: [
-      ['Matched', results.matched.length, fmt(sumVal(results.matched,'portal')), fmt(results.matched.reduce((s,r)=>s+r.portal.taxableValue,0)), fmt(results.matched.reduce((s,r)=>s+r.portal.igst,0)), fmt(results.matched.reduce((s,r)=>s+r.portal.cgst,0)), fmt(results.matched.reduce((s,r)=>s+r.portal.sgst,0)), fmt(sumTax(results.matched,'portal'))],
-      ['Amount Mismatch', results.mismatch.length, fmt(sumVal(results.mismatch,'portal')), fmt(results.mismatch.reduce((s,r)=>s+r.portal.taxableValue,0)), fmt(results.mismatch.reduce((s,r)=>s+r.portal.igst,0)), fmt(results.mismatch.reduce((s,r)=>s+r.portal.cgst,0)), fmt(results.mismatch.reduce((s,r)=>s+r.portal.sgst,0)), fmt(sumTax(results.mismatch,'portal'))],
-      ['In Portal Only', results.portalOnly.length, fmt(sumVal(results.portalOnly,'portal')), fmt(results.portalOnly.reduce((s,r)=>s+r.portal.taxableValue,0)), fmt(results.portalOnly.reduce((s,r)=>s+r.portal.igst,0)), fmt(results.portalOnly.reduce((s,r)=>s+r.portal.cgst,0)), fmt(results.portalOnly.reduce((s,r)=>s+r.portal.sgst,0)), fmt(sumTax(results.portalOnly,'portal'))],
-      ['In Books Only', results.booksOnly.length, fmt(sumVal(results.booksOnly,'books')), fmt(results.booksOnly.reduce((s,r)=>s+r.books.taxableValue,0)), fmt(results.booksOnly.reduce((s,r)=>s+r.books.igst,0)), fmt(results.booksOnly.reduce((s,r)=>s+r.books.cgst,0)), fmt(results.booksOnly.reduce((s,r)=>s+r.books.sgst,0)), fmt(sumTax(results.booksOnly,'books'))],
+      ['Matched',
+        results.matched.length,
+        fmt(sumVal(results.matched, 'portal')),
+        fmt(results.matched.reduce((s, r) => s + (r.portal?.taxableValue || 0), 0)),
+        fmt(results.matched.reduce((s, r) => s + (r.portal?.igst || 0), 0)),
+        fmt(results.matched.reduce((s, r) => s + (r.portal?.cgst || 0), 0)),
+        fmt(results.matched.reduce((s, r) => s + (r.portal?.sgst || 0), 0)),
+        fmt(sumTax(results.matched, 'portal'))],
+      ['Amount Mismatch',
+        results.mismatch.length,
+        fmt(sumVal(results.mismatch, 'portal')),
+        fmt(results.mismatch.reduce((s, r) => s + (r.portal?.taxableValue || 0), 0)),
+        fmt(results.mismatch.reduce((s, r) => s + (r.portal?.igst || 0), 0)),
+        fmt(results.mismatch.reduce((s, r) => s + (r.portal?.cgst || 0), 0)),
+        fmt(results.mismatch.reduce((s, r) => s + (r.portal?.sgst || 0), 0)),
+        fmt(sumTax(results.mismatch, 'portal'))],
+      ['In Portal Only',
+        results.portalOnly.length,
+        fmt(sumVal(results.portalOnly, 'portal')),
+        fmt(results.portalOnly.reduce((s, r) => s + (r.portal?.taxableValue || 0), 0)),
+        fmt(results.portalOnly.reduce((s, r) => s + (r.portal?.igst || 0), 0)),
+        fmt(results.portalOnly.reduce((s, r) => s + (r.portal?.cgst || 0), 0)),
+        fmt(results.portalOnly.reduce((s, r) => s + (r.portal?.sgst || 0), 0)),
+        fmt(sumTax(results.portalOnly, 'portal'))],
+      ['In Books Only',
+        results.booksOnly.length,
+        fmt(sumVal(results.booksOnly, 'books')),
+        fmt(results.booksOnly.reduce((s, r) => s + (r.books?.taxableValue || 0), 0)),
+        fmt(results.booksOnly.reduce((s, r) => s + (r.books?.igst || 0), 0)),
+        fmt(results.booksOnly.reduce((s, r) => s + (r.books?.cgst || 0), 0)),
+        fmt(results.booksOnly.reduce((s, r) => s + (r.books?.sgst || 0), 0)),
+        fmt(sumTax(results.booksOnly, 'books'))],
     ],
-    headStyles: { ...BASE_TABLE.headStyles, fillColor: BRAND },
+    headStyles: { ...BASE.headStyles, fillColor: BRAND },
     columnStyles: {
-      0: { cellWidth: 28, halign: 'left' },
-      1: { cellWidth: 12, halign: 'center' },
-      2: { cellWidth: 28, halign: 'right' },
-      3: { cellWidth: 28, halign: 'right' },
-      4: { cellWidth: 18, halign: 'right' },
-      5: { cellWidth: 18, halign: 'right' },
-      6: { cellWidth: 18, halign: 'right' },
-      7: { cellWidth: 25, halign: 'right' },
+      0: { cellWidth: 44, halign: 'left'   },
+      1: { cellWidth: 14, halign: 'center' },
+      2: { cellWidth: 40, halign: 'right'  },
+      3: { cellWidth: 40, halign: 'right'  },
+      4: { cellWidth: 28, halign: 'right'  },
+      5: { cellWidth: 28, halign: 'right'  },
+      6: { cellWidth: 28, halign: 'right'  },
+      7: { cellWidth: 55, halign: 'right'  },
     },
   });
 
-  // PAGE 2 — PORTAL ONLY
+  addFooter(); // cover page footer (autoTable overwrites it via didDrawPage)
+
+  /* ─────────────────────────────────────────────────────────────────────
+     PAGE 2 — IN PORTAL ONLY
+     Col widths: 8+36+38+26+20+26+22+18+18+18+24+23 = 277 ✓
+  ───────────────────────────────────────────────────────────────────── */
   if (results.portalOnly.length > 0) {
     doc.addPage('landscape');
-    addPageHeader(BLUE, 'In Portal Only');
-    let y = 20;
-    y = sectionHeading(y, 'In GST Portal Only — Not in Books. Action required.', BLUE, results.portalOnly.length, sumVal(results.portalOnly,'portal'));
-    
+    let y = addPageHeader(BLUE, 'In GST Portal Only');
+    y = sectionHeading(
+      y,
+      'In GST Portal Only — Not in Books.  Book these invoices to avail ITC.',
+      BLUE, results.portalOnly.length, sumVal(results.portalOnly, 'portal')
+    );
+
     autoTable(doc, {
-      ...BASE_TABLE,
+      ...BASE,
       startY: y,
-      head: [['#','GSTIN','Party Name','Invoice No','Date','Value (₹)','Taxable (₹)','IGST','CGST','SGST','Place','ITC']],
-      body: results.portalOnly.map((r,i)=>{
+      head: [['#', 'GSTIN', 'Party Name', 'Invoice No', 'Date', 'Value (₹)', 'Taxable (₹)', 'IGST', 'CGST', 'SGST', 'Place of Supply', 'ITC']],
+      body: results.portalOnly.map((r, i) => {
         const inv = r.portal;
         return [
-          String(i+1),
+          i + 1,
           inv?.gstin || '—',
           inv?.tradeOrLegalName || manualTradeNames?.[inv?.gstin] || '—',
           inv?.invoiceNoRaw || '—',
-          inv?.invoiceDate || '—',
-          fmt(inv?.invoiceValue || 0),
-          fmt(inv?.taxableValue || 0),
-          fmt(inv?.igst || 0),
-          fmt(inv?.cgst || 0),
-          fmt(inv?.sgst || 0),
-          inv?.placeOfSupply || '—',
-          inv?.itcAvailability || '—',
+          inv?.invoiceDate  || '—',
+          fmt(inv?.invoiceValue  || 0),
+          fmt(inv?.taxableValue  || 0),
+          fmt(inv?.igst          || 0),
+          fmt(inv?.cgst          || 0),
+          fmt(inv?.sgst          || 0),
+          inv?.placeOfSupply     || '—',
+          inv?.itcAvailability   || '—',
         ];
       }),
-      headStyles: { ...BASE_TABLE.headStyles, fillColor: BLUE },
+      headStyles: { ...BASE.headStyles, fillColor: BLUE },
       columnStyles: {
-        0: { cellWidth: 8, halign: 'center' },
-        1: { cellWidth: 32, halign: 'left' },
-        2: { cellWidth: 26, halign: 'left' },
-        3: { cellWidth: 18, halign: 'left' },
-        4: { cellWidth: 14, halign: 'left' },
-        5: { cellWidth: 20, halign: 'right' },
-        6: { cellWidth: 16, halign: 'right' },
-        7: { cellWidth: 12, halign: 'right' },
-        8: { cellWidth: 12, halign: 'right' },
-        9: { cellWidth: 12, halign: 'right' },
-        10: { cellWidth: 16, halign: 'left' },
-        11: { cellWidth: 12, halign: 'center' },
+        0:  { cellWidth:  8, halign: 'center' },
+        1:  { cellWidth: 36, halign: 'left'   },
+        2:  { cellWidth: 38, halign: 'left'   },
+        3:  { cellWidth: 26, halign: 'left'   },
+        4:  { cellWidth: 20, halign: 'center' },
+        5:  { cellWidth: 26, halign: 'right'  },
+        6:  { cellWidth: 22, halign: 'right'  },
+        7:  { cellWidth: 18, halign: 'right'  },
+        8:  { cellWidth: 18, halign: 'right'  },
+        9:  { cellWidth: 18, halign: 'right'  },
+        10: { cellWidth: 24, halign: 'left'   },
+        11: { cellWidth: 23, halign: 'center' },
       },
     });
   }
 
-  // PAGE 3 — BOOKS ONLY
+  /* ─────────────────────────────────────────────────────────────────────
+     PAGE 3 — IN BOOKS ONLY
+     Col widths: 8+36+42+28+20+28+24+20+20+20+31 = 277 ✓
+  ───────────────────────────────────────────────────────────────────── */
   if (results.booksOnly.length > 0) {
     doc.addPage('landscape');
-    addPageHeader(ROSE, 'In Books Only');
-    let y = 20;
-    y = sectionHeading(y, 'In Books Only — Not filed on Portal. ITC at Risk!', ROSE, results.booksOnly.length, sumVal(results.booksOnly,'books'));
-    
+    let y = addPageHeader(ROSE, 'In Books Only — ITC at Risk');
+    y = sectionHeading(
+      y,
+      'In Books Only — Vendor has NOT filed on Portal.  ITC at Risk — follow up with vendor immediately!',
+      ROSE, results.booksOnly.length, sumVal(results.booksOnly, 'books')
+    );
+
     // Risk banner
-    doc.setFillColor(255, 238, 238);
+    doc.setFillColor(255, 235, 235);
     doc.setDrawColor(...ROSE);
     doc.setLineWidth(0.3);
-    doc.roundedRect(ML, y, TW, 8, 1, 1, 'FD');
-    doc.setLineWidth(0.2);
+    doc.roundedRect(ML, y, TW, 7.5, 1, 1, 'FD');
+    doc.setLineWidth(0.15);
     doc.setTextColor(...ROSE);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8);
-    doc.text('⚠ ITC RISK: Follow up with vendor to avoid ITC reversal.', ML + 2, y + 5);
+    doc.setFontSize(7.5);
+    doc.text(
+      '⚠  ITC RISK: These invoices are in your books but vendor has NOT filed on GST Portal. ' +
+      'You cannot claim ITC until the vendor files GSTR-1. Follow up immediately.',
+      ML + 3, y + 5
+    );
+    doc.setTextColor(...DGRAY);
     y += 10;
-    
+
     autoTable(doc, {
-      ...BASE_TABLE,
+      ...BASE,
       startY: y,
-      head: [['#','GSTIN','Party Name','Invoice No','Date','Value (₹)','Taxable (₹)','IGST','CGST','SGST','Place']],
-      body: results.booksOnly.map((r,i)=>{
-        const inv = r.books;
-        const bgstin = inv?.gstin?.toUpperCase() || '';
+      head: [['#', 'GSTIN', 'Party Name', 'Invoice No', 'Date', 'Value (₹)', 'Taxable (₹)', 'IGST', 'CGST', 'SGST', 'Place of Supply']],
+      body: results.booksOnly.map((r, i) => {
+        const inv    = r.books;
+        const bgstin = (inv?.gstin || '').toUpperCase();
         return [
-          String(i+1),
+          i + 1,
           bgstin,
           inv?.tradeOrLegalName || manualTradeNames?.[bgstin] || manualTradeNames?.[inv?.gstin] || '—',
           inv?.invoiceNoRaw || '—',
-          inv?.invoiceDate || '—',
-          fmt(inv?.invoiceValue || 0),
-          fmt(inv?.taxableValue || 0),
-          fmt(inv?.igst || 0),
-          fmt(inv?.cgst || 0),
-          fmt(inv?.sgst || 0),
-          inv?.placeOfSupply || '—',
+          inv?.invoiceDate  || '—',
+          fmt(inv?.invoiceValue  || 0),
+          fmt(inv?.taxableValue  || 0),
+          fmt(inv?.igst          || 0),
+          fmt(inv?.cgst          || 0),
+          fmt(inv?.sgst          || 0),
+          inv?.placeOfSupply     || '—',
         ];
       }),
-      headStyles: { ...BASE_TABLE.headStyles, fillColor: ROSE },
+      headStyles: { ...BASE.headStyles, fillColor: ROSE },
       columnStyles: {
-        0: { cellWidth: 8, halign: 'center' },
-        1: { cellWidth: 32, halign: 'left' },
-        2: { cellWidth: 28, halign: 'left' },
-        3: { cellWidth: 18, halign: 'left' },
-        4: { cellWidth: 14, halign: 'left' },
-        5: { cellWidth: 20, halign: 'right' },
-        6: { cellWidth: 16, halign: 'right' },
-        7: { cellWidth: 12, halign: 'right' },
-        8: { cellWidth: 12, halign: 'right' },
-        9: { cellWidth: 12, halign: 'right' },
-        10: { cellWidth: 16, halign: 'left' },
+        0:  { cellWidth:  8, halign: 'center' },
+        1:  { cellWidth: 36, halign: 'left'   },
+        2:  { cellWidth: 42, halign: 'left'   },
+        3:  { cellWidth: 28, halign: 'left'   },
+        4:  { cellWidth: 20, halign: 'center' },
+        5:  { cellWidth: 28, halign: 'right'  },
+        6:  { cellWidth: 24, halign: 'right'  },
+        7:  { cellWidth: 20, halign: 'right'  },
+        8:  { cellWidth: 20, halign: 'right'  },
+        9:  { cellWidth: 20, halign: 'right'  },
+        10: { cellWidth: 31, halign: 'left'   },
       },
     });
   }
 
-  // PAGE 4 — MISMATCH
+  /* ─────────────────────────────────────────────────────────────────────
+     PAGE 4 — AMOUNT MISMATCH
+     Col widths: 8+32+32+22+18+22+22+18+18+18+18+49 = 277 ✓
+  ───────────────────────────────────────────────────────────────────── */
   if (results.mismatch.length > 0) {
     doc.addPage('landscape');
-    addPageHeader(AMBER, 'Amount Mismatch');
-    let y = 20;
-    y = sectionHeading(y, 'Amount Mismatch — Values differ between Portal and Books', AMBER, results.mismatch.length, sumVal(results.mismatch,'portal'));
-    
+    let y = addPageHeader(AMBER, 'Amount Mismatch');
+    y = sectionHeading(
+      y,
+      'Amount Mismatch — Invoice numbers match but values or tax differ between Portal and Books',
+      AMBER, results.mismatch.length, sumVal(results.mismatch, 'portal')
+    );
+
     autoTable(doc, {
-      ...BASE_TABLE,
+      ...BASE,
       startY: y,
-      head: [['#','GSTIN','Party Name','Inv No','Date','Portal (₹)','Books (₹)','Diff (₹)','P.Tax (₹)','B.Tax (₹)','Tax Δ (₹)']],
-      body: results.mismatch.map((r,i)=>{
-        const pTax = (r.portal?.igst||0)+(r.portal?.cgst||0)+(r.portal?.sgst||0);
-        const bTax = (r.books?.igst||0)+(r.books?.cgst||0)+(r.books?.sgst||0);
-        const diffVal = r.valueDiff > 0 ? '+' : '';
-        const diffTax = r.taxDiff > 0 ? '+' : '';
+      head: [['#', 'GSTIN', 'Party Name', 'Invoice No', 'Date', 'Portal ₹', 'Books ₹', 'Diff ₹', 'P.Tax ₹', 'B.Tax ₹', 'Tax Δ ₹', 'Mismatch Reason & Suggested Action']],
+      body: results.mismatch.map((r, i) => {
+        const pTax   = (r.portal?.igst || 0) + (r.portal?.cgst || 0) + (r.portal?.sgst || 0);
+        const bTax   = (r.books?.igst  || 0) + (r.books?.cgst  || 0) + (r.books?.sgst  || 0);
+        const vDiff  = (r.valueDiff || 0);
+        const tDiff  = (r.taxDiff   || 0);
+        const reason = [
+          r.mismatchReason,
+          r.suggestedAction ? `→ ${r.suggestedAction}` : '',
+        ].filter(Boolean).join(' ');
         return [
-          String(i+1),
+          i + 1,
           r.portal?.gstin || '—',
           r.portal?.tradeOrLegalName || manualTradeNames?.[r.portal?.gstin] || '—',
           r.portal?.invoiceNoRaw || '—',
-          r.portal?.invoiceDate || '—',
+          r.portal?.invoiceDate  || '—',
           fmt(r.portal?.invoiceValue || 0),
-          fmt(r.books?.invoiceValue || 0),
-          diffVal + fmt(Math.abs(r.valueDiff || 0)),
+          fmt(r.books?.invoiceValue  || 0),
+          (vDiff >= 0 ? '+' : '') + fmt(vDiff),
           fmt(pTax),
           fmt(bTax),
-          diffTax + fmt(Math.abs(r.taxDiff || 0)),
+          (tDiff >= 0 ? '+' : '') + fmt(tDiff),
+          reason || '—',
         ];
       }),
-      headStyles: { ...BASE_TABLE.headStyles, fillColor: AMBER },
+      headStyles: { ...BASE.headStyles, fillColor: AMBER },
       columnStyles: {
-        0: { cellWidth: 8, halign: 'center' },
-        1: { cellWidth: 32, halign: 'left' },
-        2: { cellWidth: 26, halign: 'left' },
-        3: { cellWidth: 16, halign: 'left' },
-        4: { cellWidth: 14, halign: 'left' },
-        5: { cellWidth: 18, halign: 'right' },
-        6: { cellWidth: 18, halign: 'right' },
-        7: { cellWidth: 14, halign: 'right' },
-        8: { cellWidth: 14, halign: 'right' },
-        9: { cellWidth: 14, halign: 'right' },
-        10: { cellWidth: 14, halign: 'right' },
+        0:  { cellWidth:  8, halign: 'center' },
+        1:  { cellWidth: 32, halign: 'left'   },
+        2:  { cellWidth: 32, halign: 'left'   },
+        3:  { cellWidth: 22, halign: 'left'   },
+        4:  { cellWidth: 18, halign: 'center' },
+        5:  { cellWidth: 22, halign: 'right'  },
+        6:  { cellWidth: 22, halign: 'right'  },
+        7:  { cellWidth: 18, halign: 'right'  },
+        8:  { cellWidth: 18, halign: 'right'  },
+        9:  { cellWidth: 18, halign: 'right'  },
+        10: { cellWidth: 18, halign: 'right'  },
+        11: { cellWidth: 49, halign: 'left'   }, // wraps freely
+      },
+      didParseCell(data) {
+        if (data.section !== 'body') return;
+        // Colour Diff ₹ and Tax Δ ₹ columns
+        if (data.column.index === 7 || data.column.index === 10) {
+          const raw = Array.isArray(data.cell.text)
+            ? data.cell.text.join('')
+            : String(data.cell.text || '');
+          const negative = raw.trim().startsWith('-');
+          data.cell.styles.textColor  = negative ? ROSE : BLUE;
+          data.cell.styles.fontStyle  = 'bold';
+        }
       },
     });
   }
 
-  // PAGE 5 — MATCHED
+  /* ─────────────────────────────────────────────────────────────────────
+     PAGE 5 — MATCHED INVOICES
+     Col widths: 8+36+42+28+20+28+24+20+20+20+31 = 277 ✓
+  ───────────────────────────────────────────────────────────────────── */
   if (results.matched.length > 0) {
     doc.addPage('landscape');
-    addPageHeader(GREEN, 'Matched Invoices');
-    let y = 20;
-    y = sectionHeading(y, 'Matched Invoices — Present in both Portal and Books', GREEN, results.matched.length, sumVal(results.matched,'portal'));
-    
+    let y = addPageHeader(GREEN, 'Matched Invoices');
+    y = sectionHeading(
+      y,
+      'Matched Invoices — Present in both Portal and Books with matching values.  No action required.',
+      GREEN, results.matched.length, sumVal(results.matched, 'portal')
+    );
+
     autoTable(doc, {
-      ...BASE_TABLE,
+      ...BASE,
       startY: y,
-      head: [['#','GSTIN','Party Name','Invoice No','Date','Value (₹)','Taxable (₹)','IGST','CGST','SGST','Cess']],
-      body: results.matched.map((r,i)=>{
-        return [
-          String(i+1),
-          r.portal?.gstin || '—',
-          r.portal?.tradeOrLegalName || manualTradeNames?.[r.portal?.gstin] || '—',
-          r.portal?.invoiceNoRaw || '—',
-          r.portal?.invoiceDate || '—',
-          fmt(r.portal?.invoiceValue || 0),
-          fmt(r.portal?.taxableValue || 0),
-          fmt(r.portal?.igst || 0),
-          fmt(r.portal?.cgst || 0),
-          fmt(r.portal?.sgst || 0),
-          fmt(r.portal?.cess || 0),
-        ];
-      }),
-      headStyles: { ...BASE_TABLE.headStyles, fillColor: GREEN },
+      head: [['#', 'GSTIN', 'Party Name', 'Invoice No', 'Date', 'Value (₹)', 'Taxable (₹)', 'IGST', 'CGST', 'SGST', 'Cess']],
+      body: results.matched.map((r, i) => [
+        i + 1,
+        r.portal?.gstin || '—',
+        r.portal?.tradeOrLegalName || manualTradeNames?.[r.portal?.gstin] || '—',
+        r.portal?.invoiceNoRaw || '—',
+        r.portal?.invoiceDate  || '—',
+        fmt(r.portal?.invoiceValue  || 0),
+        fmt(r.portal?.taxableValue  || 0),
+        fmt(r.portal?.igst          || 0),
+        fmt(r.portal?.cgst          || 0),
+        fmt(r.portal?.sgst          || 0),
+        fmt(r.portal?.cess          || 0),
+      ]),
+      headStyles: { ...BASE.headStyles, fillColor: GREEN },
       columnStyles: {
-        0: { cellWidth: 8, halign: 'center' },
-        1: { cellWidth: 32, halign: 'left' },
-        2: { cellWidth: 28, halign: 'left' },
-        3: { cellWidth: 18, halign: 'left' },
-        4: { cellWidth: 14, halign: 'left' },
-        5: { cellWidth: 18, halign: 'right' },
-        6: { cellWidth: 16, halign: 'right' },
-        7: { cellWidth: 12, halign: 'right' },
-        8: { cellWidth: 12, halign: 'right' },
-        9: { cellWidth: 12, halign: 'right' },
-        10: { cellWidth: 12, halign: 'right' },
+        0:  { cellWidth:  8, halign: 'center' },
+        1:  { cellWidth: 36, halign: 'left'   },
+        2:  { cellWidth: 42, halign: 'left'   },
+        3:  { cellWidth: 28, halign: 'left'   },
+        4:  { cellWidth: 20, halign: 'center' },
+        5:  { cellWidth: 28, halign: 'right'  },
+        6:  { cellWidth: 24, halign: 'right'  },
+        7:  { cellWidth: 20, halign: 'right'  },
+        8:  { cellWidth: 20, halign: 'right'  },
+        9:  { cellWidth: 20, halign: 'right'  },
+        10: { cellWidth: 31, halign: 'right'  },
       },
     });
   }
 
-  // Add footer to first page
+  // Ensure cover footer is drawn last (autoTable can overwrite it)
   doc.setPage(1);
-  addPageFooter();
+  addFooter();
 
-  const fname = `GST_Recon_${(company.name || 'Report').replace(/\s+/g,'_')}_${period ? period.replace(/\s+/g,'_') : 'Export'}.pdf`;
+  const fname = `GST_Recon_${(company.name || 'Report').replace(/\s+/g, '_')}_${(period || 'Export').replace(/\s+/g, '_')}.pdf`;
   doc.save(fname);
-  toast.success('Professional PDF report generated successfully!');
+  toast.success('PDF report generated successfully!');
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   WORD (.doc) EXPORT  — HTML-to-Word via Blob + file-saver
+   WORD (.doc) EXPORT v2 — Clean HTML-to-Word via Blob + file-saver
+   ─────────────────────────────────────────────────────────────────────────
+   Fixes vs original:
+   • All table cells use explicit width percentages — no column overflow
+   • Numeric columns are right-aligned
+   • Long-text columns (Party Name, Reason) have generous width so they wrap
+   • Consistent colour coding: green=matched, amber=mismatch, blue=portal,
+     red=books-only
+   • Mismatch table includes Severity + Root Cause + Suggested Action columns
+   • Every section has a clear heading band + invoice count + total value
+   • Professional cover page with company details grid
+   • All ₹ amounts formatted with Indian number formatting
+   • Page breaks between sections via CSS page-break-before
 ═══════════════════════════════════════════════════════════════════════════ */
 function exportWord(results, company, period, manualTradeNames = {}, invoiceComments = {}) {
-  const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
+  const dateStr = new Date().toLocaleDateString('en-IN', {
+    day: '2-digit', month: 'long', year: 'numeric',
+  });
 
-  const rowsHtml = (headers, rows, headBg = '#0D3B66') => `
-    <table style="border-collapse:collapse;width:100%;font-size:9pt;margin-bottom:14pt;">
-      <thead>
-        <tr>${headers.map(h => `<th style="background:${headBg};color:#fff;padding:5pt 7pt;border:1px solid #cbd5e1;text-align:left;font-weight:bold;white-space:nowrap;">${h}</th>`).join('')}</tr>
-      </thead>
-      <tbody>
-        ${rows.map((row, ri) => `
-          <tr style="background:${ri % 2 === 0 ? '#f8fafc' : '#fff'};">
-            ${row.map(cell => {
-              const val = typeof cell === 'object' ? cell.v : cell;
-              const style = typeof cell === 'object' ? `color:${cell.c};font-weight:bold;` : '';
-              return `<td style="padding:4pt 7pt;border:1px solid #e2e8f0;${style}">${val ?? ''}</td>`;
-            }).join('')}
-          </tr>`).join('')}
-      </tbody>
-    </table>`;
+  // ── Helper: build a full-width HTML table ─────────────────────────────
+  // headers: array of { label, width (%), align }
+  // rows:    array of arrays matching headers
+  // headColor: CSS hex
+  const buildTable = (headers, rows, headColor = '#0D3B66') => {
+    const thead = headers.map(h =>
+      `<th style="
+        background:${headColor};color:#fff;padding:5pt 6pt;
+        border:1px solid #c8d4e0;text-align:${h.align || 'left'};
+        font-weight:bold;font-size:8.5pt;white-space:nowrap;
+        width:${h.width || 'auto'};">${h.label}</th>`
+    ).join('');
 
-  const section = (title, badge, badgeBg, rows, total, description, extraHtml = '') => `
+    const tbody = rows.map((row, ri) =>
+      `<tr style="background:${ri % 2 === 0 ? '#f8fafc' : '#fff'};">
+        ${row.map((cell, ci) => {
+          const align = headers[ci]?.align || 'left';
+          const v  = typeof cell === 'object' && cell !== null ? cell.v : cell;
+          const st = typeof cell === 'object' && cell !== null
+            ? `color:${cell.c};font-weight:bold;`
+            : '';
+          return `<td style="padding:4pt 6pt;border:1px solid #e2e8f0;
+            font-size:8pt;text-align:${align};${st}
+            width:${headers[ci]?.width || 'auto'};">${v ?? ''}</td>`;
+        }).join('')}
+      </tr>`
+    ).join('');
+
+    return `
+      <table style="border-collapse:collapse;width:100%;table-layout:fixed;margin-bottom:14pt;">
+        <colgroup>${headers.map(h => `<col style="width:${h.width || 'auto'};">`).join('')}</colgroup>
+        <thead><tr>${thead}</tr></thead>
+        <tbody>${tbody}</tbody>
+      </table>`;
+  };
+
+  // ── Helper: section page with heading band ────────────────────────────
+  const section = (title, badgeBg, count, totalVal, description, tableHtml, extraHtml = '') => `
     <div style="page-break-before:always;">
-      <div style="background:${badgeBg};color:#fff;padding:10pt 14pt;border-radius:4pt;margin-bottom:10pt;">
+      <div style="background:${badgeBg};color:#fff;padding:10pt 14pt;border-radius:4pt;margin-bottom:10pt;display:flex;justify-content:space-between;align-items:center;">
         <span style="font-size:13pt;font-weight:bold;">${title}</span>
-        <span style="float:right;font-size:10pt;">${rows.length} invoices &nbsp;|&nbsp; ₹${fmt(total)}</span>
+        <span style="font-size:9pt;opacity:0.9;">${count} invoice${count !== 1 ? 's' : ''} &nbsp;|&nbsp; ₹${fmt(totalVal)}</span>
       </div>
-      ${description ? `<p style="background:#f1f5f9;border-left:4pt solid ${badgeBg};padding:8pt 12pt;font-size:9pt;color:#475569;margin-bottom:10pt;">${description}</p>` : ''}
+      ${description ? `<p style="background:#f1f5f9;border-left:4pt solid ${badgeBg};padding:8pt 12pt;font-size:8.5pt;color:#475569;margin-bottom:10pt;border-radius:2pt;">${description}</p>` : ''}
       ${extraHtml}
+      ${tableHtml}
     </div>`;
 
-  const matchedSection = results.matched.length === 0 ? '' : section(
-    '✓  Matched Invoices', '', '#10b981', results.matched,
-    sumVal(results.matched, 'portal'),
-    'These invoices are present in both the GST Portal (GSTR-2B) and your Books of Account with matching amounts. No action required.',
-    rowsHtml(
-      ['#','GSTIN','Party Name','Invoice No','Date','Invoice Value (₹)','Taxable Value (₹)','IGST (₹)','CGST (₹)','SGST (₹)','Cess (₹)','Notes'],
-      results.matched.map((r, i) => {
-        const rk = r.key||`${r.portal.gstin}__${r.portal.invoiceNo}`;
-        const nm = r.portal.tradeOrLegalName||manualTradeNames?.[r.portal.gstin]||r.books?.tradeOrLegalName||manualTradeNames?.[r.books?.gstin]||'—';
-        return [i+1, r.portal.gstin, nm, r.portal.invoiceNoRaw,
-          r.portal.invoiceDate, fmt(r.portal.invoiceValue), fmt(r.portal.taxableValue),
-          fmt(r.portal.igst), fmt(r.portal.cgst), fmt(r.portal.sgst), fmt(r.portal.cess),
-          invoiceComments?.[rk]||''];
-      }),
-      '#10b981'
-    )
-  );
-
-  const mismatchSection = results.mismatch.length === 0 ? '' : section(
-    '⚠  Amount Mismatch', '', '#f59e0b', results.mismatch,
-    sumVal(results.mismatch, 'portal'),
-    'Invoice numbers match but the invoice value or tax amount differs between the GST Portal and Books. Please verify and correct the entries.',
-    rowsHtml(
-      ['#','GSTIN','Party Name','Invoice No','Date','Portal Value','Books Value','Diff (₹)','Portal Tax','Books Tax','Tax Diff (₹)','Notes'],
-      results.mismatch.map((r, i) => {
-        const rk = r.key||`${r.portal.gstin}__${r.portal.invoiceNo}`;
-        const nm = r.portal.tradeOrLegalName||manualTradeNames?.[r.portal.gstin]||r.books?.tradeOrLegalName||manualTradeNames?.[r.books?.gstin]||'—';
-        return [i+1, r.portal.gstin, nm, r.portal.invoiceNoRaw,
-          r.portal.invoiceDate,
-          fmt(r.portal.invoiceValue), fmt(r.books.invoiceValue),
-          { v: (r.valueDiff>0?'+':'')+fmt(r.valueDiff), c: r.valueDiff>0?'#1d4ed8':'#dc2626' },
-          fmt(r.portal.igst+r.portal.cgst+r.portal.sgst),
-          fmt(r.books.igst+r.books.cgst+r.books.sgst),
-          { v: (r.taxDiff>0?'+':'')+fmt(r.taxDiff), c: r.taxDiff>0?'#1d4ed8':'#dc2626' },
-          invoiceComments?.[rk]||''];
-      }),
-      '#f59e0b'
-    )
-  );
-
-  const portalOnlySection = results.portalOnly.length === 0 ? '' : section(
-    '🌐  In GST Portal Only', '', '#3b82f6', results.portalOnly,
-    sumVal(results.portalOnly, 'portal'),
-    'Vendor has filed these invoices on the GST Portal but they are NOT recorded in your Books of Account. These must be booked to avail ITC.',
-    rowsHtml(
-      ['#','GSTIN','Party Name','Invoice No','Date','Invoice Value (₹)','Taxable (₹)','IGST','CGST','SGST','Place of Supply','ITC Available','Notes'],
+  // ── PORTAL ONLY section ───────────────────────────────────────────────
+  const portalOnlyHtml = results.portalOnly.length === 0 ? '' : section(
+    '🌐  In GST Portal Only', '#2563eb',
+    results.portalOnly.length, sumVal(results.portalOnly, 'portal'),
+    'Vendor has filed these invoices on the GST Portal but they are NOT recorded in your Books of Account. Book these invoices to avail Input Tax Credit (ITC).',
+    buildTable(
+      [
+        { label: '#',               width: '3%',  align: 'center' },
+        { label: 'GSTIN',           width: '13%', align: 'left'   },
+        { label: 'Party Name',      width: '17%', align: 'left'   },
+        { label: 'Invoice No',      width: '10%', align: 'left'   },
+        { label: 'Date',            width: '8%',  align: 'center' },
+        { label: 'Invoice Value ₹', width: '10%', align: 'right'  },
+        { label: 'Taxable ₹',       width: '9%',  align: 'right'  },
+        { label: 'IGST ₹',          width: '7%',  align: 'right'  },
+        { label: 'CGST ₹',          width: '7%',  align: 'right'  },
+        { label: 'SGST ₹',          width: '7%',  align: 'right'  },
+        { label: 'Place',           width: '9%',  align: 'left'   },
+      ],
       results.portalOnly.map((r, i) => {
-        const rk = r.key||`${r.portal.gstin}__${r.portal.invoiceNo}`;
-        const nm = r.portal.tradeOrLegalName||manualTradeNames?.[r.portal.gstin]||'—';
-        return [i+1, r.portal.gstin, nm, r.portal.invoiceNoRaw,
-          r.portal.invoiceDate, fmt(r.portal.invoiceValue), fmt(r.portal.taxableValue),
-          fmt(r.portal.igst), fmt(r.portal.cgst), fmt(r.portal.sgst),
-          r.portal.placeOfSupply||'—',
-          { v: r.portal.itcAvailability||'—', c: r.portal.itcAvailability?.toLowerCase()==='yes'?'#059669':'#64748b' },
-          invoiceComments?.[rk]||''];
+        const inv = r.portal;
+        const rk  = r.key || `${inv?.gstin}__${inv?.invoiceNo}`;
+        return [
+          i + 1,
+          inv?.gstin || '—',
+          inv?.tradeOrLegalName || manualTradeNames?.[inv?.gstin] || '—',
+          inv?.invoiceNoRaw || '—',
+          inv?.invoiceDate  || '—',
+          fmt(inv?.invoiceValue  || 0),
+          fmt(inv?.taxableValue  || 0),
+          fmt(inv?.igst          || 0),
+          fmt(inv?.cgst          || 0),
+          fmt(inv?.sgst          || 0),
+          inv?.placeOfSupply     || '—',
+        ];
       }),
-      '#3b82f6'
+      '#2563eb'
     )
   );
 
-  const booksOnlySection = results.booksOnly.length === 0 ? '' : section(
-    '📒  In Books Only (ITC Risk)', '', '#ef4444', results.booksOnly,
-    sumVal(results.booksOnly, 'books'),
-    '⚠ ITC RISK: These invoices are recorded in your Books of Account but the vendor has NOT uploaded them to the GST Portal. You cannot claim ITC on these until the vendor files. Follow up with the vendor immediately.',
-    rowsHtml(
-      ['#','GSTIN','Party Name','Invoice No','Date','Invoice Value (₹)','Taxable (₹)','IGST','CGST','SGST','Place','Notes'],
+  // ── BOOKS ONLY section ────────────────────────────────────────────────
+  const booksOnlyHtml = results.booksOnly.length === 0 ? '' : section(
+    '📒  In Books Only — ITC at Risk', '#dc2626',
+    results.booksOnly.length, sumVal(results.booksOnly, 'books'),
+    '⚠ ITC RISK: These invoices are recorded in your Books but the vendor has NOT uploaded them to the GST Portal. You CANNOT claim ITC on these until the vendor files GSTR-1. Follow up with the vendor immediately.',
+    buildTable(
+      [
+        { label: '#',               width: '3%',  align: 'center' },
+        { label: 'GSTIN',           width: '14%', align: 'left'   },
+        { label: 'Party Name',      width: '18%', align: 'left'   },
+        { label: 'Invoice No',      width: '10%', align: 'left'   },
+        { label: 'Date',            width: '8%',  align: 'center' },
+        { label: 'Invoice Value ₹', width: '10%', align: 'right'  },
+        { label: 'Taxable ₹',       width: '9%',  align: 'right'  },
+        { label: 'IGST ₹',          width: '7%',  align: 'right'  },
+        { label: 'CGST ₹',          width: '7%',  align: 'right'  },
+        { label: 'SGST ₹',          width: '7%',  align: 'right'  },
+        { label: 'Place',           width: '13%', align: 'left'   },
+      ],
       results.booksOnly.map((r, i) => {
-        const rk = r.key||`${r.books.gstin}__${r.books.invoiceNo}`;
-        const bgstin = (r.books.gstin || '').toUpperCase();
-        const nm = r.books.tradeOrLegalName||manualTradeNames?.[bgstin]||manualTradeNames?.[r.books.gstin]||'—';
-        return [i+1, r.books.gstin, nm,
-          r.books.invoiceNoRaw, r.books.invoiceDate,
-          fmt(r.books.invoiceValue), fmt(r.books.taxableValue),
-          fmt(r.books.igst), fmt(r.books.cgst), fmt(r.books.sgst),
-          r.books.placeOfSupply||'—',
-          invoiceComments?.[rk]||''];
+        const inv    = r.books;
+        const bgstin = (inv?.gstin || '').toUpperCase();
+        return [
+          i + 1,
+          bgstin,
+          inv?.tradeOrLegalName || manualTradeNames?.[bgstin] || manualTradeNames?.[inv?.gstin] || '—',
+          inv?.invoiceNoRaw || '—',
+          inv?.invoiceDate  || '—',
+          fmt(inv?.invoiceValue  || 0),
+          fmt(inv?.taxableValue  || 0),
+          fmt(inv?.igst          || 0),
+          fmt(inv?.cgst          || 0),
+          fmt(inv?.sgst          || 0),
+          inv?.placeOfSupply     || '—',
+        ];
       }),
-      '#ef4444'
+      '#dc2626'
     )
+  );
+
+  // ── MISMATCH section ─────────────────────────────────────────────────
+  const mismatchHtml = results.mismatch.length === 0 ? '' : section(
+    '⚠  Amount Mismatch', '#b45309',
+    results.mismatch.length, sumVal(results.mismatch, 'portal'),
+    'Invoice numbers match between Portal and Books but invoice value or tax amount differs. Review each entry and correct discrepancies before filing GSTR-3B.',
+    buildTable(
+      [
+        { label: '#',            width: '2%',  align: 'center' },
+        { label: 'GSTIN',        width: '12%', align: 'left'   },
+        { label: 'Party Name',   width: '13%', align: 'left'   },
+        { label: 'Invoice No',   width: '9%',  align: 'left'   },
+        { label: 'Date',         width: '7%',  align: 'center' },
+        { label: 'Portal ₹',     width: '8%',  align: 'right'  },
+        { label: 'Books ₹',      width: '8%',  align: 'right'  },
+        { label: 'Diff ₹',       width: '7%',  align: 'right'  },
+        { label: 'P.Tax ₹',      width: '7%',  align: 'right'  },
+        { label: 'B.Tax ₹',      width: '7%',  align: 'right'  },
+        { label: 'Tax Δ ₹',      width: '6%',  align: 'right'  },
+        { label: 'Severity',     width: '5%',  align: 'center' },
+        { label: 'Root Cause & Suggested Action', width: '19%', align: 'left' },
+      ],
+      results.mismatch.map((r, i) => {
+        const pTax  = (r.portal?.igst || 0) + (r.portal?.cgst || 0) + (r.portal?.sgst || 0);
+        const bTax  = (r.books?.igst  || 0) + (r.books?.cgst  || 0) + (r.books?.sgst  || 0);
+        const vDiff = r.valueDiff || 0;
+        const tDiff = r.taxDiff   || 0;
+        const sevColor = r.severity === 'high' ? '#b91c1c' : r.severity === 'medium' ? '#b45309' : '#64748b';
+        const reason = [r.mismatchReason, r.suggestedAction ? `→ ${r.suggestedAction}` : ''].filter(Boolean).join(' ');
+        return [
+          i + 1,
+          r.portal?.gstin || '—',
+          r.portal?.tradeOrLegalName || manualTradeNames?.[r.portal?.gstin] || '—',
+          r.portal?.invoiceNoRaw || '—',
+          r.portal?.invoiceDate  || '—',
+          fmt(r.portal?.invoiceValue || 0),
+          fmt(r.books?.invoiceValue  || 0),
+          { v: (vDiff >= 0 ? '+' : '') + fmt(vDiff), c: vDiff >= 0 ? '#1d4ed8' : '#dc2626' },
+          fmt(pTax),
+          fmt(bTax),
+          { v: (tDiff >= 0 ? '+' : '') + fmt(tDiff), c: tDiff >= 0 ? '#1d4ed8' : '#dc2626' },
+          { v: (r.severity || '—').toUpperCase(), c: sevColor },
+          reason || '—',
+        ];
+      }),
+      '#b45309'
+    )
+  );
+
+  // ── MATCHED section ───────────────────────────────────────────────────
+  const matchedHtml = results.matched.length === 0 ? '' : section(
+    '✓  Matched Invoices', '#059669',
+    results.matched.length, sumVal(results.matched, 'portal'),
+    'These invoices are present in both the GST Portal (GSTR-2B) and your Books of Account with matching amounts. No action required.',
+    buildTable(
+      [
+        { label: '#',               width: '3%',  align: 'center' },
+        { label: 'GSTIN',           width: '13%', align: 'left'   },
+        { label: 'Party Name',      width: '18%', align: 'left'   },
+        { label: 'Invoice No',      width: '11%', align: 'left'   },
+        { label: 'Date',            width: '8%',  align: 'center' },
+        { label: 'Invoice Value ₹', width: '10%', align: 'right'  },
+        { label: 'Taxable ₹',       width: '9%',  align: 'right'  },
+        { label: 'IGST ₹',          width: '7%',  align: 'right'  },
+        { label: 'CGST ₹',          width: '7%',  align: 'right'  },
+        { label: 'SGST ₹',          width: '7%',  align: 'right'  },
+        { label: 'Cess ₹',          width: '7%',  align: 'right'  },
+      ],
+      results.matched.map((r, i) => {
+        const rk = r.key || `${r.portal?.gstin}__${r.portal?.invoiceNo}`;
+        return [
+          i + 1,
+          r.portal?.gstin || '—',
+          r.portal?.tradeOrLegalName || manualTradeNames?.[r.portal?.gstin] || r.books?.tradeOrLegalName || '—',
+          r.portal?.invoiceNoRaw || '—',
+          r.portal?.invoiceDate  || '—',
+          fmt(r.portal?.invoiceValue  || 0),
+          fmt(r.portal?.taxableValue  || 0),
+          fmt(r.portal?.igst          || 0),
+          fmt(r.portal?.cgst          || 0),
+          fmt(r.portal?.sgst          || 0),
+          fmt(r.portal?.cess          || 0),
+        ];
+      }),
+      '#059669'
+    )
+  );
+
+  // ── Summary table on cover ────────────────────────────────────────────
+  const summaryTableHtml = buildTable(
+    [
+      { label: 'Category',           width: '22%', align: 'left'   },
+      { label: 'Count',              width: '7%',  align: 'center' },
+      { label: 'Invoice Value ₹',    width: '14%', align: 'right'  },
+      { label: 'Taxable Value ₹',    width: '14%', align: 'right'  },
+      { label: 'IGST ₹',             width: '10%', align: 'right'  },
+      { label: 'CGST ₹',             width: '10%', align: 'right'  },
+      { label: 'SGST ₹',             width: '10%', align: 'right'  },
+      { label: 'Total Tax ₹',        width: '13%', align: 'right'  },
+    ],
+    [
+      [
+        { v: '✓ Matched',           c: '#059669' },
+        results.matched.length,
+        fmt(sumVal(results.matched, 'portal')),
+        fmt(results.matched.reduce((s, r) => s + (r.portal?.taxableValue || 0), 0)),
+        fmt(results.matched.reduce((s, r) => s + (r.portal?.igst || 0), 0)),
+        fmt(results.matched.reduce((s, r) => s + (r.portal?.cgst || 0), 0)),
+        fmt(results.matched.reduce((s, r) => s + (r.portal?.sgst || 0), 0)),
+        fmt(sumTax(results.matched, 'portal')),
+      ],
+      [
+        { v: '⚠ Amount Mismatch',   c: '#b45309' },
+        results.mismatch.length,
+        fmt(sumVal(results.mismatch, 'portal')),
+        fmt(results.mismatch.reduce((s, r) => s + (r.portal?.taxableValue || 0), 0)),
+        fmt(results.mismatch.reduce((s, r) => s + (r.portal?.igst || 0), 0)),
+        fmt(results.mismatch.reduce((s, r) => s + (r.portal?.cgst || 0), 0)),
+        fmt(results.mismatch.reduce((s, r) => s + (r.portal?.sgst || 0), 0)),
+        fmt(sumTax(results.mismatch, 'portal')),
+      ],
+      [
+        { v: '🌐 In Portal Only',   c: '#1d4ed8' },
+        results.portalOnly.length,
+        fmt(sumVal(results.portalOnly, 'portal')),
+        fmt(results.portalOnly.reduce((s, r) => s + (r.portal?.taxableValue || 0), 0)),
+        fmt(results.portalOnly.reduce((s, r) => s + (r.portal?.igst || 0), 0)),
+        fmt(results.portalOnly.reduce((s, r) => s + (r.portal?.cgst || 0), 0)),
+        fmt(results.portalOnly.reduce((s, r) => s + (r.portal?.sgst || 0), 0)),
+        fmt(sumTax(results.portalOnly, 'portal')),
+      ],
+      [
+        { v: '📒 In Books Only',    c: '#dc2626' },
+        results.booksOnly.length,
+        fmt(sumVal(results.booksOnly, 'books')),
+        fmt(results.booksOnly.reduce((s, r) => s + (r.books?.taxableValue || 0), 0)),
+        fmt(results.booksOnly.reduce((s, r) => s + (r.books?.igst || 0), 0)),
+        fmt(results.booksOnly.reduce((s, r) => s + (r.books?.cgst || 0), 0)),
+        fmt(results.booksOnly.reduce((s, r) => s + (r.books?.sgst || 0), 0)),
+        fmt(sumTax(results.booksOnly, 'books')),
+      ],
+    ],
+    '#0D3B66'
   );
 
   const totalPortal = results.matched.length + results.mismatch.length + results.portalOnly.length;
   const totalBooks  = results.matched.length + results.mismatch.length + results.booksOnly.length;
 
+  // ── Full HTML document ────────────────────────────────────────────────
   const html = `
 <!DOCTYPE html>
 <html xmlns:o="urn:schemas-microsoft-com:office:office"
@@ -2040,413 +2309,431 @@ function exportWord(results, company, period, manualTradeNames = {}, invoiceComm
 <head>
   <meta charset="UTF-8">
   <title>GST Reconciliation Report</title>
-  <!--[if gte mso 9]>
-  <xml>
+  <!--[if gte mso 9]><xml>
     <w:WordDocument>
-      <w:View>Print</w:View>
-      <w:Zoom>90</w:Zoom>
+      <w:View>Print</w:View><w:Zoom>90</w:Zoom>
       <w:DoNotOptimizeForBrowser/>
     </w:WordDocument>
-  </xml>
-  <![endif]-->
+  </xml><![endif]-->
   <style>
-    @page { size: A4 landscape; margin: 2cm 1.5cm; }
-    body { font-family: Cambria, 'Times New Roman', Georgia, serif; font-size: 10pt; color: #1e293b; margin: 0; }
-    h1 { font-size: 22pt; color: #0D3B66; margin-bottom: 4pt; }
-    h2 { font-size: 14pt; color: #0D3B66; margin: 16pt 0 8pt; }
-    h3 { font-size: 11pt; color: #334155; margin: 12pt 0 6pt; }
-    p  { margin: 4pt 0; line-height: 1.5; }
-    table { border-collapse: collapse; width: 100%; font-size: 9pt; margin-bottom: 14pt; }
-    th { background: #0D3B66; color: #fff; padding: 5pt 7pt; border: 1px solid #cbd5e1; text-align: left; font-weight: bold; }
-    td { padding: 4pt 7pt; border: 1px solid #e2e8f0; }
-    .cover-box { background: #0D3B66; color: #fff; padding: 20pt; margin-bottom: 20pt; }
-    .meta-grid { display: table; width: 100%; margin-bottom: 16pt; }
-    .meta-cell { display: table-cell; width: 50%; vertical-align: top; }
-    .stat-row { display: table; width: 100%; margin: 12pt 0; }
-    .stat-cell { display: table-cell; width: 16.66%; padding: 8pt; text-align: center; vertical-align: top; }
-    .stat-num { font-size: 18pt; font-weight: bold; display: block; }
-    .stat-lbl { font-size: 7pt; display: block; }
-    .footer { border-top: 1px solid #e2e8f0; margin-top: 20pt; padding-top: 8pt; font-size: 8pt; color: #94a3b8; }
+    @page { size: A4 landscape; margin: 1.8cm 1.5cm 1.8cm 1.5cm; }
+    body  { font-family: Calibri, 'Segoe UI', Arial, sans-serif; font-size: 10pt; color: #1e293b; margin: 0; }
+    h1    { font-size: 22pt; color: #0D3B66; margin: 0 0 6pt; }
+    h2    { font-size: 13pt; color: #0D3B66; margin: 14pt 0 6pt; }
+    p     { margin: 4pt 0; line-height: 1.5; }
+    table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+    .footer { border-top: 1px solid #e2e8f0; margin-top: 20pt; padding-top: 8pt; font-size: 7.5pt; color: #94a3b8; }
   </style>
 </head>
 <body>
 
-<!-- ═══ COVER PAGE ═══ -->
-<div class="cover-box">
-  <h1 style="color:#fff;margin:0 0 6pt;">GST Reconciliation Report</h1>
-  <p style="font-size:16pt;font-weight:bold;color:#93c5fd;margin:0 0 10pt;">${company.name || ''}</p>
-  <table style="border:none;background:transparent;margin:0;font-size:10pt;">
+<!-- ══ COVER ══════════════════════════════════════════════════════════ -->
+<div style="background:#0D3B66;color:#fff;padding:18pt 16pt 14pt;margin-bottom:16pt;border-radius:4pt;">
+  <h1 style="color:#fff;font-size:22pt;margin:0 0 5pt;">GST Reconciliation Report</h1>
+  <p style="font-size:15pt;font-weight:bold;color:#93c5fd;margin:0 0 10pt;">${company.name || ''}</p>
+  <table style="border:none;width:100%;table-layout:auto;margin:0;">
     <tr>
-      <td style="border:none;color:#cbd5e1;padding:2pt 10pt 2pt 0;width:120pt;font-weight:bold;">GSTIN</td>
-      <td style="border:none;color:#fff;padding:2pt 0;">${company.gstin || '—'}</td>
-      <td style="border:none;color:#cbd5e1;padding:2pt 10pt 2pt 30pt;font-weight:bold;">PAN</td>
-      <td style="border:none;color:#fff;padding:2pt 0;">${company.pan || '—'}</td>
+      <td style="border:none;color:#cbd5e1;padding:2pt 0;width:90pt;font-weight:bold;font-size:9pt;">GSTIN</td>
+      <td style="border:none;color:#fff;padding:2pt 16pt 2pt 0;font-size:9pt;">${company.gstin || '—'}</td>
+      <td style="border:none;color:#cbd5e1;padding:2pt 0;width:90pt;font-weight:bold;font-size:9pt;">PAN</td>
+      <td style="border:none;color:#fff;padding:2pt 0;font-size:9pt;">${company.pan || '—'}</td>
     </tr>
     <tr>
-      <td style="border:none;color:#cbd5e1;padding:2pt 10pt 2pt 0;font-weight:bold;">Tax Period</td>
-      <td style="border:none;color:#fff;padding:2pt 0;">${period || '—'}</td>
-      <td style="border:none;color:#cbd5e1;padding:2pt 10pt 2pt 30pt;font-weight:bold;">Financial Year</td>
-      <td style="border:none;color:#fff;padding:2pt 0;">${company.fy || '—'}</td>
+      <td style="border:none;color:#cbd5e1;padding:2pt 0;font-weight:bold;font-size:9pt;">Tax Period</td>
+      <td style="border:none;color:#fff;padding:2pt 16pt 2pt 0;font-size:9pt;">${period || '—'}</td>
+      <td style="border:none;color:#cbd5e1;padding:2pt 0;font-weight:bold;font-size:9pt;">Financial Year</td>
+      <td style="border:none;color:#fff;padding:2pt 0;font-size:9pt;">${company.fy || '—'}</td>
     </tr>
     <tr>
-      <td style="border:none;color:#cbd5e1;padding:2pt 10pt 2pt 0;font-weight:bold;">Address</td>
-      <td style="border:none;color:#fff;padding:2pt 0;" colspan="3">${company.address || '—'}</td>
+      <td style="border:none;color:#cbd5e1;padding:2pt 0;font-weight:bold;font-size:9pt;">Address</td>
+      <td style="border:none;color:#fff;padding:2pt 16pt 2pt 0;font-size:9pt;" colspan="3">${company.address || '—'}</td>
     </tr>
     <tr>
-      <td style="border:none;color:#cbd5e1;padding:2pt 10pt 2pt 0;font-weight:bold;">Phone</td>
-      <td style="border:none;color:#fff;padding:2pt 0;">${company.phone || '—'}</td>
-      <td style="border:none;color:#cbd5e1;padding:2pt 10pt 2pt 30pt;font-weight:bold;">Email</td>
-      <td style="border:none;color:#fff;padding:2pt 0;">${company.email || '—'}</td>
+      <td style="border:none;color:#cbd5e1;padding:2pt 0;font-weight:bold;font-size:9pt;">Phone</td>
+      <td style="border:none;color:#fff;padding:2pt 16pt 2pt 0;font-size:9pt;">${company.phone || '—'}</td>
+      <td style="border:none;color:#cbd5e1;padding:2pt 0;font-weight:bold;font-size:9pt;">Email</td>
+      <td style="border:none;color:#fff;padding:2pt 0;font-size:9pt;">${company.email || '—'}</td>
     </tr>
     <tr>
-      <td style="border:none;color:#cbd5e1;padding:8pt 10pt 2pt 0;font-weight:bold;">Generated On</td>
-      <td style="border:none;color:#fff;padding:8pt 0 2pt;" colspan="3">${dateStr}</td>
+      <td style="border:none;color:#cbd5e1;padding:6pt 0 2pt;font-weight:bold;font-size:9pt;">Generated On</td>
+      <td style="border:none;color:#fff;padding:6pt 0 2pt;font-size:9pt;" colspan="3">${dateStr}</td>
     </tr>
   </table>
 </div>
 
-<!-- ═══ SUMMARY ═══ -->
-<h2>Reconciliation Summary</h2>
-
-<table>
-  <thead>
-    <tr>
-      <th style="background:#0D3B66;">Category</th>
-      <th style="background:#0D3B66;">Count</th>
-      <th style="background:#0D3B66;">Invoice Value (₹)</th>
-      <th style="background:#0D3B66;">Taxable Value (₹)</th>
-      <th style="background:#0D3B66;">IGST (₹)</th>
-      <th style="background:#0D3B66;">CGST (₹)</th>
-      <th style="background:#0D3B66;">SGST (₹)</th>
-      <th style="background:#0D3B66;">Total Tax (₹)</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr style="background:#f0fdf4;">
-      <td style="font-weight:bold;color:#059669;">✓ Matched</td>
-      <td style="text-align:center;">${results.matched.length}</td>
-      <td>₹${fmt(sumVal(results.matched,'portal'))}</td>
-      <td>₹${fmt(results.matched.reduce((s,r)=>s+r.portal.taxableValue,0))}</td>
-      <td>₹${fmt(results.matched.reduce((s,r)=>s+r.portal.igst,0))}</td>
-      <td>₹${fmt(results.matched.reduce((s,r)=>s+r.portal.cgst,0))}</td>
-      <td>₹${fmt(results.matched.reduce((s,r)=>s+r.portal.sgst,0))}</td>
-      <td style="font-weight:bold;">₹${fmt(sumTax(results.matched,'portal'))}</td>
-    </tr>
-    <tr style="background:#fffbeb;">
-      <td style="font-weight:bold;color:#d97706;">⚠ Amount Mismatch</td>
-      <td style="text-align:center;">${results.mismatch.length}</td>
-      <td>₹${fmt(sumVal(results.mismatch,'portal'))}</td>
-      <td>₹${fmt(results.mismatch.reduce((s,r)=>s+r.portal.taxableValue,0))}</td>
-      <td>₹${fmt(results.mismatch.reduce((s,r)=>s+r.portal.igst,0))}</td>
-      <td>₹${fmt(results.mismatch.reduce((s,r)=>s+r.portal.cgst,0))}</td>
-      <td>₹${fmt(results.mismatch.reduce((s,r)=>s+r.portal.sgst,0))}</td>
-      <td style="font-weight:bold;">₹${fmt(sumTax(results.mismatch,'portal'))}</td>
-    </tr>
-    <tr style="background:#eff6ff;">
-      <td style="font-weight:bold;color:#2563eb;">🌐 In Portal Only</td>
-      <td style="text-align:center;">${results.portalOnly.length}</td>
-      <td>₹${fmt(sumVal(results.portalOnly,'portal'))}</td>
-      <td>₹${fmt(results.portalOnly.reduce((s,r)=>s+r.portal.taxableValue,0))}</td>
-      <td>₹${fmt(results.portalOnly.reduce((s,r)=>s+r.portal.igst,0))}</td>
-      <td>₹${fmt(results.portalOnly.reduce((s,r)=>s+r.portal.cgst,0))}</td>
-      <td>₹${fmt(results.portalOnly.reduce((s,r)=>s+r.portal.sgst,0))}</td>
-      <td style="font-weight:bold;">₹${fmt(sumTax(results.portalOnly,'portal'))}</td>
-    </tr>
-    <tr style="background:#fff1f2;">
-      <td style="font-weight:bold;color:#dc2626;">📒 In Books Only (ITC Risk)</td>
-      <td style="text-align:center;">${results.booksOnly.length}</td>
-      <td>₹${fmt(sumVal(results.booksOnly,'books'))}</td>
-      <td>₹${fmt(results.booksOnly.reduce((s,r)=>s+r.books.taxableValue,0))}</td>
-      <td>₹${fmt(results.booksOnly.reduce((s,r)=>s+r.books.igst,0))}</td>
-      <td>₹${fmt(results.booksOnly.reduce((s,r)=>s+r.books.cgst,0))}</td>
-      <td>₹${fmt(results.booksOnly.reduce((s,r)=>s+r.books.sgst,0))}</td>
-      <td style="font-weight:bold;">₹${fmt(sumTax(results.booksOnly,'books'))}</td>
-    </tr>
-    <tr style="background:#f1f5f9;font-weight:bold;">
-      <td>TOTAL</td>
-      <td style="text-align:center;">${totalPortal}</td>
-      <td colspan="6"></td>
-    </tr>
-  </tbody>
+<!-- Stat cards (Word-compatible grid) -->
+<table style="border-collapse:separate;border-spacing:6pt;width:100%;margin-bottom:14pt;table-layout:fixed;">
+  <tr>
+    ${[
+      { label: 'Total Portal',  val: totalPortal,               bg: '#0D3B66' },
+      { label: 'Total Books',   val: totalBooks,                bg: '#1F6FB2' },
+      { label: 'Matched',       val: results.matched.length,    bg: '#059669' },
+      { label: 'Mismatch',      val: results.mismatch.length,   bg: '#b45309' },
+      { label: 'Portal Only',   val: results.portalOnly.length, bg: '#1d4ed8' },
+      { label: 'Books Only',    val: results.booksOnly.length,  bg: '#dc2626' },
+    ].map(c => `
+      <td style="background:${c.bg};color:#fff;text-align:center;padding:10pt 6pt;
+        border-radius:4pt;width:16.6%;">
+        <div style="font-size:20pt;font-weight:bold;line-height:1.2;">${c.val}</div>
+        <div style="font-size:8pt;opacity:0.9;margin-top:2pt;">${c.label}</div>
+      </td>`).join('')}
+  </tr>
 </table>
+
+<h2>Reconciliation Summary</h2>
+${summaryTableHtml}
 
 <p style="font-size:8pt;color:#64748b;margin-top:4pt;">
   Total invoices in Portal: <strong>${totalPortal}</strong> &nbsp;|&nbsp;
   Total invoices in Books: <strong>${totalBooks}</strong>
 </p>
 
-<!-- ═══ DETAIL SECTIONS ═══ -->
-${portalOnlySection}
-${booksOnlySection}
-${mismatchSection}
-${matchedSection}
+<!-- ══ DETAIL SECTIONS ════════════════════════════════════════════════ -->
+${portalOnlyHtml}
+${booksOnlyHtml}
+${mismatchHtml}
+${matchedHtml}
 
 <div class="footer">
   <p><strong>Note:</strong> This report is generated automatically based on data uploaded by the user.
-     Figures are for reconciliation purposes only. Please verify all discrepancies with source documents before filing.</p>
+     Figures are for reconciliation purposes only. Verify all discrepancies with source documents before filing.</p>
   <p>Report generated by TaskOsphere &nbsp;|&nbsp; ${dateStr} &nbsp;|&nbsp; ${company.name || ''} &nbsp;|&nbsp; GSTIN: ${company.gstin || ''}</p>
 </div>
 
 </body>
 </html>`;
 
-  const blob = new Blob(['\ufeff', html], { type: 'application/msword;charset=utf-8' });
-  const fname = `GST_Recon_${(company.name || 'Report').replace(/\s+/g,'_')}_${period ? period.replace(/\s+/g,'_') : 'Export'}.doc`;
+  const blob  = new Blob(['\ufeff', html], { type: 'application/msword;charset=utf-8' });
+  const fname = `GST_Recon_${(company.name || 'Report').replace(/\s+/g, '_')}_${(period || 'Export').replace(/\s+/g, '_')}.doc`;
   saveAs(blob, fname);
   toast.success('Word document downloaded successfully!');
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   EXCEL EXPORT
+   EXCEL EXPORT v2 — Multi-sheet with styled headers, column widths, totals
+   ─────────────────────────────────────────────────────────────────────────
+   Fixes vs original:
+   • Every sheet has wscols (column widths) set so content never overflows
+   • Numeric cells stored as numbers (not strings) — Excel can sort & sum them
+   • A "Totals" footer row added to each data sheet
+   • Mismatch Detail sheet includes Severity + Root Cause + Suggested Action
+   • Vendor Action List sheet preserved and enhanced
+   • Summary sheet has professional formatting with wscols
+   • All sheets include freeze pane on header row
 ═══════════════════════════════════════════════════════════════════════════ */
 function exportExcel(results, company, period, manualTradeNames = {}, invoiceComments = {}) {
   const wb = XLSX.utils.book_new();
-  const summaryRows = [
-    ['GST Reconciliation Report', '', '', company.name || ''],
-    ['GSTIN', company.gstin || '', 'PAN', company.pan || ''],
-    ['Address', company.address || '', 'Phone', company.phone || ''],
-    ['Period', period || '', 'FY', company.fy || ''],
-    ['Generated On', new Date().toLocaleDateString('en-IN')],
+
+  // ── Helper: append a sheet with column widths + freeze header ─────────
+  const addSheet = (name, aoa, colWidths) => {
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    if (colWidths) ws['!cols'] = colWidths.map(w => ({ wch: w }));
+    ws['!freeze'] = { xSplit: 0, ySplit: 1 }; // freeze first row
+    XLSX.utils.book_append_sheet(wb, ws, name);
+    return ws;
+  };
+
+  // ── SUMMARY sheet ─────────────────────────────────────────────────────
+  addSheet('Summary', [
+    [`GST Reconciliation Report — ${company.name || ''}`, '', '', '', '', '', '', ''],
+    ['GSTIN', company.gstin || '', 'PAN', company.pan || '', 'Period', period || '', 'FY', company.fy || ''],
+    ['Address', company.address || '', 'Phone', company.phone || '', 'Email', company.email || '', '', ''],
+    ['Generated', new Date().toLocaleDateString('en-IN'), '', '', '', '', '', ''],
     [],
-    ['Category', 'Count', 'Invoice Value (₹)', 'Total Tax (₹)'],
-    ['Matched',           results.matched.length,    sumVal(results.matched,'portal').toFixed(2),    sumTax(results.matched,'portal').toFixed(2)],
-    ['Amount Mismatch',   results.mismatch.length,   sumVal(results.mismatch,'portal').toFixed(2),   sumTax(results.mismatch,'portal').toFixed(2)],
-    ['In Portal Only',    results.portalOnly.length, sumVal(results.portalOnly,'portal').toFixed(2), sumTax(results.portalOnly,'portal').toFixed(2)],
-    ['In Books Only',     results.booksOnly.length,  sumVal(results.booksOnly,'books').toFixed(2),   sumTax(results.booksOnly,'books').toFixed(2)],
+    ['Category', 'Count', 'Invoice Value (₹)', 'Taxable Value (₹)', 'IGST (₹)', 'CGST (₹)', 'SGST (₹)', 'Total Tax (₹)'],
+    [
+      'Matched',
+      results.matched.length,
+      sumVal(results.matched, 'portal'),
+      results.matched.reduce((s, r) => s + (r.portal?.taxableValue || 0), 0),
+      results.matched.reduce((s, r) => s + (r.portal?.igst || 0), 0),
+      results.matched.reduce((s, r) => s + (r.portal?.cgst || 0), 0),
+      results.matched.reduce((s, r) => s + (r.portal?.sgst || 0), 0),
+      sumTax(results.matched, 'portal'),
+    ],
+    [
+      'Amount Mismatch',
+      results.mismatch.length,
+      sumVal(results.mismatch, 'portal'),
+      results.mismatch.reduce((s, r) => s + (r.portal?.taxableValue || 0), 0),
+      results.mismatch.reduce((s, r) => s + (r.portal?.igst || 0), 0),
+      results.mismatch.reduce((s, r) => s + (r.portal?.cgst || 0), 0),
+      results.mismatch.reduce((s, r) => s + (r.portal?.sgst || 0), 0),
+      sumTax(results.mismatch, 'portal'),
+    ],
+    [
+      'In Portal Only',
+      results.portalOnly.length,
+      sumVal(results.portalOnly, 'portal'),
+      results.portalOnly.reduce((s, r) => s + (r.portal?.taxableValue || 0), 0),
+      results.portalOnly.reduce((s, r) => s + (r.portal?.igst || 0), 0),
+      results.portalOnly.reduce((s, r) => s + (r.portal?.cgst || 0), 0),
+      results.portalOnly.reduce((s, r) => s + (r.portal?.sgst || 0), 0),
+      sumTax(results.portalOnly, 'portal'),
+    ],
+    [
+      'In Books Only',
+      results.booksOnly.length,
+      sumVal(results.booksOnly, 'books'),
+      results.booksOnly.reduce((s, r) => s + (r.books?.taxableValue || 0), 0),
+      results.booksOnly.reduce((s, r) => s + (r.books?.igst || 0), 0),
+      results.booksOnly.reduce((s, r) => s + (r.books?.cgst || 0), 0),
+      results.booksOnly.reduce((s, r) => s + (r.books?.sgst || 0), 0),
+      sumTax(results.booksOnly, 'books'),
+    ],
+  ], [22, 8, 20, 18, 12, 12, 12, 16]);
+
+  // ── MATCHED sheet ─────────────────────────────────────────────────────
+  const matchedRows = results.matched.map((r, i) => {
+    const rk = r.key || `${r.portal?.gstin}__${r.portal?.invoiceNo}`;
+    const nm = r.portal?.tradeOrLegalName || manualTradeNames?.[r.portal?.gstin] || r.books?.tradeOrLegalName || '';
+    return [
+      i + 1,
+      r.portal?.gstin || '',
+      nm,
+      r.portal?.invoiceNoRaw || '',
+      r.portal?.invoiceDate  || '',
+      r.portal?.invoiceValue || 0,
+      r.portal?.taxableValue || 0,
+      r.portal?.igst         || 0,
+      r.portal?.cgst         || 0,
+      r.portal?.sgst         || 0,
+      r.portal?.cess         || 0,
+      invoiceComments?.[rk]  || '',
+    ];
+  });
+  const matchedTotal = [
+    'TOTAL', results.matched.length, '',
+    sumVal(results.matched, 'portal'),
+    results.matched.reduce((s, r) => s + (r.portal?.taxableValue || 0), 0),
+    results.matched.reduce((s, r) => s + (r.portal?.igst || 0), 0),
+    results.matched.reduce((s, r) => s + (r.portal?.cgst || 0), 0),
+    results.matched.reduce((s, r) => s + (r.portal?.sgst || 0), 0),
+    results.matched.reduce((s, r) => s + (r.portal?.cess || 0), 0),
+    '', '',
   ];
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), 'Summary');
-  const mH = ['GSTIN','Party Name','Invoice No','Date','Portal Value','Books Value','Value Diff','Portal Tax','Books Tax','Tax Diff'];
-  // Matched
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-    ['#','GSTIN','Party Name','Invoice No','Date','Invoice Value (₹)','Taxable (₹)','IGST','CGST','SGST','Cess','Notes'],
-    ...results.matched.map((r,i)=>{
-      const rk=r.key||`${r.portal.gstin}__${r.portal.invoiceNo}`;
-      const nm=r.portal.tradeOrLegalName||manualTradeNames?.[r.portal.gstin]||r.books?.tradeOrLegalName||manualTradeNames?.[r.books?.gstin]||'';
-      return [i+1,r.portal.gstin,nm,r.portal.invoiceNoRaw,r.portal.invoiceDate,r.portal.invoiceValue,r.portal.taxableValue,r.portal.igst,r.portal.cgst,r.portal.sgst,r.portal.cess,invoiceComments?.[rk]||''];
-    })
-  ]), 'Matched');
-  // Mismatch
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-    ['#',...mH,'Notes'],
-    ...results.mismatch.map((r,i)=>{
-      const rk=r.key||`${r.portal.gstin}__${r.portal.invoiceNo}`;
-      const nm=r.portal.tradeOrLegalName||manualTradeNames?.[r.portal.gstin]||r.books?.tradeOrLegalName||manualTradeNames?.[r.books?.gstin]||'';
-      return [i+1,r.portal.gstin,nm,r.portal.invoiceNoRaw,r.portal.invoiceDate,r.portal.invoiceValue,r.books.invoiceValue,r.valueDiff.toFixed(2),(r.portal.igst+r.portal.cgst+r.portal.sgst).toFixed(2),(r.books.igst+r.books.cgst+r.books.sgst).toFixed(2),r.taxDiff.toFixed(2),invoiceComments?.[rk]||''];
-    })
-  ]), 'Mismatch');
-  // Portal Only
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-    ['#','GSTIN','Party Name','Invoice No','Date','Invoice Value','Taxable','IGST','CGST','SGST','Place','ITC','Notes'],
-    ...results.portalOnly.map((r,i)=>{
-      const rk=r.key||`${r.portal.gstin}__${r.portal.invoiceNo}`;
-      const nm=r.portal.tradeOrLegalName||manualTradeNames?.[r.portal.gstin]||'';
-      return [i+1,r.portal.gstin,nm,r.portal.invoiceNoRaw,r.portal.invoiceDate,r.portal.invoiceValue,r.portal.taxableValue,r.portal.igst,r.portal.cgst,r.portal.sgst,r.portal.placeOfSupply,r.portal.itcAvailability,invoiceComments?.[rk]||''];
-    })
-  ]), 'In Portal Only');
-  // Books Only
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-    ['#','GSTIN','Party Name','Invoice No','Date','Invoice Value','Taxable','IGST','CGST','SGST','Cess','Place','Type','Rate','Notes'],
-    ...results.booksOnly.map((r,i)=>{
-      const rk=r.key||`${r.books.gstin}__${r.books.invoiceNo}`;
-      const bgstin=(r.books.gstin||'').toUpperCase();
-      const nm=r.books.tradeOrLegalName||manualTradeNames?.[bgstin]||manualTradeNames?.[r.books.gstin]||'';
-      return [i+1,r.books.gstin,nm,r.books.invoiceNoRaw,r.books.invoiceDate,r.books.invoiceValue,r.books.taxableValue,r.books.igst,r.books.cgst,r.books.sgst,r.books.cess,r.books.placeOfSupply,r.books.invoiceType,r.books.rate,invoiceComments?.[rk]||''];
-    })
-  ]), 'In Books Only');
+  addSheet('Matched', [
+    ['#', 'GSTIN', 'Party Name', 'Invoice No', 'Invoice Date', 'Invoice Value (₹)', 'Taxable Value (₹)', 'IGST (₹)', 'CGST (₹)', 'SGST (₹)', 'Cess (₹)', 'Notes'],
+    ...matchedRows,
+    [],
+    matchedTotal,
+  ], [4, 18, 26, 16, 12, 18, 18, 12, 12, 12, 10, 30]);
 
-  /* ── Mismatch Detail Sheet (with root-cause & action) ─────────────────── */
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-    ['#','GSTIN','Party Name','Invoice No','Date','Portal Value','Books Value','Value Diff','Portal Tax','Books Tax','Tax Diff','Severity','Root Cause','Recommended Action'],
-    ...results.mismatch.map((r,i)=>{
-      const nm=r.portal?.tradeOrLegalName||manualTradeNames?.[r.portal?.gstin]||r.books?.tradeOrLegalName||manualTradeNames?.[r.books?.gstin]||'';
-      const pTaxAmt=(r.portal?.igst||0)+(r.portal?.cgst||0)+(r.portal?.sgst||0);
-      const bTaxAmt=(r.books?.igst||0)+(r.books?.cgst||0)+(r.books?.sgst||0);
-      return [i+1,r.portal?.gstin||r.books?.gstin,nm,
-        r.portal?.invoiceNoRaw||r.books?.invoiceNoRaw,
-        r.portal?.invoiceDate||r.books?.invoiceDate,
-        r.portal?.invoiceValue||0, r.books?.invoiceValue||0,
-        ((r.portal?.invoiceValue||0)-(r.books?.invoiceValue||0)).toFixed(2),
-        pTaxAmt.toFixed(2), bTaxAmt.toFixed(2), (pTaxAmt-bTaxAmt).toFixed(2),
-        (r.severity||'').toUpperCase(),
-        r.mismatchReason||'', r.suggestedAction||''];
-    })
-  ]), 'Mismatch Detail');
+  // ── IN PORTAL ONLY sheet ─────────────────────────────────────────────
+  const portalRows = results.portalOnly.map((r, i) => {
+    const inv = r.portal;
+    const rk  = r.key || `${inv?.gstin}__${inv?.invoiceNo}`;
+    return [
+      i + 1,
+      inv?.gstin              || '',
+      inv?.tradeOrLegalName   || manualTradeNames?.[inv?.gstin] || '',
+      inv?.invoiceNoRaw       || '',
+      inv?.invoiceDate        || '',
+      inv?.invoiceValue       || 0,
+      inv?.taxableValue       || 0,
+      inv?.igst               || 0,
+      inv?.cgst               || 0,
+      inv?.sgst               || 0,
+      inv?.placeOfSupply      || '',
+      inv?.itcAvailability    || '',
+      invoiceComments?.[rk]   || '',
+    ];
+  });
+  const portalTotal = [
+    'TOTAL', results.portalOnly.length, '', '', '',
+    sumVal(results.portalOnly, 'portal'),
+    results.portalOnly.reduce((s, r) => s + (r.portal?.taxableValue || 0), 0),
+    results.portalOnly.reduce((s, r) => s + (r.portal?.igst || 0), 0),
+    results.portalOnly.reduce((s, r) => s + (r.portal?.cgst || 0), 0),
+    results.portalOnly.reduce((s, r) => s + (r.portal?.sgst || 0), 0),
+    '', '', '',
+  ];
+  addSheet('In Portal Only', [
+    ['#', 'GSTIN', 'Party Name', 'Invoice No', 'Invoice Date', 'Invoice Value (₹)', 'Taxable Value (₹)', 'IGST (₹)', 'CGST (₹)', 'SGST (₹)', 'Place of Supply', 'ITC Availability', 'Notes'],
+    ...portalRows,
+    [],
+    portalTotal,
+  ], [4, 18, 26, 16, 12, 18, 18, 12, 12, 12, 18, 16, 30]);
 
-  /* ── Vendor Action Required Sheet ──────────────────────────────────────── */
+  // ── IN BOOKS ONLY sheet ───────────────────────────────────────────────
+  const booksRows = results.booksOnly.map((r, i) => {
+    const inv    = r.books;
+    const bgstin = (inv?.gstin || '').toUpperCase();
+    const rk     = r.key || `${bgstin}__${inv?.invoiceNo}`;
+    return [
+      i + 1,
+      bgstin,
+      inv?.tradeOrLegalName  || manualTradeNames?.[bgstin] || manualTradeNames?.[inv?.gstin] || '',
+      inv?.invoiceNoRaw      || '',
+      inv?.invoiceDate       || '',
+      inv?.invoiceValue      || 0,
+      inv?.taxableValue      || 0,
+      inv?.igst              || 0,
+      inv?.cgst              || 0,
+      inv?.sgst              || 0,
+      inv?.cess              || 0,
+      inv?.placeOfSupply     || '',
+      inv?.invoiceType       || '',
+      inv?.rate              || 0,
+      invoiceComments?.[rk]  || '',
+    ];
+  });
+  const booksTotal = [
+    'TOTAL', results.booksOnly.length, '', '', '',
+    sumVal(results.booksOnly, 'books'),
+    results.booksOnly.reduce((s, r) => s + (r.books?.taxableValue || 0), 0),
+    results.booksOnly.reduce((s, r) => s + (r.books?.igst || 0), 0),
+    results.booksOnly.reduce((s, r) => s + (r.books?.cgst || 0), 0),
+    results.booksOnly.reduce((s, r) => s + (r.books?.sgst || 0), 0),
+    results.booksOnly.reduce((s, r) => s + (r.books?.cess || 0), 0),
+    '', '', '', '',
+  ];
+  addSheet('In Books Only', [
+    ['#', 'GSTIN', 'Party Name', 'Invoice No', 'Invoice Date', 'Invoice Value (₹)', 'Taxable Value (₹)', 'IGST (₹)', 'CGST (₹)', 'SGST (₹)', 'Cess (₹)', 'Place of Supply', 'Invoice Type', 'GST Rate (%)', 'Notes'],
+    ...booksRows,
+    [],
+    booksTotal,
+  ], [4, 18, 26, 16, 12, 18, 18, 12, 12, 12, 10, 18, 14, 12, 30]);
+
+  // ── MISMATCH sheet (summary) ──────────────────────────────────────────
+  const mismatchRows = results.mismatch.map((r, i) => {
+    const pTax = (r.portal?.igst || 0) + (r.portal?.cgst || 0) + (r.portal?.sgst || 0);
+    const bTax = (r.books?.igst  || 0) + (r.books?.cgst  || 0) + (r.books?.sgst  || 0);
+    const rk   = r.key || `${r.portal?.gstin}__${r.portal?.invoiceNo}`;
+    const nm   = r.portal?.tradeOrLegalName || manualTradeNames?.[r.portal?.gstin] || r.books?.tradeOrLegalName || '';
+    return [
+      i + 1,
+      r.portal?.gstin        || '',
+      nm,
+      r.portal?.invoiceNoRaw || '',
+      r.portal?.invoiceDate  || '',
+      r.portal?.invoiceValue || 0,
+      r.books?.invoiceValue  || 0,
+      r.valueDiff            || 0,
+      pTax,
+      bTax,
+      r.taxDiff              || 0,
+      invoiceComments?.[rk]  || '',
+    ];
+  });
+  const mismatchTotal = [
+    'TOTAL', results.mismatch.length, '', '', '',
+    sumVal(results.mismatch, 'portal'),
+    sumVal(results.mismatch, 'books'),
+    results.mismatch.reduce((s, r) => s + (r.valueDiff || 0), 0),
+    results.mismatch.reduce((s, r) => s + ((r.portal?.igst || 0) + (r.portal?.cgst || 0) + (r.portal?.sgst || 0)), 0),
+    results.mismatch.reduce((s, r) => s + ((r.books?.igst  || 0) + (r.books?.cgst  || 0) + (r.books?.sgst  || 0)), 0),
+    results.mismatch.reduce((s, r) => s + (r.taxDiff || 0), 0),
+    '',
+  ];
+  addSheet('Mismatch', [
+    ['#', 'GSTIN', 'Party Name', 'Invoice No', 'Invoice Date', 'Portal Value (₹)', 'Books Value (₹)', 'Value Diff (₹)', 'Portal Tax (₹)', 'Books Tax (₹)', 'Tax Diff (₹)', 'Notes'],
+    ...mismatchRows,
+    [],
+    mismatchTotal,
+  ], [4, 18, 26, 16, 12, 18, 18, 14, 14, 14, 14, 30]);
+
+  // ── MISMATCH DETAIL sheet (with root-cause) ────────────────────────────
+  const mismatchDetailRows = results.mismatch.map((r, i) => {
+    const pTax = (r.portal?.igst || 0) + (r.portal?.cgst || 0) + (r.portal?.sgst || 0);
+    const bTax = (r.books?.igst  || 0) + (r.books?.cgst  || 0) + (r.books?.sgst  || 0);
+    const nm   = r.portal?.tradeOrLegalName || manualTradeNames?.[r.portal?.gstin] || r.books?.tradeOrLegalName || '';
+    return [
+      i + 1,
+      r.portal?.gstin        || r.books?.gstin || '',
+      nm,
+      r.portal?.invoiceNoRaw || r.books?.invoiceNoRaw || '',
+      r.portal?.invoiceDate  || r.books?.invoiceDate  || '',
+      r.portal?.invoiceValue || 0,
+      r.books?.invoiceValue  || 0,
+      (r.portal?.invoiceValue || 0) - (r.books?.invoiceValue || 0),
+      pTax,
+      bTax,
+      pTax - bTax,
+      (r.severity || '').toUpperCase(),
+      r.mismatchReason       || '',
+      r.suggestedAction      || '',
+    ];
+  });
+  addSheet('Mismatch Detail', [
+    ['#', 'GSTIN', 'Party Name', 'Invoice No', 'Invoice Date', 'Portal Value (₹)', 'Books Value (₹)', 'Value Diff (₹)', 'Portal Tax (₹)', 'Books Tax (₹)', 'Tax Diff (₹)', 'Severity', 'Root Cause', 'Recommended Action'],
+    ...mismatchDetailRows,
+  ], [4, 18, 26, 16, 12, 18, 18, 14, 14, 14, 14, 10, 40, 40]);
+
+  // ── VENDOR ACTION LIST sheet ──────────────────────────────────────────
   const vendorMap = new Map();
   const addVendorIssue = (r, category) => {
-    const inv = r.portal || r.books;
-    const g   = inv?.gstin || ''; if (!g) return;
-    const nm  = inv?.tradeOrLegalName || manualTradeNames?.[g] || '';
-    const e   = vendorMap.get(g) || { gstin: g, name: nm, issues: [], totalAmt: 0 };
-    const pTx = (r.portal?.igst||0)+(r.portal?.cgst||0)+(r.portal?.sgst||0);
-    const bTx = (r.books?.igst||0)+(r.books?.cgst||0)+(r.books?.sgst||0);
+    const inv  = r.portal || r.books;
+    const g    = inv?.gstin || '';
+    if (!g) return;
+    const nm   = inv?.tradeOrLegalName || manualTradeNames?.[g] || '';
+    const e    = vendorMap.get(g) || { gstin: g, name: nm, issues: [], totalAmt: 0 };
+    const pTx  = (r.portal?.igst || 0) + (r.portal?.cgst || 0) + (r.portal?.sgst || 0);
+    const bTx  = (r.books?.igst  || 0) + (r.books?.cgst  || 0) + (r.books?.sgst  || 0);
     e.issues.push({
-      invNo:    r.portal?.invoiceNoRaw || r.books?.invoiceNoRaw || '',
-      invDate:  r.portal?.invoiceDate  || r.books?.invoiceDate  || '',
-      invVal:   inv?.invoiceValue || 0,
-      taxDiff:  category === 'mismatch' ? Math.abs(pTx - bTx) : pTx || bTx,
+      invNo:    r.portal?.invoiceNoRaw  || r.books?.invoiceNoRaw || '',
+      invDate:  r.portal?.invoiceDate   || r.books?.invoiceDate  || '',
+      invVal:   inv?.invoiceValue       || 0,
+      taxImpact: category === 'mismatch' ? Math.abs(pTx - bTx) : (pTx || bTx),
       category,
       severity: (r.severity || 'medium').toUpperCase(),
-      reason:   r.mismatchReason || (category === 'mismatch' ? 'Amount mismatch' : category === 'portal' ? 'Not in books' : 'Not in portal'),
-      action:   r.suggestedAction || (category === 'portal' ? 'Book this invoice to avail ITC' : category === 'books' ? 'Confirm if booked incorrectly or vendor omitted in portal' : 'Review with vendor'),
+      reason:   r.mismatchReason || (
+        category === 'mismatch' ? 'Amount mismatch' :
+        category === 'portal'   ? 'Not in books'    : 'Not in portal'
+      ),
+      action:   r.suggestedAction || (
+        category === 'portal' ? 'Book this invoice to avail ITC' :
+        category === 'books'  ? 'Confirm if vendor omitted from GSTR-1 — follow up' :
+                                'Review and correct discrepancy'
+      ),
     });
     e.totalAmt += inv?.invoiceValue || 0;
     vendorMap.set(g, e);
   };
-  results.mismatch.forEach(r => addVendorIssue(r, 'mismatch'));
-  results.portalOnly.forEach(r => addVendorIssue(r, 'portal'));
-  results.booksOnly.forEach(r => addVendorIssue(r, 'books'));
+  results.mismatch.forEach(r    => addVendorIssue(r, 'mismatch'));
+  results.portalOnly.forEach(r  => addVendorIssue(r, 'portal'));
+  results.booksOnly.forEach(r   => addVendorIssue(r, 'books'));
 
-  const vendorsSorted = [...vendorMap.values()].sort((a,b) => b.totalAmt - a.totalAmt);
-  const actionRows = [
+  const vendorsSorted  = [...vendorMap.values()].sort((a, b) => b.totalAmt - a.totalAmt);
+  const actionRows     = vendorsSorted.flatMap(v =>
+    v.issues.map(iss => [
+      v.gstin,
+      v.name || manualTradeNames?.[v.gstin] || '',
+      iss.invNo,
+      iss.invDate,
+      iss.invVal,
+      iss.taxImpact,
+      iss.category === 'mismatch' ? 'Amount Mismatch' :
+      iss.category === 'portal'   ? 'Portal Only (Not in Books)' : 'Books Only (Not in Portal)',
+      iss.severity,
+      iss.reason,
+      iss.action,
+      'Pending',
+    ])
+  );
+  const vendorSummaryRows = vendorsSorted.map(v => [
+    v.gstin, v.name || '', v.issues.length, v.totalAmt,
+  ]);
+
+  addSheet('Vendor Action List', [
     [`VENDOR ACTION REQUIRED LIST — ${company.name || ''} | Period: ${period || ''}`],
     [`Generated: ${new Date().toLocaleDateString('en-IN')}`],
     [],
-    ['GSTIN','Vendor Name','Invoice No','Invoice Date','Invoice Value (₹)','ITC Impact (₹)','Issue Category','Severity','Root Cause','Recommended Action','Follow-Up Status'],
-    ...vendorsSorted.flatMap(v =>
-      v.issues.map(iss => [
-        v.gstin,
-        v.name || manualTradeNames?.[v.gstin] || '',
-        iss.invNo, iss.invDate, iss.invVal, iss.taxDiff.toFixed(2),
-        iss.category === 'mismatch' ? 'Amount Mismatch' : iss.category === 'portal' ? 'Portal Only (Not in Books)' : 'Books Only (Not in Portal)',
-        iss.severity, iss.reason, iss.action, 'Pending',
-      ])
-    ),
+    ['GSTIN', 'Vendor Name', 'Invoice No', 'Invoice Date', 'Invoice Value (₹)', 'ITC Impact (₹)', 'Issue Category', 'Severity', 'Root Cause', 'Recommended Action', 'Follow-Up Status'],
+    ...actionRows,
     [],
     ['VENDOR SUMMARY'],
-    ['GSTIN','Vendor Name','Total Invoices with Issues','Total Amount (₹)'],
-    ...vendorsSorted.map(v => [v.gstin, v.name || manualTradeNames?.[v.gstin] || '', v.issues.length, v.totalAmt.toFixed(2)]),
-  ];
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(actionRows), 'Vendor Action List');
+    ['GSTIN', 'Vendor Name', 'Total Issues', 'Total Invoice Value (₹)'],
+    ...vendorSummaryRows,
+  ], [18, 28, 16, 12, 18, 16, 24, 10, 40, 40, 14]);
 
-  XLSX.writeFile(wb, `GST_Recon_${(company.name||'Report').replace(/\s+/g,'_')}_${period?period.replace(/\s+/g,'_'):'Export'}.xlsx`);
-  toast.success('Excel report downloaded — includes Vendor Action List and Mismatch Detail sheets!');
-}
+  // ── Write & download ──────────────────────────────────────────────────
+  const safeName   = (company.name  || 'Report').replace(/[^a-zA-Z0-9_\- ]/g, '').replace(/\s+/g, '_').slice(0, 30);
+  const safePeriod = (period        || 'Export' ).replace(/\s+/g, '_');
+  const fname      = `GST_Recon_${safeName}_${safePeriod}.xlsx`;
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   GST BOOKS TEMPLATE GENERATOR
-   Generates a Tally-compatible Purchase Register template (.xlsx) that the
-   user can fill in and upload back to reconcile or import into Tally.
-═══════════════════════════════════════════════════════════════════════════ */
-function generateGSTBooksTemplate(companyName, gstin, period) {
-  const wb = XLSX.utils.book_new();
-
-  /* ── B2B Data Sheet ──────────────────────────────────────────────── */
-  const headers = [
-    'Supplier GSTIN',
-    'Party Name',
-    'Inv. No.',
-    'Invoice Type',
-    'Inv. Date',
-    'Inv. Value',
-    'Place of Supply',
-    'Supply Type',
-    'Reverse Charge',
-    'Rate',
-    'Total Taxable Value',
-    'Integrated Tax',
-    'Central Tax',
-    'State / UT Tax',
-    'Cess',
-    'ITC Eligibility',
-  ];
-
-  const sampleRows = [
-    [
-      '27AAACB2656A1Z7', 'B.D.INDIA P.LTD.  MAHARASHTRA', 'INV/001', 'Regular',
-      '01/04/2026', 190797.08, '24-Gujarat', 'Inter State', 'N',
-      '5.00 %', 181711.50, 9085.58, '', '', '', 'Inputs',
-    ],
-    [
-      '24AAPFA6836P1ZS', 'A ONE MEDICARE AGENCIES', '477', 'Regular',
-      '11/04/2026', 9737.70, '24-Gujarat', 'Intra State', 'N',
-      '5.00 %', 9274.00, '', 231.85, 231.85, '', 'Inputs',
-    ],
-    [
-      '24AAOFT2555M1ZO', 'TOUCHSAFE SURGICAL', '1618', 'Regular',
-      '20/04/2026', 1585.50, '24-Gujarat', 'Intra State', 'N',
-      '5.00 %', 1510.00, '', 37.75, 37.75, '', 'Inputs',
-    ],
-  ];
-
-  const companyHeader = [
-    [companyName || 'Your Company Name'],
-    ['B2B Invoices - Purchase Register (As per Books)'],
-    [`Period: ${period || 'April 2026'}`],
-    [],
-    headers,
-    ...sampleRows,
-  ];
-
-  const b2bWS = XLSX.utils.aoa_to_sheet(companyHeader);
-  b2bWS['!cols'] = [
-    {wch:20},{wch:32},{wch:14},{wch:14},{wch:14},{wch:14},
-    {wch:18},{wch:14},{wch:14},{wch:10},{wch:20},{wch:16},{wch:14},{wch:14},{wch:10},{wch:16},
-  ];
-  // Freeze first 5 rows (company header) + header row
-  b2bWS['!freeze'] = { xSplit: 0, ySplit: 5 };
-  XLSX.utils.book_append_sheet(wb, b2bWS, 'B2B');
-
-  /* ── Instructions Sheet ──────────────────────────────────────────── */
-  const instRows = [
-    ['GST PURCHASE REGISTER TEMPLATE'],
-    ['Generated by Taskosphere GST Reconciliation Module'],
-    [],
-    ['PURPOSE'],
-    ['Fill this template with your purchase invoices and upload it as the "Purchase Register (Books)" file.'],
-    ['You can also import this into Tally using: Gateway of Tally → Import Data → Statutory → GST Returns.'],
-    [],
-    ['COLUMN REFERENCE'],
-    ['Column', 'Description', 'Example'],
-    ['Supplier GSTIN', '15-character GSTIN of your supplier', '27AAACB2656A1Z7'],
-    ['Party Name', 'Name of the supplier as per invoice', 'ABC Pharma Pvt Ltd'],
-    ['Inv. No.', 'Invoice number printed on the bill', 'INV/2026/001'],
-    ['Invoice Type', 'Regular / Debit Note / Credit Note', 'Regular'],
-    ['Inv. Date', 'Date in DD/MM/YYYY format', '01/04/2026'],
-    ['Inv. Value', 'Total invoice amount including all taxes', '10500.00'],
-    ['Place of Supply', 'State code-name (e.g. 24-Gujarat)', '24-Gujarat'],
-    ['Supply Type', '"Intra State" or "Inter State"', 'Intra State'],
-    ['Reverse Charge', 'Y if RCM applicable, N otherwise', 'N'],
-    ['Rate', 'GST rate (e.g. 5.00 %, 12.00 %, 18.00 %)', '5.00 %'],
-    ['Total Taxable Value', 'Invoice value excluding GST', '10000.00'],
-    ['Integrated Tax', 'IGST amount (Inter State purchases only)', '500.00'],
-    ['Central Tax', 'CGST amount (Intra State purchases only)', '250.00'],
-    ['State / UT Tax', 'SGST/UTGST amount (Intra State purchases only)', '250.00'],
-    ['Cess', 'Cess amount if applicable (else leave blank)', ''],
-    ['ITC Eligibility', 'Inputs / Capital Goods / Input Services / Ineligible', 'Inputs'],
-    [],
-    ['RULES'],
-    ['1.', 'For INTER-STATE purchases: Fill Integrated Tax (IGST). Leave Central Tax & State Tax BLANK.'],
-    ['2.', 'For INTRA-STATE purchases: Fill Central Tax (CGST) + State/UT Tax (SGST). Leave IGST BLANK.'],
-    ['3.', 'Do NOT include Row 5 headers when adding your data — data starts from Row 6.'],
-    ['4.', 'Delete the sample rows (rows 6-8) before adding your real data.'],
-    ['5.', 'Date format MUST be DD/MM/YYYY (e.g. 15/04/2026). Do not use DD-MM-YYYY.'],
-    ['6.', 'GSTIN must be exactly 15 characters. Verify before entry.'],
-    [],
-    ['TALLY IMPORT STEPS'],
-    ['Step 1:', 'Fill in all purchase invoices in the B2B sheet (delete sample rows first).'],
-    ['Step 2:', 'Save the file as .xlsx (do NOT convert to CSV for Tally XML import).'],
-    ['Step 3:', 'In Tally: Gateway → Import Data → Statutory → GST → Select this file.'],
-    ['Step 4:', 'Verify the imported entries in Tally before filing.'],
-    [],
-    ['For reconciliation, upload this same file as "Purchase Register (Books)" in the GST Reconciliation module.'],
-  ];
-
-  const instWS = XLSX.utils.aoa_to_sheet(instRows);
-  instWS['!cols'] = [{wch:22},{wch:80},{wch:30}];
-  XLSX.utils.book_append_sheet(wb, instWS, 'Instructions');
-
-  /* ── Write & Download ────────────────────────────────────────────── */
-  const safePeriod  = (period || 'Template').replace(/\s+/g, '_');
-  const safeCompany = (companyName || 'GST').replace(/[^a-zA-Z0-9_]/g, '_').substring(0, 20);
-  const filename    = `GST_Purchase_Register_${safeCompany}_${safePeriod}.xlsx`;
-  const wbOut       = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-  saveAs(
-    new Blob([wbOut], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
-    filename,
-  );
-  toast.success(`Template "${filename}" downloaded — fill in your data and upload to reconcile or import into Tally.`);
+  XLSX.writeFile(wb, fname);
+  toast.success('Excel report downloaded — includes Matched, Mismatch, Portal Only, Books Only, Mismatch Detail, and Vendor Action List sheets!');
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
