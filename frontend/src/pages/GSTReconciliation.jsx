@@ -1615,9 +1615,9 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
   const BASE = {
     styles: {
       font: 'helvetica',
-      fontSize: 7.5,
+      fontSize: 7,
       overflow: 'linebreak',   // cells grow vertically; text never clips
-      cellPadding: { top: 2, bottom: 2, left: 2.5, right: 2.5 },
+      cellPadding: { top: 1.8, bottom: 1.8, left: 2, right: 2 },
       lineColor: [210, 220, 232],
       lineWidth: 0.22,
       valign: 'middle',
@@ -1880,7 +1880,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
 
   /* ─────────────────────────────────────────────────────────────────────
      PAGE 4 — AMOUNT MISMATCH
-     Col widths: 8+32+32+22+18+22+22+18+18+18+18+49 = 277 ✓
+     Col widths: 8+26+28+20+16+20+20+16+16+16+16+75 = 277 ✓
   ───────────────────────────────────────────────────────────────────── */
   if (results.mismatch.length > 0) {
     doc.addPage('landscape');
@@ -1922,17 +1922,17 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
       headStyles: { ...BASE.headStyles, fillColor: AMBER },
       columnStyles: {
         0:  { cellWidth:  8, halign: 'center' },
-        1:  { cellWidth: 32, halign: 'left'   },
-        2:  { cellWidth: 32, halign: 'left'   },
-        3:  { cellWidth: 22, halign: 'left'   },
-        4:  { cellWidth: 18, halign: 'center' },
-        5:  { cellWidth: 22, halign: 'right'  },
-        6:  { cellWidth: 22, halign: 'right'  },
-        7:  { cellWidth: 18, halign: 'right'  },
-        8:  { cellWidth: 18, halign: 'right'  },
-        9:  { cellWidth: 18, halign: 'right'  },
-        10: { cellWidth: 18, halign: 'right'  },
-        11: { cellWidth: 49, halign: 'left'   }, // wraps freely
+        1:  { cellWidth: 26, halign: 'left'   },
+        2:  { cellWidth: 28, halign: 'left'   },
+        3:  { cellWidth: 20, halign: 'left'   },
+        4:  { cellWidth: 16, halign: 'center' },
+        5:  { cellWidth: 20, halign: 'right'  },
+        6:  { cellWidth: 20, halign: 'right'  },
+        7:  { cellWidth: 16, halign: 'right'  },
+        8:  { cellWidth: 16, halign: 'right'  },
+        9:  { cellWidth: 16, halign: 'right'  },
+        10: { cellWidth: 16, halign: 'right'  },
+        11: { cellWidth: 75, halign: 'left', fontSize: 7, overflow: 'linebreak' },
       },
       didParseCell(data) {
         if (data.section !== 'body') return;
@@ -2997,7 +2997,7 @@ const CommentCell = React.memo(({ rowKey, comments, onSave }) => {
   );
 });
 
-const GSTIN_CELL_CLASS = 'min-w-[140px] whitespace-nowrap overflow-hidden text-ellipsis font-mono text-[11px]';
+const GSTIN_CELL_CLASS = 'max-w-[120px] whitespace-nowrap overflow-hidden text-ellipsis font-mono text-[10px]';
 
 const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames, onSaveTradeName, comments, onSaveComment, onRowClick }) => {
   const [search, setSearch] = useState('');
@@ -3059,8 +3059,25 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400"/>
         <input value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}} placeholder="Search GSTIN, Invoice No, Party Name…" className="w-full pl-9 pr-4 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"/>
       </div>
-      <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
-        <table className="w-full text-xs min-w-[860px]">
+      <div className={`rounded-xl border border-slate-200 dark:border-slate-700 ${tabId==='mismatch'?'overflow-x-hidden':'overflow-x-auto'}`}>
+        <table className={`w-full ${tabId==='mismatch'?'text-[10px]':'text-xs min-w-[860px]'}`} style={tabId==='mismatch'?{tableLayout:'fixed'}:{}}>
+          {tabId === 'mismatch' && (
+            <colgroup>
+              <col style={{width:'3%'}}/>
+              <col style={{width:'9%'}}/>
+              <col style={{width:'10%'}}/>
+              <col style={{width:'8%'}}/>
+              <col style={{width:'6%'}}/>
+              <col style={{width:'7%'}}/>
+              <col style={{width:'7%'}}/>
+              <col style={{width:'5%'}}/>
+              <col style={{width:'5%'}}/>
+              <col style={{width:'5%'}}/>
+              <col style={{width:'5%'}}/>
+              <col style={{width:'17%'}}/>
+              <col style={{width:'8%'}}/>
+            </colgroup>
+          )}
           <thead>
             <tr className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700">
               <th className="px-3 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap w-8">#</th>
@@ -3075,13 +3092,13 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames
               <th className="px-3 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Invoice No</th>
               <th className="px-3 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Date</th>
               {tabId === 'mismatch' ? <>
-                <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Portal ₹</th>
-                <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Books ₹</th>
-                <th className="px-3 py-2.5 text-right font-semibold text-amber-600 whitespace-nowrap">Diff ₹</th>
-                <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">P.Tax</th>
-                <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">B.Tax</th>
-                <th className="px-3 py-2.5 text-right font-semibold text-amber-600 whitespace-nowrap">Tax Diff</th>
-                <th className="px-3 py-2.5 text-left font-semibold text-amber-600 whitespace-nowrap">Fields</th>
+                <th className="px-2 py-2 text-right font-semibold text-slate-600 dark:text-slate-300">Portal ₹</th>
+                <th className="px-2 py-2 text-right font-semibold text-slate-600 dark:text-slate-300">Books ₹</th>
+                <th className="px-2 py-2 text-right font-semibold text-amber-600">Diff ₹</th>
+                <th className="px-2 py-2 text-right font-semibold text-slate-600 dark:text-slate-300">P.Tax</th>
+                <th className="px-2 py-2 text-right font-semibold text-slate-600 dark:text-slate-300">B.Tax</th>
+                <th className="px-2 py-2 text-right font-semibold text-amber-600">Tax Δ</th>
+                <th className="px-2 py-2 text-left font-semibold text-amber-600">Fields</th>
               </> : <>
                 <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Value</th>
                 <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Taxable</th>
@@ -3091,7 +3108,7 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames
                 {tabId === 'portalOnly' && <th className="px-3 py-2.5 text-center font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap min-w-[64px]">ITC</th>}
               </>}
               {(tabId === 'mismatch' || tabId === 'portalOnly' || tabId === 'booksOnly') && (
-                <th className="px-3 py-2.5 text-center font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">Status</th>
+                <th className={`${tabId==='mismatch'?'px-2 py-2':'px-3 py-2.5'} text-center font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap`}>Status</th>
               )}
               {onDelete && <th className="px-3 py-2.5 text-center font-semibold text-slate-400 whitespace-nowrap">Del</th>}
               {onSaveComment && <th className="px-3 py-2.5 text-center font-semibold text-amber-500 whitespace-nowrap w-8" title="Add comment to this invoice"><MessageSquare className="h-3 w-3 inline"/></th>}
@@ -3106,8 +3123,8 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames
                 <tr key={r.key||idx}
                   onClick={() => onRowClick && onRowClick(r)}
                   className={`border-b border-slate-100 dark:border-slate-700/50 ${onRowClick ? 'cursor-pointer' : ''} ${isPrefixRow ? 'bg-yellow-50 dark:bg-yellow-900/20 hover:bg-yellow-100 dark:hover:bg-yellow-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'}`}>
-                  <td className="px-3 py-2 text-slate-400">{n}</td>
-                  <td className={`px-3 py-2 ${GSTIN_CELL_CLASS} text-slate-600 dark:text-slate-300`}>{inv?.gstin}</td>
+                  <td className={`${tabId==='mismatch'?'px-2 py-1.5':'px-3 py-2'} text-slate-400`}>{n}</td>
+                  <td className={`${tabId==='mismatch'?'px-2 py-1.5':'px-3 py-2'} ${GSTIN_CELL_CLASS} text-slate-600 dark:text-slate-300`}>{inv?.gstin}</td>
                   {tabId === 'booksOnly'
                     ? <td className="px-3 py-2 min-w-[160px]">
                         <TradeNameCell
@@ -3116,7 +3133,7 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames
                           onSave={onSaveTradeName}
                         />
                       </td>
-                    : <td className="px-3 py-2 text-slate-700 dark:text-slate-200 max-w-[140px] truncate" title={inv?.tradeOrLegalName || manualTradeNames?.[inv?.gstin] || ''}>
+                    : <td className={`${tabId==='mismatch'?'px-2 py-1.5 max-w-[90px]':"px-3 py-2 max-w-[140px]"} text-slate-700 dark:text-slate-200 truncate`} title={inv?.tradeOrLegalName || manualTradeNames?.[inv?.gstin] || ''}>
                         {inv?.tradeOrLegalName || manualTradeNames?.[inv?.gstin] || '—'}
                       </td>
                   }
@@ -3145,21 +3162,21 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames
                       </span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{inv?.invoiceDate}</td>
+                  <td className={`${tabId==='mismatch'?'px-2 py-1.5':'px-3 py-2'} text-slate-500 whitespace-nowrap`}>{inv?.invoiceDate}</td>
                   {tabId === 'mismatch' ? <>
-                    <td className="px-3 py-2 text-right text-slate-700 dark:text-slate-200 whitespace-nowrap">
+                    <td className="px-2 py-1.5 text-right text-slate-700 dark:text-slate-200 whitespace-nowrap">
                       ₹{fmt(r.portal.invoiceValue)}
                       {r.isCreditNote && <span className="ml-1 px-1 py-0.5 rounded text-[8px] font-bold bg-slate-100 text-slate-500 dark:bg-slate-700">CN</span>}
                     </td>
-                    <td className="px-3 py-2 text-right text-slate-700 dark:text-slate-200 whitespace-nowrap">₹{fmt(r.books.invoiceValue)}</td>
-                    <td className={`px-3 py-2 text-right font-bold whitespace-nowrap ${r.valueDiff>0?'text-blue-600':'text-rose-600'}`}>{r.valueDiff>0?'+':''}{fmt(r.valueDiff)}</td>
-                    <td className="px-3 py-2 text-right text-slate-500 whitespace-nowrap">₹{fmt(r.portal.igst+r.portal.cgst+r.portal.sgst)}</td>
-                    <td className="px-3 py-2 text-right text-slate-500 whitespace-nowrap">₹{fmt(r.books.igst+r.books.cgst+r.books.sgst)}</td>
-                    <td className={`px-3 py-2 text-right font-bold whitespace-nowrap ${r.taxDiff>0?'text-blue-600':'text-rose-600'}`}>{r.taxDiff>0?'+':''}{fmt(r.taxDiff)}</td>
-                    <td className="px-3 py-2 min-w-[200px] max-w-[260px]">
+                    <td className="px-2 py-1.5 text-right text-slate-700 dark:text-slate-200 whitespace-nowrap">₹{fmt(r.books.invoiceValue)}</td>
+                    <td className={`px-2 py-1.5 text-right font-bold whitespace-nowrap ${r.valueDiff>0?'text-blue-600':'text-rose-600'}`}>{r.valueDiff>0?'+':''}{fmt(r.valueDiff)}</td>
+                    <td className="px-2 py-1.5 text-right text-slate-500 whitespace-nowrap">₹{fmt(r.portal.igst+r.portal.cgst+r.portal.sgst)}</td>
+                    <td className="px-2 py-1.5 text-right text-slate-500 whitespace-nowrap">₹{fmt(r.books.igst+r.books.cgst+r.books.sgst)}</td>
+                    <td className={`px-2 py-1.5 text-right font-bold whitespace-nowrap ${r.taxDiff>0?'text-blue-600':'text-rose-600'}`}>{r.taxDiff>0?'+':''}{fmt(r.taxDiff)}</td>
+                    <td className="px-2 py-1.5 min-w-0 max-w-[200px]">
                       {/* Severity badge */}
                       {r.severity && (
-                        <span className={`inline-block mb-1 px-1.5 py-0.5 rounded text-[9px] font-bold whitespace-nowrap mr-1
+                        <span className={`inline-block mb-0.5 px-1 py-0.5 rounded text-[8px] font-bold whitespace-nowrap mr-0.5
                           ${r.severity==='high'   ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'
                           : r.severity==='medium' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
                           :                         'bg-slate-100 text-slate-500 dark:bg-slate-700'}`}>
@@ -3169,21 +3186,21 @@ const ResultTable = ({ tabId, records, onDelete, onMarkMatched, manualTradeNames
                       {/* Mismatch field tags */}
                       <div className="flex flex-wrap gap-0.5 mb-0.5">
                         {(r.mismatchFields||[]).map(f => (
-                          <span key={f} className="inline-block px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 whitespace-nowrap">{f}</span>
+                          <span key={f} className="inline-block px-1 py-px rounded text-[8px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 whitespace-nowrap">{f}</span>
                         ))}
                         {r.rcMismatch && (
-                          <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300 whitespace-nowrap">RCM flag</span>
+                          <span className="inline-block px-1 py-px rounded text-[8px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300 whitespace-nowrap">RCM flag</span>
                         )}
                         {r.valueGstinMatch && (
-                          <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 whitespace-nowrap">Value-matched</span>
+                          <span className="inline-block px-1 py-px rounded text-[8px] font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 whitespace-nowrap">Val-match</span>
                         )}
                       </div>
                       {/* Human-readable reason */}
                       {r.mismatchReason && (
-                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug break-words">{r.mismatchReason}</p>
+                        <p className="text-[9px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug break-words">{r.mismatchReason}</p>
                       )}
                       {r.suggestedAction && (
-                        <p className="text-[10px] text-indigo-600 dark:text-indigo-400 mt-0.5 leading-snug italic break-words">→ {r.suggestedAction}</p>
+                        <p className="text-[9px] text-indigo-600 dark:text-indigo-400 mt-0.5 leading-snug italic break-words">→ {r.suggestedAction}</p>
                       )}
                     </td>
                   </> : <>
