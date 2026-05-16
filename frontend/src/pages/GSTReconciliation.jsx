@@ -122,13 +122,22 @@ function fmtDate(val) {
     } catch (_) {}
   }
   const s = String(val).trim();
-  // "7-Apr-26" / "07-Apr-2026" / "7 Apr 26" style (books often record this way)
-  const ma = s.match(/^(\d{1,2})[-\s]([A-Za-z]{3})[-\s](\d{2,4})$/);
+  // Day-MonthWord-Year in any separator: "7-Apr-26" "07/Apr/2026" "7 Apr 26" "10.Apr.2026"
+  const ma = s.match(/^(\d{1,2})[-\/\s.]([A-Za-z]{3,9})[-\/\s.](\d{2,4})$/);
   if (ma) {
-    const mo = MONTH_ABBR[ma[2].toLowerCase()];
+    const mo = MONTH_ABBR[ma[2].slice(0,3).toLowerCase()];
     if (mo) {
-      const y = ma[3].length === 2 ? `20${ma[3]}` : ma[3];
+      const y = ma[3].length <= 2 ? `20${ma[3]}` : ma[3];
       return `${ma[1].padStart(2,'0')}/${mo}/${y}`;
+    }
+  }
+  // MonthWord-Day-Year: "Apr-10-26" "April 10 2026"
+  const mb = s.match(/^([A-Za-z]{3,9})[-\/\s.](\d{1,2})[-\/\s.](\d{2,4})$/);
+  if (mb) {
+    const mo = MONTH_ABBR[mb[1].slice(0,3).toLowerCase()];
+    if (mo) {
+      const y = mb[3].length <= 2 ? `20${mb[3]}` : mb[3];
+      return `${mb[2].padStart(2,'0')}/${mo}/${y}`;
     }
   }
   // Normalise YYYY-MM-DD → DD/MM/YYYY
@@ -836,38 +845,79 @@ function extractPortalMetadata(workbook) {
 ═══════════════════════════════════════════════════════════════════════════ */
 const TOLERANCE = 1.01;   // absolute floor ₹
 
-/** Convert various date string formats to ISO "YYYY-MM-DD" for reliable comparison */
+/** Universal date normaliser — converts ANY date format → ISO "YYYY-MM-DD" for comparison.
+ *  Handles: DD/MM/YYYY, DD-MM-YYYY, DD-Mon-YY, DD-Mon-YYYY, DD/Mon/YYYY, DD Mon YY,
+ *           Mon-DD-YY, Mon DD YYYY, YYYY-MM-DD, YYYY-Mon-DD, Excel serial, MM/DD/YYYY, etc.
+ */
 function normaliseDateStr(raw) {
   if (!raw) return '';
   const s = String(raw).trim();
   if (!s || s === '0' || s === 'undefined') return '';
   // Already ISO
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  // "7-Apr-26" / "07-Apr-2026" / "7 Apr 26" — books often record month as abbreviation
-  const ma = s.match(/^(\d{1,2})[-\s]([A-Za-z]{3})[-\s](\d{2,4})$/);
-  if (ma) {
-    const MMAP = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
-    const mo = MMAP[ma[2].toLowerCase()];
+
+  const MMAP = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12,
+    january:1,february:2,march:3,april:4,june:6,july:7,august:8,september:9,october:10,november:11,december:12};
+  const SEP = '[-\\/\\s.]'; // any separator: - / space .
+
+  // DD-Mon-YY / DD-Mon-YYYY / DD/Mon/YY / DD.Mon.2026 / "7 Apr 26" etc. (day first, word month)
+  const re1 = new RegExp(`^(\\d{1,2})${SEP}([A-Za-z]{3,9})${SEP}(\\d{2,4})$`);
+  const m1 = s.match(re1);
+  if (m1) {
+    const mo = MMAP[m1[2].slice(0,3).toLowerCase()];
     if (mo) {
-      const y = ma[3].length === 2 ? `20${ma[3]}` : ma[3];
-      return `${y}-${String(mo).padStart(2,'0')}-${ma[1].padStart(2,'0')}`;
+      const y = m1[3].length <= 2 ? `20${m1[3]}` : m1[3];
+      return `${y}-${String(mo).padStart(2,'0')}-${m1[1].padStart(2,'0')}`;
     }
   }
-  // DD/MM/YYYY or DD-MM-YYYY (Indian standard)
-  const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-  if (dmy) {
-    const d = dmy[1].padStart(2,'0'), m = dmy[2].padStart(2,'0'), y = dmy[3];
-    // Heuristic: if first part > 12, it must be day
-    if (parseInt(dmy[1], 10) > 12) return `${y}-${m}-${d}`;
-    // If second part > 12, it must be day → MM/DD/YYYY
-    if (parseInt(dmy[2], 10) > 12) return `${y}-${dmy[1].padStart(2,'0')}-${dmy[2].padStart(2,'0')}`;
-    // Default: assume DD/MM/YYYY (Indian)
-    return `${y}-${m}-${d}`;
+
+  // Mon-DD-YY / Mon DD YYYY / Apr-10-26 / April 10 2026 (month word first)
+  const re2 = new RegExp(`^([A-Za-z]{3,9})${SEP}(\\d{1,2})${SEP}(\\d{2,4})$`);
+  const m2 = s.match(re2);
+  if (m2) {
+    const mo = MMAP[m2[1].slice(0,3).toLowerCase()];
+    if (mo) {
+      const y = m2[3].length <= 2 ? `20${m2[3]}` : m2[3];
+      return `${y}-${String(mo).padStart(2,'0')}-${m2[2].padStart(2,'0')}`;
+    }
   }
-  // Excel serial number
-  if (/^\d{5}$/.test(s)) {
+
+  // YYYY-Mon-DD / 2026-Apr-10 (ISO with word month)
+  const re3 = new RegExp(`^(\\d{4})${SEP}([A-Za-z]{3,9})${SEP}(\\d{1,2})$`);
+  const m3 = s.match(re3);
+  if (m3) {
+    const mo = MMAP[m3[2].slice(0,3).toLowerCase()];
+    if (mo) return `${m3[1]}-${String(mo).padStart(2,'0')}-${m3[3].padStart(2,'0')}`;
+  }
+
+  // YYYY-MM-DD (any separator)
+  const ymd = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+  if (ymd) return `${ymd[1]}-${ymd[2].padStart(2,'0')}-${ymd[3].padStart(2,'0')}`;
+
+  // DD/MM/YYYY or DD-MM-YYYY (Indian, 4-digit year)
+  const dmy4 = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+  if (dmy4) {
+    const [, d, m, y] = dmy4;
+    if (parseInt(d,10) > 12) return `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+    if (parseInt(m,10) > 12) return `${y}-${d.padStart(2,'0')}-${m.padStart(2,'0')}`;
+    return `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;   // default DD/MM
+  }
+
+  // DD/MM/YY or DD-MM-YY (2-digit year)
+  const dmy2 = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{2})$/);
+  if (dmy2) {
+    const [, d, m, yy] = dmy2;
+    const y = `20${yy}`;
+    if (parseInt(d,10) > 12) return `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+    if (parseInt(m,10) > 12) return `${y}-${d.padStart(2,'0')}-${m.padStart(2,'0')}`;
+    return `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+  }
+
+  // Excel serial (40000–60000 covers ~2009–2064)
+  const n = parseInt(s, 10);
+  if (/^\d+$/.test(s) && n >= 40000 && n <= 60000) {
     try {
-      const d = XLSX.SSF.parse_date_code(parseInt(s, 10));
+      const d = XLSX.SSF.parse_date_code(n);
       if (d) return `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;
     } catch (_) {}
   }
@@ -6774,19 +6824,20 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
                       className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-violet-600 hover:bg-violet-700 text-white transition-colors shadow-sm">
                       <ArrowLeftRight className="h-3.5 w-3.5"/> Compare P vs B
                     </button>
-                    {portalFile && booksFile && (
-                      <button
-                        onClick={handleReconcile}
-                        disabled={loading}
-                        title="Re-reconcile the same uploaded files without uploading again"
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white transition-colors shadow-sm"
-                      >
-                        {loading
-                          ? <><div className="h-3 w-3 border-2 border-white/40 border-t-white rounded-full animate-spin flex-shrink-0"/>Re-checking…</>
-                          : <><RefreshCw className="h-3.5 w-3.5 flex-shrink-0"/>Roc Again</>
-                        }
-                      </button>
-                    )}
+                    <button
+                      onClick={() => {
+                        if (!portalFile || !booksFile) { toast.error('Files are no longer in memory. Please re-upload to reconcile again.'); return; }
+                        handleReconcile();
+                      }}
+                      disabled={loading}
+                      title={portalFile && booksFile ? 'Re-run reconciliation on the same uploaded files' : 'Re-upload files to use this'}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white transition-colors shadow-sm"
+                    >
+                      {loading
+                        ? <><div className="h-3 w-3 border-2 border-white/40 border-t-white rounded-full animate-spin flex-shrink-0"/>Re-checking…</>
+                        : <><RefreshCw className="h-3.5 w-3.5 flex-shrink-0"/>Reco Again</>
+                      }
+                    </button>
                   </div>
                 </div>
                 <div className="p-4">
