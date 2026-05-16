@@ -326,6 +326,7 @@ def _parse_books(file_bytes, filename):
     rc_col     = _col("reverse charge")
     type_col   = _col("invoice type", "type")
     rate_col   = _col("rate")
+    hsn_col    = _col("hsn", "hsn/sac", "hsn code", "hsncode", "hsn_sac")
 
     if gstin_col is None or inv_no_col is None:
         raise HTTPException(400, "Books file: could not locate 'GSTIN of Supplier' or 'Invoice Number' columns.")
@@ -357,6 +358,7 @@ def _parse_books(file_bytes, filename):
             "reverse_charge":  _to_str(row.get(rc_col,   ""))  if rc_col   else "",
             "invoice_type":    _to_str(row.get(type_col, ""))  if type_col else "",
             "rate":            _to_num(row.get(rate_col,  0))  if rate_col else 0.0,
+            "hsn":             _to_str(row.get(hsn_col,  "")) if hsn_col  else "",
             "trade_name":      "", "itc_availability": "", "filing_date": "",
             "source":          "books",
             "is_duplicate":    is_duplicate,
