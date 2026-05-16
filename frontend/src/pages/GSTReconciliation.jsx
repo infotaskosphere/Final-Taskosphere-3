@@ -1679,6 +1679,72 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
     return y + hH + 2;
   }
 
+  // ── Blocked ITC (Section 17(5) CGST Act) — HSN/SAC detection ─────────
+  const BLOCKED_HSN4 = new Set([
+    '8703','8711',                          // Motor cars, motorcycles
+    '6802','6907','7324','6910',            // Marble/granite, tiles, sanitary ware
+    '2523',                                 // Cement
+    '8415','8428',                          // AC, elevators (capitalized)
+  ]);
+  const BLOCKED_CHAPTERS = new Set([
+    '87','88','89',                         // Vehicles, aircraft, ships
+    '72','73',                              // Iron/steel (TMT bars, iron items)
+    '70','32','94',                         // Glass, paints, furniture
+  ]);
+  const BLOCKED_SAC = [
+    '998714','998713','997133',             // Vehicle service/repair/insurance
+    '996331','996333',                      // Restaurant, catering
+    '999721','999722','999723',             // Beauty, cosmetic, salon, gym
+    '9993','999312',                        // Health services, health check-up
+    '999599',                              // Club membership
+    '9985','998552',                        // Travel/vacation, LTC
+    '9963','9972',                          // Celebration, guest house
+    '996411','9964','998551',              // Rent-a-cab, passenger transport, air travel
+    '9954','995411','995412',              // Works contract, construction
+  ];
+
+  function isBlockedHSN(hsn) {
+    if (!hsn) return false;
+    const h = String(hsn).trim().replace(/[\s\-\.]/g, '');
+    if (!h || h.length < 2) return false;
+    if (BLOCKED_CHAPTERS.has(h.substring(0, 2))) return true;
+    if (h.length >= 4 && BLOCKED_HSN4.has(h.substring(0, 4))) return true;
+    return BLOCKED_SAC.some(s => h.startsWith(s) || s.startsWith(h.substring(0, 6)));
+  }
+
+  function itcFlag(r) {
+    return (r?.portal?.itcAvailability || r?.books?.itcAvailability || '').trim().toUpperCase();
+  }
+
+  function isIneligible(r) {
+    const flag = itcFlag(r);
+    if (flag === 'N' || flag === 'INELIGIBLE' || flag === 'BLOCKED') return true;
+    const hsn = r?.books?.hsn || r?.portal?.hsn || '';
+    return isBlockedHSN(hsn);
+  }
+
+  function ineligibleReason(r) {
+    const flag = itcFlag(r);
+    if (flag === 'N' || flag === 'INELIGIBLE' || flag === 'BLOCKED')
+      return 'ITC marked Ineligible (N) by GST Portal — Section 17(5) applies.';
+    const hsn = r?.books?.hsn || r?.portal?.hsn || '';
+    if (hsn) return `HSN/SAC ${hsn} — Blocked under Section 17(5) of CGST Act.`;
+    return 'Ineligible Credit — Section 17(5) of CGST Act.';
+  }
+
+  const INELIGIBLE_FILL = [255, 235, 235];   // light red for ineligible rows
+  const INELIGIBLE_RED  = [185,  28,  28];   // dark red text
+
+  function willDrawCellHighlight(data, rows) {
+    if (data.section !== 'body') return;
+    const r = rows[data.row.index];
+    if (r && isIneligible(r)) {
+      data.cell.styles.fillColor  = INELIGIBLE_FILL;
+      data.cell.styles.textColor  = INELIGIBLE_RED;
+      data.cell.styles.fontStyle  = 'bold';
+    }
+  }
+
   // ── Shared autoTable base config ──────────────────────────────────────
   // CRITICAL: tableWidth:TW forces the table to exactly fill usable width.
   // columnStyles widths must sum to TW for each table.
@@ -1877,6 +1943,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
         10: { cellWidth: 24, halign: 'left'   },
         11: { cellWidth: 20, halign: 'center' },
       },
+      willDrawCell(data) { willDrawCellHighlight(data, results.portalOnly); },
     });
   }
 
@@ -1950,7 +2017,8 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
 
   /* ─────────────────────────────────────────────────────────────────────
      PAGE 4 — AMOUNT MISMATCH
-     Col widths: 8+26+28+20+16+20+20+16+16+16+16+auto=277 (col11 fills rest)
+     10 cols — widths: 6+26+30+22+16+22+22+18+18+91 = 271 ✓
+     P.Tax / B.Tax merged into Tax Diff to free space for Reason column.
   ───────────────────────────────────────────────────────────────────── */
   if (results.mismatch.length > 0) {
     doc.addPage('landscape');
@@ -1961,18 +2029,21 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
       AMBER, results.mismatch.length, sumVal(results.mismatch, 'portal')
     );
 
+    const mismatchRows = results.mismatch;
     autoTable(doc, {
       ...BASE,
       startY: y,
-      head: [['#', 'GSTIN', 'Party Name', 'Invoice No', 'Date', 'Portal Rs', 'Books Rs', 'Diff Rs', 'P.Tax Rs', 'B.Tax Rs', 'Tax Diff', 'Reason & Suggested Action']],
-      body: results.mismatch.map((r, i) => {
-        const pTax   = (r.portal?.igst || 0) + (r.portal?.cgst || 0) + (r.portal?.sgst || 0);
-        const bTax   = (r.books?.igst  || 0) + (r.books?.cgst  || 0) + (r.books?.sgst  || 0);
-        const vDiff  = (r.valueDiff || 0);
-        const tDiff  = (r.taxDiff   || 0);
+      head: [['#', 'GSTIN', 'Party Name', 'Invoice No', 'Date', 'Portal Rs', 'Books Rs', 'Diff Rs', 'Tax Diff', 'Reason & Suggested Action']],
+      body: mismatchRows.map((r, i) => {
+        const pTax  = (r.portal?.igst || 0) + (r.portal?.cgst || 0) + (r.portal?.sgst || 0);
+        const bTax  = (r.books?.igst  || 0) + (r.books?.cgst  || 0) + (r.books?.sgst  || 0);
+        const tDiff = pTax - bTax;
+        const vDiff = (r.valueDiff || 0);
+        const inelig = isIneligible(r) ? ' [INELIGIBLE ITC - Sec 17(5)]' : '';
         const reason = [
           r.mismatchReason,
           r.suggestedAction ? `>> ${r.suggestedAction}` : '',
+          inelig,
         ].filter(Boolean).join(' ');
         return [
           i + 1,
@@ -1983,37 +2054,32 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
           fmt(r.portal?.invoiceValue || 0),
           fmt(r.books?.invoiceValue  || 0),
           (vDiff >= 0 ? '+' : '') + fmt(vDiff),
-          fmt(pTax),
-          fmt(bTax),
           (tDiff >= 0 ? '+' : '') + fmt(tDiff),
           reason || '—',
         ];
       }),
       headStyles: { ...BASE.headStyles, fillColor: AMBER },
       columnStyles: {
-        0:  { cellWidth:  6, halign: 'center', fontSize: 6.5 },
-        1:  { cellWidth: 24, halign: 'left',   fontSize: 6   },
-        2:  { cellWidth: 24, halign: 'left'   },
-        3:  { cellWidth: 18, halign: 'left'   },
-        4:  { cellWidth: 15, halign: 'center' },
-        5:  { cellWidth: 18, halign: 'right'  },
-        6:  { cellWidth: 18, halign: 'right'  },
-        7:  { cellWidth: 14, halign: 'right'  },
-        8:  { cellWidth: 14, halign: 'right'  },
-        9:  { cellWidth: 14, halign: 'right'  },
-        10: { cellWidth: 14, halign: 'right'  },
-        11: { cellWidth: 92, halign: 'left',   fontSize: 6.5, overflow: 'linebreak', cellPadding: { top: 2, bottom: 2, left: 2, right: 2 } },
+        0: { cellWidth:  6, halign: 'center' },
+        1: { cellWidth: 26, halign: 'left',  fontSize: 6.5 },
+        2: { cellWidth: 30, halign: 'left'   },
+        3: { cellWidth: 22, halign: 'left'   },
+        4: { cellWidth: 16, halign: 'center' },
+        5: { cellWidth: 22, halign: 'right'  },
+        6: { cellWidth: 22, halign: 'right'  },
+        7: { cellWidth: 18, halign: 'right'  },
+        8: { cellWidth: 18, halign: 'right'  },
+        9: { cellWidth: 91, halign: 'left',  fontSize: 6.5, overflow: 'linebreak' },
       },
+      willDrawCell(data) { willDrawCellHighlight(data, mismatchRows); },
       didParseCell(data) {
         if (data.section !== 'body') return;
-        // Colour Diff ₹ and Tax Δ ₹ columns
-        if (data.column.index === 7 || data.column.index === 10) {
-          const raw = Array.isArray(data.cell.text)
-            ? data.cell.text.join('')
-            : String(data.cell.text || '');
-          const negative = raw.trim().startsWith('-');
-          data.cell.styles.textColor  = negative ? ROSE : BLUE;
-          data.cell.styles.fontStyle  = 'bold';
+        if (data.column.index === 7 || data.column.index === 8) {
+          const raw = Array.isArray(data.cell.text) ? data.cell.text.join('') : String(data.cell.text || '');
+          if (!isIneligible(mismatchRows[data.row.index])) {
+            data.cell.styles.textColor = raw.trim().startsWith('-') ? ROSE : BLUE;
+            data.cell.styles.fontStyle = 'bold';
+          }
         }
       },
     });
@@ -2149,6 +2215,93 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
         8:  { cellWidth: 20, halign: 'right'  },
         9:  { cellWidth: 20, halign: 'right'  },
         10: { cellWidth: 29, halign: 'right'  },
+      },
+      willDrawCell(data) { willDrawCellHighlight(data, results.matched); },
+    });
+  }
+
+  /* ─────────────────────────────────────────────────────────────────────
+     INELIGIBLE ITC PAGE — Section 17(5) Blocked Credits
+     Collects invoices from ALL categories where ITC is blocked by HSN/SAC
+     or itcAvailability = 'N'. Rows highlighted in red.
+     Cols: 6+26+30+22+16+22+20+20+20+89 = 271 ✓
+  ───────────────────────────────────────────────────────────────────── */
+  const allIneligible = [
+    ...results.matched.filter(isIneligible).map(r => ({ ...r, _src: 'Matched' })),
+    ...(results.portalOnly || []).filter(isIneligible).map(r => ({ ...r, _src: 'Portal Only' })),
+    ...(results.booksOnly  || []).filter(isIneligible).map(r => ({ ...r, _src: 'Books Only'  })),
+    ...(results.mismatch   || []).filter(isIneligible).map(r => ({ ...r, _src: 'Mismatch'    })),
+  ];
+
+  if (allIneligible.length > 0) {
+    const BRICK = [153, 27, 27];
+    doc.addPage('landscape');
+    let y = addPageHeader(BRICK, 'Ineligible ITC — Section 17(5)');
+    y = sectionHeading(
+      y,
+      'Ineligible ITC (Sec 17(5)) — These credits CANNOT be claimed. Reverse immediately to avoid GST demand + interest.',
+      BRICK, allIneligible.length,
+      allIneligible.reduce((s, r) => s + (r.portal?.invoiceValue || r.books?.invoiceValue || 0), 0)
+    );
+
+    // Warning banner
+    doc.setFillColor(255, 235, 235);
+    doc.setDrawColor(...BRICK);
+    doc.setLineWidth(0.3);
+    doc.roundedRect(ML, y, TW, 9, 1, 1, 'FD');
+    doc.setLineWidth(0.15);
+    doc.setTextColor(...BRICK);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.text(
+      '[!] CRITICAL: Claiming ITC on these invoices violates Section 17(5) of CGST Act 2017. ' +
+      'Reverse via GSTR-3B Table 4(B)(2) to avoid interest & penalty.',
+      ML + 3, y + 6
+    );
+    doc.setTextColor(...DGRAY);
+    y += 12;
+
+    autoTable(doc, {
+      ...BASE,
+      startY: y,
+      head: [['#', 'GSTIN', 'Party Name', 'Invoice No', 'Date', 'Value (Rs)', 'IGST', 'CGST', 'SGST', 'Why Ineligible (Sec 17(5))', 'Source']],
+      body: allIneligible.map((r, i) => {
+        const inv = r.portal || r.books || {};
+        const hsn = r.books?.hsn || r.portal?.hsn || '';
+        const why = ineligibleReason(r);
+        return [
+          i + 1,
+          inv.gstin || '—',
+          inv.tradeOrLegalName || manualTradeNames?.[inv.gstin] || '—',
+          inv.invoiceNoRaw || '—',
+          inv.invoiceDate  || '—',
+          fmt(inv.invoiceValue || 0),
+          fmt(inv.igst || 0),
+          fmt(inv.cgst || 0),
+          fmt(inv.sgst || 0),
+          hsn ? `HSN: ${hsn} — ${why}` : why,
+          r._src || '—',
+        ];
+      }),
+      headStyles: { ...BASE.headStyles, fillColor: BRICK },
+      styles: { ...BASE.styles, fontSize: 6.5 },
+      columnStyles: {
+        0:  { cellWidth:  6, halign: 'center' },
+        1:  { cellWidth: 26, halign: 'left',  fontSize: 6   },
+        2:  { cellWidth: 28, halign: 'left'   },
+        3:  { cellWidth: 20, halign: 'left'   },
+        4:  { cellWidth: 15, halign: 'center' },
+        5:  { cellWidth: 20, halign: 'right'  },
+        6:  { cellWidth: 18, halign: 'right'  },
+        7:  { cellWidth: 18, halign: 'right'  },
+        8:  { cellWidth: 18, halign: 'right'  },
+        9:  { cellWidth: 92, halign: 'left',  overflow: 'linebreak', fontStyle: 'bold' },
+        10: { cellWidth: 10, halign: 'center', fontSize: 6  },
+      },
+      didParseCell(data) {
+        if (data.section !== 'body') return;
+        data.cell.styles.fillColor = INELIGIBLE_FILL;
+        data.cell.styles.textColor = INELIGIBLE_RED;
       },
     });
   }
