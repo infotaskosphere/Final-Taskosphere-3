@@ -1671,7 +1671,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(7.5);
       doc.text(
-        `${count} invoice${count !== 1 ? 's' : ''}  |  ₹${fmt(value)}`,
+        `${count} invoice${count !== 1 ? 's' : ''}  |  Rs.${fmt(value)}`,
         W - MR - 2, y + 4.8, { align: 'right' }
       );
     }
@@ -1735,7 +1735,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
     period        ? `Period: ${period}`         : null,
     company.fy    ? `FY: ${company.fy}`         : null,
     `Generated: ${dateStr}`,
-  ].filter(Boolean).join('   •   ');
+  ].filter(Boolean).join('  |  ');
   doc.text(metaLine, ML + 2, 33);
   doc.setTextColor(...DGRAY);
 
@@ -1778,7 +1778,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
   autoTable(doc, {
     ...BASE,
     startY: tableY,
-    head: [['Category', 'Count', 'Invoice Value (Rs)', 'Taxable Value (Rs)', 'IGST (Rs)', 'CGST (Rs)', 'SGST (Rs)', 'Total Tax (₹)']],
+    head: [['Category', 'Count', 'Invoice Value (Rs)', 'Taxable Value (Rs)', 'IGST (Rs)', 'CGST (Rs)', 'SGST (Rs)', 'Total Tax (Rs)']],
     body: [
       ['Matched',
         results.matched.length,
@@ -1903,7 +1903,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7.5);
     doc.text(
-      '⚠  ITC RISK: These invoices are in your books but vendor has NOT filed on GST Portal. ' +
+      '[!] ITC RISK: These invoices are in your books but vendor has NOT filed on GST Portal. ' +
       'You cannot claim ITC until the vendor files GSTR-1. Follow up immediately.',
       ML + 3, y + 5
     );
@@ -1950,7 +1950,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
 
   /* ─────────────────────────────────────────────────────────────────────
      PAGE 4 — AMOUNT MISMATCH
-     Col widths: 8+26+28+20+16+20+20+16+16+16+16+75 = 277 ✓
+     Col widths: 8+26+28+20+16+20+20+16+16+16+16+auto=277 (col11 fills rest)
   ───────────────────────────────────────────────────────────────────── */
   if (results.mismatch.length > 0) {
     doc.addPage('landscape');
@@ -1972,7 +1972,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
         const tDiff  = (r.taxDiff   || 0);
         const reason = [
           r.mismatchReason,
-          r.suggestedAction ? `→ ${r.suggestedAction}` : '',
+          r.suggestedAction ? `>> ${r.suggestedAction}` : '',
         ].filter(Boolean).join(' ');
         return [
           i + 1,
@@ -2002,7 +2002,7 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
         8:  { cellWidth: 16, halign: 'right'  },
         9:  { cellWidth: 16, halign: 'right'  },
         10: { cellWidth: 16, halign: 'right'  },
-        11: { halign: 'left', fontSize: 6.5, overflow: 'linebreak' },
+        11: { minCellWidth: 55, halign: 'left', fontSize: 6.5, overflow: 'linebreak' },
       },
       didParseCell(data) {
         if (data.section !== 'body') return;
@@ -6826,7 +6826,12 @@ Keep each bullet under 2 lines. Use ₹ for amounts. Be direct and actionable.`;
                     </button>
                     <button
                       onClick={() => {
-                        if (!portalFile || !booksFile) { toast.error('Files are no longer in memory. Please re-upload to reconcile again.'); return; }
+                        if (!portalFile || !booksFile) {
+                          toast.info('Files not in memory — please upload files again to re-reconcile.');
+                          setResults(null);
+                          setPageView('new');
+                          return;
+                        }
                         handleReconcile();
                       }}
                       disabled={loading}
