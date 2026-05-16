@@ -1505,12 +1505,14 @@ const sumVal = (arr, src) => arr.reduce((s, r) => s + (r[src]?.invoiceValue || 0
 const sumTax = (arr, src) => arr.reduce((s, r) => { const i = r[src]; return s + (i ? i.igst+i.cgst+i.sgst : 0); }, 0);
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   PDF EXPORT  — Improved layout, larger fonts, no text cutting, A4 landscape
+   PDF EXPORT v2 — Professional layout with proper alignment & centering
 ═══════════════════════════════════════════════════════════════════════════ */
 function exportPDF(results, company, period, manualTradeNames = {}, invoiceComments = {}) {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-  const W = doc.internal.pageSize.getWidth();
-  const H = doc.internal.pageSize.getHeight();
+  const W = doc.internal.pageSize.getWidth();   // 297 mm landscape
+  const H = doc.internal.pageSize.getHeight();  // 210 mm landscape
+  const ML = 10, MR = 10;                       // left / right margin
+  const TW = W - ML - MR;                       // usable table width = 277 mm
 
   const BRAND  = [13,  59, 102];
   const BRAND2 = [31, 111, 178];
@@ -1524,181 +1526,394 @@ function exportPDF(results, company, period, manualTradeNames = {}, invoiceComme
 
   const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
 
+  // Improved base table config with better centering
   const BASE_TABLE = {
+    startY: 'auto',
     styles: {
-      font: 'helvetica', fontSize: 8, overflow: 'linebreak',
-      cellPadding: { top: 3, bottom: 3, left: 3, right: 3 },
-      lineColor: [220, 225, 230], lineWidth: 0.2, valign: 'middle',
+      font: 'helvetica',
+      fontSize: 8.5,
+      overflow: 'linebreak',
+      cellPadding: { top: 2.5, bottom: 2.5, left: 2.5, right: 2.5 },
+      lineColor: [220, 225, 230],
+      lineWidth: 0.25,
+      valign: 'middle',
+      halign: 'left',
     },
     headStyles: {
-      font: 'helvetica', fontStyle: 'bold', fontSize: 8.5, textColor: 255,
-      halign: 'center', valign: 'middle', minCellHeight: 10,
-      cellPadding: { top: 3, bottom: 3, left: 3, right: 3 },
+      font: 'helvetica',
+      fontStyle: 'bold',
+      fontSize: 9,
+      textColor: 255,
+      halign: 'center',
+      valign: 'middle',
+      minCellHeight: 9,
+      cellPadding: { top: 2.5, bottom: 2.5, left: 2.5, right: 2.5 },
+      lineWidth: 0.3,
     },
-    margin: { left: 12, right: 12 },
-    tableWidth: 'wrap',
+    margin: { left: ML, right: MR, top: 5, bottom: 10 },
+    tableWidth: 'auto',
     showHead: 'everyPage',
     rowPageBreak: 'avoid',
-    didDrawPage: () => addPageFooter(),
+    theme: 'grid',
+    didDrawPage: (data) => addPageFooter(),
+    columnStyles: {}, // Will be set per table
+    alternateRowStyles: {
+      fillColor: LGRAY,
+    },
   };
 
   function addPageFooter() {
     const totalPages = doc.internal.getNumberOfPages();
     const curPage    = doc.internal.getCurrentPageInfo().pageNumber;
-    doc.setFontSize(7.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(...GRAY);
-    doc.text('Confidential — GST Reconciliation Report', 12, H - 5);
-    doc.text(`Page ${curPage} of ${totalPages}`, W / 2, H - 5, { align: 'center' });
-    doc.text(company.name || '', W - 12, H - 5, { align: 'right' });
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...GRAY);
+    
+    // Footer text - properly spaced
+    doc.text('Confidential — GST Reconciliation Report', ML, H - 4);
+    doc.text(`Page ${curPage} of ${totalPages}`, W / 2, H - 4, { align: 'center' });
+    doc.text(company.name || '', W - MR, H - 4, { align: 'right' });
   }
 
-  function addPageHeader(color) {
-    doc.setFillColor(...(color || BRAND)); doc.rect(0, 0, W, 16, 'F');
-    doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
-    doc.text('GST RECONCILIATION REPORT', 12, 7.5);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5);
-    doc.text(company.name || '', 12, 13);
-    doc.text(`${period || ''} | Generated: ${dateStr}`, W - 12, 7.5, { align: 'right' });
-    doc.text(`GSTIN: ${company.gstin || ''}`, W - 12, 13, { align: 'right' });
+  function addPageHeader(color, title) {
+    const headerH = 18;
+    doc.setFillColor(...(color || BRAND));
+    doc.rect(0, 0, W, headerH, 'F');
+    
+    // Left side - title & company
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text('GST RECONCILIATION REPORT', ML, 7.5);
+    
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.text(company.name || '', ML, 12.5);
+    
+    // Right side - details
+    doc.setFontSize(8);
+    const rightX = W - MR;
+    doc.text(`${period || 'Tax Period'}`, rightX, 7, { align: 'right' });
+    doc.text(`GSTIN: ${company.gstin || 'N/A'}`, rightX, 11, { align: 'right' });
+    doc.text(`Generated: ${dateStr}`, rightX, 15, { align: 'right' });
+    
     doc.setTextColor(...DGRAY);
+    return headerH + 2;
   }
 
   function sectionHeading(y, text, color, count, value) {
-    doc.setFillColor(...(color || BRAND)); doc.roundedRect(12, y, W - 24, 10, 2, 2, 'F');
-    doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
-    doc.text(text, 16, y + 6.8);
+    const hH = 8;
+    doc.setFillColor(...(color || BRAND));
+    doc.roundedRect(ML, y, TW, hH, 1.5, 1.5, 'F');
+    
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text(text, ML + 2, y + 5.5);
+    
     if (count !== undefined) {
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5);
-      doc.text(`${count} invoice${count !== 1 ? 's' : ''}  |  ₹${fmt(value)}`, W - 16, y + 6.8, { align: 'right' });
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.text(`${count} invoices  |  ₹${fmt(value)}`, W - MR - 2, y + 5.5, { align: 'right' });
     }
-    doc.setTextColor(...DGRAY); return y + 13;
+    
+    doc.setTextColor(...DGRAY);
+    return y + hH + 2;
   }
 
-  // PAGE 1 — COVER + SUMMARY
-  doc.setFillColor(...BRAND); doc.rect(0, 0, W, 52, 'F');
-  doc.setFillColor(...BRAND2); doc.triangle(W - 90, 0, W, 0, W, 52, 'F');
-  doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(24);
-  doc.text('GST Reconciliation Report', 14, 22);
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(13); doc.text(company.name || 'Company Name', 14, 32);
-  doc.setFontSize(9.5);
-  const subtitle = [company.gstin ? `GSTIN: ${company.gstin}` : null, period ? `Period: ${period}` : null, company.fy ? `FY: ${company.fy}` : null].filter(Boolean).join('   •   ');
-  doc.text(subtitle, 14, 40); doc.text(`Generated on ${dateStr}`, 14, 47);
+  // PAGE 1 — COVER PAGE
+  doc.setFillColor(...BRAND);
+  doc.rect(0, 0, W, 35, 'F');
+  
+  // Gradient effect with shape
+  doc.setFillColor(...BRAND2);
+  doc.triangle(W - 80, 0, W, 0, W, 35, 'F');
+  
+  // Title
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(26);
+  doc.text('GST Reconciliation', ML + 2, 15);
+  
+  // Subtitle
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(14);
+  doc.text(company.name || 'Company Name', ML + 2, 25);
+  
+  // Details
+  doc.setFontSize(9);
+  const details = [
+    company.gstin ? `GSTIN: ${company.gstin}` : null,
+    period ? `Period: ${period}` : null,
+    company.fy ? `FY: ${company.fy}` : null,
+  ].filter(Boolean).join('  •  ');
+  
+  doc.text(details, ML + 2, 31);
+  doc.text(`Generated: ${dateStr}`, ML + 2, 36);
 
+  // Summary Cards
   const cards = [
-    { label: 'Total Portal', val: results.matched.length + results.mismatch.length + results.portalOnly.length, sub: '', color: BRAND },
-    { label: 'Total Books',  val: results.matched.length + results.mismatch.length + results.booksOnly.length,  sub: '', color: BRAND2 },
-    { label: 'Matched',      val: results.matched.length,    sub: `₹${fmt(sumVal(results.matched,'portal'))}`,    color: GREEN },
-    { label: 'Mismatch',     val: results.mismatch.length,   sub: `₹${fmt(sumVal(results.mismatch,'portal'))}`,   color: AMBER },
-    { label: 'Portal Only',  val: results.portalOnly.length, sub: `₹${fmt(sumVal(results.portalOnly,'portal'))}`, color: BLUE  },
-    { label: 'Books Only',   val: results.booksOnly.length,  sub: `₹${fmt(sumVal(results.booksOnly,'books'))}`,   color: ROSE  },
+    { label: 'Total Portal', val: results.matched.length + results.mismatch.length + results.portalOnly.length, color: BRAND },
+    { label: 'Total Books',  val: results.matched.length + results.mismatch.length + results.booksOnly.length,  color: BRAND2 },
+    { label: 'Matched',      val: results.matched.length,    color: GREEN },
+    { label: 'Mismatch',     val: results.mismatch.length,   color: AMBER },
+    { label: 'Portal Only',  val: results.portalOnly.length, color: BLUE  },
+    { label: 'Books Only',   val: results.booksOnly.length,  color: ROSE  },
   ];
-  const cardW = (W - 24 - 10) / 6, cardGap = 2;
+  
+  const cardW = (TW - 12) / 6;
+  const cardGap = 2;
+  const cardStartY = 42;
+  
   cards.forEach((card, i) => {
-    const cx = 12 + i * (cardW + cardGap), cy = 58;
-    doc.setFillColor(...card.color); doc.roundedRect(cx, cy, cardW, 24, 2.5, 2.5, 'F');
-    doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(18);
-    doc.text(String(card.val), cx + cardW / 2, cy + 12, { align: 'center' });
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5);
-    doc.text(card.label, cx + cardW / 2, cy + 18, { align: 'center' });
-    if (card.sub) { doc.setFontSize(7); doc.text(card.sub, cx + cardW / 2, cy + 22.5, { align: 'center' }); }
+    const cx = ML + i * (cardW + cardGap);
+    const cy = cardStartY;
+    
+    doc.setFillColor(...card.color);
+    doc.roundedRect(cx, cy, cardW, 16, 1.2, 1.2, 'F');
+    
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.text(String(card.val), cx + cardW / 2, cy + 8, { align: 'center' });
+    
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.text(card.label, cx + cardW / 2, cy + 13, { align: 'center' });
   });
 
-  doc.setTextColor(...DGRAY); doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text('Tax Summary', 12, 93);
+  // Tax Summary Table
+  doc.setTextColor(...DGRAY);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  let tableY = cardStartY + 20;
+  doc.text('Tax Summary', ML, tableY);
+  
+  tableY += 3;
   autoTable(doc, {
-    ...BASE_TABLE, startY: 97,
-    head: [['Category','Invoices','Invoice Value (Rs.)','Taxable Value (Rs.)','IGST (Rs.)','CGST (Rs.)','SGST (Rs.)','Total Tax (Rs.)']],
+    ...BASE_TABLE,
+    startY: tableY,
+    head: [['Category','Count','Invoice Value (₹)','Taxable Value (₹)','IGST (₹)','CGST (₹)','SGST (₹)','Total Tax (₹)']],
     body: [
       ['Matched', results.matched.length, fmt(sumVal(results.matched,'portal')), fmt(results.matched.reduce((s,r)=>s+r.portal.taxableValue,0)), fmt(results.matched.reduce((s,r)=>s+r.portal.igst,0)), fmt(results.matched.reduce((s,r)=>s+r.portal.cgst,0)), fmt(results.matched.reduce((s,r)=>s+r.portal.sgst,0)), fmt(sumTax(results.matched,'portal'))],
       ['Amount Mismatch', results.mismatch.length, fmt(sumVal(results.mismatch,'portal')), fmt(results.mismatch.reduce((s,r)=>s+r.portal.taxableValue,0)), fmt(results.mismatch.reduce((s,r)=>s+r.portal.igst,0)), fmt(results.mismatch.reduce((s,r)=>s+r.portal.cgst,0)), fmt(results.mismatch.reduce((s,r)=>s+r.portal.sgst,0)), fmt(sumTax(results.mismatch,'portal'))],
-      ['In Portal Only (Not in Books)', results.portalOnly.length, fmt(sumVal(results.portalOnly,'portal')), fmt(results.portalOnly.reduce((s,r)=>s+r.portal.taxableValue,0)), fmt(results.portalOnly.reduce((s,r)=>s+r.portal.igst,0)), fmt(results.portalOnly.reduce((s,r)=>s+r.portal.cgst,0)), fmt(results.portalOnly.reduce((s,r)=>s+r.portal.sgst,0)), fmt(sumTax(results.portalOnly,'portal'))],
-      ['In Books Only (ITC Risk)', results.booksOnly.length, fmt(sumVal(results.booksOnly,'books')), fmt(results.booksOnly.reduce((s,r)=>s+r.books.taxableValue,0)), fmt(results.booksOnly.reduce((s,r)=>s+r.books.igst,0)), fmt(results.booksOnly.reduce((s,r)=>s+r.books.cgst,0)), fmt(results.booksOnly.reduce((s,r)=>s+r.books.sgst,0)), fmt(sumTax(results.booksOnly,'books'))],
+      ['In Portal Only', results.portalOnly.length, fmt(sumVal(results.portalOnly,'portal')), fmt(results.portalOnly.reduce((s,r)=>s+r.portal.taxableValue,0)), fmt(results.portalOnly.reduce((s,r)=>s+r.portal.igst,0)), fmt(results.portalOnly.reduce((s,r)=>s+r.portal.cgst,0)), fmt(results.portalOnly.reduce((s,r)=>s+r.portal.sgst,0)), fmt(sumTax(results.portalOnly,'portal'))],
+      ['In Books Only', results.booksOnly.length, fmt(sumVal(results.booksOnly,'books')), fmt(results.booksOnly.reduce((s,r)=>s+r.books.taxableValue,0)), fmt(results.booksOnly.reduce((s,r)=>s+r.books.igst,0)), fmt(results.booksOnly.reduce((s,r)=>s+r.books.cgst,0)), fmt(results.booksOnly.reduce((s,r)=>s+r.books.sgst,0)), fmt(sumTax(results.booksOnly,'books'))],
     ],
     headStyles: { ...BASE_TABLE.headStyles, fillColor: BRAND },
-    alternateRowStyles: { fillColor: LGRAY },
-    columnStyles: { 0:{fontStyle:'bold',cellWidth:52},1:{halign:'center',cellWidth:18},2:{halign:'right',cellWidth:32},3:{halign:'right',cellWidth:32},4:{halign:'right',cellWidth:22},5:{halign:'right',cellWidth:22},6:{halign:'right',cellWidth:22},7:{halign:'right',cellWidth:28} },
-    didDrawPage: () => addPageFooter(),
+    columnStyles: {
+      0: { cellWidth: 28, halign: 'left' },
+      1: { cellWidth: 12, halign: 'center' },
+      2: { cellWidth: 28, halign: 'right' },
+      3: { cellWidth: 28, halign: 'right' },
+      4: { cellWidth: 18, halign: 'right' },
+      5: { cellWidth: 18, halign: 'right' },
+      6: { cellWidth: 18, halign: 'right' },
+      7: { cellWidth: 25, halign: 'right' },
+    },
   });
 
-  // PAGE 2 — IN PORTAL ONLY
+  // PAGE 2 — PORTAL ONLY
   if (results.portalOnly.length > 0) {
-    doc.addPage(); addPageHeader(BLUE);
-    let y = sectionHeading(20,'In GST Portal Only — Vendor uploaded but NOT recorded in Books. Action required.',BLUE,results.portalOnly.length,sumVal(results.portalOnly,'portal'));
+    doc.addPage('landscape');
+    addPageHeader(BLUE, 'In Portal Only');
+    let y = 20;
+    y = sectionHeading(y, 'In GST Portal Only — Not in Books. Action required.', BLUE, results.portalOnly.length, sumVal(results.portalOnly,'portal'));
+    
     autoTable(doc, {
-      ...BASE_TABLE, startY: y,
-      head: [['#','GSTIN','Party Name','Invoice No','Date','Invoice Value\n(Rs.)','Taxable\n(Rs.)','IGST','CGST','SGST','Place','ITC','Notes']],
+      ...BASE_TABLE,
+      startY: y,
+      head: [['#','GSTIN','Party Name','Invoice No','Date','Value (₹)','Taxable (₹)','IGST','CGST','SGST','Place','ITC']],
       body: results.portalOnly.map((r,i)=>{
-        const rowKey=r.key||`${r.portal.gstin}__${r.portal.invoiceNo}`;
-        const name=r.portal.tradeOrLegalName||manualTradeNames?.[r.portal.gstin]||'—';
-        return [i+1,r.portal.gstin,name,r.portal.invoiceNoRaw,r.portal.invoiceDate,fmt(r.portal.invoiceValue),fmt(r.portal.taxableValue),fmt(r.portal.igst),fmt(r.portal.cgst),fmt(r.portal.sgst),r.portal.placeOfSupply||'—',{content:r.portal.itcAvailability||'—',styles:{textColor:r.portal.itcAvailability?.toLowerCase()==='yes'?[5,150,80]:[100,116,139],fontStyle:'bold',halign:'center'}},invoiceComments?.[rowKey]||''];
+        const inv = r.portal;
+        return [
+          String(i+1),
+          inv?.gstin || '—',
+          inv?.tradeOrLegalName || manualTradeNames?.[inv?.gstin] || '—',
+          inv?.invoiceNoRaw || '—',
+          inv?.invoiceDate || '—',
+          fmt(inv?.invoiceValue || 0),
+          fmt(inv?.taxableValue || 0),
+          fmt(inv?.igst || 0),
+          fmt(inv?.cgst || 0),
+          fmt(inv?.sgst || 0),
+          inv?.placeOfSupply || '—',
+          inv?.itcAvailability || '—',
+        ];
       }),
-      headStyles:{...BASE_TABLE.headStyles,fillColor:BLUE},alternateRowStyles:{fillColor:[236,246,255]},
-      columnStyles:{0:{cellWidth:8,halign:'center'},1:{cellWidth:32,overflow:'linebreak'},2:{cellWidth:34,overflow:'linebreak'},3:{cellWidth:20,overflow:'linebreak'},4:{cellWidth:18},5:{cellWidth:22,halign:'right'},6:{cellWidth:20,halign:'right'},7:{cellWidth:14,halign:'right'},8:{cellWidth:14,halign:'right'},9:{cellWidth:14,halign:'right'},10:{cellWidth:20},11:{cellWidth:12,halign:'center'},12:{cellWidth:'auto',fontStyle:'italic',textColor:[120,55,10],overflow:'linebreak'}},
+      headStyles: { ...BASE_TABLE.headStyles, fillColor: BLUE },
+      columnStyles: {
+        0: { cellWidth: 8, halign: 'center' },
+        1: { cellWidth: 32, halign: 'left' },
+        2: { cellWidth: 26, halign: 'left' },
+        3: { cellWidth: 18, halign: 'left' },
+        4: { cellWidth: 14, halign: 'left' },
+        5: { cellWidth: 20, halign: 'right' },
+        6: { cellWidth: 16, halign: 'right' },
+        7: { cellWidth: 12, halign: 'right' },
+        8: { cellWidth: 12, halign: 'right' },
+        9: { cellWidth: 12, halign: 'right' },
+        10: { cellWidth: 16, halign: 'left' },
+        11: { cellWidth: 12, halign: 'center' },
+      },
     });
   }
 
-  // PAGE 3 — IN BOOKS ONLY
+  // PAGE 3 — BOOKS ONLY
   if (results.booksOnly.length > 0) {
-    doc.addPage(); addPageHeader(ROSE);
-    let y = sectionHeading(20,'In Books Only — Recorded in Books but vendor has NOT uploaded to GST Portal. ITC at risk!',ROSE,results.booksOnly.length,sumVal(results.booksOnly,'books'));
-    doc.setFillColor(255,238,238); doc.setDrawColor(...ROSE); doc.setLineWidth(0.5);
-    doc.roundedRect(12,y,W-24,11,2,2,'FD'); doc.setLineWidth(0.2);
-    doc.setTextColor(...ROSE); doc.setFont('helvetica','bold'); doc.setFontSize(8.5);
-    doc.text('ITC RISK: These invoices are in your books but the vendor has not filed them on the GST portal. Follow up with the vendor to avoid ITC reversal.',16,y+7.5,{maxWidth:W-32});
-    doc.setTextColor(...DGRAY); y+=15;
+    doc.addPage('landscape');
+    addPageHeader(ROSE, 'In Books Only');
+    let y = 20;
+    y = sectionHeading(y, 'In Books Only — Not filed on Portal. ITC at Risk!', ROSE, results.booksOnly.length, sumVal(results.booksOnly,'books'));
+    
+    // Risk banner
+    doc.setFillColor(255, 238, 238);
+    doc.setDrawColor(...ROSE);
+    doc.setLineWidth(0.3);
+    doc.roundedRect(ML, y, TW, 8, 1, 1, 'FD');
+    doc.setLineWidth(0.2);
+    doc.setTextColor(...ROSE);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.text('⚠ ITC RISK: Follow up with vendor to avoid ITC reversal.', ML + 2, y + 5);
+    y += 10;
+    
     autoTable(doc, {
-      ...BASE_TABLE, startY: y,
-      head: [['#','GSTIN','Party Name','Invoice No','Date','Invoice Value\n(Rs.)','Taxable\n(Rs.)','IGST','CGST','SGST','Place','Notes']],
+      ...BASE_TABLE,
+      startY: y,
+      head: [['#','GSTIN','Party Name','Invoice No','Date','Value (₹)','Taxable (₹)','IGST','CGST','SGST','Place']],
       body: results.booksOnly.map((r,i)=>{
-        const rowKey=r.key||`${r.books.gstin}__${r.books.invoiceNo}`;
-        const bgstin=(r.books.gstin||'').toUpperCase();
-        const name=r.books.tradeOrLegalName||manualTradeNames?.[bgstin]||manualTradeNames?.[r.books.gstin]||'—';
-        return [i+1,r.books.gstin,name,r.books.invoiceNoRaw,r.books.invoiceDate,fmt(r.books.invoiceValue),fmt(r.books.taxableValue),fmt(r.books.igst),fmt(r.books.cgst),fmt(r.books.sgst),r.books.placeOfSupply||'—',invoiceComments?.[rowKey]||''];
+        const inv = r.books;
+        const bgstin = inv?.gstin?.toUpperCase() || '';
+        return [
+          String(i+1),
+          bgstin,
+          inv?.tradeOrLegalName || manualTradeNames?.[bgstin] || manualTradeNames?.[inv?.gstin] || '—',
+          inv?.invoiceNoRaw || '—',
+          inv?.invoiceDate || '—',
+          fmt(inv?.invoiceValue || 0),
+          fmt(inv?.taxableValue || 0),
+          fmt(inv?.igst || 0),
+          fmt(inv?.cgst || 0),
+          fmt(inv?.sgst || 0),
+          inv?.placeOfSupply || '—',
+        ];
       }),
-      headStyles:{...BASE_TABLE.headStyles,fillColor:ROSE},alternateRowStyles:{fillColor:[255,240,240]},
-      columnStyles:{0:{cellWidth:8,halign:'center'},1:{cellWidth:32,overflow:'linebreak'},2:{cellWidth:36,overflow:'linebreak'},3:{cellWidth:20,overflow:'linebreak'},4:{cellWidth:18},5:{cellWidth:22,halign:'right'},6:{cellWidth:20,halign:'right'},7:{cellWidth:14,halign:'right'},8:{cellWidth:14,halign:'right'},9:{cellWidth:14,halign:'right'},10:{cellWidth:20},11:{cellWidth:'auto',fontStyle:'italic',textColor:[120,55,10],overflow:'linebreak'}},
+      headStyles: { ...BASE_TABLE.headStyles, fillColor: ROSE },
+      columnStyles: {
+        0: { cellWidth: 8, halign: 'center' },
+        1: { cellWidth: 32, halign: 'left' },
+        2: { cellWidth: 28, halign: 'left' },
+        3: { cellWidth: 18, halign: 'left' },
+        4: { cellWidth: 14, halign: 'left' },
+        5: { cellWidth: 20, halign: 'right' },
+        6: { cellWidth: 16, halign: 'right' },
+        7: { cellWidth: 12, halign: 'right' },
+        8: { cellWidth: 12, halign: 'right' },
+        9: { cellWidth: 12, halign: 'right' },
+        10: { cellWidth: 16, halign: 'left' },
+      },
     });
   }
 
-  // PAGE 4 — AMOUNT MISMATCH
+  // PAGE 4 — MISMATCH
   if (results.mismatch.length > 0) {
-    doc.addPage(); addPageHeader(AMBER);
-    let y = sectionHeading(20,'Amount Mismatch — Invoice found in both Portal and Books but amounts differ',AMBER,results.mismatch.length,sumVal(results.mismatch,'portal'));
+    doc.addPage('landscape');
+    addPageHeader(AMBER, 'Amount Mismatch');
+    let y = 20;
+    y = sectionHeading(y, 'Amount Mismatch — Values differ between Portal and Books', AMBER, results.mismatch.length, sumVal(results.mismatch,'portal'));
+    
     autoTable(doc, {
-      ...BASE_TABLE, startY: y,
-      head: [['#','GSTIN','Party Name','Inv No','Date','Portal Value\n(Rs.)','Books Value\n(Rs.)','Diff\n(Rs.)','Portal Tax\n(Rs.)','Books Tax\n(Rs.)','Tax Diff\n(Rs.)','Notes']],
+      ...BASE_TABLE,
+      startY: y,
+      head: [['#','GSTIN','Party Name','Inv No','Date','Portal (₹)','Books (₹)','Diff (₹)','P.Tax (₹)','B.Tax (₹)','Tax Δ (₹)']],
       body: results.mismatch.map((r,i)=>{
-        const rowKey=r.key||`${r.portal.gstin}__${r.portal.invoiceNo}`;
-        const name=r.portal.tradeOrLegalName||manualTradeNames?.[r.portal.gstin]||r.books?.tradeOrLegalName||manualTradeNames?.[r.books?.gstin]||'—';
-        const diffPos=r.valueDiff>0, taxDiffP=r.taxDiff>0;
-        return [i+1,r.portal.gstin,name,r.portal.invoiceNoRaw,r.portal.invoiceDate,fmt(r.portal.invoiceValue),fmt(r.books.invoiceValue),{content:(diffPos?'+':'')+fmt(r.valueDiff),styles:{textColor:diffPos?[37,99,200]:[185,28,28],fontStyle:'bold',halign:'right'}},fmt(r.portal.igst+r.portal.cgst+r.portal.sgst),fmt(r.books.igst+r.books.cgst+r.books.sgst),{content:(taxDiffP?'+':'')+fmt(r.taxDiff),styles:{textColor:taxDiffP?[37,99,200]:[185,28,28],fontStyle:'bold',halign:'right'}},invoiceComments?.[rowKey]||''];
+        const pTax = (r.portal?.igst||0)+(r.portal?.cgst||0)+(r.portal?.sgst||0);
+        const bTax = (r.books?.igst||0)+(r.books?.cgst||0)+(r.books?.sgst||0);
+        const diffVal = r.valueDiff > 0 ? '+' : '';
+        const diffTax = r.taxDiff > 0 ? '+' : '';
+        return [
+          String(i+1),
+          r.portal?.gstin || '—',
+          r.portal?.tradeOrLegalName || manualTradeNames?.[r.portal?.gstin] || '—',
+          r.portal?.invoiceNoRaw || '—',
+          r.portal?.invoiceDate || '—',
+          fmt(r.portal?.invoiceValue || 0),
+          fmt(r.books?.invoiceValue || 0),
+          diffVal + fmt(Math.abs(r.valueDiff || 0)),
+          fmt(pTax),
+          fmt(bTax),
+          diffTax + fmt(Math.abs(r.taxDiff || 0)),
+        ];
       }),
-      headStyles:{...BASE_TABLE.headStyles,fillColor:AMBER},alternateRowStyles:{fillColor:[255,250,230]},
-      columnStyles:{0:{cellWidth:8,halign:'center'},1:{cellWidth:32,overflow:'linebreak'},2:{cellWidth:32,overflow:'linebreak'},3:{cellWidth:20,overflow:'linebreak'},4:{cellWidth:18},5:{cellWidth:22,halign:'right'},6:{cellWidth:22,halign:'right'},7:{cellWidth:18,halign:'right'},8:{cellWidth:20,halign:'right'},9:{cellWidth:20,halign:'right'},10:{cellWidth:18,halign:'right'},11:{cellWidth:'auto',fontStyle:'italic',textColor:[120,55,10],overflow:'linebreak'}},
+      headStyles: { ...BASE_TABLE.headStyles, fillColor: AMBER },
+      columnStyles: {
+        0: { cellWidth: 8, halign: 'center' },
+        1: { cellWidth: 32, halign: 'left' },
+        2: { cellWidth: 26, halign: 'left' },
+        3: { cellWidth: 16, halign: 'left' },
+        4: { cellWidth: 14, halign: 'left' },
+        5: { cellWidth: 18, halign: 'right' },
+        6: { cellWidth: 18, halign: 'right' },
+        7: { cellWidth: 14, halign: 'right' },
+        8: { cellWidth: 14, halign: 'right' },
+        9: { cellWidth: 14, halign: 'right' },
+        10: { cellWidth: 14, halign: 'right' },
+      },
     });
   }
 
-  // PAGE 5 — MATCHED INVOICES
+  // PAGE 5 — MATCHED
   if (results.matched.length > 0) {
-    doc.addPage(); addPageHeader(GREEN);
-    let y = sectionHeading(20,'Matched Invoices — Present in both GST Portal and Books with matching amounts',GREEN,results.matched.length,sumVal(results.matched,'portal'));
+    doc.addPage('landscape');
+    addPageHeader(GREEN, 'Matched Invoices');
+    let y = 20;
+    y = sectionHeading(y, 'Matched Invoices — Present in both Portal and Books', GREEN, results.matched.length, sumVal(results.matched,'portal'));
+    
     autoTable(doc, {
-      ...BASE_TABLE, startY: y,
-      head: [['#','GSTIN','Party Name','Invoice No','Date','Invoice Value\n(Rs.)','Taxable Value\n(Rs.)','IGST\n(Rs.)','CGST\n(Rs.)','SGST\n(Rs.)','Cess\n(Rs.)','Notes']],
+      ...BASE_TABLE,
+      startY: y,
+      head: [['#','GSTIN','Party Name','Invoice No','Date','Value (₹)','Taxable (₹)','IGST','CGST','SGST','Cess']],
       body: results.matched.map((r,i)=>{
-        const rowKey=r.key||`${r.portal.gstin}__${r.portal.invoiceNo}`;
-        const name=r.portal.tradeOrLegalName||manualTradeNames?.[r.portal.gstin]||r.books?.tradeOrLegalName||manualTradeNames?.[r.books?.gstin]||'—';
-        return [i+1,r.portal.gstin,name,r.portal.invoiceNoRaw,r.portal.invoiceDate,fmt(r.portal.invoiceValue),fmt(r.portal.taxableValue),fmt(r.portal.igst),fmt(r.portal.cgst),fmt(r.portal.sgst),fmt(r.portal.cess),invoiceComments?.[rowKey]||''];
+        return [
+          String(i+1),
+          r.portal?.gstin || '—',
+          r.portal?.tradeOrLegalName || manualTradeNames?.[r.portal?.gstin] || '—',
+          r.portal?.invoiceNoRaw || '—',
+          r.portal?.invoiceDate || '—',
+          fmt(r.portal?.invoiceValue || 0),
+          fmt(r.portal?.taxableValue || 0),
+          fmt(r.portal?.igst || 0),
+          fmt(r.portal?.cgst || 0),
+          fmt(r.portal?.sgst || 0),
+          fmt(r.portal?.cess || 0),
+        ];
       }),
-      headStyles:{...BASE_TABLE.headStyles,fillColor:GREEN},alternateRowStyles:{fillColor:[236,253,243]},
-      columnStyles:{0:{cellWidth:8,halign:'center'},1:{cellWidth:32,overflow:'linebreak'},2:{cellWidth:36,overflow:'linebreak'},3:{cellWidth:20,overflow:'linebreak'},4:{cellWidth:18},5:{cellWidth:24,halign:'right'},6:{cellWidth:24,halign:'right'},7:{cellWidth:16,halign:'right'},8:{cellWidth:16,halign:'right'},9:{cellWidth:16,halign:'right'},10:{cellWidth:14,halign:'right'},11:{cellWidth:'auto',fontStyle:'italic',textColor:[120,55,10],overflow:'linebreak'}},
+      headStyles: { ...BASE_TABLE.headStyles, fillColor: GREEN },
+      columnStyles: {
+        0: { cellWidth: 8, halign: 'center' },
+        1: { cellWidth: 32, halign: 'left' },
+        2: { cellWidth: 28, halign: 'left' },
+        3: { cellWidth: 18, halign: 'left' },
+        4: { cellWidth: 14, halign: 'left' },
+        5: { cellWidth: 18, halign: 'right' },
+        6: { cellWidth: 16, halign: 'right' },
+        7: { cellWidth: 12, halign: 'right' },
+        8: { cellWidth: 12, halign: 'right' },
+        9: { cellWidth: 12, halign: 'right' },
+        10: { cellWidth: 12, halign: 'right' },
+      },
     });
   }
 
-  doc.setPage(1); addPageFooter();
+  // Add footer to first page
+  doc.setPage(1);
+  addPageFooter();
+
   const fname = `GST_Recon_${(company.name || 'Report').replace(/\s+/g,'_')}_${period ? period.replace(/\s+/g,'_') : 'Export'}.pdf`;
   doc.save(fname);
-  toast.success('PDF report downloaded successfully!');
+  toast.success('Professional PDF report generated successfully!');
 }
-
 
 /* ═══════════════════════════════════════════════════════════════════════════
    WORD (.doc) EXPORT  — HTML-to-Word via Blob + file-saver
