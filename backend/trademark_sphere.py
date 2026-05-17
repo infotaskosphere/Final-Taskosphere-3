@@ -1439,7 +1439,7 @@ async def delete_tm(tm_id: str, user: User = Depends(get_current_user)):
         raise HTTPException(404, "Not found")
     await db.trademark_sphere_reminders.delete_many({"trademark_id": tm_id})
     return {"deleted": tm_id}
-\n
+
 
 @router.post("/sync/{application_number}")
 async def sync_trademark(application_number: str):
@@ -1472,4 +1472,3 @@ async def get_watchlists():
 async def search_trademark(query: str):
 
     return await search_service.search(query)
-
