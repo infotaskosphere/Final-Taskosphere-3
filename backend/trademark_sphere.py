@@ -1472,3 +1472,4 @@ async def get_watchlists():
 async def search_trademark(query: str):
 
     return await search_service.search(query)
+
