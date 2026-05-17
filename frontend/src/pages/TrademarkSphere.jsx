@@ -9,7 +9,7 @@ import api from '@/lib/api';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import useDark from '../hooks/useDark';
-import AgentPortalSyncModal from '@/components/AgentPortalSyncModal';
+import PortalSyncModal from '@/components/PortalSyncModal';
 import {
   Shield, Plus, Search, RefreshCw, Trash2, Edit2, Eye,
   Calendar, AlertTriangle, CheckCircle2, Clock, X,
@@ -1270,7 +1270,7 @@ export default function TrademarkSphere() {
 
       <AnimatePresence>
         {showPortalSync && (
-          <AgentPortalSyncModal
+          <PortalSyncModal
             key="portal-sync"
             isDark={isDark}
             onClose={() => setShowPortalSync(false)}
