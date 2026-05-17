@@ -82,6 +82,8 @@ class ImportNumbersBody(BaseModel):
     attorney:            Optional[str] = None
     client_id:           Optional[str] = None
     client_name:         Optional[str] = None
+    # Optional pre-fetched full details from agent portal (avoids double-scraping)
+    full_details:        Optional[List[dict]] = None
 
 
 # ── Estatus flow ────────────────────────────────────────────────────────────
@@ -151,11 +153,25 @@ async def import_scraped_numbers(
     body: ImportNumbersBody, bg: BackgroundTasks,
     user: User = Depends(get_current_user),
 ):
-    # Avoid a circular import by importing lazily.
+    """
+    Import trademark application numbers into the database.
+
+    If `full_details` is provided (pre-fetched by the agent portal login),
+    those are used directly. Otherwise each number is scraped individually
+    via QuickCompany / IP India public search.
+    """
     from backend.trademark_sphere import scrape_trademark, _compute_deadlines, _gen_reminders, db, IST
     from datetime import datetime
 
-    added, skipped = 0, 0
+    # Build lookup from pre-fetched details (supplied by agent login)
+    prefetched: dict = {}
+    if body.full_details:
+        for d in body.full_details:
+            num_key = (d.get("application_number") or "").strip()
+            if num_key:
+                prefetched[num_key] = d
+
+    added, skipped, failed = 0, 0, 0
     for num in body.application_numbers:
         num = (num or "").strip()
         if not num:
@@ -164,11 +180,25 @@ async def import_scraped_numbers(
         if exists:
             skipped += 1
             continue
-        try:
-            raw = await scrape_trademark(num, "")
-        except Exception as exc:
-            logger.warning("scrape %s failed: %s", num, exc)
-            continue
+
+        raw: dict = {}
+
+        # Use pre-fetched detail if available and has meaningful data
+        if num in prefetched:
+            pf = prefetched[num]
+            if pf.get("word_mark") or pf.get("tm_status"):
+                raw = pf
+                logger.info("Using pre-fetched agent portal detail for %s", num)
+
+        # Otherwise fall back to QuickCompany / public IP India scrape
+        if not raw:
+            try:
+                raw = await scrape_trademark(num, "")
+            except Exception as exc:
+                logger.warning("scrape %s failed: %s", num, exc)
+                raw = {"application_number": num}
+                failed += 1
+
         dl = _compute_deadlines(raw)
         now = datetime.now(IST)
         tid = str(uuid.uuid4())
@@ -178,6 +208,7 @@ async def import_scraped_numbers(
                 "application_number", "word_mark", "class_number", "tm_status",
                 "proprietor", "applicant_name", "filing_date", "registration_date",
                 "valid_upto", "goods_and_services", "trademark_image_url", "address",
+                "attorney_code", "detail_url",
             )},
             "attorney":      body.attorney or raw.get("attorney", ""),
             "client_id":     body.client_id or "",
@@ -190,7 +221,7 @@ async def import_scraped_numbers(
             "updated_at":    now.isoformat(),
             "created_by":    user.id,
             "raw_data":      raw,
-            "scrape_source": raw.get("scrape_source", "ipindia"),
+            "scrape_source": raw.get("source") or raw.get("scrape_source", "ipindia"),
             "documents":     raw.get("documents", []),
             "hearings":      raw.get("hearings"),
             **dl,
@@ -199,4 +230,9 @@ async def import_scraped_numbers(
         bg.add_task(_gen_reminders, tid, doc)
         added += 1
 
-    return {"added": added, "skipped": skipped, "requested": len(body.application_numbers)}
+    return {
+        "added":     added,
+        "skipped":   skipped,
+        "failed":    failed,
+        "requested": len(body.application_numbers),
+    }
