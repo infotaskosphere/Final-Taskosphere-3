@@ -450,11 +450,34 @@ def _qc_fetch_by_app_number(app_number: str) -> Dict[str, Any]:
         logger.error(f"QC fetch error for {app_number}: {e}")
 
     if not detail_html:
-        raise HTTPException(
-            404,
-            f"Trademark {app_number} not found on QuickCompany. "
-            "Try adding it manually."
-        )
+        # FALLBACK: Return empty template so user can enter data manually
+        # This prevents errors and allows users to still complete the feature
+        logger.warning(f"Could not auto-fetch trademark {app_number} - returning empty template for manual entry")
+        fallback_data = {
+            "application_number": str(app_number).strip(),
+            "word_mark": "",
+            "tm_status": "Unknown",
+            "class_number": "",
+            "proprietor": "",
+            "applicant_name": "",
+            "filing_date": "",
+            "registration_date": "",
+            "valid_upto": "",
+            "goods_and_services": "",
+            "address": "",
+            "trademark_image_url": "",
+            "state": "",
+            "ip_office": "",
+            "filing_mode": "",
+            "used_since": "",
+            "mark_type": "",
+            "attorney": "",
+            "documents": [],
+            "hearings": None,
+            "scrape_source": "manual_entry_required",
+        }
+        _tm_cache[cache_key] = fallback_data
+        return fallback_data
 
     data = _qc_parse_detail_page(detail_html, app_number)
     _tm_cache[cache_key] = data
