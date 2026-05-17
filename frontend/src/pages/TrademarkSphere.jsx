@@ -1207,10 +1207,15 @@ export default function TrademarkSphere() {
         api.get('/trademark-sphere/stats'),
         api.get('/trademark-sphere/deadlines?days=180'),
       ]);
-      setTrademarks(listRes.data.items);
-      setTotalCount(listRes.data.total);
-      setStats(statsRes.data);
-      setDeadlines(dlRes.data);
+      const listData = listRes.data || {};
+      setTrademarks(Array.isArray(listData.items) ? listData.items : []);
+      setTotalCount(typeof listData.total === 'number' ? listData.total : 0);
+      setStats(statsRes.data || null);
+      const dlData = dlRes.data || {};
+      setDeadlines({
+        upcoming: Array.isArray(dlData.upcoming) ? dlData.upcoming : [],
+        overdue:  Array.isArray(dlData.overdue)  ? dlData.overdue  : [],
+      });
     } catch {
       toast.error('Failed to load trademark data');
     } finally { setLoading(false); }
