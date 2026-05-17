@@ -303,11 +303,18 @@ function AgentFlow({ onDone, isDark }) {
         password:   form.password,
         captcha:    form.captcha.trim(),
       });
-      toast.success(`Logged in — found ${data.application_numbers?.length || 0} TM(s)`);
+      const totalFound = data.application_numbers?.length || 0;
+      toast.success(`Logged in — found ${totalFound} TM application(s)`);
       setStage('importing');
-      const r = await api.post('/trademark-sphere/portals/import',
-                               { application_numbers: data.application_numbers || [] });
-      toast.success(`Imported ${r.data.added} new (${r.data.skipped} already tracked)`);
+      // Pass full_details (pre-fetched from IP India portal) to avoid double-scraping
+      const r = await api.post('/trademark-sphere/portals/import', {
+        application_numbers: data.application_numbers || [],
+        full_details:        data.full_details        || [],
+      });
+      const msg = `Imported ${r.data.added} new trademark(s)` +
+                  (r.data.skipped ? ` (${r.data.skipped} already tracked)` : '') +
+                  (r.data.failed  ? ` — ${r.data.failed} could not be fetched` : '');
+      toast.success(msg);
       onDone?.();
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Login failed');
@@ -342,9 +349,14 @@ function AgentFlow({ onDone, isDark }) {
       )}
 
       {stage === 'importing' && (
-        <div className="text-center py-6">
-          <Loader2 className="w-8 h-8 animate-spin mx-auto text-blue-500" />
-          <p className="mt-3 text-sm font-semibold">Importing trademarks…</p>
+        <div className="text-center py-6 space-y-3">
+          <Loader2 className="w-10 h-10 animate-spin mx-auto text-blue-500" />
+          <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+            Logging in &amp; fetching trademark details…
+          </p>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Auto-browsing IP India portal. This may take 30–60 seconds.
+          </p>
         </div>
       )}
     </div>
