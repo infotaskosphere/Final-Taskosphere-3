@@ -125,3 +125,14 @@ lxml==5.2.1
 PyKCS11==1.5.13
 cryptography>=42.0.0
 # pyscard is excluded — requires libpcsclite-dev system lib not available on Render.com
+
+
+# =========================
+# TM Login Portal
+# =========================
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+pymongo>=4.6.0
+python-dotenv>=1.0.0
+selenium>=4.20.0  
