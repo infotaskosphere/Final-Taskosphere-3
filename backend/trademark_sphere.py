@@ -1,3 +1,9 @@
+
+from backend.services.watchlist_service import watchlist_service
+from backend.services.search_service import search_service
+
+
+from backend.services.ipindia_scraper import scraper
 """
 backend/trademark_sphere.py
 ---------------------------
@@ -450,34 +456,11 @@ def _qc_fetch_by_app_number(app_number: str) -> Dict[str, Any]:
         logger.error(f"QC fetch error for {app_number}: {e}")
 
     if not detail_html:
-        # FALLBACK: Return empty template so user can enter data manually
-        # This prevents errors and allows users to still complete the feature
-        logger.warning(f"Could not auto-fetch trademark {app_number} - returning empty template for manual entry")
-        fallback_data = {
-            "application_number": str(app_number).strip(),
-            "word_mark": "",
-            "tm_status": "Unknown",
-            "class_number": "",
-            "proprietor": "",
-            "applicant_name": "",
-            "filing_date": "",
-            "registration_date": "",
-            "valid_upto": "",
-            "goods_and_services": "",
-            "address": "",
-            "trademark_image_url": "",
-            "state": "",
-            "ip_office": "",
-            "filing_mode": "",
-            "used_since": "",
-            "mark_type": "",
-            "attorney": "",
-            "documents": [],
-            "hearings": None,
-            "scrape_source": "manual_entry_required",
-        }
-        _tm_cache[cache_key] = fallback_data
-        return fallback_data
+        raise HTTPException(
+            404,
+            f"Trademark {app_number} not found on QuickCompany. "
+            "Try adding it manually."
+        )
 
     data = _qc_parse_detail_page(detail_html, app_number)
     _tm_cache[cache_key] = data
@@ -1456,3 +1439,36 @@ async def delete_tm(tm_id: str, user: User = Depends(get_current_user)):
         raise HTTPException(404, "Not found")
     await db.trademark_sphere_reminders.delete_many({"trademark_id": tm_id})
     return {"deleted": tm_id}
+\n
+
+@router.post("/sync/{application_number}")
+async def sync_trademark(application_number: str):
+
+    return await scraper.search_application(
+        application_number
+    )
+
+@router.get("/health")
+async def trademark_health():
+
+    return {
+        "status": "running",
+        "module": "Trademark Sphere"
+    }
+
+
+
+@router.post("/watchlist")
+async def create_watchlist(payload: dict):
+
+    return await watchlist_service.add(payload)
+
+@router.get("/watchlist")
+async def get_watchlists():
+
+    return await watchlist_service.list()
+
+@router.get("/search")
+async def search_trademark(query: str):
+
+    return await search_service.search(query)
