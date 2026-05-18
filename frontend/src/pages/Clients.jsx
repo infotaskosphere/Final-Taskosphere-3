@@ -26,6 +26,7 @@ import {
 import { detectClientDuplicates } from '@/lib/aiDuplicateEngine';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
 import ClientPortalManager from '@/components/ClientPortalManager';
+import DSCLinkerSection from '@/components/DSCLinkerSection';
 import { format, startOfDay, differenceInDays } from 'date-fns';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -3704,27 +3705,17 @@ export default function Clients() {
                     ))}</div>
                   </div>
                   {/* DSC Details */}
-                  <div className={`border rounded-2xl p-6 ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50/60 border-slate-100'}`}>
-                    <div className="flex items-center justify-between mb-5">
-                      <SectionHeading icon={<Shield className="h-4 w-4" />} title="DSC Details" subtitle="Digital Signature Certificates" isDark={isDark} />
-                      <Button type="button" size="sm" onClick={addDSC} variant="outline" className="h-8 px-3 text-xs rounded-xl border-slate-200 -mt-2"><Plus className="h-3 w-3 mr-1" /> Add DSC</Button>
-                    </div>
-                    <div className="space-y-4">{formData.dsc_details.map((dsc, idx) => (
-                      <div key={idx} className={`border rounded-xl p-5 relative ${isDark ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-200'}`}>
-                        <div className="flex items-center justify-between mb-4">
-                          <div className="flex items-center gap-2"><div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center">{idx + 1}</div><span className="text-sm font-semibold text-slate-700">DSC Certificate</span></div>
-                          <button type="button" onClick={() => removeDSC(idx)} className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash className="h-3.5 w-3.5" /></button>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div><label className={labelCls}>Certificate Number</label><Input value={dsc.certificate_number} onChange={e => updateDSC(idx, 'certificate_number', e.target.value)} className={fieldCls(false)} /></div>
-                          <div><label className={labelCls}>Holder Name</label><Input value={dsc.holder_name} onChange={e => updateDSC(idx, 'holder_name', e.target.value)} className={fieldCls(false)} /></div>
-                          <div><label className={labelCls}>Issue Date</label><Input type="date" value={dsc.issue_date || ''} onChange={e => updateDSC(idx, 'issue_date', e.target.value)} className={fieldCls(false)} /></div>
-                          <div><label className={labelCls}>Expiry Date</label><Input type="date" value={dsc.expiry_date || ''} onChange={e => updateDSC(idx, 'expiry_date', e.target.value)} className={fieldCls(false)} /></div>
-                          <div className="md:col-span-2"><label className={labelCls}>Notes</label><Textarea value={dsc.notes || ''} onChange={e => updateDSC(idx, 'notes', e.target.value)} className={`min-h-[80px] rounded-xl text-sm resize-y ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} /></div>
-                        </div>
-                      </div>
-                    ))}</div>
-                  </div>
+                  <DSCLinkerSection
+                    formData={formData}
+                    setFormData={setFormData}
+                    updateDSC={updateDSC}
+                    addDSC={addDSC}
+                    removeDSC={removeDSC}
+                    companyName={formData.company_name}
+                    isDark={isDark}
+                    labelCls={labelCls}
+                    fieldCls={fieldCls}
+                  />
                   {/* Services */}
                   <div className={`border rounded-2xl p-6 ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50/60 border-slate-100'}`}>
                     <SectionHeading icon={<BarChart3 className="h-4 w-4" />} title="Services" subtitle="Select all applicable services" isDark={isDark} />
