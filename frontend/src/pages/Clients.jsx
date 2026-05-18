@@ -1920,48 +1920,130 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
 
           {/* ════════════════ GOVT FEES TAB ════════════════ */}
           {activeTab === 'govtfees' && (() => {
-            // Only show UNPAID adhoc fees here. Paid ones are shown in
-            // the Compliance & Client (Details) views.
-            const unpaidAdhoc = (adhocFees || []).filter(
-              f => (f.status || '').toLowerCase() !== 'paid'
-            );
-            // Compliance-linked items are considered "paid" when an amount > 0
-            // has been recorded; hide those from the Govt Fees tab.
-            const unpaidLinked = (govtFees || []).filter(
-              i => !((i.govt_fees_amount || 0) > 0)
-            );
+            const isSavedLinkedFee = (item) => {
+              const amount = Number(item.govt_fees_amount || 0);
+              return amount > 0 || !!item.govt_fees_srn || !!item.govt_fees_notes;
+            };
+            const pendingLinked = (govtFees || []).filter(item => !isSavedLinkedFee(item));
+            const savedLinked = (govtFees || []).filter(isSavedLinkedFee);
+            const paymentRows = [
+              ...savedLinked.map(item => ({
+                id: `linked-${item.assignment_id}`,
+                type: 'linked',
+                source: 'Compliance Tracker',
+                title: item.name || 'Compliance fee',
+                category: item.category || '—',
+                fy_year: item.fy_year || '—',
+                due_date: item.due_date || '',
+                amount: Number(item.govt_fees_amount || 0),
+                srn: item.govt_fees_srn || '',
+                notes: item.govt_fees_notes || '',
+                status: Number(item.govt_fees_amount || 0) > 0 ? 'paid' : 'unpaid',
+                payment_date: item.payment_date || item.paid_on || item.paid_at || '',
+              })),
+              ...(adhocFees || []).map(fee => ({
+                id: `adhoc-${fee.id}`,
+                type: 'adhoc',
+                source: 'Ad-hoc',
+                raw: fee,
+                title: fee.title || 'Government fee',
+                category: fee.category || 'OTHER',
+                fy_year: fee.fy_year || '—',
+                due_date: fee.due_date || '',
+                amount: Number(fee.amount || 0),
+                srn: fee.srn || '',
+                notes: fee.notes || '',
+                status: fee.status || (fee.payment_date || fee.paid_on || fee.paid_at ? 'paid' : 'unpaid'),
+                payment_date: fee.payment_date || fee.paid_on || fee.paid_at || '',
+              })),
+            ];
+            const money = (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const dateText = (d) => d ? format(new Date(String(d).slice(0, 10)), 'MMM d, yyyy') : '—';
+            const statusLabel = (s) => (String(s || '').toLowerCase() === 'paid' ? 'Paid' : 'Unpaid');
+            const exportGovtFees = (kind) => {
+              if (!paymentRows.length) { toast.error('No government fee payments to export'); return; }
+              const fileName = `govt_fees_${(selectedClient?.company_name || 'client').replace(/[^a-z0-9]+/gi, '_')}_${format(new Date(), 'dd-MMM-yyyy')}`;
+              const rows = paymentRows.map((row, i) => [
+                i + 1,
+                selectedClient?.company_name || '',
+                row.source,
+                row.title,
+                row.category,
+                row.fy_year,
+                dateText(row.due_date),
+                statusLabel(row.status),
+                dateText(row.payment_date),
+                row.amount,
+                row.srn || '',
+                row.notes || '',
+              ]);
+              const headers = ['#', 'Client', 'Source', 'Title', 'Category', 'FY Year', 'Due Date', 'Status', 'Payment Date', 'Amount (₹)', 'SRN', 'Details'];
+              if (kind === 'excel') {
+                const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+                ws['!cols'] = [{wch:5},{wch:32},{wch:20},{wch:28},{wch:14},{wch:12},{wch:14},{wch:12},{wch:14},{wch:14},{wch:18},{wch:32}];
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, 'Govt Fees');
+                XLSX.writeFile(wb, `${fileName}.xlsx`);
+                toast.success('Government fees Excel exported');
+                return;
+              }
+              const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+              doc.setFontSize(15);
+              doc.text('Government Fees Payment List', 14, 14);
+              doc.setFontSize(9);
+              doc.text(`${selectedClient?.company_name || ''} • ${format(new Date(), 'dd MMM yyyy')}`, 14, 20);
+              autoTable(doc, {
+                startY: 26,
+                head: [headers],
+                body: rows,
+                styles: { fontSize: 7, cellPadding: 2 },
+                headStyles: { fillColor: [13, 59, 102] },
+                columnStyles: { 0: { cellWidth: 8 }, 9: { halign: 'right' } },
+              });
+              doc.save(`${fileName}.pdf`);
+              toast.success('Government fees PDF exported');
+            };
             return (
             <div className="p-6 space-y-6">
 
-              {/* Heading + description (no button up here) */}
-              <div className="flex flex-col items-center text-center gap-1">
-                <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
-                  Government Fees
-                </p>
-                <p className="text-xs text-slate-500 max-w-md">
-                  Compliance-linked fees come from the Compliance Tracker. Unpaid
-                  fees stay here; once marked paid they move to the Compliance &
-                  Client views.
-                </p>
-              </div>
-
-              {/* Compliance-linked govt fees */}
-              {govtFeesLoading ? (
-                <div className="py-10 text-center text-sm text-slate-500">Loading…</div>
-              ) : unpaidLinked.length === 0 ? (
-                <div className="py-10 text-center rounded-xl border border-dashed border-slate-200">
-                  <IndianRupee className="h-8 w-8 mx-auto mb-2 text-slate-300" />
-                  <p className={`text-sm font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                    No unpaid compliance-linked government fees
+              {/* Heading, details and export controls */}
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="space-y-1">
+                  <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                    Government Fees
                   </p>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Paid fees appear under the Compliance and Details tabs.
+                  <p className="text-xs text-slate-500 max-w-xl">
+                    Saved compliance fees and added government fees are shown together in this full payment list, including paid entries.
                   </p>
                 </div>
-              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Export</span>
+                  <button
+                    type="button"
+                    onClick={() => exportGovtFees('excel')}
+                    disabled={!paymentRows.length}
+                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs font-bold disabled:opacity-40"
+                    style={{ borderColor: isDark ? '#334155' : '#cbd5e1', color: isDark ? '#cbd5e1' : '#0f172a', backgroundColor: isDark ? '#1e293b' : '#fff' }}>
+                    <FileSpreadsheet className="h-3.5 w-3.5" /> Excel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => exportGovtFees('pdf')}
+                    disabled={!paymentRows.length}
+                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs font-bold disabled:opacity-40"
+                    style={{ borderColor: isDark ? '#334155' : '#cbd5e1', color: isDark ? '#cbd5e1' : '#0f172a', backgroundColor: isDark ? '#1e293b' : '#fff' }}>
+                    <Download className="h-3.5 w-3.5" /> PDF
+                  </button>
+                </div>
+              </div>
+
+              {/* Pending compliance-linked govt fees */}
+              {govtFeesLoading ? (
+                <div className="py-10 text-center text-sm text-slate-500">Loading…</div>
+              ) : pendingLinked.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                    From Compliance Tracker
+                    Pending From Compliance Tracker
                   </p>
                   <div className={`grid gap-2 px-3 py-2 text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
                     style={{ gridTemplateColumns: '2fr 80px 100px 120px 1fr 80px' }}>
@@ -1972,7 +2054,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                     <div>SRN</div>
                     <div className="text-right">Action</div>
                   </div>
-                  {unpaidLinked.map(item => {
+                  {pendingLinked.map(item => {
                     const draft = govtFeesDraft[item.assignment_id] || { amount: 0, notes: '', srn: '' };
                     const dirty = (parseFloat(draft.amount) || 0) !== (item.govt_fees_amount || 0)
                                || (draft.notes || '') !== (item.govt_fees_notes || '')
@@ -2029,65 +2111,76 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 </div>
               )}
 
-              {/* Standalone (ad-hoc) govt fees — unpaid only */}
+              {/* Single full payment list */}
               <div className="space-y-2">
                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                  One-off / Ad-hoc Fees (Unpaid)
+                  Full Payment List
                 </p>
-                {adhocFeesLoading ? (
+                {(adhocFeesLoading || govtFeesLoading) ? (
                   <div className="py-6 text-center text-xs text-slate-500">Loading…</div>
-                ) : unpaidAdhoc.length === 0 ? (
-                  <div className="py-6 text-center text-xs text-slate-500 rounded-xl border border-dashed border-slate-200">
-                    No unpaid one-off fees. Paid fees appear under Compliance & Details.
+                ) : paymentRows.length === 0 ? (
+                  <div className="py-8 text-center text-xs text-slate-500 rounded-xl border border-dashed border-slate-200">
+                    No government fee payments yet. Save a tracker fee or add a government fee below.
                   </div>
                 ) : (
                   <>
                     <div className={`grid gap-2 px-3 py-2 text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
-                      style={{ gridTemplateColumns: '2fr 90px 100px 110px 1fr 100px' }}>
+                      style={{ gridTemplateColumns: '120px 2fr 90px 110px 90px 1fr 90px' }}>
+                      <div>Source</div>
                       <div>Title</div>
-                      <div>Category</div>
                       <div>FY</div>
                       <div>Due Date</div>
+                      <div>Status</div>
                       <div>Amount / SRN</div>
                       <div className="text-right">Actions</div>
                     </div>
-                    {unpaidAdhoc.map(fee => (
-                      <div key={fee.id}
+                    {paymentRows.map(row => (
+                      <div key={row.id}
                         className={`grid gap-2 items-center px-3 py-2.5 rounded-xl border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-white border-slate-200'}`}
-                        style={{ gridTemplateColumns: '2fr 90px 100px 110px 1fr 100px' }}>
+                        style={{ gridTemplateColumns: '120px 2fr 90px 110px 90px 1fr 90px' }}>
+                        <div className="text-[11px] font-bold text-slate-500">{row.source}</div>
                         <div>
-                          <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{fee.title}</p>
-                          {fee.period_label && <p className="text-[11px] text-slate-500">{fee.period_label}</p>}
+                          <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{row.title}</p>
+                          <p className="text-[11px] text-slate-500">{row.category}{row.notes ? ` · ${row.notes}` : ''}</p>
                         </div>
-                        <div className="text-xs text-slate-600">{fee.category || 'OTHER'}</div>
-                        <div className="text-xs text-slate-600">{fee.fy_year || '—'}</div>
-                        <div className="text-xs text-slate-600">
-                          {fee.due_date ? format(new Date(fee.due_date.slice(0, 10)), 'MMM d, yyyy') : '—'}
+                        <div className="text-xs text-slate-600">{row.fy_year || '—'}</div>
+                        <div className="text-xs text-slate-600">{dateText(row.due_date)}</div>
+                        <div>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${String(row.status).toLowerCase() === 'paid' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
+                            {statusLabel(row.status)}
+                          </span>
+                          {row.payment_date && <p className="text-[10px] text-slate-500 mt-1">{dateText(row.payment_date)}</p>}
                         </div>
                         <div>
-                          <p className="text-sm font-bold">₹ {(fee.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-                          <p className="text-[11px] font-mono text-slate-500">{fee.srn || '—'}</p>
+                          <p className="text-sm font-bold">₹ {money(row.amount)}</p>
+                          <p className="text-[11px] font-mono text-slate-500">{row.srn || '—'}</p>
                         </div>
                         <div className="flex justify-end gap-1">
-                          <button
-                            onClick={() => { setEditingAdhoc(fee); setShowAdhocDialog(true); }}
-                            className="p-1.5 rounded-lg hover:bg-slate-100" title="Edit">
-                            <Edit className="h-3.5 w-3.5 text-slate-600" />
-                          </button>
-                          <button
-                            onClick={async () => {
-                              if (!window.confirm(`Delete "${fee.title}"?`)) return;
-                              try {
-                                await api.delete(`/compliance/standalone-govt-fees/${fee.id}`);
-                                toast.success('Government fee deleted');
-                                setAdhocFees(prev => prev.filter(f => f.id !== fee.id));
-                              } catch (e) {
-                                toast.error(e?.response?.data?.detail || 'Delete failed');
-                              }
-                            }}
-                            className="p-1.5 rounded-lg hover:bg-red-50" title="Delete">
-                            <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                          </button>
+                          {row.type === 'adhoc' ? (
+                            <>
+                              <button
+                                onClick={() => { setEditingAdhoc(row.raw); setShowAdhocDialog(true); }}
+                                className="p-1.5 rounded-lg hover:bg-slate-100" title="Edit">
+                                <Edit className="h-3.5 w-3.5 text-slate-600" />
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  if (!window.confirm(`Delete "${row.title}"?`)) return;
+                                  try {
+                                    await api.delete(`/compliance/standalone-govt-fees/${row.raw.id}`);
+                                    toast.success('Government fee deleted');
+                                    setAdhocFees(prev => prev.filter(f => f.id !== row.raw.id));
+                                  } catch (e) {
+                                    toast.error(e?.response?.data?.detail || 'Delete failed');
+                                  }
+                                }}
+                                className="p-1.5 rounded-lg hover:bg-red-50" title="Delete">
+                                <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                              </button>
+                            </>
+                          ) : (
+                            <span className="text-[10px] font-bold text-slate-400">Saved</span>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -2095,16 +2188,13 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 )}
               </div>
 
-              {/* Totals (unpaid only) */}
-              {(unpaidLinked.length > 0 || unpaidAdhoc.length > 0) && (
+              {/* Totals (full list) */}
+              {paymentRows.length > 0 && (
                 <div className={`flex justify-end px-3 py-3 rounded-xl border ${isDark ? 'bg-slate-700/30 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
                   <p className="text-sm">
-                    <span className="text-slate-500 mr-2">Total unpaid:</span>
+                    <span className="text-slate-500 mr-2">Total listed:</span>
                     <span className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                      ₹ {(
-                        unpaidLinked.reduce((s, i) => s + (i.govt_fees_amount || 0), 0) +
-                        unpaidAdhoc.reduce((s, f) => s + (f.amount || 0), 0)
-                      ).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      ₹ {money(paymentRows.reduce((s, row) => s + (row.amount || 0), 0))}
                     </span>
                   </p>
                 </div>
