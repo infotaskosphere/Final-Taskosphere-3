@@ -1397,6 +1397,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
           d[it.assignment_id] = {
             amount: it.govt_fees_amount ?? 0,
             notes:  it.govt_fees_notes  ?? '',
+            srn:    it.govt_fees_srn    ?? '',
           };
         });
         setGovtFeesDraft(d);
@@ -1421,11 +1422,11 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
     try {
       await api.patch(
         `/compliance/${item.compliance_id}/assignments/${item.assignment_id}/govt-fee`,
-        { govt_fees_amount: parseFloat(draft.amount) || 0, govt_fees_notes: draft.notes || '' }
+        { govt_fees_amount: parseFloat(draft.amount) || 0, govt_fees_notes: draft.notes || '', govt_fees_srn: draft.srn || '' }
       );
       setGovtFees(prev => prev.map(x =>
         x.assignment_id === item.assignment_id
-          ? { ...x, govt_fees_amount: parseFloat(draft.amount) || 0, govt_fees_notes: draft.notes || '' }
+          ? { ...x, govt_fees_amount: parseFloat(draft.amount) || 0, govt_fees_notes: draft.notes || '', govt_fees_srn: draft.srn || '' }
           : x
       ));
       toast.success('Government fee saved');
@@ -1907,29 +1908,33 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <div className={`grid grid-cols-12 gap-2 px-3 py-2 text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                    <div className="col-span-4">Compliance</div>
-                    <div className="col-span-2">FY Year</div>
-                    <div className="col-span-2">Due Date</div>
-                    <div className="col-span-2">Govt Fee (₹)</div>
-                    <div className="col-span-2 text-right">Action</div>
+                  <div className={`grid gap-2 px-3 py-2 text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+                    style={{gridTemplateColumns:'2fr 80px 100px 120px 1fr 80px'}}>
+                    <div>Compliance</div>
+                    <div>FY Year</div>
+                    <div>Due Date</div>
+                    <div>Govt Fee (₹)</div>
+                    <div>SRN</div>
+                    <div className="text-right">Action</div>
                   </div>
                   {govtFees.map(item => {
-                    const draft = govtFeesDraft[item.assignment_id] || { amount: 0, notes: '' };
+                    const draft = govtFeesDraft[item.assignment_id] || { amount: 0, notes: '', srn: '' };
                     const dirty = (parseFloat(draft.amount) || 0) !== (item.govt_fees_amount || 0)
-                               || (draft.notes || '') !== (item.govt_fees_notes || '');
+                               || (draft.notes || '') !== (item.govt_fees_notes || '')
+                               || (draft.srn   || '') !== (item.govt_fees_srn   || '');
                     return (
                       <div key={item.assignment_id}
-                        className={`grid grid-cols-12 gap-2 items-center px-3 py-2.5 rounded-xl border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-white border-slate-200'}`}>
-                        <div className="col-span-4">
+                        className={`grid gap-2 items-center px-3 py-2.5 rounded-xl border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-white border-slate-200'}`}
+                        style={{gridTemplateColumns:'2fr 80px 100px 120px 1fr 80px'}}>
+                        <div>
                           <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{item.name}</p>
                           <p className="text-[11px] text-slate-500">{item.category} · {item.frequency}{item.period_label ? ` · ${item.period_label}` : ''}</p>
                         </div>
-                        <div className="col-span-2 text-xs text-slate-600">{item.fy_year || '—'}</div>
-                        <div className="col-span-2 text-xs text-slate-600">
+                        <div className="text-xs text-slate-600">{item.fy_year || '—'}</div>
+                        <div className="text-xs text-slate-600">
                           {item.due_date ? format(new Date(item.due_date), 'MMM d, yyyy') : '—'}
                         </div>
-                        <div className="col-span-2">
+                        <div>
                           <input
                             type="number" min="0" step="0.01"
                             value={draft.amount}
@@ -1941,7 +1946,19 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                             placeholder="0.00"
                           />
                         </div>
-                        <div className="col-span-2 flex justify-end">
+                        <div>
+                          <input
+                            type="text"
+                            value={draft.srn}
+                            onChange={e => setGovtFeesDraft(prev => ({
+                              ...prev,
+                              [item.assignment_id]: { ...prev[item.assignment_id], srn: e.target.value },
+                            }))}
+                            className={`w-full px-2.5 py-1.5 text-sm rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100' : 'bg-white border-slate-300'}`}
+                            placeholder="SRN…"
+                          />
+                        </div>
+                        <div className="flex justify-end">
                           <button
                             onClick={() => saveGovtFee(item)}
                             disabled={!dirty || govtFeesSavingId === item.assignment_id}
