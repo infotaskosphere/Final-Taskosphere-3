@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { differenceInDays } from "date-fns";
 import api from "@/lib/api";
+import { toast } from "sonner";
 
 // ─── DSC expiry helpers ────────────────────────────────────────────────────────
 function getDaysLeft(dateStr) {
@@ -182,10 +183,13 @@ export default function DSCLinkerSection({
       .then(res => {
         if (cancelled) return;
         const data = res.data;
-        const items = Array.isArray(data) ? data : (data?.dscs || data?.items || []);
+        const items = Array.isArray(data) ? data : (data?.data || data?.dscs || data?.items || []);
         setDscRegister(items);
       })
-      .catch(() => {})
+      .catch((err) => {
+        console.error("DSCLinkerSection: failed to load DSC register", err);
+        toast.error("Could not load DSC Register — check permissions.");
+      })
       .finally(() => { if (!cancelled) setLoadingReg(false); });
     return () => { cancelled = true; };
   }, []);
