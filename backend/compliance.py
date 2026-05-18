@@ -1233,9 +1233,13 @@ async def list_standalone_govt_fees(
     cids = list({r["client_id"] for r in rows if r.get("client_id")})
     if cids:
         clients = await db.clients.find(
-            {"id": {"$in": cids}}, {"_id": 0, "id": 1, "name": 1}
+            {"id": {"$in": cids}},
+            {"_id": 0, "id": 1, "company_name": 1, "name": 1},
         ).to_list(5000)
-        cmap = {c["id"]: c.get("name") for c in clients}
+        cmap = {
+            c["id"]: (c.get("company_name") or c.get("name"))
+            for c in clients
+        }
         for r in rows:
             r["client_name"] = cmap.get(r.get("client_id"))
     return {"items": rows}
