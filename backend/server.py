@@ -2113,75 +2113,6 @@ async def offboard_user(
     }
 
 
-@api_router.get("/users/{user_id}/assigned-clients")
-async def get_user_assigned_clients(
-    user_id: str,
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Return the list of clients assigned to a specific user.
-    - Admin: can view for any user
-    - Manager with can_manage_users: can view for their team members
-    - Staff: can only view their own assigned clients
-    Permission also respects can_view_all_clients and cross_visibility flags.
-    """
-    # Determine if the requester is allowed to see this user's clients
-    is_own = (user_id == current_user.id)
-    perms = get_user_permissions(current_user)
-
-    if not is_own:
-        if current_user.role == "admin":
-            pass  # admin can see any user
-        elif current_user.role == "manager" and perms.get("can_manage_users", False):
-            team_ids = await get_team_user_ids(current_user.id)
-            # Also check governed_users list (explicit governance scope)
-            governed = perms.get("governed_users", []) or []
-            if user_id not in team_ids and user_id not in governed:
-                raise HTTPException(status_code=403, detail="User is not in your team")
-        else:
-            # Check cross_visibility
-            cross_ids = await get_cross_visibility_union(current_user.id)
-            if user_id not in cross_ids:
-                raise HTTPException(status_code=403, detail="Not allowed to view this user's clients")
-
-    # Fetch target user's permissions to get their assigned_client IDs
-    target_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
-    if not target_user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    target_perms = target_user.get("permissions", {})
-    assigned_ids = target_perms.get("assigned_clients", []) or []
-
-    # Also include clients where assigned_to == user_id or created_by == user_id
-    or_clauses = [
-        {"assigned_to": user_id},
-        {"created_by": user_id},
-    ]
-    if assigned_ids:
-        or_clauses.append({"id": {"$in": assigned_ids}})
-
-    clients = await db.clients.find({"$or": or_clauses}, {"_id": 0}).to_list(1000)
-
-    for client in clients:
-        if isinstance(client.get("created_at"), str):
-            try:
-                client["created_at"] = datetime.fromisoformat(client["created_at"])
-            except ValueError:
-                client["created_at"] = None
-        if client.get("birthday") and isinstance(client["birthday"], str):
-            try:
-                client["birthday"] = date.fromisoformat(client["birthday"])
-            except ValueError:
-                client["birthday"] = None
-
-    return {
-        "user_id": user_id,
-        "user_name": target_user.get("full_name", ""),
-        "clients": clients,
-        "total": len(clients)
-    }
-
-
 @api_router.get("/users/{user_id}/permissions")
 async def get_permissions(user_id: str, current_user: User = Depends(get_current_user)):
     """
@@ -2208,8 +2139,7 @@ async def get_permissions(user_id: str, current_user: User = Depends(get_current
     perms = get_user_permissions(current_user)
     if current_user.role == "manager" and perms.get("can_manage_users", False):
         team_ids = await get_team_user_ids(current_user.id)
-        governed = perms.get("governed_users", []) or []
-        if user_id not in team_ids and user_id not in governed:
+        if user_id not in team_ids:
             raise HTTPException(status_code=403, detail="User is not in your team")
         target_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
         if not target_user:
@@ -2251,8 +2181,7 @@ async def update_user_permissions(
     perms = get_user_permissions(current_user)
     if current_user.role == "manager" and perms.get("can_manage_users", False):
         team_ids = await get_team_user_ids(current_user.id)
-        governed = perms.get("governed_users", []) or []
-        if user_id not in team_ids and user_id not in governed:
+        if user_id not in team_ids:
             raise HTTPException(status_code=403, detail="User is not in your team")
         existing = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
         if not existing:
@@ -6705,8 +6634,103 @@ _DEPT_SERVICE_MAP: Dict[str, List[str]] = {
     "DSC":   [],
     "OTHER": [],
 }
- 
- 
+
+
+@api_router.get("/users/{user_id}/assigned-clients")
+async def get_user_assigned_clients(
+    user_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return all clients assigned to a specific user, considering BOTH:
+      - the legacy single `assigned_to` field, AND
+      - the per-service `assignments[].user_id` list
+    so that a client whose services are split across multiple users
+    shows up for each of those users.
+
+    Each returned client includes an `assigned_services` array listing
+    which services this particular user is assigned to on that client
+    (legacy `assigned_to` is shown as "All services").
+
+    Access:
+      - admin: any user
+      - manager: self or any user in their cross-visibility union
+      - staff: self only (unless they have can_view_user_page and the
+        target user is in their cross-visibility union)
+    """
+    # ── Access control ─────────────────────────────────────────────
+    if current_user.role != "admin" and user_id != current_user.id:
+        permissions = get_user_permissions(current_user)
+        can_view_dir = permissions.get("can_view_user_page", False)
+        cross_ids = await get_cross_visibility_union(current_user.id)
+        if current_user.role == "manager":
+            if user_id not in cross_ids and user_id != current_user.id:
+                raise HTTPException(status_code=403, detail="User not in your visibility scope")
+        else:
+            if not (can_view_dir and user_id in cross_ids):
+                raise HTTPException(status_code=403, detail="Not allowed")
+
+    # ── Query: legacy OR per-service ───────────────────────────────
+    query = {
+        "$or": [
+            {"assigned_to": user_id},
+            {"assignments.user_id": user_id},
+        ]
+    }
+    clients_raw = await db.clients.find(query, {"_id": 0}).to_list(2000)
+
+    results = []
+    for c in clients_raw:
+        # Compute which services this user is assigned to on this client
+        assigned_services: List[str] = []
+        for a in (c.get("assignments") or []):
+            if (a or {}).get("user_id") == user_id:
+                svcs = a.get("services") or []
+                if isinstance(svcs, list):
+                    assigned_services.extend([str(s) for s in svcs if s])
+        # If legacy assigned_to matches and no per-service entry exists,
+        # surface that as "All services"
+        legacy_match = c.get("assigned_to") == user_id
+        if legacy_match and not assigned_services:
+            assigned_services = ["All services"]
+        # De-duplicate while preserving order
+        seen = set()
+        assigned_services = [
+            s for s in assigned_services if not (s in seen or seen.add(s))
+        ]
+
+        # Coerce dates to iso strings for JSON
+        created_at = c.get("created_at")
+        if isinstance(created_at, datetime):
+            created_at = created_at.isoformat()
+
+        results.append({
+            "id": c.get("id"),
+            "company_name": c.get("company_name"),
+            "client_type": c.get("client_type"),
+            "client_type_label": c.get("client_type_label"),
+            "email": c.get("email"),
+            "phone": c.get("phone"),
+            "city": c.get("city"),
+            "state": c.get("state"),
+            "status": c.get("status") or "active",
+            "services": c.get("services") or [],
+            "assigned_services": assigned_services,
+            "assigned_to": c.get("assigned_to"),
+            "assignments": c.get("assignments") or [],
+            "gstin": c.get("gstin"),
+            "pan": c.get("pan"),
+            "created_at": created_at,
+        })
+
+    # Sort: active first, then by company name
+    results.sort(key=lambda r: (
+        0 if (r.get("status") or "active") == "active" else 1,
+        (r.get("company_name") or "").lower(),
+    ))
+    return {"user_id": user_id, "count": len(results), "clients": results}
+
+
 @api_router.get("/clients", response_model=List[Client])
 async def get_clients(current_user: User = Depends(check_module_permission("clients", "view"))):
     permissions = get_user_permissions(current_user)
@@ -6722,9 +6746,12 @@ async def get_clients(current_user: User = Depends(check_module_permission("clie
         or_clauses = [
             {"assigned_to": current_user.id},
             {"created_by": current_user.id},
+            # Per-service multi-user assignments
+            {"assignments.user_id": current_user.id},
         ]
         if team_ids:
             or_clauses.append({"assigned_to": {"$in": team_ids}})
+            or_clauses.append({"assignments.user_id": {"$in": team_ids}})
         if extra_clients:
             or_clauses.append({"id": {"$in": extra_clients}})
         query = {"$or": or_clauses}
@@ -6735,6 +6762,8 @@ async def get_clients(current_user: User = Depends(check_module_permission("clie
         or_clauses = [
             {"assigned_to": current_user.id},
             {"created_by": current_user.id},
+            # Per-service multi-user assignments
+            {"assignments.user_id": current_user.id},
         ]
         if extra_clients:
             or_clauses.append({"id": {"$in": extra_clients}})
@@ -6774,13 +6803,21 @@ async def get_client(client_id: str, current_user: User = Depends(get_current_us
         is_created_by = client.get("created_by") == current_user.id
         extra_clients = permissions.get("assigned_clients", []) or []
         in_extra_list = client_id in extra_clients
-        # Manager also sees team-assigned clients
+        # Per-service multi-user assignments
+        assignments = client.get("assignments") or []
+        in_assignments = any(
+            (a or {}).get("user_id") == current_user.id for a in assignments
+        )
+        # Manager also sees team-assigned clients (including per-service team assignments)
         team_in = False
         if current_user.role == "manager":
             team_ids = await get_team_user_ids(current_user.id)
-            team_in = client.get("assigned_to") in team_ids
+            team_in = (
+                client.get("assigned_to") in team_ids
+                or any((a or {}).get("user_id") in team_ids for a in assignments)
+            )
 
-        if not (can_view_all or is_assigned or is_created_by or in_extra_list or team_in):
+        if not (can_view_all or is_assigned or is_created_by or in_extra_list or in_assignments or team_in):
             raise HTTPException(status_code=403, detail="Not authorized to view this client")
 
     if isinstance(client["created_at"], str):
@@ -6818,8 +6855,13 @@ async def update_client(
         is_created_by = existing.get("created_by") == current_user.id
         extra_clients = perms.get("assigned_clients", []) or []
         in_extra_list = client_id in extra_clients
+        # Per-service multi-user assignments
+        assignments = existing.get("assignments") or []
+        in_assignments = any(
+            (a or {}).get("user_id") == current_user.id for a in assignments
+        )
 
-        if not (can_edit_all or is_assigned or is_created_by or in_extra_list):
+        if not (can_edit_all or is_assigned or is_created_by or in_extra_list or in_assignments):
             raise HTTPException(status_code=403, detail="Not authorized to edit this client")
  
     # ── Whitelist: only persist known fields ────────────────────────
