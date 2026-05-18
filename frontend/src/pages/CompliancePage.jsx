@@ -2384,15 +2384,21 @@ export default function CompliancePage(){
   };
 
   const filteredAdhoc = useMemo(() => {
+    // Govt Fees tab shows ONLY unpaid fees. Paid fees flow to the
+    // Compliance & Client views and should not be shown here.
+    const unpaid = (adhocFees || []).filter(
+      f => (f.status || '').toLowerCase() !== 'paid'
+    );
     const q = adhocSearch.trim().toLowerCase();
-    if (!q) return adhocFees;
-    return adhocFees.filter(f =>
+    if (!q) return unpaid;
+    return unpaid.filter(f =>
       (f.title || '').toLowerCase().includes(q) ||
       (f.client_name || '').toLowerCase().includes(q) ||
       (f.srn || '').toLowerCase().includes(q) ||
       (f.category || '').toLowerCase().includes(q)
     );
   }, [adhocFees, adhocSearch]);
+
 
   const fetchAll=useCallback(async()=>{
     setLoading(true);
@@ -2681,21 +2687,22 @@ export default function CompliancePage(){
                   }}>
                   <BookOpen className="w-4 h-4" /> Compliance Types
                 </button>
-                {pageView==='govtfees' && (
-                  <button onClick={()=>{ setEditingAdhoc(null); setShowAdhocDialog(true); }}
-                    className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-bold text-white"
-                    style={{ background:'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
-                    <Plus className="w-3.5 h-3.5"/> Add Govt Fee
-                  </button>
-                )}
               </div>
 
               {pageView==='govtfees' ? (
-                <div className="relative max-w-md">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{color:isDark?D.dimmer:'#94a3b8'}}/>
-                  <input value={adhocSearch} onChange={e=>setAdhocSearch(e.target.value)} placeholder="Search by title, client, SRN…"
-                    className="w-full pl-9 pr-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}/>
+                <div className="flex flex-col items-center gap-3">
+                  {/* Single centered Add button */}
+                  <button onClick={()=>{ setEditingAdhoc(null); setShowAdhocDialog(true); }}
+                    className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg text-xs font-bold text-white"
+                    style={{ background:'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
+                    <Plus className="w-3.5 h-3.5"/> Add Government Fee
+                  </button>
+                  <div className="relative w-full max-w-md">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{color:isDark?D.dimmer:'#94a3b8'}}/>
+                    <input value={adhocSearch} onChange={e=>setAdhocSearch(e.target.value)} placeholder="Search by title, client, SRN…"
+                      className="w-full pl-9 pr-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}/>
+                  </div>
                 </div>
               ) : (
               <div className="flex items-center gap-3 flex-wrap">
