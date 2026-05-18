@@ -434,7 +434,7 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
     <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
       style={{background:'rgba(0,0,0,0.75)',backdropFilter:'blur(8px)'}}
       initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} onClick={onClose}>
-      <motion.div className="w-full max-w-xl rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col"
+      <motion.div className="w-full max-w-3xl rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col"
         style={{backgroundColor:isDark?D.card:'#fff',border:isDark?`1px solid ${D.border}`:'1px solid #e2e8f0'}}
         initial={{scale:0.92,y:24}} animate={{scale:1,y:0}} exit={{scale:0.92,y:24}}
         transition={{type:'spring',stiffness:220,damping:22}} onClick={e=>e.stopPropagation()}>
@@ -483,7 +483,7 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
               className={inputCls} style={inputStyle}/>
           </div>
 
-          {/* Category + Frequency */}
+          {/* Category + Frequency + FY Year + Period in 2x2 grid */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-sm font-semibold mb-1.5 block" style={{color:isDark?D.muted:'#374151'}}>Category</label>
@@ -497,10 +497,6 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
                 {FREQUENCIES.map(f=><option key={f.value} value={f.value}>{f.label}</option>)}
               </select>
             </div>
-          </div>
-
-          {/* FY Year + Period Label */}
-          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-sm font-semibold mb-1.5 block" style={{color:isDark?D.muted:'#374151'}}>FY Year</label>
               <select value={fyYear} onChange={e=>setFyYear(e.target.value)} className={inputCls} style={inputStyle}>
@@ -1170,6 +1166,10 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
   // Row detail modal
   const[detailRow,setDetailRow]=useState(null); // assignment object
 
+  // Inline govt fee & SRN editing in tracker table
+  const[editingFee,setEditingFee]=useState(null); // {id, amount, srn}
+  const[savingFeeId,setSavingFeeId]=useState(null);
+
   const userMap=useMemo(()=>{const m={};(allUsers||[]).forEach(u=>{m[u.id]=u.full_name;});return m;},[allUsers]);
 
   const openCommentPopup=useCallback(async(a)=>{
@@ -1285,6 +1285,21 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
     setItems(prev=>prev.filter(a=>a.id!==id));
     try{await api.delete(`/compliance/${compliance.id}/assignments/${id}`);}
     catch{fetchItems();}
+  };
+
+  const saveGovtFee=async(assignmentId,amount,srn)=>{
+    setSavingFeeId(assignmentId);
+    try{
+      await api.patch(`/compliance/${compliance.id}/assignments/${assignmentId}/govt-fee`,{
+        govt_fees_amount:parseFloat(amount)||0,
+        govt_fees_srn:srn||'',
+        govt_fees_notes:'',
+      });
+      setItems(prev=>prev.map(a=>a.id===assignmentId?{...a,govt_fees_amount:parseFloat(amount)||0,govt_fees_srn:srn||''}:a));
+      setEditingFee(null);
+      toast.success('Saved');
+    }catch{toast.error('Save failed');}
+    finally{setSavingFeeId(null);}
   };
 
   const addComment=async()=>{
@@ -1606,7 +1621,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
         {/* Table */}
         <div className="flex-1 overflow-auto" style={{scrollbarWidth:'thin'}}>
           <div className="sticky top-0 z-10 grid px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider border-b"
-            style={{gridTemplateColumns:'36px 48px 1fr 148px 160px 180px 44px 100px 40px',backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
+            style={{gridTemplateColumns:'36px 48px 1fr 148px 130px 150px 130px 130px 44px 90px 40px',backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
             <div className="flex items-center justify-center">
               <button onClick={()=>allSelected?setSelectedIds(new Set()):setSelectedIds(new Set(items.map(a=>a.id)))}
                 className="w-4 h-4 rounded border-2 flex items-center justify-center"
@@ -1619,6 +1634,8 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
             <div>Status</div>
             <div>Assigned To</div>
             <div>Notes</div>
+            <div>Govt Fee (₹)</div>
+            <div>SRN</div>
             <div className="text-center">Cmts</div>
             <div>Updated</div>
             <div/>
@@ -1644,7 +1661,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                 return(
                   <motion.div key={a.id}
                     className="group grid px-4 py-2.5 items-center gap-2 transition-colors"
-                    style={{gridTemplateColumns:'36px 48px 1fr 148px 160px 180px 44px 100px 40px',backgroundColor:isSel?(isDark?'rgba(59,130,246,0.06)':'#eff6ff'):'transparent'}}
+                    style={{gridTemplateColumns:'36px 48px 1fr 148px 130px 150px 130px 130px 44px 90px 40px',backgroundColor:isSel?(isDark?'rgba(59,130,246,0.06)':'#eff6ff'):'transparent'}}
                     whileHover={{backgroundColor:isDark?'rgba(255,255,255,0.03)':'#fafafa'}}>
                     <div className="flex items-center justify-center">
                       <button onClick={()=>setSelectedIds(prev=>{const s=new Set(prev);isSel?s.delete(a.id):s.add(a.id);return s;})}
@@ -1689,6 +1706,51 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                           style={{color:a.notes?(isDark?D.muted:'#64748b'):(isDark?D.dimmer:'#cbd5e1')}}>
                           <StickyNote className="w-3 h-3 opacity-0 group-hover/note:opacity-60 flex-shrink-0"/>
                           {a.notes||<span className="italic">add note</span>}
+                        </button>
+                      )}
+                    </div>
+                    {/* Govt Fee cell */}
+                    <div className="min-w-0 flex-shrink-0" onClick={e=>e.stopPropagation()}>
+                      {editingFee?.id===a.id?(
+                        <div className="flex items-center gap-1">
+                          <input autoFocus type="number" min="0" step="0.01"
+                            value={editingFee.amount}
+                            onChange={e=>setEditingFee(f=>({...f,amount:e.target.value}))}
+                            onKeyDown={e=>{if(e.key==='Enter')saveGovtFee(a.id,editingFee.amount,editingFee.srn);if(e.key==='Escape')setEditingFee(null);}}
+                            className="w-20 px-1.5 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-green-500"
+                            style={{backgroundColor:isDark?D.raised:'#fff',borderColor:isDark?D.border:'#d1d5db',color:isDark?D.text:'#1e293b'}}
+                            placeholder="0.00"/>
+                          <button onClick={()=>saveGovtFee(a.id,editingFee.amount,editingFee.srn)}
+                            disabled={savingFeeId===a.id}
+                            className="text-emerald-500 flex-shrink-0"><CheckCircle2 className="w-3.5 h-3.5"/></button>
+                          <button onClick={()=>setEditingFee(null)} className="text-red-400 flex-shrink-0"><X className="w-3 h-3"/></button>
+                        </div>
+                      ):(
+                        <button onClick={()=>setEditingFee({id:a.id,amount:a.govt_fees_amount||0,srn:a.govt_fees_srn||''})}
+                          className="w-full text-left text-xs truncate hover:opacity-70 transition-opacity"
+                          style={{color:a.govt_fees_amount?(isDark?'#4ade80':'#15803d'):(isDark?D.dimmer:'#cbd5e1')}}>
+                          {a.govt_fees_amount?`₹${Number(a.govt_fees_amount).toLocaleString('en-IN')}`:
+                            <span className="italic text-[10px]">add fee</span>}
+                        </button>
+                      )}
+                    </div>
+                    {/* SRN cell */}
+                    <div className="min-w-0 flex-shrink-0" onClick={e=>e.stopPropagation()}>
+                      {editingFee?.id===a.id?(
+                        <div className="flex items-center gap-1">
+                          <input
+                            value={editingFee.srn}
+                            onChange={e=>setEditingFee(f=>({...f,srn:e.target.value}))}
+                            onKeyDown={e=>{if(e.key==='Enter')saveGovtFee(a.id,editingFee.amount,editingFee.srn);if(e.key==='Escape')setEditingFee(null);}}
+                            className="w-full px-1.5 py-0.5 border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            style={{backgroundColor:isDark?D.raised:'#fff',borderColor:isDark?D.border:'#d1d5db',color:isDark?D.text:'#1e293b'}}
+                            placeholder="SRN…"/>
+                        </div>
+                      ):(
+                        <button onClick={()=>setEditingFee({id:a.id,amount:a.govt_fees_amount||0,srn:a.govt_fees_srn||''})}
+                          className="w-full text-left text-xs truncate hover:opacity-70 transition-opacity font-mono"
+                          style={{color:a.govt_fees_srn?(isDark?D.text:'#1e293b'):(isDark?D.dimmer:'#cbd5e1')}}>
+                          {a.govt_fees_srn||<span className="italic font-sans text-[10px]">add SRN</span>}
                         </button>
                       )}
                     </div>
