@@ -16,12 +16,14 @@ import {
   ArrowLeft, StickyNote, ShieldCheck, AlertTriangle,
   Info, Repeat, LayoutGrid, List, MessageSquare, Send,
   BarChart3, ChevronLeft, TrendingUp, Settings2, Sparkles,
+  IndianRupee,
 } from 'lucide-react';
 import LayoutCustomizer from '@/components/layout/LayoutCustomizer';
 import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
 import { usePageLayout } from '@/hooks/usePageLayout';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
 import { detectComplianceDuplicates } from '@/lib/aiDuplicateEngine';
+import StandaloneGovtFeeDialog from '@/components/StandaloneGovtFeeDialog';
 
 const D = {
   bg:'#0f172a',card:'#1e293b',raised:'#263348',border:'#334155',
@@ -2335,6 +2337,63 @@ export default function CompliancePage(){
   const [dupGroups,      setDupGroups]      = useState([]);
   const [detectingDups,  setDetectingDups]  = useState(false);
 
+  // ── Top-level page view: compliance types vs standalone Govt Fees ──
+  const [pageView,        setPageView]        = useState('compliance'); // 'compliance' | 'govtfees'
+  const [adhocFees,       setAdhocFees]       = useState([]);
+  const [adhocFeesLoading,setAdhocFeesLoading]= useState(false);
+  const [showAdhocDialog, setShowAdhocDialog] = useState(false);
+  const [editingAdhoc,    setEditingAdhoc]    = useState(null);
+  const [adhocClients,    setAdhocClients]    = useState([]);
+  const [adhocSearch,     setAdhocSearch]     = useState('');
+
+  const fetchAdhocFees = useCallback(async () => {
+    setAdhocFeesLoading(true);
+    try {
+      const r = await api.get('/compliance/standalone-govt-fees');
+      setAdhocFees(r.data?.items || []);
+    } catch {
+      toast.error('Failed to load government fees');
+    } finally {
+      setAdhocFeesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (pageView !== 'govtfees') return;
+    fetchAdhocFees();
+    if (!adhocClients.length) {
+      api.get('/clients', { params: { page_size: 2000 } })
+        .then(r => {
+          const list = r.data?.clients || r.data || [];
+          setAdhocClients(list.map(c => ({ id: c.id, name: c.company_name || c.name })));
+        })
+        .catch(() => setAdhocClients([]));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageView]);
+
+  const handleDeleteAdhoc = async (fee) => {
+    if (!window.confirm(`Delete "${fee.title}"?`)) return;
+    try {
+      await api.delete(`/compliance/standalone-govt-fees/${fee.id}`);
+      toast.success('Government fee deleted');
+      setAdhocFees(prev => prev.filter(f => f.id !== fee.id));
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Delete failed');
+    }
+  };
+
+  const filteredAdhoc = useMemo(() => {
+    const q = adhocSearch.trim().toLowerCase();
+    if (!q) return adhocFees;
+    return adhocFees.filter(f =>
+      (f.title || '').toLowerCase().includes(q) ||
+      (f.client_name || '').toLowerCase().includes(q) ||
+      (f.srn || '').toLowerCase().includes(q) ||
+      (f.category || '').toLowerCase().includes(q)
+    );
+  }, [adhocFees, adhocSearch]);
+
   const fetchAll=useCallback(async()=>{
     setLoading(true);
     try{
@@ -2601,7 +2660,45 @@ export default function CompliancePage(){
 
           /* ── FILTERS ── */
           if (sectionId === 'filters') return (
-            <motion.div key="filters" variants={itemVariants} className="flex items-center gap-3 flex-wrap">
+            <motion.div key="filters" variants={itemVariants} className="space-y-3">
+
+              {/* ── Top-level: Govt Fees | Compliance Types ── */}
+              <div className="flex items-center gap-2 border-b pb-2"
+                style={{borderColor:isDark?D.border:'#e2e8f0'}}>
+                <button onClick={()=>setPageView('govtfees')}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-bold rounded-t-lg border-b-2 transition-all"
+                  style={{
+                    borderColor: pageView==='govtfees' ? '#1F6FB2' : 'transparent',
+                    color: pageView==='govtfees' ? '#1F6FB2' : (isDark?D.dimmer:'#64748b'),
+                  }}>
+                  <IndianRupee className="w-4 h-4" /> Govt Fees
+                </button>
+                <button onClick={()=>setPageView('compliance')}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-bold rounded-t-lg border-b-2 transition-all"
+                  style={{
+                    borderColor: pageView==='compliance' ? '#1F6FB2' : 'transparent',
+                    color: pageView==='compliance' ? '#1F6FB2' : (isDark?D.dimmer:'#64748b'),
+                  }}>
+                  <BookOpen className="w-4 h-4" /> Compliance Types
+                </button>
+                {pageView==='govtfees' && (
+                  <button onClick={()=>{ setEditingAdhoc(null); setShowAdhocDialog(true); }}
+                    className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-bold text-white"
+                    style={{ background:'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
+                    <Plus className="w-3.5 h-3.5"/> Add Govt Fee
+                  </button>
+                )}
+              </div>
+
+              {pageView==='govtfees' ? (
+                <div className="relative max-w-md">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{color:isDark?D.dimmer:'#94a3b8'}}/>
+                  <input value={adhocSearch} onChange={e=>setAdhocSearch(e.target.value)} placeholder="Search by title, client, SRN…"
+                    className="w-full pl-9 pr-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}/>
+                </div>
+              ) : (
+              <div className="flex items-center gap-3 flex-wrap">
               <div className="relative flex-1 min-w-[180px] max-w-xs">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{color:isDark?D.dimmer:'#94a3b8'}}/>
                 <input value={searchQ} onChange={e=>setSearchQ(e.target.value)} placeholder="Search compliance…"
@@ -2655,13 +2752,97 @@ export default function CompliancePage(){
                 </button>
               </div>
               {filtered.length>0&&<span className="text-xs font-semibold" style={{color:isDark?D.dimmer:'#94a3b8'}}>{filtered.length} types</span>}
+              </div>
+              )}
             </motion.div>
           );
 
           /* ── CONTENT ── */
           if (sectionId === 'content') return (
             <React.Fragment key="content">
-              {loading?(
+              {pageView === 'govtfees' ? (
+                <motion.div className="rounded-2xl border overflow-hidden"
+                  style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0'}}>
+                  {adhocFeesLoading ? (
+                    <div className="flex items-center justify-center py-20">
+                      <Loader2 className="w-7 h-7 text-blue-500 animate-spin"/>
+                    </div>
+                  ) : filteredAdhoc.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-20 gap-3">
+                      <IndianRupee className="w-10 h-10" style={{color:isDark?D.dimmer:'#cbd5e1'}}/>
+                      <p className="text-sm font-bold" style={{color:isDark?D.text:'#0f172a'}}>
+                        {adhocSearch ? 'No matching govt fees' : 'No ad-hoc government fees yet'}
+                      </p>
+                      <p className="text-xs" style={{color:isDark?D.muted:'#64748b'}}>
+                        Use <strong>Add Govt Fee</strong> above to record a fee for a compliance that isn't in the tracker.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider border-b"
+                        style={{gridTemplateColumns:'2fr 1.5fr 90px 100px 110px 1fr 90px',
+                          backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
+                        <div>Title</div><div>Client</div><div>Category</div>
+                        <div>FY</div><div>Due Date</div>
+                        <div>Amount / SRN</div><div className="text-right">Actions</div>
+                      </div>
+                      {filteredAdhoc.map(fee => (
+                        <div key={fee.id}
+                          className="grid items-center gap-2 px-4 py-3 border-b text-sm"
+                          style={{gridTemplateColumns:'2fr 1.5fr 90px 100px 110px 1fr 90px',
+                            borderColor:isDark?D.border:'#f1f5f9',color:isDark?D.text:'#1e293b'}}>
+                          <div>
+                            <p className="font-semibold">{fee.title}</p>
+                            {fee.period_label && (
+                              <p className="text-[11px]" style={{color:isDark?D.dimmer:'#94a3b8'}}>{fee.period_label}</p>
+                            )}
+                          </div>
+                          <div className="text-xs">{fee.client_name || '—'}</div>
+                          <div>
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold"
+                              style={{
+                                backgroundColor: (CATEGORY_CFG[fee.category]?.bg) || '#f1f5f9',
+                                color: (CATEGORY_CFG[fee.category]?.color) || '#64748b',
+                              }}>
+                              {CATEGORY_CFG[fee.category]?.label || fee.category || 'OTHER'}
+                            </span>
+                          </div>
+                          <div className="text-xs">{fee.fy_year || '—'}</div>
+                          <div className="text-xs">
+                            {fee.due_date ? format(parseISO(fee.due_date.slice(0,10)), 'MMM d, yyyy') : '—'}
+                          </div>
+                          <div>
+                            <p className="font-bold">₹ {(fee.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+                            <p className="text-[11px] font-mono" style={{color:isDark?D.dimmer:'#94a3b8'}}>{fee.srn || '—'}</p>
+                          </div>
+                          <div className="flex justify-end gap-1">
+                            <button onClick={()=>{ setEditingAdhoc(fee); setShowAdhocDialog(true); }}
+                              className="p-1.5 rounded-lg hover:bg-slate-100" title="Edit"
+                              style={{color:isDark?D.muted:'#64748b'}}>
+                              <Edit2 className="w-3.5 h-3.5"/>
+                            </button>
+                            {canManage && (
+                              <button onClick={()=>handleDeleteAdhoc(fee)}
+                                className="p-1.5 rounded-lg hover:bg-red-50 text-red-600" title="Delete">
+                                <Trash2 className="w-3.5 h-3.5"/>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                      <div className="flex justify-end px-4 py-3"
+                        style={{backgroundColor:isDark?D.raised:'#f8fafc'}}>
+                        <p className="text-sm">
+                          <span style={{color:isDark?D.dimmer:'#64748b'}} className="mr-2">Total:</span>
+                          <span className="font-bold" style={{color:isDark?D.text:'#0f172a'}}>
+                            ₹ {filteredAdhoc.reduce((s,f)=>s+(f.amount||0),0).toLocaleString('en-IN',{minimumFractionDigits:2})}
+                          </span>
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </motion.div>
+              ) : loading?(
                 <div className="flex items-center justify-center py-20"><Loader2 className="w-7 h-7 text-blue-500 animate-spin"/></div>
               ):filtered.length===0?(
                 <motion.div variants={itemVariants} className="flex flex-col items-center justify-center py-20 gap-4 rounded-2xl border"
@@ -2759,6 +2940,15 @@ export default function CompliancePage(){
           } catch { toast.error('Failed to delete compliance'); }
         } : undefined}
         onView={(c) => { setDetailItem(c); setShowDupDialog(false); }}
+      />
+
+      {/* ── Standalone Govt Fee dialog (create / edit) ── */}
+      <StandaloneGovtFeeDialog
+        open={showAdhocDialog}
+        onOpenChange={setShowAdhocDialog}
+        editing={editingAdhoc}
+        clients={adhocClients}
+        onSaved={fetchAdhocFees}
       />
     </div>
     </>
