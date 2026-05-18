@@ -1354,10 +1354,6 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
   const [showAdhocDialog,  setShowAdhocDialog]  = React.useState(false);
   const [editingAdhoc,     setEditingAdhoc]     = React.useState(null);
 
-  // Client compliance tab
-  const [clientComplianceItems,     setClientComplianceItems]     = React.useState([]);
-  const [clientComplianceLoading,   setClientComplianceLoading]   = React.useState(false);
-
   const fetchAdhocFees = React.useCallback(async () => {
     if (!selectedClient?.id) return;
     setAdhocFeesLoading(true);
@@ -1382,7 +1378,6 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
     setAdhocFees([]);
     setEditingAdhoc(null);
     setShowAdhocDialog(false);
-    setClientComplianceItems([]);
     setPortalUsers([]);
     setShowPortalManager(false);
   }, [selectedClient?.id]);
@@ -1437,16 +1432,6 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
       .finally(() => setGovtFeesLoading(false));
     fetchAdhocFees();
   }, [activeTab, selectedClient, fetchAdhocFees]);
-
-  // Fetch all compliance assignments for this client (Compliance tab)
-  React.useEffect(() => {
-    if (activeTab !== 'compliance' || !selectedClient?.id) return;
-    setClientComplianceLoading(true);
-    api.get(`/compliance/by-client/${selectedClient.id}`)
-      .then(r => setClientComplianceItems(r.data?.items || []))
-      .catch(() => setClientComplianceItems([]))
-      .finally(() => setClientComplianceLoading(false));
-  }, [activeTab, selectedClient]);
 
   // Fetch portal users for this client
   React.useEffect(() => {
@@ -1555,7 +1540,6 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
             { key: 'invoices',       label: 'Invoices',    icon: <FileText className="h-3.5 w-3.5" /> },
             { key: 'reconciliation', label: 'GST Recon',   icon: <ArrowLeftRight className="h-3.5 w-3.5" /> },
             { key: 'govtfees',       label: 'Govt Fees',   icon: <IndianRupee className="h-3.5 w-3.5" /> },
-            { key: 'compliance',      label: 'Compliance', icon: <CheckCircle2 className="h-3.5 w-3.5" /> },
             { key: 'portal',         label: 'Portal',      icon: <Globe className="h-3.5 w-3.5" /> },
           ].map(tab => (
             <button
@@ -1582,11 +1566,6 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
               {tab.key === 'govtfees' && govtFees.length > 0 && (
                 <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold" style={{ background: activeTab === 'govtfees' ? 'rgba(255,255,255,0.25)' : '#e2e8f0', color: activeTab === 'govtfees' ? '#fff' : '#64748b' }}>
                   {govtFees.length}
-                </span>
-              )}
-              {tab.key === 'compliance' && clientComplianceItems.length > 0 && (
-                <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold" style={{ background: activeTab === 'compliance' ? 'rgba(255,255,255,0.25)' : '#e2e8f0', color: activeTab === 'compliance' ? '#fff' : '#64748b' }}>
-                  {clientComplianceItems.length}
                 </span>
               )}
               {tab.key === 'portal' && portalUsers.length > 0 && (
@@ -1940,42 +1919,44 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
           )}
 
           {/* ════════════════ GOVT FEES TAB ════════════════ */}
-          {activeTab === 'govtfees' && (
+          {activeTab === 'govtfees' && (() => {
+            // Only show UNPAID adhoc fees here. Paid ones are shown in
+            // the Compliance & Client (Details) views.
+            const unpaidAdhoc = (adhocFees || []).filter(
+              f => (f.status || '').toLowerCase() !== 'paid'
+            );
+            // Compliance-linked items are considered "paid" when an amount > 0
+            // has been recorded; hide those from the Govt Fees tab.
+            const unpaidLinked = (govtFees || []).filter(
+              i => !((i.govt_fees_amount || 0) > 0)
+            );
+            return (
             <div className="p-6 space-y-6">
 
-              {/* Header */}
-              <div className="text-center mb-2">
+              {/* Heading + description (no button up here) */}
+              <div className="flex flex-col items-center text-center gap-1">
                 <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
                   Government Fees
                 </p>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Compliance-linked fees come from the Compliance Tracker.
+                <p className="text-xs text-slate-500 max-w-md">
+                  Compliance-linked fees come from the Compliance Tracker. Unpaid
+                  fees stay here; once marked paid they move to the Compliance &
+                  Client views.
                 </p>
-              </div>
-              {/* Single centered Add button */}
-              <div className="flex justify-center">
-                <Button
-                  size="sm"
-                  onClick={() => { setEditingAdhoc(null); setShowAdhocDialog(true); }}
-                  className="h-9 px-6 rounded-xl text-white text-xs font-semibold gap-1.5"
-                  style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
-                  <Plus className="h-4 w-4" /> Add Government Fee
-                </Button>
               </div>
 
               {/* Compliance-linked govt fees */}
               {govtFeesLoading ? (
                 <div className="py-10 text-center text-sm text-slate-500">Loading…</div>
-              ) : govtFees.length === 0 ? (
+              ) : unpaidLinked.length === 0 ? (
                 <div className="py-10 text-center rounded-xl border border-dashed border-slate-200">
                   <IndianRupee className="h-8 w-8 mx-auto mb-2 text-slate-300" />
                   <p className={`text-sm font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                    No compliance-linked government fees
+                    No unpaid compliance-linked government fees
                   </p>
                   <p className="text-xs text-slate-500 mt-1">
-                    In Compliance Tracker, mark a compliance “Government Fees: Yes” and assign it to this client.
+                    Paid fees appear under the Compliance and Details tabs.
                   </p>
-
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -1983,16 +1964,15 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                     From Compliance Tracker
                   </p>
                   <div className={`grid gap-2 px-3 py-2 text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
-                    style={{ gridTemplateColumns: '2fr 80px 100px 120px 1fr 70px 80px' }}>
+                    style={{ gridTemplateColumns: '2fr 80px 100px 120px 1fr 80px' }}>
                     <div>Compliance</div>
                     <div>FY Year</div>
                     <div>Due Date</div>
                     <div>Govt Fee (₹)</div>
                     <div>SRN</div>
-                    <div>Status</div>
                     <div className="text-right">Action</div>
                   </div>
-                  {govtFees.map(item => {
+                  {unpaidLinked.map(item => {
                     const draft = govtFeesDraft[item.assignment_id] || { amount: 0, notes: '', srn: '' };
                     const dirty = (parseFloat(draft.amount) || 0) !== (item.govt_fees_amount || 0)
                                || (draft.notes || '') !== (item.govt_fees_notes || '')
@@ -2000,7 +1980,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                     return (
                       <div key={item.assignment_id}
                         className={`grid gap-2 items-center px-3 py-2.5 rounded-xl border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-white border-slate-200'}`}
-                        style={{ gridTemplateColumns: '2fr 80px 100px 120px 1fr 70px 80px' }}>
+                        style={{ gridTemplateColumns: '2fr 80px 100px 120px 1fr 80px' }}>
                         <div>
                           <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{item.name}</p>
                           <p className="text-[11px] text-slate-500">{item.category} · {item.frequency}{item.period_label ? ` · ${item.period_label}` : ''}</p>
@@ -2033,13 +2013,6 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                             placeholder="SRN…"
                           />
                         </div>
-                        <div>
-                          {(parseFloat(draft.amount) || 0) > 0 ? (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Paid</span>
-                          ) : (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Pending</span>
-                          )}
-                        </div>
                         <div className="flex justify-end">
                           <button
                             onClick={() => saveGovtFee(item)}
@@ -2056,16 +2029,16 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 </div>
               )}
 
-              {/* Standalone (ad-hoc) govt fees */}
+              {/* Standalone (ad-hoc) govt fees — unpaid only */}
               <div className="space-y-2">
                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                  One-off / Ad-hoc Fees
+                  One-off / Ad-hoc Fees (Unpaid)
                 </p>
                 {adhocFeesLoading ? (
                   <div className="py-6 text-center text-xs text-slate-500">Loading…</div>
-                ) : adhocFees.length === 0 ? (
+                ) : unpaidAdhoc.length === 0 ? (
                   <div className="py-6 text-center text-xs text-slate-500 rounded-xl border border-dashed border-slate-200">
-                    No one-off fees yet. Click “+ Add” above to record one.
+                    No unpaid one-off fees. Paid fees appear under Compliance & Details.
                   </div>
                 ) : (
                   <>
@@ -2078,7 +2051,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                       <div>Amount / SRN</div>
                       <div className="text-right">Actions</div>
                     </div>
-                    {adhocFees.map(fee => (
+                    {unpaidAdhoc.map(fee => (
                       <div key={fee.id}
                         className={`grid gap-2 items-center px-3 py-2.5 rounded-xl border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-white border-slate-200'}`}
                         style={{ gridTemplateColumns: '2fr 90px 100px 110px 1fr 100px' }}>
@@ -2122,20 +2095,31 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 )}
               </div>
 
-              {/* Totals */}
-              {(govtFees.length > 0 || adhocFees.length > 0) && (
+              {/* Totals (unpaid only) */}
+              {(unpaidLinked.length > 0 || unpaidAdhoc.length > 0) && (
                 <div className={`flex justify-end px-3 py-3 rounded-xl border ${isDark ? 'bg-slate-700/30 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
                   <p className="text-sm">
-                    <span className="text-slate-500 mr-2">Total recorded:</span>
+                    <span className="text-slate-500 mr-2">Total unpaid:</span>
                     <span className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
                       ₹ {(
-                        govtFees.reduce((s, i) => s + (i.govt_fees_amount || 0), 0) +
-                        adhocFees.reduce((s, f) => s + (f.amount || 0), 0)
+                        unpaidLinked.reduce((s, i) => s + (i.govt_fees_amount || 0), 0) +
+                        unpaidAdhoc.reduce((s, f) => s + (f.amount || 0), 0)
                       ).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                     </span>
                   </p>
                 </div>
               )}
+
+              {/* Single Add button — placed BELOW the fees/details */}
+              <div className="flex justify-center pt-2">
+                <Button
+                  size="sm"
+                  onClick={() => { setEditingAdhoc(null); setShowAdhocDialog(true); }}
+                  className="h-9 px-4 rounded-xl text-white text-xs font-semibold gap-1.5"
+                  style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+                  <Plus className="h-4 w-4" /> Add Government Fee
+                </Button>
+              </div>
 
               {/* Ad-hoc govt fee dialog */}
               <StandaloneGovtFeeDialog
@@ -2147,91 +2131,9 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 onSaved={() => { fetchAdhocFees(); setEditingAdhoc(null); }}
               />
             </div>
-          )}
+            );
+          })()}
 
-
-          {/* ════════════════ COMPLIANCE TAB ════════════════ */}
-          {activeTab === 'compliance' && (
-            <div className="p-6 space-y-4">
-              <div className="flex items-center justify-between mb-2">
-                <div>
-                  <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Compliance Overview</p>
-                  <p className="text-xs text-slate-500 mt-0.5">All compliance items assigned to this client</p>
-                </div>
-              </div>
-              {clientComplianceLoading ? (
-                <MiniLoader height={120} />
-              ) : clientComplianceItems.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-                  <CheckCircle2 className="h-10 w-10 mb-3 opacity-20" />
-                  <p className="text-sm font-medium">No compliance items assigned</p>
-                  <p className="text-xs mt-1 text-slate-300">Assign this client to compliance types in the Compliance Tracker</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {/* Summary pills */}
-                  {(() => {
-                    const paid = clientComplianceItems.filter(i => (i.govt_fees_amount || 0) > 0).length;
-                    const filed = clientComplianceItems.filter(i => i.status === 'filed' || i.status === 'completed').length;
-                    const pending = clientComplianceItems.filter(i => !i.status || i.status === 'not_started' || i.status === 'in_progress').length;
-                    return (
-                      <div className="grid grid-cols-3 gap-3 mb-4">
-                        {[
-                          { label: 'Total', value: clientComplianceItems.length, color: '#1F6FB2' },
-                          { label: 'Filed / Done', value: filed, color: '#059669' },
-                          { label: 'Pending', value: pending, color: pending > 0 ? '#dc2626' : '#059669' },
-                        ].map((s, i) => (
-                          <div key={i} className={`rounded-xl p-3 border text-center ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">{s.label}</p>
-                            <p className="text-sm font-bold" style={{ color: s.color }}>{s.value}</p>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })()}
-                  {clientComplianceItems.map(item => {
-                    const STATUS_MAP = {
-                      not_started: { label: 'Not Started', color: '#64748b', bg: 'rgba(100,116,139,0.1)' },
-                      in_progress: { label: 'In Progress', color: '#3B82F6', bg: 'rgba(59,130,246,0.1)' },
-                      completed:   { label: 'Completed',   color: '#1FAF5A', bg: 'rgba(31,175,90,0.1)' },
-                      filed:       { label: 'Filed',       color: '#8B5CF6', bg: 'rgba(139,92,246,0.1)' },
-                      na:          { label: 'N/A',         color: '#94a3b8', bg: 'rgba(148,163,184,0.08)' },
-                    };
-                    const sc = STATUS_MAP[item.status] || STATUS_MAP.not_started;
-                    const isPaid = (item.govt_fees_amount || 0) > 0;
-                    const isGovtFee = item.govt_fees === true;
-                    return (
-                      <div key={item.assignment_id || item.id}
-                        className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-colors ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-white border-slate-200'}`}>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{item.name}</p>
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: sc.bg, color: sc.color }}>{sc.label}</span>
-                            {isGovtFee && (
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isPaid ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                                {isPaid ? '✓ Fee Paid' : '⏳ Fee Pending'}
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-[11px] text-slate-500 mt-0.5">
-                            {item.category} · {item.frequency}
-                            {item.fy_year ? ` · FY ${item.fy_year}` : ''}
-                            {item.due_date ? ` · Due: ${format(new Date(item.due_date), 'MMM d, yyyy')}` : ''}
-                          </p>
-                        </div>
-                        {isGovtFee && isPaid && (
-                          <div className="text-right flex-shrink-0">
-                            <p className="text-xs font-bold text-emerald-600">₹ {(item.govt_fees_amount || 0).toLocaleString('en-IN')}</p>
-                            {item.govt_fees_srn && <p className="text-[10px] font-mono text-slate-400">{item.govt_fees_srn}</p>}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
 
           {/* ════════════════ DETAILS TAB ════════════════ */}
           {activeTab === 'details' && (
