@@ -1472,21 +1472,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
               className="w-full pl-8 pr-3 py-1.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}/>
           </div>
-          {selectedIds.size>0&&(
-            <div className="relative" onClick={e=>e.stopPropagation()}>
-              <button onClick={()=>setBulkOpen(b=>!b)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-bold text-white" style={{backgroundColor:catCfg.color}}>
-                <Zap className="w-3.5 h-3.5"/>Update {selectedIds.size}<ChevronDown className="w-3 h-3"/>
-              </button>
-              <AnimatePresence>
-                {bulkOpen&&(
-                  <motion.div className="absolute left-0 top-full mt-1 z-50"
-                    initial={{opacity:0,y:-6}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-6}}>
-                    <StatusDropdown current={null} onSelect={bulkUpdate} isDark={isDark}/>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          )}
+{/* placeholder — bulk bar is rendered as floating overlay below */}
           <button onClick={()=>setShowAssign(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold border hover:opacity-80"
             style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.muted:'#374151'}}>
             <Plus className="w-3.5 h-3.5"/>Add Clients
@@ -1495,13 +1481,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
             style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.muted:'#374151'}}>
             <Upload className="w-3.5 h-3.5"/>Import Excel
           </button>
-          {selectedIds.size>0&&(
-            <button onClick={bulkDelete}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold border hover:opacity-80"
-              style={{backgroundColor:'rgba(239,68,68,0.08)',borderColor:'rgba(239,68,68,0.4)',color:'#ef4444'}}>
-              <Trash2 className="w-3.5 h-3.5"/>Delete {selectedIds.size}
-            </button>
-          )}
+{/* delete in floating bar */}
           <button
             onClick={()=>{
               if(detectingDetailDups)return;
@@ -2120,6 +2100,73 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
           }catch{toast.error('Failed to remove entry');}
         }:undefined}
       />
+
+      {/* ── FLOATING BULK ACTION BAR ── */}
+      <AnimatePresence>
+        {selectedIds.size>0&&(
+          <motion.div
+            className="fixed bottom-6 left-1/2 z-[9998] flex items-center gap-2 px-4 py-3 rounded-2xl shadow-2xl border"
+            style={{
+              transform:'translateX(-50%)',
+              backgroundColor:isDark?'#1e293b':'#fff',
+              borderColor:catCfg.color,
+              borderWidth:1.5,
+              boxShadow:`0 8px 40px rgba(0,0,0,0.28), 0 0 0 1px ${catCfg.color}22`,
+              minWidth:420,
+              backdropFilter:'blur(12px)',
+            }}
+            initial={{opacity:0,y:32,scale:0.95}}
+            animate={{opacity:1,y:0,scale:1}}
+            exit={{opacity:0,y:24,scale:0.95}}
+            transition={{type:'spring',stiffness:280,damping:24}}>
+
+            {/* Selection badge */}
+            <div className="flex items-center gap-2 pr-3 border-r flex-shrink-0" style={{borderColor:isDark?'#334155':'#e2e8f0'}}>
+              <div className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-xs font-black flex-shrink-0"
+                style={{backgroundColor:catCfg.color}}>
+                {selectedIds.size}
+              </div>
+              <span className="text-xs font-bold whitespace-nowrap" style={{color:isDark?'#94a3b8':'#64748b'}}>
+                client{selectedIds.size!==1?'s':''} selected
+              </span>
+            </div>
+
+            {/* Status update buttons */}
+            <div className="flex items-center gap-1.5 flex-wrap flex-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider flex-shrink-0 mr-0.5" style={{color:isDark?'#475569':'#94a3b8'}}>Set to:</span>
+              {STATUSES.map(s=>{
+                const cfg=STATUS_CFG[s];
+                return(
+                  <button key={s} onClick={()=>bulkUpdate(s)}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all hover:scale-105 active:scale-95 flex-shrink-0"
+                    style={{color:cfg.color,backgroundColor:cfg.bg,borderColor:cfg.border}}>
+                    <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{backgroundColor:cfg.dot}}/>
+                    {cfg.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Divider */}
+            <div className="w-px h-6 flex-shrink-0" style={{backgroundColor:isDark?'#334155':'#e2e8f0'}}/>
+
+            {/* Delete */}
+            <button onClick={bulkDelete}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all hover:scale-105 active:scale-95 flex-shrink-0"
+              style={{backgroundColor:'rgba(239,68,68,0.1)',color:'#ef4444',border:'1px solid rgba(239,68,68,0.3)'}}>
+              <Trash2 className="w-3.5 h-3.5"/>Delete
+            </button>
+
+            {/* Deselect */}
+            <button onClick={()=>setSelectedIds(new Set())}
+              className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:opacity-70 flex-shrink-0"
+              style={{backgroundColor:isDark?'#334155':'#f1f5f9',color:isDark?'#94a3b8':'#64748b'}}>
+              <X className="w-3.5 h-3.5"/>
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     </motion.div>
   );
 }
