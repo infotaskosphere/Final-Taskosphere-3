@@ -2134,7 +2134,9 @@ async def get_user_assigned_clients(
             pass  # admin can see any user
         elif current_user.role == "manager" and perms.get("can_manage_users", False):
             team_ids = await get_team_user_ids(current_user.id)
-            if user_id not in team_ids:
+            # Also check governed_users list (explicit governance scope)
+            governed = perms.get("governed_users", []) or []
+            if user_id not in team_ids and user_id not in governed:
                 raise HTTPException(status_code=403, detail="User is not in your team")
         else:
             # Check cross_visibility
@@ -2206,7 +2208,8 @@ async def get_permissions(user_id: str, current_user: User = Depends(get_current
     perms = get_user_permissions(current_user)
     if current_user.role == "manager" and perms.get("can_manage_users", False):
         team_ids = await get_team_user_ids(current_user.id)
-        if user_id not in team_ids:
+        governed = perms.get("governed_users", []) or []
+        if user_id not in team_ids and user_id not in governed:
             raise HTTPException(status_code=403, detail="User is not in your team")
         target_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
         if not target_user:
@@ -2248,7 +2251,8 @@ async def update_user_permissions(
     perms = get_user_permissions(current_user)
     if current_user.role == "manager" and perms.get("can_manage_users", False):
         team_ids = await get_team_user_ids(current_user.id)
-        if user_id not in team_ids:
+        governed = perms.get("governed_users", []) or []
+        if user_id not in team_ids and user_id not in governed:
             raise HTTPException(status_code=403, detail="User is not in your team")
         existing = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
         if not existing:
