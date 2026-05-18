@@ -16,7 +16,7 @@ import {
   ArrowLeft, StickyNote, ShieldCheck, AlertTriangle,
   Info, Repeat, LayoutGrid, List, MessageSquare, Send,
   BarChart3, ChevronLeft, TrendingUp, Settings2, Sparkles,
-  IndianRupee,
+  IndianRupee, Download, FileSpreadsheet,
 } from 'lucide-react';
 import LayoutCustomizer from '@/components/layout/LayoutCustomizer';
 import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
@@ -24,6 +24,9 @@ import { usePageLayout } from '@/hooks/usePageLayout';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
 import { detectComplianceDuplicates } from '@/lib/aiDuplicateEngine';
 import StandaloneGovtFeeDialog from '@/components/StandaloneGovtFeeDialog';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const D = {
   bg:'#0f172a',card:'#1e293b',raised:'#263348',border:'#334155',
@@ -2384,20 +2387,62 @@ export default function CompliancePage(){
   };
 
   const filteredAdhoc = useMemo(() => {
-    // Govt Fees tab shows ONLY unpaid fees. Paid fees flow to the
-    // Compliance & Client views and should not be shown here.
-    const unpaid = (adhocFees || []).filter(
-      f => (f.status || '').toLowerCase() !== 'paid'
-    );
+    const list = adhocFees || [];
     const q = adhocSearch.trim().toLowerCase();
-    if (!q) return unpaid;
-    return unpaid.filter(f =>
+    if (!q) return list;
+    return list.filter(f =>
       (f.title || '').toLowerCase().includes(q) ||
       (f.client_name || '').toLowerCase().includes(q) ||
       (f.srn || '').toLowerCase().includes(q) ||
-      (f.category || '').toLowerCase().includes(q)
+      (f.category || '').toLowerCase().includes(q) ||
+      (f.status || '').toLowerCase().includes(q)
     );
   }, [adhocFees, adhocSearch]);
+
+  const exportGovtFees = useCallback((kind) => {
+    if (!filteredAdhoc.length) { toast.error('No government fee payments to export'); return; }
+    const dateText = (d) => d ? format(parseISO(String(d).slice(0, 10)), 'MMM d, yyyy') : '—';
+    const statusText = (s) => String(s || '').toLowerCase() === 'paid' ? 'Paid' : 'Unpaid';
+    const headers = ['#', 'Client', 'Title', 'Category', 'FY Year', 'Due Date', 'Status', 'Payment Date', 'Amount (₹)', 'SRN', 'Details'];
+    const rows = filteredAdhoc.map((fee, i) => [
+      i + 1,
+      fee.client_name || '',
+      fee.title || '',
+      CATEGORY_CFG[fee.category]?.label || fee.category || 'OTHER',
+      fee.fy_year || '',
+      dateText(fee.due_date),
+      statusText(fee.status),
+      dateText(fee.payment_date || fee.paid_on || fee.paid_at),
+      Number(fee.amount || 0),
+      fee.srn || '',
+      fee.notes || '',
+    ]);
+    const fileName = `govt_fees_full_list_${format(new Date(), 'dd-MMM-yyyy')}`;
+    if (kind === 'excel') {
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+      ws['!cols'] = [{wch:5},{wch:30},{wch:28},{wch:16},{wch:12},{wch:14},{wch:12},{wch:14},{wch:14},{wch:18},{wch:32}];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Govt Fees');
+      XLSX.writeFile(wb, `${fileName}.xlsx`);
+      toast.success('Government fees Excel exported');
+      return;
+    }
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    doc.setFontSize(15);
+    doc.text('Government Fees Full Payment List', 14, 14);
+    doc.setFontSize(9);
+    doc.text(format(new Date(), 'dd MMM yyyy'), 14, 20);
+    autoTable(doc, {
+      startY: 26,
+      head: [headers],
+      body: rows,
+      styles: { fontSize: 7, cellPadding: 2 },
+      headStyles: { fillColor: [13, 59, 102] },
+      columnStyles: { 0: { cellWidth: 8 }, 8: { halign: 'right' } },
+    });
+    doc.save(`${fileName}.pdf`);
+    toast.success('Government fees PDF exported');
+  }, [filteredAdhoc]);
 
 
   const fetchAll=useCallback(async()=>{
@@ -2697,6 +2742,16 @@ export default function CompliancePage(){
                       className="w-full pl-9 pr-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                       style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}/>
                   </div>
+                  <button onClick={()=>exportGovtFees('excel')} disabled={!filteredAdhoc.length}
+                    className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-bold border disabled:opacity-40"
+                    style={{ backgroundColor:isDark?D.card:'#fff', borderColor:isDark?D.border:'#cbd5e1', color:isDark?D.text:'#0f172a' }}>
+                    <FileSpreadsheet className="w-3.5 h-3.5"/> Excel
+                  </button>
+                  <button onClick={()=>exportGovtFees('pdf')} disabled={!filteredAdhoc.length}
+                    className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-bold border disabled:opacity-40"
+                    style={{ backgroundColor:isDark?D.card:'#fff', borderColor:isDark?D.border:'#cbd5e1', color:isDark?D.text:'#0f172a' }}>
+                    <Download className="w-3.5 h-3.5"/> PDF
+                  </button>
                   {/* Single Add button next to search */}
                   <button onClick={()=>{ setEditingAdhoc(null); setShowAdhocDialog(true); }}
                     className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg text-xs font-bold text-white"
@@ -2781,22 +2836,22 @@ export default function CompliancePage(){
                         {adhocSearch ? 'No matching govt fees' : 'No ad-hoc government fees yet'}
                       </p>
                       <p className="text-xs" style={{color:isDark?D.muted:'#64748b'}}>
-                        Use <strong>Add Govt Fee</strong> above to record a fee for a compliance that isn't in the tracker.
+                        Use <strong>Add Govt Fee</strong> above to record payments. Paid and unpaid fees stay in this list.
                       </p>
                     </div>
                   ) : (
                     <>
                       <div className="grid px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider border-b"
-                        style={{gridTemplateColumns:'2fr 1.5fr 90px 100px 110px 1fr 90px',
+                        style={{gridTemplateColumns:'2fr 1.4fr 80px 80px 105px 85px 1fr 90px',
                           backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
                         <div>Title</div><div>Client</div><div>Category</div>
-                        <div>FY</div><div>Due Date</div>
+                        <div>FY</div><div>Due Date</div><div>Status</div>
                         <div>Amount / SRN</div><div className="text-right">Actions</div>
                       </div>
                       {filteredAdhoc.map(fee => (
                         <div key={fee.id}
                           className="grid items-center gap-2 px-4 py-3 border-b text-sm"
-                          style={{gridTemplateColumns:'2fr 1.5fr 90px 100px 110px 1fr 90px',
+                          style={{gridTemplateColumns:'2fr 1.4fr 80px 80px 105px 85px 1fr 90px',
                             borderColor:isDark?D.border:'#f1f5f9',color:isDark?D.text:'#1e293b'}}>
                           <div>
                             <p className="font-semibold">{fee.title}</p>
@@ -2817,6 +2872,16 @@ export default function CompliancePage(){
                           <div className="text-xs">{fee.fy_year || '—'}</div>
                           <div className="text-xs">
                             {fee.due_date ? format(parseISO(fee.due_date.slice(0,10)), 'MMM d, yyyy') : '—'}
+                          </div>
+                          <div>
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${String(fee.status || '').toLowerCase() === 'paid' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
+                              {String(fee.status || '').toLowerCase() === 'paid' ? 'Paid' : 'Unpaid'}
+                            </span>
+                            {(fee.payment_date || fee.paid_on || fee.paid_at) && (
+                              <p className="text-[10px] mt-1" style={{color:isDark?D.dimmer:'#94a3b8'}}>
+                                {format(parseISO(String(fee.payment_date || fee.paid_on || fee.paid_at).slice(0,10)), 'MMM d, yyyy')}
+                              </p>
+                            )}
                           </div>
                           <div>
                             <p className="font-bold">₹ {(fee.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
