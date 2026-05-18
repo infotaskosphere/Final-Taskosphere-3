@@ -1182,3 +1182,127 @@ async def update_assignment_govt_fee(
         raise HTTPException(404, "Assignment not found")
     doc = await db.compliance_assignments.find_one({"id": assignment_id}, {"_id": 0})
     return doc
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STANDALONE GOVT FEES — ad-hoc government fees NOT tied to a compliance master
+# Useful for one-off filings that aren't part of a client's annual compliance
+# (e.g. company-specific name change, increase in authorised capital, etc.)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class StandaloneGovtFeeIn(BaseModel):
+    client_id:    str
+    title:        str
+    category:     Optional[str] = "OTHER"
+    period_label: Optional[str] = None
+    fy_year:      Optional[str] = None
+    due_date:     Optional[str] = None
+    payment_date: Optional[str] = None
+    amount:       float = 0.0
+    srn:          Optional[str] = None
+    notes:        Optional[str] = None
+    status:       Optional[str] = "pending"   # pending | paid
+
+
+class StandaloneGovtFeeUpdate(BaseModel):
+    title:        Optional[str]   = None
+    category:     Optional[str]   = None
+    period_label: Optional[str]   = None
+    fy_year:      Optional[str]   = None
+    due_date:     Optional[str]   = None
+    payment_date: Optional[str]   = None
+    amount:       Optional[float] = None
+    srn:          Optional[str]   = None
+    notes:        Optional[str]   = None
+    status:       Optional[str]   = None
+
+
+@router.get("/standalone-govt-fees")
+async def list_standalone_govt_fees(
+    client_id: Optional[str] = Query(None),
+    current_user: User = Depends(check_module_permission("compliance", "view")),
+):
+    """List ad-hoc govt fees. Optionally filter by client_id."""
+    q: dict = {}
+    if client_id:
+        q["client_id"] = client_id
+    rows = await db.standalone_govt_fees.find(q, {"_id": 0}) \
+        .sort("created_at", -1).to_list(5000)
+
+    # Hydrate client name for table display on compliance-side view
+    cids = list({r["client_id"] for r in rows if r.get("client_id")})
+    if cids:
+        clients = await db.clients.find(
+            {"id": {"$in": cids}}, {"_id": 0, "id": 1, "name": 1}
+        ).to_list(5000)
+        cmap = {c["id"]: c.get("name") for c in clients}
+        for r in rows:
+            r["client_name"] = cmap.get(r.get("client_id"))
+    return {"items": rows}
+
+
+@router.post("/standalone-govt-fees")
+async def create_standalone_govt_fee(
+    data: StandaloneGovtFeeIn,
+    current_user: User = Depends(check_module_permission("compliance", "create")),
+):
+    if not (data.title or "").strip():
+        raise HTTPException(400, "Title is required")
+    if not (data.client_id or "").strip():
+        raise HTTPException(400, "client_id is required")
+    doc = {
+        "id":           str(uuid.uuid4()),
+        "client_id":    data.client_id,
+        "title":        data.title.strip(),
+        "category":     (data.category or "OTHER").upper(),
+        "period_label": data.period_label,
+        "fy_year":      data.fy_year,
+        "due_date":     data.due_date,
+        "payment_date": data.payment_date,
+        "amount":       float(data.amount or 0),
+        "srn":          (data.srn or "").strip() or None,
+        "notes":        data.notes,
+        "status":       data.status or "pending",
+        "is_standalone": True,
+        "created_at":   _now(),
+        "updated_at":   _now(),
+        "created_by":   current_user.id,
+    }
+    await db.standalone_govt_fees.insert_one(dict(doc))
+    doc.pop("_id", None)
+    return doc
+
+
+@router.patch("/standalone-govt-fees/{fee_id}")
+async def update_standalone_govt_fee(
+    fee_id: str,
+    data: StandaloneGovtFeeUpdate,
+    current_user: User = Depends(check_module_permission("compliance", "create")),
+):
+    update = {k: v for k, v in data.model_dump(exclude_none=True).items()}
+    if "amount" in update:
+        update["amount"] = float(update["amount"] or 0)
+    if "title" in update:
+        update["title"] = (update["title"] or "").strip()
+    if "srn" in update:
+        update["srn"] = (update["srn"] or "").strip() or None
+    if "category" in update and update["category"]:
+        update["category"] = update["category"].upper()
+    update["updated_at"] = _now()
+    update["updated_by"] = current_user.id
+    res = await db.standalone_govt_fees.update_one({"id": fee_id}, {"$set": update})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Standalone govt fee not found")
+    doc = await db.standalone_govt_fees.find_one({"id": fee_id}, {"_id": 0})
+    return doc
+
+
+@router.delete("/standalone-govt-fees/{fee_id}")
+async def delete_standalone_govt_fee(
+    fee_id: str,
+    current_user: User = Depends(check_module_permission("compliance", "delete")),
+):
+    res = await db.standalone_govt_fees.delete_one({"id": fee_id})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Standalone govt fee not found")
+    return {"ok": True}
