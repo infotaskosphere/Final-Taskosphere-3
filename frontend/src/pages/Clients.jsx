@@ -1919,48 +1919,51 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
           )}
 
           {/* ════════════════ GOVT FEES TAB ════════════════ */}
-          {activeTab === 'govtfees' && (
+          {activeTab === 'govtfees' && (() => {
+            // Only show UNPAID adhoc fees here. Paid ones are shown in
+            // the Compliance & Client (Details) views.
+            const unpaidAdhoc = (adhocFees || []).filter(
+              f => (f.status || '').toLowerCase() !== 'paid'
+            );
+            // Compliance-linked items are considered "paid" when an amount > 0
+            // has been recorded; hide those from the Govt Fees tab.
+            const unpaidLinked = (govtFees || []).filter(
+              i => !((i.govt_fees_amount || 0) > 0)
+            );
+            return (
             <div className="p-6 space-y-6">
 
-              {/* Header with + Add */}
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
-                    Government Fees
-                  </p>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Compliance-linked fees come from the Compliance Tracker. Use “+ Add”
-                    to record a one-off govt fee that isn’t part of a recurring compliance.
-                  </p>
-                </div>
+              {/* Centered description + single Add button */}
+              <div className="flex flex-col items-center text-center gap-2">
+                <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                  Government Fees
+                </p>
+                <p className="text-xs text-slate-500 max-w-md">
+                  Compliance-linked fees come from the Compliance Tracker. Unpaid
+                  fees stay here; once marked paid they move to the Compliance &
+                  Client views.
+                </p>
                 <Button
                   size="sm"
                   onClick={() => { setEditingAdhoc(null); setShowAdhocDialog(true); }}
-                  className="h-9 px-4 rounded-xl text-white text-xs font-semibold gap-1.5"
+                  className="mt-2 h-9 px-4 rounded-xl text-white text-xs font-semibold gap-1.5"
                   style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
-                  <Plus className="h-4 w-4" /> Add
+                  <Plus className="h-4 w-4" /> Add Government Fee
                 </Button>
               </div>
 
               {/* Compliance-linked govt fees */}
               {govtFeesLoading ? (
                 <div className="py-10 text-center text-sm text-slate-500">Loading…</div>
-              ) : govtFees.length === 0 ? (
+              ) : unpaidLinked.length === 0 ? (
                 <div className="py-10 text-center rounded-xl border border-dashed border-slate-200">
                   <IndianRupee className="h-8 w-8 mx-auto mb-2 text-slate-300" />
                   <p className={`text-sm font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                    No compliance-linked government fees
+                    No unpaid compliance-linked government fees
                   </p>
                   <p className="text-xs text-slate-500 mt-1">
-                    In Compliance Tracker, mark a compliance “Government Fees: Yes” and assign it to this client.
+                    Paid fees appear under the Compliance and Details tabs.
                   </p>
-                  <Button
-                    size="sm"
-                    onClick={() => { setEditingAdhoc(null); setShowAdhocDialog(true); }}
-                    className="mt-4 h-8 px-4 rounded-lg text-white text-xs font-semibold gap-1.5"
-                    style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
-                    <Plus className="h-3.5 w-3.5" /> Add Government Fee
-                  </Button>
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -1976,7 +1979,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                     <div>SRN</div>
                     <div className="text-right">Action</div>
                   </div>
-                  {govtFees.map(item => {
+                  {unpaidLinked.map(item => {
                     const draft = govtFeesDraft[item.assignment_id] || { amount: 0, notes: '', srn: '' };
                     const dirty = (parseFloat(draft.amount) || 0) !== (item.govt_fees_amount || 0)
                                || (draft.notes || '') !== (item.govt_fees_notes || '')
@@ -2033,16 +2036,16 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 </div>
               )}
 
-              {/* Standalone (ad-hoc) govt fees */}
+              {/* Standalone (ad-hoc) govt fees — unpaid only */}
               <div className="space-y-2">
                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                  One-off / Ad-hoc Fees
+                  One-off / Ad-hoc Fees (Unpaid)
                 </p>
                 {adhocFeesLoading ? (
                   <div className="py-6 text-center text-xs text-slate-500">Loading…</div>
-                ) : adhocFees.length === 0 ? (
+                ) : unpaidAdhoc.length === 0 ? (
                   <div className="py-6 text-center text-xs text-slate-500 rounded-xl border border-dashed border-slate-200">
-                    No one-off fees yet. Click “+ Add” above to record one.
+                    No unpaid one-off fees. Paid fees appear under Compliance & Details.
                   </div>
                 ) : (
                   <>
@@ -2055,7 +2058,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                       <div>Amount / SRN</div>
                       <div className="text-right">Actions</div>
                     </div>
-                    {adhocFees.map(fee => (
+                    {unpaidAdhoc.map(fee => (
                       <div key={fee.id}
                         className={`grid gap-2 items-center px-3 py-2.5 rounded-xl border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-white border-slate-200'}`}
                         style={{ gridTemplateColumns: '2fr 90px 100px 110px 1fr 100px' }}>
@@ -2099,15 +2102,15 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 )}
               </div>
 
-              {/* Totals */}
-              {(govtFees.length > 0 || adhocFees.length > 0) && (
+              {/* Totals (unpaid only) */}
+              {(unpaidLinked.length > 0 || unpaidAdhoc.length > 0) && (
                 <div className={`flex justify-end px-3 py-3 rounded-xl border ${isDark ? 'bg-slate-700/30 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
                   <p className="text-sm">
-                    <span className="text-slate-500 mr-2">Total recorded:</span>
+                    <span className="text-slate-500 mr-2">Total unpaid:</span>
                     <span className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
                       ₹ {(
-                        govtFees.reduce((s, i) => s + (i.govt_fees_amount || 0), 0) +
-                        adhocFees.reduce((s, f) => s + (f.amount || 0), 0)
+                        unpaidLinked.reduce((s, i) => s + (i.govt_fees_amount || 0), 0) +
+                        unpaidAdhoc.reduce((s, f) => s + (f.amount || 0), 0)
                       ).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                     </span>
                   </p>
@@ -2124,7 +2127,8 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 onSaved={() => { fetchAdhocFees(); setEditingAdhoc(null); }}
               />
             </div>
-          )}
+            );
+          })()}
 
 
           {/* ════════════════ DETAILS TAB ════════════════ */}
