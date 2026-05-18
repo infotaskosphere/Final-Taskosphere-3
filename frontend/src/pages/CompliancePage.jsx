@@ -2353,9 +2353,18 @@ export default function CompliancePage(){
     setAdhocFeesLoading(true);
     try {
       const r = await api.get('/compliance/standalone-govt-fees');
-      setAdhocFees(r.data?.items || []);
-    } catch {
+      const data = r?.data;
+      // Be defensive about response shape — sometimes backend returns
+      // {items:[...]}, sometimes a bare array. Either way we keep data on screen.
+      const items = Array.isArray(data)
+        ? data
+        : (data?.items || data?.fees || data?.results || []);
+      setAdhocFees(items);
+    } catch (e) {
+      console.error('Failed to load govt fees:', e);
       toast.error('Failed to load government fees');
+      // IMPORTANT: do NOT clear adhocFees here — keeping stale data avoids
+      // the "tab sometimes blank" UX when a request hiccups.
     } finally {
       setAdhocFeesLoading(false);
     }
@@ -2373,7 +2382,7 @@ export default function CompliancePage(){
         .catch(() => setAdhocClients([]));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageView]);
+  }, [pageView, refreshKey]);
 
   const handleDeleteAdhoc = async (fee) => {
     if (!window.confirm(`Delete "${fee.title}"?`)) return;
@@ -2386,17 +2395,29 @@ export default function CompliancePage(){
     }
   };
 
+  // Robust, multi-token search across every meaningful field.
+  // Each whitespace-separated token must match somewhere — order-independent.
   const filteredAdhoc = useMemo(() => {
     const list = adhocFees || [];
     const q = adhocSearch.trim().toLowerCase();
     if (!q) return list;
-    return list.filter(f =>
-      (f.title || '').toLowerCase().includes(q) ||
-      (f.client_name || '').toLowerCase().includes(q) ||
-      (f.srn || '').toLowerCase().includes(q) ||
-      (f.category || '').toLowerCase().includes(q) ||
-      (f.status || '').toLowerCase().includes(q)
-    );
+    const tokens = q.split(/\s+/).filter(Boolean);
+    return list.filter(f => {
+      const hay = [
+        f.title,
+        f.client_name,
+        f.srn,
+        f.category,
+        CATEGORY_CFG[f.category]?.label,
+        f.status,
+        f.notes,
+        f.fy_year,
+        f.period_label,
+        f.amount != null ? String(f.amount) : '',
+        f.due_date ? String(f.due_date).slice(0, 10) : '',
+      ].filter(Boolean).join(' ').toLowerCase();
+      return tokens.every(t => hay.includes(t));
+    });
   }, [adhocFees, adhocSearch]);
 
   const exportGovtFees = useCallback((kind) => {
@@ -2735,29 +2756,52 @@ export default function CompliancePage(){
               </div>
 
               {pageView==='govtfees' ? (
-                <div className="flex items-center gap-3 flex-wrap">
-                  <div className="relative flex-1 min-w-[220px] max-w-md">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="relative flex-1 min-w-[240px] max-w-md">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{color:isDark?D.dimmer:'#94a3b8'}}/>
-                    <input value={adhocSearch} onChange={e=>setAdhocSearch(e.target.value)} placeholder="Search by title, client, SRN…"
-                      className="w-full pl-9 pr-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    <input value={adhocSearch} onChange={e=>setAdhocSearch(e.target.value)} placeholder="Search title, client, SRN, FY, notes…"
+                      className="w-full pl-9 pr-9 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                       style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}/>
+                    {adhocSearch && (
+                      <button onClick={()=>setAdhocSearch('')} title="Clear"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md hover:bg-slate-100"
+                        style={{color:isDark?D.dimmer:'#94a3b8'}}>
+                        <X className="w-3.5 h-3.5"/>
+                      </button>
+                    )}
                   </div>
-                  <button onClick={()=>exportGovtFees('excel')} disabled={!filteredAdhoc.length}
-                    className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-bold border disabled:opacity-40"
-                    style={{ backgroundColor:isDark?D.card:'#fff', borderColor:isDark?D.border:'#cbd5e1', color:isDark?D.text:'#0f172a' }}>
-                    <FileSpreadsheet className="w-3.5 h-3.5"/> Excel
-                  </button>
-                  <button onClick={()=>exportGovtFees('pdf')} disabled={!filteredAdhoc.length}
-                    className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-bold border disabled:opacity-40"
-                    style={{ backgroundColor:isDark?D.card:'#fff', borderColor:isDark?D.border:'#cbd5e1', color:isDark?D.text:'#0f172a' }}>
-                    <Download className="w-3.5 h-3.5"/> PDF
-                  </button>
-                  {/* Single Add button next to search */}
-                  <button onClick={()=>{ setEditingAdhoc(null); setShowAdhocDialog(true); }}
-                    className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg text-xs font-bold text-white"
-                    style={{ background:'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
-                    <Plus className="w-3.5 h-3.5"/> Add Government Fee
-                  </button>
+                  {adhocSearch && (
+                    <span className="text-[11px] font-semibold px-2 py-1 rounded-md"
+                      style={{backgroundColor:isDark?D.raised:'#f1f5f9',color:isDark?D.muted:'#64748b'}}>
+                      {filteredAdhoc.length} of {adhocFees.length}
+                    </span>
+                  )}
+                  <div className="flex items-center gap-1.5 ml-auto">
+                    <div className="inline-flex rounded-lg border overflow-hidden"
+                      style={{borderColor:isDark?D.border:'#cbd5e1'}}>
+                      <button onClick={()=>exportGovtFees('excel')} disabled={!filteredAdhoc.length}
+                        className="inline-flex items-center gap-1.5 h-9 px-3 text-xs font-bold disabled:opacity-40 hover:opacity-90"
+                        style={{ backgroundColor:isDark?D.card:'#fff', color:isDark?D.text:'#0f172a' }}>
+                        <FileSpreadsheet className="w-3.5 h-3.5"/> Excel
+                      </button>
+                      <div style={{width:1, backgroundColor:isDark?D.border:'#e2e8f0'}}/>
+                      <button onClick={()=>exportGovtFees('pdf')} disabled={!filteredAdhoc.length}
+                        className="inline-flex items-center gap-1.5 h-9 px-3 text-xs font-bold disabled:opacity-40 hover:opacity-90"
+                        style={{ backgroundColor:isDark?D.card:'#fff', color:isDark?D.text:'#0f172a' }}>
+                        <Download className="w-3.5 h-3.5"/> PDF
+                      </button>
+                    </div>
+                    <button onClick={()=>setRefreshKey(k=>k+1)} title="Refresh"
+                      className="p-2 h-9 w-9 inline-flex items-center justify-center rounded-lg border hover:opacity-80"
+                      style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.muted:'#64748b'}}>
+                      <RefreshCw className={`w-4 h-4 ${adhocFeesLoading?'animate-spin':''}`}/>
+                    </button>
+                    <button onClick={()=>{ setEditingAdhoc(null); setShowAdhocDialog(true); }}
+                      className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg text-xs font-bold text-white shadow-sm hover:shadow-md transition-shadow"
+                      style={{ background:'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
+                      <Plus className="w-3.5 h-3.5"/> Add Government Fee
+                    </button>
+                  </div>
                 </div>
               ) : (
               <div className="flex items-center gap-3 flex-wrap">
@@ -2823,9 +2867,16 @@ export default function CompliancePage(){
           if (sectionId === 'content') return (
             <React.Fragment key="content">
               {pageView === 'govtfees' ? (
-                <motion.div className="rounded-2xl border overflow-hidden"
+                <motion.div className="relative rounded-2xl border overflow-hidden"
                   style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0'}}>
-                  {adhocFeesLoading ? (
+                  {/*
+                    CRITICAL: only show the full-screen loader on the FIRST load
+                    (when we have no data yet). On subsequent refreshes we keep
+                    the existing rows on screen — this fixes the "Govt Fees tab
+                    sometimes blank" issue where a slow refetch would wipe the
+                    list.
+                  */}
+                  {adhocFeesLoading && adhocFees.length === 0 ? (
                     <div className="flex items-center justify-center py-20">
                       <Loader2 className="w-7 h-7 text-blue-500 animate-spin"/>
                     </div>
@@ -2835,33 +2886,50 @@ export default function CompliancePage(){
                       <p className="text-sm font-bold" style={{color:isDark?D.text:'#0f172a'}}>
                         {adhocSearch ? 'No matching govt fees' : 'No ad-hoc government fees yet'}
                       </p>
-                      <p className="text-xs" style={{color:isDark?D.muted:'#64748b'}}>
-                        Use <strong>Add Govt Fee</strong> above to record payments. Paid and unpaid fees stay in this list.
+                      <p className="text-xs text-center max-w-sm" style={{color:isDark?D.muted:'#64748b'}}>
+                        {adhocSearch
+                          ? 'Try a shorter or different keyword. Search matches title, client, SRN, category, status, FY, notes.'
+                          : <>Use <strong>Add Government Fee</strong> above to record payments. Paid and unpaid fees stay in this list.</>}
                       </p>
+                      {!adhocSearch && (
+                        <button onClick={()=>{ setEditingAdhoc(null); setShowAdhocDialog(true); }}
+                          className="mt-1 inline-flex items-center gap-1.5 h-9 px-4 rounded-lg text-xs font-bold text-white"
+                          style={{ background:'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
+                          <Plus className="w-3.5 h-3.5"/> Add Government Fee
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <>
+                      {/* Subtle inline reload indicator that doesn't blank the list */}
+                      {adhocFeesLoading && (
+                        <div className="absolute right-3 top-3 z-10 flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold"
+                          style={{backgroundColor:isDark?D.raised:'#eff6ff',color:'#1F6FB2'}}>
+                          <Loader2 className="w-3 h-3 animate-spin"/> Refreshing
+                        </div>
+                      )}
+                      {/* Header row */}
                       <div className="grid px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider border-b"
-                        style={{gridTemplateColumns:'2fr 1.4fr 80px 80px 105px 85px 1fr 90px',
+                        style={{gridTemplateColumns:'minmax(200px,1.8fr) minmax(160px,1.4fr) 96px 70px 110px 96px minmax(150px,1.1fr) 92px',
                           backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
                         <div>Title</div><div>Client</div><div>Category</div>
                         <div>FY</div><div>Due Date</div><div>Status</div>
-                        <div>Amount / SRN</div><div className="text-right">Actions</div>
+                        <div>Amount / SRN</div><div className="text-right pr-1">Actions</div>
                       </div>
                       {filteredAdhoc.map(fee => (
                         <div key={fee.id}
-                          className="grid items-center gap-2 px-4 py-3 border-b text-sm"
-                          style={{gridTemplateColumns:'2fr 1.4fr 80px 80px 105px 85px 1fr 90px',
+                          className="group grid items-center gap-2 px-4 py-3 border-b text-sm transition-colors hover:bg-slate-50/60 dark:hover:bg-white/5"
+                          style={{gridTemplateColumns:'minmax(200px,1.8fr) minmax(160px,1.4fr) 96px 70px 110px 96px minmax(150px,1.1fr) 92px',
                             borderColor:isDark?D.border:'#f1f5f9',color:isDark?D.text:'#1e293b'}}>
-                          <div>
-                            <p className="font-semibold">{fee.title}</p>
+                          <div className="min-w-0">
+                            <p className="font-semibold truncate" title={fee.title}>{fee.title}</p>
                             {fee.period_label && (
-                              <p className="text-[11px]" style={{color:isDark?D.dimmer:'#94a3b8'}}>{fee.period_label}</p>
+                              <p className="text-[11px] truncate" style={{color:isDark?D.dimmer:'#94a3b8'}}>{fee.period_label}</p>
                             )}
                           </div>
-                          <div className="text-xs">{fee.client_name || '—'}</div>
+                          <div className="text-xs truncate" title={fee.client_name || ''}>{fee.client_name || '—'}</div>
                           <div>
-                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold"
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold whitespace-nowrap"
                               style={{
                                 backgroundColor: (CATEGORY_CFG[fee.category]?.bg) || '#f1f5f9',
                                 color: (CATEGORY_CFG[fee.category]?.color) || '#64748b',
@@ -2870,7 +2938,7 @@ export default function CompliancePage(){
                             </span>
                           </div>
                           <div className="text-xs">{fee.fy_year || '—'}</div>
-                          <div className="text-xs">
+                          <div className="text-xs whitespace-nowrap">
                             {fee.due_date ? format(parseISO(fee.due_date.slice(0,10)), 'MMM d, yyyy') : '—'}
                           </div>
                           <div>
@@ -2883,19 +2951,21 @@ export default function CompliancePage(){
                               </p>
                             )}
                           </div>
-                          <div>
-                            <p className="font-bold">₹ {(fee.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-                            <p className="text-[11px] font-mono" style={{color:isDark?D.dimmer:'#94a3b8'}}>{fee.srn || '—'}</p>
+                          <div className="min-w-0">
+                            <p className="font-bold whitespace-nowrap">₹ {(fee.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+                            <p className="text-[11px] font-mono truncate" title={fee.srn || ''} style={{color:isDark?D.dimmer:'#94a3b8'}}>{fee.srn || '—'}</p>
                           </div>
-                          <div className="flex justify-end gap-1">
+                          <div className="flex justify-end items-center gap-0.5 opacity-70 group-hover:opacity-100 transition-opacity">
                             <button onClick={()=>{ setEditingAdhoc(fee); setShowAdhocDialog(true); }}
-                              className="p-1.5 rounded-lg hover:bg-slate-100" title="Edit"
+                              className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                              title="Edit fee"
                               style={{color:isDark?D.muted:'#64748b'}}>
                               <Edit2 className="w-3.5 h-3.5"/>
                             </button>
                             {canManage && (
                               <button onClick={()=>handleDeleteAdhoc(fee)}
-                                className="p-1.5 rounded-lg hover:bg-red-50 text-red-600" title="Delete">
+                                className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-red-50 text-red-500 hover:text-red-600 transition-colors"
+                                title="Delete fee">
                                 <Trash2 className="w-3.5 h-3.5"/>
                               </button>
                             )}
