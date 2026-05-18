@@ -2113,6 +2113,73 @@ async def offboard_user(
     }
 
 
+@api_router.get("/users/{user_id}/assigned-clients")
+async def get_user_assigned_clients(
+    user_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Return the list of clients assigned to a specific user.
+    - Admin: can view for any user
+    - Manager with can_manage_users: can view for their team members
+    - Staff: can only view their own assigned clients
+    Permission also respects can_view_all_clients and cross_visibility flags.
+    """
+    # Determine if the requester is allowed to see this user's clients
+    is_own = (user_id == current_user.id)
+    perms = get_user_permissions(current_user)
+
+    if not is_own:
+        if current_user.role == "admin":
+            pass  # admin can see any user
+        elif current_user.role == "manager" and perms.get("can_manage_users", False):
+            team_ids = await get_team_user_ids(current_user.id)
+            if user_id not in team_ids:
+                raise HTTPException(status_code=403, detail="User is not in your team")
+        else:
+            # Check cross_visibility
+            cross_ids = await get_cross_visibility_union(current_user.id)
+            if user_id not in cross_ids:
+                raise HTTPException(status_code=403, detail="Not allowed to view this user's clients")
+
+    # Fetch target user's permissions to get their assigned_client IDs
+    target_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    target_perms = target_user.get("permissions", {})
+    assigned_ids = target_perms.get("assigned_clients", []) or []
+
+    # Also include clients where assigned_to == user_id or created_by == user_id
+    or_clauses = [
+        {"assigned_to": user_id},
+        {"created_by": user_id},
+    ]
+    if assigned_ids:
+        or_clauses.append({"id": {"$in": assigned_ids}})
+
+    clients = await db.clients.find({"$or": or_clauses}, {"_id": 0}).to_list(1000)
+
+    for client in clients:
+        if isinstance(client.get("created_at"), str):
+            try:
+                client["created_at"] = datetime.fromisoformat(client["created_at"])
+            except ValueError:
+                client["created_at"] = None
+        if client.get("birthday") and isinstance(client["birthday"], str):
+            try:
+                client["birthday"] = date.fromisoformat(client["birthday"])
+            except ValueError:
+                client["birthday"] = None
+
+    return {
+        "user_id": user_id,
+        "user_name": target_user.get("full_name", ""),
+        "clients": clients,
+        "total": len(clients)
+    }
+
+
 @api_router.get("/users/{user_id}/permissions")
 async def get_permissions(user_id: str, current_user: User = Depends(get_current_user)):
     """
