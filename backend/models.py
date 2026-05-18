@@ -273,6 +273,7 @@ class UserPermissions(BaseModel):
     view_other_todos: List[str] = Field(default_factory=list)
     view_other_activity: List[str] = Field(default_factory=list)
     assigned_clients: List[str] = Field(default_factory=list)
+    governed_users: List[str] = Field(default_factory=list)   # users this person can manage (when can_manage_users=True)
 
     model_config = ConfigDict(extra="ignore")
 
