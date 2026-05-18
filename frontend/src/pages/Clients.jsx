@@ -24,6 +24,7 @@ import {
   IndianRupee, Save as SaveIcon, Globe, Settings,
 } from 'lucide-react';
 import { detectClientDuplicates } from '@/lib/aiDuplicateEngine';
+import StandaloneGovtFeeDialog from '@/components/StandaloneGovtFeeDialog';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
 import ClientPortalManager from '@/components/ClientPortalManager';
 import DSCLinkerSection from '@/components/DSCLinkerSection';
@@ -1347,12 +1348,36 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
   const [govtFeesSavingId, setGovtFeesSavingId] = React.useState(null);
   const [govtFeesDraft,    setGovtFeesDraft]    = React.useState({}); // { assignment_id: { amount, notes } }
 
+  // Standalone (ad-hoc) govt fees for this client
+  const [adhocFees,        setAdhocFees]        = React.useState([]);
+  const [adhocFeesLoading, setAdhocFeesLoading] = React.useState(false);
+  const [showAdhocDialog,  setShowAdhocDialog]  = React.useState(false);
+  const [editingAdhoc,     setEditingAdhoc]     = React.useState(null);
+
+  const fetchAdhocFees = React.useCallback(async () => {
+    if (!selectedClient?.id) return;
+    setAdhocFeesLoading(true);
+    try {
+      const r = await api.get('/compliance/standalone-govt-fees', {
+        params: { client_id: selectedClient.id },
+      });
+      setAdhocFees(r.data?.items || []);
+    } catch {
+      setAdhocFees([]);
+    } finally {
+      setAdhocFeesLoading(false);
+    }
+  }, [selectedClient?.id]);
+
   React.useEffect(() => {
     setActiveTab('details');
     setClientInvoices([]);
     setGstSessions([]);
     setGovtFees([]);
     setGovtFeesDraft({});
+    setAdhocFees([]);
+    setEditingAdhoc(null);
+    setShowAdhocDialog(false);
     setPortalUsers([]);
     setShowPortalManager(false);
   }, [selectedClient?.id]);
@@ -1405,7 +1430,8 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
       })
       .catch(() => setGovtFees([]))
       .finally(() => setGovtFeesLoading(false));
-  }, [activeTab, selectedClient]);
+    fetchAdhocFees();
+  }, [activeTab, selectedClient, fetchAdhocFees]);
 
   // Fetch portal users for this client
   React.useEffect(() => {
@@ -1894,23 +1920,55 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
 
           {/* ════════════════ GOVT FEES TAB ════════════════ */}
           {activeTab === 'govtfees' && (
-            <div className="p-6">
+            <div className="p-6 space-y-6">
+
+              {/* Header with + Add */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                    Government Fees
+                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Compliance-linked fees come from the Compliance Tracker. Use “+ Add”
+                    to record a one-off govt fee that isn’t part of a recurring compliance.
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => { setEditingAdhoc(null); setShowAdhocDialog(true); }}
+                  className="h-9 px-4 rounded-xl text-white text-xs font-semibold gap-1.5"
+                  style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+                  <Plus className="h-4 w-4" /> Add
+                </Button>
+              </div>
+
+              {/* Compliance-linked govt fees */}
               {govtFeesLoading ? (
-                <div className="py-16 text-center text-sm text-slate-500">Loading…</div>
+                <div className="py-10 text-center text-sm text-slate-500">Loading…</div>
               ) : govtFees.length === 0 ? (
-                <div className="py-16 text-center">
-                  <IndianRupee className="h-10 w-10 mx-auto mb-3 text-slate-300" />
+                <div className="py-10 text-center rounded-xl border border-dashed border-slate-200">
+                  <IndianRupee className="h-8 w-8 mx-auto mb-2 text-slate-300" />
                   <p className={`text-sm font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                    No government-fee compliance yet
+                    No compliance-linked government fees
                   </p>
                   <p className="text-xs text-slate-500 mt-1">
-                    In Compliance Tracker, mark a compliance "Government Fees: Yes" and assign it to this client.
+                    In Compliance Tracker, mark a compliance “Government Fees: Yes” and assign it to this client.
                   </p>
+                  <Button
+                    size="sm"
+                    onClick={() => { setEditingAdhoc(null); setShowAdhocDialog(true); }}
+                    className="mt-4 h-8 px-4 rounded-lg text-white text-xs font-semibold gap-1.5"
+                    style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+                    <Plus className="h-3.5 w-3.5" /> Add Government Fee
+                  </Button>
                 </div>
               ) : (
                 <div className="space-y-2">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                    From Compliance Tracker
+                  </p>
                   <div className={`grid gap-2 px-3 py-2 text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
-                    style={{gridTemplateColumns:'2fr 80px 100px 120px 1fr 80px'}}>
+                    style={{ gridTemplateColumns: '2fr 80px 100px 120px 1fr 80px' }}>
                     <div>Compliance</div>
                     <div>FY Year</div>
                     <div>Due Date</div>
@@ -1926,7 +1984,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                     return (
                       <div key={item.assignment_id}
                         className={`grid gap-2 items-center px-3 py-2.5 rounded-xl border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-white border-slate-200'}`}
-                        style={{gridTemplateColumns:'2fr 80px 100px 120px 1fr 80px'}}>
+                        style={{ gridTemplateColumns: '2fr 80px 100px 120px 1fr 80px' }}>
                         <div>
                           <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{item.name}</p>
                           <p className="text-[11px] text-slate-500">{item.category} · {item.frequency}{item.period_label ? ` · ${item.period_label}` : ''}</p>
@@ -1972,18 +2030,102 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                       </div>
                     );
                   })}
-                  <div className={`mt-4 flex justify-end px-3 py-3 rounded-xl border ${isDark ? 'bg-slate-700/30 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-                    <p className="text-sm">
-                      <span className="text-slate-500 mr-2">Total recorded:</span>
-                      <span className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                        ₹ {govtFees.reduce((s, i) => s + (i.govt_fees_amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </span>
-                    </p>
-                  </div>
                 </div>
               )}
+
+              {/* Standalone (ad-hoc) govt fees */}
+              <div className="space-y-2">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  One-off / Ad-hoc Fees
+                </p>
+                {adhocFeesLoading ? (
+                  <div className="py-6 text-center text-xs text-slate-500">Loading…</div>
+                ) : adhocFees.length === 0 ? (
+                  <div className="py-6 text-center text-xs text-slate-500 rounded-xl border border-dashed border-slate-200">
+                    No one-off fees yet. Click “+ Add” above to record one.
+                  </div>
+                ) : (
+                  <>
+                    <div className={`grid gap-2 px-3 py-2 text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+                      style={{ gridTemplateColumns: '2fr 90px 100px 110px 1fr 100px' }}>
+                      <div>Title</div>
+                      <div>Category</div>
+                      <div>FY</div>
+                      <div>Due Date</div>
+                      <div>Amount / SRN</div>
+                      <div className="text-right">Actions</div>
+                    </div>
+                    {adhocFees.map(fee => (
+                      <div key={fee.id}
+                        className={`grid gap-2 items-center px-3 py-2.5 rounded-xl border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-white border-slate-200'}`}
+                        style={{ gridTemplateColumns: '2fr 90px 100px 110px 1fr 100px' }}>
+                        <div>
+                          <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{fee.title}</p>
+                          {fee.period_label && <p className="text-[11px] text-slate-500">{fee.period_label}</p>}
+                        </div>
+                        <div className="text-xs text-slate-600">{fee.category || 'OTHER'}</div>
+                        <div className="text-xs text-slate-600">{fee.fy_year || '—'}</div>
+                        <div className="text-xs text-slate-600">
+                          {fee.due_date ? format(new Date(fee.due_date.slice(0, 10)), 'MMM d, yyyy') : '—'}
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold">₹ {(fee.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+                          <p className="text-[11px] font-mono text-slate-500">{fee.srn || '—'}</p>
+                        </div>
+                        <div className="flex justify-end gap-1">
+                          <button
+                            onClick={() => { setEditingAdhoc(fee); setShowAdhocDialog(true); }}
+                            className="p-1.5 rounded-lg hover:bg-slate-100" title="Edit">
+                            <Edit className="h-3.5 w-3.5 text-slate-600" />
+                          </button>
+                          <button
+                            onClick={async () => {
+                              if (!window.confirm(`Delete "${fee.title}"?`)) return;
+                              try {
+                                await api.delete(`/compliance/standalone-govt-fees/${fee.id}`);
+                                toast.success('Government fee deleted');
+                                setAdhocFees(prev => prev.filter(f => f.id !== fee.id));
+                              } catch (e) {
+                                toast.error(e?.response?.data?.detail || 'Delete failed');
+                              }
+                            }}
+                            className="p-1.5 rounded-lg hover:bg-red-50" title="Delete">
+                            <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+
+              {/* Totals */}
+              {(govtFees.length > 0 || adhocFees.length > 0) && (
+                <div className={`flex justify-end px-3 py-3 rounded-xl border ${isDark ? 'bg-slate-700/30 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                  <p className="text-sm">
+                    <span className="text-slate-500 mr-2">Total recorded:</span>
+                    <span className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                      ₹ {(
+                        govtFees.reduce((s, i) => s + (i.govt_fees_amount || 0), 0) +
+                        adhocFees.reduce((s, f) => s + (f.amount || 0), 0)
+                      ).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    </span>
+                  </p>
+                </div>
+              )}
+
+              {/* Ad-hoc govt fee dialog */}
+              <StandaloneGovtFeeDialog
+                open={showAdhocDialog}
+                onOpenChange={setShowAdhocDialog}
+                editing={editingAdhoc}
+                clientId={selectedClient?.id}
+                lockClient={true}
+                onSaved={() => { fetchAdhocFees(); setEditingAdhoc(null); }}
+              />
             </div>
           )}
+
 
           {/* ════════════════ DETAILS TAB ════════════════ */}
           {activeTab === 'details' && (
