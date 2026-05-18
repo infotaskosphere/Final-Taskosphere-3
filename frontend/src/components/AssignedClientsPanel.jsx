@@ -193,9 +193,9 @@ export default function AssignedClientsPanel({ isDark }) {
     <div className="space-y-4">
       {/* HEADER */}
       <div
-        className={`rounded-2xl border overflow-hidden ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"}`}
+        className={`rounded-2xl border ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"}`}
       >
-        <div className="px-5 py-4 flex flex-wrap items-center gap-4" style={{ background: GRADIENT }}>
+        <div className="px-5 py-4 flex flex-wrap items-center gap-4 rounded-t-2xl" style={{ background: GRADIENT }}>
           <div className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0">
             <UsersIcon className="h-5 w-5 text-white" />
           </div>
@@ -224,7 +224,7 @@ export default function AssignedClientsPanel({ isDark }) {
                 {userPickerOpen && (
                   <motion.div
                     initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
-                    className={`absolute right-0 mt-2 w-72 max-h-80 overflow-y-auto rounded-xl shadow-2xl border z-30 ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"}`}
+                    className={`absolute right-0 mt-2 w-72 max-h-80 overflow-y-auto rounded-xl shadow-2xl border z-50 ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"}`}
                   >
                     {users.map(u => {
                       const sel = u.id === selectedUserId;
@@ -254,7 +254,7 @@ export default function AssignedClientsPanel({ isDark }) {
         </div>
 
         {/* METRICS STRIP */}
-        <div className={`grid grid-cols-2 sm:grid-cols-4 gap-px ${isDark ? "bg-slate-700" : "bg-slate-100"}`}>
+        <div className={`grid grid-cols-2 sm:grid-cols-4 gap-px overflow-hidden rounded-b-2xl ${isDark ? "bg-slate-700" : "bg-slate-100"}`}>
           {[
             { label: "Total Clients", value: data.count, accent: COLORS.deepBlue, icon: Building2 },
             { label: "Active",        value: activeCount, accent: COLORS.emeraldGreen, icon: CheckCircle2 },
