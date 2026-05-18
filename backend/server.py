@@ -17,7 +17,7 @@ from datetime import datetime, date, timezone, timedelta
 
 # --- FIXED ROUTER IMPORTS ---
 # Added 'backend.' to invoicing to match the others
-from backend.compliance import router as compliance_router
+from backend.compliance import router as compliance_router, create_compliance_indexes
 from backend.ai_document_reader import router as ai_document_reader_router
 from backend.gst_reconciliation import router as gst_reconciliation_router
 from backend.gst_reconciliation import create_gst_reconciliation_indexes
@@ -375,7 +375,7 @@ def force_punch_out_11pm_task():
 async def startup_event():
     try:
         await db.tasks.create_index("assigned_to")
-        await create_compliance_indexes()  # import it too
+        await create_compliance_indexes()
         await create_gst_reconciliation_indexes()
         await db.tasks.create_index("created_by")
         await db.tasks.create_index("due_date")
