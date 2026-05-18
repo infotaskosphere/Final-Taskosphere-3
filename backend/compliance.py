@@ -1110,6 +1110,7 @@ async def update_monthly_status(
 class GovtFeeUpdate(BaseModel):
     govt_fees_amount: float = 0.0
     govt_fees_notes:  Optional[str] = None
+    govt_fees_srn:    Optional[str] = None
 
 
 @router.get("/by-client/{client_id}")
@@ -1153,6 +1154,7 @@ async def list_compliance_for_client(
             "status":           a.get("status"),
             "govt_fees_amount": a.get("govt_fees_amount", 0) or 0,
             "govt_fees_notes":  a.get("govt_fees_notes", "") or "",
+            "govt_fees_srn":    a.get("govt_fees_srn", "") or "",
         })
     items.sort(key=lambda x: (x.get("fy_year") or "", x.get("name") or ""))
     return {"items": items}
@@ -1171,6 +1173,7 @@ async def update_assignment_govt_fee(
         {"$set": {
             "govt_fees_amount": float(data.govt_fees_amount or 0),
             "govt_fees_notes":  data.govt_fees_notes,
+            "govt_fees_srn":    data.govt_fees_srn,
             "updated_at":       _now(),
             "updated_by":       current_user.id,
         }},
