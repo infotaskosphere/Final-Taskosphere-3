@@ -251,7 +251,39 @@ async def list_compliance_masters(
         query["fy_year"] = fy_year
 
     items = await db.compliance_masters.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
-    return [await _enrich(item) for item in items]
+    if not items:
+        return []
+
+    # PERF: batch enrichment in a single aggregation instead of N round-trips
+    cids = [it["id"] for it in items]
+    pipeline = [
+        {"$match": {"compliance_id": {"$in": cids}}},
+        {"$group": {
+            "_id": {"cid": "$compliance_id", "status": "$status"},
+            "n": {"$sum": 1},
+        }},
+    ]
+    stats_map: Dict[str, Dict[str, int]] = {cid: {} for cid in cids}
+    async for row in db.compliance_assignments.aggregate(pipeline):
+        cid = row["_id"]["cid"]
+        st  = row["_id"]["status"]
+        stats_map.setdefault(cid, {})[st] = row["n"]
+
+    for it in items:
+        counts = stats_map.get(it["id"], {})
+        total  = sum(counts.values())
+        done   = counts.get("completed", 0) + counts.get("filed", 0)
+        it["_stats"] = {
+            "total":       total,
+            "not_started": counts.get("not_started", 0),
+            "in_progress": counts.get("in_progress", 0),
+            "completed":   counts.get("completed", 0),
+            "filed":       counts.get("filed", 0),
+            "na":          counts.get("na", 0),
+            "done":        done,
+            "pct":         round(done / total * 100, 1) if total else 0.0,
+        }
+    return items
 
 
 @router.post("")
