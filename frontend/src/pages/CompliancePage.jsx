@@ -2348,6 +2348,19 @@ export default function CompliancePage(){
   const [editingAdhoc,    setEditingAdhoc]    = useState(null);
   const [adhocClients,    setAdhocClients]    = useState([]);
   const [adhocSearch,     setAdhocSearch]     = useState('');
+  // ── Govt Fees sub-tab: 'direct' (standalone only) | 'all' (standalone + compliance-linked) ──
+  const [govtFeesSubTab,  setGovtFeesSubTab]  = useState('direct'); // 'direct' | 'all'
+  // ── Govt Fees advanced filters ──
+  const [gfFormFilter,    setGfFormFilter]    = useState('all');    // category/form filter
+  const [gfEntityFilter,  setGfEntityFilter]  = useState('all');    // entity type filter
+  const [gfDateMode,      setGfDateMode]      = useState('all');    // 'all'|'month'|'year'|'custom'
+  const [gfMonth,         setGfMonth]         = useState('');       // "YYYY-MM"
+  const [gfYear,          setGfYear]          = useState('');       // "YYYY"
+  const [gfDateFrom,      setGfDateFrom]      = useState('');       // "YYYY-MM-DD"
+  const [gfDateTo,        setGfDateTo]        = useState('');       // "YYYY-MM-DD"
+  // ── Compliance-linked fees for "All Payments" sub-tab ──
+  const [linkedFees,      setLinkedFees]      = useState([]);
+  const [linkedFeesLoading,setLinkedFeesLoading] = useState(false);
 
   const fetchAdhocFees = useCallback(async () => {
     setAdhocFeesLoading(true);
@@ -2370,9 +2383,60 @@ export default function CompliancePage(){
     }
   }, []);
 
+  // Fetch compliance-linked govt fee payments (assignments that have govt_fees_amount > 0)
+  const fetchLinkedFees = useCallback(async () => {
+    setLinkedFeesLoading(true);
+    try {
+      // Pull all compliance masters that are flagged as govt_fees=true
+      const [mastersRes, assignmentsRes] = await Promise.all([
+        api.get('/compliance', { params: { page_size: 5000 } }),
+        api.get('/compliance/dashboard/summary'),
+      ]);
+      const masters = Array.isArray(mastersRes.data) ? mastersRes.data : [];
+      const govtFeesMasters = masters.filter(m => m.govt_fees);
+      // For each master, fetch assignments and hydrate client names
+      if (!govtFeesMasters.length) { setLinkedFees([]); return; }
+      const allItems = [];
+      await Promise.all(govtFeesMasters.map(async master => {
+        try {
+          const r = await api.get(`/compliance/${master.id}/assignments`);
+          const asgns = Array.isArray(r.data) ? r.data : (r.data?.items || []);
+          asgns.forEach(a => {
+            if ((a.govt_fees_amount || 0) > 0) {
+              allItems.push({
+                id: a.id,
+                assignment_id: a.id,
+                compliance_id: master.id,
+                title: master.name,
+                client_id: a.client_id,
+                client_name: a.client_name || a.client_company || '',
+                category: master.category,
+                fy_year: master.fy_year || a.fy_year,
+                period_label: master.period_label,
+                due_date: master.due_date || a.due_date,
+                status: a.status,
+                amount: a.govt_fees_amount || 0,
+                srn: a.govt_fees_srn || '',
+                notes: a.govt_fees_notes || '',
+                is_linked: true, // marks as compliance-linked
+                payment_date: a.payment_date || a.paid_on || null,
+              });
+            }
+          });
+        } catch {}
+      }));
+      setLinkedFees(allItems);
+    } catch (e) {
+      console.error('Failed to load linked fees:', e);
+    } finally {
+      setLinkedFeesLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (pageView !== 'govtfees') return;
     fetchAdhocFees();
+    fetchLinkedFees();
     if (!adhocClients.length) {
       api.get('/clients', { params: { page_size: 2000 } })
         .then(r => {
@@ -2395,37 +2459,106 @@ export default function CompliancePage(){
     }
   };
 
+  // Entity types commonly used in Indian CA practice
+  const ENTITY_TYPES = [
+    { value: 'pvt_ltd',    label: 'Private Ltd (Pvt Ltd)' },
+    { value: 'pub_ltd',    label: 'Public Ltd' },
+    { value: 'llp',        label: 'LLP' },
+    { value: 'opc',        label: 'OPC' },
+    { value: 'partnership',label: 'Partnership' },
+    { value: 'proprietorship', label: 'Proprietorship' },
+    { value: 'trust',      label: 'Trust / NGO' },
+    { value: 'huf',        label: 'HUF' },
+    { value: 'individual', label: 'Individual' },
+    { value: 'other',      label: 'Other' },
+  ];
+
+  // Shared date-range filter helper
+  const applyDateFilter = (fee) => {
+    const dateStr = fee.payment_date || fee.paid_on || fee.paid_at || fee.due_date;
+    if (!dateStr) return gfDateMode === 'all';
+    const d = safeDate(String(dateStr).slice(0, 10));
+    if (!d) return gfDateMode === 'all';
+    if (gfDateMode === 'month' && gfMonth) {
+      const [y, m] = gfMonth.split('-');
+      return d.getFullYear() === Number(y) && d.getMonth() + 1 === Number(m);
+    }
+    if (gfDateMode === 'year' && gfYear) {
+      return d.getFullYear() === Number(gfYear);
+    }
+    if (gfDateMode === 'custom') {
+      const from = gfDateFrom ? safeDate(gfDateFrom) : null;
+      const to   = gfDateTo   ? safeDate(gfDateTo)   : null;
+      if (from && d < from) return false;
+      if (to   && d > to  ) return false;
+      return true;
+    }
+    return true;
+  };
+
+  // Shared field-filter helper (form + entity)
+  const applyFieldFilters = (fee) => {
+    if (gfFormFilter !== 'all' && fee.category !== gfFormFilter) return false;
+    if (gfEntityFilter !== 'all' && (fee.entity_type || '') !== gfEntityFilter) return false;
+    return true;
+  };
+
   // Robust, multi-token search across every meaningful field.
   // Each whitespace-separated token must match somewhere — order-independent.
   const filteredAdhoc = useMemo(() => {
     const list = adhocFees || [];
     const q = adhocSearch.trim().toLowerCase();
-    if (!q) return list;
-    const tokens = q.split(/\s+/).filter(Boolean);
+    const tokens = q ? q.split(/\s+/).filter(Boolean) : [];
     return list.filter(f => {
+      if (!applyFieldFilters(f)) return false;
+      if (!applyDateFilter(f)) return false;
+      if (!tokens.length) return true;
       const hay = [
-        f.title,
-        f.client_name,
-        f.srn,
-        f.category,
-        CATEGORY_CFG[f.category]?.label,
-        f.status,
-        f.notes,
-        f.fy_year,
-        f.period_label,
+        f.title, f.client_name, f.srn, f.category,
+        CATEGORY_CFG[f.category]?.label, f.status, f.notes,
+        f.fy_year, f.period_label,
         f.amount != null ? String(f.amount) : '',
         f.due_date ? String(f.due_date).slice(0, 10) : '',
+        f.entity_type || '',
       ].filter(Boolean).join(' ').toLowerCase();
       return tokens.every(t => hay.includes(t));
     });
-  }, [adhocFees, adhocSearch]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adhocFees, adhocSearch, gfFormFilter, gfEntityFilter, gfDateMode, gfMonth, gfYear, gfDateFrom, gfDateTo]);
+
+  // Combined list for "All Payments" sub-tab (standalone + compliance-linked)
+  const filteredAllFees = useMemo(() => {
+    const standaloneWithTag = (adhocFees || []).map(f => ({ ...f, _source: 'direct' }));
+    const linkedWithTag     = (linkedFees || []).map(f => ({ ...f, _source: 'linked' }));
+    const combined = [...standaloneWithTag, ...linkedWithTag];
+    const q = adhocSearch.trim().toLowerCase();
+    const tokens = q ? q.split(/\s+/).filter(Boolean) : [];
+    return combined.filter(f => {
+      if (!applyFieldFilters(f)) return false;
+      if (!applyDateFilter(f)) return false;
+      if (!tokens.length) return true;
+      const hay = [
+        f.title, f.client_name, f.srn, f.category,
+        CATEGORY_CFG[f.category]?.label, f.status, f.notes,
+        f.fy_year, f.period_label,
+        f.amount != null ? String(f.amount) : '',
+        f.entity_type || '',
+        f._source === 'linked' ? 'compliance linked' : 'direct',
+      ].filter(Boolean).join(' ').toLowerCase();
+      return tokens.every(t => hay.includes(t));
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adhocFees, linkedFees, adhocSearch, gfFormFilter, gfEntityFilter, gfDateMode, gfMonth, gfYear, gfDateFrom, gfDateTo]);
+
+  // Active list based on sub-tab
+  const activeGovtFeesList = govtFeesSubTab === 'direct' ? filteredAdhoc : filteredAllFees;
 
   const exportGovtFees = useCallback((kind) => {
-    if (!filteredAdhoc.length) { toast.error('No government fee payments to export'); return; }
+    if (!activeGovtFeesList.length) { toast.error('No government fee payments to export'); return; }
     const dateText = (d) => d ? format(parseISO(String(d).slice(0, 10)), 'MMM d, yyyy') : '—';
     const statusText = (s) => String(s || '').toLowerCase() === 'paid' ? 'Paid' : 'Unpaid';
-    const headers = ['#', 'Client', 'Title', 'Category', 'FY Year', 'Due Date', 'Status', 'Payment Date', 'Amount (₹)', 'SRN', 'Details'];
-    const rows = filteredAdhoc.map((fee, i) => [
+    const headers = ['#', 'Client', 'Title', 'Category', 'FY Year', 'Due Date', 'Status', 'Payment Date', 'Amount (₹)', 'SRN', 'Type', 'Details'];
+    const rows = activeGovtFeesList.map((fee, i) => [
       i + 1,
       fee.client_name || '',
       fee.title || '',
@@ -2436,6 +2569,7 @@ export default function CompliancePage(){
       dateText(fee.payment_date || fee.paid_on || fee.paid_at),
       Number(fee.amount || 0),
       fee.srn || '',
+      fee._source === 'linked' ? 'Compliance-Linked' : 'Direct',
       fee.notes || '',
     ]);
     const fileName = `govt_fees_full_list_${format(new Date(), 'dd-MMM-yyyy')}`;
@@ -2463,7 +2597,7 @@ export default function CompliancePage(){
     });
     doc.save(`${fileName}.pdf`);
     toast.success('Government fees PDF exported');
-  }, [filteredAdhoc]);
+  }, [activeGovtFeesList]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
   const fetchAll=useCallback(async()=>{
@@ -2756,51 +2890,167 @@ export default function CompliancePage(){
               </div>
 
               {pageView==='govtfees' ? (
-                <div className="flex items-center gap-2 flex-wrap">
-                  <div className="relative flex-1 min-w-[240px] max-w-md">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{color:isDark?D.dimmer:'#94a3b8'}}/>
-                    <input value={adhocSearch} onChange={e=>setAdhocSearch(e.target.value)} placeholder="Search title, client, SRN, FY, notes…"
-                      className="w-full pl-9 pr-9 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}/>
-                    {adhocSearch && (
-                      <button onClick={()=>setAdhocSearch('')} title="Clear"
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md hover:bg-slate-100"
-                        style={{color:isDark?D.dimmer:'#94a3b8'}}>
-                        <X className="w-3.5 h-3.5"/>
+                <div className="space-y-3">
+                  {/* ── Sub-tabs: Direct Payments | All Payments ── */}
+                  <div className="flex items-center gap-1 p-1 rounded-xl w-fit"
+                    style={{backgroundColor:isDark?D.raised:'#f1f5f9'}}>
+                    {[
+                      {key:'direct', label:'Direct Payments', title:'Payments not linked to any compliance'},
+                      {key:'all',    label:'All Payments',    title:'Direct payments + compliance-linked payments'},
+                    ].map(tab => (
+                      <button key={tab.key} onClick={()=>setGovtFeesSubTab(tab.key)} title={tab.title}
+                        className="px-4 py-1.5 rounded-lg text-xs font-bold transition-all"
+                        style={{
+                          backgroundColor: govtFeesSubTab===tab.key ? (isDark?D.card:'#fff') : 'transparent',
+                          color: govtFeesSubTab===tab.key ? '#1F6FB2' : (isDark?D.dimmer:'#64748b'),
+                          boxShadow: govtFeesSubTab===tab.key ? '0 1px 4px rgba(0,0,0,0.1)' : 'none',
+                        }}>
+                        {tab.label}
+                        {govtFeesSubTab===tab.key && (
+                          <span className="ml-1.5 px-1.5 py-0.5 text-[9px] rounded-full font-black"
+                            style={{backgroundColor:'#1F6FB215',color:'#1F6FB2'}}>
+                            {tab.key==='direct' ? filteredAdhoc.length : filteredAllFees.length}
+                          </span>
+                        )}
                       </button>
-                    )}
+                    ))}
                   </div>
-                  {adhocSearch && (
+
+                  {/* ── Filter Row 1: Search + Form (Category) + Entity Type ── */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="relative flex-1 min-w-[200px] max-w-sm">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{color:isDark?D.dimmer:'#94a3b8'}}/>
+                      <input value={adhocSearch} onChange={e=>setAdhocSearch(e.target.value)} placeholder="Search title, client, SRN, FY, notes…"
+                        className="w-full pl-9 pr-9 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}/>
+                      {adhocSearch && (
+                        <button onClick={()=>setAdhocSearch('')} title="Clear"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md hover:bg-slate-100"
+                          style={{color:isDark?D.dimmer:'#94a3b8'}}>
+                          <X className="w-3.5 h-3.5"/>
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Form / Category filter */}
+                    <select value={gfFormFilter} onChange={e=>setGfFormFilter(e.target.value)}
+                      className="h-9 px-3 border rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{backgroundColor:isDark?D.card:'#fff',borderColor:gfFormFilter!=='all'?'#1F6FB2':(isDark?D.border:'#e2e8f0'),color:gfFormFilter!=='all'?'#1F6FB2':(isDark?D.text:'#1e293b'),minWidth:130}}>
+                      <option value="all">All Forms</option>
+                      {CATEGORIES.map(cat => (
+                        <option key={cat} value={cat}>{CATEGORY_CFG[cat]?.label || cat}</option>
+                      ))}
+                    </select>
+
+                    {/* Entity Type filter */}
+                    <select value={gfEntityFilter} onChange={e=>setGfEntityFilter(e.target.value)}
+                      className="h-9 px-3 border rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{backgroundColor:isDark?D.card:'#fff',borderColor:gfEntityFilter!=='all'?'#1F6FB2':(isDark?D.border:'#e2e8f0'),color:gfEntityFilter!=='all'?'#1F6FB2':(isDark?D.text:'#1e293b'),minWidth:160}}>
+                      <option value="all">All Entity Types</option>
+                      {ENTITY_TYPES.map(et => (
+                        <option key={et.value} value={et.value}>{et.label}</option>
+                      ))}
+                    </select>
+
+                    {/* Result count */}
                     <span className="text-[11px] font-semibold px-2 py-1 rounded-md"
                       style={{backgroundColor:isDark?D.raised:'#f1f5f9',color:isDark?D.muted:'#64748b'}}>
-                      {filteredAdhoc.length} of {adhocFees.length}
+                      {activeGovtFeesList.length} records
                     </span>
-                  )}
-                  <div className="flex items-center gap-1.5 ml-auto">
-                    <div className="inline-flex rounded-lg border overflow-hidden"
-                      style={{borderColor:isDark?D.border:'#cbd5e1'}}>
-                      <button onClick={()=>exportGovtFees('excel')} disabled={!filteredAdhoc.length}
-                        className="inline-flex items-center gap-1.5 h-9 px-3 text-xs font-bold disabled:opacity-40 hover:opacity-90"
-                        style={{ backgroundColor:isDark?D.card:'#fff', color:isDark?D.text:'#0f172a' }}>
-                        <FileSpreadsheet className="w-3.5 h-3.5"/> Excel
+
+                    {/* Export + Refresh + Add */}
+                    <div className="flex items-center gap-1.5 ml-auto">
+                      <div className="inline-flex rounded-lg border overflow-hidden"
+                        style={{borderColor:isDark?D.border:'#cbd5e1'}}>
+                        <button onClick={()=>exportGovtFees('excel')} disabled={!activeGovtFeesList.length}
+                          className="inline-flex items-center gap-1.5 h-9 px-3 text-xs font-bold disabled:opacity-40 hover:opacity-90"
+                          style={{ backgroundColor:isDark?D.card:'#fff', color:isDark?D.text:'#0f172a' }}>
+                          <FileSpreadsheet className="w-3.5 h-3.5"/> Excel
+                        </button>
+                        <div style={{width:1, backgroundColor:isDark?D.border:'#e2e8f0'}}/>
+                        <button onClick={()=>exportGovtFees('pdf')} disabled={!activeGovtFeesList.length}
+                          className="inline-flex items-center gap-1.5 h-9 px-3 text-xs font-bold disabled:opacity-40 hover:opacity-90"
+                          style={{ backgroundColor:isDark?D.card:'#fff', color:isDark?D.text:'#0f172a' }}>
+                          <Download className="w-3.5 h-3.5"/> PDF
+                        </button>
+                      </div>
+                      <button onClick={()=>setRefreshKey(k=>k+1)} title="Refresh"
+                        className="p-2 h-9 w-9 inline-flex items-center justify-center rounded-lg border hover:opacity-80"
+                        style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.muted:'#64748b'}}>
+                        <RefreshCw className={`w-4 h-4 ${(adhocFeesLoading||linkedFeesLoading)?'animate-spin':''}`}/>
                       </button>
-                      <div style={{width:1, backgroundColor:isDark?D.border:'#e2e8f0'}}/>
-                      <button onClick={()=>exportGovtFees('pdf')} disabled={!filteredAdhoc.length}
-                        className="inline-flex items-center gap-1.5 h-9 px-3 text-xs font-bold disabled:opacity-40 hover:opacity-90"
-                        style={{ backgroundColor:isDark?D.card:'#fff', color:isDark?D.text:'#0f172a' }}>
-                        <Download className="w-3.5 h-3.5"/> PDF
-                      </button>
+                      {govtFeesSubTab==='direct' && (
+                        <button onClick={()=>{ setEditingAdhoc(null); setShowAdhocDialog(true); }}
+                          className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg text-xs font-bold text-white shadow-sm hover:shadow-md transition-shadow"
+                          style={{ background:'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
+                          <Plus className="w-3.5 h-3.5"/> Add Government Fee
+                        </button>
+                      )}
                     </div>
-                    <button onClick={()=>setRefreshKey(k=>k+1)} title="Refresh"
-                      className="p-2 h-9 w-9 inline-flex items-center justify-center rounded-lg border hover:opacity-80"
-                      style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.muted:'#64748b'}}>
-                      <RefreshCw className={`w-4 h-4 ${adhocFeesLoading?'animate-spin':''}`}/>
-                    </button>
-                    <button onClick={()=>{ setEditingAdhoc(null); setShowAdhocDialog(true); }}
-                      className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg text-xs font-bold text-white shadow-sm hover:shadow-md transition-shadow"
-                      style={{ background:'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
-                      <Plus className="w-3.5 h-3.5"/> Add Government Fee
-                    </button>
+                  </div>
+
+                  {/* ── Filter Row 2: Date Filters ── */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] font-bold uppercase tracking-wider" style={{color:isDark?D.dimmer:'#94a3b8'}}>
+                      <Calendar className="inline w-3 h-3 mr-1"/>Date Filter:
+                    </span>
+                    {[
+                      {key:'all',    label:'All Time'},
+                      {key:'month',  label:'By Month'},
+                      {key:'year',   label:'By Year'},
+                      {key:'custom', label:'Custom Range'},
+                    ].map(opt => (
+                      <button key={opt.key} onClick={()=>setGfDateMode(opt.key)}
+                        className="px-3 py-1 rounded-lg text-[11px] font-semibold border transition-all"
+                        style={{
+                          backgroundColor: gfDateMode===opt.key ? '#1F6FB215' : (isDark?D.card:'#fff'),
+                          borderColor: gfDateMode===opt.key ? '#1F6FB2' : (isDark?D.border:'#e2e8f0'),
+                          color: gfDateMode===opt.key ? '#1F6FB2' : (isDark?D.muted:'#64748b'),
+                        }}>
+                        {opt.label}
+                      </button>
+                    ))}
+
+                    {/* Month picker */}
+                    {gfDateMode==='month' && (
+                      <input type="month" value={gfMonth} onChange={e=>setGfMonth(e.target.value)}
+                        className="h-8 px-2 border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}/>
+                    )}
+
+                    {/* Year picker */}
+                    {gfDateMode==='year' && (
+                      <select value={gfYear} onChange={e=>setGfYear(e.target.value)}
+                        className="h-8 px-2 border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}>
+                        <option value="">Select Year</option>
+                        {Array.from({length:15},(_,i)=>new Date().getFullYear()-i).map(y=>(
+                          <option key={y} value={String(y)}>{y}</option>
+                        ))}
+                      </select>
+                    )}
+
+                    {/* Custom date range */}
+                    {gfDateMode==='custom' && (
+                      <div className="flex items-center gap-1.5">
+                        <input type="date" value={gfDateFrom} onChange={e=>setGfDateFrom(e.target.value)}
+                          className="h-8 px-2 border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}/>
+                        <span className="text-[10px]" style={{color:isDark?D.dimmer:'#94a3b8'}}>to</span>
+                        <input type="date" value={gfDateTo} onChange={e=>setGfDateTo(e.target.value)}
+                          className="h-8 px-2 border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}/>
+                      </div>
+                    )}
+
+                    {/* Reset all filters button */}
+                    {(gfFormFilter!=='all'||gfEntityFilter!=='all'||gfDateMode!=='all'||adhocSearch) && (
+                      <button onClick={()=>{setGfFormFilter('all');setGfEntityFilter('all');setGfDateMode('all');setGfMonth('');setGfYear('');setGfDateFrom('');setGfDateTo('');setAdhocSearch('');}}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all"
+                        style={{borderColor:'#EF4444',color:'#EF4444',backgroundColor:isDark?'rgba(239,68,68,0.08)':'#fef2f2'}}>
+                        <X className="w-3 h-3"/> Reset Filters
+                      </button>
+                    )}
                   </div>
                 </div>
               ) : (
