@@ -1200,15 +1200,29 @@ async def update_assignment_govt_fee(
     current_user: User = Depends(check_module_permission("compliance", "create")),
 ):
     """Persist the manually entered government-fee amount for a single client/compliance."""
+    amount = float(data.govt_fees_amount or 0)
+    srn    = (data.govt_fees_srn or "").strip()
+    set_doc = {
+        "govt_fees_amount": amount,
+        "govt_fees_notes":  data.govt_fees_notes,
+        "govt_fees_srn":    srn,
+        "updated_at":       _now(),
+        "updated_by":       current_user.id,
+    }
+    # Auto-mark as Filed when both SRN and amount are present.
+    # Payment date = today (the day the SRN + amount were saved).
+    if amount > 0 and srn:
+        now = _now()
+        today = now[:10]
+        set_doc.update({
+            "status":       "filed",
+            "filed_at":     now,
+            "completed_at": now,
+            "payment_date": today,
+        })
     res = await db.compliance_assignments.update_one(
         {"id": assignment_id, "compliance_id": compliance_id},
-        {"$set": {
-            "govt_fees_amount": float(data.govt_fees_amount or 0),
-            "govt_fees_notes":  data.govt_fees_notes,
-            "govt_fees_srn":    data.govt_fees_srn,
-            "updated_at":       _now(),
-            "updated_by":       current_user.id,
-        }},
+        {"$set": set_doc},
     )
     if res.matched_count == 0:
         raise HTTPException(404, "Assignment not found")
