@@ -81,6 +81,112 @@ const pageVariants = {
 
 const safeDate = s=>{try{const d=parseISO(s);return isNaN(d)?null:d;}catch{return null;}};
 const fmtDate  = (s,f='dd MMM yyyy')=>{const d=safeDate(s);return d?format(d,f):'—';};
+
+// ── GovtFeeRow: isolated component so a single bad record never blanks the table ──
+function GovtFeeRow({ fee, idx, govtFeesSubTab, isDark, canManage, onEdit, onDelete }) {
+  try {
+    const colsAll    = 'minmax(180px,1.6fr) minmax(140px,1.3fr) 96px 70px 110px 96px minmax(130px,1fr) 80px 92px';
+    const colsDirect = 'minmax(200px,1.8fr) minmax(160px,1.4fr) 96px 70px 110px 96px minmax(150px,1.1fr) 92px';
+    const gridCols   = govtFeesSubTab === 'all' ? colsAll : colsDirect;
+    const isLinked   = fee._source === 'linked';
+
+    const dueDateStr     = fee.due_date ? fmtDate(String(fee.due_date).slice(0, 10)) : '—';
+    const paymentDateStr = (() => {
+      const pd = fee.payment_date || fee.paid_on || fee.paid_at;
+      if (!pd) return null;
+      const s = fmtDate(String(pd).slice(0, 10));
+      return s !== '—' ? s : null;
+    })();
+
+    const catCfg = CATEGORY_CFG[fee.category] || CATEGORY_CFG.OTHER;
+    const statusLower = String(fee.status || '').toLowerCase();
+    const isPaid = statusLower === 'paid';
+    const isCompletedOrFiled = statusLower === 'completed' || statusLower === 'filed';
+
+    return (
+      <div key={fee.id || `fee-row-${idx}`}
+        className="group grid items-center gap-2 px-4 py-3 border-b text-sm"
+        style={{ gridTemplateColumns: gridCols, borderColor: isDark ? D.border : '#f1f5f9', color: isDark ? D.text : '#1e293b' }}>
+
+        {/* Title */}
+        <div className="min-w-0">
+          <p className="font-semibold truncate" title={fee.title || ''}>{fee.title || '—'}</p>
+          {fee.period_label ? <p className="text-[11px] truncate" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>{fee.period_label}</p> : null}
+        </div>
+
+        {/* Client */}
+        <div className="text-xs truncate" title={fee.client_name || ''}>{fee.client_name || '—'}</div>
+
+        {/* Category */}
+        <div>
+          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold whitespace-nowrap"
+            style={{ backgroundColor: catCfg.bg, color: catCfg.color }}>
+            {catCfg.label}
+          </span>
+        </div>
+
+        {/* FY */}
+        <div className="text-xs">{fee.fy_year || '—'}</div>
+
+        {/* Due Date */}
+        <div className="text-xs whitespace-nowrap">{dueDateStr}</div>
+
+        {/* Status */}
+        <div>
+          {isLinked ? (
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${isCompletedOrFiled ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>
+              {STATUS_CFG[fee.status]?.label || fee.status || 'In Progress'}
+            </span>
+          ) : (
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${isPaid ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+              {isPaid ? 'Paid' : 'Unpaid'}
+            </span>
+          )}
+          {paymentDateStr && <p className="text-[10px] mt-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>{paymentDateStr}</p>}
+        </div>
+
+        {/* Amount / SRN */}
+        <div className="min-w-0">
+          <p className="font-bold whitespace-nowrap">&#8377; {Number(fee.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+          <p className="text-[11px] font-mono truncate" title={fee.srn || ''} style={{ color: isDark ? D.dimmer : '#94a3b8' }}>{fee.srn || '—'}</p>
+        </div>
+
+        {/* Type badge (All Payments tab only) */}
+        {govtFeesSubTab === 'all' && (
+          <div>
+            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border whitespace-nowrap ${isLinked ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-sky-50 text-sky-700 border-sky-200'}`}>
+              {isLinked ? 'Compliance' : 'Direct'}
+            </span>
+          </div>
+        )}
+
+        {/* Actions */}
+        <div className="flex justify-end items-center gap-0.5 opacity-70 group-hover:opacity-100 transition-opacity">
+          {!isLinked && (
+            <>
+              <button onClick={() => onEdit(fee)}
+                className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                title="Edit fee" style={{ color: isDark ? D.muted : '#64748b' }}>
+                <Edit2 className="w-3.5 h-3.5" />
+              </button>
+              {canManage && (
+                <button onClick={() => onDelete(fee)}
+                  className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-red-50 text-red-500 hover:text-red-600 transition-colors"
+                  title="Delete fee">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </>
+          )}
+          {isLinked && <span className="text-[9px] italic px-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>via compliance</span>}
+        </div>
+      </div>
+    );
+  } catch (err) {
+    console.warn('GovtFeeRow render error for fee:', fee?.id, err);
+    return null;
+  }
+}
 const timeAgo  = s=>{
   if(!s)return'—'; const d=new Date(s); if(isNaN(d))return'—';
   const diff=Math.floor((Date.now()-d)/1000);
@@ -3186,109 +3292,18 @@ export default function CompliancePage(){
                         {govtFeesSubTab==='all' && <div>Type</div>}
                         <div className="text-right pr-1">Actions</div>
                       </div>
-                      {activeGovtFeesList.map((fee, idx) => {
-                        // Guard: skip rows that would cause a render crash
-                        try {
-                        return (
-                        <div key={fee.id || `fee-row-${idx}`}
-                          className="group grid items-center gap-2 px-4 py-3 border-b text-sm transition-colors hover:bg-slate-50/60 dark:hover:bg-white/5"
-                          style={{
-                            gridTemplateColumns: govtFeesSubTab==='all'
-                              ? 'minmax(180px,1.6fr) minmax(140px,1.3fr) 96px 70px 110px 96px minmax(130px,1fr) 80px 92px'
-                              : 'minmax(200px,1.8fr) minmax(160px,1.4fr) 96px 70px 110px 96px minmax(150px,1.1fr) 92px',
-                            borderColor:isDark?D.border:'#f1f5f9',color:isDark?D.text:'#1e293b'}}>
-                          <div className="min-w-0">
-                            <p className="font-semibold truncate" title={fee.title}>{fee.title}</p>
-                            {fee.period_label && (
-                              <p className="text-[11px] truncate" style={{color:isDark?D.dimmer:'#94a3b8'}}>{fee.period_label}</p>
-                            )}
-                          </div>
-                          <div className="text-xs truncate" title={fee.client_name || ''}>{fee.client_name || '—'}</div>
-                          <div>
-                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold whitespace-nowrap"
-                              style={{
-                                backgroundColor: (CATEGORY_CFG[fee.category]?.bg) || '#f1f5f9',
-                                color: (CATEGORY_CFG[fee.category]?.color) || '#64748b',
-                              }}>
-                              {CATEGORY_CFG[fee.category]?.label || fee.category || 'OTHER'}
-                            </span>
-                          </div>
-                          <div className="text-xs">{fee.fy_year || '—'}</div>
-                          <div className="text-xs whitespace-nowrap">
-                            {fee.due_date ? fmtDate(String(fee.due_date).slice(0,10)) : '—'}
-                          </div>
-                          <div>
-                            {fee._source === 'linked' ? (
-                              /* Compliance-linked: show assignment status */
-                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                                String(fee.status||'').toLowerCase()==='completed'||String(fee.status||'').toLowerCase()==='filed'
-                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                  : 'bg-blue-50 text-blue-700 border-blue-200'
-                              }`}>
-                                {STATUS_CFG[fee.status]?.label || fee.status || 'In Progress'}
-                              </span>
-                            ) : (
-                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                                String(fee.status||'').toLowerCase()==='paid'
-                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                  : 'bg-amber-50 text-amber-700 border-amber-200'
-                              }`}>
-                                {String(fee.status||'').toLowerCase()==='paid' ? 'Paid' : 'Unpaid'}
-                              </span>
-                            )}
-                            {(fee.payment_date || fee.paid_on || fee.paid_at) && (() => {
-                              const pd = fee.payment_date || fee.paid_on || fee.paid_at;
-                              const formatted = fmtDate(String(pd).slice(0,10));
-                              return formatted !== '—' ? (
-                                <p className="text-[10px] mt-1" style={{color:isDark?D.dimmer:'#94a3b8'}}>{formatted}</p>
-                              ) : null;
-                            })()}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="font-bold whitespace-nowrap">₹ {(fee.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-                            <p className="text-[11px] font-mono truncate" title={fee.srn || ''} style={{color:isDark?D.dimmer:'#94a3b8'}}>{fee.srn || '—'}</p>
-                          </div>
-                          {/* Type badge — only in All Payments tab */}
-                          {govtFeesSubTab==='all' && (
-                            <div>
-                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border whitespace-nowrap ${
-                                fee._source==='linked'
-                                  ? 'bg-purple-50 text-purple-700 border-purple-200'
-                                  : 'bg-sky-50 text-sky-700 border-sky-200'
-                              }`}>
-                                {fee._source==='linked' ? '⇄ Compliance' : '✦ Direct'}
-                              </span>
-                            </div>
-                          )}
-                          <div className="flex justify-end items-center gap-0.5 opacity-70 group-hover:opacity-100 transition-opacity">
-                            {/* Only direct (standalone) fees can be edited/deleted here */}
-                            {fee._source !== 'linked' && (
-                              <>
-                                <button onClick={()=>{ setEditingAdhoc(fee); setShowAdhocDialog(true); }}
-                                  className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-blue-50 hover:text-blue-600 transition-colors"
-                                  title="Edit fee"
-                                  style={{color:isDark?D.muted:'#64748b'}}>
-                                  <Edit2 className="w-3.5 h-3.5"/>
-                                </button>
-                                {canManage && (
-                                  <button onClick={()=>handleDeleteAdhoc(fee)}
-                                    className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-red-50 text-red-500 hover:text-red-600 transition-colors"
-                                    title="Delete fee">
-                                    <Trash2 className="w-3.5 h-3.5"/>
-                                  </button>
-                                )}
-                              </>
-                            )}
-                            {fee._source === 'linked' && (
-                              <span className="text-[9px] italic px-1" style={{color:isDark?D.dimmer:'#94a3b8'}}>via compliance</span>
-                            )}
-                          </div>
-                        </div>
-                        ); } catch(rowErr) {
-                          console.warn('Fee row render error:', rowErr, fee);
-                          return null;
-                        }
-                      })}
+                      {activeGovtFeesList.map((fee, idx) => (
+                        <GovtFeeRow
+                          key={fee.id || `fee-row-${idx}`}
+                          fee={fee}
+                          idx={idx}
+                          govtFeesSubTab={govtFeesSubTab}
+                          isDark={isDark}
+                          canManage={canManage}
+                          onEdit={(f) => { setEditingAdhoc(f); setShowAdhocDialog(true); }}
+                          onDelete={handleDeleteAdhoc}
+                        />
+                      ))}
                       {/* Footer totals */}
                       <div className="flex items-center justify-between px-4 py-3"
                         style={{backgroundColor:isDark?D.raised:'#f8fafc'}}>
