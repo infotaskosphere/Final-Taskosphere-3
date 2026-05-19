@@ -162,23 +162,22 @@ function GovtFeeRow({ fee, idx, govtFeesSubTab, isDark, canManage, onEdit, onDel
 
         {/* Actions */}
         <div className="flex justify-end items-center gap-0.5 opacity-70 group-hover:opacity-100 transition-opacity">
-          {!isLinked && (
-            <>
-              <button onClick={() => onEdit(fee)}
-                className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-blue-50 hover:text-blue-600 transition-colors"
-                title="Edit fee" style={{ color: isDark ? D.muted : '#64748b' }}>
-                <Edit2 className="w-3.5 h-3.5" />
-              </button>
-              {canManage && (
-                <button onClick={() => onDelete(fee)}
-                  className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-red-50 text-red-500 hover:text-red-600 transition-colors"
-                  title="Delete fee">
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </>
+          <button onClick={() => onEdit(fee)}
+            className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-blue-50 hover:text-blue-600 transition-colors"
+            title={isLinked ? 'Edit linked compliance payment' : 'Edit fee'}
+            style={{ color: isDark ? D.muted : '#64748b' }}>
+            <Edit2 className="w-3.5 h-3.5" />
+          </button>
+          {!isLinked && canManage && (
+            <button onClick={() => onDelete(fee)}
+              className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-red-50 text-red-500 hover:text-red-600 transition-colors"
+              title="Delete fee">
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
           )}
-          {isLinked && <span className="text-[9px] italic px-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>via compliance</span>}
+          {isLinked && (
+            <span className="text-[9px] italic px-1 hidden xl:inline" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>via compliance</span>
+          )}
         </div>
       </div>
     );
@@ -1406,9 +1405,20 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
         govt_fees_srn:srn||'',
         govt_fees_notes:'',
       });
-      setItems(prev=>prev.map(a=>a.id===assignmentId?{...a,govt_fees_amount:parseFloat(amount)||0,govt_fees_srn:srn||''}:a));
+      const amt = parseFloat(amount)||0;
+      const srnVal = (srn||'').trim();
+      const autoFiled = amt > 0 && !!srnVal;
+      const today = new Date().toISOString().slice(0,10);
+      setItems(prev=>prev.map(a=>a.id===assignmentId
+        ? {
+            ...a,
+            govt_fees_amount: amt,
+            govt_fees_srn: srnVal,
+            ...(autoFiled ? { status:'filed', payment_date: today, filed_at: new Date().toISOString() } : {}),
+          }
+        : a));
       setEditingFee(null);
-      toast.success('Saved');
+      toast.success(autoFiled ? 'Saved · marked as Filed' : 'Saved');
     }catch{toast.error('Save failed');}
     finally{setSavingFeeId(null);}
   };
@@ -2452,6 +2462,8 @@ export default function CompliancePage(){
   const [adhocFeesLoading,setAdhocFeesLoading]= useState(false);
   const [showAdhocDialog, setShowAdhocDialog] = useState(false);
   const [editingAdhoc,    setEditingAdhoc]    = useState(null);
+  const [editingLinkedFee, setEditingLinkedFee] = useState(null); // linked fee row being edited
+  const [savingLinkedFee, setSavingLinkedFee] = useState(false);
   const [adhocClients,    setAdhocClients]    = useState([]);
   const [adhocSearch,     setAdhocSearch]     = useState('');
   // ── Govt Fees sub-tab: 'direct' (standalone only) | 'all' (standalone + compliance-linked) ──
@@ -3300,7 +3312,17 @@ export default function CompliancePage(){
                           govtFeesSubTab={govtFeesSubTab}
                           isDark={isDark}
                           canManage={canManage}
-                          onEdit={(f) => { setEditingAdhoc(f); setShowAdhocDialog(true); }}
+                          onEdit={(f) => {
+                            if (f._source === 'linked') {
+                              setEditingLinkedFee({
+                                ...f,
+                                amount: f.amount || 0,
+                                srn: f.srn || '',
+                              });
+                            } else {
+                              setEditingAdhoc(f); setShowAdhocDialog(true);
+                            }
+                          }}
                           onDelete={handleDeleteAdhoc}
                         />
                       ))}
@@ -3441,6 +3463,90 @@ export default function CompliancePage(){
         clients={adhocClients}
         onSaved={() => { fetchAdhocFees(); setEditingAdhoc(null); }}
       />
+
+      {/* ── Linked compliance-payment edit modal ── */}
+      {editingLinkedFee && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(4px)' }}
+          onClick={() => !savingLinkedFee && setEditingLinkedFee(null)}>
+          <div onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-2xl shadow-2xl border overflow-hidden"
+            style={{
+              backgroundColor: isDark ? D.card : '#ffffff',
+              borderColor: isDark ? D.border : '#e2e8f0',
+              color: isDark ? D.text : '#0f172a',
+            }}>
+            <div className="px-5 py-4 border-b flex items-center justify-between"
+              style={{ borderColor: isDark ? D.border : '#f1f5f9' }}>
+              <div className="min-w-0">
+                <h3 className="font-bold text-base truncate">Edit compliance payment</h3>
+                <p className="text-[11px] truncate" style={{ color: isDark ? D.dimmer : '#64748b' }}>
+                  {editingLinkedFee.title} · {editingLinkedFee.client_name || '—'}
+                </p>
+              </div>
+              <button onClick={() => !savingLinkedFee && setEditingLinkedFee(null)}
+                className="w-8 h-8 rounded-md flex items-center justify-center hover:bg-slate-100"
+                style={{ color: isDark ? D.muted : '#64748b' }}>
+                <X className="w-4 h-4"/>
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: isDark ? D.muted : '#475569' }}>Amount (₹)</label>
+                <input type="number" min="0" step="0.01"
+                  value={editingLinkedFee.amount}
+                  onChange={e => setEditingLinkedFee(f => ({ ...f, amount: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#cbd5e1', color: isDark ? D.text : '#0f172a' }}
+                  autoFocus/>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: isDark ? D.muted : '#475569' }}>SRN</label>
+                <input type="text"
+                  value={editingLinkedFee.srn}
+                  onChange={e => setEditingLinkedFee(f => ({ ...f, srn: e.target.value }))}
+                  placeholder="e.g. M31188626"
+                  className="w-full px-3 py-2 rounded-lg border text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#cbd5e1', color: isDark ? D.text : '#0f172a' }}/>
+              </div>
+              <p className="text-[11px] italic" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                Saving with both Amount and SRN will mark this compliance as <b>Filed</b> and record today as the payment date.
+              </p>
+            </div>
+            <div className="px-5 py-3 border-t flex items-center justify-end gap-2"
+              style={{ borderColor: isDark ? D.border : '#f1f5f9', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
+              <button onClick={() => setEditingLinkedFee(null)} disabled={savingLinkedFee}
+                className="px-3 py-1.5 rounded-lg text-sm font-semibold border hover:bg-slate-100 disabled:opacity-50"
+                style={{ color: isDark ? D.muted : '#475569', borderColor: isDark ? D.border : '#cbd5e1' }}>
+                Cancel
+              </button>
+              <button disabled={savingLinkedFee}
+                onClick={async () => {
+                  const f = editingLinkedFee;
+                  setSavingLinkedFee(true);
+                  try {
+                    await api.patch(`/compliance/${f.compliance_id}/assignments/${f.assignment_id}/govt-fee`, {
+                      govt_fees_amount: parseFloat(f.amount) || 0,
+                      govt_fees_srn: (f.srn || '').trim(),
+                      govt_fees_notes: f.notes || '',
+                    });
+                    toast.success('Payment updated');
+                    setEditingLinkedFee(null);
+                    fetchLinkedFees();
+                  } catch {
+                    toast.error('Update failed');
+                  } finally {
+                    setSavingLinkedFee(false);
+                  }
+                }}
+                className="px-4 py-1.5 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60 inline-flex items-center gap-1.5">
+                {savingLinkedFee && <Loader2 className="w-3.5 h-3.5 animate-spin"/>}
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
     </>
   );
