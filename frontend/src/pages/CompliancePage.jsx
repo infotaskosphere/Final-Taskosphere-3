@@ -3232,10 +3232,10 @@ export default function CompliancePage(){
           );
 
           /* ── CONTENT ── */
-          if (sectionId === 'content') return (
+           if (sectionId === 'content') return (
             <React.Fragment key="content">
               {pageView === 'govtfees' ? (
-                <motion.div className="relative rounded-2xl border overflow-hidden"
+                <motion.div variants={itemVariants} className="relative rounded-2xl border overflow-hidden"
                   style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0'}}>
                   {/*
                     Show full-screen loader ONLY on first load (no data yet for this sub-tab).
