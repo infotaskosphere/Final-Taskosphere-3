@@ -2372,12 +2372,17 @@ export default function CompliancePage(){
       const items = Array.isArray(data)
         ? data
         : (data?.items || data?.fees || data?.results || []);
-      setAdhocFees(items);
+      // Only update if we got actual data — never overwrite good data with empty
+      if (items.length > 0) {
+        setAdhocFees(items);
+      } else {
+        // Empty result is valid — update state to reflect it
+        setAdhocFees(items);
+      }
     } catch (e) {
       console.error('Failed to load govt fees:', e);
-      toast.error('Failed to load government fees');
-      // IMPORTANT: do NOT clear adhocFees here — keeping stale data avoids
-      // the "tab sometimes blank" UX when a request hiccups.
+      // Do NOT show toast on background pre-fetch (only if user is on the tab)
+      // Do NOT clear adhocFees — keep stale data on screen
     } finally {
       setAdhocFeesLoading(false);
     }
@@ -2391,7 +2396,7 @@ export default function CompliancePage(){
       const mastersRes = await api.get('/compliance', { params: { page_size: 5000 } });
       const masters = Array.isArray(mastersRes.data) ? mastersRes.data : [];
       const govtFeesMasters = masters.filter(m => m.govt_fees);
-      if (!govtFeesMasters.length) { setLinkedFees([]); return; }
+      if (!govtFeesMasters.length) { setLinkedFees([]); setLinkedFeesLoading(false); return; }
 
       // For each govt-fee master, fetch its assignments in parallel
       const allItems = [];
@@ -2437,12 +2442,10 @@ export default function CompliancePage(){
     }
   }, []);
 
-  // Fetch on mount always (so data is ready when user first clicks Govt Fees tab)
-  // and re-fetch whenever pageView switches to govtfees or refreshKey bumps
+  // Pre-fetch standalone fees on mount so Govt Fees tab shows data immediately on first click.
+  // linkedFees (N+1 compliance master fetches) is heavier — only fetch when tab is actually visited.
   useEffect(() => {
-    // Always pre-fetch so first-visit to govtfees tab shows data immediately
     fetchAdhocFees();
-    fetchLinkedFees();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // mount only
 
@@ -3187,8 +3190,11 @@ export default function CompliancePage(){
                         {govtFeesSubTab==='all' && <div>Type</div>}
                         <div className="text-right pr-1">Actions</div>
                       </div>
-                      {activeGovtFeesList.map((fee, idx) => (
-                        <div key={fee.id || `${fee._source}-${idx}`}
+                      {activeGovtFeesList.map((fee, idx) => {
+                        // Guard: skip rows that would cause a render crash
+                        try {
+                        return (
+                        <div key={fee.id || `fee-row-${idx}`}
                           className="group grid items-center gap-2 px-4 py-3 border-b text-sm transition-colors hover:bg-slate-50/60 dark:hover:bg-white/5"
                           style={{
                             gridTemplateColumns: govtFeesSubTab==='all'
@@ -3213,7 +3219,7 @@ export default function CompliancePage(){
                           </div>
                           <div className="text-xs">{fee.fy_year || '—'}</div>
                           <div className="text-xs whitespace-nowrap">
-                            {fee.due_date ? format(parseISO(String(fee.due_date).slice(0,10)), 'MMM d, yyyy') : '—'}
+                            {fee.due_date ? fmtDate(String(fee.due_date).slice(0,10)) : '—'}
                           </div>
                           <div>
                             {fee._source === 'linked' ? (
@@ -3234,11 +3240,13 @@ export default function CompliancePage(){
                                 {String(fee.status||'').toLowerCase()==='paid' ? 'Paid' : 'Unpaid'}
                               </span>
                             )}
-                            {(fee.payment_date || fee.paid_on || fee.paid_at) && (
-                              <p className="text-[10px] mt-1" style={{color:isDark?D.dimmer:'#94a3b8'}}>
-                                {format(parseISO(String(fee.payment_date || fee.paid_on || fee.paid_at).slice(0,10)), 'MMM d, yyyy')}
-                              </p>
-                            )}
+                            {(fee.payment_date || fee.paid_on || fee.paid_at) && (() => {
+                              const pd = fee.payment_date || fee.paid_on || fee.paid_at;
+                              const formatted = fmtDate(String(pd).slice(0,10));
+                              return formatted !== '—' ? (
+                                <p className="text-[10px] mt-1" style={{color:isDark?D.dimmer:'#94a3b8'}}>{formatted}</p>
+                              ) : null;
+                            })()}
                           </div>
                           <div className="min-w-0">
                             <p className="font-bold whitespace-nowrap">₹ {(fee.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
@@ -3280,7 +3288,11 @@ export default function CompliancePage(){
                             )}
                           </div>
                         </div>
-                      ))}
+                        ); } catch(rowErr) {
+                          console.warn('Fee row render error:', rowErr, fee);
+                          return null;
+                        }
+                      })}
                       {/* Footer totals */}
                       <div className="flex items-center justify-between px-4 py-3"
                         style={{backgroundColor:isDark?D.raised:'#f8fafc'}}>
