@@ -2387,43 +2387,47 @@ export default function CompliancePage(){
   const fetchLinkedFees = useCallback(async () => {
     setLinkedFeesLoading(true);
     try {
-      // Pull all compliance masters that are flagged as govt_fees=true
-      const [mastersRes, assignmentsRes] = await Promise.all([
-        api.get('/compliance', { params: { page_size: 5000 } }),
-        api.get('/compliance/dashboard/summary'),
-      ]);
+      // Pull all compliance masters (flagged as govt_fees=true)
+      const mastersRes = await api.get('/compliance', { params: { page_size: 5000 } });
       const masters = Array.isArray(mastersRes.data) ? mastersRes.data : [];
       const govtFeesMasters = masters.filter(m => m.govt_fees);
-      // For each master, fetch assignments and hydrate client names
       if (!govtFeesMasters.length) { setLinkedFees([]); return; }
+
+      // For each govt-fee master, fetch its assignments in parallel
       const allItems = [];
       await Promise.all(govtFeesMasters.map(async master => {
         try {
-          const r = await api.get(`/compliance/${master.id}/assignments`);
+          const r = await api.get(`/compliance/${master.id}/assignments`, { params: { limit: 1000 } });
+          // Response shape: {total, page, limit, items:[...]} or bare array
           const asgns = Array.isArray(r.data) ? r.data : (r.data?.items || []);
           asgns.forEach(a => {
-            if ((a.govt_fees_amount || 0) > 0) {
+            const feeAmt = parseFloat(a.govt_fees_amount || 0);
+            if (feeAmt > 0) {
               allItems.push({
-                id: a.id,
+                id: `linked-${a.id}`,           // unique key (avoid collisions with standalone)
                 assignment_id: a.id,
                 compliance_id: master.id,
                 title: master.name,
                 client_id: a.client_id,
-                client_name: a.client_name || a.client_company || '',
+                client_name: a.client_name || '',  // stored at assignment creation time
                 category: master.category,
-                fy_year: master.fy_year || a.fy_year,
-                period_label: master.period_label,
-                due_date: master.due_date || a.due_date,
-                status: a.status,
-                amount: a.govt_fees_amount || 0,
+                entity_type: a.entity_type || '',
+                fy_year: a.fy_year || master.fy_year || '',
+                period_label: master.period_label || '',
+                due_date: a.due_date || master.due_date || null,
+                status: a.status || 'not_started',
+                amount: feeAmt,
                 srn: a.govt_fees_srn || '',
                 notes: a.govt_fees_notes || '',
-                is_linked: true, // marks as compliance-linked
                 payment_date: a.payment_date || a.paid_on || null,
+                _source: 'linked',
               });
             }
           });
-        } catch {}
+        } catch (err) {
+          // Silently skip masters we can't fetch (permission-scoped users)
+          console.warn(`Could not fetch assignments for compliance ${master.id}:`, err?.response?.status);
+        }
       }));
       setLinkedFees(allItems);
     } catch (e) {
@@ -2432,6 +2436,15 @@ export default function CompliancePage(){
       setLinkedFeesLoading(false);
     }
   }, []);
+
+  // Fetch on mount always (so data is ready when user first clicks Govt Fees tab)
+  // and re-fetch whenever pageView switches to govtfees or refreshKey bumps
+  useEffect(() => {
+    // Always pre-fetch so first-visit to govtfees tab shows data immediately
+    fetchAdhocFees();
+    fetchLinkedFees();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // mount only
 
   useEffect(() => {
     if (pageView !== 'govtfees') return;
@@ -3120,28 +3133,31 @@ export default function CompliancePage(){
                 <motion.div className="relative rounded-2xl border overflow-hidden"
                   style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0'}}>
                   {/*
-                    CRITICAL: only show the full-screen loader on the FIRST load
-                    (when we have no data yet). On subsequent refreshes we keep
-                    the existing rows on screen — this fixes the "Govt Fees tab
-                    sometimes blank" issue where a slow refetch would wipe the
-                    list.
+                    Show full-screen loader ONLY on first load (no data yet for this sub-tab).
+                    On refreshes keep existing rows visible — avoids "blank tab" flash.
                   */}
-                  {adhocFeesLoading && adhocFees.length === 0 ? (
+                  {(adhocFeesLoading || linkedFeesLoading) && activeGovtFeesList.length === 0 ? (
                     <div className="flex items-center justify-center py-20">
                       <Loader2 className="w-7 h-7 text-blue-500 animate-spin"/>
                     </div>
-                  ) : filteredAdhoc.length === 0 ? (
+                  ) : activeGovtFeesList.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-20 gap-3">
                       <IndianRupee className="w-10 h-10" style={{color:isDark?D.dimmer:'#cbd5e1'}}/>
                       <p className="text-sm font-bold" style={{color:isDark?D.text:'#0f172a'}}>
-                        {adhocSearch ? 'No matching govt fees' : 'No ad-hoc government fees yet'}
+                        {(adhocSearch||gfFormFilter!=='all'||gfEntityFilter!=='all'||gfDateMode!=='all')
+                          ? 'No matching govt fees'
+                          : govtFeesSubTab==='all'
+                            ? 'No government fee payments found'
+                            : 'No direct government fees yet'}
                       </p>
                       <p className="text-xs text-center max-w-sm" style={{color:isDark?D.muted:'#64748b'}}>
-                        {adhocSearch
-                          ? 'Try a shorter or different keyword. Search matches title, client, SRN, category, status, FY, notes.'
-                          : <>Use <strong>Add Government Fee</strong> above to record payments. Paid and unpaid fees stay in this list.</>}
+                        {(adhocSearch||gfFormFilter!=='all'||gfEntityFilter!=='all'||gfDateMode!=='all')
+                          ? 'Try adjusting your search or filters.'
+                          : govtFeesSubTab==='all'
+                            ? 'Direct payments and compliance-linked fee payments will appear here once recorded.'
+                            : <>Use <strong>Add Government Fee</strong> above to record payments not linked to a compliance.</>}
                       </p>
-                      {!adhocSearch && (
+                      {govtFeesSubTab==='direct' && !adhocSearch && gfFormFilter==='all' && gfEntityFilter==='all' && gfDateMode==='all' && (
                         <button onClick={()=>{ setEditingAdhoc(null); setShowAdhocDialog(true); }}
                           className="mt-1 inline-flex items-center gap-1.5 h-9 px-4 rounded-lg text-xs font-bold text-white"
                           style={{ background:'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
@@ -3151,25 +3167,33 @@ export default function CompliancePage(){
                     </div>
                   ) : (
                     <>
-                      {/* Subtle inline reload indicator that doesn't blank the list */}
-                      {adhocFeesLoading && (
+                      {/* Subtle inline reload indicator */}
+                      {(adhocFeesLoading || linkedFeesLoading) && (
                         <div className="absolute right-3 top-3 z-10 flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold"
                           style={{backgroundColor:isDark?D.raised:'#eff6ff',color:'#1F6FB2'}}>
                           <Loader2 className="w-3 h-3 animate-spin"/> Refreshing
                         </div>
                       )}
-                      {/* Header row */}
+                      {/* Header row — extra "Type" col for All Payments tab */}
                       <div className="grid px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider border-b"
-                        style={{gridTemplateColumns:'minmax(200px,1.8fr) minmax(160px,1.4fr) 96px 70px 110px 96px minmax(150px,1.1fr) 92px',
+                        style={{
+                          gridTemplateColumns: govtFeesSubTab==='all'
+                            ? 'minmax(180px,1.6fr) minmax(140px,1.3fr) 96px 70px 110px 96px minmax(130px,1fr) 80px 92px'
+                            : 'minmax(200px,1.8fr) minmax(160px,1.4fr) 96px 70px 110px 96px minmax(150px,1.1fr) 92px',
                           backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
                         <div>Title</div><div>Client</div><div>Category</div>
                         <div>FY</div><div>Due Date</div><div>Status</div>
-                        <div>Amount / SRN</div><div className="text-right pr-1">Actions</div>
+                        <div>Amount / SRN</div>
+                        {govtFeesSubTab==='all' && <div>Type</div>}
+                        <div className="text-right pr-1">Actions</div>
                       </div>
-                      {filteredAdhoc.map(fee => (
-                        <div key={fee.id}
+                      {activeGovtFeesList.map((fee, idx) => (
+                        <div key={fee.id || `${fee._source}-${idx}`}
                           className="group grid items-center gap-2 px-4 py-3 border-b text-sm transition-colors hover:bg-slate-50/60 dark:hover:bg-white/5"
-                          style={{gridTemplateColumns:'minmax(200px,1.8fr) minmax(160px,1.4fr) 96px 70px 110px 96px minmax(150px,1.1fr) 92px',
+                          style={{
+                            gridTemplateColumns: govtFeesSubTab==='all'
+                              ? 'minmax(180px,1.6fr) minmax(140px,1.3fr) 96px 70px 110px 96px minmax(130px,1fr) 80px 92px'
+                              : 'minmax(200px,1.8fr) minmax(160px,1.4fr) 96px 70px 110px 96px minmax(150px,1.1fr) 92px',
                             borderColor:isDark?D.border:'#f1f5f9',color:isDark?D.text:'#1e293b'}}>
                           <div className="min-w-0">
                             <p className="font-semibold truncate" title={fee.title}>{fee.title}</p>
@@ -3189,12 +3213,27 @@ export default function CompliancePage(){
                           </div>
                           <div className="text-xs">{fee.fy_year || '—'}</div>
                           <div className="text-xs whitespace-nowrap">
-                            {fee.due_date ? format(parseISO(fee.due_date.slice(0,10)), 'MMM d, yyyy') : '—'}
+                            {fee.due_date ? format(parseISO(String(fee.due_date).slice(0,10)), 'MMM d, yyyy') : '—'}
                           </div>
                           <div>
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${String(fee.status || '').toLowerCase() === 'paid' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
-                              {String(fee.status || '').toLowerCase() === 'paid' ? 'Paid' : 'Unpaid'}
-                            </span>
+                            {fee._source === 'linked' ? (
+                              /* Compliance-linked: show assignment status */
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                String(fee.status||'').toLowerCase()==='completed'||String(fee.status||'').toLowerCase()==='filed'
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : 'bg-blue-50 text-blue-700 border-blue-200'
+                              }`}>
+                                {STATUS_CFG[fee.status]?.label || fee.status || 'In Progress'}
+                              </span>
+                            ) : (
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                String(fee.status||'').toLowerCase()==='paid'
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : 'bg-amber-50 text-amber-700 border-amber-200'
+                              }`}>
+                                {String(fee.status||'').toLowerCase()==='paid' ? 'Paid' : 'Unpaid'}
+                              </span>
+                            )}
                             {(fee.payment_date || fee.paid_on || fee.paid_at) && (
                               <p className="text-[10px] mt-1" style={{color:isDark?D.dimmer:'#94a3b8'}}>
                                 {format(parseISO(String(fee.payment_date || fee.paid_on || fee.paid_at).slice(0,10)), 'MMM d, yyyy')}
@@ -3205,29 +3244,66 @@ export default function CompliancePage(){
                             <p className="font-bold whitespace-nowrap">₹ {(fee.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
                             <p className="text-[11px] font-mono truncate" title={fee.srn || ''} style={{color:isDark?D.dimmer:'#94a3b8'}}>{fee.srn || '—'}</p>
                           </div>
+                          {/* Type badge — only in All Payments tab */}
+                          {govtFeesSubTab==='all' && (
+                            <div>
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border whitespace-nowrap ${
+                                fee._source==='linked'
+                                  ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                  : 'bg-sky-50 text-sky-700 border-sky-200'
+                              }`}>
+                                {fee._source==='linked' ? '⇄ Compliance' : '✦ Direct'}
+                              </span>
+                            </div>
+                          )}
                           <div className="flex justify-end items-center gap-0.5 opacity-70 group-hover:opacity-100 transition-opacity">
-                            <button onClick={()=>{ setEditingAdhoc(fee); setShowAdhocDialog(true); }}
-                              className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-blue-50 hover:text-blue-600 transition-colors"
-                              title="Edit fee"
-                              style={{color:isDark?D.muted:'#64748b'}}>
-                              <Edit2 className="w-3.5 h-3.5"/>
-                            </button>
-                            {canManage && (
-                              <button onClick={()=>handleDeleteAdhoc(fee)}
-                                className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-red-50 text-red-500 hover:text-red-600 transition-colors"
-                                title="Delete fee">
-                                <Trash2 className="w-3.5 h-3.5"/>
-                              </button>
+                            {/* Only direct (standalone) fees can be edited/deleted here */}
+                            {fee._source !== 'linked' && (
+                              <>
+                                <button onClick={()=>{ setEditingAdhoc(fee); setShowAdhocDialog(true); }}
+                                  className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                                  title="Edit fee"
+                                  style={{color:isDark?D.muted:'#64748b'}}>
+                                  <Edit2 className="w-3.5 h-3.5"/>
+                                </button>
+                                {canManage && (
+                                  <button onClick={()=>handleDeleteAdhoc(fee)}
+                                    className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-red-50 text-red-500 hover:text-red-600 transition-colors"
+                                    title="Delete fee">
+                                    <Trash2 className="w-3.5 h-3.5"/>
+                                  </button>
+                                )}
+                              </>
+                            )}
+                            {fee._source === 'linked' && (
+                              <span className="text-[9px] italic px-1" style={{color:isDark?D.dimmer:'#94a3b8'}}>via compliance</span>
                             )}
                           </div>
                         </div>
                       ))}
-                      <div className="flex justify-end px-4 py-3"
+                      {/* Footer totals */}
+                      <div className="flex items-center justify-between px-4 py-3"
                         style={{backgroundColor:isDark?D.raised:'#f8fafc'}}>
+                        {govtFeesSubTab==='all' ? (
+                          <div className="flex items-center gap-4 text-xs" style={{color:isDark?D.dimmer:'#64748b'}}>
+                            <span>
+                              <span className="inline-block w-2 h-2 rounded-sm bg-sky-400 mr-1"/>
+                              Direct: <strong style={{color:isDark?D.text:'#0f172a'}}>
+                                ₹ {activeGovtFeesList.filter(f=>f._source!=='linked').reduce((s,f)=>s+(f.amount||0),0).toLocaleString('en-IN',{minimumFractionDigits:2})}
+                              </strong>
+                            </span>
+                            <span>
+                              <span className="inline-block w-2 h-2 rounded-sm bg-purple-400 mr-1"/>
+                              Compliance-linked: <strong style={{color:isDark?D.text:'#0f172a'}}>
+                                ₹ {activeGovtFeesList.filter(f=>f._source==='linked').reduce((s,f)=>s+(f.amount||0),0).toLocaleString('en-IN',{minimumFractionDigits:2})}
+                              </strong>
+                            </span>
+                          </div>
+                        ) : <div/>}
                         <p className="text-sm">
                           <span style={{color:isDark?D.dimmer:'#64748b'}} className="mr-2">Total:</span>
                           <span className="font-bold" style={{color:isDark?D.text:'#0f172a'}}>
-                            ₹ {filteredAdhoc.reduce((s,f)=>s+(f.amount||0),0).toLocaleString('en-IN',{minimumFractionDigits:2})}
+                            ₹ {activeGovtFeesList.reduce((s,f)=>s+(f.amount||0),0).toLocaleString('en-IN',{minimumFractionDigits:2})}
                           </span>
                         </p>
                       </div>
