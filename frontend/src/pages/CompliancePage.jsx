@@ -105,7 +105,7 @@ function GovtFeeRow({ fee, idx, govtFeesSubTab, isDark, canManage, onEdit, onDel
 
     return (
       <div key={fee.id || `fee-row-${idx}`}
-        className="group grid items-center gap-2 px-4 py-3 border-b text-sm"
+        className="group grid items-center gap-2 px-4 py-3.5 border-b text-sm transition-colors hover:bg-blue-500/[0.04]"
         style={{ gridTemplateColumns: gridCols, borderColor: isDark ? D.border : '#f1f5f9', color: isDark ? D.text : '#1e293b' }}>
 
         {/* Title */}
@@ -161,22 +161,19 @@ function GovtFeeRow({ fee, idx, govtFeesSubTab, isDark, canManage, onEdit, onDel
         )}
 
         {/* Actions */}
-        <div className="flex justify-end items-center gap-0.5 opacity-70 group-hover:opacity-100 transition-opacity">
+        <div className="flex justify-end items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
           <button onClick={() => onEdit(fee)}
-            className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-blue-50 hover:text-blue-600 transition-colors"
+            className="inline-flex items-center justify-center w-8 h-8 rounded-lg hover:bg-blue-500/10 hover:text-blue-600 transition-colors"
             title={isLinked ? 'Edit linked compliance payment' : 'Edit fee'}
             style={{ color: isDark ? D.muted : '#64748b' }}>
             <Edit2 className="w-3.5 h-3.5" />
           </button>
           {!isLinked && canManage && (
             <button onClick={() => onDelete(fee)}
-              className="inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-red-50 text-red-500 hover:text-red-600 transition-colors"
+              className="inline-flex items-center justify-center w-8 h-8 rounded-lg hover:bg-red-500/10 text-red-500 hover:text-red-600 transition-colors"
               title="Delete fee">
               <Trash2 className="w-3.5 h-3.5" />
             </button>
-          )}
-          {isLinked && (
-            <span className="text-[9px] italic px-1 hidden xl:inline" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>via compliance</span>
           )}
         </div>
       </div>
@@ -3465,88 +3462,118 @@ export default function CompliancePage(){
       />
 
       {/* ── Linked compliance-payment edit modal ── */}
-      {editingLinkedFee && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4"
-          style={{ backgroundColor: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(4px)' }}
-          onClick={() => !savingLinkedFee && setEditingLinkedFee(null)}>
-          <div onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md rounded-2xl shadow-2xl border overflow-hidden"
-            style={{
-              backgroundColor: isDark ? D.card : '#ffffff',
-              borderColor: isDark ? D.border : '#e2e8f0',
-              color: isDark ? D.text : '#0f172a',
-            }}>
-            <div className="px-5 py-4 border-b flex items-center justify-between"
-              style={{ borderColor: isDark ? D.border : '#f1f5f9' }}>
-              <div className="min-w-0">
-                <h3 className="font-bold text-base truncate">Edit compliance payment</h3>
-                <p className="text-[11px] truncate" style={{ color: isDark ? D.dimmer : '#64748b' }}>
-                  {editingLinkedFee.title} · {editingLinkedFee.client_name || '—'}
-                </p>
+      <AnimatePresence>
+        {editingLinkedFee && (
+          <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+            style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => !savingLinkedFee && setEditingLinkedFee(null)}>
+            <motion.div onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden flex flex-col"
+              style={{
+                backgroundColor: isDark ? D.card : '#fff',
+                border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0',
+                color: isDark ? D.text : '#0f172a',
+              }}
+              initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }}
+              transition={{ type: 'spring', stiffness: 220, damping: 22 }}>
+
+              {/* Header — gradient like other modals */}
+              <div className="px-6 py-5 flex items-center justify-between text-white"
+                style={{ background: 'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <IndianRupee className="w-5 h-5 text-white"/>
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="text-lg font-black truncate">Edit Compliance Payment</h2>
+                    <p className="text-blue-200 text-xs truncate">
+                      {editingLinkedFee.title} · {editingLinkedFee.client_name || '—'}
+                    </p>
+                  </div>
+                </div>
+                <button onClick={() => !savingLinkedFee && setEditingLinkedFee(null)}
+                  className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center flex-shrink-0">
+                  <X className="w-4 h-4 text-white"/>
+                </button>
               </div>
-              <button onClick={() => !savingLinkedFee && setEditingLinkedFee(null)}
-                className="w-8 h-8 rounded-md flex items-center justify-center hover:bg-slate-100"
-                style={{ color: isDark ? D.muted : '#64748b' }}>
-                <X className="w-4 h-4"/>
-              </button>
-            </div>
-            <div className="p-5 space-y-4">
-              <div>
-                <label className="block text-xs font-semibold mb-1.5" style={{ color: isDark ? D.muted : '#475569' }}>Amount (₹)</label>
-                <input type="number" min="0" step="0.01"
-                  value={editingLinkedFee.amount}
-                  onChange={e => setEditingLinkedFee(f => ({ ...f, amount: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                  style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#cbd5e1', color: isDark ? D.text : '#0f172a' }}
-                  autoFocus/>
+
+              {/* Body */}
+              <div className="p-6 space-y-5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-semibold mb-1.5 block" style={{ color: isDark ? D.muted : '#374151' }}>
+                      Amount (₹)
+                    </label>
+                    <input type="number" min="0" step="0.01" autoFocus
+                      value={editingLinkedFee.amount}
+                      onChange={e => setEditingLinkedFee(f => ({ ...f, amount: e.target.value }))}
+                      placeholder="0.00"
+                      className="w-full px-3.5 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                      style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#d1d5db', color: isDark ? D.text : '#1e293b' }}/>
+                  </div>
+                  <div>
+                    <label className="text-sm font-semibold mb-1.5 block" style={{ color: isDark ? D.muted : '#374151' }}>
+                      SRN
+                    </label>
+                    <input type="text"
+                      value={editingLinkedFee.srn}
+                      onChange={e => setEditingLinkedFee(f => ({ ...f, srn: e.target.value }))}
+                      placeholder="e.g. M31188626"
+                      className="w-full px-3.5 py-2.5 border rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                      style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#d1d5db', color: isDark ? D.text : '#1e293b' }}/>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2.5 px-3.5 py-3 rounded-xl border"
+                  style={{
+                    backgroundColor: isDark ? 'rgba(31,111,178,0.08)' : '#eff6ff',
+                    borderColor: isDark ? 'rgba(31,111,178,0.25)' : '#bfdbfe',
+                  }}>
+                  <ShieldCheck className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: '#1F6FB2' }}/>
+                  <p className="text-[11px] leading-relaxed" style={{ color: isDark ? D.muted : '#1e3a8a' }}>
+                    Saving both <b>Amount</b> and <b>SRN</b> auto-marks this compliance as <b>Filed</b> and records today as the payment date.
+                  </p>
+                </div>
               </div>
-              <div>
-                <label className="block text-xs font-semibold mb-1.5" style={{ color: isDark ? D.muted : '#475569' }}>SRN</label>
-                <input type="text"
-                  value={editingLinkedFee.srn}
-                  onChange={e => setEditingLinkedFee(f => ({ ...f, srn: e.target.value }))}
-                  placeholder="e.g. M31188626"
-                  className="w-full px-3 py-2 rounded-lg border text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-400"
-                  style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#cbd5e1', color: isDark ? D.text : '#0f172a' }}/>
+
+              {/* Footer */}
+              <div className="px-6 py-4 border-t flex items-center justify-end gap-2"
+                style={{ borderColor: isDark ? D.border : '#f1f5f9', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
+                <button onClick={() => setEditingLinkedFee(null)} disabled={savingLinkedFee}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold border hover:opacity-80 disabled:opacity-50 transition-all"
+                  style={{ color: isDark ? D.muted : '#475569', borderColor: isDark ? D.border : '#cbd5e1', backgroundColor: isDark ? D.card : '#fff' }}>
+                  Cancel
+                </button>
+                <button disabled={savingLinkedFee}
+                  onClick={async () => {
+                    const f = editingLinkedFee;
+                    setSavingLinkedFee(true);
+                    try {
+                      await api.patch(`/compliance/${f.compliance_id}/assignments/${f.assignment_id}/govt-fee`, {
+                        govt_fees_amount: parseFloat(f.amount) || 0,
+                        govt_fees_srn: (f.srn || '').trim(),
+                        govt_fees_notes: f.notes || '',
+                      });
+                      toast.success('Payment updated');
+                      setEditingLinkedFee(null);
+                      fetchLinkedFees();
+                    } catch {
+                      toast.error('Update failed');
+                    } finally {
+                      setSavingLinkedFee(false);
+                    }
+                  }}
+                  className="px-5 py-2 rounded-xl text-sm font-bold text-white shadow-sm hover:shadow-md disabled:opacity-60 inline-flex items-center gap-2 transition-all"
+                  style={{ background: 'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
+                  {savingLinkedFee ? <Loader2 className="w-4 h-4 animate-spin"/> : <CheckCircle2 className="w-4 h-4"/>}
+                  Save Payment
+                </button>
               </div>
-              <p className="text-[11px] italic" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
-                Saving with both Amount and SRN will mark this compliance as <b>Filed</b> and record today as the payment date.
-              </p>
-            </div>
-            <div className="px-5 py-3 border-t flex items-center justify-end gap-2"
-              style={{ borderColor: isDark ? D.border : '#f1f5f9', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
-              <button onClick={() => setEditingLinkedFee(null)} disabled={savingLinkedFee}
-                className="px-3 py-1.5 rounded-lg text-sm font-semibold border hover:bg-slate-100 disabled:opacity-50"
-                style={{ color: isDark ? D.muted : '#475569', borderColor: isDark ? D.border : '#cbd5e1' }}>
-                Cancel
-              </button>
-              <button disabled={savingLinkedFee}
-                onClick={async () => {
-                  const f = editingLinkedFee;
-                  setSavingLinkedFee(true);
-                  try {
-                    await api.patch(`/compliance/${f.compliance_id}/assignments/${f.assignment_id}/govt-fee`, {
-                      govt_fees_amount: parseFloat(f.amount) || 0,
-                      govt_fees_srn: (f.srn || '').trim(),
-                      govt_fees_notes: f.notes || '',
-                    });
-                    toast.success('Payment updated');
-                    setEditingLinkedFee(null);
-                    fetchLinkedFees();
-                  } catch {
-                    toast.error('Update failed');
-                  } finally {
-                    setSavingLinkedFee(false);
-                  }
-                }}
-                className="px-4 py-1.5 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60 inline-flex items-center gap-1.5">
-                {savingLinkedFee && <Loader2 className="w-3.5 h-3.5 animate-spin"/>}
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
     </>
   );
