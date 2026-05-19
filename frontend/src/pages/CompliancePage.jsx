@@ -2363,6 +2363,9 @@ export default function CompliancePage(){
   const [linkedFeesLoading,setLinkedFeesLoading] = useState(false);
 
   const fetchAdhocFees = useCallback(async () => {
+    // Guard: never call API without auth token
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    if (!token) return;
     setAdhocFeesLoading(true);
     try {
       const r = await api.get('/compliance/standalone-govt-fees');
@@ -2372,16 +2375,9 @@ export default function CompliancePage(){
       const items = Array.isArray(data)
         ? data
         : (data?.items || data?.fees || data?.results || []);
-      // Only update if we got actual data — never overwrite good data with empty
-      if (items.length > 0) {
-        setAdhocFees(items);
-      } else {
-        // Empty result is valid — update state to reflect it
-        setAdhocFees(items);
-      }
+      setAdhocFees(items);
     } catch (e) {
       console.error('Failed to load govt fees:', e);
-      // Do NOT show toast on background pre-fetch (only if user is on the tab)
       // Do NOT clear adhocFees — keep stale data on screen
     } finally {
       setAdhocFeesLoading(false);
@@ -2390,6 +2386,9 @@ export default function CompliancePage(){
 
   // Fetch compliance-linked govt fee payments (assignments that have govt_fees_amount > 0)
   const fetchLinkedFees = useCallback(async () => {
+    // Guard: never call API without auth token
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    if (!token) return;
     setLinkedFeesLoading(true);
     try {
       // Pull all compliance masters (flagged as govt_fees=true)
@@ -2442,14 +2441,11 @@ export default function CompliancePage(){
     }
   }, []);
 
-  // Pre-fetch standalone fees on mount so Govt Fees tab shows data immediately on first click.
-  // linkedFees (N+1 compliance master fetches) is heavier — only fetch when tab is actually visited.
+  // Pre-fetch standalone fees whenever user is authenticated and on the govtfees tab.
+  // NO mount-only effect — that fires before the auth token is set → 401 errors.
+  // The user?.id dep ensures re-fetch when auth session is restored after page load.
   useEffect(() => {
-    fetchAdhocFees();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // mount only
-
-  useEffect(() => {
+    if (!user) return; // wait for auth to resolve before any API call
     if (pageView !== 'govtfees') return;
     fetchAdhocFees();
     fetchLinkedFees();
@@ -2462,7 +2458,7 @@ export default function CompliancePage(){
         .catch(() => setAdhocClients([]));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageView, refreshKey]);
+  }, [pageView, refreshKey, user?.id]);
 
   const handleDeleteAdhoc = async (fee) => {
     if (!window.confirm(`Delete "${fee.title}"?`)) return;
