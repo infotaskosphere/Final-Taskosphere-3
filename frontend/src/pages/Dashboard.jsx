@@ -63,6 +63,26 @@ const getAuthHeader = () => {
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
+// ── Dashboard session cache (2-minute TTL) ───────────────────────────────────
+const DASH_CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+const DASH_CACHE_KEY = 'dashboard_cache_v1';
+
+const getDashCache = () => {
+  try {
+    const raw = sessionStorage.getItem(DASH_CACHE_KEY);
+    if (!raw) return null;
+    const { data, ts } = JSON.parse(raw);
+    if (Date.now() - ts > DASH_CACHE_TTL) { sessionStorage.removeItem(DASH_CACHE_KEY); return null; }
+    return data;
+  } catch { return null; }
+};
+
+const setDashCache = (data) => {
+  try { sessionStorage.setItem(DASH_CACHE_KEY, JSON.stringify({ data, ts: Date.now() })); } catch {}
+};
+
+const clearDashCache = () => { try { sessionStorage.removeItem(DASH_CACHE_KEY); } catch {} };
+
 const IST_TIMEZONE = 'Asia/Kolkata';
 
 const COLORS = {
@@ -904,13 +924,46 @@ export default function Dashboard() {
   const [dataLoading,      setDataLoading]      = useState(true);
   const [deptMembers,      setDeptMembers]      = useState({ count: 0, departments: [], members: [] });
 
-  // ── Fetch All Dashboard Data ───────────────────────────────────────────────
-  const fetchDashboardData = React.useCallback(async () => {
+  // ── Fetch All Dashboard Data (with session cache for fast revisits) ──────────
+  const applyWave1Data = React.useCallback((d) => {
+    if (Array.isArray(d.tasks))      setTasks(d.tasks);
+    if (Array.isArray(d.holidays))   setHolidaysData(d.holidays);
+    if (Array.isArray(d.visits))     setVisits(d.visits);
+    if (d.stats && !Array.isArray(d.stats)) setStats(d.stats);
+    if (Array.isArray(d.dueDates))   setUpcomingDueDates(d.dueDates);
+    if (d.attendance)                setTodayAttendance(d.attendance);
+    if (Array.isArray(d.todos))      setTodosRaw(d.todos);
+    if (Array.isArray(d.reminders))  setReminders(d.reminders);
+    if (d.deptMembers && typeof d.deptMembers.count === 'number') setDeptMembers(d.deptMembers);
+  }, []);
+
+  const applyWave2Data = React.useCallback((d) => {
+    if (Array.isArray(d.users))    { setAllUsers(d.users); setUsersLoading(false); }
+    if (Array.isArray(d.leads))    setLeadsData(d.leads);
+    if (Array.isArray(d.rankings)) setRankings(d.rankings);
+  }, []);
+
+  const fetchDashboardData = React.useCallback(async (forceRefresh = false) => {
+    // Serve from cache if available (instant load on revisit)
+    if (!forceRefresh) {
+      const cached = getDashCache();
+      if (cached) {
+        applyWave1Data(cached.wave1);
+        applyWave2Data(cached.wave2);
+        setDataLoading(false);
+        setUsersLoading(false);
+        // Silently refresh in background so data stays fresh
+        setTimeout(() => fetchDashboardData(true), 100);
+        return;
+      }
+    }
+
     setDataLoading(true);
 
     // ── Wave 1: critical path ──
+    let wave1 = {};
     try {
-      const [tasksData, statsData, dueDatesData, attendanceData, todosData, visitsData, holidaysRes, deptMembersRes, remindersData] =
+      const [tasks, stats, dueDates, attendance, todos, visits, holidays, deptMembers, reminders] =
         await Promise.all([
           apiFetch('/tasks'),
           apiFetch('/dashboard/stats'),
@@ -922,52 +975,35 @@ export default function Dashboard() {
           apiFetch('/dashboard/dept-members'),
           apiFetch('/email/reminders'),
         ]);
-        
-      if (Array.isArray(tasksData)) setTasks(tasksData);
-      if (Array.isArray(holidaysRes)) setHolidaysData(holidaysRes);
-      if (Array.isArray(visitsData)) setVisits(visitsData);
-      
-      if (statsData && typeof statsData === 'object' && !Array.isArray(statsData)) {
-        setStats(statsData);
-      }
-      if (Array.isArray(dueDatesData)) setUpcomingDueDates(dueDatesData);
-      if (attendanceData) setTodayAttendance(attendanceData);
-      if (Array.isArray(todosData)) setTodosRaw(todosData);
-      if (Array.isArray(remindersData)) setReminders(remindersData);
-      if (deptMembersRes && typeof deptMembersRes.count === 'number') {
-        setDeptMembers(deptMembersRes);
-      }
-      
+      wave1 = { tasks, stats, dueDates, attendance, todos, visits, holidays, deptMembers, reminders };
+      applyWave1Data(wave1);
     } catch (e) {
       console.error('Dashboard wave-1 fetch error:', e);
     }
-    
     setDataLoading(false);
 
     // ── Wave 2: secondary ──
+    let wave2 = {};
     try {
-      const [usersData, leadsRes, rankingsData] = await Promise.all([
+      const [users, leads, rankings] = await Promise.all([
         apiFetch('/users'),
         apiFetch('/leads'),
         apiFetch(`/reports/performance-rankings?period=${rankingPeriod}`),
       ]);
-      
-      if (Array.isArray(usersData)) { 
-        setAllUsers(usersData);   
-        setUsersLoading(false); 
-      }
-      if (Array.isArray(leadsRes)) setLeadsData(leadsRes);
-      if (Array.isArray(rankingsData)) setRankings(rankingsData);
-      
+      wave2 = { users, leads, rankings };
+      applyWave2Data(wave2);
     } catch (e) {
       console.error('Dashboard wave-2 fetch error:', e);
       setUsersLoading(false);
     }
-  }, [apiFetch, rankingPeriod, user?.id]);
 
-  // Initial load
+    // Cache the fresh data
+    setDashCache({ wave1, wave2 });
+  }, [apiFetch, rankingPeriod, applyWave1Data, applyWave2Data]);
+
+  // Initial load — serve from cache first, refresh in background
   useEffect(() => {
-    fetchDashboardData();
+    fetchDashboardData(false);
   }, [fetchDashboardData]);
 
   // Re-fetch rankings when period changes
@@ -1411,6 +1447,18 @@ export default function Dashboard() {
 
   const overdueTaskCount = useMemo(() => myTasks.filter(t => t.status !== 'completed' && t.due_date && new Date(t.due_date) < new Date()).length, [myTasks]);
 
+  // Today's new tasks: tasks assigned to me created today
+  const todayNewTasks = useMemo(() => {
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    return tasks.filter(t => {
+      if (!t.created_at) return false;
+      const assignedToMe = t.assigned_to === user?.id || t.sub_assignees?.includes(user?.id);
+      if (!assignedToMe) return false;
+      const createdDate = format(new Date(t.created_at), 'yyyy-MM-dd');
+      return createdDate === todayStr;
+    });
+  }, [tasks, user?.id]);
+
   return (
     <>
       {/* Non-blocking top bar loader */}
@@ -1618,7 +1666,7 @@ export default function Dashboard() {
         <React.Fragment key="metrics">
         {/* KEY METRICS — 6 EQUAL CARDS */}
         <motion.div
-          className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 [&>*]:min-w-0"
+          className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-3 [&>*]:min-w-0"
           variants={itemVariants}
         >
 
@@ -1651,7 +1699,44 @@ export default function Dashboard() {
             </CardContent>
           </motion.div>
 
-          {/* 2. Pending Todos */}
+          {/* 2. Today's New Tasks */}
+          <motion.div
+            whileHover={{ y: -3, transition: springPhysics.card }}
+            whileTap={{ scale: 0.985 }}
+            onClick={() => navigate('/tasks?filter=today_new')}
+            className={`${metricCardCls} ${
+              todayNewTasks.length > 0
+                ? isDark
+                  ? 'bg-indigo-900/20 border-indigo-800 hover:border-indigo-700'
+                  : 'bg-indigo-50/60 border-indigo-200 hover:border-indigo-300'
+                : metricCardDefault
+            }`}
+          >
+            <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
+              <div className="flex items-start justify-between">
+                <div className="min-w-0 flex-1 mr-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">New Today</p>
+                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: isDark ? '#a5b4fc' : '#4338ca' }}>
+                    {todayNewTasks.length}
+                  </p>
+                </div>
+                <div
+                  className="p-2 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
+                  style={{ backgroundColor: isDark ? 'rgba(165,180,252,0.12)' : '#e0e7ff' }}
+                >
+                  <Zap className="h-4 w-4" style={{ color: isDark ? '#a5b4fc' : '#4338ca' }} />
+                </div>
+              </div>
+              <div className={`flex items-center gap-1 mt-3 text-xs font-medium transition-colors ${
+                todayNewTasks.length > 0 ? 'text-indigo-500' : isDark ? 'text-slate-500' : 'text-slate-400'
+              } group-hover:text-indigo-500`}>
+                <span>{todayNewTasks.length > 0 ? `${todayNewTasks.length} assigned today` : 'None today'}</span>
+                {todayNewTasks.length > 0 && <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />}
+              </div>
+            </CardContent>
+          </motion.div>
+
+          {/* 3. Pending Todos */}
           <motion.div
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
@@ -1686,7 +1771,7 @@ export default function Dashboard() {
             </CardContent>
           </motion.div>
 
-          {/* 3. Overdue */}
+          {/* 4. Overdue */}
           <motion.div
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
@@ -1721,7 +1806,7 @@ export default function Dashboard() {
             </CardContent>
           </motion.div>
 
-          {/* 4. DSC Alerts */}
+          {/* 5. DSC Alerts */}
           <motion.div
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
@@ -1759,7 +1844,7 @@ export default function Dashboard() {
             </CardContent>
           </motion.div>
 
-          {/* 5. Completion */}
+          {/* 6. Completion */}
           <motion.div
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
@@ -1793,7 +1878,7 @@ export default function Dashboard() {
             </CardContent>
           </motion.div>
 
-          {/* 6. Team Task */}
+          {/* 7. Team Task */}
           <motion.div
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
