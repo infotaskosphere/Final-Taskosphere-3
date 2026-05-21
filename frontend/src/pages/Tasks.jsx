@@ -759,6 +759,7 @@ export default function Tasks() {
   const [filterTeamOnly,      setFilterTeamOnly]      = useState(false);
   const [filterAssignedByMe,  setFilterAssignedByMe]  = useState(false);
   const [filterCreatedBy,     setFilterCreatedBy]     = useState('all');
+  const [filterTodayNew,      setFilterTodayNew]      = useState(false);
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
   const [duplicateGroups,     setDuplicateGroups]     = useState([]);
   const [detectingDuplicates, setDetectingDuplicates] = useState(false);
@@ -878,6 +879,10 @@ export default function Tasks() {
       setEditingTask(null);
       setFormData({ ...EMPTY_FORM });
       setDialogOpen(true);
+      setSearchParams({}, { replace: true });
+    }
+    if (searchParams.get('filter') === 'today_new') {
+      setFilterTodayNew(true);
       setSearchParams({}, { replace: true });
     }
   }, [searchParams, setSearchParams]);
@@ -1432,7 +1437,14 @@ export default function Tasks() {
     const matchesTeam     = !filterTeamOnly || task.assigned_to === user?.id || (task.sub_assignees || []).includes(user?.id) || crossVisibilityUserIds.includes(task.assigned_to) || (task.sub_assignees || []).some(id => crossVisibilityUserIds.includes(id));
     let matchesStatus = true;
     if (filterStatus !== 'all') matchesStatus = filterStatus === 'overdue' ? isOverdue(task) : task.status === filterStatus;
-    return matchesSearch && matchesStatus && matchesPriority && matchesCategory && matchesAssignee && matchesTeam;
+    let matchesTodayNew = true;
+    if (filterTodayNew) {
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
+      const createdDate = task.created_at ? format(new Date(task.created_at), 'yyyy-MM-dd') : '';
+      const assignedToMe = task.assigned_to === user?.id || (task.sub_assignees || []).includes(user?.id);
+      matchesTodayNew = createdDate === todayStr && assignedToMe;
+    }
+    return matchesSearch && matchesStatus && matchesPriority && matchesCategory && matchesAssignee && matchesTeam && matchesTodayNew;
   });
 
   // ── displayTasks must be defined BEFORE filteredStats ────────────────────
@@ -1501,8 +1513,9 @@ export default function Tasks() {
     if (filterTeamOnly)           parts.push('Team');
     if (filterAssignedByMe)       parts.push('By Me');
     if (filterCreatedBy !== 'all') parts.push(`By ${users.find(u => u.id === filterCreatedBy)?.full_name || ''}`);
+    if (filterTodayNew)           parts.push("Today's New");
     return parts.filter(Boolean).join(' · ');
-  }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly, filterTeamOnly, filterAssignedByMe, filterCreatedBy, users]);
+  }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly, filterTeamOnly, filterAssignedByMe, filterCreatedBy, filterTodayNew, users]);
 
   useEffect(() => {
     const pills = [];
@@ -1515,8 +1528,9 @@ export default function Tasks() {
     if (filterTeamOnly)           pills.push({ key: 'teamonly',    label: 'Team Tasks' });
     if (filterAssignedByMe)       pills.push({ key: 'assignedby',  label: 'Assigned by Me' });
     if (filterCreatedBy !== 'all') pills.push({ key: 'createdby', label: `By: ${users.find(u => u.id === filterCreatedBy)?.full_name || filterCreatedBy}` });
+    if (filterTodayNew)           pills.push({ key: 'todaynew',   label: "Today's New Tasks" });
     setActiveFilters(pills);
-  }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly, filterTeamOnly, filterAssignedByMe, filterCreatedBy, users]);
+  }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly, filterTeamOnly, filterAssignedByMe, filterCreatedBy, filterTodayNew, users]);
 
   const removeFilter = (key) => {
     if (key === 'search')   setSearchQuery('');
@@ -1528,11 +1542,13 @@ export default function Tasks() {
     if (key === 'teamonly')    setFilterTeamOnly(false);
     if (key === 'assignedby') setFilterAssignedByMe(false);
     if (key === 'createdby')  setFilterCreatedBy('all');
+    if (key === 'todaynew')   setFilterTodayNew(false);
   };
 
   const clearAllFilters = () => {
     setSearchQuery(''); setFilterStatus('all'); setFilterPriority('all'); setFilterCategory('all'); setFilterAssignee('all');
     setShowMyTasksOnly(false); setFilterTeamOnly(false); setFilterAssignedByMe(false); setFilterCreatedBy('all'); setSortBy('due_date'); setSortDirection('asc');
+    setFilterTodayNew(false);
     toast.success('Filters cleared');
   };
 
