@@ -973,59 +973,181 @@ async def iclock_getrequest(request: Request):
     return "OK\n"
 
 
-# 🔹 Main attendance data endpoint
+# 🔹 Main attendance data endpoint — ADMS cloud push (machine → Render)
 @identix_router.api_route("/iclock/cdata", methods=["GET", "POST"])
 async def iclock_cdata(request: Request):
+    """
+    Called automatically by the Identix machine every time someone punches.
+    Also handles initial device handshake (GET with no body → return OK).
+    Data format per line:  user_id\tYYYY-MM-DD HH:MM:SS\tpunch_type\tverify\t...
+    punch_type: 0 = check-in, 1 = check-out
+    """
     try:
+        from zoneinfo import ZoneInfo
+        IST = ZoneInfo("Asia/Kolkata")
+
         params = dict(request.query_params)
-        body = await request.body()
+        body   = await request.body()
+        raw    = body.decode("utf-8", errors="replace").strip()
 
-        raw = body.decode("utf-8")
+        # Handshake / info-only GET (no punch data)
+        if not raw or raw.upper().startswith("SN="):
+            logger.info(f"📡 Identix handshake: {params}")
+            return "OK\n"
 
-        print("✅ DEVICE CONNECTED")
-        print("PARAMS:", params)
-        print("RAW DATA:\n", raw)
+        logger.info(f"✅ Identix push received | params={params} | lines={len(raw.splitlines())}")
 
         inserted = 0
 
-        lines = raw.strip().split("\n")
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line:
+                continue
 
-        for line in lines:
             parts = line.split("\t")
-
             if len(parts) < 4:
                 continue
 
-            device_user_id = parts[0]
-            punch_time = parts[1]
-            punch_type = "in" if parts[2] == "0" else "out"
+            device_user_id = parts[0].strip()
+            punch_time_raw = parts[1].strip()          # "2026-05-22 09:15:00"
+            punch_code     = parts[2].strip()          # "0"=in, "1"=out, "4"=OT-in, "5"=OT-out
+            punch_type     = "in" if punch_code in ("0", "4") else "out"
 
-            # avoid duplicates
+            # ── Deduplicate ───────────────────────────────────────────────
             existing = await db.identix_attendance.find_one({
                 "device_user_id": device_user_id,
-                "punch_time": punch_time
+                "punch_time":     punch_time_raw,
             })
-
             if existing:
                 continue
 
+            # ── Save raw log ──────────────────────────────────────────────
             record = {
-                "id": str(uuid.uuid4()),
+                "id":             str(uuid.uuid4()),
                 "device_user_id": device_user_id,
-                "punch_time": punch_time,
-                "punch_type": punch_type,
-                "source": "machine_push",
-                "created_at": datetime.now(timezone.utc).isoformat()
+                "punch_time":     punch_time_raw,
+                "punch_type":     punch_type,
+                "source":         "machine_push",
+                "created_at":     datetime.now(timezone.utc).isoformat(),
             }
-
             await db.identix_attendance.insert_one(record)
             inserted += 1
 
+            # ── Mirror to main attendance collection ──────────────────────
+            try:
+                # Look up user by identix_uid
+                user = await db.users.find_one(
+                    {"identix_uid": int(device_user_id)},
+                    {"_id": 0, "id": 1, "full_name": 1, "departments": 1,
+                     "punch_in_time": 1, "grace_time": 1, "punch_out_time": 1},
+                ) if device_user_id.isdigit() else None
+
+                if not user:
+                    # fallback: match by string user_id field
+                    user = await db.users.find_one(
+                        {"identix_uid": device_user_id},
+                        {"_id": 0, "id": 1, "full_name": 1, "departments": 1,
+                         "punch_in_time": 1, "grace_time": 1, "punch_out_time": 1},
+                    )
+
+                if not user:
+                    logger.warning(f"No user found for identix_uid={device_user_id}")
+                    continue
+
+                # Parse punch datetime → IST
+                punch_dt = datetime.strptime(punch_time_raw, "%Y-%m-%d %H:%M:%S")
+                punch_dt = punch_dt.replace(tzinfo=timezone.utc).astimezone(IST)
+                date_str = punch_dt.date().isoformat()
+                user_id  = user["id"]
+
+                if punch_type == "in":
+                    # Late calculation
+                    is_late = False
+                    try:
+                        pit_str       = user.get("punch_in_time", "10:30")
+                        gt_str        = user.get("grace_time",    "00:10")
+                        pit           = datetime.strptime(pit_str, "%H:%M")
+                        gt            = datetime.strptime(gt_str,  "%H:%M")
+                        grace_minutes = gt.hour * 60 + gt.minute
+                        deadline      = punch_dt.replace(
+                            hour=pit.hour, minute=pit.minute,
+                            second=0, microsecond=0,
+                        ) + timedelta(minutes=grace_minutes)
+                        is_late = punch_dt > deadline
+                    except Exception:
+                        pass
+
+                    existing_att = await db.attendance.find_one(
+                        {"user_id": user_id, "date": date_str}, {"_id": 0}
+                    )
+                    if not (existing_att and existing_att.get("punch_in")):
+                        await db.attendance.update_one(
+                            {"user_id": user_id, "date": date_str},
+                            {"$set": {
+                                "status":      "present",
+                                "punch_in":    punch_dt.isoformat(),
+                                "is_late":     is_late,
+                                "auto_marked": False,
+                                "source":      "machine_push",
+                            }},
+                            upsert=True,
+                        )
+
+                elif punch_type == "out":
+                    existing_att = await db.attendance.find_one(
+                        {"user_id": user_id, "date": date_str}, {"_id": 0}
+                    )
+                    if existing_att and existing_att.get("punch_in"):
+                        punch_in_raw = existing_att["punch_in"]
+                        punch_in_dt  = datetime.fromisoformat(punch_in_raw) \
+                            if isinstance(punch_in_raw, str) else punch_in_raw
+                        if punch_in_dt.tzinfo is None:
+                            punch_in_dt = punch_in_dt.replace(tzinfo=timezone.utc)
+
+                        duration_minutes = max(0, int(
+                            (punch_dt.astimezone(timezone.utc) - punch_in_dt.astimezone(timezone.utc))
+                            .total_seconds() / 60
+                        ))
+
+                        early = False
+                        try:
+                            pot_str  = user.get("punch_out_time", "19:00")
+                            pot      = datetime.strptime(pot_str, "%H:%M")
+                            expected = punch_dt.replace(
+                                hour=pot.hour, minute=pot.minute,
+                                second=0, microsecond=0,
+                            )
+                            early = punch_dt < expected
+                        except Exception:
+                            pass
+
+                        await db.attendance.update_one(
+                            {"user_id": user_id, "date": date_str},
+                            {"$set": {
+                                "punch_out":         punch_dt.isoformat(),
+                                "duration_minutes":  duration_minutes,
+                                "punched_out_early": early,
+                            }},
+                        )
+                    else:
+                        await db.attendance.update_one(
+                            {"user_id": user_id, "date": date_str},
+                            {"$set": {
+                                "punch_out": punch_dt.isoformat(),
+                                "source":    "machine_push",
+                            }},
+                            upsert=True,
+                        )
+
+            except Exception as mirror_err:
+                logger.warning(f"Mirror failed for uid={device_user_id}: {mirror_err}")
+
+        logger.info(f"Identix push: inserted {inserted} new record(s)")
         return "OK\n"
 
     except Exception as e:
-        print("❌ ERROR:", str(e))
-        return "ERROR"
+        logger.error(f"❌ iclock/cdata error: {e}\n{traceback.format_exc()}")
+        return "OK\n"   # Always return OK so device doesn't retry indefinitely
 
 @identix_router.get("/")
 async def root_test():
