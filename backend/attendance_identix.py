@@ -1,21 +1,33 @@
 """
-attendance_identix.py  — COMPLETE REWRITE (all fixes applied)
+attendance_identix.py  — ADMS CLOUD PUSH MODEL
 ─────────────────────────────────────────────────────────────────────────────
+Architecture: ADMS Cloud Push (machine → Render API)
+  Machine is configured with Server Address = http://api.taskosphere.com
+  Machine pushes attendance data to /iclock/cdata
+  Machine pulls commands from /iclock/getrequest
+  LAN/TCP mode kept as optional fallback for local deployments only.
+
 Routes provided:
   DEVICES
     GET    /identix/devices
     POST   /identix/devices
     PUT    /identix/devices/{device_id}
     DELETE /identix/devices/{device_id}
-    POST   /identix/devices/{device_id}/test
-    POST   /identix/devices/{device_id}/sync-users
+    GET    /identix/devices/{device_id}/heartbeat
+    POST   /identix/devices/{device_id}/test         ← ADMS heartbeat check
+    POST   /identix/devices/{device_id}/sync-users   ← queues commands (cloud)
     POST   /identix/devices/scan
     GET    /identix/devices/scan/{scan_id}
+
+  ADMS PUSH (root-level, no /api prefix)
+    GET/POST /iclock/cdata          ← machine pushes attendance here
+    GET/POST /iclock/getrequest     ← machine pulls commands here
+    GET/POST /iclock/devicecmd      ← alias / compat
 
   ATTENDANCE
     GET    /identix/attendance          (paginated, filterable)
     POST   /identix/attendance/sync
-    GET    /identix/attendance/summary  ← was missing (404 fixed)
+    GET    /identix/attendance/summary
 
   ENROLLMENT
     GET    /identix/users
@@ -23,27 +35,27 @@ Routes provided:
     POST   /identix/users/{user_id}/sync-to-device
 
 HOW TO INTEGRATE:
-  1. pip install pyzk
-  2. Drop this file in backend/
-  3. In server.py:
-       from attendance_identix import identix_router
-       api_router.include_router(identix_router)
-  4. After new_user insert in /auth/register:
-       asyncio.create_task(sync_user_to_identix_devices(new_user))
+  1. In server.py:
+       from attendance_identix import identix_router, iclock_cdata, iclock_getrequest
+       api_router.include_router(identix_router, prefix="/identix")
+       app.add_api_route("/iclock/cdata", iclock_cdata, methods=["GET", "POST"])
+       app.add_api_route("/iclock/getrequest", iclock_getrequest, methods=["GET", "POST"])
+       app.add_api_route("/iclock/devicecmd", iclock_getrequest, methods=["GET", "POST"])
+  2. Set env var RENDER=true on Render to enable cloud-only mode.
 ─────────────────────────────────────────────────────────────────────────────
 """
 
-import os
 import asyncio
+import os
 import uuid
 import socket
 import logging
 import traceback
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from fastapi import Request
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
-from fastapi.responses import PlainTextResponse
+from starlette.responses import PlainTextResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger("identix")
@@ -53,30 +65,22 @@ from backend.models import User
 
 identix_router = APIRouter()
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # CLOUD / LAN MODE DETECTION
 # ─────────────────────────────────────────────────────────────────────────────
-# In cloud mode (Render / production) the backend CANNOT reach the device on
-# its LAN IP, so any pyzk/TCP socket attempt would fail. Instead, the device
-# pushes data via ADMS to /iclock/cdata and pulls commands from
-# /iclock/getrequest. In LAN mode (local dev) the legacy pyzk path stays
-# available for backward compatibility.
-def _is_cloud_mode() -> bool:
-    val = (
-        os.getenv("ADMS_CLOUD_MODE")
-        or os.getenv("BIOMETRIC_MODE")
-        or ("cloud" if os.getenv("RENDER") else "")
-        or os.getenv("ENVIRONMENT", "")
-    ).strip().lower()
-    if val in ("cloud", "production", "render", "prod", "1", "true", "yes"):
-        return True
-    if val in ("lan", "local", "development", "dev", "0", "false", "no"):
-        return False
-    # Default: assume cloud if running on Render-like infra
-    return bool(os.getenv("RENDER") or os.getenv("RENDER_EXTERNAL_URL"))
 
-
-HEARTBEAT_ONLINE_SECONDS = 120  # 2 minutes
+def _is_cloud() -> bool:
+    """
+    Returns True when running on Render or any cloud environment where LAN/TCP
+    connections to 192.168.x.x devices are impossible.
+    Set RENDER=true or CLOUD_MODE=true in environment variables.
+    """
+    return (
+        os.getenv("RENDER", "").lower() == "true"
+        or os.getenv("CLOUD_MODE", "").lower() == "true"
+        or os.getenv("RENDER_SERVICE_ID", "") != ""
+    )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # IN-MEMORY SCAN STATE  (keyed by scan_id UUID)
@@ -342,29 +346,39 @@ async def sync_user_to_identix_devices(user_doc: dict):
                 }},
             )
 
-        cloud = _is_cloud_mode()
-
         for device in devices:
             try:
-                if cloud:
-                    sn = device.get("serial_number")
-                    if not sn:
-                        logger.info(
-                            f"[ADMS COMMAND] skipped {device.get('name')}: no serial_number yet"
-                        )
-                        continue
-                    await _queue_device_command(
-                        sn, _build_userinfo_command({**user_doc, "identix_uid": identix_uid})
+                if _is_cloud():
+                    # CLOUD MODE: queue command for device to pull via /iclock/getrequest
+                    device_sn = device.get("serial_number") or device.get("id", "")
+                    cmd = (
+                        f"C:DATA UPDATE USERINFO PIN={identix_uid} "
+                        f"Name={user_doc.get('full_name', '')[:24]}"
+                    )
+                    await db.device_commands.insert_one({
+                        "id":         str(uuid.uuid4()),
+                        "device_sn":  device_sn,
+                        "command":    cmd,
+                        "status":     "pending",
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    })
+                    logger.info(
+                        f"[ADMS COMMAND] Queued user sync for {user_doc.get('full_name')} "
+                        f"to device SN={device_sn}"
                     )
                 else:
+                    # LAN MODE: direct ZK TCP push
                     await asyncio.get_event_loop().run_in_executor(
                         None, _sync_single_user_to_device, device, identix_uid, user_doc,
                     )
+                    logger.info(
+                        f"User {user_doc.get('full_name')} synced via LAN to {device.get('name')}"
+                    )
+
                 await db.users.update_one(
                     {"id": user_doc["id"]},
                     {"$set": {"identix_enrolled": True}},
                 )
-                logger.info(f"User {user_doc.get('full_name')} synced to {device.get('name')}")
             except Exception as e:
                 logger.error(f"Failed to sync user to device {device.get('name')}: {e}")
 
@@ -472,183 +486,129 @@ async def delete_device(
     return {"message": "Device deleted"}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# HEARTBEAT + COMMAND-QUEUE HELPERS (ADMS cloud model)
-# ─────────────────────────────────────────────────────────────────────────────
-
-async def _record_heartbeat(serial: Optional[str], ip: Optional[str]) -> None:
-    """Upsert heartbeat into device_heartbeats and mirror onto identix_devices."""
-    if not serial:
-        return
-    now = datetime.now(timezone.utc)
-    try:
-        await db.device_heartbeats.update_one(
-            {"serial_number": serial},
-            {"$set": {
-                "serial_number": serial,
-                "last_seen":     now,
-                "last_ip":       ip,
-            }},
-            upsert=True,
-        )
-        # Mirror onto registered device (match by serial_number or last_ip)
-        match: Dict[str, Any] = {"$or": [{"serial_number": serial}]}
-        if ip:
-            match["$or"].append({"ip_address": ip})
-        await db.identix_devices.update_one(
-            match,
-            {"$set": {
-                "last_seen":     now.isoformat(),
-                "last_ip":       ip,
-                "serial_number": serial,
-            }},
-        )
-    except Exception as e:
-        logger.warning(f"[ADMS HEARTBEAT] failed to persist sn={serial}: {e}")
-
-
-async def _get_heartbeat_status(device: dict) -> dict:
-    """Return {online, last_seen, last_ip, serial_number} for a registered device."""
-    serial = device.get("serial_number")
-    last_seen_raw = device.get("last_seen")
-    last_ip = device.get("last_ip")
-    hb = None
-    if serial:
-        hb = await db.device_heartbeats.find_one(
-            {"serial_number": serial}, {"_id": 0}
-        )
-    if hb:
-        last_seen_raw = hb.get("last_seen") or last_seen_raw
-        last_ip = hb.get("last_ip") or last_ip
-
-    last_seen_dt: Optional[datetime] = None
-    if isinstance(last_seen_raw, datetime):
-        last_seen_dt = last_seen_raw
-    elif isinstance(last_seen_raw, str):
-        try:
-            last_seen_dt = datetime.fromisoformat(last_seen_raw.replace("Z", "+00:00"))
-        except Exception:
-            last_seen_dt = None
-    if last_seen_dt and last_seen_dt.tzinfo is None:
-        last_seen_dt = last_seen_dt.replace(tzinfo=timezone.utc)
-
-    online = False
-    if last_seen_dt:
-        age = (datetime.now(timezone.utc) - last_seen_dt).total_seconds()
-        online = age <= HEARTBEAT_ONLINE_SECONDS
-
-    return {
-        "online":        online,
-        "last_seen":     last_seen_dt.isoformat() if last_seen_dt else None,
-        "last_ip":       last_ip,
-        "serial_number": serial,
-    }
-
-
-async def _queue_device_command(device_sn: str, command: str) -> str:
-    cmd_id = str(uuid.uuid4())
-    await db.device_commands.insert_one({
-        "id":         cmd_id,
-        "device_sn":  device_sn,
-        "command":    command,
-        "status":     "pending",
-        "created_at": datetime.now(timezone.utc),
-    })
-    logger.info(f"[ADMS COMMAND] queued sn={device_sn} cmd={command[:60]}")
-    return cmd_id
-
-
-async def _pop_pending_commands(device_sn: str, limit: int = 20) -> List[dict]:
-    cursor = db.device_commands.find(
-        {"device_sn": device_sn, "status": "pending"},
-        {"_id": 0},
-    ).sort("created_at", 1).limit(limit)
-    pending = await cursor.to_list(limit)
-    if pending:
-        ids = [c["id"] for c in pending]
-        await db.device_commands.update_many(
-            {"id": {"$in": ids}},
-            {"$set": {"status": "sent", "sent_at": datetime.now(timezone.utc)}},
-        )
-    return pending
-
-
-def _build_userinfo_command(user: dict) -> str:
-    """Build a DATA UPDATE USERINFO command line for a single user."""
-    pin = user.get("identix_uid") or user.get("id")
-    name = (user.get("full_name") or "").replace("\t", " ").replace("\n", " ")[:24]
-    return f"C:{uuid.uuid4().hex[:8]}:DATA UPDATE USERINFO PIN={pin}\tName={name}\tPri=0\tPasswd=\tCard=\tGrp=1\tTZ=0000000100000000"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# DEVICE TEST + SYNC (cloud-safe)
-# ─────────────────────────────────────────────────────────────────────────────
-
-@identix_router.post("/devices/{device_id}/test")
-async def test_device(
-    device_id: str,
-    current_user: User = Depends(require_admin()),
-):
-    device = await db.identix_devices.find_one({"id": device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
-
-    cloud = _is_cloud_mode()
-
-    if cloud:
-        status = await _get_heartbeat_status(device)
-        if status["online"]:
-            return {
-                "success": True,
-                "mode":    "cloud",
-                "message": f"Device online (last seen {status['last_seen']})",
-                "deviceInfo": {
-                    "serialNumber": status["serial_number"],
-                    "lastSeen":     status["last_seen"],
-                    "lastIp":       status["last_ip"],
-                },
-            }
-        return {
-            "success": False,
-            "mode":    "cloud",
-            "message": (
-                "Device has not pushed to /iclock/cdata in the last 2 minutes. "
-                "Verify the machine's ADMS server is set to this backend URL "
-                "and that it has internet access."
-            ),
-            "deviceInfo": None,
-        }
-
-    # LAN mode (local development only)
-    reachable = await _tcp_reachable(device["ip_address"], device.get("port", 4370))
-    if not reachable:
-        return {
-            "success":    False,
-            "mode":       "lan",
-            "message":    (
-                f"Cannot reach {device['ip_address']}:{device.get('port', 4370)}. "
-                "Check IP, port, power, and firewall."
-            ),
-            "deviceInfo": None,
-        }
-    try:
-        info = await asyncio.get_event_loop().run_in_executor(
-            None, _test_device_connection, device
-        )
-        return {"success": True, "mode": "lan", "message": "Connected successfully", "deviceInfo": info}
-    except Exception as e:
-        return {"success": False, "mode": "lan", "message": str(e), "deviceInfo": None}
-
-
-@identix_router.get("/devices/{device_id}/heartbeat")
+@identix_router.api_route("/devices/{device_id}/heartbeat", methods=["GET", "POST"])
 async def get_device_heartbeat(
     device_id: str,
     current_user: User = Depends(require_admin()),
 ):
-    device = await db.identix_devices.find_one({"id": device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
-    return await _get_heartbeat_status(device)
+    """Return ADMS heartbeat status for a device (based on last /iclock/cdata hit)."""
+    try:
+        device = await db.identix_devices.find_one({"id": device_id}, {"_id": 0})
+        if not device:
+            return {"success": False, "online": False, "message": "Device not found"}
+        last_seen_raw = device.get("last_seen")
+        if last_seen_raw:
+            try:
+                last_seen_dt = datetime.fromisoformat(str(last_seen_raw))
+                if last_seen_dt.tzinfo is None:
+                    last_seen_dt = last_seen_dt.replace(tzinfo=timezone.utc)
+                age_seconds = int((datetime.now(timezone.utc) - last_seen_dt).total_seconds())
+                online = age_seconds < 120
+                return {
+                    "success":       True,
+                    "online":        online,
+                    "last_seen":     last_seen_raw,
+                    "last_ip":       device.get("last_ip"),
+                    "serial_number": device.get("serial_number"),
+                    "age_seconds":   age_seconds,
+                }
+            except Exception:
+                pass
+        return {"success": True, "online": False, "last_seen": None, "last_ip": None, "serial_number": None, "age_seconds": None}
+    except Exception as e:
+        logger.error(f"[heartbeat] {e}")
+        return {"success": False, "online": False, "message": "Internal error checking heartbeat"}
+
+
+@identix_router.api_route("/devices/{device_id}/test", methods=["GET", "POST"])
+async def test_device(
+    device_id: str,
+    current_user: User = Depends(require_admin()),
+):
+    """
+    CLOUD MODE: checks ADMS heartbeat — device is ONLINE if it pinged /iclock/cdata within 2 minutes.
+    LAN MODE (non-cloud only): falls back to TCP socket test.
+    Never raises — always returns structured JSON.
+    """
+    try:
+        device = await db.identix_devices.find_one({"id": device_id}, {"_id": 0})
+        if not device:
+            return {"success": False, "online": False, "mode": "adms", "message": "Device not found", "deviceInfo": None}
+
+        # ── Always try ADMS heartbeat first ──────────────────────────────────
+        last_seen_raw = device.get("last_seen")
+        if last_seen_raw:
+            try:
+                last_seen_dt = datetime.fromisoformat(str(last_seen_raw))
+                if last_seen_dt.tzinfo is None:
+                    last_seen_dt = last_seen_dt.replace(tzinfo=timezone.utc)
+                age_seconds = int((datetime.now(timezone.utc) - last_seen_dt).total_seconds())
+                online = age_seconds < 120
+                logger.info(
+                    f"[ADMS HEARTBEAT] Device {device.get('name')} "
+                    f"last_seen={age_seconds}s ago online={online}"
+                )
+                return {
+                    "success":    online,
+                    "online":     online,
+                    "mode":       "adms",
+                    "message":    (
+                        f"Online — last heartbeat {age_seconds}s ago "
+                        f"(IP: {device.get('last_ip', 'unknown')})"
+                        if online else
+                        f"Offline — last heartbeat was {age_seconds // 60} min ago. "
+                        "Machine may be powered off or network issue."
+                    ),
+                    "deviceInfo": {
+                        "serialNumber": device.get("serial_number"),
+                        "lastIp":       device.get("last_ip"),
+                        "lastSeen":     last_seen_raw,
+                    },
+                }
+            except Exception:
+                pass
+
+        # ── No ADMS heartbeat yet ─────────────────────────────────────────────
+        if _is_cloud():
+            return {
+                "success":    False,
+                "online":     False,
+                "mode":       "adms",
+                "message":    (
+                    "Waiting for ADMS heartbeat from device. "
+                    "Ensure the machine's Server Address is set to http://api.taskosphere.com "
+                    "and ADMS is enabled. The device will appear Online once it connects."
+                ),
+                "deviceInfo": None,
+            }
+
+        # ── LAN fallback (local/dev deployments only) ─────────────────────────
+        reachable = await _tcp_reachable(device.get("ip_address", ""), device.get("port", 4370))
+        if not reachable:
+            return {
+                "success":    False,
+                "online":     False,
+                "mode":       "lan",
+                "message":    (
+                    f"Cannot reach {device.get('ip_address', '?')}:{device.get('port', 4370)} via LAN. "
+                    "Check IP, port, power, and firewall."
+                ),
+                "deviceInfo": None,
+            }
+        try:
+            info = await asyncio.get_event_loop().run_in_executor(
+                None, _test_device_connection, device
+            )
+            return {
+                "success": True, "online": True, "mode": "lan",
+                "message": "Connected successfully (LAN)", "deviceInfo": info,
+            }
+        except Exception as e:
+            return {"success": False, "online": False, "mode": "lan", "message": str(e), "deviceInfo": None}
+
+    except Exception as e:
+        logger.error(f"[test_device] Unhandled error: {e}")
+        return {"success": False, "online": False, "mode": "adms", "message": "Internal error — check server logs", "deviceInfo": None}
 
 
 @identix_router.post("/devices/{device_id}/sync-users")
@@ -656,6 +616,10 @@ async def sync_users_to_device(
     device_id: str,
     current_user: User = Depends(require_admin()),
 ):
+    """
+    CLOUD MODE: queues USERINFO commands — machine pulls them via /iclock/getrequest.
+    LAN MODE: direct ZK TCP push (local deployments only).
+    """
     device = await db.identix_devices.find_one({"id": device_id}, {"_id": 0})
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
@@ -673,43 +637,38 @@ async def sync_users_to_device(
             "message": "No users with Identix UIDs",
         }
 
-    cloud = _is_cloud_mode()
-
-    if cloud:
-        sn = device.get("serial_number")
-        if not sn:
-            return {
-                "success": False,
-                "synced":  0,
-                "failed":  len(users),
-                "message": (
-                    "Device has no serial number on file yet. It will be filled "
-                    "automatically after the first ADMS heartbeat — then retry."
-                ),
-            }
+    if _is_cloud():
+        # ── CLOUD MODE: queue commands for ADMS pull ──────────────────────────
+        device_sn = device.get("serial_number") or device.get("id", "")
         queued = 0
         for u in users:
             try:
-                await _queue_device_command(sn, _build_userinfo_command(u))
-                await db.users.update_one(
-                    {"id": u["id"]},
-                    {"$set": {"identix_enrolled": True}},
+                cmd = (
+                    f"C:DATA UPDATE USERINFO PIN={u['identix_uid']} "
+                    f"Name={u.get('full_name', '')[:24]}"
                 )
+                await db.device_commands.insert_one({
+                    "id":         str(uuid.uuid4()),
+                    "device_sn":  device_sn,
+                    "command":    cmd,
+                    "status":     "pending",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
                 queued += 1
-            except Exception as e:
-                logger.warning(f"[ADMS COMMAND] queue failed for {u.get('id')}: {e}")
+            except Exception:
+                pass
+        logger.info(f"[ADMS COMMAND] Queued {queued} user sync commands for SN={device_sn}")
         return {
             "success": True,
             "synced":  queued,
-            "failed":  len(users) - queued,
-            "queued":  True,
+            "failed":  0,
             "message": (
-                f"Queued {queued} user-update commands. The machine will pull "
-                "them on its next ADMS poll."
+                f"Queued {queued} user sync commands — "
+                "machine will pull them on next /iclock/getrequest heartbeat"
             ),
         }
 
-    # LAN mode
+    # ── LAN MODE: direct ZK TCP push ─────────────────────────────────────────
     try:
         synced, failed = await asyncio.get_event_loop().run_in_executor(
             None, _sync_users_batch_to_device, device, users
@@ -723,7 +682,7 @@ async def sync_users_to_device(
             "success": failed == 0,
             "synced":  synced,
             "failed":  failed,
-            "message": f"Synced {synced} users ({failed} failed)",
+            "message": f"Synced {synced} users via LAN ({failed} failed)",
         }
     except Exception as e:
         return {
@@ -734,70 +693,99 @@ async def sync_users_to_device(
         }
 
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # LAN SCAN ROUTES
 # ─────────────────────────────────────────────────────────────────────────────
 
-@identix_router.post("/devices/scan")
+@identix_router.api_route("/devices/scan", methods=["GET", "POST"])
 async def start_lan_scan(
-    payload: ScanRequest,
+    request: Request,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(require_admin()),
 ):
     """
     Kick off an async LAN scan for ZKTeco/Identix devices.
+    In cloud/Render deployments returns a friendly 200 — no 405/400.
     Returns a scan_id immediately; poll GET /devices/scan/{scan_id} for results.
-    Disabled in cloud mode — devices on a private LAN cannot be probed from Render.
     """
-    if _is_cloud_mode():
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "LAN scan is disabled in cloud mode. Configure the machine's ADMS "
-                "server URL to point at this backend; devices will register "
-                "themselves via /iclock/cdata."
+    # ── CLOUD MODE: LAN scanning is impossible from Render ────────────────────
+    if _is_cloud():
+        return {
+            "success":  False,
+            "scan_id":  None,
+            "done":     True,
+            "progress": 100,
+            "found":    [],
+            "message":  (
+                "LAN scanning is disabled in cloud deployment. "
+                "Add devices manually using their Serial Number. "
+                "Configure the machine's ADMS Server Address to http://api.taskosphere.com."
             ),
-        )
-    scan_id = str(uuid.uuid4())
+        }
 
-    subnet = (payload.subnet or "").strip()
+    # ── Parse body leniently — accepts both JSON body and no-body ────────────
+    subnet = ""
+    port   = 4370
+    try:
+        body = await request.json()
+        subnet = (body.get("subnet") or "").strip()
+        port   = int(body.get("port") or 4370)
+    except Exception:
+        pass  # no body or invalid JSON is fine
+
     if not subnet:
         subnet = _auto_detect_subnet()
 
-    existing       = await db.identix_devices.find({}, {"_id": 0, "ip_address": 1}).to_list(100)
-    registered_ips = {d["ip_address"] for d in existing}
+    try:
+        existing       = await db.identix_devices.find({}, {"_id": 0, "ip_address": 1}).to_list(100)
+        registered_ips = {d.get("ip_address", "") for d in existing}
+    except Exception:
+        registered_ips = set()
 
+    scan_id = str(uuid.uuid4())
     _SCAN_STATE[scan_id] = {
         "done":     False,
         "progress": 0,
         "found":    [],
         "subnet":   subnet,
-        "port":     payload.port,
-        "message":  f"Scanning {subnet}.0/24 on port {payload.port}…",
+        "port":     port,
+        "message":  f"Scanning {subnet}.0/24 on port {port}…",
     }
 
-    background_tasks.add_task(
-        _do_lan_scan, scan_id, subnet, payload.port, registered_ips
-    )
+    background_tasks.add_task(_do_lan_scan, scan_id, subnet, port, registered_ips)
 
     return {
+        "success": True,
         "scan_id": scan_id,
         "subnet":  subnet,
-        "port":    payload.port,
-        "message": f"Scanning {subnet}.0/24 on port {payload.port}…",
+        "port":    port,
+        "message": f"Scanning {subnet}.0/24 on port {port}…",
     }
 
 
-@identix_router.get("/devices/scan/{scan_id}")
+@identix_router.api_route("/devices/scan/{scan_id}", methods=["GET", "POST"])
 async def poll_lan_scan(
     scan_id: str,
     current_user: User = Depends(require_admin()),
 ):
     """Poll the status and results of an in-progress LAN scan."""
+    if _is_cloud():
+        return {
+            "success":  False,
+            "done":     True,
+            "progress": 100,
+            "found":    [],
+            "message":  "LAN scanning disabled in cloud deployment.",
+        }
     state = _SCAN_STATE.get(scan_id)
     if not state:
-        raise HTTPException(status_code=404, detail="Scan not found or expired")
+        # Return 200 with done=True rather than a 404 that breaks the frontend poller
+        return {
+            "done":     True,
+            "progress": 100,
+            "found":    [],
+            "message":  "Scan not found or already expired.",
+        }
     return state
 
 
@@ -1204,268 +1192,255 @@ async def sync_single_user_to_devices(
         "message": f"Syncing {user['full_name']} to all active devices in background"
     }
 # ─────────────────────────────────────────────────────────────────────────────
-# ADMS CLOUD-PUSH ENDPOINTS (machine → backend)
-# These are also exposed at ROOT level (/iclock/...) from server.py because
-# devices append /iclock/cdata to their configured server URL automatically.
-# Never raise — always return plain-text "OK" so the firmware stays connected.
+# ADMS ROOT-LEVEL ENDPOINTS  (also registered at app level in server.py)
+# Machine firmware hits these without any /api prefix.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _extract_sn(params: dict, raw: str) -> Optional[str]:
-    sn = params.get("SN") or params.get("sn")
+async def _update_device_heartbeat(sn: str, ip: str):
+    """Update last_seen / last_ip on the matching device document."""
+    if not sn:
+        return
+    try:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        result = await db.identix_devices.update_one(
+            {"$or": [{"serial_number": sn}, {"id": sn}]},
+            {"$set": {
+                "last_seen":     now_iso,
+                "last_ip":       ip,
+                "serial_number": sn,
+            }},
+        )
+        if result.matched_count == 0:
+            logger.info(f"[ADMS CONNECT] Unknown SN={sn} — no matching device document")
+        else:
+            logger.info(f"[ADMS HEARTBEAT] SN={sn} IP={ip} heartbeat updated")
+    except Exception as e:
+        logger.warning(f"[ADMS HEARTBEAT] Failed to update heartbeat SN={sn}: {e}")
+
+
+@identix_router.api_route("/iclock/getrequest", methods=["GET", "POST"])
+async def iclock_getrequest(request: Request):
+    """
+    Machine polls this endpoint periodically to receive pending commands.
+    Returns the next pending command string, or plain "OK" if none queued.
+    Also serves as a heartbeat — updates last_seen for the device.
+    """
+    params = dict(request.query_params)
+    sn     = (params.get("SN") or params.get("sn") or "").strip()
+    ip     = request.client.host if request.client else "unknown"
+
+    logger.info(f"[ADMS COMMAND] GETREQUEST SN={sn} IP={ip}")
+
+    # Update heartbeat
+    await _update_device_heartbeat(sn, ip)
+
+    # Check for pending commands for this device
     if sn:
-        return sn.strip()
-    for token in (raw or "").splitlines():
-        token = token.strip()
-        if token.upper().startswith("SN="):
-            return token.split("=", 1)[1].strip()
-    return None
+        try:
+            cmd_doc = await db.device_commands.find_one(
+                {"device_sn": sn, "status": "pending"},
+                sort=[("created_at", 1)],
+            )
+            if cmd_doc:
+                await db.device_commands.update_one(
+                    {"id": cmd_doc["id"]},
+                    {"$set": {"status": "sent", "sent_at": datetime.now(timezone.utc).isoformat()}},
+                )
+                logger.info(f"[ADMS COMMAND] Sending to SN={sn}: {cmd_doc['command']}")
+                return PlainTextResponse(cmd_doc["command"] + "\n")
+        except Exception as e:
+            logger.warning(f"[ADMS COMMAND] Command queue error SN={sn}: {e}")
+
+    return PlainTextResponse("OK\n")
 
 
-def _client_ip(request: Request) -> Optional[str]:
-    fwd = request.headers.get("x-forwarded-for")
-    if fwd:
-        return fwd.split(",")[0].strip()
-    return request.client.host if request.client else None
-
-
-async def _mirror_punch_to_attendance(device_user_id: str, punch_time_raw: str, punch_type: str) -> None:
+# 🔹 Main attendance data endpoint — ADMS cloud push (machine → Render)
+@identix_router.api_route("/iclock/cdata", methods=["GET", "POST"])
+async def iclock_cdata(request: Request):
+    """
+    Called automatically by the Identix/ZKTeco machine on every punch and heartbeat.
+    Also handles initial device handshake (GET with no body → return OK).
+    Data format per line:  user_id\tYYYY-MM-DD HH:MM:SS\tpunch_type\tverify\t...
+    punch_type: 0 = check-in, 1 = check-out
+    ALWAYS returns plain text "OK" — any other response disconnects the device permanently.
+    """
     try:
         from zoneinfo import ZoneInfo
         IST = ZoneInfo("Asia/Kolkata")
 
-        user = None
-        if device_user_id.isdigit():
-            user = await db.users.find_one(
-                {"identix_uid": int(device_user_id)},
-                {"_id": 0, "id": 1, "full_name": 1, "departments": 1,
-                 "punch_in_time": 1, "grace_time": 1, "punch_out_time": 1},
-            )
-        if not user:
-            user = await db.users.find_one(
-                {"identix_uid": device_user_id},
-                {"_id": 0, "id": 1, "full_name": 1, "departments": 1,
-                 "punch_in_time": 1, "grace_time": 1, "punch_out_time": 1},
-            )
-        if not user:
-            logger.warning(f"[ADMS ATTENDANCE] no user for identix_uid={device_user_id}")
-            return
-
-        punch_dt = datetime.strptime(punch_time_raw, "%Y-%m-%d %H:%M:%S")
-        punch_dt = punch_dt.replace(tzinfo=timezone.utc).astimezone(IST)
-        date_str = punch_dt.date().isoformat()
-        user_id = user["id"]
-
-        if punch_type == "in":
-            is_late = False
-            try:
-                pit = datetime.strptime(user.get("punch_in_time", "10:30"), "%H:%M")
-                gt = datetime.strptime(user.get("grace_time", "00:10"), "%H:%M")
-                deadline = punch_dt.replace(
-                    hour=pit.hour, minute=pit.minute, second=0, microsecond=0,
-                ) + timedelta(minutes=gt.hour * 60 + gt.minute)
-                is_late = punch_dt > deadline
-            except Exception:
-                pass
-            existing_att = await db.attendance.find_one(
-                {"user_id": user_id, "date": date_str}, {"_id": 0}
-            )
-            if not (existing_att and existing_att.get("punch_in")):
-                await db.attendance.update_one(
-                    {"user_id": user_id, "date": date_str},
-                    {"$set": {
-                        "status": "present",
-                        "punch_in": punch_dt.isoformat(),
-                        "is_late": is_late,
-                        "auto_marked": False,
-                        "source": "machine_push",
-                    }},
-                    upsert=True,
-                )
-        else:
-            existing_att = await db.attendance.find_one(
-                {"user_id": user_id, "date": date_str}, {"_id": 0}
-            )
-            if existing_att and existing_att.get("punch_in"):
-                punch_in_raw = existing_att["punch_in"]
-                punch_in_dt = (
-                    datetime.fromisoformat(punch_in_raw)
-                    if isinstance(punch_in_raw, str) else punch_in_raw
-                )
-                if punch_in_dt.tzinfo is None:
-                    punch_in_dt = punch_in_dt.replace(tzinfo=timezone.utc)
-                duration_minutes = max(0, int(
-                    (punch_dt.astimezone(timezone.utc) - punch_in_dt.astimezone(timezone.utc))
-                    .total_seconds() / 60
-                ))
-                early = False
-                try:
-                    pot = datetime.strptime(user.get("punch_out_time", "19:00"), "%H:%M")
-                    expected = punch_dt.replace(
-                        hour=pot.hour, minute=pot.minute, second=0, microsecond=0,
-                    )
-                    early = punch_dt < expected
-                except Exception:
-                    pass
-                await db.attendance.update_one(
-                    {"user_id": user_id, "date": date_str},
-                    {"$set": {
-                        "punch_out": punch_dt.isoformat(),
-                        "duration_minutes": duration_minutes,
-                        "punched_out_early": early,
-                    }},
-                )
-            else:
-                await db.attendance.update_one(
-                    {"user_id": user_id, "date": date_str},
-                    {"$set": {
-                        "punch_out": punch_dt.isoformat(),
-                        "source": "machine_push",
-                    }},
-                    upsert=True,
-                )
-    except Exception as e:
-        logger.warning(f"[ADMS ATTENDANCE] mirror failed uid={device_user_id}: {e}")
-
-
-@identix_router.api_route("/iclock/getrequest", methods=["GET", "POST"], response_class=PlainTextResponse)
-async def iclock_getrequest(request: Request):
-    """Machine polls for queued commands. Returns 'OK' if none."""
-    try:
         params = dict(request.query_params)
-        ip = _client_ip(request)
-        body = (await request.body()).decode("utf-8", errors="replace").strip()
-        sn = _extract_sn(params, body)
-        logger.info(f"[ADMS COMMAND] poll sn={sn} ip={ip} params={params}")
-        await _record_heartbeat(sn, ip)
-        if not sn:
-            return "OK"
-        pending = await _pop_pending_commands(sn)
-        if not pending:
-            return "OK"
-        return "\n".join(c["command"] for c in pending)
-    except Exception as e:
-        logger.error(f"[ADMS COMMAND] getrequest error: {e}\n{traceback.format_exc()}")
-        return "OK"
+        body   = await request.body()
+        raw    = body.decode("utf-8", errors="replace").strip()
+        ip     = request.client.host if request.client else "unknown"
 
+        # Extract serial number from query string (machine sends ?SN=XXXX)
+        sn = (params.get("SN") or params.get("sn") or "").strip()
 
-@identix_router.api_route("/iclock/devicecmd", methods=["GET", "POST"], response_class=PlainTextResponse)
-async def iclock_devicecmd(request: Request):
-    """Machine reports command execution results back here."""
-    try:
-        params = dict(request.query_params)
-        ip = _client_ip(request)
-        body = (await request.body()).decode("utf-8", errors="replace").strip()
-        sn = _extract_sn(params, body)
-        logger.info(f"[ADMS COMMAND] ack sn={sn} ip={ip} body={body[:200]}")
-        await _record_heartbeat(sn, ip)
-        if sn:
-            await db.device_commands.update_many(
-                {"device_sn": sn, "status": "sent"},
-                {"$set": {"status": "done", "completed_at": datetime.now(timezone.utc)}},
-            )
-        return "OK"
-    except Exception as e:
-        logger.error(f"[ADMS COMMAND] devicecmd error: {e}\n{traceback.format_exc()}")
-        return "OK"
+        logger.info(f"[ADMS CONNECT] cdata hit: SN={sn} IP={ip} method={request.method}")
 
+        # Update device heartbeat on every hit (GET or POST)
+        await _update_device_heartbeat(sn, ip)
 
-@identix_router.api_route("/iclock/cdata", methods=["GET", "POST"], response_class=PlainTextResponse)
-async def iclock_cdata(request: Request):
-    """
-    Primary ADMS endpoint. Accepts ATTLOG / OPLOG pushes and registration
-    handshakes. MUST always return plain-text 'OK' or the device disconnects.
-    """
-    try:
-        params = dict(request.query_params)
-        ip = _client_ip(request)
-        body = await request.body()
-        raw = body.decode("utf-8", errors="replace").strip()
-
-        sn = _extract_sn(params, raw)
-        table = (params.get("table") or params.get("Table") or "").upper().strip()
-        stamp = params.get("Stamp") or params.get("stamp")
-        options = params.get("options") or params.get("OPTIONS")
-
-        logger.info(
-            f"[ADMS CONNECT] sn={sn} ip={ip} table={table or '-'} stamp={stamp} "
-            f"options={options} q={params} body_bytes={len(body)}"
-        )
-
-        await _record_heartbeat(sn, ip)
-
+        # Handshake / info-only GET (no punch data)
         if not raw or raw.upper().startswith("SN="):
-            logger.info(f"[ADMS CONNECT] handshake sn={sn}")
-            return "OK"
+            logger.info(f"[ADMS HEARTBEAT] Handshake from SN={sn} IP={ip}")
+            return PlainTextResponse("OK\n")
+
+        logger.info(f"[ADMS ATTENDANCE] Push received SN={sn} | lines={len(raw.splitlines())}")
 
         inserted = 0
-        is_oplog = table in ("OPERLOG", "OPLOG")
 
         for line in raw.splitlines():
-            try:
-                line = line.strip()
-                if not line:
-                    continue
-
-                upper = line.upper()
-                if upper.startswith("ATTLOG\t"):
-                    line = line.split("\t", 1)[1]
-                elif upper.startswith("OPLOG\t") or upper.startswith("OPERLOG\t"):
-                    is_oplog = True
-                    line = line.split("\t", 1)[1]
-
-                if is_oplog:
-                    logger.info(f"[ADMS ATTENDANCE] oplog sn={sn} line={line[:120]}")
-                    continue
-
-                parts = line.split("\t")
-                if len(parts) < 2:
-                    continue
-
-                device_user_id = parts[0].strip()
-                punch_time_raw = parts[1].strip()
-                punch_code = parts[2].strip() if len(parts) > 2 else "0"
-                punch_type = "in" if punch_code in ("0", "4") else "out"
-
-                if not device_user_id or not punch_time_raw:
-                    continue
-
-                existing = await db.identix_attendance.find_one({
-                    "device_user_id": device_user_id,
-                    "punch_time":     punch_time_raw,
-                })
-                if existing:
-                    continue
-
-                record = {
-                    "id":             str(uuid.uuid4()),
-                    "device_user_id": device_user_id,
-                    "device_serial":  sn,
-                    "punch_time":     punch_time_raw,
-                    "punch_type":     punch_type,
-                    "punch_state":    punch_code,
-                    "source":         "machine_push",
-                    "created_at":     datetime.now(timezone.utc).isoformat(),
-                }
-                await db.identix_attendance.insert_one(record)
-                inserted += 1
-                logger.info(
-                    f"[ADMS ATTENDANCE] sn={sn} uid={device_user_id} "
-                    f"time={punch_time_raw} type={punch_type}"
-                )
-
-                await _mirror_punch_to_attendance(device_user_id, punch_time_raw, punch_type)
-            except Exception as line_err:
-                logger.warning(f"[ADMS ATTENDANCE] bad line skipped: {line_err}")
+            line = line.strip()
+            if not line:
                 continue
 
-        logger.info(f"[ADMS ATTENDANCE] sn={sn} inserted={inserted}")
-        return "OK"
+            parts = line.split("\t")
+            if len(parts) < 4:
+                continue
+
+            device_user_id = parts[0].strip()
+            punch_time_raw = parts[1].strip()          # "2026-05-22 09:15:00"
+            punch_code     = parts[2].strip()          # "0"=in, "1"=out, "4"=OT-in, "5"=OT-out
+            punch_type     = "in" if punch_code in ("0", "4") else "out"
+
+            # ── Deduplicate ───────────────────────────────────────────────
+            existing = await db.identix_attendance.find_one({
+                "device_user_id": device_user_id,
+                "punch_time":     punch_time_raw,
+            })
+            if existing:
+                continue
+
+            # ── Save raw log ──────────────────────────────────────────────
+            record = {
+                "id":             str(uuid.uuid4()),
+                "device_user_id": device_user_id,
+                "punch_time":     punch_time_raw,
+                "punch_type":     punch_type,
+                "source":         "machine_push",
+                "created_at":     datetime.now(timezone.utc).isoformat(),
+            }
+            await db.identix_attendance.insert_one(record)
+            inserted += 1
+
+            # ── Mirror to main attendance collection ──────────────────────
+            try:
+                # Look up user by identix_uid
+                user = await db.users.find_one(
+                    {"identix_uid": int(device_user_id)},
+                    {"_id": 0, "id": 1, "full_name": 1, "departments": 1,
+                     "punch_in_time": 1, "grace_time": 1, "punch_out_time": 1},
+                ) if device_user_id.isdigit() else None
+
+                if not user:
+                    # fallback: match by string user_id field
+                    user = await db.users.find_one(
+                        {"identix_uid": device_user_id},
+                        {"_id": 0, "id": 1, "full_name": 1, "departments": 1,
+                         "punch_in_time": 1, "grace_time": 1, "punch_out_time": 1},
+                    )
+
+                if not user:
+                    logger.warning(f"No user found for identix_uid={device_user_id}")
+                    continue
+
+                # Parse punch datetime → IST
+                punch_dt = datetime.strptime(punch_time_raw, "%Y-%m-%d %H:%M:%S")
+                punch_dt = punch_dt.replace(tzinfo=timezone.utc).astimezone(IST)
+                date_str = punch_dt.date().isoformat()
+                user_id  = user["id"]
+
+                if punch_type == "in":
+                    # Late calculation
+                    is_late = False
+                    try:
+                        pit_str       = user.get("punch_in_time", "10:30")
+                        gt_str        = user.get("grace_time",    "00:10")
+                        pit           = datetime.strptime(pit_str, "%H:%M")
+                        gt            = datetime.strptime(gt_str,  "%H:%M")
+                        grace_minutes = gt.hour * 60 + gt.minute
+                        deadline      = punch_dt.replace(
+                            hour=pit.hour, minute=pit.minute,
+                            second=0, microsecond=0,
+                        ) + timedelta(minutes=grace_minutes)
+                        is_late = punch_dt > deadline
+                    except Exception:
+                        pass
+
+                    existing_att = await db.attendance.find_one(
+                        {"user_id": user_id, "date": date_str}, {"_id": 0}
+                    )
+                    if not (existing_att and existing_att.get("punch_in")):
+                        await db.attendance.update_one(
+                            {"user_id": user_id, "date": date_str},
+                            {"$set": {
+                                "status":      "present",
+                                "punch_in":    punch_dt.isoformat(),
+                                "is_late":     is_late,
+                                "auto_marked": False,
+                                "source":      "machine_push",
+                            }},
+                            upsert=True,
+                        )
+
+                elif punch_type == "out":
+                    existing_att = await db.attendance.find_one(
+                        {"user_id": user_id, "date": date_str}, {"_id": 0}
+                    )
+                    if existing_att and existing_att.get("punch_in"):
+                        punch_in_raw = existing_att["punch_in"]
+                        punch_in_dt  = datetime.fromisoformat(punch_in_raw) \
+                            if isinstance(punch_in_raw, str) else punch_in_raw
+                        if punch_in_dt.tzinfo is None:
+                            punch_in_dt = punch_in_dt.replace(tzinfo=timezone.utc)
+
+                        duration_minutes = max(0, int(
+                            (punch_dt.astimezone(timezone.utc) - punch_in_dt.astimezone(timezone.utc))
+                            .total_seconds() / 60
+                        ))
+
+                        early = False
+                        try:
+                            pot_str  = user.get("punch_out_time", "19:00")
+                            pot      = datetime.strptime(pot_str, "%H:%M")
+                            expected = punch_dt.replace(
+                                hour=pot.hour, minute=pot.minute,
+                                second=0, microsecond=0,
+                            )
+                            early = punch_dt < expected
+                        except Exception:
+                            pass
+
+                        await db.attendance.update_one(
+                            {"user_id": user_id, "date": date_str},
+                            {"$set": {
+                                "punch_out":         punch_dt.isoformat(),
+                                "duration_minutes":  duration_minutes,
+                                "punched_out_early": early,
+                            }},
+                        )
+                    else:
+                        await db.attendance.update_one(
+                            {"user_id": user_id, "date": date_str},
+                            {"$set": {
+                                "punch_out": punch_dt.isoformat(),
+                                "source":    "machine_push",
+                            }},
+                            upsert=True,
+                        )
+
+            except Exception as mirror_err:
+                logger.warning(f"Mirror failed for uid={device_user_id}: {mirror_err}")
+
+        logger.info(f"[ADMS ATTENDANCE] Inserted {inserted} new record(s) from SN={sn}")
+        return PlainTextResponse("OK\n")
 
     except Exception as e:
-        logger.error(f"[ADMS CONNECT] cdata error: {e}\n{traceback.format_exc()}")
-        return "OK"
+        logger.error(f"[ADMS ATTENDANCE] iclock/cdata error: {e}\n{traceback.format_exc()}")
+        return PlainTextResponse("OK\n")   # Always return OK so device doesn't disconnect
 
 
 @identix_router.get("/")
 async def root_test():
-    return {"status": "API LIVE", "mode": "cloud" if _is_cloud_mode() else "lan"}
+    return {"status": "Identix ADMS API LIVE", "mode": "cloud" if _is_cloud() else "lan"}
