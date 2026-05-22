@@ -8291,3 +8291,14 @@ api_router.include_router(activity_monitor_router)
 api_router.include_router(client_portal_router)
 app.include_router(google_auth_router)
 app.include_router(api_router)
+
+# ── Identix machine root-level routes ────────────────────────────────────────
+# Older firmware machines that have no "Server Path" field hit these URLs:
+#   GET/POST http://<ip>/iclock/getrequest
+#   GET/POST http://<ip>/iclock/cdata
+# We just proxy them to the same handlers in attendance_identix.py
+from backend.attendance_identix import iclock_getrequest, iclock_cdata
+from fastapi.routing import APIRoute
+
+app.add_api_route("/iclock/getrequest", iclock_getrequest, methods=["GET", "POST"])
+app.add_api_route("/iclock/cdata",      iclock_cdata,      methods=["GET", "POST"])
