@@ -8292,15 +8292,17 @@ api_router.include_router(client_portal_router)
 app.include_router(google_auth_router)
 app.include_router(api_router)
 
-# ── Identix machine root-level routes ────────────────────────────────────────
-# Older firmware machines that have no "Server Path" field hit these URLs:
-#   GET/POST http://<ip>/iclock/getrequest
-#   GET/POST http://<ip>/iclock/cdata
-# We just proxy them to the same handlers in attendance_identix.py
+# ── ADMS machine root-level routes ───────────────────────────────────────────
+# ZKTeco / Identix machines configured in ADMS Cloud mode push to these URLs.
+# Machine firmware appends these paths to the Server Address automatically:
+#   GET/POST  https://api.taskosphere.com/iclock/cdata
+#   GET/POST  https://api.taskosphere.com/iclock/getrequest
+#   GET/POST  https://api.taskosphere.com/iclock/devicecmd
+#
+# IMPORTANT: These routes must be at ROOT level — NOT under /api/identix/...
+# No auth middleware. No CORS required. Always return plain text "OK".
 from backend.attendance_identix import iclock_getrequest, iclock_cdata, iclock_devicecmd
-from fastapi.routing import APIRoute
-from fastapi.responses import PlainTextResponse
 
-app.add_api_route("/iclock/getrequest", iclock_getrequest, methods=["GET", "POST"], response_class=PlainTextResponse)
-app.add_api_route("/iclock/cdata",      iclock_cdata,      methods=["GET", "POST"], response_class=PlainTextResponse)
-app.add_api_route("/iclock/devicecmd",  iclock_devicecmd,  methods=["GET", "POST"], response_class=PlainTextResponse)
+app.add_api_route("/iclock/cdata",       iclock_cdata,       methods=["GET", "POST"])
+app.add_api_route("/iclock/getrequest",  iclock_getrequest,  methods=["GET", "POST"])
+app.add_api_route("/iclock/devicecmd",   iclock_getrequest,  methods=["GET", "POST"])
