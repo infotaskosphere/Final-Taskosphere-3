@@ -8297,8 +8297,10 @@ app.include_router(api_router)
 #   GET/POST http://<ip>/iclock/getrequest
 #   GET/POST http://<ip>/iclock/cdata
 # We just proxy them to the same handlers in attendance_identix.py
-from backend.attendance_identix import iclock_getrequest, iclock_cdata
+from backend.attendance_identix import iclock_getrequest, iclock_cdata, iclock_devicecmd
 from fastapi.routing import APIRoute
+from fastapi.responses import PlainTextResponse
 
-app.add_api_route("/iclock/getrequest", iclock_getrequest, methods=["GET", "POST"])
-app.add_api_route("/iclock/cdata",      iclock_cdata,      methods=["GET", "POST"])
+app.add_api_route("/iclock/getrequest", iclock_getrequest, methods=["GET", "POST"], response_class=PlainTextResponse)
+app.add_api_route("/iclock/cdata",      iclock_cdata,      methods=["GET", "POST"], response_class=PlainTextResponse)
+app.add_api_route("/iclock/devicecmd",  iclock_devicecmd,  methods=["GET", "POST"], response_class=PlainTextResponse)
