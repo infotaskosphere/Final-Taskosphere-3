@@ -1273,12 +1273,15 @@ const UserCard = ({ userData, onEdit, onDelete, onOffboard, onPermissions, onApp
   , [userData.permissions]);
 
   return (
-    <motion.div variants={itemVariants} layout whileHover={{ y: -4, transition: springPhysics.lift }} whileTap={{ scale: 0.99 }}
-      className={`relative bg-white dark:bg-slate-800 rounded-2xl overflow-hidden border shadow-sm transition-all duration-200 ${
-        isPending ? 'border-amber-200 dark:border-amber-800 hover:shadow-xl' : hovered ? 'border-blue-200 dark:border-blue-700 hover:shadow-xl' : 'border-slate-200/80 dark:border-slate-700 hover:shadow-lg'
+    <motion.div variants={itemVariants} layout whileHover={{ y: -5, transition: springPhysics.lift }} whileTap={{ scale: 0.99 }}
+      className={`group relative bg-white dark:bg-slate-800 rounded-2xl overflow-hidden border shadow-sm transition-all duration-300 ${
+        isPending ? 'border-amber-200 dark:border-amber-800 hover:shadow-xl hover:shadow-amber-100/50' : hovered ? 'border-blue-200 dark:border-blue-700 hover:shadow-2xl hover:shadow-blue-100/60 dark:hover:shadow-blue-900/30' : 'border-slate-200/80 dark:border-slate-700 hover:shadow-xl'
       }`}
       onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
       <div className={`h-1.5 w-full bg-gradient-to-r ${roleCfg.gradient}`} />
+      {/* subtle role-tinted decor */}
+      <div className="pointer-events-none absolute -right-12 -top-12 w-40 h-40 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-500"
+        style={{ background: `radial-gradient(circle, ${roleCfg.hex}1f 0%, transparent 70%)` }} />
       <AnimatePresence>
         {hovered && !isPending && (
           <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}
@@ -1314,24 +1317,28 @@ const UserCard = ({ userData, onEdit, onDelete, onOffboard, onPermissions, onApp
           </motion.div>
         )}
       </AnimatePresence>
-      <div className="p-4">
-        <div className="flex items-start gap-3">
+      <div className="relative p-4 sm:p-5">
+        <div className="flex items-start gap-3.5">
           <div className="relative flex-shrink-0">
-            <div className="w-[52px] h-[52px] rounded-xl overflow-hidden shadow-sm ring-1 ring-slate-100 dark:ring-slate-700">
+            <div className="w-[60px] h-[60px] rounded-2xl overflow-hidden shadow-md ring-4 ring-slate-50 dark:ring-slate-700/50 group-hover:ring-blue-50 dark:group-hover:ring-blue-900/30 transition-all duration-300">
               {userData.profile_picture
                 ? <img src={userData.profile_picture} alt={userData.full_name} className="w-full h-full object-cover" />
-                : <div className={`w-full h-full flex items-center justify-center text-white text-xl font-black bg-gradient-to-br ${roleCfg.gradient}`}>
+                : <div className={`w-full h-full flex items-center justify-center text-white text-2xl font-black bg-gradient-to-br ${roleCfg.gradient}`}>
                     {userData.full_name?.charAt(0)?.toUpperCase()}
                   </div>}
             </div>
-            <div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-lg bg-gradient-to-br ${roleCfg.gradient} flex items-center justify-center ring-2 ring-white dark:ring-slate-800 shadow-sm`}>
+            {/* live status dot */}
+            <span className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full ring-[3px] ring-white dark:ring-slate-800 ${
+              isPending ? 'bg-amber-400' : userData.is_active ? 'bg-emerald-500' : 'bg-slate-300'
+            }`} />
+            <div className={`absolute -top-1 -left-1 w-5 h-5 rounded-lg bg-gradient-to-br ${roleCfg.gradient} flex items-center justify-center ring-2 ring-white dark:ring-slate-800 shadow-sm`}>
               <RoleIcon className="h-2.5 w-2.5 text-white" />
             </div>
           </div>
           <div className="flex-1 min-w-0 pt-0.5">
-            <h3 className="font-semibold text-sm tracking-tight text-slate-900 dark:text-white truncate">{userData.full_name}</h3>
+            <h3 className="font-bold text-[15px] tracking-tight text-slate-900 dark:text-white truncate">{userData.full_name}</h3>
             <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold text-white bg-gradient-to-r ${roleCfg.gradient}`}>
+              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold text-white bg-gradient-to-r ${roleCfg.gradient} shadow-sm`}>
                 <RoleIcon className="h-2.5 w-2.5" />{roleCfg.label}
               </span>
               <StatusBadge status={userData.status} isActive={userData.is_active} />
@@ -1339,26 +1346,29 @@ const UserCard = ({ userData, onEdit, onDelete, onOffboard, onPermissions, onApp
           </div>
         </div>
         {(userData.departments || []).length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-3">{userData.departments.map(d => <DeptPill key={d} dept={d} />)}</div>
+          <div className="mt-3.5">
+            <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-1.5">Expertise</p>
+            <div className="flex flex-wrap gap-1">{userData.departments.map(d => <DeptPill key={d} dept={d} />)}</div>
+          </div>
         )}
         <ModuleAccessBadges userData={userData} />
-        <div className="mt-3 space-y-1.5 text-xs text-slate-500 dark:text-slate-400">
-          <div className="flex items-center gap-2 truncate"><Mail className="h-3 w-3 text-slate-400 flex-shrink-0" /><span className="truncate">{userData.email}</span></div>
-          <div className="flex items-center gap-2"><Phone className="h-3 w-3 text-slate-400 flex-shrink-0" />{userData.phone || '—'}</div>
+        <div className={`mt-3.5 p-3 rounded-xl space-y-1.5 text-xs ${isPending ? 'bg-amber-50/40 dark:bg-amber-900/10' : 'bg-slate-50 dark:bg-slate-900/40'}`}>
+          <div className="flex items-center gap-2 truncate text-slate-600 dark:text-slate-300"><Mail className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" /><span className="truncate font-medium">{userData.email}</span></div>
+          <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300"><Phone className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />{userData.phone || '—'}</div>
           {userData.company_name && (
-            <div className="flex items-center gap-2 truncate"><Building2 className="h-3 w-3 text-slate-400 flex-shrink-0" /><span className="truncate">{userData.company_name}</span></div>
+            <div className="flex items-center gap-2 truncate text-slate-600 dark:text-slate-300"><Building2 className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" /><span className="truncate">{userData.company_name}</span></div>
           )}
           {(userData.punch_in_time || userData.punch_out_time) && (
-            <div className="flex items-center gap-2"><Clock className="h-3 w-3 text-slate-400 flex-shrink-0" />{userData.punch_in_time || '—'} → {userData.punch_out_time || '—'}</div>
+            <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300"><Clock className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" /><span className="tabular-nums">{userData.punch_in_time || '—'} → {userData.punch_out_time || '—'}</span></div>
           )}
-          <div className="flex items-center gap-2"><Calendar className="h-3 w-3 text-slate-400 flex-shrink-0" />
+          <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400"><Calendar className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
             Joined {userData.created_at ? format(new Date(userData.created_at), 'dd MMM yyyy') : 'N/A'}
           </div>
         </div>
         {userData.role !== 'admin' && (
           <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
-            <span className="text-[10px] text-slate-400 font-medium">Permissions</span>
-            <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-semibold"
+            <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Permissions</span>
+            <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold"
               style={{ background: `${COLORS.mediumBlue}10`, color: COLORS.mediumBlue }}>
               <ShieldCheck className="h-3 w-3" />{permCount} active
             </div>
@@ -2414,25 +2424,36 @@ export default function Users() {
 
       {/* ── Page Header ── */}
       <motion.div variants={slideIn}>
-        <div className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
-          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)`, boxShadow: '0 8px 32px rgba(13,59,102,0.28)' }}>
-          <div className="absolute right-0 top-0 w-72 h-72 rounded-full -mr-24 -mt-24 opacity-10"
+        <div className="relative overflow-hidden rounded-3xl px-5 sm:px-8 pt-6 sm:pt-7 pb-6"
+          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 55%, #2196d1 100%)`, boxShadow: '0 20px 48px -12px rgba(13,59,102,0.42)' }}>
+          <div className="absolute -right-24 -top-24 w-80 h-80 rounded-full opacity-15"
             style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
-          <div className="absolute right-28 bottom-0 w-40 h-40 rounded-full mb-[-40px] opacity-5"
+          <div className="absolute -left-20 -bottom-20 w-72 h-72 rounded-full opacity-10"
+            style={{ background: 'radial-gradient(circle, #5CCB5F 0%, transparent 70%)' }} />
+          <div className="absolute right-40 bottom-0 w-40 h-40 rounded-full mb-[-40px] opacity-[0.06]"
             style={{ background: 'white' }} />
-          <div className="absolute left-0 bottom-0 w-48 h-48 rounded-full -ml-20 -mb-20 opacity-5" style={{ background: 'white' }} />
-          <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0">
+          <div className="relative flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-white/15 backdrop-blur-md border border-white/20 flex items-center justify-center flex-shrink-0 shadow-inner">
                 {mainTab === 'identix'
-                  ? <Fingerprint className="h-5 w-5 text-white" />
-                  : <UsersIcon className="h-5 w-5 text-white" />}
+                  ? <Fingerprint className="h-6 w-6 text-white" />
+                  : <UsersIcon className="h-6 w-6 text-white" />}
               </div>
-              <div>
-                <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-0.5">Team Management</p>
-                <h1 className="text-2xl font-bold text-white tracking-tight leading-tight">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/15">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse" />
+                    <p className="text-white/80 text-[10px] font-bold uppercase tracking-widest">Team Management</p>
+                  </span>
+                </div>
+                <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight leading-tight">
                   {mainTab === 'identix' ? 'Identix Machine Integration' : 'User Directory'}
                 </h1>
+                <p className="text-white/70 text-xs sm:text-sm mt-1 max-w-md">
+                  {mainTab === 'identix'
+                    ? 'Manage biometric devices, enrollments, and attendance logs.'
+                    : `Organize roles, track access, and onboard new members — ${users.length} ${users.length === 1 ? 'member' : 'members'} in your team.`}
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-3 flex-wrap">
@@ -2477,19 +2498,24 @@ export default function Users() {
       {mainTab === 'users' && (
         <>
           {/* Stats */}
-          <motion.div variants={containerVariants} className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <motion.div variants={containerVariants} className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
             {stats.map((s, i) => {
               const Icon = s.icon;
               return (
-                <motion.div key={i} variants={itemVariants} whileHover={{ y: -2, transition: springPhysics.card }} whileTap={{ scale: 0.985 }}
-                  className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200/80 dark:border-slate-700 shadow-sm hover:shadow-md transition-all cursor-default">
-                  <div className="p-3.5 flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{s.label}</p>
-                      <p className="text-2xl font-bold mt-0.5 tracking-tight" style={{ color: s.color }}>{s.value}</p>
+                <motion.div key={i} variants={itemVariants} whileHover={{ y: -3, transition: springPhysics.card }} whileTap={{ scale: 0.985 }}
+                  className="group relative overflow-hidden bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/80 dark:border-slate-700 shadow-sm hover:shadow-xl transition-all cursor-default">
+                  <div className="absolute -right-8 -top-8 w-24 h-24 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-500" style={{ background: `radial-gradient(circle, ${s.color}26 0%, transparent 70%)` }} />
+                  <div className="absolute left-0 top-0 bottom-0 w-1 opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: s.color }} />
+                  <div className="relative p-4 sm:p-5 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">{s.label}</p>
+                      <p className="text-3xl font-black mt-1 tracking-tight tabular-nums" style={{ color: s.color }}>
+                        {String(s.value).padStart(2, '0')}
+                      </p>
                     </div>
-                    <div className="p-2 rounded-xl flex-shrink-0" style={{ background: `${s.color}12` }}>
-                      <Icon className="h-4 w-4" style={{ color: s.color }} />
+                    <div className="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 transition-all duration-300 group-hover:scale-110 group-hover:rotate-3"
+                      style={{ background: `${s.color}15`, boxShadow: `inset 0 0 0 1px ${s.color}22` }}>
+                      <Icon className="h-5 w-5" style={{ color: s.color }} />
                     </div>
                   </div>
                 </motion.div>
@@ -2515,26 +2541,30 @@ export default function Users() {
             </motion.div>
           )}
 
-          {/* Tabs + Search */}
-          <motion.div variants={itemVariants} className="space-y-3">
-            <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          {/* Tabs + Search — unified control panel */}
+          <motion.div variants={itemVariants}
+            className={`flex flex-col lg:flex-row lg:items-center gap-3 p-3 rounded-2xl border shadow-sm ${
+              isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-white border-slate-200/80'
+            }`}>
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 lg:pb-0 -mx-1 px-1 lg:flex-shrink-0">
               {tabs.map(tab => (
                 <button key={tab.id} onClick={() => setActiveTab(tab.id)}
                   className={`flex items-center gap-2 px-4 py-2 rounded-xl font-semibold text-sm transition-all whitespace-nowrap ${
-                    activeTab === tab.id ? 'text-white shadow-md' : isDark ? 'bg-slate-800 text-slate-400 border border-slate-700 hover:border-slate-600 hover:text-slate-200' : 'bg-white text-slate-600 border border-slate-200 hover:border-slate-300'
+                    activeTab === tab.id ? 'text-white shadow-lg' : isDark ? 'text-slate-400 hover:bg-slate-700/60 hover:text-slate-200' : 'text-slate-600 hover:bg-slate-100'
                   }`}
-                  style={activeTab === tab.id ? { background: GRADIENT } : {}}>
+                  style={activeTab === tab.id ? { background: GRADIENT, boxShadow: '0 8px 20px -6px rgba(31,111,178,0.45)' } : {}}>
                   {tab.label}
                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md leading-none ${
-                    activeTab === tab.id ? 'bg-white/20 text-white' : isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'
+                    activeTab === tab.id ? 'bg-white/25 text-white' : isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'
                   }`}>{tab.count}</span>
                 </button>
               ))}
             </div>
-            <div className="relative">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <div className={`hidden lg:block h-8 w-px ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
+            <div className="relative flex-1 group">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
               <Input placeholder="Search by name or email…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-                className={`pl-11 h-11 rounded-xl text-sm border ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 placeholder:text-slate-500 focus:border-blue-600' : 'bg-white border-slate-200 placeholder:text-slate-400 focus:border-blue-400'}`} />
+                className={`pl-11 h-11 rounded-xl text-sm border-0 ${isDark ? 'bg-slate-900/60 text-slate-100 placeholder:text-slate-500 focus-visible:ring-2 focus-visible:ring-blue-600' : 'bg-slate-50 placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-blue-200'}`} />
               {searchQuery && (
                 <button onClick={() => setSearchQuery('')} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
                   <X className="h-4 w-4" />
