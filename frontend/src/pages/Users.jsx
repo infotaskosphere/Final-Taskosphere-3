@@ -779,20 +779,36 @@ function IdentixDevicesTab() {
             return (
               <div key={d.id} style={{ background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 14 }}>
                 <div style={{ flex: 1, minWidth: 240 }}>
+                  {(() => {
+                    const lastSeenMs = d.last_seen ? new Date(d.last_seen).getTime() : 0;
+                    const isOnline = lastSeenMs && (Date.now() - lastSeenMs) < 120000;
+                    return (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
                     <Monitor size={18} color={COLORS.mediumBlue} />
                     <span style={{ fontWeight: 700, fontSize: 15 }}>{d.name}</span>
                     <span style={{ padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: d.is_active ? '#d1fae5' : '#fee2e2', color: d.is_active ? '#065f46' : '#991b1b' }}>{d.is_active ? 'Active' : 'Inactive'}</span>
+                    {d.last_seen && (
+                      <span style={{ padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: isOnline ? '#dcfce7' : '#fef3c7', color: isOnline ? '#15803d' : '#92400e' }}>
+                        {isOnline ? '● Online' : '○ Offline'}
+                      </span>
+                    )}
                   </div>
+                    );
+                  })()}
                   <div style={{ fontSize: 12, color: COLORS.slate, display: 'flex', flexWrap: 'wrap', gap: '3px 16px' }}>
                     <span>IP: <b>{d.ip_address}:{d.port}</b></span>
                     {d.location && <span>📍 {d.location}</span>}
                     {d.serial_number && <span>S/N: {d.serial_number}</span>}
+                    {d.last_seen && <span>Last seen: {fmtTime(d.last_seen)}</span>}
                     {d.last_sync_at && <span>Last sync: {fmtTime(d.last_sync_at)}</span>}
                   </div>
                   {tr && !tr.testing && (
                     <div style={{ marginTop: 8, padding: '7px 12px', borderRadius: 8, fontSize: 12, background: tr.success ? '#d1fae5' : '#fee2e2', color: tr.success ? '#065f46' : '#991b1b' }}>
-                      {tr.success ? `✓ Connected — S/N: ${tr.deviceInfo?.serialNumber}, Users: ${tr.deviceInfo?.userCount}` : `✗ ${tr.message}`}
+                      {tr.success
+                        ? (tr.mode === 'cloud'
+                            ? `✓ Online (ADMS) — S/N: ${tr.deviceInfo?.serialNumber ?? '—'}, Last seen: ${tr.deviceInfo?.lastSeen ? fmtTime(tr.deviceInfo.lastSeen) : '—'}`
+                            : `✓ Connected — S/N: ${tr.deviceInfo?.serialNumber}, Users: ${tr.deviceInfo?.userCount}`)
+                        : `✗ ${tr.message}`}
                     </div>
                   )}
                   {tr?.testing && <div style={{ marginTop: 8, fontSize: 12, color: COLORS.slate, display: 'flex', alignItems: 'center', gap: 6 }}><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />Testing…</div>}
