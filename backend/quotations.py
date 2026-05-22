@@ -1140,6 +1140,20 @@ async def get_companies(current_user: User = Depends(check_module_permission("qu
     return companies
 
 
+@router.get("/companies/list")
+async def list_companies(current_user: User = Depends(get_current_user)):
+    """
+    Lightweight company list for cross-module dropdowns (Users, Attendance,
+    Reports). Requires authentication only — does NOT require the
+    `quotations.view` permission, since non-quotation modules also need it.
+    Returns only the fields needed to render a picker.
+    """
+    query = {} if current_user.role == "admin" else {"created_by": current_user.id}
+    projection = {"_id": 0, "id": 1, "name": 1, "gstin": 1, "has_gst": 1}
+    companies = await db.companies.find(query, projection).to_list(500)
+    return companies
+
+
 @router.put("/companies/{company_id}")
 async def update_company(
     company_id: str, data: dict,
