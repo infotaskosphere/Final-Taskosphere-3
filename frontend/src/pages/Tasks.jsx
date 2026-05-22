@@ -760,6 +760,7 @@ export default function Tasks() {
   const [filterAssignedByMe,  setFilterAssignedByMe]  = useState(false);
   const [filterCreatedBy,     setFilterCreatedBy]     = useState('all');
   const [filterTodayNew,      setFilterTodayNew]      = useState(false);
+  const [filterPending,       setFilterPending]       = useState(false);
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
   const [duplicateGroups,     setDuplicateGroups]     = useState([]);
   const [detectingDuplicates, setDetectingDuplicates] = useState(false);
@@ -1441,10 +1442,26 @@ export default function Tasks() {
     if (filterTodayNew) {
       const todayStr = format(new Date(), 'yyyy-MM-dd');
       const createdDate = task.created_at ? format(new Date(task.created_at), 'yyyy-MM-dd') : '';
-      const assignedToMe = task.assigned_to === user?.id || (task.sub_assignees || []).includes(user?.id);
-      matchesTodayNew = createdDate === todayStr && assignedToMe;
+      if (isAdmin) {
+        // Admin: if a specific assignee is selected, show that user's today-new tasks; else show all users' today-new tasks
+        matchesTodayNew = createdDate === todayStr && (filterAssignee === 'all' || task.assigned_to === filterAssignee || (task.sub_assignees || []).includes(filterAssignee));
+      } else {
+        const assignedToMe = task.assigned_to === user?.id || (task.sub_assignees || []).includes(user?.id);
+        matchesTodayNew = createdDate === todayStr && assignedToMe;
+      }
     }
-    return matchesSearch && matchesStatus && matchesPriority && matchesCategory && matchesAssignee && matchesTeam && matchesTodayNew;
+    let matchesPending = true;
+    if (filterPending) {
+      const isNotCompleted = task.status !== 'completed';
+      if (isAdmin) {
+        // Admin: if a specific assignee is selected show their pending; else all pending
+        matchesPending = isNotCompleted && (filterAssignee === 'all' || task.assigned_to === filterAssignee || (task.sub_assignees || []).includes(filterAssignee));
+      } else {
+        const assignedToMe = task.assigned_to === user?.id || (task.sub_assignees || []).includes(user?.id);
+        matchesPending = isNotCompleted && assignedToMe;
+      }
+    }
+    return matchesSearch && matchesStatus && matchesPriority && matchesCategory && matchesAssignee && matchesTeam && matchesTodayNew && matchesPending;
   });
 
   // ── displayTasks must be defined BEFORE filteredStats ────────────────────
@@ -1514,8 +1531,9 @@ export default function Tasks() {
     if (filterAssignedByMe)       parts.push('By Me');
     if (filterCreatedBy !== 'all') parts.push(`By ${users.find(u => u.id === filterCreatedBy)?.full_name || ''}`);
     if (filterTodayNew)           parts.push("Today's New");
+    if (filterPending)            parts.push('Pending');
     return parts.filter(Boolean).join(' · ');
-  }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly, filterTeamOnly, filterAssignedByMe, filterCreatedBy, filterTodayNew, users]);
+  }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly, filterTeamOnly, filterAssignedByMe, filterCreatedBy, filterTodayNew, filterPending, users]);
 
   useEffect(() => {
     const pills = [];
@@ -1529,8 +1547,9 @@ export default function Tasks() {
     if (filterAssignedByMe)       pills.push({ key: 'assignedby',  label: 'Assigned by Me' });
     if (filterCreatedBy !== 'all') pills.push({ key: 'createdby', label: `By: ${users.find(u => u.id === filterCreatedBy)?.full_name || filterCreatedBy}` });
     if (filterTodayNew)           pills.push({ key: 'todaynew',   label: "Today's New Tasks" });
+    if (filterPending)            pills.push({ key: 'pending',    label: 'Pending Tasks' });
     setActiveFilters(pills);
-  }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly, filterTeamOnly, filterAssignedByMe, filterCreatedBy, filterTodayNew, users]);
+  }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly, filterTeamOnly, filterAssignedByMe, filterCreatedBy, filterTodayNew, filterPending, users]);
 
   const removeFilter = (key) => {
     if (key === 'search')   setSearchQuery('');
@@ -1543,12 +1562,14 @@ export default function Tasks() {
     if (key === 'assignedby') setFilterAssignedByMe(false);
     if (key === 'createdby')  setFilterCreatedBy('all');
     if (key === 'todaynew')   setFilterTodayNew(false);
+    if (key === 'pending')    setFilterPending(false);
   };
 
   const clearAllFilters = () => {
     setSearchQuery(''); setFilterStatus('all'); setFilterPriority('all'); setFilterCategory('all'); setFilterAssignee('all');
     setShowMyTasksOnly(false); setFilterTeamOnly(false); setFilterAssignedByMe(false); setFilterCreatedBy('all'); setSortBy('due_date'); setSortDirection('asc');
     setFilterTodayNew(false);
+    setFilterPending(false);
     toast.success('Filters cleared');
   };
 
@@ -1989,6 +2010,7 @@ export default function Tasks() {
         if (filterAssignedByMe)        filterParts.push({ key: 'byme',      icon: '✍️', text: 'Assigned by Me' });
         if (filterCreatedBy !== 'all') filterParts.push({ key: 'creator',   icon: '✍️', text: `By ${users.find(u => u.id === filterCreatedBy)?.full_name || 'Creator'}` });
         if (filterTodayNew)            filterParts.push({ key: 'todaynew',  icon: '⚡', text: "Today's New" });
+        if (filterPending)             filterParts.push({ key: 'pending',   icon: '⏳', text: 'Pending' });
 
         const isFiltered = filterParts.length > 0;
 
@@ -2181,261 +2203,249 @@ export default function Tasks() {
         );
       })()}
 
-      {/* ── TOOLBAR — removed My Tasks toggle, kept all filters ─────────── */}
+      {/* ── TOOLBAR — single row, compact ─────────────────────────────── */}
       <motion.div variants={itemVariants}
-        className={`flex flex-wrap items-center gap-2 border rounded-2xl px-4 py-3 shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        className={`flex items-center gap-1.5 border rounded-2xl px-3 py-2 shadow-sm overflow-x-auto ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+
         {/* Search */}
-        <div className="relative flex-1 min-w-40">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-          <Input placeholder="Search tasks…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-            className={`pl-9 h-8 text-sm rounded-xl ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-400' : 'bg-slate-50 border-slate-200'}`} />
+        <div className="relative shrink-0 w-36">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
+          <Input placeholder="Search…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+            className={`pl-7 h-7 text-xs rounded-lg ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-400' : 'bg-slate-50 border-slate-200'}`} />
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className={`h-8 w-32 text-xs rounded-xl ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Status" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Statuses</SelectItem>
-              <SelectItem value="pending">To Do</SelectItem>
-              <SelectItem value="in_progress">In Progress</SelectItem>
-              <SelectItem value="completed">Completed</SelectItem>
-              <SelectItem value="overdue">Overdue</SelectItem>
-            </SelectContent>
-          </Select>
+        {/* Divider */}
+        <div className={`h-5 w-px shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
 
-          <Select value={filterPriority} onValueChange={setFilterPriority}>
-            <SelectTrigger className={`h-8 w-32 text-xs rounded-xl ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Priority" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Priorities</SelectItem>
-              <SelectItem value="low">Low</SelectItem>
-              <SelectItem value="medium">Medium</SelectItem>
-              <SelectItem value="high">High</SelectItem>
-              <SelectItem value="critical">Critical</SelectItem>
-            </SelectContent>
-          </Select>
+        {/* Status */}
+        <Select value={filterStatus} onValueChange={setFilterStatus}>
+          <SelectTrigger className={`h-7 w-[105px] shrink-0 text-[11px] rounded-lg ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}>
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Statuses</SelectItem>
+            <SelectItem value="pending">To Do</SelectItem>
+            <SelectItem value="in_progress">In Progress</SelectItem>
+            <SelectItem value="completed">Completed</SelectItem>
+            <SelectItem value="overdue">Overdue</SelectItem>
+          </SelectContent>
+        </Select>
 
-          <Select value={filterCategory} onValueChange={setFilterCategory}>
-            <SelectTrigger className={`h-8 w-32 text-xs rounded-xl ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Department" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Depts</SelectItem>
-              {TASK_CATEGORIES.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
+        {/* Priority */}
+        <Select value={filterPriority} onValueChange={setFilterPriority}>
+          <SelectTrigger className={`h-7 w-[100px] shrink-0 text-[11px] rounded-lg ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}>
+            <SelectValue placeholder="Priority" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Priorities</SelectItem>
+            <SelectItem value="low">Low</SelectItem>
+            <SelectItem value="medium">Medium</SelectItem>
+            <SelectItem value="high">High</SelectItem>
+            <SelectItem value="critical">Critical</SelectItem>
+          </SelectContent>
+        </Select>
 
-          <Select value={filterAssignee} onValueChange={setFilterAssignee}>
-            <SelectTrigger className={`h-8 w-32 text-xs rounded-xl ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Assignee" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Assignees</SelectItem>
-              {visibleUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+        {/* Department */}
+        <Select value={filterCategory} onValueChange={setFilterCategory}>
+          <SelectTrigger className={`h-7 w-[90px] shrink-0 text-[11px] rounded-lg ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}>
+            <SelectValue placeholder="Dept" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Depts</SelectItem>
+            {TASK_CATEGORIES.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
 
-          <Select value={`${sortBy}-${sortDirection}`} onValueChange={(v) => { const [sb, sd] = v.split('-'); setSortBy(sb); setSortDirection(sd); }}>
-            <SelectTrigger className={`h-8 w-40 text-xs rounded-xl ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}><SelectValue placeholder="Sort" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="due_date-asc">Due Date ↑</SelectItem>
-              <SelectItem value="due_date-desc">Due Date ↓</SelectItem>
-              <SelectItem value="created_date-asc">Created ↑ (FIFO)</SelectItem>
-              <SelectItem value="created_date-desc">Created ↓ (LIFO)</SelectItem>
-              <SelectItem value="priority-desc">Priority ↓</SelectItem>
-              <SelectItem value="title-asc">Title A-Z</SelectItem>
-            </SelectContent>
-          </Select>
+        {/* Assignee */}
+        <Select value={filterAssignee} onValueChange={setFilterAssignee}>
+          <SelectTrigger className={`h-7 w-[110px] shrink-0 text-[11px] rounded-lg ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}>
+            <SelectValue placeholder="Assignee" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Assignees</SelectItem>
+            {visibleUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}
+          </SelectContent>
+        </Select>
 
-          {/* Assigned By dropdown — permission-aware creator filter */}
-          <Select
-            value={filterCreatedBy !== 'all' ? filterCreatedBy : (filterAssignedByMe ? '__me__' : 'all')}
-            onValueChange={(v) => {
-              if (v === '__me__') {
-                setFilterAssignedByMe(true);
-                setFilterCreatedBy('all');
-                setShowMyTasksOnly(false);
-                setFilterTeamOnly(false);
-                setFilterAssignee('all');
-              } else {
-                setFilterAssignedByMe(false);
-                setFilterCreatedBy(v);
-                if (v !== 'all') { setShowMyTasksOnly(false); setFilterTeamOnly(false); }
-              }
-            }}
-          >
-            <SelectTrigger
-              className={`h-8 text-xs rounded-xl flex-1 min-w-[130px] max-w-[200px] transition-all ${
-                (filterCreatedBy !== 'all' || filterAssignedByMe)
-                  ? (isDark ? 'bg-purple-900/40 border-purple-500 text-purple-300' : 'bg-purple-50 border-purple-400 text-purple-700')
-                  : (isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200')
-              }`}
-            >
-              <div className="flex items-center gap-1.5 min-w-0">
-                <User className="h-3 w-3 flex-shrink-0" />
-                <SelectValue placeholder="Assigned by" />
-              </div>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Creators</SelectItem>
-              <SelectItem value="__me__">Assigned by Me</SelectItem>
-              {visibleCreators
-                .filter(u => u.id !== user?.id) // "me" already covered above
-                .map(u => (
-                  <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
-                ))
-              }
-            </SelectContent>
-          </Select>
+        {/* Sort */}
+        <Select value={`${sortBy}-${sortDirection}`} onValueChange={(v) => { const [sb, sd] = v.split('-'); setSortBy(sb); setSortDirection(sd); }}>
+          <SelectTrigger className={`h-7 w-[105px] shrink-0 text-[11px] rounded-lg ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}>
+            <SelectValue placeholder="Sort" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="due_date-asc">Due Date ↑</SelectItem>
+            <SelectItem value="due_date-desc">Due Date ↓</SelectItem>
+            <SelectItem value="created_date-asc">Created ↑</SelectItem>
+            <SelectItem value="created_date-desc">Created ↓</SelectItem>
+            <SelectItem value="priority-desc">Priority ↓</SelectItem>
+            <SelectItem value="title-asc">Title A-Z</SelectItem>
+          </SelectContent>
+        </Select>
 
-          {/* ── New Today toggle ── */}
-          <button
-            onClick={() => setFilterTodayNew(p => !p)}
-            title="Show only tasks assigned to you today"
-            className={`h-8 px-3 text-[10px] font-bold tracking-wide rounded-xl border transition-all flex items-center gap-1.5 whitespace-nowrap
-              ${filterTodayNew
-                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm shadow-indigo-500/30'
-                : (isDark
-                    ? 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-indigo-900/40 hover:border-indigo-500 hover:text-indigo-300'
-                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700')
-              }`}
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-            </svg>
-            New Today
-            {filterTodayNew && (
-              <span className="ml-0.5 inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-white/25 text-[9px] font-black leading-none">
-                ✓
-              </span>
-            )}
-          </button>
-
-          {/* AI Provider Selector + Duplicate Detector */}
-          <div className={`flex items-center rounded-xl border overflow-hidden ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
-            {/* Tab: Gemini */}
-            <button
-              onClick={() => setAiProvider('gemini')}
-              title="Use Google Gemini AI"
-              className={`h-8 px-2.5 text-[10px] font-bold tracking-wide border-r transition-all flex items-center gap-1
-                ${aiProvider === 'gemini'
-                  ? 'bg-violet-600 text-white border-violet-600'
-                  : (isDark ? 'bg-slate-700 text-slate-400 border-slate-600 hover:bg-violet-900/30 hover:text-violet-300' : 'bg-white text-slate-500 border-slate-200 hover:bg-violet-50 hover:text-violet-700')
-                }`}
-            >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2L9.5 9.5 2 12l7.5 2.5L12 22l2.5-7.5L22 12l-7.5-2.5z"/>
-              </svg>
-              Gemini
-            </button>
-
-            {/* Tab: Grok */}
-            <button
-              onClick={() => setAiProvider('grok')}
-              title="Use xAI Grok"
-              className={`h-8 px-2.5 text-[10px] font-bold tracking-wide border-r transition-all flex items-center gap-1
-                ${aiProvider === 'grok'
-                  ? 'bg-orange-500 text-white border-orange-500'
-                  : (isDark ? 'bg-slate-700 text-slate-400 border-slate-600 hover:bg-orange-900/30 hover:text-orange-300' : 'bg-white text-slate-500 border-slate-200 hover:bg-orange-50 hover:text-orange-600')
-                }`}
-            >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
-              </svg>
-              Grok
-            </button>
-
-            {/* Tab: Local */}
-            <button
-              onClick={() => setAiProvider('local')}
-              title="Use local browser algorithm (offline)"
-              className={`h-8 px-2.5 text-[10px] font-bold tracking-wide border-r transition-all flex items-center gap-1
-                ${aiProvider === 'local'
-                  ? 'bg-slate-600 text-white border-slate-600'
-                  : (isDark ? 'bg-slate-700 text-slate-400 border-slate-600 hover:bg-slate-600 hover:text-slate-200' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100 hover:text-slate-700')
-                }`}
-            >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
-              </svg>
-              Local
-            </button>
-
-            {/* Tab: Auto */}
-            <button
-              onClick={() => setAiProvider('auto')}
-              title="Auto: tries Gemini → Grok → Local"
-              className={`h-8 px-2.5 text-[10px] font-bold tracking-wide border-r transition-all
-                ${aiProvider === 'auto'
-                  ? 'bg-emerald-500 text-white border-emerald-500'
-                  : (isDark ? 'bg-slate-700 text-slate-400 border-slate-600 hover:bg-emerald-900/30 hover:text-emerald-300' : 'bg-white text-slate-500 border-slate-200 hover:bg-emerald-50 hover:text-emerald-600')
-                }`}
-            >
-              Auto
-            </button>
-
-            {/* Run button */}
-            <button
-              onClick={handleDetectDuplicates}
-              disabled={detectingDuplicates}
-              className={`h-8 px-3 text-[10px] font-bold transition-all flex items-center gap-1.5 whitespace-nowrap
-                ${aiProvider === 'gemini' ? (detectingDuplicates ? 'bg-violet-400 text-white' : 'bg-violet-600 hover:bg-violet-700 text-white') :
-                  aiProvider === 'grok'   ? (detectingDuplicates ? 'bg-orange-400 text-white' : 'bg-orange-500 hover:bg-orange-600 text-white') :
-                  aiProvider === 'local'  ? (detectingDuplicates ? 'bg-slate-400 text-white'  : 'bg-slate-600 hover:bg-slate-700 text-white')  :
-                                            (detectingDuplicates ? 'bg-emerald-400 text-white': 'bg-emerald-500 hover:bg-emerald-600 text-white')}
-              `}
-            >
-              {detectingDuplicates
-                ? <><Loader2 className="h-3 w-3 animate-spin" />Scanning…</>
-                : <><Sparkles className="h-3 w-3" />Scan</>}
-            </button>
-          </div>
-
-          {/* Scan progress + status (only while scanning) */}
-          {detectingDuplicates && (
-            <div className={`flex items-center gap-2 h-8 px-3 rounded-xl border min-w-[200px] ${
-              isDark ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-200 text-slate-700'
-            }`}>
-              <Loader2 className="h-3 w-3 animate-spin shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="text-[10px] font-medium truncate" title={scanStatus}>
-                  {scanStatus || 'Scanning…'}
-                </div>
-                <div className={`mt-0.5 h-1 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
-                  <div
-                    className={`h-full transition-all duration-200 ${
-                      aiProvider === 'gemini' ? 'bg-violet-500' :
-                      aiProvider === 'grok'   ? 'bg-orange-500' :
-                      aiProvider === 'local'  ? 'bg-slate-500'  :
-                                                'bg-emerald-500'
-                    }`}
-                    style={{ width: `${Math.max(2, Math.min(100, scanProgress))}%` }}
-                  />
-                </div>
-              </div>
-              <span className="text-[10px] font-bold tabular-nums shrink-0">{scanProgress}%</span>
-              <button
-                type="button"
-                onClick={cancelScan}
-                title="Cancel scan"
-                aria-label="Cancel scan"
-                className={`shrink-0 inline-flex items-center justify-center h-5 w-5 rounded-md transition-colors ${
-                  isDark
-                    ? 'text-slate-400 hover:text-white hover:bg-red-600/70'
-                    : 'text-slate-500 hover:text-white hover:bg-red-500'
-                }`}
-              >
-                <X className="h-3 w-3" />
-              </button>
+        {/* Creator / Assigned By */}
+        <Select
+          value={filterCreatedBy !== 'all' ? filterCreatedBy : (filterAssignedByMe ? '__me__' : 'all')}
+          onValueChange={(v) => {
+            if (v === '__me__') {
+              setFilterAssignedByMe(true); setFilterCreatedBy('all');
+              setShowMyTasksOnly(false); setFilterTeamOnly(false); setFilterAssignee('all');
+            } else {
+              setFilterAssignedByMe(false); setFilterCreatedBy(v);
+              if (v !== 'all') { setShowMyTasksOnly(false); setFilterTeamOnly(false); }
+            }
+          }}
+        >
+          <SelectTrigger className={`h-7 w-[110px] shrink-0 text-[11px] rounded-lg transition-all ${
+            (filterCreatedBy !== 'all' || filterAssignedByMe)
+              ? (isDark ? 'bg-purple-900/40 border-purple-500 text-purple-300' : 'bg-purple-50 border-purple-400 text-purple-700')
+              : (isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200')
+          }`}>
+            <div className="flex items-center gap-1 min-w-0">
+              <User className="h-3 w-3 flex-shrink-0" />
+              <SelectValue placeholder="All Creators" />
             </div>
-          )}
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Creators</SelectItem>
+            <SelectItem value="__me__">Assigned by Me</SelectItem>
+            {visibleCreators.filter(u => u.id !== user?.id).map(u => (
+              <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
-          {/* View toggle */}
-          <div className={`flex p-0.5 rounded-xl ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-            <button onClick={() => setViewMode('list')}
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${viewMode === 'list' ? (isDark ? 'bg-slate-600 shadow-sm text-slate-100' : 'bg-white shadow-sm text-slate-800') : 'text-slate-500 hover:text-slate-700'}`}>
-              <List className="h-3.5 w-3.5" />
-            </button>
-            <button onClick={() => setViewMode('board')}
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${viewMode === 'board' ? (isDark ? 'bg-slate-600 shadow-sm text-slate-100' : 'bg-white shadow-sm text-slate-800') : 'text-slate-500 hover:text-slate-700'}`}>
-              <LayoutGrid className="h-3.5 w-3.5" />
+        {/* Divider */}
+        <div className={`h-5 w-px shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
+
+        {/* ── New Today toggle ── */}
+        <button
+          onClick={() => { setFilterTodayNew(p => !p); if (filterPending) setFilterPending(false); }}
+          title={isAdmin
+            ? filterAssignee === 'all'
+              ? 'Show tasks created today across all users'
+              : `Show tasks created today for selected user`
+            : 'Show your tasks created today'}
+          className={`h-7 px-2.5 text-[10px] font-bold tracking-wide rounded-lg border transition-all flex items-center gap-1 whitespace-nowrap shrink-0
+            ${filterTodayNew
+              ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm shadow-indigo-500/30'
+              : (isDark
+                  ? 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-indigo-900/40 hover:border-indigo-500 hover:text-indigo-300'
+                  : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700')
+            }`}
+        >
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+          </svg>
+          New Today
+          {filterTodayNew && (
+            <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-white/25 text-[9px] font-black leading-none">✓</span>
+          )}
+        </button>
+
+        {/* ── Pending toggle ── */}
+        <button
+          onClick={() => { setFilterPending(p => !p); if (filterTodayNew) setFilterTodayNew(false); }}
+          title={isAdmin
+            ? filterAssignee === 'all'
+              ? 'Show all pending (incomplete) tasks across all users'
+              : 'Show pending tasks for selected user'
+            : 'Show your pending (incomplete) tasks'}
+          className={`h-7 px-2.5 text-[10px] font-bold tracking-wide rounded-lg border transition-all flex items-center gap-1 whitespace-nowrap shrink-0
+            ${filterPending
+              ? 'bg-amber-500 text-white border-amber-500 shadow-sm shadow-amber-400/30'
+              : (isDark
+                  ? 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-amber-900/40 hover:border-amber-500 hover:text-amber-300'
+                  : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-amber-50 hover:border-amber-300 hover:text-amber-700')
+            }`}
+        >
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+          </svg>
+          Pending
+          {filterPending && (
+            <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-white/25 text-[9px] font-black leading-none">✓</span>
+          )}
+        </button>
+
+        {/* Divider */}
+        <div className={`h-5 w-px shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
+
+        {/* AI Provider Selector + Duplicate Detector */}
+        <div className={`flex items-center rounded-lg border overflow-hidden shrink-0 ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
+          <button onClick={() => setAiProvider('gemini')} title="Use Google Gemini AI"
+            className={`h-7 px-2 text-[10px] font-bold tracking-wide border-r transition-all flex items-center gap-0.5
+              ${aiProvider === 'gemini' ? 'bg-violet-600 text-white border-violet-600'
+                : (isDark ? 'bg-slate-700 text-slate-400 border-slate-600 hover:bg-violet-900/30 hover:text-violet-300' : 'bg-white text-slate-500 border-slate-200 hover:bg-violet-50 hover:text-violet-700')}`}>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L9.5 9.5 2 12l7.5 2.5L12 22l2.5-7.5L22 12l-7.5-2.5z"/></svg>
+            Gemini
+          </button>
+          <button onClick={() => setAiProvider('grok')} title="Use xAI Grok"
+            className={`h-7 px-2 text-[10px] font-bold tracking-wide border-r transition-all flex items-center gap-0.5
+              ${aiProvider === 'grok' ? 'bg-orange-500 text-white border-orange-500'
+                : (isDark ? 'bg-slate-700 text-slate-400 border-slate-600 hover:bg-orange-900/30 hover:text-orange-300' : 'bg-white text-slate-500 border-slate-200 hover:bg-orange-50 hover:text-orange-600')}`}>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+            Grok
+          </button>
+          <button onClick={() => setAiProvider('local')} title="Use local browser algorithm (offline)"
+            className={`h-7 px-2 text-[10px] font-bold tracking-wide border-r transition-all flex items-center gap-0.5
+              ${aiProvider === 'local' ? 'bg-slate-600 text-white border-slate-600'
+                : (isDark ? 'bg-slate-700 text-slate-400 border-slate-600 hover:bg-slate-600 hover:text-slate-200' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100 hover:text-slate-700')}`}>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            Local
+          </button>
+          <button onClick={() => setAiProvider('auto')} title="Auto: tries Gemini → Grok → Local"
+            className={`h-7 px-2 text-[10px] font-bold tracking-wide border-r transition-all
+              ${aiProvider === 'auto' ? 'bg-emerald-500 text-white border-emerald-500'
+                : (isDark ? 'bg-slate-700 text-slate-400 border-slate-600 hover:bg-emerald-900/30 hover:text-emerald-300' : 'bg-white text-slate-500 border-slate-200 hover:bg-emerald-50 hover:text-emerald-600')}`}>
+            Auto
+          </button>
+          <button onClick={handleDetectDuplicates} disabled={detectingDuplicates}
+            className={`h-7 px-2.5 text-[10px] font-bold transition-all flex items-center gap-1 whitespace-nowrap
+              ${aiProvider === 'gemini' ? (detectingDuplicates ? 'bg-violet-400 text-white' : 'bg-violet-600 hover:bg-violet-700 text-white') :
+                aiProvider === 'grok'   ? (detectingDuplicates ? 'bg-orange-400 text-white' : 'bg-orange-500 hover:bg-orange-600 text-white') :
+                aiProvider === 'local'  ? (detectingDuplicates ? 'bg-slate-400 text-white'  : 'bg-slate-600 hover:bg-slate-700 text-white')  :
+                                          (detectingDuplicates ? 'bg-emerald-400 text-white': 'bg-emerald-500 hover:bg-emerald-600 text-white')}`}>
+            {detectingDuplicates ? <><Loader2 className="h-3 w-3 animate-spin" />Scanning…</> : <><Sparkles className="h-3 w-3" />Scan</>}
+          </button>
+        </div>
+
+        {/* Scan progress (only while scanning) */}
+        {detectingDuplicates && (
+          <div className={`flex items-center gap-1.5 h-7 px-2.5 rounded-lg border min-w-[160px] shrink-0 ${
+            isDark ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-slate-200 text-slate-700'
+          }`}>
+            <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] font-medium truncate">{scanStatus || 'Scanning…'}</div>
+              <div className={`mt-0.5 h-1 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
+                <div className={`h-full transition-all duration-200 ${
+                  aiProvider === 'gemini' ? 'bg-violet-500' : aiProvider === 'grok' ? 'bg-orange-500' :
+                  aiProvider === 'local'  ? 'bg-slate-500'  : 'bg-emerald-500'}`}
+                  style={{ width: `${Math.max(2, Math.min(100, scanProgress))}%` }} />
+              </div>
+            </div>
+            <span className="text-[10px] font-bold tabular-nums shrink-0">{scanProgress}%</span>
+            <button type="button" onClick={cancelScan} title="Cancel scan"
+              className={`shrink-0 inline-flex items-center justify-center h-4 w-4 rounded transition-colors ${
+                isDark ? 'text-slate-400 hover:text-white hover:bg-red-600/70' : 'text-slate-500 hover:text-white hover:bg-red-500'}`}>
+              <X className="h-2.5 w-2.5" />
             </button>
           </div>
+        )}
+
+        {/* Spacer pushes view toggle to the right */}
+        <div className="flex-1" />
+
+        {/* View toggle */}
+        <div className={`flex p-0.5 rounded-lg shrink-0 ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+          <button onClick={() => setViewMode('list')}
+            className={`px-2 py-1 rounded-md text-xs font-medium transition-all ${viewMode === 'list' ? (isDark ? 'bg-slate-600 shadow-sm text-slate-100' : 'bg-white shadow-sm text-slate-800') : 'text-slate-500 hover:text-slate-700'}`}>
+            <List className="h-3.5 w-3.5" />
+          </button>
+          <button onClick={() => setViewMode('board')}
+            className={`px-2 py-1 rounded-md text-xs font-medium transition-all ${viewMode === 'board' ? (isDark ? 'bg-slate-600 shadow-sm text-slate-100' : 'bg-white shadow-sm text-slate-800') : 'text-slate-500 hover:text-slate-700'}`}>
+            <LayoutGrid className="h-3.5 w-3.5" />
+          </button>
         </div>
       </motion.div>
 
