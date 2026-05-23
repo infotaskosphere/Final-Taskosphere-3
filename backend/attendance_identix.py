@@ -437,28 +437,55 @@ async def test_device(
     device_id: str,
     current_user: User = Depends(require_admin()),
 ):
+    """
+    ADMS Cloud Connectivity Check.
+    Instead of trying a direct LAN TCP connection (which always fails from cloud),
+    this checks whether the device has recently sent a heartbeat to this server.
+    A device is considered "connected" if it sent a heartbeat within the last 10 minutes.
+    """
     device = await db.identix_devices.find_one({"id": device_id}, {"_id": 0})
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
-    reachable = await _tcp_reachable(device["ip_address"], device.get("port", 4370))
-    if not reachable:
-        return {
-            "success":    False,
-            "message":    (
-                f"Cannot reach {device['ip_address']}:{device.get('port', 4370)}. "
-                "Check IP, port, power, and firewall."
-            ),
-            "deviceInfo": None,
-        }
+    last_heartbeat = device.get("last_heartbeat_at")
+    is_online = device.get("is_online", False)
+    sn = device.get("serial_number", "")
 
-    try:
-        info = await asyncio.get_event_loop().run_in_executor(
-            None, _test_device_connection, device
-        )
-        return {"success": True, "message": "Connected successfully", "deviceInfo": info}
-    except Exception as e:
-        return {"success": False, "message": str(e), "deviceInfo": None}
+    if last_heartbeat:
+        try:
+            hb_dt = datetime.fromisoformat(last_heartbeat)
+            if hb_dt.tzinfo is None:
+                hb_dt = hb_dt.replace(tzinfo=timezone.utc)
+            minutes_ago = (datetime.now(timezone.utc) - hb_dt).total_seconds() / 60
+            if minutes_ago <= 10:
+                return {
+                    "success": True,
+                    "connection_type": "adms_cloud",
+                    "message": f"✓ Machine is connected via ADMS. Last heartbeat {int(minutes_ago)}m ago.",
+                    "last_heartbeat_at": last_heartbeat,
+                    "minutes_since_heartbeat": round(minutes_ago, 1),
+                    "deviceInfo": {"serialNumber": sn},
+                }
+            else:
+                return {
+                    "success": False,
+                    "connection_type": "adms_cloud",
+                    "message": f"Machine last seen {int(minutes_ago)} minutes ago. It may be offline or ADMS is not configured correctly.",
+                    "last_heartbeat_at": last_heartbeat,
+                    "minutes_since_heartbeat": round(minutes_ago, 1),
+                    "deviceInfo": None,
+                }
+        except Exception:
+            pass
+
+    return {
+        "success": False,
+        "connection_type": "adms_cloud",
+        "message": "No heartbeat received yet. Configure ADMS on the machine with this server's URL.",
+        "last_heartbeat_at": None,
+        "minutes_since_heartbeat": None,
+        "deviceInfo": None,
+    }
 
 
 @identix_router.post("/devices/{device_id}/sync-users")
