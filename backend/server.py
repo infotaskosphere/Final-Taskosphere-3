@@ -21,7 +21,7 @@ from backend.compliance import router as compliance_router, create_compliance_in
 from backend.ai_document_reader import router as ai_document_reader_router
 from backend.gst_reconciliation import router as gst_reconciliation_router
 from backend.gst_reconciliation import create_gst_reconciliation_indexes
-# reminders routes are inlined directly below (no separate router file needed)
+from backend.reminders_router import router as reminders_router
 from backend.quotations import router as quotation_router
 from backend.attendance_identix import identix_router
 from backend.google_auth import router as google_auth_router
@@ -34,8 +34,6 @@ from backend.notifications import router as notification_router, create_notifica
 from backend.email_integration import router as email_router
 from backend.trademark_sphere import router as trademark_sphere_router
 from backend.trademark_portals_router import router as trademark_portals_router
-from backend.reminders_router import router as reminders_router
-
 
 # Gemini AI instance (already configured in email_integration module)
 try:
@@ -8308,4 +8306,4 @@ from backend.attendance_identix import iclock_getrequest, iclock_cdata, iclock_d
 
 app.add_api_route("/iclock/cdata",       iclock_cdata,       methods=["GET", "POST"])
 app.add_api_route("/iclock/getrequest",  iclock_getrequest,  methods=["GET", "POST"])
-app.add_api_route("/iclock/devicecmd",   iclock_getrequest,  methods=["GET", "POST"])
+app.add_api_route("/iclock/devicecmd",   iclock_devicecmd,   methods=["GET", "POST"])
