@@ -34,6 +34,8 @@ from backend.notifications import router as notification_router, create_notifica
 from backend.email_integration import router as email_router
 from backend.trademark_sphere import router as trademark_sphere_router
 from backend.trademark_portals_router import router as trademark_portals_router
+from backend.reminders_router import router as reminders_router
+
 
 # Gemini AI instance (already configured in email_integration module)
 try:
@@ -8289,6 +8291,7 @@ api_router.include_router(notification_router)
 api_router.include_router(email_router)
 api_router.include_router(activity_monitor_router)
 api_router.include_router(client_portal_router)
+api_router.include_router(reminders_router)
 app.include_router(google_auth_router)
 app.include_router(api_router)
 
