@@ -611,17 +611,14 @@ function LanScanner({ onAddDevice }) {
 
   return (
     <div style={{ background: 'linear-gradient(135deg, #eff6ff, #f0fdf4)', border: '1.5px solid #bfdbfe', borderRadius: 14, padding: 20, marginBottom: 20 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
         <div style={{ width: 36, height: 36, borderRadius: 10, background: COLORS.deepBlue, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Radar size={16} color="#fff" />
         </div>
         <div>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: '#0f172a' }}>Auto-Discover Devices (LAN only)</p>
-          <p style={{ margin: 0, fontSize: 12, color: COLORS.slate }}>Scans your local network for ZKTeco / Identix machines · Not available on cloud/Render</p>
+          <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: '#0f172a' }}>Auto-Discover Devices</p>
+          <p style={{ margin: 0, fontSize: 12, color: COLORS.slate }}>Scans your LAN for ZKTeco / Identix machines on port {port}</p>
         </div>
-      </div>
-      <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 8, background: '#fef9c3', border: '1px solid #fde047', fontSize: 12, color: '#854d0e' }}>
-        ⚠️ <b>Cloud deployment detected:</b> LAN scan is unavailable from Render. Add devices manually using their Serial Number. The machine will connect to you via ADMS push.
       </div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14, alignItems: 'flex-end' }}>
         <div style={{ flex: '1 1 160px' }}>
@@ -634,10 +631,9 @@ function LanScanner({ onAddDevice }) {
           <input type="number" value={port} onChange={e => setPort(Number(e.target.value))} disabled={scanning}
             style={{ ...inputStyleIdentix, fontSize: 12 }} />
         </div>
-        <button onClick={startScan} disabled={true}
-          title="LAN scan unavailable in cloud deployment — add devices manually"
-          style={{ padding: '9px 16px', background: '#e2e8f0', color: '#94a3b8', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: 'not-allowed', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Radar size={13} />Scan LAN (cloud: disabled)
+        <button onClick={startScan} disabled={scanning}
+          style={{ padding: '9px 16px', background: scanning ? '#e2e8f0' : COLORS.deepBlue, color: scanning ? '#94a3b8' : '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: scanning ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+          {scanning ? <><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />Scanning…</> : <><Radar size={13} />Scan LAN</>}
         </button>
       </div>
       {(scanning || progress > 0) && (
@@ -783,60 +779,28 @@ function IdentixDevicesTab() {
             return (
               <div key={d.id} style={{ background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 14 }}>
                 <div style={{ flex: 1, minWidth: 240 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
                     <Monitor size={18} color={COLORS.mediumBlue} />
                     <span style={{ fontWeight: 700, fontSize: 15 }}>{d.name}</span>
                     <span style={{ padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: d.is_active ? '#d1fae5' : '#fee2e2', color: d.is_active ? '#065f46' : '#991b1b' }}>{d.is_active ? 'Active' : 'Inactive'}</span>
-                    {/* ADMS heartbeat online/offline badge */}
-                    {d.last_seen
-                      ? (() => {
-                          const ageSec = Math.floor((Date.now() - new Date(d.last_seen).getTime()) / 1000);
-                          const online = ageSec < 120;
-                          return (
-                            <span style={{ padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 700,
-                              background: online ? '#d1fae5' : '#f1f5f9',
-                              color: online ? '#065f46' : '#64748b',
-                              border: `1px solid ${online ? '#6ee7b7' : '#e2e8f0'}` }}>
-                              {online ? '● Online' : '○ Offline'}
-                            </span>
-                          );
-                        })()
-                      : <span style={{ padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: '#fef9c3', color: '#854d0e', border: '1px solid #fde047' }}>Awaiting Heartbeat</span>
+                    {d.is_online
+                      ? <span style={{ padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: '#d1fae5', color: '#065f46' }}>🟢 Online</span>
+                      : <span style={{ padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: '#fef3c7', color: '#92400e' }}>⏳ Awaiting Heartbeat</span>
                     }
                   </div>
                   <div style={{ fontSize: 12, color: COLORS.slate, display: 'flex', flexWrap: 'wrap', gap: '3px 16px' }}>
+                    <span>IP: <b>{d.ip_address}:{d.port}</b></span>
                     {d.location && <span>📍 {d.location}</span>}
-                    {(d.serial_number || d.last_ip) && (
-                      <span>S/N: <b>{d.serial_number || '—'}</b>{d.last_ip ? ` · Last IP: ${d.last_ip}` : ''}</span>
-                    )}
-                    {d.last_seen && (
-                      <span>Last synced: <b>{fmtTime(d.last_seen)}</b></span>
-                    )}
-                    {!d.last_seen && d.ip_address && (
-                      <span style={{ color: '#94a3b8' }}>Configured: {d.ip_address}:{d.port}</span>
-                    )}
-                    {d.last_sync_at && <span>Last user sync: {fmtTime(d.last_sync_at)}</span>}
+                    {d.serial_number && <span>S/N: {d.serial_number}</span>}
+                    {d.last_heartbeat_at && <span>Last seen: {fmtTime(d.last_heartbeat_at)}</span>}
+                    {d.last_sync_at && <span>Last sync: {fmtTime(d.last_sync_at)}</span>}
                   </div>
-                  {/* Test result panel */}
                   {tr && !tr.testing && (
-                    <div style={{ marginTop: 8, padding: '7px 12px', borderRadius: 8, fontSize: 12,
-                      background: tr.success ? '#d1fae5' : (tr.mode === 'adms' ? '#fef9c3' : '#fee2e2'),
-                      color:      tr.success ? '#065f46' : (tr.mode === 'adms' ? '#854d0e' : '#991b1b') }}>
-                      {tr.success
-                        ? `✓ ${tr.message}`
-                        : `${tr.mode === 'adms' ? '⏳' : '✗'} ${tr.message}`}
-                      {tr.deviceInfo?.lastSeen && !tr.success && (
-                        <div style={{ marginTop: 3, fontSize: 11, opacity: 0.8 }}>
-                          Last heartbeat: {fmtTime(tr.deviceInfo.lastSeen)}
-                        </div>
-                      )}
+                    <div style={{ marginTop: 8, padding: '7px 12px', borderRadius: 8, fontSize: 12, background: tr.success ? '#d1fae5' : '#fee2e2', color: tr.success ? '#065f46' : '#991b1b' }}>
+                      {tr.success ? `✓ Connected — S/N: ${tr.deviceInfo?.serialNumber}, Users: ${tr.deviceInfo?.userCount}` : `✗ ${tr.message}`}
                     </div>
                   )}
-                  {tr?.testing && (
-                    <div style={{ marginTop: 8, fontSize: 12, color: COLORS.slate, display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />Checking ADMS heartbeat…
-                    </div>
-                  )}
+                  {tr?.testing && <div style={{ marginTop: 8, fontSize: 12, color: COLORS.slate, display: 'flex', alignItems: 'center', gap: 6 }}><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />Testing…</div>}
                 </div>
                 <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', flexShrink: 0 }}>
                   {[
@@ -868,15 +832,11 @@ function IdentixDevicesTab() {
               <button onClick={() => setShowModal(false)} style={{ background: '#f1f5f9', border: 'none', cursor: 'pointer', width: 30, height: 30, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={15} color={COLORS.slate} /></button>
             </div>
             <div style={{ padding: '18px 22px 22px' }}>
-              {/* Cloud mode note */}
-              <div style={{ marginBottom: 16, padding: '10px 14px', borderRadius: 8, background: '#eff6ff', border: '1px solid #bfdbfe', fontSize: 12, color: '#1e40af' }}>
-                <b>Cloud (ADMS) Mode:</b> Ensure the machine's <b>Server Address</b> is set to <code>http://api.taskosphere.com</code>. IP Address below is stored for reference only — the machine connects to you, not the other way around.
-              </div>
               {[
                 { label: 'Device Name *', key: 'name',          type: 'text',   placeholder: 'e.g. Main Entrance' },
-                { label: 'IP Address (reference)',  key: 'ip_address', type: 'text', placeholder: 'e.g. 192.168.0.201 (for info only)' },
+                { label: 'IP Address *',  key: 'ip_address',    type: 'text',   placeholder: 'e.g. 192.168.1.201' },
                 { label: 'Location',      key: 'location',      type: 'text',   placeholder: 'e.g. Ground Floor' },
-                { label: 'Serial Number (S/N)', key: 'serial_number', type: 'text', placeholder: 'From device settings — used to match ADMS pushes' },
+                { label: 'Serial Number', key: 'serial_number', type: 'text',   placeholder: 'Optional' },
               ].map(f => (
                 <div key={f.key} style={{ marginBottom: 14 }}>
                   <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4 }}>{f.label}</label>
