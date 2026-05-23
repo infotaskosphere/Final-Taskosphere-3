@@ -1175,3 +1175,17 @@ async def iclock_cdata(request: Request):
 @identix_router.get("/")
 async def root_test():
     return {"status": "API LIVE"}
+
+
+# 🔹 Device command endpoint — machine polls for pending commands (e.g. user enroll/delete)
+@identix_router.api_route("/iclock/devicecmd", methods=["GET", "POST"])
+async def iclock_devicecmd(request: Request):
+    """
+    Some Identix/ZKTeco firmware versions poll /iclock/devicecmd for pending commands.
+    Return empty OK so the device stays happy and doesn't retry indefinitely.
+    """
+    params = dict(request.query_params)
+    sn = params.get("SN") or params.get("sn", "")
+    logger.info(f"📡 DEVICECMD from SN={sn}")
+    await _mark_device_online(sn)
+    return "OK\n"
