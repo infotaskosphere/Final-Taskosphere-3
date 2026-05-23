@@ -786,7 +786,6 @@ function IdentixDevicesTab() {
               {[
                 ['Server Address', 'api.taskosphere.com'],
                 ['Port', '443'],
-                ['Server Path', '(leave blank — not required)'],
                 ['ADMS', 'Enable / ON'],
               ].map(([label, val]) => (
                 <React.Fragment key={label}>
@@ -803,10 +802,10 @@ function IdentixDevicesTab() {
                 </React.Fragment>
               ))}
             </div>
-            <div style={{ marginTop: 12, padding: '8px 12px', background: '#fef9c3', border: '1px solid #fde047', borderRadius: 8, fontSize: 12, color: '#713f12' }}>
-              <b>Note:</b> The <b>"Check ADMS"</b> button verifies if your machine has connected by checking its last heartbeat.
-              After configuring the machine, wait 1–2 minutes then click <b>Check ADMS</b> — it will show <b>Online</b> once connected.
-              The <b>"Test"</b> LAN button was removed as it cannot reach local devices from the cloud server.
+            <div style={{ marginTop: 12, padding: '8px 12px', background: '#fef9c3', border: '1px solid #fde047', borderRadius: 8, fontSize: 12, color: '#713f12', lineHeight: 1.6 }}>
+              <b>⚠️ Server Path:</b> Leave it <b>blank</b> on the machine — it is not needed and cannot be entered on most Identix models.<br/>
+              The machine will automatically push to <b>api.taskosphere.com/iclock/cdata</b> which is already registered on the server.<br/><br/>
+              After saving on the machine, wait <b>1–2 minutes</b> then click <b>Check ADMS</b> — status will turn <b>🟢 Online</b> once connected.
             </div>
           </div>
         )}
