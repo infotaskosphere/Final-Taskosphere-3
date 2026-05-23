@@ -731,16 +731,18 @@ function IdentixDevicesTab() {
     catch { toast.error('Delete failed'); }
   };
 
-  const testConn = async (d) => {
+  const checkADMS = async (d) => {
     setTestingId(d.id); setTestResults(prev => ({ ...prev, [d.id]: { testing: true } }));
     try {
       const { data } = await api.post(`/identix/devices/${d.id}/test`);
       setTestResults(prev => ({ ...prev, [d.id]: data }));
-      if (data.success) toast.success(`✓ Connected to ${d.name}`);
+      if (data.success) toast.success(`✓ ${d.name} is connected via ADMS`);
       else toast.error(`${d.name}: ${data.message}`);
-    } catch { toast.error('Test failed'); }
+    } catch { toast.error('ADMS check failed'); }
     finally { setTestingId(null); }
   };
+
+  const [showSetupGuide, setShowSetupGuide] = useState(false);
 
   const syncUsers = async (d) => {
     setSyncingId(d.id);
@@ -761,6 +763,54 @@ function IdentixDevicesTab() {
       </div>
 
       <LanScanner onAddDevice={handleDiscoveredDevice} />
+
+      {/* ADMS Setup Guide */}
+      <div style={{ background: '#f0f9ff', border: '1.5px solid #bae6fd', borderRadius: 12, padding: '14px 18px', marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Network size={16} color="#0284c7" />
+            <span style={{ fontWeight: 700, fontSize: 13, color: '#0c4a6e' }}>ADMS Cloud Setup</span>
+            <span style={{ fontSize: 12, color: '#0369a1' }}>— Configure your machine to push attendance to this server</span>
+          </div>
+          <button onClick={() => setShowSetupGuide(g => !g)}
+            style={{ fontSize: 12, fontWeight: 600, color: '#0284c7', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+            {showSetupGuide ? 'Hide' : 'Show'} Setup Guide
+          </button>
+        </div>
+        {showSetupGuide && (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 12, color: '#0c4a6e', fontWeight: 600, marginBottom: 10 }}>
+              Set these values on your Identix machine (Menu → Comm → Cloud Server / ADMS):
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: '6px 12px', fontSize: 13 }}>
+              {[
+                ['Server Address', 'api.taskosphere.com'],
+                ['Port', '443'],
+                ['Server Path', '(leave blank — not required)'],
+                ['ADMS', 'Enable / ON'],
+              ].map(([label, val]) => (
+                <React.Fragment key={label}>
+                  <div style={{ color: '#64748b', fontWeight: 600 }}>{label}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <code style={{ background: '#e0f2fe', color: '#0c4a6e', padding: '2px 8px', borderRadius: 5, fontWeight: 700, fontSize: 13 }}>{val}</code>
+                    {val !== '(leave blank — not required)' && val !== 'Enable / ON' && (
+                      <button onClick={() => { navigator.clipboard.writeText(val); toast.success('Copied!'); }}
+                        style={{ fontSize: 11, color: '#0284c7', background: 'none', border: '1px solid #bae6fd', borderRadius: 4, padding: '1px 7px', cursor: 'pointer' }}>
+                        Copy
+                      </button>
+                    )}
+                  </div>
+                </React.Fragment>
+              ))}
+            </div>
+            <div style={{ marginTop: 12, padding: '8px 12px', background: '#fef9c3', border: '1px solid #fde047', borderRadius: 8, fontSize: 12, color: '#713f12' }}>
+              <b>Note:</b> The <b>"Check ADMS"</b> button verifies if your machine has connected by checking its last heartbeat.
+              After configuring the machine, wait 1–2 minutes then click <b>Check ADMS</b> — it will show <b>Online</b> once connected.
+              The <b>"Test"</b> LAN button was removed as it cannot reach local devices from the cloud server.
+            </div>
+          </div>
+        )}
+      </div>
 
       {loading ? (
         <div style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>
@@ -797,17 +847,19 @@ function IdentixDevicesTab() {
                   </div>
                   {tr && !tr.testing && (
                     <div style={{ marginTop: 8, padding: '7px 12px', borderRadius: 8, fontSize: 12, background: tr.success ? '#d1fae5' : '#fee2e2', color: tr.success ? '#065f46' : '#991b1b' }}>
-                      {tr.success ? `✓ Connected — S/N: ${tr.deviceInfo?.serialNumber}, Users: ${tr.deviceInfo?.userCount}` : `✗ ${tr.message}`}
+                      {tr.success
+                        ? `✓ ADMS Connected — S/N: ${tr.deviceInfo?.serialNumber || d.serial_number} · Last heartbeat ${tr.minutes_since_heartbeat}m ago`
+                        : `✗ ${tr.message}`}
                     </div>
                   )}
-                  {tr?.testing && <div style={{ marginTop: 8, fontSize: 12, color: COLORS.slate, display: 'flex', alignItems: 'center', gap: 6 }}><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />Testing…</div>}
+                  {tr?.testing && <div style={{ marginTop: 8, fontSize: 12, color: COLORS.slate, display: 'flex', alignItems: 'center', gap: 6 }}><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />Checking ADMS connection…</div>}
                 </div>
                 <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', flexShrink: 0 }}>
                   {[
-                    { label: 'Test',       icon: Wifi,     color: '#3b82f6', action: () => testConn(d),  loading: testingId === d.id  },
-                    { label: 'Sync Users', icon: UsersIcon,color: COLORS.green, action: () => syncUsers(d), loading: syncingId === d.id },
-                    { label: 'Edit',       icon: Edit,     color: '#374151', action: () => openEdit(d), loading: false },
-                    { label: 'Delete',     icon: Trash2,   color: COLORS.red,  action: () => remove(d),  loading: false },
+                    { label: 'Check ADMS', icon: Radar,     color: '#3b82f6', action: () => checkADMS(d),  loading: testingId === d.id  },
+                    { label: 'Sync Users', icon: UsersIcon, color: COLORS.green, action: () => syncUsers(d), loading: syncingId === d.id },
+                    { label: 'Edit',       icon: Edit,      color: '#374151', action: () => openEdit(d), loading: false },
+                    { label: 'Delete',     icon: Trash2,    color: COLORS.red,  action: () => remove(d),  loading: false },
                   ].map(btn => (
                     <button key={btn.label} onClick={btn.action} disabled={btn.loading}
                       style={{ padding: '6px 11px', background: 'transparent', color: btn.loading ? '#94a3b8' : btn.color, border: `1.5px solid ${btn.loading ? '#e2e8f0' : btn.color}`, borderRadius: 7, fontWeight: 600, fontSize: 12, cursor: btn.loading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
