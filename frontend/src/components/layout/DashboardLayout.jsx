@@ -43,7 +43,6 @@ const NAV_GROUPS = [
       { path: '/attendance', icon: Clock,           label: 'Attendance' },
       { path: '/reminders',  icon: Bell,            label: 'Reminders' },
       { path: '/visits',     icon: MapPin,          label: 'Client Visits' },
-      { path: '/reports',        icon: BarChart3,     label: 'Reports' },
       { path: '/ai-reader',      icon: BrainCircuit,  label: 'AI Document Reader' },  // ← ADD THIS
     ],
   },
@@ -89,8 +88,8 @@ const NAV_GROUPS = [
     id: 'admin',
     dividerLabel: 'Admin',
     items: [
-      // Reports — <Protected> route, visible to all roles (data scoped server-side)
-      { path: '/reports',        icon: BarChart3,  label: 'Reports' },
+      // Reports — Admin only
+      { path: '/reports',        icon: BarChart3,  label: 'Reports', adminOnly: true },
       { path: '/task-audit',     icon: Activity,   label: 'Task Audit Log',   permission: 'can_view_audit_logs'  },
       { path: '/users',          icon: Users,      label: 'Users',            permission: 'can_view_user_page'   },
       { path: '/staff-activity', icon: Activity,   label: 'Staff Activity',   adminOnly: true                    },
