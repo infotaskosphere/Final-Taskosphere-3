@@ -281,6 +281,19 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
     setSelectedIds(new Set(base.map(c => c.id)));
   }, [activeClients, filteredClients]);
 
+  const selectAllVisible = useCallback(() => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      displayedClients.forEach(client => {
+        const isLocked = clientScope === 'active' && client.status === 'inactive';
+        if (!isLocked) next.add(client.id);
+      });
+      return next;
+    });
+  }, [displayedClients, clientScope]);
+
+  const unselectAll = useCallback(() => setSelectedIds(new Set()), []);
+
   const someSelected = selectedIds.size > 0;
   const phoneCount = selectedClients.filter(c => c.phone).length;
   const emailCount = selectedClients.filter(c => c.email).length;
@@ -378,6 +391,26 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                 <input className="w-full pl-8 pr-3 h-8 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-blue-300 bg-white"
                   placeholder="Filter clients…" value={clientSearch} onChange={e => setClientSearch(e.target.value)} />
+              </div>
+            </div>
+            <div className={"flex items-center justify-between px-3 py-1.5 border-b " + (isDark ? "border-slate-700 bg-slate-800/40" : "border-slate-100 bg-white/80")}>
+              <span className={"text-[10px] " + (isDark ? "text-slate-400" : "text-slate-400")}>
+                {selectedIds.size} of {displayedClients.filter(cl => !(clientScope === 'active' && cl.status === 'inactive')).length} selected
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={selectAllVisible}
+                  className="text-[10px] font-semibold px-2 py-0.5 rounded-md border transition hover:opacity-80"
+                  style={{ borderColor: accentColor, color: accentColor, background: accentColor + '18' }}
+                >
+                  Select All
+                </button>
+                <button
+                  onClick={unselectAll}
+                  className={"text-[10px] font-semibold px-2 py-0.5 rounded-md border transition hover:opacity-80 " + (isDark ? "border-slate-600 text-slate-400" : "border-slate-200 text-slate-500")}
+                >
+                  Clear All
+                </button>
               </div>
             </div>
             <div className="flex-1 overflow-y-auto">
