@@ -4914,6 +4914,11 @@ const fetchAll = useCallback(async () => {
     catch (err) { toast.error(err.response?.data?.detail || 'Failed to queue email'); }
   }, [fetchAll]);
 
+  const handleWhatsAppInvoice = useCallback((inv) => {
+    setWaInvoice(inv);
+    setWaDialogOpen(true);
+  }, []);
+
   const handleExport = useCallback(() => {
     if (!(enrichedFiltered?.length)) { toast.error('No invoices to export'); return; }
     const rows = [['Invoice No','Type','Client','Date','Due Date','Taxable','GST','Total','Paid','Balance','Status'],
@@ -5278,6 +5283,7 @@ const fetchAll = useCallback(async () => {
         onDelete={handleDelete}
         onDownloadPdf={handleDownloadPdf}
         onSendEmail={handleSendEmail}
+        onWhatsApp={handleWhatsAppInvoice}
         onPreview={handlePreviewInvoice}
         onDuplicate={handleDuplicateInv}
         onSaleReturn={handleSaleReturn}
