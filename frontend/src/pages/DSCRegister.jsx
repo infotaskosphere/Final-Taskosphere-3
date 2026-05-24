@@ -18,7 +18,8 @@ import {
   History, Search, ArrowUpDown, Printer, CheckSquare, Square,
   MinusSquare, XCircle, Key, Shield, Clock, TrendingDown,
   Sparkles, Loader2, Share2, Mail, MessageCircle, Download, Eye,
-  Usb, ChevronDown, ChevronUp, CheckCircle2, Lock
+  Usb, ChevronDown, ChevronUp, CheckCircle2, Lock, Bell, BellOff,
+  Zap, Settings2, Phone, Send, Timer, RefreshCw
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
@@ -107,8 +108,36 @@ function PaginationBar({ currentPage, totalPages, totalItems, pageSize, onPageCh
   );
 }
 
+// ─── Build WhatsApp expiry alert message ──────────────────────────────────────
+function buildExpiryAlertText(dsc) {
+  const daysLeft = Math.ceil((new Date(dsc.expiry_date) - new Date()) / (1000 * 60 * 60 * 24));
+  const isExpired = daysLeft < 0;
+  const expiryStr = format(new Date(dsc.expiry_date), 'dd MMM yyyy');
+  return [
+    `🔔 *DSC ${isExpired ? 'Expiry Alert' : 'Expiring Soon Alert'}*`,
+    ``,
+    `Dear *${dsc.holder_name}*,`,
+    ``,
+    isExpired
+      ? `⚠️ Your Digital Signature Certificate (DSC) *has expired* on ${expiryStr}.`
+      : `⏰ Your Digital Signature Certificate (DSC) is expiring in *${daysLeft} day${daysLeft !== 1 ? 's' : ''}* on ${expiryStr}.`,
+    ``,
+    `📋 *Certificate Details:*`,
+    `• Type: ${dsc.dsc_type || 'Standard'}`,
+    dsc.associated_with ? `• Organisation: ${dsc.associated_with}` : null,
+    dsc.serial_number ? `• Serial No: ${dsc.serial_number}` : null,
+    `• Expiry Date: ${expiryStr}`,
+    ``,
+    isExpired
+      ? `Please renew your DSC immediately to avoid any inconvenience in filing and compliance activities.`
+      : `Please arrange for renewal at the earliest to avoid any disruption in filing and compliance activities.`,
+    ``,
+    `— TaskOsphere Command Center`,
+  ].filter(Boolean).join('\n');
+}
+
 // ─── DSC Table ────────────────────────────────────────────────────────────────
-function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStatus, type, globalIndexStart, isDark, selectedIds, onToggleSelect, onToggleAll }) {
+function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStatus, type, globalIndexStart, isDark, selectedIds, onToggleSelect, onToggleAll, onWhatsAppAlert }) {
   const allSelected  = dscList.length > 0 && dscList.every(d => selectedIds.has(d.id));
   const someSelected = dscList.some(d => selectedIds.has(d.id)) && !allSelected;
 
@@ -195,6 +224,13 @@ function DSCTable({ dscList, onEdit, onDelete, onMovement, onViewLog, getDSCStat
                     <Button variant="ghost" size="sm" onClick={() => onViewLog(dsc)} className={`h-7 w-7 p-0 ${isDark ? 'hover:bg-slate-600' : 'hover:bg-slate-100'}`} title="View Details & Share">
                       <Eye className="h-3.5 w-3.5 text-indigo-500" />
                     </Button>
+                    {onWhatsAppAlert && (
+                      <Button variant="ghost" size="sm" onClick={() => onWhatsAppAlert(dsc)}
+                        className={`h-7 w-7 p-0 hover:bg-emerald-50 text-emerald-600`}
+                        title="Send WhatsApp expiry alert to DSC holder">
+                        <MessageCircle className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                     <Button variant="ghost" size="sm" onClick={() => onMovement(dsc, type === 'IN' ? 'OUT' : 'IN')}
                       className={`h-7 w-7 p-0 ${type === 'IN' ? 'hover:bg-red-50 text-red-600' : 'hover:bg-emerald-50 text-emerald-600'}`}
                       title={type === 'IN' ? 'Mark as OUT' : 'Mark as IN'}>
@@ -1025,9 +1061,23 @@ export default function DSCRegister() {
   const [currentPageIn, setCurrentPageIn]           = useState(1);
   const [currentPageOut, setCurrentPageOut]         = useState(1);
   const [currentPageExpired, setCurrentPageExpired] = useState(1);
+  const [currentPageExpiring, setCurrentPageExpiring] = useState(1);
   const [sortOrder, setSortOrder]                   = useState('az');
   const [activeTab, setActiveTab]                   = useState('in');
   const [sharing, setSharing]                       = useState(false);
+
+  // ── WhatsApp automation state ─────────────────────────────────────────────
+  const [whatsappAutoOpen, setWhatsappAutoOpen]       = useState(false);
+  const [autoEnabled, setAutoEnabled]                 = useState(() => {
+    try { return JSON.parse(localStorage.getItem('dsc_wa_auto_enabled') || 'false'); } catch { return false; }
+  });
+  const [autoSettings, setAutoSettings]               = useState(() => {
+    try { return JSON.parse(localStorage.getItem('dsc_wa_auto_settings') || 'null') || { days: [7, 30], time: '10:00', sendExpired: true }; } catch { return { days: [7, 30], time: '10:00', sendExpired: true }; }
+  });
+  const [autoLastRun, setAutoLastRun]                 = useState(() => localStorage.getItem('dsc_wa_last_run') || null);
+  const [autoSending, setAutoSending]                 = useState(false);
+  const [waPhoneDialog, setWaPhoneDialog]             = useState(null); // dsc object for phone entry
+  const [waPhoneNumber, setWaPhoneNumber]             = useState('');
 
   const [selectedIds, setSelectedIds]           = useState(new Set());
   const [bulkDialogOpen, setBulkDialogOpen]     = useState(false);
@@ -1178,7 +1228,67 @@ export default function DSCRegister() {
     })();
     return () => { cancelled = true; };
   }, []);
-  useEffect(() => { setCurrentPageIn(1); setCurrentPageOut(1); setCurrentPageExpired(1); }, [sortOrder, searchQuery]);
+  useEffect(() => { setCurrentPageIn(1); setCurrentPageOut(1); setCurrentPageExpired(1); setCurrentPageExpiring(1); }, [sortOrder, searchQuery]);
+
+  // ── WhatsApp alert handlers ───────────────────────────────────────────────
+  const handleWhatsAppAlert = (dsc) => {
+    // If DSC has a phone number stored in notes, use it directly; otherwise prompt
+    const phoneMatch = dsc.notes?.match(/(?:phone|mobile|mob|ph)[:\s]*([+\d\s\-]{8,15})/i);
+    if (phoneMatch) {
+      const phone = phoneMatch[1].replace(/\s|-/g, '');
+      const msg = buildExpiryAlertText(dsc);
+      window.open(`https://wa.me/${phone.startsWith('+') ? phone.slice(1) : phone}?text=${encodeURIComponent(msg)}`, '_blank');
+    } else {
+      setWaPhoneNumber('');
+      setWaPhoneDialog(dsc);
+    }
+  };
+
+  const handleWhatsAppSendWithPhone = () => {
+    if (!waPhoneDialog) return;
+    const phone = waPhoneNumber.replace(/\s|-|\+/g, '');
+    const msg = buildExpiryAlertText(waPhoneDialog);
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+    setWaPhoneDialog(null);
+    toast.success(`WhatsApp alert opened for ${waPhoneDialog.holder_name}`);
+  };
+
+  const saveAutoSettings = (settings, enabled) => {
+    localStorage.setItem('dsc_wa_auto_settings', JSON.stringify(settings));
+    localStorage.setItem('dsc_wa_auto_enabled', JSON.stringify(enabled));
+    setAutoSettings(settings);
+    setAutoEnabled(enabled);
+  };
+
+  const handleRunAutomation = () => {
+    setAutoSending(true);
+    // Find DSCs that match the automation criteria
+    const alertDSCs = dscList.filter(dsc => {
+      const daysLeft = Math.ceil((new Date(dsc.expiry_date) - new Date()) / (1000 * 60 * 60 * 24));
+      if (daysLeft < 0) return autoSettings.sendExpired;
+      return autoSettings.days.some(d => daysLeft <= d && daysLeft >= 0);
+    });
+    // Open WhatsApp for each (sequentially with delay)
+    let count = 0;
+    alertDSCs.forEach((dsc, i) => {
+      setTimeout(() => {
+        const msg = buildExpiryAlertText(dsc);
+        window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+        count++;
+        if (count === alertDSCs.length) {
+          const now = new Date().toLocaleString('en-IN');
+          localStorage.setItem('dsc_wa_last_run', now);
+          setAutoLastRun(now);
+          setAutoSending(false);
+          toast.success(`Sent WhatsApp alerts for ${count} DSC holder(s)`);
+        }
+      }, i * 800);
+    });
+    if (alertDSCs.length === 0) {
+      setAutoSending(false);
+      toast.info('No DSCs match the automation criteria right now.');
+    }
+  };
 
   // ── USB DSC Token Detection ───────────────────────────────────────────────
   // WebUSB only fires 'connect' for devices that have been previously granted
@@ -1518,6 +1628,10 @@ export default function DSCRegister() {
   const inDSC      = applySortOrder(dscList.filter(d => new Date(d.expiry_date) >= nowDate && getDSCInOutStatus(d) === 'IN'  && filterBySearch(d)));
   const outDSC     = applySortOrder(dscList.filter(d => new Date(d.expiry_date) >= nowDate && getDSCInOutStatus(d) === 'OUT' && filterBySearch(d)));
   const expiredDSC = applySortOrder(dscList.filter(d => new Date(d.expiry_date) < nowDate  && filterBySearch(d)));
+  const expiring7DSC = applySortOrder(dscList.filter(d => {
+    const dl = Math.ceil((new Date(d.expiry_date) - nowDate) / 86400000);
+    return dl >= 0 && dl <= 7 && filterBySearch(d);
+  }));
 
   // ── Stats ─────────────────────────────────────────────────────────────────
   const statsExpiring7  = dscList.filter(d => { const dl = Math.ceil((new Date(d.expiry_date) - nowDate) / 86400000); return dl >= 0 && dl <= 7; }).length;
@@ -1531,12 +1645,15 @@ export default function DSCRegister() {
   const tpIn  = Math.ceil(inDSC.length      / rowsPerPage);
   const tpOut = Math.ceil(outDSC.length     / rowsPerPage);
   const tpExp = Math.ceil(expiredDSC.length / rowsPerPage);
+  const tpExpiring = Math.ceil(expiring7DSC.length / rowsPerPage);
   const spIn  = safePage(currentPageIn,      tpIn);
   const spOut = safePage(currentPageOut,     tpOut);
   const spExp = safePage(currentPageExpired, tpExp);
+  const spExpiring = safePage(currentPageExpiring, tpExpiring);
   const pagedIn  = inDSC.slice((spIn  - 1) * rowsPerPage, spIn  * rowsPerPage);
   const pagedOut = outDSC.slice((spOut - 1) * rowsPerPage, spOut * rowsPerPage);
   const pagedExp = expiredDSC.slice((spExp - 1) * rowsPerPage, spExp * rowsPerPage);
+  const pagedExpiring = expiring7DSC.slice((spExpiring - 1) * rowsPerPage, spExpiring * rowsPerPage);
 
   // ── Bulk selection ────────────────────────────────────────────────────────
   const toggleSelect   = (id)  => setSelectedIds(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
@@ -1746,6 +1863,21 @@ export default function DSCRegister() {
             <Button variant="outline" onClick={handlePrint}
               className="h-9 px-4 gap-2 rounded-xl text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 backdrop-blur-sm">
               <Printer className="h-4 w-4" />Print
+            </Button>
+            {/* ── WhatsApp Automation Button ── */}
+            <Button
+              variant="outline"
+              onClick={() => setWhatsappAutoOpen(true)}
+              className="h-9 px-4 gap-2 rounded-xl text-sm backdrop-blur-sm font-semibold transition-all"
+              style={{
+                backgroundColor: autoEnabled ? 'rgba(16,185,129,0.20)' : 'rgba(255,255,255,0.10)',
+                borderColor: autoEnabled ? 'rgba(16,185,129,0.60)' : 'rgba(255,255,255,0.25)',
+                color: autoEnabled ? '#6ee7b7' : '#fff',
+              }}
+              title="WhatsApp expiry alerts & automation"
+            >
+              {autoEnabled ? <Bell className="h-3.5 w-3.5" /> : <MessageCircle className="h-3.5 w-3.5" />}
+              WA Alerts {autoEnabled && <span className="ml-0.5 text-[10px] bg-emerald-400/30 px-1.5 py-0.5 rounded-full">AUTO ON</span>}
             </Button>
             {/* ── USB DSC Token Button ── */}
             {usbSupported && (
@@ -2026,6 +2158,15 @@ export default function DSCRegister() {
               className="rounded-lg px-5 py-2 text-sm font-semibold transition-all data-[state=active]:bg-amber-600 data-[state=active]:text-white data-[state=active]:shadow-md">
               <AlertCircle className="h-4 w-4 mr-1.5 inline" />EXPIRED ({expiredDSC.length})
             </TabsTrigger>
+            <TabsTrigger value="expiring7"
+              className="rounded-lg px-4 py-2 text-sm font-semibold transition-all data-[state=active]:bg-orange-500 data-[state=active]:text-white data-[state=active]:shadow-md relative">
+              <Clock className="h-4 w-4 mr-1.5 inline" />Expiring 7d
+              {expiring7DSC.length > 0 && (
+                <span className="ml-1.5 inline-flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full text-[10px] font-bold bg-orange-500 text-white data-[state=active]:bg-white data-[state=active]:text-orange-600" style={{background: activeTab === 'expiring7' ? '#fff' : '#f97316', color: activeTab === 'expiring7' ? '#ea580c' : '#fff'}}>
+                  {expiring7DSC.length}
+                </span>
+              )}
+            </TabsTrigger>
           </TabsList>
 
           {/* IN tab */}
@@ -2045,7 +2186,8 @@ export default function DSCRegister() {
                   : <DSCTable dscList={pagedIn} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog}
                       onViewLog={openLogDialog} getDSCStatus={getDSCStatus} type="IN"
                       globalIndexStart={(spIn-1)*rowsPerPage} isDark={isDark}
-                      selectedIds={selectedIds} onToggleSelect={toggleSelect} onToggleAll={toggleAll} />
+                      selectedIds={selectedIds} onToggleSelect={toggleSelect} onToggleAll={toggleAll}
+                      onWhatsAppAlert={null} />
               }
               <PaginationBar currentPage={spIn} totalPages={tpIn} totalItems={inDSC.length} pageSize={rowsPerPage} onPageChange={setCurrentPageIn} isDark={isDark} />
             </div>
@@ -2068,7 +2210,8 @@ export default function DSCRegister() {
                   : <DSCTable dscList={pagedOut} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog}
                       onViewLog={openLogDialog} getDSCStatus={getDSCStatus} type="OUT"
                       globalIndexStart={(spOut-1)*rowsPerPage} isDark={isDark}
-                      selectedIds={selectedIds} onToggleSelect={toggleSelect} onToggleAll={toggleAll} />
+                      selectedIds={selectedIds} onToggleSelect={toggleSelect} onToggleAll={toggleAll}
+                      onWhatsAppAlert={null} />
               }
               <PaginationBar currentPage={spOut} totalPages={tpOut} totalItems={outDSC.length} pageSize={rowsPerPage} onPageChange={setCurrentPageOut} isDark={isDark} />
             </div>
@@ -2091,9 +2234,53 @@ export default function DSCRegister() {
                   : <DSCTable dscList={pagedExp} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog}
                       onViewLog={openLogDialog} getDSCStatus={getDSCStatus} type="EXPIRED"
                       globalIndexStart={(spExp-1)*rowsPerPage} isDark={isDark}
-                      selectedIds={selectedIds} onToggleSelect={toggleSelect} onToggleAll={toggleAll} />
+                      selectedIds={selectedIds} onToggleSelect={toggleSelect} onToggleAll={toggleAll}
+                      onWhatsAppAlert={handleWhatsAppAlert} />
               }
               <PaginationBar currentPage={spExp} totalPages={tpExp} totalItems={expiredDSC.length} pageSize={rowsPerPage} onPageChange={setCurrentPageExpired} isDark={isDark} />
+            </div>
+          </TabsContent>
+
+          {/* EXPIRING 7d tab */}
+          <TabsContent value="expiring7" className="mt-4">
+            <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col" style={tabCard('#fed7aa')}>
+              <div className="border-b px-5 py-3 flex items-center justify-between gap-2"
+                style={{ background: isDark ? 'rgba(251,146,60,0.10)' : '#fff7ed', borderColor: isDark ? 'rgba(251,146,60,0.25)' : '#fed7aa' }}>
+                <div className="flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-orange-600 flex-shrink-0" />
+                  <p className="text-sm font-semibold text-orange-700 uppercase tracking-wider">DSC EXPIRING WITHIN 7 DAYS ({expiring7DSC.length})</p>
+                </div>
+                {expiring7DSC.length > 0 && (
+                  <Button size="sm" onClick={() => {
+                    expiring7DSC.forEach((dsc, i) => {
+                      setTimeout(() => {
+                        const msg = buildExpiryAlertText(dsc);
+                        window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+                      }, i * 700);
+                    });
+                    toast.success(`Opening WhatsApp for ${expiring7DSC.length} holder(s)…`);
+                  }}
+                    className="h-8 px-3 text-xs gap-1.5 rounded-lg font-semibold"
+                    style={{ background: 'linear-gradient(135deg,#25d366,#128c7e)', color: '#fff', border: 'none' }}>
+                    <MessageCircle className="h-3.5 w-3.5" />
+                    Alert All ({expiring7DSC.length}) via WhatsApp
+                  </Button>
+                )}
+              </div>
+              {loading && expiring7DSC.length === 0
+                ? <MiniLoader />
+                : expiring7DSC.length === 0
+                  ? <div className={`text-center py-16 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                      <Clock className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                      <p className="font-medium">No DSC certificates expiring within 7 days 🎉</p>
+                    </div>
+                  : <DSCTable dscList={pagedExpiring} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog}
+                      onViewLog={openLogDialog} getDSCStatus={getDSCStatus} type="IN"
+                      globalIndexStart={(spExpiring-1)*rowsPerPage} isDark={isDark}
+                      selectedIds={selectedIds} onToggleSelect={toggleSelect} onToggleAll={toggleAll}
+                      onWhatsAppAlert={handleWhatsAppAlert} />
+              }
+              <PaginationBar currentPage={spExpiring} totalPages={tpExpiring} totalItems={expiring7DSC.length} pageSize={rowsPerPage} onPageChange={setCurrentPageExpiring} isDark={isDark} />
             </div>
           </TabsContent>
         </Tabs>
@@ -2327,6 +2514,178 @@ export default function DSCRegister() {
             setActiveTab('in');
           }}
         />
+      )}
+
+      {/* ── WhatsApp Phone Entry Dialog ── */}
+      {waPhoneDialog && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}>
+          <div className={`rounded-2xl shadow-2xl w-full max-w-sm p-6 ${isDark ? 'bg-slate-900 border border-slate-700' : 'bg-white border border-slate-200'}`}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: '#25d36620' }}>
+                <MessageCircle className="h-5 w-5" style={{ color: '#25d366' }} />
+              </div>
+              <div>
+                <h3 className={`font-bold text-base ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Send WhatsApp Alert</h3>
+                <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{waPhoneDialog.holder_name}</p>
+              </div>
+            </div>
+            <p className={`text-sm mb-3 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+              Enter the mobile number of <strong>{waPhoneDialog.holder_name}</strong> to send DSC expiry alert:
+            </p>
+            <div className="flex items-center gap-2 mb-1">
+              <span className={`text-sm font-semibold px-3 py-2 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-600 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>+91</span>
+              <input
+                className={`flex-1 px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100 placeholder:text-slate-500' : 'bg-white border-slate-300 text-slate-900 placeholder:text-slate-400'}`}
+                placeholder="10-digit mobile number"
+                type="tel"
+                maxLength={15}
+                value={waPhoneNumber}
+                onChange={e => setWaPhoneNumber(e.target.value.replace(/[^0-9+\s-]/g, ''))}
+                onKeyDown={e => { if (e.key === 'Enter' && waPhoneNumber.length >= 8) handleWhatsAppSendWithPhone(); }}
+                autoFocus
+              />
+            </div>
+            <p className={`text-[11px] mb-4 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>💡 Tip: Add phone numbers in DSC notes (e.g. "Phone: 9876543210") to skip this step next time.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setWaPhoneDialog(null)}
+                className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                Cancel
+              </button>
+              <button onClick={handleWhatsAppSendWithPhone}
+                disabled={waPhoneNumber.length < 8}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-opacity"
+                style={{ background: waPhoneNumber.length < 8 ? '#9ca3af' : 'linear-gradient(135deg,#25d366,#128c7e)', cursor: waPhoneNumber.length < 8 ? 'not-allowed' : 'pointer' }}>
+                <Send className="h-4 w-4" />Send Alert
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── WhatsApp Automation Dialog ── */}
+      {whatsappAutoOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}>
+          <div className={`rounded-2xl shadow-2xl w-full max-w-md ${isDark ? 'bg-slate-900 border border-slate-700' : 'bg-white border border-slate-200'}`}>
+            {/* Header */}
+            <div className="px-6 pt-6 pb-4 flex items-center gap-3">
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#25d36620,#128c7e20)' }}>
+                <Zap className="h-5 w-5" style={{ color: '#25d366' }} />
+              </div>
+              <div className="flex-1">
+                <h3 className={`font-bold text-lg ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>WhatsApp Alerts & Automation</h3>
+                <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Configure expiry notifications for DSC holders</p>
+              </div>
+              <button onClick={() => setWhatsappAutoOpen(false)} className={`h-8 w-8 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-500'}`}>✕</button>
+            </div>
+
+            <div className="px-6 pb-6 space-y-5">
+              {/* Automation toggle */}
+              <div className={`rounded-xl p-4 border ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    {autoEnabled ? <Bell className="h-4 w-4 text-emerald-500" /> : <BellOff className="h-4 w-4 text-slate-400" />}
+                    <span className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Automated Alerts</span>
+                  </div>
+                  <button
+                    onClick={() => saveAutoSettings(autoSettings, !autoEnabled)}
+                    className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0"
+                    style={{ background: autoEnabled ? '#10b981' : (isDark ? '#334155' : '#d1d5db') }}>
+                    <span className="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"
+                      style={{ transform: autoEnabled ? 'translateX(22px)' : 'translateX(2px)' }} />
+                  </button>
+                </div>
+                <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  {autoEnabled ? '✅ Automation is ON — click "Run Now" to send alerts manually, or set a browser reminder.' : 'Enable to configure automatic WhatsApp alerts for expiring DSCs.'}
+                </p>
+                {autoLastRun && <p className={`text-[11px] mt-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Last run: {autoLastRun}</p>}
+              </div>
+
+              {/* Alert criteria */}
+              <div>
+                <p className={`text-xs font-semibold uppercase tracking-widest mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Alert Criteria</p>
+                <div className="space-y-2">
+                  {[7, 14, 30].map(d => (
+                    <label key={d} className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${autoSettings.days.includes(d) ? (isDark ? 'border-emerald-600 bg-emerald-900/20' : 'border-emerald-300 bg-emerald-50') : (isDark ? 'border-slate-700 hover:border-slate-600' : 'border-slate-200 hover:border-slate-300')}`}>
+                      <input type="checkbox" className="sr-only"
+                        checked={autoSettings.days.includes(d)}
+                        onChange={() => {
+                          const days = autoSettings.days.includes(d) ? autoSettings.days.filter(x => x !== d) : [...autoSettings.days, d];
+                          saveAutoSettings({ ...autoSettings, days }, autoEnabled);
+                        }} />
+                      <div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 ${autoSettings.days.includes(d) ? 'bg-emerald-500 border-emerald-500' : (isDark ? 'border-slate-600' : 'border-slate-300')}`}>
+                        {autoSettings.days.includes(d) && <CheckCircle2 className="h-3 w-3 text-white" />}
+                      </div>
+                      <span className={`text-sm font-medium ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Alert when expiring within <strong>{d} days</strong></span>
+                      <span className={`ml-auto text-xs px-2 py-0.5 rounded-full font-semibold ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>
+                        {dscList.filter(x => { const dl = Math.ceil((new Date(x.expiry_date) - new Date()) / 86400000); return dl >= 0 && dl <= d; }).length} DSC
+                      </span>
+                    </label>
+                  ))}
+                  <label className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${autoSettings.sendExpired ? (isDark ? 'border-red-700 bg-red-900/20' : 'border-red-200 bg-red-50') : (isDark ? 'border-slate-700 hover:border-slate-600' : 'border-slate-200 hover:border-slate-300')}`}>
+                    <input type="checkbox" className="sr-only"
+                      checked={autoSettings.sendExpired}
+                      onChange={() => saveAutoSettings({ ...autoSettings, sendExpired: !autoSettings.sendExpired }, autoEnabled)} />
+                    <div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 ${autoSettings.sendExpired ? 'bg-red-500 border-red-500' : (isDark ? 'border-slate-600' : 'border-slate-300')}`}>
+                      {autoSettings.sendExpired && <CheckCircle2 className="h-3 w-3 text-white" />}
+                    </div>
+                    <span className={`text-sm font-medium ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Also alert for <strong>already expired</strong> DSCs</span>
+                    <span className={`ml-auto text-xs px-2 py-0.5 rounded-full font-semibold ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>
+                      {expiredDSC.length} DSC
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Quick send section */}
+              <div className={`rounded-xl p-4 border ${isDark ? 'bg-slate-800/40 border-slate-700' : 'bg-emerald-50/50 border-emerald-100'}`}>
+                <p className={`text-xs font-semibold uppercase tracking-widest mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Quick Actions</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => {
+                    expiring7DSC.forEach((dsc, i) => {
+                      setTimeout(() => { window.open(`https://wa.me/?text=${encodeURIComponent(buildExpiryAlertText(dsc))}`, '_blank'); }, i * 700);
+                    });
+                    toast.success(`Opening WhatsApp for ${expiring7DSC.length} expiring holder(s)…`);
+                    setWhatsappAutoOpen(false);
+                  }}
+                    disabled={expiring7DSC.length === 0}
+                    className="flex flex-col items-center gap-1.5 p-3 rounded-xl text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    style={{ background: 'linear-gradient(135deg,#f97316,#ea580c)', color: '#fff' }}>
+                    <Clock className="h-4 w-4" />
+                    Alert Expiring 7d
+                    <span className="text-[10px] opacity-80">({expiring7DSC.length} DSC)</span>
+                  </button>
+                  <button onClick={() => {
+                    expiredDSC.forEach((dsc, i) => {
+                      setTimeout(() => { window.open(`https://wa.me/?text=${encodeURIComponent(buildExpiryAlertText(dsc))}`, '_blank'); }, i * 700);
+                    });
+                    toast.success(`Opening WhatsApp for ${expiredDSC.length} expired holder(s)…`);
+                    setWhatsappAutoOpen(false);
+                  }}
+                    disabled={expiredDSC.length === 0}
+                    className="flex flex-col items-center gap-1.5 p-3 rounded-xl text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    style={{ background: 'linear-gradient(135deg,#dc2626,#b91c1c)', color: '#fff' }}>
+                    <AlertCircle className="h-4 w-4" />
+                    Alert Expired
+                    <span className="text-[10px] opacity-80">({expiredDSC.length} DSC)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Run automation button */}
+              <button
+                onClick={() => { handleRunAutomation(); setWhatsappAutoOpen(false); }}
+                disabled={autoSending || (autoSettings.days.length === 0 && !autoSettings.sendExpired)}
+                className="w-full py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{ background: 'linear-gradient(135deg,#25d366,#128c7e)', color: '#fff', boxShadow: '0 4px 15px rgba(37,211,102,0.3)' }}>
+                {autoSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                {autoSending ? 'Sending…' : 'Run Automation Now'}
+              </button>
+              <p className={`text-[11px] text-center ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                💡 WhatsApp will open for each DSC holder matching the criteria above. Phone numbers are read from DSC notes.
+              </p>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── AI Duplicate Detection Dialog ── */}
