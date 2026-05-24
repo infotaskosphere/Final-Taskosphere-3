@@ -26,6 +26,8 @@ import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
+import { getWASettings, buildPasswordMessage } from '@/hooks/useWhatsApp';
+import WhatsAppSendDialog from '@/components/ui/WhatsAppSendDialog';
 
 const C = { deepBlue: '#0D3B66', medBlue: '#1F6FB2', green: '#1FAF5A', whatsapp: '#25D366' };
 const spring = { type: 'spring', stiffness: 340, damping: 24 };
