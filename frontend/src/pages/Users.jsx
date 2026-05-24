@@ -23,7 +23,7 @@ import {
   ShieldOff, Fingerprint, Download, Pencil, Inbox, X,
   Monitor, Wifi, WifiOff, RefreshCw, Radar, Loader2,
   Network, Save, ClipboardList, LayoutDashboard, AlertTriangle, MapPin, UserMinus, ArrowRight,
-  Building2,
+  Building2, MessageSquare,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -133,6 +133,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_view_gst_reconciliation: true,
       can_view_all_visits: true, can_edit_visits: true, can_delete_visits: true, can_delete_own_visits: true,
       can_view_client_portal: true,
+      can_manage_whatsapp: true,
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
       view_other_attendance: [], view_other_reports: [], view_other_todos: [],
       view_other_activity: [], view_other_visits: [],
@@ -186,6 +187,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_edit_visits: true,          // Client Visits → EDIT/UPDATE (Own + Team)
       can_delete_visits: false,       // admin-granted only
       can_delete_own_visits: true,    // always allowed for own records
+      can_manage_whatsapp: false,     // admin-granted only
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
       view_other_attendance: [], view_other_reports: [], view_other_todos: [],
       view_other_activity: [], view_other_visits: [],
@@ -239,6 +241,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_edit_visits: true,          // Client Visits → EDIT/UPDATE (Own)
       can_delete_visits: false,       // admin-granted only
       can_delete_own_visits: true,    // always allowed for own records
+      can_manage_whatsapp: false,     // admin-granted only
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
       view_other_attendance: [], view_other_reports: [], view_other_todos: [],
       view_other_activity: [], view_other_visits: [],
@@ -264,6 +267,7 @@ const EMPTY_PERMISSIONS = {
   can_view_all_visits: false, can_edit_visits: false,
   can_delete_visits: false, can_delete_own_visits: true,
   can_view_client_portal: false,
+  can_manage_whatsapp: false,
   view_password_departments: [], assigned_clients: [], view_other_tasks: [],
   view_other_attendance: [], view_other_reports: [], view_other_todos: [],
   view_other_activity: [], view_other_visits: [],
@@ -287,6 +291,7 @@ const GLOBAL_PERMS = [
   { key: 'can_view_gst_reconciliation',     label: 'GST Reconciliation',           desc: 'Access the GST Reconciliation module (GST dept users)',  icon: FileText    },
   { key: 'can_create_quotations',           label: 'Quotations Module',            desc: 'Create, edit, export and share quotations',              icon: Receipt     },
   { key: 'can_view_client_portal',          label: 'Client Portal Manager',        desc: 'Access the Client Portal Manager (admin-level module)',   icon: Building2   },
+  { key: 'can_manage_whatsapp',             label: 'WhatsApp Settings',            desc: 'Access and configure WhatsApp integration settings',     icon: MessageSquare },
 ];
 
 const OPS_PERMS = [
@@ -437,6 +442,7 @@ const ModuleAccessBadges = ({ userData }) => {
       icon: KeyRound,
     },
     { label: 'Client Portal', active: !!p.can_view_client_portal, color: '#0D3B66', icon: Building2 },
+    { label: 'WhatsApp',      active: !!p.can_manage_whatsapp,    color: '#25D366', icon: MessageSquare },
   ];
   return (
     <div className="flex flex-wrap gap-1.5 mt-3">
@@ -459,7 +465,7 @@ const ModuleAccessBadges = ({ userData }) => {
 
 const PermissionMatrixSummary = ({ permissions }) => {
   // Include module-level perms (managed from the Modules tab) so coverage % is accurate
-  const MODULE_PERM_KEYS = ['can_manage_invoices', 'can_view_passwords', 'can_edit_passwords', 'can_view_gst_reconciliation', 'can_view_trademark_sphere', 'can_view_client_portal'];
+  const MODULE_PERM_KEYS = ['can_manage_invoices', 'can_view_passwords', 'can_edit_passwords', 'can_view_gst_reconciliation', 'can_view_trademark_sphere', 'can_view_client_portal', 'can_manage_whatsapp'];
   const allPerms = [...GLOBAL_PERMS, ...OPS_PERMS, ...EDIT_PERMS];
   const granted  = allPerms.filter(p => permissions[p.key]).length
                  + MODULE_PERM_KEYS.filter(k => permissions[k]).length;
@@ -3139,6 +3145,18 @@ export default function Users() {
                     setPermissions={setPermissions}
                     accentColor="#0D3B66"
                     badge={permissions.can_view_client_portal ? 'Full Access' : undefined}
+                  />
+
+                  {/* ── WhatsApp Settings ──────────────────────────────── */}
+                  <ModuleAccessCard
+                    icon={MessageSquare}
+                    title="WhatsApp Settings"
+                    desc="Access and configure WhatsApp integration — manage API credentials, message templates, and notification rules."
+                    permKey="can_manage_whatsapp"
+                    permissions={permissions}
+                    setPermissions={setPermissions}
+                    accentColor="#25D366"
+                    badge={permissions.can_manage_whatsapp ? 'Full Access' : undefined}
                   />
                 </div>
               </div>
