@@ -43,6 +43,8 @@ except ImportError:
 from backend.passwords import router as passwords_router
 from backend.client_portal import router as client_portal_router
 from backend.activity_monitor import router as activity_monitor_router
+from backend.whatsapp_integration import router as whatsapp_router
+from backend.whatsapp_scheduler import wa_birthday_job, wa_dsc_expiry_job, wa_compliance_job
 
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -481,6 +483,27 @@ async def startup_event():
             id="force_punch_out_11pm",
             replace_existing=True,
         )
+
+        # ── WhatsApp notification jobs ────────────────────────────────────
+        scheduler.add_job(
+            wa_birthday_job,
+            'cron', hour=9, minute=0,
+            timezone=pytz.timezone("Asia/Kolkata"),
+            id="wa_birthday_wishes", replace_existing=True,
+        )
+        scheduler.add_job(
+            wa_dsc_expiry_job,
+            'cron', hour=9, minute=30,
+            timezone=pytz.timezone("Asia/Kolkata"),
+            id="wa_dsc_expiry_alerts", replace_existing=True,
+        )
+        scheduler.add_job(
+            wa_compliance_job,
+            'cron', hour=10, minute=0,
+            timezone=pytz.timezone("Asia/Kolkata"),
+            id="wa_compliance_reminders", replace_existing=True,
+        )
+
         scheduler.start()
         logger.info("APScheduler started successfully.")
     except Exception as e:
@@ -4988,11 +5011,33 @@ async def send_birthday_wish_manual(
     # Main client email
     client_name  = client.get("company_name") or "Valued Client"
     client_email = client.get("email")
+    wa_sent_to = []
+
     if client_email:
         ok = send_birthday_email(client_email, client_name)
         (sent_to if ok else failed).append(client_email)
     else:
         no_email.append(client_name)
+
+    # WhatsApp birthday wish for main client
+    client_phone = "".join(c for c in (client.get("phone") or "") if c.isdigit())
+    if len(client_phone) == 10:
+        client_phone = "91" + client_phone
+    if client_phone:
+        try:
+            from backend.whatsapp_integration import send_whatsapp_notification
+            wa_msg = (
+                f"🎂 *Happy Birthday, {client_name}!*\n\n"
+                f"Wishing you a wonderful birthday filled with joy and prosperity! 🎉\n\n"
+                f"Best wishes,\n_Taskosphere Team_"
+            )
+            await send_whatsapp_notification(
+                to=client_phone, message=wa_msg, message_type="birthday",
+                context_id=client_id, sent_by=current_user.id,
+            )
+            wa_sent_to.append(client_phone)
+        except Exception as wa_err:
+            logger.warning(f"WhatsApp birthday failed for {client_name}: {wa_err}")
 
     # Contact persons
     for cp in client.get("contact_persons") or []:
@@ -5004,7 +5049,28 @@ async def send_birthday_wish_manual(
         else:
             no_email.append(cp_name)
 
-    return {"status": "completed", "sent_to": sent_to, "failed": failed, "no_email": no_email}
+        # WhatsApp for contact person
+        cp_phone = "".join(c for c in (cp.get("phone") or "") if c.isdigit())
+        if len(cp_phone) == 10:
+            cp_phone = "91" + cp_phone
+        if cp_phone:
+            try:
+                from backend.whatsapp_integration import send_whatsapp_notification
+                cp_msg = (
+                    f"🎂 *Happy Birthday, {cp_name}!*\n\n"
+                    f"Wishing you a wonderful day! 🎉\n\n"
+                    f"_Taskosphere Team_"
+                )
+                await send_whatsapp_notification(
+                    to=cp_phone, message=cp_msg, message_type="birthday",
+                    context_id=client_id, sent_by=current_user.id,
+                )
+                wa_sent_to.append(cp_phone)
+            except Exception:
+                pass
+
+    return {"status": "completed", "sent_to": sent_to, "failed": failed,
+            "no_email": no_email, "whatsapp_sent_to": wa_sent_to}
 
 @api_router.get("/leads/meta/services")
 async def get_leads_services_meta(current_user: User = Depends(get_current_user)):
@@ -8290,6 +8356,7 @@ api_router.include_router(email_router)
 api_router.include_router(activity_monitor_router)
 api_router.include_router(client_portal_router)
 api_router.include_router(reminders_router)
+api_router.include_router(whatsapp_router)
 app.include_router(google_auth_router)
 app.include_router(api_router)
 
