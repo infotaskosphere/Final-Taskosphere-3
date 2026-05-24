@@ -3,16 +3,17 @@
 // Theme matches GeneralSettings / rest of the app via useDark()
 // =============================================================================
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useDark } from "@/hooks/useDark";
 import { useAuth } from "@/contexts/AuthContext";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import {
   MessageCircle, Settings, Save, CheckCircle2,
-  FileText, Users, Shield, Key, Eye, Building2,
+  FileText, Users, Shield, Key, Eye, Building2, ChevronDown,
 } from "lucide-react";
 import { getWASettings, saveWASettings } from "@/hooks/useWhatsApp";
+import api from "@/lib/api";
 
 // ─── Brand colours (same palette as rest of app) ─────────────────────────────
 const COLORS = {
@@ -119,6 +120,19 @@ export default function WhatsAppSettings() {
   const [saved,      setSaved]      = useState(false);
   const [previewKey, setPreviewKey] = useState("invoice");
   const [activeTab,  setActiveTab]  = useState(isAdmin ? "templates" : "info");
+  const [companies,  setCompanies]  = useState([]);
+
+  useEffect(() => {
+    api.get("/companies").then(r => setCompanies(r.data || [])).catch(() => {});
+  }, []);
+
+  // Auto-populate firmName from first company if not yet set
+  useEffect(() => {
+    if (companies.length > 0 && !settings.firmName) {
+      const first = companies[0];
+      setSettings(s => ({ ...s, firmName: first.name || first.trade_name || "" }));
+    }
+  }, [companies]); // eslint-disable-line
 
   const update = (key, val) => setSettings(s => ({ ...s, [key]: val }));
 
@@ -221,12 +235,42 @@ export default function WhatsAppSettings() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className={labelCls}>Firm Name</label>
-                    <input
-                      className={inputCls}
-                      value={settings.firmName || ""}
-                      onChange={e => update("firmName", e.target.value)}
-                      placeholder="Your CA Firm"
-                    />
+                    {companies.length > 0 ? (
+                      <div className="flex gap-2">
+                        <input
+                          className={inputCls}
+                          value={settings.firmName || ""}
+                          onChange={e => update("firmName", e.target.value)}
+                          placeholder="Your CA Firm"
+                        />
+                        <div className="relative flex-shrink-0">
+                          <select
+                            className={`${inputCls} pr-7 appearance-none cursor-pointer`}
+                            style={{ width: "auto", minWidth: 32 }}
+                            value=""
+                            onChange={e => { if (e.target.value) update("firmName", e.target.value); }}
+                            title="Pick from your companies"
+                          >
+                            <option value="">↓</option>
+                            {companies.map(co => (
+                              <option key={co.id} value={co.name || co.trade_name || ""}>
+                                {co.name || co.trade_name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    ) : (
+                      <input
+                        className={inputCls}
+                        value={settings.firmName || ""}
+                        onChange={e => update("firmName", e.target.value)}
+                        placeholder="Your CA Firm"
+                      />
+                    )}
+                    {companies.length > 0 && (
+                      <p className={`text-[10px] mt-1 ${muted}`}>Click ↓ to pick from your companies</p>
+                    )}
                   </div>
                   <div>
                     <label className={labelCls}>Tagline</label>
