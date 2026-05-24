@@ -36,6 +36,7 @@ const StaffActivity         = lazy(() => import("@/pages/StaffActivity.jsx"));
 const ClientPortalLogin     = lazy(() => import("@/pages/ClientPortalLogin.jsx"));
 const ClientPortalDashboard = lazy(() => import("@/pages/ClientPortalDashboard.jsx"));
 const ClientPortalManagerPage = lazy(() => import("@/pages/ClientPortalManagerPage.jsx"));
+const WhatsAppSettings        = lazy(() => import("@/pages/WhatsAppSettings.jsx"));
 
 
 
@@ -155,6 +156,8 @@ function AppRoutes() {
       {/* Settings — all roles */}
       <Route path="/settings/general" element={<Protected><PageLoader><GeneralSettings /></PageLoader></Protected>} />
       <Route path="/settings/email"   element={<Protected><PageLoader><EmailSettings /></PageLoader></Protected>} />
+      {/* WhatsApp Settings — admin always, others only with can_manage_whatsapp */}
+      <Route path="/settings/whatsapp" element={<Permission permission="can_manage_whatsapp"><PageLoader><WhatsAppSettings /></PageLoader></Permission>} />
       <Route path="/settings"         element={<Navigate to="/settings/general" replace />} />
 
       {/* PERMISSION-BASED MODULES */}
