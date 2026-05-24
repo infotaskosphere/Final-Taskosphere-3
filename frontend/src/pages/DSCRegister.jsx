@@ -124,32 +124,41 @@ function getWASettings() {
 }
 
 // ─── Build WhatsApp expiry alert message ──────────────────────────────────────
+// NOTE: Emoji are pasted as literal characters so they survive URL-encoding
+// and render correctly in both WhatsApp Web and the mobile app.
 function buildExpiryAlertText(dsc, customSettings) {
   const s = customSettings || getWASettings();
   const daysLeft = Math.ceil((new Date(dsc.expiry_date) - new Date()) / (1000 * 60 * 60 * 24));
   const isExpired = daysLeft < 0;
   const expiryStr = format(new Date(dsc.expiry_date), 'dd MMM yyyy');
-  // Use plain ASCII-safe Unicode emojis that render correctly in WhatsApp
+  const bell   = '\uD83D\uDD14'; // 🔔
+  const siren  = '\uD83D\uDEA8'; // 🚨
+  const warn   = '\u26A0\uFE0F'; // ⚠️
+  const clock  = '\uD83D\uDD50'; // 🕐
+  const clip   = '\uD83D\uDCCB'; // 📋
+  const bullet = '\u2022';       // •  (plain bullet — works in WA)
+  const dash   = '\u2014';       // —
+
   return [
     isExpired
-      ? `\u{1F6A8} *DSC Expiry Alert*`
-      : `\u{1F514} *DSC Expiring Soon Alert*`,
+      ? `${siren} *DSC Expiry Alert*`
+      : `${bell} *DSC Expiring Soon Alert*`,
     ``,
     `${s.greetingPrefix} *${dsc.holder_name}*,`,
     ``,
     isExpired
-      ? `\u26A0\uFE0F Your Digital Signature Certificate (DSC) *has expired* on ${expiryStr}.`
-      : `\u23F3 Your Digital Signature Certificate (DSC) is expiring in *${daysLeft} day${daysLeft !== 1 ? 's' : ''}* on *${expiryStr}*.`,
+      ? `${warn} Your Digital Signature Certificate (DSC) *has expired* on ${expiryStr}.`
+      : `${clock} Your Digital Signature Certificate (DSC) is expiring in *${daysLeft} day${daysLeft !== 1 ? 's' : ''}* on *${expiryStr}*.`,
     ``,
-    `\u{1F4CB} *Certificate Details:*`,
-    `\u2022 Type: ${dsc.dsc_type || 'Standard'}`,
-    (s.showOrganisation && dsc.associated_with) ? `\u2022 Organisation: ${dsc.associated_with}` : null,
-    (s.showSerialNumber && dsc.serial_number) ? `\u2022 Serial No: ${dsc.serial_number}` : null,
-    `\u2022 Expiry Date: ${expiryStr}`,
+    `${clip} *Certificate Details:*`,
+    `${bullet} Type: ${dsc.dsc_type || 'Standard'}`,
+    (s.showOrganisation && dsc.associated_with) ? `${bullet} Organisation: ${dsc.associated_with}` : null,
+    (s.showSerialNumber && dsc.serial_number)   ? `${bullet} Serial No: ${dsc.serial_number}` : null,
+    `${bullet} Expiry Date: ${expiryStr}`,
     ``,
     isExpired ? s.expiredFooterNote : s.footerNote,
     ``,
-    `\u2014 ${s.senderName}`,
+    `${dash} ${s.senderName}`,
   ].filter(line => line !== null).join('\n');
 }
 
@@ -1338,17 +1347,96 @@ export default function DSCRegister() {
 
   const handleWhatsAppChoice = async (choice, dsc) => {
     setShareChoiceDialog(null);
+
+    if (choice === 'screenshot') {
+      // ── Direct screenshot → WhatsApp share ──────────────────────────────
+      // We need the DSC card rendered so html2canvas can capture it.
+      // Strategy: open the detail dialog, wait for paint, capture, share.
+      setSelectedDSC(dsc);
+      setLogDialogOpen(true);
+
+      // Wait for the dialog DOM to paint (two rAF ticks + 350 ms for animation)
+      await new Promise(resolve => {
+        requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 380)));
+      });
+
+      const cardEl = shareAreaRef.current;
+      if (!cardEl) {
+        toast.error('Could not find DSC card to capture.');
+        return;
+      }
+
+      setSharing(true);
+      try {
+        const canvas = await html2canvas(cardEl, {
+          backgroundColor: isDark ? '#0f172a' : '#ffffff',
+          scale: 2,
+          useCORS: true,
+          logging: false,
+        });
+
+        const safeName = (dsc.holder_name || 'DSC').replace(/[^a-z0-9]/gi, '_');
+        const fileName = `DSC_${safeName}.png`;
+        const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+        if (!blob) throw new Error('Canvas blob empty');
+
+        const file = new File([blob], fileName, { type: 'image/png' });
+        const alertText = buildExpiryAlertText(dsc, waMsgSettings);
+
+        // Try native Web Share API (works on Android Chrome / mobile)
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          try {
+            await navigator.share({
+              files: [file],
+              title: `DSC Alert — ${dsc.holder_name}`,
+              text: alertText,
+            });
+            toast.success('Shared via WhatsApp');
+            return;
+          } catch (err) {
+            if (err?.name === 'AbortError') return; // user cancelled — do nothing
+            // Fall through to desktop fallback
+          }
+        }
+
+        // Desktop fallback: download image + open WA Web with text
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.download = fileName;
+        link.href = url;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1500);
+
+        // Copy text to clipboard so user can paste it
+        try { await navigator.clipboard?.writeText(alertText); } catch { /* silent */ }
+
+        // Build phone-specific WA link if available
+        const ph = dsc?.mobile?.replace(/[\s\-\+]/g, '');
+        const phone = ph && ph.replace(/\D/g,'').length >= 10
+          ? (ph.startsWith('91') ? ph : '91' + ph)
+          : '';
+
+        window.open(
+          phone
+            ? `https://wa.me/${phone}?text=${encodeURIComponent(alertText)}`
+            : `https://wa.me/?text=${encodeURIComponent(alertText)}`,
+          '_blank'
+        );
+
+        toast.success('Screenshot downloaded & WhatsApp opened — attach the image in your chat');
+      } catch (err) {
+        console.error('Screenshot share failed:', err);
+        toast.error('Screenshot failed. Try the Screenshot button in the DSC card.');
+      } finally {
+        setSharing(false);
+      }
+      return;
+    }
+
+    // ── Text message path ────────────────────────────────────────────────────
     const ph = dsc?.mobile?.replace(/\s|-|\+/g, '');
     const phone = ph ? (ph.startsWith('91') ? ph : '91' + ph) : null;
 
-    if (choice === 'screenshot') {
-      // Open the detail dialog so screenshot can be taken
-      setSelectedDSC(dsc);
-      setLogDialogOpen(true);
-      toast.info('DSC details opened — use the Screenshot button to share.');
-      return;
-    }
-    // 'message' choice
     if (phone && phone.replace(/\D/g,'').length >= 10) {
       sendWhatsAppMessage(dsc, phone);
     } else {
@@ -1391,7 +1479,7 @@ export default function DSCRegister() {
     let count = 0;
     alertDSCs.forEach((dsc, i) => {
       setTimeout(() => {
-        const msg = buildExpiryAlertText(dsc);
+        const msg = buildExpiryAlertText(dsc, getWASettings());
         window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
         count++;
         if (count === alertDSCs.length) {
@@ -2412,7 +2500,7 @@ export default function DSCRegister() {
                   <Button size="sm" onClick={() => {
                     expiring7DSC.forEach((dsc, i) => {
                       setTimeout(() => {
-                        const msg = buildExpiryAlertText(dsc);
+                        const msg = buildExpiryAlertText(dsc, getWASettings());
                         window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
                       }, i * 700);
                     });
@@ -2611,7 +2699,7 @@ export default function DSCRegister() {
                         <div className="flex items-center gap-2 mb-1">
                           <Phone className="h-3 w-3 text-slate-400 flex-shrink-0" />
                           <button
-                            onClick={() => { const msg = buildExpiryAlertText(selectedDSC); const ph = selectedDSC.mobile.replace(/\s|-|\+/g,''); window.open(`https://wa.me/${ph.startsWith('91')?ph:'91'+ph}?text=${encodeURIComponent(msg)}`, '_blank'); }}
+                            onClick={() => { const msg = buildExpiryAlertText(selectedDSC, waMsgSettings); const ph = selectedDSC.mobile.replace(/\s|-|\+/g,''); window.open(`https://wa.me/${ph.startsWith('91')?ph:'91'+ph}?text=${encodeURIComponent(msg)}`, '_blank'); }}
                             className="text-sm font-semibold text-emerald-600 hover:underline"
                             title="Click to send WhatsApp alert">
                             {selectedDSC.mobile}
@@ -2622,7 +2710,7 @@ export default function DSCRegister() {
                       {selectedDSC?.email && (
                         <div className="flex items-center gap-2">
                           <Mail className="h-3 w-3 text-slate-400 flex-shrink-0" />
-                          <a href={`mailto:${selectedDSC.email}?subject=DSC Expiry Alert — ${selectedDSC.holder_name}&body=${encodeURIComponent(buildExpiryAlertText(selectedDSC))}`}
+                          <a href={`mailto:${selectedDSC.email}?subject=DSC Expiry Alert — ${selectedDSC.holder_name}&body=${encodeURIComponent(buildExpiryAlertText(selectedDSC, waMsgSettings))}`}
                             className="text-sm font-semibold text-blue-500 hover:underline truncate" title="Click to send email alert">
                             {selectedDSC.email}
                           </a>
@@ -2688,12 +2776,49 @@ export default function DSCRegister() {
             </div>
 
             <div className={`px-6 py-4 border-t flex gap-2 print:hidden ${isDark ? 'border-slate-700 bg-slate-900/50' : 'border-slate-100 bg-slate-50/50'}`}>
-              <Button size="sm" variant="outline" disabled={sharing} onClick={() => { setLogDialogOpen(false); setTimeout(() => handleWhatsAppAlert(selectedDSC), 150); }} className="flex-1 gap-1.5 text-emerald-600 border-emerald-200 hover:bg-emerald-50">
+              {/* WhatsApp — shows message vs screenshot choice */}
+              <Button size="sm" variant="outline" disabled={sharing}
+                onClick={() => handleWhatsAppAlert(selectedDSC)}
+                className="flex-1 gap-1.5 text-emerald-600 border-emerald-200 hover:bg-emerald-50">
                 {sharing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageCircle className="h-3.5 w-3.5" />}
                 WhatsApp
               </Button>
-              <Button size="sm" variant="outline" disabled={sharing} onClick={() => handleShare('download')} className="flex-1 gap-1.5 text-slate-700 border-slate-200 hover:bg-slate-100">
-                <Download className="h-3.5 w-3.5" />Screenshot
+              {/* Screenshot — capture + native share sheet */}
+              <Button size="sm" variant="outline" disabled={sharing}
+                onClick={async () => {
+                  if (!shareAreaRef.current || !selectedDSC) return;
+                  setSharing(true);
+                  try {
+                    const canvas = await html2canvas(shareAreaRef.current, {
+                      backgroundColor: isDark ? '#0f172a' : '#ffffff',
+                      scale: 2, useCORS: true, logging: false,
+                    });
+                    const safeName = (selectedDSC.holder_name || 'DSC').replace(/[^a-z0-9]/gi, '_');
+                    const fileName = `DSC_${safeName}.png`;
+                    const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+                    if (!blob) throw new Error('empty blob');
+                    const file = new File([blob], fileName, { type: 'image/png' });
+                    const alertText = buildExpiryAlertText(selectedDSC, waMsgSettings);
+                    // Try native share (Android / mobile Chrome)
+                    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                      try {
+                        await navigator.share({ files: [file], title: `DSC — ${selectedDSC.holder_name}`, text: alertText });
+                        toast.success('Shared successfully');
+                        return;
+                      } catch (e) { if (e?.name === 'AbortError') return; }
+                    }
+                    // Desktop: download
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a'); a.download = fileName; a.href = url; a.click();
+                    setTimeout(() => URL.revokeObjectURL(url), 1500);
+                    toast.success('Screenshot downloaded — attach it in WhatsApp');
+                  } catch (err) {
+                    console.error(err); toast.error('Screenshot failed. Please try again.');
+                  } finally { setSharing(false); }
+                }}
+                className="flex-1 gap-1.5 text-slate-700 border-slate-200 hover:bg-slate-100">
+                {sharing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                Screenshot
               </Button>
               <Button size="sm" variant="outline" disabled={sharing} onClick={() => handleShare('email')} className="gap-1.5 text-blue-600 border-blue-200 hover:bg-blue-50">
                 <Mail className="h-3.5 w-3.5" />
@@ -3004,7 +3129,7 @@ export default function DSCRegister() {
                 <div className="grid grid-cols-2 gap-2">
                   <button onClick={() => {
                     expiring7DSC.forEach((dsc, i) => {
-                      setTimeout(() => { window.open(`https://wa.me/?text=${encodeURIComponent(buildExpiryAlertText(dsc))}`, '_blank'); }, i * 700);
+                      setTimeout(() => { window.open(`https://wa.me/?text=${encodeURIComponent(buildExpiryAlertText(dsc, autoSettings._msgSettings))}`, '_blank'); }, i * 700);
                     });
                     toast.success(`Opening WhatsApp for ${expiring7DSC.length} expiring holder(s)…`);
                     setWhatsappAutoOpen(false);
@@ -3018,7 +3143,7 @@ export default function DSCRegister() {
                   </button>
                   <button onClick={() => {
                     expiredDSC.forEach((dsc, i) => {
-                      setTimeout(() => { window.open(`https://wa.me/?text=${encodeURIComponent(buildExpiryAlertText(dsc))}`, '_blank'); }, i * 700);
+                      setTimeout(() => { window.open(`https://wa.me/?text=${encodeURIComponent(buildExpiryAlertText(dsc, autoSettings._msgSettings))}`, '_blank'); }, i * 700);
                     });
                     toast.success(`Opening WhatsApp for ${expiredDSC.length} expired holder(s)…`);
                     setWhatsappAutoOpen(false);
