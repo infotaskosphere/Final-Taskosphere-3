@@ -108,32 +108,49 @@ function PaginationBar({ currentPage, totalPages, totalItems, pageSize, onPageCh
   );
 }
 
+// ─── WhatsApp Message Template Settings ───────────────────────────────────────
+const DEFAULT_WA_SETTINGS = {
+  senderName: 'TaskOsphere Command Center',
+  greetingPrefix: 'Dear',
+  showSerialNumber: true,
+  showOrganisation: true,
+  footerNote: 'Please arrange for renewal at the earliest to avoid any disruption in filing and compliance activities.',
+  expiredFooterNote: 'Please renew your DSC immediately to avoid any inconvenience in filing and compliance activities.',
+};
+
+function getWASettings() {
+  try { return { ...DEFAULT_WA_SETTINGS, ...JSON.parse(localStorage.getItem('dsc_wa_msg_settings') || '{}') }; }
+  catch { return DEFAULT_WA_SETTINGS; }
+}
+
 // ─── Build WhatsApp expiry alert message ──────────────────────────────────────
-function buildExpiryAlertText(dsc) {
+function buildExpiryAlertText(dsc, customSettings) {
+  const s = customSettings || getWASettings();
   const daysLeft = Math.ceil((new Date(dsc.expiry_date) - new Date()) / (1000 * 60 * 60 * 24));
   const isExpired = daysLeft < 0;
   const expiryStr = format(new Date(dsc.expiry_date), 'dd MMM yyyy');
+  // Use plain ASCII-safe Unicode emojis that render correctly in WhatsApp
   return [
-    `🔔 *DSC ${isExpired ? 'Expiry Alert' : 'Expiring Soon Alert'}*`,
+    isExpired
+      ? `\u{1F6A8} *DSC Expiry Alert*`
+      : `\u{1F514} *DSC Expiring Soon Alert*`,
     ``,
-    `Dear *${dsc.holder_name}*,`,
+    `${s.greetingPrefix} *${dsc.holder_name}*,`,
     ``,
     isExpired
-      ? `⚠️ Your Digital Signature Certificate (DSC) *has expired* on ${expiryStr}.`
-      : `⏰ Your Digital Signature Certificate (DSC) is expiring in *${daysLeft} day${daysLeft !== 1 ? 's' : ''}* on ${expiryStr}.`,
+      ? `\u26A0\uFE0F Your Digital Signature Certificate (DSC) *has expired* on ${expiryStr}.`
+      : `\u23F3 Your Digital Signature Certificate (DSC) is expiring in *${daysLeft} day${daysLeft !== 1 ? 's' : ''}* on *${expiryStr}*.`,
     ``,
-    `📋 *Certificate Details:*`,
-    `• Type: ${dsc.dsc_type || 'Standard'}`,
-    dsc.associated_with ? `• Organisation: ${dsc.associated_with}` : null,
-    dsc.serial_number ? `• Serial No: ${dsc.serial_number}` : null,
-    `• Expiry Date: ${expiryStr}`,
+    `\u{1F4CB} *Certificate Details:*`,
+    `\u2022 Type: ${dsc.dsc_type || 'Standard'}`,
+    (s.showOrganisation && dsc.associated_with) ? `\u2022 Organisation: ${dsc.associated_with}` : null,
+    (s.showSerialNumber && dsc.serial_number) ? `\u2022 Serial No: ${dsc.serial_number}` : null,
+    `\u2022 Expiry Date: ${expiryStr}`,
     ``,
-    isExpired
-      ? `Please renew your DSC immediately to avoid any inconvenience in filing and compliance activities.`
-      : `Please arrange for renewal at the earliest to avoid any disruption in filing and compliance activities.`,
+    isExpired ? s.expiredFooterNote : s.footerNote,
     ``,
-    `— TaskOsphere Command Center`,
-  ].filter(Boolean).join('\n');
+    `\u2014 ${s.senderName}`,
+  ].filter(line => line !== null).join('\n');
 }
 
 // ─── DSC Table ────────────────────────────────────────────────────────────────
@@ -1142,6 +1159,9 @@ export default function DSCRegister() {
 
   // ── WhatsApp automation state ─────────────────────────────────────────────
   const [whatsappAutoOpen, setWhatsappAutoOpen]       = useState(false);
+  const [waMsgSettingsOpen, setWaMsgSettingsOpen]     = useState(false);
+  const [waMsgSettings, setWaMsgSettings]             = useState(getWASettings);
+  const [shareChoiceDialog, setShareChoiceDialog]     = useState(null); // dsc for share-choice
   const [autoEnabled, setAutoEnabled]                 = useState(() => {
     try { return JSON.parse(localStorage.getItem('dsc_wa_auto_enabled') || 'false'); } catch { return false; }
   });
@@ -1218,7 +1238,7 @@ export default function DSCRegister() {
       dsc.notes ? `📝 Notes: ${dsc.notes}` : null,
       lastMove ? `\nLast Movement: ${lastMove.movement_type} by ${lastMove.person_name} on ${format(new Date(lastMove.timestamp), 'dd MMM yyyy, hh:mm a')}` : null,
       ``,
-      `— TaskOsphere Command Center`,
+      `\u2014 ${getWASettings().senderName}`,
     ].filter(Boolean).join('\n');
   };
 
@@ -1306,18 +1326,36 @@ export default function DSCRegister() {
 
   // ── WhatsApp alert handlers ───────────────────────────────────────────────
   const handleWhatsAppAlert = (dsc) => {
-    // Use stored mobile field first, then fall back to phone in notes
-    if (dsc.mobile && dsc.mobile.replace(/\D/g,'').length >= 10) {
-      const phone = dsc.mobile.replace(/\s|-|\+/g, '');
-      const msg = buildExpiryAlertText(dsc);
-      window.open(`https://wa.me/${phone.startsWith('91') ? phone : '91' + phone}?text=${encodeURIComponent(msg)}`, '_blank');
-      toast.success(`WhatsApp opened for ${dsc.holder_name}`);
+    // Show choice: send message or send screenshot
+    setShareChoiceDialog(dsc);
+  };
+
+  const sendWhatsAppMessage = (dsc, phone) => {
+    const msg = buildExpiryAlertText(dsc, waMsgSettings);
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+    toast.success(`WhatsApp opened for ${dsc.holder_name}`);
+  };
+
+  const handleWhatsAppChoice = async (choice, dsc) => {
+    setShareChoiceDialog(null);
+    const ph = dsc?.mobile?.replace(/\s|-|\+/g, '');
+    const phone = ph ? (ph.startsWith('91') ? ph : '91' + ph) : null;
+
+    if (choice === 'screenshot') {
+      // Open the detail dialog so screenshot can be taken
+      setSelectedDSC(dsc);
+      setLogDialogOpen(true);
+      toast.info('DSC details opened — use the Screenshot button to share.');
+      return;
+    }
+    // 'message' choice
+    if (phone && phone.replace(/\D/g,'').length >= 10) {
+      sendWhatsAppMessage(dsc, phone);
     } else {
       const phoneMatch = dsc.notes?.match(/(?:phone|mobile|mob|ph)[:\s]*([+\d\s\-]{8,15})/i);
       if (phoneMatch) {
-        const phone = phoneMatch[1].replace(/\s|-/g, '');
-        const msg = buildExpiryAlertText(dsc);
-        window.open(`https://wa.me/${phone.startsWith('+') ? phone.slice(1) : phone}?text=${encodeURIComponent(msg)}`, '_blank');
+        const p = phoneMatch[1].replace(/\s|-/g, '');
+        sendWhatsAppMessage(dsc, p.startsWith('+') ? p.slice(1) : p);
       } else {
         setWaPhoneNumber('');
         setWaPhoneDialog(dsc);
@@ -1328,7 +1366,7 @@ export default function DSCRegister() {
   const handleWhatsAppSendWithPhone = () => {
     if (!waPhoneDialog) return;
     const phone = waPhoneNumber.replace(/\s|-|\+/g, '');
-    const msg = buildExpiryAlertText(waPhoneDialog);
+    const msg = buildExpiryAlertText(waPhoneDialog, waMsgSettings);
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
     setWaPhoneDialog(null);
     toast.success(`WhatsApp alert opened for ${waPhoneDialog.holder_name}`);
@@ -2145,7 +2183,7 @@ export default function DSCRegister() {
           {[
             { label: 'Total IN',     value: statsIn,         icon: ArrowDownCircle, color: '#10b981' },
             { label: 'Total OUT',    value: statsOut,        icon: ArrowUpCircle,   color: '#ef4444' },
-            { label: 'Expiring 7d',  value: statsExpiring7,  icon: AlertCircle,     color: '#f97316' },
+            { label: 'EXPIRING 7 DAYS',  value: statsExpiring7,  icon: AlertCircle,     color: '#f97316' },
             { label: 'Expiring 30d', value: statsExpiring30, icon: Clock,           color: '#f59e0b' },
             { label: 'Expired',      value: statsExpired,    icon: TrendingDown,    color: '#94a3b8' },
           ].map(stat => {
@@ -2280,7 +2318,7 @@ export default function DSCRegister() {
             </TabsTrigger>
             <TabsTrigger value="expiring7"
               className="rounded-lg px-4 py-2 text-sm font-semibold transition-all data-[state=active]:bg-orange-500 data-[state=active]:text-white data-[state=active]:shadow-md relative">
-              <Clock className="h-4 w-4 mr-1.5 inline" />Expiring 7d
+              <Clock className="h-4 w-4 mr-1.5 inline" />EXPIRING 7 DAYS
               {expiring7DSC.length > 0 && (
                 <span className="ml-1.5 inline-flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full text-[10px] font-bold bg-orange-500 text-white data-[state=active]:bg-white data-[state=active]:text-orange-600" style={{background: activeTab === 'expiring7' ? '#fff' : '#f97316', color: activeTab === 'expiring7' ? '#ea580c' : '#fff'}}>
                   {expiring7DSC.length}
@@ -2475,17 +2513,37 @@ export default function DSCRegister() {
           </DialogHeader>
 
           <div ref={shareAreaRef} className={`rounded-2xl overflow-hidden border shadow-2xl ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
-            <div className="relative px-6 py-5" style={{ background: 'linear-gradient(135deg,#0f1f4d,#1e3a8a)' }}>
-              <div className="flex items-center gap-3">
+            {(() => {
+              const daysLeft = selectedDSC ? Math.ceil((new Date(selectedDSC.expiry_date) - new Date()) / (1000 * 60 * 60 * 24)) : 999;
+              const isUrgent = daysLeft <= 7;
+              const isExpiredDSC = daysLeft < 0;
+              const headerGrad = isExpiredDSC
+                ? 'linear-gradient(135deg,#7f1d1d,#dc2626)'
+                : isUrgent
+                  ? 'linear-gradient(135deg,#7c2d12,#ea580c)'
+                  : 'linear-gradient(135deg,#0f1f4d,#1e3a8a)';
+              return (
+            <div className="relative px-6 py-5" style={{ background: headerGrad }}>
+              {isUrgent && <div className="absolute inset-0 opacity-10" style={{ background: 'repeating-linear-gradient(45deg,#fff,#fff 2px,transparent 2px,transparent 12px)' }} />}
+              <div className="flex items-center gap-3 relative">
                 <div className="h-13 w-13 rounded-xl bg-white/10 flex items-center justify-center backdrop-blur">
-                  <Key className="h-6 w-6 text-white" />
+                  {isExpiredDSC ? <AlertCircle className="h-6 w-6 text-white" /> : isUrgent ? <Clock className="h-6 w-6 text-white" /> : <Key className="h-6 w-6 text-white" />}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-bold tracking-[0.18em] text-white/60 uppercase">DSC Details</p>
+                  <p className="text-[10px] font-bold tracking-[0.18em] text-white/60 uppercase">
+                    {isExpiredDSC ? 'DSC EXPIRED' : isUrgent ? 'DSC EXPIRING SOON' : 'DSC Details'}
+                  </p>
                   <h2 className="text-xl font-bold text-white truncate">{selectedDSC?.holder_name || '—'}</h2>
+                  {isUrgent && (
+                    <p className="text-white/80 text-xs mt-0.5 font-semibold">
+                      {isExpiredDSC ? `Expired on ${format(new Date(selectedDSC.expiry_date), 'dd MMM yyyy')}` : `Expires in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`}
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
+              );
+            })()}
 
             <div className="p-6 space-y-4">
               <div className="flex flex-wrap gap-2">
@@ -2630,7 +2688,7 @@ export default function DSCRegister() {
             </div>
 
             <div className={`px-6 py-4 border-t flex gap-2 print:hidden ${isDark ? 'border-slate-700 bg-slate-900/50' : 'border-slate-100 bg-slate-50/50'}`}>
-              <Button size="sm" variant="outline" disabled={sharing} onClick={() => handleShare('whatsapp')} className="flex-1 gap-1.5 text-emerald-600 border-emerald-200 hover:bg-emerald-50">
+              <Button size="sm" variant="outline" disabled={sharing} onClick={() => { setLogDialogOpen(false); setTimeout(() => handleWhatsAppAlert(selectedDSC), 150); }} className="flex-1 gap-1.5 text-emerald-600 border-emerald-200 hover:bg-emerald-50">
                 {sharing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageCircle className="h-3.5 w-3.5" />}
                 WhatsApp
               </Button>
@@ -2666,6 +2724,148 @@ export default function DSCRegister() {
             setActiveTab('in');
           }}
         />
+      )}
+
+      {/* ── WhatsApp Share Choice Dialog ── */}
+      {shareChoiceDialog && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.60)', backdropFilter: 'blur(6px)' }}>
+          <div className={`rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden ${isDark ? 'bg-slate-900 border border-slate-700' : 'bg-white border border-slate-200'}`}>
+            <div className="px-6 pt-6 pb-4">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-11 h-11 rounded-xl flex items-center justify-center" style={{ background: '#25d36620' }}>
+                  <MessageCircle className="h-5 w-5" style={{ color: '#25d366' }} />
+                </div>
+                <div>
+                  <h3 className={`font-bold text-base ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Send WhatsApp Alert</h3>
+                  <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{shareChoiceDialog.holder_name}</p>
+                </div>
+              </div>
+              <p className={`text-sm mb-4 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>How would you like to send the DSC expiry alert?</p>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => handleWhatsAppChoice('message', shareChoiceDialog)}
+                  className="flex flex-col items-center gap-2.5 p-4 rounded-xl border-2 transition-all hover:scale-[1.02] active:scale-95"
+                  style={{ borderColor: '#25d366', background: '#25d36610' }}>
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: '#25d36625' }}>
+                    <Send className="h-5 w-5" style={{ color: '#25d366' }} />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm font-bold" style={{ color: '#25d366' }}>Send Message</p>
+                    <p className={`text-[11px] mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Text alert with details</p>
+                  </div>
+                </button>
+                <button
+                  onClick={() => handleWhatsAppChoice('screenshot', shareChoiceDialog)}
+                  className={`flex flex-col items-center gap-2.5 p-4 rounded-xl border-2 transition-all hover:scale-[1.02] active:scale-95 ${isDark ? 'border-slate-600 hover:border-indigo-500' : 'border-slate-200 hover:border-indigo-400'}`}
+                  style={{ background: isDark ? 'rgba(99,102,241,0.08)' : 'rgba(99,102,241,0.05)' }}>
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDark ? 'bg-indigo-900/40' : 'bg-indigo-50'}`}>
+                    <Download className="h-5 w-5 text-indigo-500" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm font-bold text-indigo-500">Screenshot</p>
+                    <p className={`text-[11px] mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Visual card image</p>
+                  </div>
+                </button>
+              </div>
+            </div>
+            <div className={`px-6 pb-5 border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+              <button
+                onClick={() => setShareChoiceDialog(null)}
+                className={`w-full py-2 rounded-xl text-sm font-semibold border ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── WhatsApp Message Settings Dialog ── */}
+      {waMsgSettingsOpen && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.60)', backdropFilter: 'blur(6px)' }}>
+          <div className={`rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto ${isDark ? 'bg-slate-900 border border-slate-700' : 'bg-white border border-slate-200'}`}>
+            <div className="px-6 pt-6 pb-4 flex items-center gap-3 border-b" style={{ borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }}>
+              <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${isDark ? 'bg-indigo-900/40' : 'bg-indigo-50'}`}>
+                <Settings2 className="h-5 w-5 text-indigo-500" />
+              </div>
+              <div className="flex-1">
+                <h3 className={`font-bold text-base ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>WhatsApp Message Template</h3>
+                <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Customise the expiry alert message sent via WhatsApp</p>
+              </div>
+              <button onClick={() => setWaMsgSettingsOpen(false)} className={`h-8 w-8 rounded-lg flex items-center justify-center ${isDark ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-500'}`}>✕</button>
+            </div>
+            <div className="px-6 py-5 space-y-5">
+              {[
+                { key: 'senderName', label: 'Sender Name (Signature)', placeholder: 'e.g. Your Firm Name', hint: 'Appears at the bottom of every message as "— Sender Name"' },
+                { key: 'greetingPrefix', label: 'Greeting Prefix', placeholder: 'e.g. Dear / Hello / Hi', hint: 'Appears before the holder\'s name' },
+              ].map(({ key, label, placeholder, hint }) => (
+                <div key={key}>
+                  <label className={`block text-xs font-semibold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{label}</label>
+                  <input
+                    className={`w-full px-3 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100 placeholder:text-slate-500' : 'bg-white border-slate-300 text-slate-900 placeholder:text-slate-400'}`}
+                    placeholder={placeholder}
+                    value={waMsgSettings[key] || ''}
+                    onChange={e => setWaMsgSettings(prev => ({ ...prev, [key]: e.target.value }))}
+                  />
+                  {hint && <p className={`text-[11px] mt-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{hint}</p>}
+                </div>
+              ))}
+              {[
+                { key: 'footerNote', label: 'Renewal Reminder (expiring)', placeholder: 'Message for DSC expiring soon...' },
+                { key: 'expiredFooterNote', label: 'Renewal Reminder (expired)', placeholder: 'Message for already expired DSC...' },
+              ].map(({ key, label, placeholder }) => (
+                <div key={key}>
+                  <label className={`block text-xs font-semibold uppercase tracking-wider mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{label}</label>
+                  <textarea
+                    rows={3}
+                    className={`w-full px-3 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100 placeholder:text-slate-500' : 'bg-white border-slate-300 text-slate-900 placeholder:text-slate-400'}`}
+                    placeholder={placeholder}
+                    value={waMsgSettings[key] || ''}
+                    onChange={e => setWaMsgSettings(prev => ({ ...prev, [key]: e.target.value }))}
+                  />
+                </div>
+              ))}
+              <div className="flex gap-4">
+                {[
+                  { key: 'showOrganisation', label: 'Show Organisation' },
+                  { key: 'showSerialNumber', label: 'Show Serial Number' },
+                ].map(({ key, label }) => (
+                  <label key={key} className="flex items-center gap-2 cursor-pointer">
+                    <button
+                      onClick={() => setWaMsgSettings(prev => ({ ...prev, [key]: !prev[key] }))}
+                      className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0"
+                      style={{ background: waMsgSettings[key] ? '#6366f1' : (isDark ? '#334155' : '#d1d5db') }}>
+                      <span className="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform"
+                        style={{ transform: waMsgSettings[key] ? 'translateX(18px)' : 'translateX(2px)' }} />
+                    </button>
+                    <span className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{label}</span>
+                  </label>
+                ))}
+              </div>
+              {/* Live Preview */}
+              <div className={`rounded-xl p-4 border ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-emerald-50 border-emerald-200'}`}>
+                <p className={`text-[10px] font-bold tracking-widest uppercase mb-2 ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>Preview</p>
+                <pre className={`text-xs whitespace-pre-wrap font-mono leading-relaxed ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                  {buildExpiryAlertText({ holder_name: 'John Doe', expiry_date: new Date(Date.now() + 5 * 86400000).toISOString(), dsc_type: 'Class 3', associated_with: 'Sample Firm Pvt Ltd', serial_number: 'ABC12345' }, waMsgSettings)}
+                </pre>
+              </div>
+            </div>
+            <div className={`px-6 pb-6 flex gap-3 border-t pt-4 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+              <button onClick={() => { setWaMsgSettings(DEFAULT_WA_SETTINGS); }}
+                className={`px-4 py-2.5 rounded-xl text-sm font-semibold border ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                Reset to Default
+              </button>
+              <button onClick={() => {
+                  localStorage.setItem('dsc_wa_msg_settings', JSON.stringify(waMsgSettings));
+                  setWaMsgSettingsOpen(false);
+                  toast.success('WhatsApp message template saved');
+                }}
+                className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white"
+                style={{ background: 'linear-gradient(135deg,#4f46e5,#6366f1)' }}>
+                Save Template
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── WhatsApp Phone Entry Dialog ── */}
@@ -2729,8 +2929,18 @@ export default function DSCRegister() {
               </div>
               <button onClick={() => setWhatsappAutoOpen(false)} className={`h-8 w-8 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-500'}`}>✕</button>
             </div>
+            {/* Message Template shortcut */}
+            <div className={`mx-6 mt-2 mb-0 rounded-xl p-3 border flex items-center gap-3 cursor-pointer transition-all hover:opacity-80 ${isDark ? 'bg-indigo-900/20 border-indigo-800/40' : 'bg-indigo-50 border-indigo-100'}`}
+              onClick={() => { setWhatsappAutoOpen(false); setWaMsgSettingsOpen(true); }}>
+              <Settings2 className="h-4 w-4 text-indigo-500 flex-shrink-0" />
+              <div className="flex-1">
+                <p className={`text-xs font-semibold ${isDark ? 'text-indigo-300' : 'text-indigo-700'}`}>Customise Message Template</p>
+                <p className={`text-[11px] ${isDark ? 'text-indigo-400/70' : 'text-indigo-500/70'}`}>Edit sender name, greeting, footer text & more</p>
+              </div>
+              <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${isDark ? 'bg-indigo-800/60 text-indigo-300' : 'bg-indigo-100 text-indigo-600'}`}>Settings →</span>
+            </div>
 
-            <div className="px-6 pb-6 space-y-5">
+            <div className="px-6 pb-6 space-y-5 mt-4">
               {/* Automation toggle */}
               <div className={`rounded-xl p-4 border ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
                 <div className="flex items-center justify-between mb-1">
@@ -2803,7 +3013,7 @@ export default function DSCRegister() {
                     className="flex flex-col items-center gap-1.5 p-3 rounded-xl text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                     style={{ background: 'linear-gradient(135deg,#f97316,#ea580c)', color: '#fff' }}>
                     <Clock className="h-4 w-4" />
-                    Alert Expiring 7d
+                    Alert Expiring 7 Days
                     <span className="text-[10px] opacity-80">({expiring7DSC.length} DSC)</span>
                   </button>
                   <button onClick={() => {
