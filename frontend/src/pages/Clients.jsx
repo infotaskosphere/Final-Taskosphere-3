@@ -29,6 +29,8 @@ import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
 import ClientPortalManager from '@/components/ClientPortalManager';
 import DSCLinkerSection from '@/components/DSCLinkerSection';
 import { format, startOfDay, differenceInDays } from 'date-fns';
+import WhatsAppSendDialog from '@/components/ui/WhatsAppSendDialog';
+import { buildClientMessage, getWASettings } from '@/hooks/useWhatsApp';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -4555,6 +4557,21 @@ export default function Clients() {
     </div>
   </DialogContent>
 </Dialog>
+
+      {/* WHATSAPP CLIENT DIALOG */}
+      {waClient && (
+        <WhatsAppSendDialog
+          open={waDialogOpen}
+          onClose={() => { setWaDialogOpen(false); setWaClient(null); }}
+          phone={waClient.phone || ''}
+          entityName={waClient.company_name || ''}
+          message={buildClientMessage(waClient, 'We would like to connect with you regarding your compliance requirements.', getWASettings())}
+          title="Send WhatsApp to Client"
+          subtitle={waClient.company_name}
+          isDark={isDark}
+          canSendScreenshot={false}
+        />
+      )}
 
       {/* MDS PREVIEW DIALOG */}
       <Dialog open={mdsPreviewOpen} onOpenChange={(open) => { if (!open) { setMdsPreviewOpen(false); setMdsData(null); setMdsForm(null); } }}>
