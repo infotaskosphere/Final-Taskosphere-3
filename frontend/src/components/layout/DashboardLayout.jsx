@@ -7,8 +7,8 @@ import {
   Users, LogOut, Menu, Calendar, Activity, ChevronDown,
   PanelLeftClose, PanelLeftOpen, Target, Sun, Moon, MapPin,
   Settings, Mail, Receipt, X, KeyRound, BrainCircuit,
-  CreditCard, Fingerprint, Bell, Shield, ShieldCheck, ArrowLeftRight,
-  Building2, MessageSquare,
+  CreditCard, Fingerprint, Bell, Shield, ShieldCheck, ArrowLeftRight, MessageCircle,
+  Building2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -102,10 +102,9 @@ const NAV_GROUPS = [
     dividerLabel: 'Settings',
     items: [
       // Settings — <Protected> routes, visible to all roles
-      { path: '/settings/email',     icon: Mail,           label: 'Email Accounts'    },
-      { path: '/settings/general',   icon: Settings,       label: 'General Settings'  },
-      // WhatsApp Settings — admin always, others only with can_manage_whatsapp
-      { path: '/settings/whatsapp',  icon: MessageSquare,  label: 'WhatsApp Settings', permission: 'can_manage_whatsapp' },
+      { path: '/settings/email',   icon: Mail,     label: 'Email Accounts'   },
+      { path: '/settings/general', icon: Settings, label: 'General Settings' },
+      { path: '/settings/whatsapp', icon: MessageCircle, label: 'WhatsApp Settings' },
     ],
   },
 ];
