@@ -1204,6 +1204,7 @@ export default function DSCRegister() {
   const [editMovementData, setEditMovementData] = useState({ movement_type: 'IN', person_name: '', notes: '' });
 
   const shareAreaRef = useRef(null);
+  const cardCaptureRef = useRef(null); // captures ONLY the card body (no buttons)
 
   // ── USB state ──────────────────────────────────────────────────────────────
   const [usbPromptOpen, setUsbPromptOpen] = useState(false);
@@ -1252,69 +1253,94 @@ export default function DSCRegister() {
   };
 
   // ── Share handler ─────────────────────────────────────────────────────────
-  const handleShare = async (method) => {
-    if (!shareAreaRef.current || !selectedDSC) return;
+  // ── Capture the card (content only, no buttons) ───────────────────────────
+  const captureCard = async () => {
+    const el = cardCaptureRef.current || shareAreaRef.current;
+    if (!el) throw new Error('No card element');
+    const canvas = await html2canvas(el, {
+      backgroundColor: isDark ? '#0f172a' : '#ffffff',
+      scale: 2,
+      useCORS: true,
+      logging: false,
+      // Ensure full width — no clipping
+      width: el.scrollWidth,
+      height: el.scrollHeight,
+      windowWidth: el.scrollWidth,
+    });
+    return canvas;
+  };
+
+  // ── Share the screenshot: native share → WA web fallback ─────────────────
+  const shareScreenshotToWhatsApp = async (dsc) => {
     setSharing(true);
     try {
-      const canvas = await html2canvas(shareAreaRef.current, {
-        backgroundColor: isDark ? '#0f172a' : '#ffffff',
-        scale: 2,
-        useCORS: true,
-      });
-      const summaryText = buildSummaryText(selectedDSC);
-      const safeName = (selectedDSC.holder_name || 'DSC').replace(/[^a-z0-9]/gi, '_');
+      const canvas = await captureCard();
+      const safeName = (dsc.holder_name || 'DSC').replace(/[^a-z0-9]/gi, '_');
       const fileName = `DSC_${safeName}.png`;
-      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+      const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+      if (!blob) throw new Error('empty blob');
+      const file = new File([blob], fileName, { type: 'image/png' });
+      const alertText = buildExpiryAlertText(dsc, waMsgSettings);
 
-      if (method === 'whatsapp') {
-        const file = blob ? new File([blob], fileName, { type: 'image/png' }) : null;
-        if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
-          try {
-            await navigator.share({ files: [file], title: `DSC — ${selectedDSC.holder_name}`, text: summaryText });
-            toast.success('Opened share sheet');
-            return;
-          } catch (err) {
-            if (err?.name === 'AbortError') return;
-          }
+      // Mobile: native OS share sheet (Android Chrome, Safari iOS)
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: `DSC Alert — ${dsc.holder_name}`, text: alertText });
+          toast.success('Shared via WhatsApp ✓');
+          return;
+        } catch (e) {
+          if (e?.name === 'AbortError') return; // user cancelled
+          // fall through to desktop
         }
-        if (blob) {
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.download = fileName; link.href = url; link.click();
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-        }
-        try { await navigator.clipboard?.writeText(summaryText); toast.success('Image downloaded & details copied. Paste in WhatsApp ✓'); }
-        catch { toast.success('Image downloaded. Attach it in WhatsApp.'); }
-        window.open(`https://wa.me/?text=${encodeURIComponent(summaryText)}`, '_blank');
-        return;
       }
-      if (method === 'email') {
-        if (blob) {
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.download = fileName; link.href = url; link.click();
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-        }
-        window.location.href = `mailto:?subject=${encodeURIComponent('DSC Certificate Details — ' + selectedDSC.holder_name)}&body=${encodeURIComponent(summaryText)}`;
-        return;
-      }
-      if (method === 'download') {
-        const dataUrl = canvas.toDataURL('image/png');
-        const link = document.createElement('a');
-        link.download = fileName; link.href = dataUrl; link.click();
-        toast.success('Screenshot downloaded');
-        return;
-      }
-      if (method === 'copy') {
-        try { await navigator.clipboard.writeText(summaryText); toast.success('DSC details copied to clipboard'); }
-        catch { toast.error('Could not copy to clipboard'); }
-        return;
-      }
+
+      // Desktop: download image + open wa.me
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.download = fileName; a.href = url; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      try { await navigator.clipboard?.writeText(alertText); } catch { /* silent */ }
+      const ph = dsc?.mobile?.replace(/[\s\-\+]/g, '');
+      const phone = ph && ph.replace(/\D/g,'').length >= 10 ? (ph.startsWith('91') ? ph : '91' + ph) : '';
+      window.open(phone ? `https://wa.me/${phone}?text=${encodeURIComponent(alertText)}` : `https://wa.me/?text=${encodeURIComponent(alertText)}`, '_blank');
+      toast.success('Screenshot downloaded — attach it in WhatsApp chat');
     } catch (err) {
-      console.error('Share failed:', err);
-      toast.error('Failed to capture / share. Please try again.');
+      console.error('Screenshot share error:', err);
+      toast.error('Screenshot failed. Please try again.');
     } finally {
       setSharing(false);
+    }
+  };
+
+  // ── Download screenshot only ──────────────────────────────────────────────
+  const downloadScreenshot = async (dsc) => {
+    setSharing(true);
+    try {
+      const canvas = await captureCard();
+      const safeName = (dsc.holder_name || 'DSC').replace(/[^a-z0-9]/gi, '_');
+      const a = document.createElement('a');
+      a.download = `DSC_${safeName}.png`;
+      a.href = canvas.toDataURL('image/png');
+      a.click();
+      toast.success('Screenshot downloaded');
+    } catch (err) {
+      toast.error('Screenshot failed');
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  const handleShare = async (method) => {
+    if (!selectedDSC) return;
+    if (method === 'whatsapp') { await shareScreenshotToWhatsApp(selectedDSC); return; }
+    if (method === 'download') { await downloadScreenshot(selectedDSC); return; }
+    if (method === 'email') {
+      const summaryText = buildSummaryText(selectedDSC);
+      window.location.href = `mailto:?subject=${encodeURIComponent('DSC Certificate Details — ' + selectedDSC.holder_name)}&body=${encodeURIComponent(summaryText)}`;
+      return;
+    }
+    if (method === 'copy') {
+      try { await navigator.clipboard.writeText(buildSummaryText(selectedDSC)); toast.success('DSC details copied to clipboard'); }
+      catch { toast.error('Could not copy to clipboard'); }
     }
   };
 
@@ -1334,9 +1360,11 @@ export default function DSCRegister() {
   useEffect(() => { setCurrentPageIn(1); setCurrentPageOut(1); setCurrentPageExpired(1); setCurrentPageExpiring(1); }, [sortOrder, searchQuery]);
 
   // ── WhatsApp alert handlers ───────────────────────────────────────────────
+  // ── WhatsApp alert handlers ───────────────────────────────────────────────
+  // Row WA button: open the detail card — all share actions are in the footer
   const handleWhatsAppAlert = (dsc) => {
-    // Show choice: send message or send screenshot
-    setShareChoiceDialog(dsc);
+    setSelectedDSC(dsc);
+    setLogDialogOpen(true);
   };
 
   const sendWhatsAppMessage = (dsc, phone) => {
@@ -1345,98 +1373,10 @@ export default function DSCRegister() {
     toast.success(`WhatsApp opened for ${dsc.holder_name}`);
   };
 
-  const handleWhatsAppChoice = async (choice, dsc) => {
-    setShareChoiceDialog(null);
-
-    if (choice === 'screenshot') {
-      // ── Direct screenshot → WhatsApp share ──────────────────────────────
-      // We need the DSC card rendered so html2canvas can capture it.
-      // Strategy: open the detail dialog, wait for paint, capture, share.
-      setSelectedDSC(dsc);
-      setLogDialogOpen(true);
-
-      // Wait for the dialog DOM to paint (two rAF ticks + 350 ms for animation)
-      await new Promise(resolve => {
-        requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 380)));
-      });
-
-      const cardEl = shareAreaRef.current;
-      if (!cardEl) {
-        toast.error('Could not find DSC card to capture.');
-        return;
-      }
-
-      setSharing(true);
-      try {
-        const canvas = await html2canvas(cardEl, {
-          backgroundColor: isDark ? '#0f172a' : '#ffffff',
-          scale: 2,
-          useCORS: true,
-          logging: false,
-        });
-
-        const safeName = (dsc.holder_name || 'DSC').replace(/[^a-z0-9]/gi, '_');
-        const fileName = `DSC_${safeName}.png`;
-        const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
-        if (!blob) throw new Error('Canvas blob empty');
-
-        const file = new File([blob], fileName, { type: 'image/png' });
-        const alertText = buildExpiryAlertText(dsc, waMsgSettings);
-
-        // Try native Web Share API (works on Android Chrome / mobile)
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          try {
-            await navigator.share({
-              files: [file],
-              title: `DSC Alert — ${dsc.holder_name}`,
-              text: alertText,
-            });
-            toast.success('Shared via WhatsApp');
-            return;
-          } catch (err) {
-            if (err?.name === 'AbortError') return; // user cancelled — do nothing
-            // Fall through to desktop fallback
-          }
-        }
-
-        // Desktop fallback: download image + open WA Web with text
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.download = fileName;
-        link.href = url;
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(url), 1500);
-
-        // Copy text to clipboard so user can paste it
-        try { await navigator.clipboard?.writeText(alertText); } catch { /* silent */ }
-
-        // Build phone-specific WA link if available
-        const ph = dsc?.mobile?.replace(/[\s\-\+]/g, '');
-        const phone = ph && ph.replace(/\D/g,'').length >= 10
-          ? (ph.startsWith('91') ? ph : '91' + ph)
-          : '';
-
-        window.open(
-          phone
-            ? `https://wa.me/${phone}?text=${encodeURIComponent(alertText)}`
-            : `https://wa.me/?text=${encodeURIComponent(alertText)}`,
-          '_blank'
-        );
-
-        toast.success('Screenshot downloaded & WhatsApp opened — attach the image in your chat');
-      } catch (err) {
-        console.error('Screenshot share failed:', err);
-        toast.error('Screenshot failed. Try the Screenshot button in the DSC card.');
-      } finally {
-        setSharing(false);
-      }
-      return;
-    }
-
-    // ── Text message path ────────────────────────────────────────────────────
+  // Send plain text alert from footer
+  const handleSendTextAlert = (dsc) => {
     const ph = dsc?.mobile?.replace(/\s|-|\+/g, '');
     const phone = ph ? (ph.startsWith('91') ? ph : '91' + ph) : null;
-
     if (phone && phone.replace(/\D/g,'').length >= 10) {
       sendWhatsAppMessage(dsc, phone);
     } else {
@@ -1449,6 +1389,13 @@ export default function DSCRegister() {
         setWaPhoneDialog(dsc);
       }
     }
+  };
+
+  // Legacy: kept for automation quick-action buttons
+  const handleWhatsAppChoice = (choice, dsc) => {
+    setShareChoiceDialog(null);
+    if (choice === 'screenshot') { shareScreenshotToWhatsApp(dsc); }
+    else { handleSendTextAlert(dsc); }
   };
 
   const handleWhatsAppSendWithPhone = () => {
@@ -2601,6 +2548,8 @@ export default function DSCRegister() {
           </DialogHeader>
 
           <div ref={shareAreaRef} className={`rounded-2xl overflow-hidden border shadow-2xl ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+            {/* ── Card body — captured by html2canvas (ref=cardCaptureRef) ── */}
+            <div ref={cardCaptureRef}>
             {(() => {
               const daysLeft = selectedDSC ? Math.ceil((new Date(selectedDSC.expiry_date) - new Date()) / (1000 * 60 * 60 * 24)) : 999;
               const isUrgent = daysLeft <= 7;
@@ -2621,7 +2570,7 @@ export default function DSCRegister() {
                   <p className="text-[10px] font-bold tracking-[0.18em] text-white/60 uppercase">
                     {isExpiredDSC ? 'DSC EXPIRED' : isUrgent ? 'DSC EXPIRING SOON' : 'DSC Details'}
                   </p>
-                  <h2 className="text-xl font-bold text-white truncate">{selectedDSC?.holder_name || '—'}</h2>
+                  <h2 className="text-xl font-bold text-white break-words leading-tight">{selectedDSC?.holder_name || '—'}</h2>
                   {isUrgent && (
                     <p className="text-white/80 text-xs mt-0.5 font-semibold">
                       {isExpiredDSC ? `Expired on ${format(new Date(selectedDSC.expiry_date), 'dd MMM yyyy')}` : `Expires in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`}
@@ -2775,57 +2724,50 @@ export default function DSCRegister() {
               </div>
             </div>
 
-            <div className={`px-6 py-4 border-t flex gap-2 print:hidden ${isDark ? 'border-slate-700 bg-slate-900/50' : 'border-slate-100 bg-slate-50/50'}`}>
-              {/* WhatsApp — shows message vs screenshot choice */}
-              <Button size="sm" variant="outline" disabled={sharing}
-                onClick={() => handleWhatsAppAlert(selectedDSC)}
-                className="flex-1 gap-1.5 text-emerald-600 border-emerald-200 hover:bg-emerald-50">
-                {sharing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageCircle className="h-3.5 w-3.5" />}
-                WhatsApp
-              </Button>
-              {/* Screenshot — capture + native share sheet */}
-              <Button size="sm" variant="outline" disabled={sharing}
-                onClick={async () => {
-                  if (!shareAreaRef.current || !selectedDSC) return;
-                  setSharing(true);
-                  try {
-                    const canvas = await html2canvas(shareAreaRef.current, {
-                      backgroundColor: isDark ? '#0f172a' : '#ffffff',
-                      scale: 2, useCORS: true, logging: false,
-                    });
-                    const safeName = (selectedDSC.holder_name || 'DSC').replace(/[^a-z0-9]/gi, '_');
-                    const fileName = `DSC_${safeName}.png`;
-                    const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
-                    if (!blob) throw new Error('empty blob');
-                    const file = new File([blob], fileName, { type: 'image/png' });
-                    const alertText = buildExpiryAlertText(selectedDSC, waMsgSettings);
-                    // Try native share (Android / mobile Chrome)
-                    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                      try {
-                        await navigator.share({ files: [file], title: `DSC — ${selectedDSC.holder_name}`, text: alertText });
-                        toast.success('Shared successfully');
-                        return;
-                      } catch (e) { if (e?.name === 'AbortError') return; }
-                    }
-                    // Desktop: download
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a'); a.download = fileName; a.href = url; a.click();
-                    setTimeout(() => URL.revokeObjectURL(url), 1500);
-                    toast.success('Screenshot downloaded — attach it in WhatsApp');
-                  } catch (err) {
-                    console.error(err); toast.error('Screenshot failed. Please try again.');
-                  } finally { setSharing(false); }
-                }}
-                className="flex-1 gap-1.5 text-slate-700 border-slate-200 hover:bg-slate-100">
-                {sharing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-                Screenshot
-              </Button>
-              <Button size="sm" variant="outline" disabled={sharing} onClick={() => handleShare('email')} className="gap-1.5 text-blue-600 border-blue-200 hover:bg-blue-50">
-                <Mail className="h-3.5 w-3.5" />
-              </Button>
-              <Button size="sm" variant="outline" disabled={sharing} onClick={() => handleShare('copy')} className="gap-1.5 text-indigo-600 border-indigo-200 hover:bg-indigo-50">
-                <Share2 className="h-3.5 w-3.5" />
-              </Button>
+            </div>{/* end cardCaptureRef */}
+
+            {/* ── Action footer — NOT captured in screenshot ── */}
+            <div className={`px-4 py-3 border-t print:hidden ${isDark ? 'border-slate-700 bg-slate-900/50' : 'border-slate-100 bg-slate-50/50'}`}>
+              {/* Primary row: Send Message | Screenshot → WA */}
+              <div className="flex gap-2 mb-2">
+                <button
+                  disabled={sharing}
+                  onClick={() => handleSendTextAlert(selectedDSC)}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95 disabled:opacity-50"
+                  style={{ background: 'linear-gradient(135deg,#25d366,#128c7e)', color: '#fff', boxShadow: '0 2px 8px rgba(37,211,102,0.30)' }}>
+                  {sharing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageCircle className="h-3.5 w-3.5" />}
+                  Send Message
+                </button>
+                <button
+                  disabled={sharing}
+                  onClick={() => shareScreenshotToWhatsApp(selectedDSC)}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold border-2 transition-all active:scale-95 disabled:opacity-50"
+                  style={{ borderColor: '#25d366', color: '#16a34a', background: isDark ? 'rgba(37,211,102,0.08)' : '#f0fdf4' }}>
+                  {sharing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                  Screenshot → WA
+                </button>
+              </div>
+              {/* Secondary row: Download | Email | Copy */}
+              <div className="flex gap-2">
+                <button
+                  disabled={sharing}
+                  onClick={() => downloadScreenshot(selectedDSC)}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold border transition-all active:scale-95 disabled:opacity-50 ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-100'}`}>
+                  <Download className="h-3.5 w-3.5" />Download
+                </button>
+                <button
+                  disabled={sharing}
+                  onClick={() => handleShare('email')}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold border transition-all active:scale-95 disabled:opacity-50 ${isDark ? 'border-slate-600 text-blue-400 hover:bg-slate-800' : 'border-blue-200 text-blue-600 hover:bg-blue-50'}`}>
+                  <Mail className="h-3.5 w-3.5" />Email
+                </button>
+                <button
+                  disabled={sharing}
+                  onClick={() => handleShare('copy')}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold border transition-all active:scale-95 disabled:opacity-50 ${isDark ? 'border-slate-600 text-indigo-400 hover:bg-slate-800' : 'border-indigo-200 text-indigo-600 hover:bg-indigo-50'}`}>
+                  <Share2 className="h-3.5 w-3.5" />Copy
+                </button>
+              </div>
             </div>
           </div>
         </DialogContent>
