@@ -317,6 +317,8 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved, clients = [] }) {
     serial_number:   '',
     associated_with: '',
     entity_type:     'proprietor',
+    mobile:          '',
+    email:           '',
     issue_date:      todayStr(),
     expiry_date:     defaultExpiry(),
     notes:           device ? [
@@ -529,6 +531,8 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved, clients = [] }) {
         serial_number:   form.serial_number,
         associated_with: form.associated_with,
         entity_type:     form.entity_type === 'other' ? (form.entity_type_other || 'other') : form.entity_type,
+        mobile:          form.mobile,
+        email:           form.email,
         issue_date:      new Date(form.issue_date).toISOString(),
         expiry_date:     new Date(form.expiry_date).toISOString(),
         notes:           form.notes,
@@ -926,6 +930,34 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved, clients = [] }) {
                   </label>
                   <input style={inputStyle} type="text" placeholder="e.g. 12345678" value={form.dsc_password} onChange={e => set('dsc_password', e.target.value)} />
                 </div>
+                {/* ── Mobile & Email — needed for WhatsApp/email alerts ── */}
+                <div>
+                  <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Phone style={{ width: 10, height: 10 }} />
+                    Mobile No. <span style={{ color: '#25d366', fontSize: 9, fontWeight: 700, marginLeft: 2 }}>for WhatsApp</span>
+                  </label>
+                  <input
+                    style={inputStyle}
+                    type="tel"
+                    placeholder="e.g. 9876543210"
+                    value={form.mobile}
+                    onChange={e => set('mobile', e.target.value.replace(/[^0-9+\s-]/g, ''))}
+                    maxLength={15}
+                  />
+                </div>
+                <div>
+                  <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Mail style={{ width: 10, height: 10 }} />
+                    Email ID <span style={{ color: '#3b82f6', fontSize: 9, fontWeight: 700, marginLeft: 2 }}>for alerts</span>
+                  </label>
+                  <input
+                    style={inputStyle}
+                    type="email"
+                    placeholder="e.g. holder@email.com"
+                    value={form.email}
+                    onChange={e => set('email', e.target.value)}
+                  />
+                </div>
                 <div>
                   <label style={labelStyle}>Issue Date <span style={{ color: '#ef4444' }}>*</span></label>
                   <input
@@ -960,6 +992,48 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved, clients = [] }) {
                       autoFocus
                     />
                   )}
+                </div>
+              </div>
+
+              {/* ── Mobile & Email — full width row ── */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                <div>
+                  <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Phone style={{ width: 10, height: 10 }} />
+                    Mobile Number <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <span style={{ ...inputStyle, width: 44, flexShrink: 0, textAlign: 'center', color: labelClr, fontSize: 12, fontWeight: 700, padding: '7px 6px' }}>+91</span>
+                    <input
+                      style={{ ...inputStyle, flex: 1, borderColor: form.mobile && form.mobile.replace(/\D/g,'').length < 10 ? '#f97316' : (form.mobile ? '#10b981' : inputBdr) }}
+                      type="tel"
+                      placeholder="10-digit mobile number"
+                      maxLength={15}
+                      value={form.mobile}
+                      onChange={e => set('mobile', e.target.value.replace(/[^0-9+\s-]/g, ''))}
+                    />
+                  </div>
+                  {form.mobile && form.mobile.replace(/\D/g,'').length < 10 && (
+                    <p style={{ margin: '3px 0 0', fontSize: 10, color: '#f97316' }}>Enter a valid 10-digit number</p>
+                  )}
+                  <p style={{ margin: '3px 0 0', fontSize: 10, color: labelClr }}>Used to send WhatsApp alerts directly</p>
+                </div>
+                <div>
+                  <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Mail style={{ width: 10, height: 10 }} />
+                    Email Address
+                  </label>
+                  <input
+                    style={{ ...inputStyle, borderColor: form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email) ? '#f97316' : (form.email ? '#10b981' : inputBdr) }}
+                    type="email"
+                    placeholder="holder@example.com"
+                    value={form.email}
+                    onChange={e => set('email', e.target.value)}
+                  />
+                  {form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email) && (
+                    <p style={{ margin: '3px 0 0', fontSize: 10, color: '#f97316' }}>Enter a valid email address</p>
+                  )}
+                  <p style={{ margin: '3px 0 0', fontSize: 10, color: labelClr }}>Used to send expiry alert via email</p>
                 </div>
               </div>
 
@@ -1094,7 +1168,7 @@ export default function DSCRegister() {
   const [formData, setFormData] = useState({
     holder_name: '', dsc_type: '', dsc_password: '', serial_number: '',
     associated_with: '', entity_type: 'proprietor', entity_type_other: '',
-    _assocOther: false,
+    _assocOther: false, mobile: '', email: '',
     issue_date: '', expiry_date: '', notes: '',
   });
   const [movementData, setMovementData]         = useState({ movement_type: 'IN', person_name: '', notes: '' });
@@ -1232,15 +1306,22 @@ export default function DSCRegister() {
 
   // ── WhatsApp alert handlers ───────────────────────────────────────────────
   const handleWhatsAppAlert = (dsc) => {
-    // If DSC has a phone number stored in notes, use it directly; otherwise prompt
-    const phoneMatch = dsc.notes?.match(/(?:phone|mobile|mob|ph)[:\s]*([+\d\s\-]{8,15})/i);
-    if (phoneMatch) {
-      const phone = phoneMatch[1].replace(/\s|-/g, '');
+    // Use stored mobile field first, then fall back to phone in notes
+    if (dsc.mobile && dsc.mobile.replace(/\D/g,'').length >= 10) {
+      const phone = dsc.mobile.replace(/\s|-|\+/g, '');
       const msg = buildExpiryAlertText(dsc);
-      window.open(`https://wa.me/${phone.startsWith('+') ? phone.slice(1) : phone}?text=${encodeURIComponent(msg)}`, '_blank');
+      window.open(`https://wa.me/${phone.startsWith('91') ? phone : '91' + phone}?text=${encodeURIComponent(msg)}`, '_blank');
+      toast.success(`WhatsApp opened for ${dsc.holder_name}`);
     } else {
-      setWaPhoneNumber('');
-      setWaPhoneDialog(dsc);
+      const phoneMatch = dsc.notes?.match(/(?:phone|mobile|mob|ph)[:\s]*([+\d\s\-]{8,15})/i);
+      if (phoneMatch) {
+        const phone = phoneMatch[1].replace(/\s|-/g, '');
+        const msg = buildExpiryAlertText(dsc);
+        window.open(`https://wa.me/${phone.startsWith('+') ? phone.slice(1) : phone}?text=${encodeURIComponent(msg)}`, '_blank');
+      } else {
+        setWaPhoneNumber('');
+        setWaPhoneDialog(dsc);
+      }
     }
   };
 
@@ -1476,6 +1557,8 @@ export default function DSCRegister() {
         serial_number:   formData.serial_number || '',
         associated_with: formData.associated_with,
         entity_type:     formData.entity_type === 'other' ? (formData.entity_type_other || 'other') : formData.entity_type,
+        mobile:          formData.mobile || '',
+        email:           formData.email  || '',
         notes:           formData.notes,
         issue_date:      new Date(formData.issue_date).toISOString(),
         expiry_date:     new Date(formData.expiry_date).toISOString(),
@@ -1580,6 +1663,8 @@ export default function DSCRegister() {
       entity_type:     isKnown ? dsc.entity_type : (dsc.entity_type ? 'other' : 'proprietor'),
       entity_type_other: isKnown ? '' : (dsc.entity_type || ''),
       _assocOther:     !!isAssocOther,
+      mobile:          dsc.mobile || '',
+      email:           dsc.email  || '',
       issue_date:      format(new Date(dsc.issue_date), 'yyyy-MM-dd'),
       expiry_date:     format(new Date(dsc.expiry_date), 'yyyy-MM-dd'),
       notes:           dsc.notes || '',
@@ -1601,7 +1686,7 @@ export default function DSCRegister() {
   };
 
   const resetForm = () => {
-    setFormData({ holder_name: '', dsc_type: '', dsc_password: '', serial_number: '', associated_with: '', entity_type: 'proprietor', entity_type_other: '', _assocOther: false, issue_date: '', expiry_date: '', notes: '' });
+    setFormData({ holder_name: '', dsc_type: '', dsc_password: '', serial_number: '', associated_with: '', entity_type: 'proprietor', entity_type_other: '', _assocOther: false, mobile: '', email: '', issue_date: '', expiry_date: '', notes: '' });
     setEditingDSC(null);
   };
 
@@ -1784,6 +1869,41 @@ export default function DSCRegister() {
           <Label htmlFor="expiry_date">Expiry Date <span className="text-red-500">*</span></Label>
           <Input id="expiry_date" type="date" value={formData.expiry_date}
             onChange={e => setFormData({ ...formData, expiry_date: e.target.value })} required data-testid="dsc-expiry-date-input" />
+        </div>
+      </div>
+      {/* ── Contact Details for WhatsApp & Email alerts ── */}
+      <div className={`rounded-xl border p-4 space-y-3 ${isDark ? 'bg-emerald-950/20 border-emerald-800/40' : 'bg-emerald-50 border-emerald-200'}`}>
+        <div className="flex items-center gap-2 mb-1">
+          <MessageCircle className="h-4 w-4 text-emerald-600" />
+          <p className={`text-xs font-bold uppercase tracking-widest ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>Contact Details for Alerts</p>
+          <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${isDark ? 'bg-emerald-900/50 text-emerald-300' : 'bg-emerald-100 text-emerald-600'}`}>WhatsApp & Email</span>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="mobile" className="flex items-center gap-1.5 text-sm">
+              <Phone className="h-3.5 w-3.5" />Mobile Number <span className="text-red-500">*</span>
+            </Label>
+            <div className="flex gap-2">
+              <span className={`flex items-center justify-center px-3 rounded-lg border text-xs font-bold flex-shrink-0 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-600'}`}>+91</span>
+              <Input id="mobile" type="tel" placeholder="10-digit mobile" maxLength={15}
+                value={formData.mobile}
+                onChange={e => setFormData({ ...formData, mobile: e.target.value.replace(/[^0-9+\s-]/g, '') })}
+                className={formData.mobile && formData.mobile.replace(/\D/g,'').length >= 10 ? 'border-emerald-400 focus:border-emerald-500' : ''}
+                data-testid="dsc-mobile-input" />
+            </div>
+            <p className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Used to send WhatsApp alerts directly</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="email" className="flex items-center gap-1.5 text-sm">
+              <Mail className="h-3.5 w-3.5" />Email Address
+            </Label>
+            <Input id="email" type="email" placeholder="holder@example.com"
+              value={formData.email}
+              onChange={e => setFormData({ ...formData, email: e.target.value })}
+              className={formData.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email) ? 'border-emerald-400 focus:border-emerald-500' : ''}
+              data-testid="dsc-email-input" />
+            <p className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Used to send expiry alert via email</p>
+          </div>
         </div>
       </div>
       <div className="space-y-2">
@@ -2422,6 +2542,38 @@ export default function DSCRegister() {
                     </div>
                   </div>
                 )}
+                {(selectedDSC?.mobile || selectedDSC?.email) && (
+                  <div className={`flex items-start gap-3 rounded-xl p-3 ${isDark ? 'bg-emerald-950/30 border border-emerald-800/30' : 'bg-emerald-50 border border-emerald-100'}`}>
+                    <div className={`h-7 w-7 rounded-md flex items-center justify-center mt-0.5 flex-shrink-0 ${isDark ? 'bg-emerald-900/50' : 'bg-emerald-100'}`}>
+                      <MessageCircle className="h-3.5 w-3.5 text-emerald-500" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-bold tracking-[0.15em] text-emerald-500 uppercase mb-1.5">Contact for Alerts</p>
+                      {selectedDSC?.mobile && (
+                        <div className="flex items-center gap-2 mb-1">
+                          <Phone className="h-3 w-3 text-slate-400 flex-shrink-0" />
+                          <button
+                            onClick={() => { const msg = buildExpiryAlertText(selectedDSC); const ph = selectedDSC.mobile.replace(/\s|-|\+/g,''); window.open(`https://wa.me/${ph.startsWith('91')?ph:'91'+ph}?text=${encodeURIComponent(msg)}`, '_blank'); }}
+                            className="text-sm font-semibold text-emerald-600 hover:underline"
+                            title="Click to send WhatsApp alert">
+                            {selectedDSC.mobile}
+                          </button>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${isDark ? 'bg-emerald-900/60 text-emerald-400' : 'bg-emerald-100 text-emerald-600'}`}>WhatsApp →</span>
+                        </div>
+                      )}
+                      {selectedDSC?.email && (
+                        <div className="flex items-center gap-2">
+                          <Mail className="h-3 w-3 text-slate-400 flex-shrink-0" />
+                          <a href={`mailto:${selectedDSC.email}?subject=DSC Expiry Alert — ${selectedDSC.holder_name}&body=${encodeURIComponent(buildExpiryAlertText(selectedDSC))}`}
+                            className="text-sm font-semibold text-blue-500 hover:underline truncate" title="Click to send email alert">
+                            {selectedDSC.email}
+                          </a>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold flex-shrink-0 ${isDark ? 'bg-blue-900/40 text-blue-400' : 'bg-blue-50 text-blue-600'}`}>Email →</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <div className="flex items-start gap-3">
                   <div className={`h-7 w-7 rounded-md flex items-center justify-center mt-0.5 ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
                     <Clock className="h-3.5 w-3.5 text-slate-500" />
@@ -2545,7 +2697,7 @@ export default function DSCRegister() {
                 autoFocus
               />
             </div>
-            <p className={`text-[11px] mb-4 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>💡 Tip: Add phone numbers in DSC notes (e.g. "Phone: 9876543210") to skip this step next time.</p>
+            <p className={`text-[11px] mb-4 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>💡 Tip: Save the mobile number in the DSC record (Mobile Number field) to skip this step next time and enable one-click WhatsApp alerts.</p>
             <div className="flex gap-2">
               <button onClick={() => setWaPhoneDialog(null)}
                 className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
