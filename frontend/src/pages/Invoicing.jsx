@@ -5303,7 +5303,6 @@ const fetchAll = useCallback(async () => {
       <GSTReportsModal open={gstOpen} onClose={() => setGstOpen(false)} invoices={invoices} companies={companies} clients={clients} isDark={isDark} />
       {settingsOpen && <InvoiceSettings open={settingsOpen} onClose={() => setSettingsOpen(false)} companies={companies} isDark={isDark} />}
       {ledgerOpen && <PartyLedger open={ledgerOpen} onClose={() => setLedgerOpen(false)} invoices={invoices} clients={clients} companies={companies} isDark={isDark} initialClient={ledgerClient} />}
-    </div>
       {/* WHATSAPP INVOICE DIALOG */}
       {waInvoice && (
         <WhatsAppSendDialog
@@ -5318,6 +5317,7 @@ const fetchAll = useCallback(async () => {
           canSendScreenshot={true}
         />
       )}
+    </div>
     );
 }
 
