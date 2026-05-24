@@ -4587,6 +4587,8 @@ function Invoicing() {
   const [outstandingPage, setOutstandingPage] = useState(1);
   const [receivedPage, setReceivedPage] = useState(1);
   const [listViewFilter, setListViewFilter] = useState('all'); // 'all' | 'outstanding' | 'received'
+  const [waInvoice, setWaInvoice] = useState(null);
+  const [waDialogOpen, setWaDialogOpen] = useState(false);
 
   // ── B. ALL useRef ─────────────────────────────────────────────────────────
   const iframeRef = useRef(null);
