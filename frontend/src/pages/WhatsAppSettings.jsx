@@ -1,3 +1,107 @@
+
+// Global Message Templates Panel
+function GlobalMessageSettings() {
+  const [settings, setSettings] = React.useState(getWASettings);
+  const [saved, setSaved] = React.useState(false);
+  const [preview, setPreview] = React.useState('invoice');
+
+  const update = (key, val) => setSettings(s => ({ ...s, [key]: val }));
+
+  const doSave = () => {
+    saveWASettings(settings);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
+  };
+
+  const buildPreview = () => {
+    const s = settings;
+    const lines = [];
+    if (s.includeGreeting) { lines.push((s.greetingTemplate||'Dear {name},').replace('{name}','Valued Client')); lines.push(''); }
+    if (s.firmName) lines.push('*' + s.firmName + '*' + (s.firmTagline ? ' | ' + s.firmTagline : ''));
+    lines.push('');
+    const previews = {
+      invoice: (s.invoiceTemplate||'').replace('{number}','INV-2024-001').replace('{amount}','25,000.00').replace('{due_date}','31 May 2026').replace('{status}','PENDING'),
+      client:  (s.clientTemplate||'').replace('{name}','Infosys Ltd').replace('{firm}',s.firmName||'Your Firm').replace('{message}','Reminder about pending compliance.'),
+      dsc:     (s.dscTemplate||'').replace('{holder}','John Doe').replace('{expiry}','15 Jun 2026').replace('{days}','22'),
+      password:(s.passwordTemplate||'').replace('{portal}','GST Portal').replace('{username}','user@firm.com').replace('{password}','••••••••'),
+    };
+    lines.push(previews[preview] || '');
+    if (s.includeFooter && s.footerNote) { lines.push(''); lines.push(s.footerNote); }
+    return lines.join('\n');
+  };
+
+  const f = { width:'100%', border:'1px solid #1e3a5f', borderRadius:8, background:'#1a2236', color:'#f0f4f8', fontSize:13, padding:'9px 12px', outline:'none', boxSizing:'border-box', fontFamily:"'DM Sans', system-ui" };
+  const lbl = { color:'#8fa3bf', fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:0.8, marginBottom:5, display:'block' };
+
+  return (
+    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:20 }}>
+      <div style={{ background:'#111827', borderRadius:14, padding:'24px 28px', border:'1px solid #1e3a5f' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16 }}>
+          <Settings size={18} color="#3b82f6"/>
+          <h2 style={{ color:'#f0f4f8', margin:0, fontSize:17, fontWeight:600 }}>Global Message Templates</h2>
+        </div>
+        <p style={{ color:'#8fa3bf', fontSize:13, marginBottom:20 }}>
+          These templates are shared across Clients, Invoicing, DSC, and Password Vault. Changes take effect everywhere immediately.
+        </p>
+        <p style={{ color:'#25D366', fontSize:11, fontWeight:700, marginBottom:10, textTransform:'uppercase', letterSpacing:1 }}>Firm Identity</p>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:16 }}>
+          <div><label style={lbl}>Firm Name</label><input style={f} value={settings.firmName||''} onChange={e=>update('firmName',e.target.value)} placeholder="Your CA Firm" /></div>
+          <div><label style={lbl}>Tagline</label><input style={f} value={settings.firmTagline||''} onChange={e=>update('firmTagline',e.target.value)} placeholder="Trusted Compliance Partner" /></div>
+        </div>
+        <div style={{ display:'flex', gap:20, marginBottom:16 }}>
+          {[{key:'includeGreeting',label:'Include Greeting'},{key:'includeFooter',label:'Include Footer'}].map(({key,label})=>(
+            <label key={key} style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', fontSize:13, color:'#8fa3bf' }}>
+              <div onClick={()=>update(key,!settings[key])} style={{ width:40, height:22, borderRadius:11, background:settings[key]?'#25D366':'#1e3a5f', position:'relative', cursor:'pointer', transition:'background 0.2s' }}>
+                <div style={{ position:'absolute', top:3, left:settings[key]?20:3, width:16, height:16, borderRadius:'50%', background:'#fff', transition:'left 0.2s' }}/>
+              </div>{label}
+            </label>
+          ))}
+        </div>
+        {settings.includeGreeting && <div style={{marginBottom:12}}><label style={lbl}>Greeting (use {'{name}'})</label><input style={f} value={settings.greetingTemplate||''} onChange={e=>update('greetingTemplate',e.target.value)} /></div>}
+        {settings.includeFooter && <div style={{marginBottom:12}}><label style={lbl}>Footer Note</label><input style={f} value={settings.footerNote||''} onChange={e=>update('footerNote',e.target.value)} /></div>}
+        <div style={{marginBottom:12}}><label style={lbl}>Footer note</label></div>
+        <p style={{ color:'#25D366', fontSize:11, fontWeight:700, marginBottom:10, textTransform:'uppercase', letterSpacing:1 }}>Message Templates</p>
+        {[
+          {key:'invoiceTemplate', label:'Invoice Template', vars:'{number} {amount} {due_date} {status}', pk:'invoice'},
+          {key:'clientTemplate',  label:'Client Message',  vars:'{name} {firm} {message}',              pk:'client'},
+          {key:'dscTemplate',     label:'DSC Expiry',      vars:'{holder} {expiry} {days}',             pk:'dsc'},
+          {key:'passwordTemplate',label:'Password Share',  vars:'{portal} {username} {password}',       pk:'password'},
+        ].map(({key,label,vars,pk})=>(
+          <div key={key} style={{marginBottom:14}}>
+            <label style={lbl}>{label} <span style={{color:'#546a82', fontSize:10}}>{vars}</span></label>
+            <textarea style={{...f, minHeight:65, resize:'vertical'}} value={settings[key]||''} onChange={e=>update(key,e.target.value)} onFocus={()=>setPreview(pk)}/>
+          </div>
+        ))}
+        <button onClick={doSave} style={{ width:'100%', padding:'11px 20px', background:saved?'#25D366':'linear-gradient(135deg,#128C7E,#25D366)', color:'#000', border:'none', borderRadius:10, fontSize:14, fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
+          {saved ? <><CheckCircle2 size={16}/> Saved to all pages!</> : <><Save size={16}/> Save Templates</>}
+        </button>
+      </div>
+      <div style={{ background:'#111827', borderRadius:14, padding:'24px 28px', border:'1px solid #1e3a5f' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14 }}>
+          <MessageCircle size={18} color="#25D366"/>
+          <h2 style={{ color:'#f0f4f8', margin:0, fontSize:17, fontWeight:600 }}>Live WhatsApp Preview</h2>
+        </div>
+        <div style={{ display:'flex', gap:6, marginBottom:14, flexWrap:'wrap' }}>
+          {[{key:'invoice',label:'Invoice'},{key:'client',label:'Client'},{key:'dsc',label:'DSC'},{key:'password',label:'Password'}].map(({key,label})=>(
+            <button key={key} onClick={()=>setPreview(key)} style={{ padding:'4px 12px', borderRadius:20, border:'1px solid', borderColor:preview===key?'#25D366':'#1e3a5f', background:preview===key?'rgba(37,211,102,0.15)':'transparent', color:preview===key?'#25D366':'#8fa3bf', cursor:'pointer', fontSize:12, fontWeight:preview===key?600:400 }}>{label}</button>
+          ))}
+        </div>
+        <div style={{ background:'#0b141a', borderRadius:12, padding:16, minHeight:220 }}>
+          <div style={{ background:'#005c4b', borderRadius:'8px 8px 8px 2px', padding:'10px 14px', maxWidth:'85%', fontSize:13, color:'#e9edef', lineHeight:1.6, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>
+            {buildPreview() || 'Configure a template on the left to see preview'}
+          </div>
+          <p style={{ color:'#546a82', fontSize:11, marginTop:8, textAlign:'right' }}>Delivered ✓✓</p>
+        </div>
+        <div style={{ marginTop:14, background:'#1a2236', borderRadius:10, padding:'12px 14px', border:'1px solid #1e3a5f' }}>
+          <p style={{ color:'#8fa3bf', fontSize:12, margin:0, lineHeight:1.5 }}>
+            💡 <strong style={{color:'#f0f4f8'}}>One settings page, all pages synced.</strong> Click any WhatsApp button in Clients, Invoicing, DSC, or PassVault — it uses these templates with real data auto-filled.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /**
  * WhatsAppSettings.jsx
  * 
@@ -15,8 +119,9 @@ import {
   MessageCircle, QrCode, CheckCircle2, XCircle, AlertCircle,
   Loader2, RefreshCw, LogOut, Users, Clock, Send, Shield,
   ChevronDown, ChevronUp, Phone, Eye, BarChart3, Ban,
-  UserCheck, UserX, Wifi, WifiOff, History, Lock,
+  UserCheck, UserX, Wifi, WifiOff, History, Lock, Settings, Save,
 } from "lucide-react";
+import { getWASettings, saveWASettings } from "@/hooks/useWhatsApp";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { format, parseISO } from "date-fns";
@@ -653,6 +758,7 @@ export default function WhatsAppSettings() {
         { id: "access",     label: "User Access", icon: Users },
         { id: "scheduler",  label: "Scheduler",   icon: BarChart3 },
         { id: "history",    label: "Message Log",  icon: History },
+        { id: "templates", label: "Message Templates", icon: Settings },
       ]
     : [
         { id: "access",  label: "My Access",      icon: Shield },
@@ -809,6 +915,11 @@ export default function WhatsAppSettings() {
           {/* SCHEDULER TAB (Admin) */}
           {activeTab === "scheduler" && isAdmin && (
             <SchedulerPanel />
+          )}
+
+          {/* TEMPLATES TAB (Admin) */}
+          {activeTab === 'templates' && isAdmin && (
+            <GlobalMessageSettings />
           )}
 
           {/* HISTORY TAB */}
