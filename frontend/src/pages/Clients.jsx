@@ -2619,6 +2619,8 @@ export default function Clients() {
   const [previewData, setPreviewData]     = useState([]);
   const [previewHeaders, setPreviewHeaders] = useState([]);
   const [previewOpen, setPreviewOpen]     = useState(false);
+  const [waClient, setWaClient]           = useState(null);
+  const [waDialogOpen, setWaDialogOpen]   = useState(false);
 
   // ── Persisted preferences (inlined localStorage — avoids custom hook bundler issues) ──
   const [viewMode, setViewModeRaw] = useState(() => {
@@ -2837,6 +2839,11 @@ export default function Clients() {
   const openWhatsApp = useCallback((phone, name = "") => {
     const cleanPhone = phone?.replace(/\D/g, '') || '';
     window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(`Hello ${name}, this is Manthan Desai's office regarding your services.`)}`, '_blank');
+  }, []);
+
+  const handleWhatsAppClient = useCallback((client) => {
+    setWaClient(client);
+    setWaDialogOpen(true);
   }, []);
 
   // ── AI Duplicate Detection ────────────────────────────────────────────────
