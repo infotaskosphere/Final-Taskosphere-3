@@ -344,3 +344,129 @@ async def trigger_job_manually(job_name: str, current_user: User = Depends(requi
         return {"message": f"Job '{job_name}' completed"}
     except Exception as exc:
         raise HTTPException(500, f"Job failed: {exc}")
+
+
+# ── Scheduled Bulk Send ──────────────────────────────────────────────────────
+
+class WAScheduledRecipient(BaseModel):
+    phone: str
+    message: str
+    client_id: Optional[str] = None
+    client_name: Optional[str] = None
+
+class WAScheduleBulkRequest(BaseModel):
+    recipients: List[WAScheduledRecipient]
+    scheduled_at: str   # ISO datetime string e.g. "2026-05-26T09:00:00"
+    message_template: Optional[str] = None
+    message_type: str = "bulk_scheduled"
+    session_id: Optional[str] = None
+
+
+@router.post("/schedule-bulk")
+async def schedule_bulk_send(body: WAScheduleBulkRequest, current_user: User = Depends(get_current_user)):
+    """Schedule a bulk personalized WhatsApp send at a future datetime."""
+    if not await _has_wa_access(current_user):
+        raise HTTPException(403, "WhatsApp access not granted")
+    db = _db()
+    job_id = f"bulk_{int(_time.time() * 1000)}"
+    job_doc = {
+        "job_id": job_id,
+        "created_by": current_user.id,
+        "created_by_name": current_user.name,
+        "scheduled_at": body.scheduled_at,
+        "message_template": body.message_template,
+        "message_type": body.message_type,
+        "session_id": body.session_id,
+        "recipient_count": len(body.recipients),
+        "recipients": [r.dict() for r in body.recipients],
+        "status": "pending",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db["whatsapp_scheduled_bulk"].insert_one(job_doc)
+    logger.info("Scheduled bulk WA job %s for %s (%d recipients)", job_id, body.scheduled_at, len(body.recipients))
+    return {"job_id": job_id, "scheduled_at": body.scheduled_at, "recipient_count": len(body.recipients)}
+
+
+@router.get("/scheduled-bulk")
+async def list_scheduled_bulk(current_user: User = Depends(get_current_user)):
+    """List pending scheduled bulk jobs."""
+    db = _db()
+    query = {"status": "pending"}
+    if current_user.role != "admin":
+        query["created_by"] = current_user.id
+    jobs = await db["whatsapp_scheduled_bulk"].find(query).sort("scheduled_at", 1).to_list(100)
+    for j in jobs:
+        j["id"] = str(j.pop("_id"))
+        j.pop("recipients", None)   # don't return full recipient list in listing
+    return {"jobs": jobs}
+
+
+@router.delete("/scheduled-bulk/{job_id}")
+async def cancel_scheduled_bulk(job_id: str, current_user: User = Depends(get_current_user)):
+    """Cancel a pending scheduled bulk job."""
+    db = _db()
+    query = {"job_id": job_id, "status": "pending"}
+    if current_user.role != "admin":
+        query["created_by"] = current_user.id
+    result = await db["whatsapp_scheduled_bulk"].update_one(query, {"$set": {"status": "cancelled", "cancelled_at": datetime.now(timezone.utc).isoformat()}})
+    if result.matched_count == 0:
+        raise HTTPException(404, "Job not found or already processed")
+    return {"message": "Job cancelled"}
+
+
+async def _run_scheduled_bulk_jobs():
+    """
+    Called by APScheduler every minute. Finds pending jobs whose scheduled_at
+    has passed and sends them via the WA bridge.
+    """
+    db = _db()
+    now_str = datetime.now(timezone.utc).isoformat()
+    # Find jobs due now (scheduled_at <= now and still pending)
+    jobs = await db["whatsapp_scheduled_bulk"].find({
+        "status": "pending",
+        "scheduled_at": {"$lte": now_str},
+    }).to_list(20)
+
+    for job in jobs:
+        job_id = job["job_id"]
+        # Mark as running to prevent double-execution
+        await db["whatsapp_scheduled_bulk"].update_one(
+            {"job_id": job_id, "status": "pending"},
+            {"$set": {"status": "running", "started_at": datetime.now(timezone.utc).isoformat()}}
+        )
+        results = []
+        for r in job.get("recipients", []):
+            try:
+                await _bridge_post("/send", {"to": r["phone"], "message": r["message"], "sessionId": job.get("session_id")})
+                await _store_message(
+                    sent_by=f"scheduler:bulk:{job_id}",
+                    to=r["phone"], message=r["message"],
+                    message_type=job.get("message_type", "bulk_scheduled"),
+                    context_id=r.get("client_id"), status_val="sent", session_id=job.get("session_id"),
+                )
+                results.append({"phone": r["phone"], "status": "sent"})
+            except Exception as exc:
+                results.append({"phone": r["phone"], "status": "failed", "error": str(exc)})
+            await asyncio.sleep(0.8)
+        sent = sum(1 for r in results if r["status"] == "sent")
+        failed = sum(1 for r in results if r["status"] == "failed")
+        await db["whatsapp_scheduled_bulk"].update_one(
+            {"job_id": job_id},
+            {"$set": {"status": "completed", "completed_at": datetime.now(timezone.utc).isoformat(),
+                      "sent_count": sent, "failed_count": failed, "results": results}}
+        )
+        logger.info("Bulk job %s completed: sent=%d failed=%d", job_id, sent, failed)
+
+
+def wa_scheduled_bulk_job():
+    """APScheduler sync wrapper — run every minute."""
+    loop = None
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(_run_scheduled_bulk_jobs())
+    except Exception as exc:
+        logger.error("wa_scheduled_bulk_job failed: %s", exc)
+    finally:
+        if loop and not loop.is_closed():
+            loop.close()
