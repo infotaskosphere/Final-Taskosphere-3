@@ -21,7 +21,7 @@ import {
   Copy, ExternalLink, CheckSquare, Square, MinusSquare,
   Shield, Download, UserCheck, AlertCircle, Sparkles, Loader2,
   ArrowLeftRight, RefreshCw, FileSpreadsheet, ExternalLink as ExternalLinkIcon,
-  IndianRupee, Save as SaveIcon, Globe, Settings,
+  IndianRupee, Save as SaveIcon, Globe, Settings, Clock, Send,
 } from 'lucide-react';
 import { detectClientDuplicates } from '@/lib/aiDuplicateEngine';
 import StandaloneGovtFeeDialog from '@/components/StandaloneGovtFeeDialog';
@@ -235,8 +235,10 @@ const ActiveFilterChips = ({ statusFilter, clientTypeFilter, serviceFilter, assi
 };
 
 // ═══════════════════════════════════════════════════════════
-// BULK MESSAGE MODAL
-// ═══════════════════════════════════════════════════════════
+// BULK MESSAGE MODAL — Enhanced with Direct Send, Personalization & Scheduling
+// ═══════════════════════════════════════════════════════════════════════════
+const SEND_MODES = { DIRECT: 'direct', WHATSAPP_WEB: 'web', EXPORT: 'export', SCHEDULE: 'schedule' };
+
 const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isDark }) => {
   const [message, setMessage] = useState('');
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -244,6 +246,16 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
   const [copied, setCopied] = useState(false);
   const [exportDone, setExportDone] = useState(false);
   const [clientScope, setClientScope] = useState('active'); // 'active' | 'all'
+  // Direct send & scheduling state
+  const [sendMode, setSendMode] = useState(SEND_MODES.DIRECT); // direct | web | export | schedule
+  const [waConnected, setWaConnected] = useState(null); // null=loading, true, false
+  const [sendingBulk, setSendingBulk] = useState(false);
+  const [sendProgress, setSendProgress] = useState(null); // { done, total, results }
+  const [scheduleDate, setScheduleDate] = useState('');
+  const [scheduleTime, setScheduleTime] = useState('09:00');
+  const [scheduledJobs, setScheduledJobs] = useState([]);
+  const [loadingJobs, setLoadingJobs] = useState(false);
+  const [showVariables, setShowVariables] = useState(false);
 
   const activeClients = useMemo(() => filteredClients.filter(c => (c?.status || 'active') !== 'inactive'), [filteredClients]);
   const archivedCount = filteredClients.length - activeClients.length;
@@ -253,8 +265,28 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
       setClientScope('active');
       setSelectedIds(new Set(activeClients.map(c => c.id)));
       setMessage(''); setClientSearch(''); setCopied(false); setExportDone(false);
+      setSendProgress(null); setSendingBulk(false);
+      // Set default schedule to tomorrow 09:00
+      const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+      setScheduleDate(tomorrow.toISOString().split('T')[0]);
+      setScheduleTime('09:00');
+      if (mode === 'whatsapp') {
+        // Check if WA bridge is connected
+        api.get('/whatsapp/status').then(r => setWaConnected(r.data?.connected ?? false)).catch(() => setWaConnected(false));
+        // Load existing scheduled jobs
+        loadScheduledJobs();
+      }
     }
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const loadScheduledJobs = useCallback(async () => {
+    setLoadingJobs(true);
+    try {
+      const r = await api.get('/whatsapp/scheduled-bulk');
+      setScheduledJobs(r.data?.jobs || []);
+    } catch { setScheduledJobs([]); }
+    finally { setLoadingJobs(false); }
+  }, []);
 
   // Always show ALL clients — archived ones appear dimmed/unchecked in Active mode
   const displayedClients = useMemo(() => {
@@ -301,6 +333,74 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
   const accentColor = isWhatsApp ? '#25D366' : '#1F6FB2';
   const accentGrad  = isWhatsApp ? 'linear-gradient(135deg, #128C7E, #25D366)' : 'linear-gradient(135deg, #0D3B66, #1F6FB2)';
   const relevantCount = isWhatsApp ? phoneCount : emailCount;
+
+  // Personalize message for a specific client
+  const personalizeMessage = useCallback((rawMsg, client) => {
+    return rawMsg
+      .replace(/\{name\}/gi, client.company_name || 'Valued Client')
+      .replace(/\{phone\}/gi, client.phone || '')
+      .replace(/\{email\}/gi, client.email || '')
+      .replace(/\{city\}/gi, client.city || '')
+      .replace(/\{gstin\}/gi, client.gstin || '')
+      .replace(/\{services\}/gi, (client.services || []).join(', ') || '');
+  }, []);
+
+  // Direct send via WA bridge
+  const handleDirectSend = useCallback(async () => {
+    if (!message.trim()) { toast.error('Please write a message first'); return; }
+    const toSend = selectedClients.filter(c => c.phone);
+    if (toSend.length === 0) { toast.error('No selected clients have a phone number'); return; }
+    setSendingBulk(true);
+    setSendProgress({ done: 0, total: toSend.length, results: [] });
+    const results = [];
+    for (let i = 0; i < toSend.length; i++) {
+      const client = toSend[i];
+      const personalMsg = personalizeMessage(message, client);
+      const digits = client.phone.replace(/\D/g, '');
+      const waPhone = digits.length === 10 ? `91${digits}` : digits;
+      try {
+        await api.post('/whatsapp/send', { to: waPhone, message: personalMsg, message_type: 'bulk_client', context_id: client.id });
+        results.push({ id: client.id, name: client.company_name, status: 'sent' });
+      } catch (err) {
+        results.push({ id: client.id, name: client.company_name, status: 'failed', error: err?.response?.data?.detail || 'Failed' });
+      }
+      setSendProgress({ done: i + 1, total: toSend.length, results: [...results] });
+    }
+    setSendingBulk(false);
+    const sentCount = results.filter(r => r.status === 'sent').length;
+    const failCount = results.filter(r => r.status === 'failed').length;
+    toast.success(`Sent ${sentCount} messages${failCount > 0 ? `, ${failCount} failed` : ''}`);
+  }, [message, selectedClients, personalizeMessage]);
+
+  // Schedule bulk send
+  const handleScheduleSend = useCallback(async () => {
+    if (!message.trim()) { toast.error('Please write a message first'); return; }
+    if (!scheduleDate) { toast.error('Please select a date'); return; }
+    const toSend = selectedClients.filter(c => c.phone);
+    if (toSend.length === 0) { toast.error('No selected clients have a phone number'); return; }
+    try {
+      const scheduledAt = `${scheduleDate}T${scheduleTime}:00`;
+      const recipients = toSend.map(c => ({
+        phone: c.phone.replace(/\D/g, '').length === 10 ? `91${c.phone.replace(/\D/g, '')}` : c.phone.replace(/\D/g, ''),
+        message: personalizeMessage(message, c),
+        client_id: c.id,
+        client_name: c.company_name,
+      }));
+      await api.post('/whatsapp/schedule-bulk', { recipients, scheduled_at: scheduledAt, message_template: message, message_type: 'bulk_scheduled' });
+      toast.success(`Scheduled ${toSend.length} messages for ${scheduleDate} at ${scheduleTime}`);
+      loadScheduledJobs();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to schedule messages');
+    }
+  }, [message, selectedClients, scheduleDate, scheduleTime, personalizeMessage, loadScheduledJobs]);
+
+  const handleCancelJob = useCallback(async (jobId) => {
+    try {
+      await api.delete(`/whatsapp/scheduled-bulk/${jobId}`);
+      toast.success('Scheduled job cancelled');
+      loadScheduledJobs();
+    } catch { toast.error('Failed to cancel job'); }
+  }, [loadScheduledJobs]);
 
   const handleExportBroadcast = useCallback(() => {
     if (selectedClients.length === 0) { toast.error('Select at least one client first'); return; }
@@ -349,70 +449,74 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
     toast.success(`Opening mail client with ${emailCount} recipients in BCC`);
   }, [message, selectedClients, emailCount]);
 
+  const WA_GREEN = '#25D366';
+  const WA_DARK  = '#128C7E';
+  const sendBtnEnabled = message.trim() && selectedClients.length > 0 && phoneCount > 0;
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-3xl max-h-[92vh] overflow-hidden flex flex-col rounded-2xl border border-slate-200 shadow-2xl p-0 bg-white">
+      <DialogContent className="max-w-4xl max-h-[94vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0" style={{ background: isDark ? '#0f172a' : '#fff', borderColor: isDark ? '#1e3a5f' : '#e2e8f0' }}>
         <DialogTitle className="sr-only">{isWhatsApp ? 'Bulk WhatsApp' : 'Bulk Email'}</DialogTitle>
-        <div className="flex-shrink-0 px-7 py-5 border-b border-slate-100"
-          style={{ background: isWhatsApp ? 'linear-gradient(135deg, #f0fdf4, #dcfce7)' : 'linear-gradient(135deg, #eff6ff, #dbeafe)' }}>
+
+        {/* Header */}
+        <div className="flex-shrink-0 px-6 py-4 border-b" style={{ background: isWhatsApp ? 'linear-gradient(135deg, #064e3b, #065f46)' : 'linear-gradient(135deg, #1e3a5f, #1e40af)', borderColor: 'transparent' }}>
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-sm flex-shrink-0" style={{ background: accentGrad }}>
-              {isWhatsApp ? <MessageCircle className="h-5 w-5" /> : <Mail className="h-5 w-5" />}
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(255,255,255,0.15)' }}>
+              {isWhatsApp ? <MessageCircle className="h-5 w-5 text-white" /> : <Mail className="h-5 w-5 text-white" />}
             </div>
-            <div>
-              <h2 className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{isWhatsApp ? 'Bulk WhatsApp Message' : 'Bulk Email'}</h2>
-              <p className="text-xs text-slate-500 mt-0.5">{isWhatsApp ? 'Draft → Export for Broadcast or Copy & send via WhatsApp Web' : 'Draft → opens in your mail client with all recipients in BCC'}</p>
+            <div className="flex-1">
+              <h2 className="text-base font-bold text-white">{isWhatsApp ? 'Bulk WhatsApp — Direct Send' : 'Bulk Email'}</h2>
+              <p className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.65)' }}>
+                {isWhatsApp ? 'Send personalized messages directly · Schedule for later · Export for Broadcast' : 'Draft → opens in your mail client with all recipients in BCC'}
+              </p>
             </div>
-            <div className="ml-auto flex-shrink-0">
-              <span className="text-xs font-bold px-3 py-1.5 rounded-full border"
-                style={isWhatsApp ? { background: '#dcfce7', color: '#166534', borderColor: '#bbf7d0' } : { background: '#dbeafe', color: '#1e40af', borderColor: '#bfdbfe' }}>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {isWhatsApp && waConnected !== null && (
+                <span className="text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5"
+                  style={{ background: waConnected ? 'rgba(37,211,102,0.2)' : 'rgba(239,68,68,0.2)', color: waConnected ? '#4ade80' : '#f87171', border: `1px solid ${waConnected ? 'rgba(37,211,102,0.4)' : 'rgba(239,68,68,0.3)'}` }}>
+                  <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ background: waConnected ? '#4ade80' : '#f87171' }} />
+                  {waConnected ? 'WA Connected' : 'WA Offline'}
+                </span>
+              )}
+              <span className="text-xs font-bold px-2.5 py-1 rounded-full" style={{ background: 'rgba(255,255,255,0.15)', color: '#fff' }}>
                 {relevantCount} {isWhatsApp ? 'with phone' : 'with email'}
               </span>
             </div>
           </div>
         </div>
+
         <div className="flex flex-1 overflow-hidden">
-          <div className={`w-72 flex-shrink-0 border-r flex flex-col ${isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-100 bg-slate-50/40'}`}>
-            <div className={`flex items-center gap-1.5 px-3 py-2.5 border-b flex-shrink-0 ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-white'}`}>
-              <button onClick={() => handleScopeChange('active')}
-                className={`flex-1 text-[11px] font-semibold px-2 py-1.5 rounded-lg border transition-all ${clientScope === 'active' ? 'text-white border-transparent' : (isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50')}`}
-                style={clientScope === 'active' ? { background: accentColor } : {}}>
-                Active <span className={`${clientScope === 'active' ? 'opacity-80' : 'opacity-60'}`}>({activeClients.length})</span>
+          {/* Left: client list */}
+          <div className="w-64 flex-shrink-0 flex flex-col border-r" style={{ borderColor: isDark ? '#1e3a5f' : '#f1f5f9', background: isDark ? '#0f172a' : '#fafafa' }}>
+            {/* Scope tabs */}
+            <div className="flex items-center gap-1 px-3 py-2 border-b flex-shrink-0" style={{ borderColor: isDark ? '#1e3a5f' : '#f1f5f9' }}>
+              <button onClick={() => handleScopeChange('active')} className="flex-1 text-[11px] font-semibold px-2 py-1.5 rounded-lg border transition-all"
+                style={clientScope === 'active' ? { background: accentColor, color: '#fff', borderColor: 'transparent' } : { borderColor: isDark ? '#334155' : '#e2e8f0', color: isDark ? '#94a3b8' : '#64748b' }}>
+                Active ({activeClients.length})
               </button>
-              <button onClick={() => handleScopeChange('all')}
-                className={`flex-1 text-[11px] font-semibold px-2 py-1.5 rounded-lg border transition-all ${clientScope === 'all' ? 'text-white border-transparent' : (isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50')}`}
-                style={clientScope === 'all' ? { background: accentColor } : {}}>
-                All <span className={`${clientScope === 'all' ? 'opacity-80' : 'opacity-60'}`}>({filteredClients.length})</span>
+              <button onClick={() => handleScopeChange('all')} className="flex-1 text-[11px] font-semibold px-2 py-1.5 rounded-lg border transition-all"
+                style={clientScope === 'all' ? { background: accentColor, color: '#fff', borderColor: 'transparent' } : { borderColor: isDark ? '#334155' : '#e2e8f0', color: isDark ? '#94a3b8' : '#64748b' }}>
+                All ({filteredClients.length})
               </button>
-              <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-slate-100 text-slate-500 flex-shrink-0">{selectedIds.size} ✓</span>
             </div>
-            <div className="px-3 py-2 border-b border-slate-100 flex-shrink-0">
+            {/* Search */}
+            <div className="px-3 py-2 border-b flex-shrink-0" style={{ borderColor: isDark ? '#1e3a5f' : '#f1f5f9' }}>
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                <input className="w-full pl-8 pr-3 h-8 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-blue-300 bg-white"
-                  placeholder="Filter clients…" value={clientSearch} onChange={e => setClientSearch(e.target.value)} />
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                <input className="w-full pl-8 pr-3 h-8 text-xs rounded-lg border focus:outline-none"
+                  style={{ borderColor: isDark ? '#334155' : '#e2e8f0', background: isDark ? '#1e293b' : '#fff', color: isDark ? '#f1f5f9' : '#0f172a' }}
+                  placeholder="Search clients…" value={clientSearch} onChange={e => setClientSearch(e.target.value)} />
               </div>
             </div>
-            <div className={"flex items-center justify-between px-3 py-1.5 border-b " + (isDark ? "border-slate-700 bg-slate-800/40" : "border-slate-100 bg-white/80")}>
-              <span className={"text-[10px] " + (isDark ? "text-slate-400" : "text-slate-400")}>
-                {selectedIds.size} of {displayedClients.filter(cl => !(clientScope === 'active' && cl.status === 'inactive')).length} selected
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={selectAllVisible}
-                  className="text-[10px] font-semibold px-2 py-0.5 rounded-md border transition hover:opacity-80"
-                  style={{ borderColor: accentColor, color: accentColor, background: accentColor + '18' }}
-                >
-                  Select All
-                </button>
-                <button
-                  onClick={unselectAll}
-                  className={"text-[10px] font-semibold px-2 py-0.5 rounded-md border transition hover:opacity-80 " + (isDark ? "border-slate-600 text-slate-400" : "border-slate-200 text-slate-500")}
-                >
-                  Clear All
-                </button>
+            {/* Select/clear */}
+            <div className="flex items-center justify-between px-3 py-1.5 border-b flex-shrink-0" style={{ borderColor: isDark ? '#1e3a5f' : '#f1f5f9' }}>
+              <span className="text-[10px]" style={{ color: isDark ? '#64748b' : '#94a3b8' }}>{selectedIds.size} of {displayedClients.filter(cl => !(clientScope === 'active' && cl.status === 'inactive')).length} selected</span>
+              <div className="flex gap-2">
+                <button onClick={selectAllVisible} className="text-[10px] font-semibold px-2 py-0.5 rounded border" style={{ borderColor: accentColor, color: accentColor, background: accentColor + '18' }}>Select All</button>
+                <button onClick={unselectAll} className="text-[10px] font-semibold px-2 py-0.5 rounded border" style={{ borderColor: isDark ? '#334155' : '#e2e8f0', color: isDark ? '#94a3b8' : '#64748b' }}>Clear</button>
               </div>
             </div>
+            {/* Client list */}
             <div className="flex-1 overflow-y-auto">
               {displayedClients.map(client => {
                 const isSelected = selectedIds.has(client.id);
@@ -421,23 +525,18 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
                 const isLocked = clientScope === 'active' && isArchived;
                 return (
                   <div key={client.id} onClick={() => toggleClient(client.id, isArchived)}
-                    className={`flex items-center gap-3 px-4 py-2.5 border-b transition-all ${isDark ? 'border-slate-700' : 'border-slate-50'} ${isLocked ? 'opacity-35 cursor-not-allowed' : 'cursor-pointer'} ${isSelected && !isLocked ? (isDark ? 'bg-slate-700' : 'bg-white') : (isDark ? 'hover:bg-slate-700/60' : 'hover:bg-white/60')} ${!hasContact && !isLocked ? 'opacity-40' : ''}`}>
-                    <span className="flex-shrink-0" style={{ color: isSelected && !isLocked ? accentColor : '#cbd5e1' }}>
-                      {isSelected && !isLocked ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                    className="flex items-center gap-2.5 px-3 py-2.5 border-b transition-all"
+                    style={{ borderColor: isDark ? '#1e2d3d' : '#f1f5f9', opacity: isLocked || !hasContact ? 0.4 : 1, cursor: isLocked ? 'not-allowed' : 'pointer', background: isSelected && !isLocked ? (isDark ? 'rgba(37,211,102,0.06)' : 'rgba(37,211,102,0.05)') : 'transparent' }}>
+                    <span style={{ color: isSelected && !isLocked ? accentColor : isDark ? '#475569' : '#cbd5e1' }}>
+                      {isSelected && !isLocked ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
                     </span>
-                    <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0" style={{ background: getAvatarGradient(client.company_name) }}>
+                    <div className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0" style={{ background: getAvatarGradient(client.company_name) }}>
                       {client.company_name?.charAt(0).toUpperCase() || '?'}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className={`text-xs font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{client.company_name}</p>
-                      <p className="text-[10px] text-slate-400 truncate">{isWhatsApp ? (client.phone || '— no phone') : (client.email || '— no email')}</p>
+                      <p className="text-[11px] font-semibold truncate" style={{ color: isDark ? '#e2e8f0' : '#0f172a' }}>{client.company_name}</p>
+                      <p className="text-[10px] truncate" style={{ color: isDark ? '#475569' : '#94a3b8' }}>{isWhatsApp ? (client.phone || '— no phone') : (client.email || '— no email')}</p>
                     </div>
-                    {!hasContact && !isArchived && <span className="text-[9px] font-bold text-amber-500 bg-amber-50 px-1.5 py-0.5 rounded flex-shrink-0">{isWhatsApp ? 'No phone' : 'No email'}</span>}
-                    {isArchived && (
-                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 ${isLocked ? 'text-slate-400 bg-slate-100' : 'text-amber-600 bg-amber-50'}`}>
-                        {isLocked ? '🔒 Archived' : 'Archived'}
-                      </span>
-                    )}
                   </div>
                 );
               })}
@@ -448,58 +547,224 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
               )}
             </div>
           </div>
+
+          {/* Right: compose + send */}
           <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+
+              {/* Message composer */}
               <div>
-                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2 block">{isWhatsApp ? 'WhatsApp Message' : 'Email Message'}</label>
-                <textarea
-                  className={`w-full min-h-[180px] border rounded-xl text-sm p-4 resize-none outline-none transition-all leading-relaxed ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 focus:border-blue-400' : 'bg-slate-50 border-slate-200 focus:border-blue-300 focus:bg-white focus:ring-1 focus:ring-blue-100'}`}
-                  placeholder={isWhatsApp ? "Dear {name},\n\nGST filing reminder…\n\nRegards,\nManthan Desai & Associates" : "Subject: Important Update\n\nDear Client,\n\nWe wanted to update you regarding…\n\nRegards,\nManthan Desai & Associates"}
-                  value={message} onChange={e => setMessage(e.target.value)} />
-                <div className="flex items-center justify-between mt-1.5">
-                  <p className="text-[10px] text-slate-400">{isWhatsApp ? 'Use {name} → replaced with company name in export' : 'First line becomes the email subject'}</p>
-                  <span className="text-[10px] text-slate-400">{message.length} chars</span>
-                </div>
-              </div>
-              {isWhatsApp && (
-                <div className="rounded-2xl border-2 border-dashed p-5 space-y-3" style={{ borderColor: '#86efac', background: 'linear-gradient(135deg, #f0fdf4, #f7fffe)' }}>
-                  <div className="flex items-start gap-3">
-                    <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 text-white text-sm font-bold shadow-sm" style={{ background: 'linear-gradient(135deg, #128C7E, #25D366)' }}>📤</div>
-                    <div className="flex-1">
-                      <p className="text-sm font-bold text-emerald-900">Export for WhatsApp Broadcast</p>
-                      <p className="text-xs text-emerald-700 mt-0.5 leading-relaxed">Downloads a <strong>CSV</strong> with all phone numbers + your message. Also <strong>copies numbers to clipboard</strong> in WhatsApp format (91XXXXXXXXXX).</p>
-                    </div>
-                  </div>
-                  <button onClick={handleExportBroadcast} disabled={phoneCount === 0}
-                    className="w-full flex items-center justify-center gap-2 h-11 rounded-xl text-white text-sm font-bold shadow-sm transition-all hover:opacity-90 disabled:opacity-40"
-                    style={{ background: exportDone ? 'linear-gradient(135deg, #059669, #10b981)' : 'linear-gradient(135deg, #128C7E, #25D366)' }}>
-                    {exportDone ? <><CheckCircle2 className="h-4 w-4" /> Exported!</> : <><FileText className="h-4 w-4" /> Export &amp; Copy Numbers ({phoneCount} clients)</>}
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-widest" style={{ color: isDark ? '#64748b' : '#94a3b8' }}>Message</label>
+                  <button onClick={() => setShowVariables(v => !v)} className="text-[10px] font-semibold px-2 py-0.5 rounded" style={{ background: isDark ? '#1e293b' : '#f1f5f9', color: isDark ? '#94a3b8' : '#64748b' }}>
+                    {showVariables ? '▲ Hide variables' : '▼ Variables'}
                   </button>
                 </div>
-              )}
-              {selectedClients.length > 0 && (
-                <div className="rounded-xl border p-4" style={isWhatsApp ? { background: '#f0fdf4', borderColor: '#bbf7d0' } : { background: '#eff6ff', borderColor: '#bfdbfe' }}>
-                  <p className="text-xs font-bold mb-2" style={{ color: isWhatsApp ? '#166534' : '#1e40af' }}>{isWhatsApp ? '📱 Selected clients' : '📧 Ready to email'}</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {selectedClients.slice(0, 8).map(c => (
-                      <span key={c.id} className="text-[10px] font-semibold px-2 py-1 rounded-lg border bg-white"
-                        style={isWhatsApp ? { borderColor: '#86efac', color: '#166534' } : { borderColor: '#93c5fd', color: '#1e40af' }}>{c.company_name}</span>
+                {showVariables && (
+                  <div className="flex flex-wrap gap-1.5 mb-2 p-2.5 rounded-lg border" style={{ background: isDark ? '#0f1e2d' : '#f8fafc', borderColor: isDark ? '#1e3a5f' : '#e2e8f0' }}>
+                    {['{name}', '{phone}', '{email}', '{city}', '{gstin}', '{services}'].map(v => (
+                      <button key={v} onClick={() => setMessage(m => m + v)} className="text-[10px] font-mono font-bold px-2 py-1 rounded-md border hover:opacity-80 transition"
+                        style={{ background: isDark ? '#1e3a5f' : '#eff6ff', color: isDark ? '#93c5fd' : '#1d4ed8', borderColor: isDark ? '#2563eb40' : '#bfdbfe' }}>
+                        {v}
+                      </button>
                     ))}
-                    {selectedClients.length > 8 && <span className="text-[10px] font-semibold px-2 py-1 rounded-lg border bg-white border-slate-200 text-slate-500">+{selectedClients.length - 8} more</span>}
+                    <span className="text-[10px] self-center" style={{ color: isDark ? '#475569' : '#94a3b8' }}>→ auto-replaced per client when sent</span>
+                  </div>
+                )}
+                <textarea
+                  className="w-full min-h-[140px] border rounded-xl text-sm p-3.5 resize-none outline-none transition-all leading-relaxed"
+                  style={{ background: isDark ? '#1e293b' : '#f8fafc', borderColor: isDark ? '#334155' : '#e2e8f0', color: isDark ? '#e2e8f0' : '#0f172a' }}
+                  placeholder={"Dear {name},
+
+GST filing reminder for this month…
+
+Regards,
+Manthan Desai & Associates"}
+                  value={message} onChange={e => setMessage(e.target.value)} />
+                <p className="text-[10px] mt-1" style={{ color: isDark ? '#475569' : '#94a3b8' }}>{message.length} chars · Use variables above for personalization per client</p>
+              </div>
+
+              {isWhatsApp && (
+                <>
+                  {/* Send mode tabs */}
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-widest mb-2 block" style={{ color: isDark ? '#64748b' : '#94a3b8' }}>Send Method</label>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {[
+                        { key: SEND_MODES.DIRECT, label: '⚡ Direct Send', desc: 'Via WA bridge', color: WA_GREEN, req: waConnected },
+                        { key: SEND_MODES.SCHEDULE, label: '🕐 Schedule', desc: 'Pick date & time', color: '#f59e0b', req: waConnected },
+                        { key: SEND_MODES.WHATSAPP_WEB, label: '🌐 WA Web', desc: 'Copy & open', color: '#3b82f6', req: true },
+                        { key: SEND_MODES.EXPORT, label: '📤 Export CSV', desc: 'Broadcast list', color: '#8b5cf6', req: true },
+                      ].map(({ key, label, desc, color, req }) => (
+                        <button key={key} onClick={() => setSendMode(key)}
+                          className="flex flex-col items-center gap-0.5 p-2.5 rounded-xl border text-center transition-all"
+                          style={{
+                            background: sendMode === key ? color + '15' : (isDark ? '#1e293b' : '#f8fafc'),
+                            borderColor: sendMode === key ? color : (isDark ? '#334155' : '#e2e8f0'),
+                            opacity: req === false ? 0.45 : 1,
+                          }}>
+                          <span className="text-xs font-bold" style={{ color: sendMode === key ? color : (isDark ? '#94a3b8' : '#64748b') }}>{label}</span>
+                          <span className="text-[9px]" style={{ color: isDark ? '#475569' : '#94a3b8' }}>{desc}</span>
+                          {req === false && <span className="text-[9px] text-red-400">WA offline</span>}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Direct send panel */}
+                  {sendMode === SEND_MODES.DIRECT && (
+                    <div className="rounded-xl border p-4 space-y-3" style={{ background: isDark ? '#0a1628' : '#f0fdf4', borderColor: isDark ? '#1a3a1a' : '#bbf7d0' }}>
+                      <p className="text-xs font-bold" style={{ color: isDark ? '#4ade80' : '#166534' }}>⚡ Direct Send — {phoneCount} clients with phone</p>
+                      <p className="text-xs" style={{ color: isDark ? '#6ee7b7' : '#15803d' }}>Messages are sent individually with personalized content. Each client receives their own message with their name and details.</p>
+                      {sendProgress && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-xs font-semibold" style={{ color: isDark ? '#4ade80' : '#166534' }}>
+                            <span>Sending {sendProgress.done} / {sendProgress.total}</span>
+                            <span>{Math.round(sendProgress.done / sendProgress.total * 100)}%</span>
+                          </div>
+                          <div className="h-2 rounded-full overflow-hidden" style={{ background: isDark ? '#1e3a1e' : '#dcfce7' }}>
+                            <div className="h-full rounded-full transition-all" style={{ width: `${sendProgress.done / sendProgress.total * 100}%`, background: WA_GREEN }} />
+                          </div>
+                          {sendProgress.results.length > 0 && (
+                            <div className="max-h-20 overflow-y-auto space-y-0.5">
+                              {sendProgress.results.slice(-5).map((r, i) => (
+                                <p key={i} className="text-[10px]" style={{ color: r.status === 'sent' ? (isDark ? '#4ade80' : '#166534') : '#ef4444' }}>
+                                  {r.status === 'sent' ? '✓' : '✗'} {r.name}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {!sendProgress && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {selectedClients.filter(c => c.phone).slice(0, 6).map(c => (
+                            <span key={c.id} className="text-[10px] font-semibold px-2 py-0.5 rounded-lg border" style={{ borderColor: isDark ? '#166534' : '#86efac', color: isDark ? '#4ade80' : '#166534', background: isDark ? '#0a2518' : '#fff' }}>{c.company_name}</span>
+                          ))}
+                          {phoneCount > 6 && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-lg border" style={{ borderColor: isDark ? '#334155' : '#e2e8f0', color: isDark ? '#64748b' : '#94a3b8', background: isDark ? '#1e293b' : '#fff' }}>+{phoneCount - 6} more</span>}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Schedule panel */}
+                  {sendMode === SEND_MODES.SCHEDULE && (
+                    <div className="rounded-xl border p-4 space-y-3" style={{ background: isDark ? '#1a1200' : '#fffbeb', borderColor: isDark ? '#3a2500' : '#fde68a' }}>
+                      <p className="text-xs font-bold" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>🕐 Schedule Bulk Send</p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-semibold block mb-1" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>Date</label>
+                          <input type="date" value={scheduleDate} onChange={e => setScheduleDate(e.target.value)}
+                            min={new Date().toISOString().split('T')[0]}
+                            className="w-full h-9 px-3 rounded-lg border text-sm"
+                            style={{ background: isDark ? '#1e293b' : '#fff', borderColor: isDark ? '#334155' : '#e2e8f0', color: isDark ? '#e2e8f0' : '#0f172a' }} />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-semibold block mb-1" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>Time (IST)</label>
+                          <input type="time" value={scheduleTime} onChange={e => setScheduleTime(e.target.value)}
+                            className="w-full h-9 px-3 rounded-lg border text-sm"
+                            style={{ background: isDark ? '#1e293b' : '#fff', borderColor: isDark ? '#334155' : '#e2e8f0', color: isDark ? '#e2e8f0' : '#0f172a' }} />
+                        </div>
+                      </div>
+                      <p className="text-[11px]" style={{ color: isDark ? '#d97706' : '#a16207' }}>
+                        Will send {phoneCount} personalized messages on {scheduleDate} at {scheduleTime} IST
+                      </p>
+                      {/* Existing scheduled jobs */}
+                      {scheduledJobs.length > 0 && (
+                        <div className="mt-2">
+                          <p className="text-[10px] font-bold mb-1.5" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>Scheduled Jobs</p>
+                          <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                            {scheduledJobs.map(job => (
+                              <div key={job.id} className="flex items-center justify-between text-[10px] px-2.5 py-1.5 rounded-lg border"
+                                style={{ background: isDark ? '#1e293b' : '#fff', borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                                <div>
+                                  <span className="font-semibold" style={{ color: isDark ? '#e2e8f0' : '#0f172a' }}>{job.recipient_count} clients</span>
+                                  <span className="ml-2" style={{ color: isDark ? '#64748b' : '#94a3b8' }}>{job.scheduled_at?.replace('T', ' ').slice(0, 16)} IST</span>
+                                </div>
+                                <button onClick={() => handleCancelJob(job.id)} className="text-red-400 hover:text-red-500 font-semibold ml-2">Cancel</button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* WA Web panel */}
+                  {sendMode === SEND_MODES.WHATSAPP_WEB && (
+                    <div className="rounded-xl border p-4" style={{ background: isDark ? '#0a1628' : '#eff6ff', borderColor: isDark ? '#1e3a5f' : '#bfdbfe' }}>
+                      <p className="text-xs font-bold mb-1" style={{ color: isDark ? '#93c5fd' : '#1e40af' }}>🌐 Copy & Open WhatsApp Web</p>
+                      <p className="text-xs" style={{ color: isDark ? '#60a5fa' : '#1d4ed8' }}>Copies your message to clipboard and opens WhatsApp Web. Paste and send manually to each client.</p>
+                    </div>
+                  )}
+
+                  {/* Export CSV panel */}
+                  {sendMode === SEND_MODES.EXPORT && (
+                    <div className="rounded-2xl border-2 border-dashed p-4 space-y-2.5" style={{ borderColor: isDark ? '#2d4a2d' : '#86efac', background: isDark ? '#0a1a0a' : 'linear-gradient(135deg, #f0fdf4, #f7fffe)' }}>
+                      <div className="flex items-start gap-3">
+                        <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 text-white text-sm font-bold" style={{ background: 'linear-gradient(135deg, #128C7E, #25D366)' }}>📤</div>
+                        <div>
+                          <p className="text-sm font-bold" style={{ color: isDark ? '#4ade80' : '#166534' }}>Export for WhatsApp Broadcast</p>
+                          <p className="text-xs mt-0.5" style={{ color: isDark ? '#6ee7b7' : '#15803d' }}>Downloads a CSV with all phone numbers + message. Also copies numbers to clipboard in WhatsApp format (91XXXXXXXXXX).</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Email compose hint */}
+              {!isWhatsApp && selectedClients.length > 0 && (
+                <div className="rounded-xl border p-3.5" style={{ background: isDark ? '#0a1628' : '#eff6ff', borderColor: isDark ? '#1e3a5f' : '#bfdbfe' }}>
+                  <p className="text-xs font-bold mb-1.5" style={{ color: isDark ? '#93c5fd' : '#1e40af' }}>📧 {emailCount} recipients</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedClients.slice(0, 6).map(c => (
+                      <span key={c.id} className="text-[10px] font-semibold px-2 py-0.5 rounded-lg border" style={{ borderColor: isDark ? '#1e3a5f' : '#93c5fd', color: isDark ? '#93c5fd' : '#1e40af', background: isDark ? '#0a1628' : '#fff' }}>{c.company_name}</span>
+                    ))}
+                    {selectedClients.length > 6 && <span className="text-[10px] px-2 py-0.5" style={{ color: isDark ? '#64748b' : '#94a3b8' }}>+{selectedClients.length - 6} more</span>}
                   </div>
                 </div>
               )}
             </div>
-            <div className={`flex-shrink-0 flex items-center justify-between gap-3 px-6 py-4 border-t ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-white'}`}>
-              <Button type="button" variant="ghost" onClick={onClose} className="h-10 px-4 text-sm rounded-xl text-slate-500">Cancel</Button>
-              <div className="flex items-center gap-2">
-                {selectedClients.length === 0 && <span className="text-xs text-amber-600 font-medium">← Select at least one client</span>}
+
+            {/* Footer action bar */}
+            <div className="flex-shrink-0 flex items-center justify-between gap-3 px-5 py-3.5 border-t" style={{ borderColor: isDark ? '#1e2d3d' : '#f1f5f9', background: isDark ? '#0a1220' : '#fff' }}>
+              <Button type="button" variant="ghost" onClick={onClose} className="h-10 px-4 text-sm rounded-xl" style={{ color: isDark ? '#64748b' : '#94a3b8' }}>Cancel</Button>
+              {selectedClients.length === 0 && <span className="text-xs text-amber-500 font-medium">← Select at least one client</span>}
+              <div className="flex items-center gap-2 ml-auto">
                 {isWhatsApp ? (
-                  <Button type="button" disabled={!message.trim() || selectedClients.length === 0} onClick={handleWhatsApp}
-                    className="h-10 px-5 text-sm rounded-xl text-white font-semibold gap-2 shadow-sm disabled:opacity-50"
-                    style={{ background: !message.trim() || selectedClients.length === 0 ? '#94a3b8' : 'linear-gradient(135deg, #128C7E, #25D366)' }}>
-                    {copied ? <><CheckCircle2 className="h-4 w-4" /> Copied!</> : <><Copy className="h-4 w-4" /> Copy &amp; Open WhatsApp Web</>}
-                  </Button>
+                  <>
+                    {sendMode === SEND_MODES.DIRECT && (
+                      <button disabled={!sendBtnEnabled || sendingBulk || !waConnected} onClick={handleDirectSend}
+                        className="flex items-center gap-2 h-10 px-5 rounded-xl text-white text-sm font-bold transition-all disabled:opacity-50"
+                        style={{ background: sendBtnEnabled && waConnected ? `linear-gradient(135deg, ${WA_DARK}, ${WA_GREEN})` : '#94a3b8', boxShadow: sendBtnEnabled && waConnected ? `0 4px 14px ${WA_GREEN}40` : 'none' }}>
+                        {sendingBulk
+                          ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending {sendProgress?.done}/{sendProgress?.total}…</>
+                          : <><Send className="h-4 w-4" /> Send to {phoneCount} clients</>}
+                      </button>
+                    )}
+                    {sendMode === SEND_MODES.SCHEDULE && (
+                      <button disabled={!sendBtnEnabled || !scheduleDate || !waConnected} onClick={handleScheduleSend}
+                        className="flex items-center gap-2 h-10 px-5 rounded-xl text-white text-sm font-bold transition-all disabled:opacity-50"
+                        style={{ background: sendBtnEnabled && scheduleDate && waConnected ? 'linear-gradient(135deg, #d97706, #f59e0b)' : '#94a3b8' }}>
+                        <Clock className="h-4 w-4" /> Schedule {phoneCount} Messages
+                      </button>
+                    )}
+                    {sendMode === SEND_MODES.WHATSAPP_WEB && (
+                      <button disabled={!message.trim() || selectedClients.length === 0} onClick={handleWhatsApp}
+                        className="flex items-center gap-2 h-10 px-5 rounded-xl text-white text-sm font-bold transition-all disabled:opacity-50"
+                        style={{ background: message.trim() && selectedClients.length > 0 ? `linear-gradient(135deg, #1e40af, #3b82f6)` : '#94a3b8' }}>
+                        {copied ? <><CheckCircle2 className="h-4 w-4" /> Copied!</> : <><Copy className="h-4 w-4" /> Copy & Open WA Web</>}
+                      </button>
+                    )}
+                    {sendMode === SEND_MODES.EXPORT && (
+                      <button onClick={handleExportBroadcast} disabled={phoneCount === 0}
+                        className="flex items-center gap-2 h-10 px-5 rounded-xl text-white text-sm font-bold transition-all disabled:opacity-50"
+                        style={{ background: exportDone ? 'linear-gradient(135deg, #059669, #10b981)' : `linear-gradient(135deg, ${WA_DARK}, ${WA_GREEN})` }}>
+                        {exportDone ? <><CheckCircle2 className="h-4 w-4" /> Exported!</> : <><FileText className="h-4 w-4" /> Export CSV ({phoneCount} clients)</>}
+                      </button>
+                    )}
+                  </>
                 ) : (
                   <Button type="button" disabled={!message.trim() || selectedClients.length === 0} onClick={handleEmail}
                     className="h-10 px-6 text-sm rounded-xl text-white font-semibold gap-2 shadow-sm disabled:opacity-50"
