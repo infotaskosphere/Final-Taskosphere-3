@@ -249,6 +249,8 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
   // Direct send & scheduling state
   const [sendMode, setSendMode] = useState(SEND_MODES.DIRECT); // direct | web | export | schedule
   const [waConnected, setWaConnected] = useState(null); // null=loading, true, false
+  const [waSessions, setWaSessions] = useState([]); // connected WA sessions
+  const [waSelectedSession, setWaSelectedSession] = useState(null); // chosen session ID
   const [sendingBulk, setSendingBulk] = useState(false);
   const [sendProgress, setSendProgress] = useState(null); // { done, total, results }
   const [scheduleDate, setScheduleDate] = useState('');
@@ -271,8 +273,15 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
       setScheduleDate(tomorrow.toISOString().split('T')[0]);
       setScheduleTime('09:00');
       if (mode === 'whatsapp') {
-        // Check if WA bridge is connected
-        api.get('/whatsapp/status').then(r => setWaConnected(r.data?.connected ?? false)).catch(() => setWaConnected(false));
+        // Check if WA bridge is connected and fetch sessions
+        api.get('/whatsapp/sessions')
+          .then(r => {
+            const connected = (r.data?.sessions || []).filter(s => s.status === 'connected');
+            setWaConnected(connected.length > 0);
+            setWaSessions(connected);
+            if (connected.length === 1) setWaSelectedSession(connected[0].sessionId);
+          })
+          .catch(() => { setWaConnected(false); setWaSessions([]); });
         // Load existing scheduled jobs
         loadScheduledJobs();
       }
@@ -359,7 +368,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
       const digits = client.phone.replace(/\D/g, '');
       const waPhone = digits.length === 10 ? `91${digits}` : digits;
       try {
-        await api.post('/whatsapp/send', { to: waPhone, message: personalMsg, message_type: 'bulk_client', context_id: client.id });
+        await api.post('/whatsapp/send', { to: waPhone, message: personalMsg, message_type: 'bulk_client', context_id: client.id, session_id: waSelectedSession || undefined });
         results.push({ id: client.id, name: client.company_name, status: 'sent' });
       } catch (err) {
         results.push({ id: client.id, name: client.company_name, status: 'failed', error: err?.response?.data?.detail || 'Failed' });
@@ -475,8 +484,26 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
                 <span className="text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5"
                   style={{ background: waConnected ? 'rgba(37,211,102,0.2)' : 'rgba(239,68,68,0.2)', color: waConnected ? '#4ade80' : '#f87171', border: `1px solid ${waConnected ? 'rgba(37,211,102,0.4)' : 'rgba(239,68,68,0.3)'}` }}>
                   <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ background: waConnected ? '#4ade80' : '#f87171' }} />
-                  {waConnected ? 'WA Connected' : 'WA Offline'}
+                  {waConnected ? `WA Connected${waSessions.length > 1 ? ` (${waSessions.length})` : ''}` : 'WA Offline'}
                 </span>
+              )}
+              {/* Multi-account selector — shown when >1 session connected */}
+              {isWhatsApp && waSessions.length > 1 && (
+                <select
+                  value={waSelectedSession || ''}
+                  onChange={e => setWaSelectedSession(e.target.value || null)}
+                  style={{
+                    fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 8,
+                    background: 'rgba(255,255,255,0.15)', color: '#fff',
+                    border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer', outline: 'none',
+                  }}>
+                  <option value="" style={{ background: '#0f172a' }}>Auto-pick account</option>
+                  {waSessions.map(s => (
+                    <option key={s.sessionId} value={s.sessionId} style={{ background: '#0f172a' }}>
+                      {s.displayName || `+${s.phoneNumber}`}
+                    </option>
+                  ))}
+                </select>
               )}
               <span className="text-xs font-bold px-2.5 py-1 rounded-full" style={{ background: 'rgba(255,255,255,0.15)', color: '#fff' }}>
                 {relevantCount} {isWhatsApp ? 'with phone' : 'with email'}
