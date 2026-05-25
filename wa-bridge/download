@@ -1,0 +1,6 @@
+# WhatsApp session credentials — never commit these
+sessions/
+
+# Node
+node_modules/
+npm-debug.log*
