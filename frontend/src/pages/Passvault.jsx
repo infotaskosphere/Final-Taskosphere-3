@@ -8,6 +8,10 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import api from '@/lib/api';
 import {
+  clientToPassvaultPatch,
+  fetchClientFillForEntry,
+} from '@/lib/clientPassvaultSync';
+import {
   KeyRound, Plus, Search, Eye, EyeOff, Copy, Edit2, Trash2,
   Globe, Lock, X, RefreshCw, Clock, User as UserIcon, Tag,
   Building2, Filter, ExternalLink, Send, Download, Upload,
@@ -301,7 +305,7 @@ function EditModal({ open, onClose, entry, isDark, onSuccess }) {
   
   useEffect(() => {
     if (!open) return;
-  
+
     if (entry) {
       setForm({
         ...entry,
@@ -315,15 +319,23 @@ function EditModal({ open, onClose, entry, isDark, onSuccess }) {
         department: 'OTHER'
       });
     }
-  
+
     api.get('/clients')
       .then(r => {
         const list = Array.isArray(r.data) ? r.data : [];
         setClientList(list);
-  
+
         if (entry?.client_id) {
           const found = list.find(c => String(c.id) === String(entry.client_id));
           setClientMode(found ? 'select' : 'manual');
+          // ── Autofill any BLANK fields from the linked client ────────────
+          if (found) {
+            const patch = clientToPassvaultPatch(found, entry);
+            if (Object.keys(patch).length) {
+              setForm(prev => ({ ...prev, ...patch }));
+              toast.message(`Auto-filled ${Object.keys(patch).length} field(s) from client`);
+            }
+          }
         } else {
           setClientMode('select');
         }
@@ -332,7 +344,24 @@ function EditModal({ open, onClose, entry, isDark, onSuccess }) {
         setClientList([]);
         setClientMode('manual');
       });
-  
+
+    // Extra safety: if /clients list didn't include this client, fetch it directly
+    if (entry?.client_id) {
+      fetchClientFillForEntry(entry).then(patch => {
+        if (patch && Object.keys(patch).length) {
+          setForm(prev => {
+            // only apply keys that are still empty (don't clobber user edits)
+            const merged = { ...prev };
+            for (const [k, v] of Object.entries(patch)) {
+              if (merged[k] === undefined || merged[k] === '' || merged[k] === null) {
+                merged[k] = v;
+              }
+            }
+            return merged;
+          });
+        }
+      });
+    }
   }, [open]);
 
   const set = (k, v) => {
@@ -353,6 +382,30 @@ function EditModal({ open, onClose, entry, isDark, onSuccess }) {
         await api.post('/passwords', form);
         toast.success('Entry created');
       }
+
+      // ── Reverse sync: fill blank fields on the linked client ──────────
+      if (form.client_id) {
+        try {
+          const linked = clientList.find(c => String(c.id) === String(form.client_id));
+          if (linked) {
+            const cPatch = {};
+            const setIfBlank = (k, v) => {
+              if (v && (linked[k] === undefined || linked[k] === null || String(linked[k]).trim() === '')) {
+                cPatch[k] = v;
+              }
+            };
+            setIfBlank('phone', form.mobile);
+            if (form.username && /\S+@\S+\.\S+/.test(form.username)) setIfBlank('email', form.username);
+            setIfBlank('pan', form.holder_pan);
+            if (Object.keys(cPatch).length) {
+              await api.put(`/clients/${linked.id}`, { ...linked, ...cPatch });
+              toast.message(`Synced ${Object.keys(cPatch).length} field(s) back to client`);
+              qc.invalidateQueries({ queryKey: ['clients'] });
+            }
+          }
+        } catch { /* non-fatal */ }
+      }
+
       qc.invalidateQueries({ queryKey: ['passwords'] });
       onSuccess?.();
       onClose();
@@ -449,7 +502,22 @@ function EditModal({ open, onClose, entry, isDark, onSuccess }) {
                   if (v === '__none__') { set('client_id', ''); set('client_name', ''); }
                   else {
                     const c = clientList.find(x => String(x.id) === v);
-                    if (c) { set('client_id', String(c.id)); set('client_name', c.company_name); }
+                    if (c) {
+                      // Link + auto-fill any blank fields from this client
+                      setForm(prev => {
+                        const base = { ...prev, client_id: String(c.id), client_name: c.company_name };
+                        const patch = clientToPassvaultPatch(c, base);
+                        const merged = { ...base };
+                        let filled = 0;
+                        for (const [k, val] of Object.entries(patch)) {
+                          if (merged[k] === undefined || merged[k] === '' || merged[k] === null) {
+                            merged[k] = val; filled++;
+                          }
+                        }
+                        if (filled) toast.message(`Auto-filled ${filled} field(s) from ${c.company_name}`);
+                        return merged;
+                      });
+                    }
                   }
                 }}>
                 <SelectTrigger className={`rounded-xl ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : ''}`}>
