@@ -1,0 +1,58 @@
+##############################################################################
+# render.yaml — Taskosphere service definitions
+#
+# Deploy instructions:
+#   1. Connect your GitHub repo to Render
+#   2. Render will auto-detect this file and create all services
+#   3. Set the required environment variables in each service's dashboard
+##############################################################################
+
+services:
+
+  # ── Backend (Python / FastAPI) ─────────────────────────────────────────────
+  - type: web
+    name: taskosphere-backend
+    env: python
+    rootDir: .
+    buildCommand: bash build.sh
+    startCommand: uvicorn backend.server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: WA_BRIDGE_URL
+        value: https://taskosphere-wa-bridge.onrender.com   # update to your wa-bridge URL
+      - key: MONGO_URL
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+    healthCheckPath: /health
+
+  # ── Frontend (React / Vite) ────────────────────────────────────────────────
+  - type: web
+    name: taskosphere-frontend
+    env: node
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: no-cache
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+  # ── WhatsApp Bridge (Node.js / Baileys) ───────────────────────────────────
+  - type: web
+    name: taskosphere-wa-bridge
+    env: node
+    rootDir: wa-bridge
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: BACKEND_URL
+        value: https://taskosphere-backend.onrender.com   # update to your backend URL
+      # PORT is injected automatically by Render — no need to set it
+    disk:
+      name: wa-sessions
+      mountPath: /opt/render/project/src/sessions
+      sizeGB: 1
