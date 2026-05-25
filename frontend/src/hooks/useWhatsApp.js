@@ -132,6 +132,7 @@ export function useWhatsApp() {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [settings, setSettingsState] = useState(getWASettings);
+  const [connectedSessions, setConnectedSessions] = useState([]);
 
   const refreshStatus = useCallback(async () => {
     setLoading(true);
@@ -145,19 +146,31 @@ export function useWhatsApp() {
     }
   }, []);
 
-  useEffect(() => { refreshStatus(); }, [refreshStatus]);
+  const refreshSessions = useCallback(async () => {
+    try {
+      const { data } = await api.get('/whatsapp/sessions');
+      const connected = (data?.sessions || []).filter(s => s.status === 'connected');
+      setConnectedSessions(connected);
+    } catch {
+      setConnectedSessions([]);
+    }
+  }, []);
+
+  useEffect(() => { refreshStatus(); refreshSessions(); }, [refreshStatus, refreshSessions]);
 
   const updateSettings = useCallback((newSettings) => {
     saveWASettings(newSettings);
     setSettingsState(newSettings);
   }, []);
 
-  const send = useCallback(async (phone, message) => {
+  const send = useCallback(async (phone, message, sessionId = null) => {
     const e164 = formatPhoneE164(phone);
     if (!e164) return { success: false, error: 'Invalid phone number' };
     if (status?.connected) {
       try {
-        await api.post('/whatsapp/send', { to: e164, message });
+        const payload = { to: e164, message, message_type: 'general' };
+        if (sessionId) payload.session_id = sessionId;
+        await api.post('/whatsapp/send', payload);
         return { success: true, method: 'api' };
       } catch {
         // Fall back to web redirect
@@ -167,7 +180,7 @@ export function useWhatsApp() {
     return { success: true, method: 'web' };
   }, [status]);
 
-  return { status, loading, settings, updateSettings, send, refreshStatus };
+  return { status, loading, settings, updateSettings, send, refreshStatus, connectedSessions, refreshSessions };
 }
 
 export default useWhatsApp;
