@@ -265,14 +265,14 @@ export default function WhatsAppSendDialog({
     <Dialog open={open} onOpenChange={v => !v && onClose?.()}>
       <DialogContent style={{
         background: bg, border: `1px solid ${border}`,
-        borderRadius: 20, padding: 0, maxWidth: 460,
+        borderRadius: 20, padding: 0, maxWidth: 560,
         overflow: 'hidden', fontFamily: "'DM Sans', system-ui, sans-serif",
       }}>
 
         {/* ── Header ── */}
         <div style={{
           background: `linear-gradient(135deg, ${WA_DARK} 0%, ${WA_GREEN} 100%)`,
-          padding: '18px 22px 16px',
+          padding: '14px 22px 12px',
           display: 'flex', alignItems: 'center', gap: 12,
         }}>
           <div style={{
@@ -331,7 +331,7 @@ export default function WhatsAppSendDialog({
             <motion.div key="pick"
               initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.2 }}
-              style={{ padding: '20px 22px 22px' }}>
+              style={{ padding: '14px 22px 18px' }}>
 
               <p style={{ margin: '0 0 14px', fontSize: 13, color: label, lineHeight: 1.5 }}>
                 Multiple WhatsApp accounts are connected. Choose which one to send from:
@@ -381,7 +381,7 @@ export default function WhatsAppSendDialog({
             <motion.div key="sent"
               initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0 }}
-              style={{ padding: '32px 22px', display: 'flex', flexDirection: 'column',
+              style={{ padding: '20px 22px', display: 'flex', flexDirection: 'column',
                 alignItems: 'center', gap: 12 }}>
               <div style={{
                 width: 64, height: 64, borderRadius: '50%',
@@ -401,7 +401,7 @@ export default function WhatsAppSendDialog({
             <motion.div key="compose"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }}
               exit={{ opacity: 0 }} transition={{ duration: 0.15 }}
-              style={{ padding: '18px 22px 22px' }}>
+              style={{ padding: '14px 22px 18px' }}>
 
               {/* Entity */}
               {entityName && (
@@ -512,7 +512,7 @@ export default function WhatsAppSendDialog({
 
                 {showMsgEdit ? (
                   <textarea
-                    value={editedMsg} onChange={e => setEditedMsg(e.target.value)} rows={6}
+                    value={editedMsg} onChange={e => setEditedMsg(e.target.value)} rows={4}
                     style={{
                       width: '100%', border: `2px solid ${WA_GREEN}40`, borderRadius: 12,
                       background: isDark ? '#1e3a2f' : '#f0fdf4', color: text,
