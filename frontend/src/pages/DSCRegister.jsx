@@ -1371,28 +1371,27 @@ export default function DSCRegister() {
     setWaAlertDialogOpen(true);
   };
 
-  const sendWhatsAppMessage = (dsc, phone) => {
+  const sendWhatsAppMessage = async (dsc, phone) => {
     const msg = buildExpiryAlertText(dsc, waMsgSettings);
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+    const digits = phone.replace(/\D/g, '');
+    const e164 = digits.startsWith('91') ? digits : `91${digits}`;
+    try {
+      const res = await api.post('/whatsapp/send', {
+        to: e164, message: msg, message_type: 'dsc_expiry', context_id: dsc.id
+      }).catch(() => null);
+      if (res?.data?.success) {
+        toast.success(`Message sent directly to ${dsc.holder_name} ✓`);
+        return;
+      }
+    } catch {}
+    window.open(`https://wa.me/${e164}?text=${encodeURIComponent(msg)}`, '_blank');
     toast.success(`WhatsApp opened for ${dsc.holder_name}`);
   };
 
-  // Send plain text alert from footer
+  // Send plain text alert — always opens WhatsApp Send Dialog for direct send
   const handleSendTextAlert = (dsc) => {
-    const ph = dsc?.mobile?.replace(/\s|-|\+/g, '');
-    const phone = ph ? (ph.startsWith('91') ? ph : '91' + ph) : null;
-    if (phone && phone.replace(/\D/g,'').length >= 10) {
-      sendWhatsAppMessage(dsc, phone);
-    } else {
-      const phoneMatch = dsc.notes?.match(/(?:phone|mobile|mob|ph)[:\s]*([+\d\s\-]{8,15})/i);
-      if (phoneMatch) {
-        const p = phoneMatch[1].replace(/\s|-/g, '');
-        sendWhatsAppMessage(dsc, p.startsWith('+') ? p.slice(1) : p);
-      } else {
-        setWaPhoneNumber('');
-        setWaPhoneDialog(dsc);
-      }
-    }
+    setWaAlertDsc(dsc);
+    setWaAlertDialogOpen(true);
   };
 
   // Legacy: kept for automation quick-action buttons
@@ -1406,9 +1405,15 @@ export default function DSCRegister() {
     if (!waPhoneDialog) return;
     const phone = waPhoneNumber.replace(/\s|-|\+/g, '');
     const msg = buildExpiryAlertText(waPhoneDialog, waMsgSettings);
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+    const digits = phone.replace(/\D/g, '');
+    const e164 = digits.startsWith('91') ? digits : `91${digits}`;
+    api.post('/whatsapp/send', { to: e164, message: msg, message_type: 'dsc_expiry', context_id: waPhoneDialog.id })
+      .then(res => {
+        if (res?.data?.success) toast.success(`Message sent directly to ${waPhoneDialog.holder_name} \u2713`);
+        else { window.open(`https://wa.me/${e164}?text=${encodeURIComponent(msg)}`, '_blank'); toast.success(`WhatsApp opened for ${waPhoneDialog.holder_name}`); }
+      })
+      .catch(() => { window.open(`https://wa.me/${e164}?text=${encodeURIComponent(msg)}`, '_blank'); toast.success(`WhatsApp opened for ${waPhoneDialog.holder_name}`); });
     setWaPhoneDialog(null);
-    toast.success(`WhatsApp alert opened for ${waPhoneDialog.holder_name}`);
   };
 
   const saveAutoSettings = (settings, enabled) => {
@@ -2951,8 +2956,8 @@ export default function DSCRegister() {
           subtitle={waAlertDsc.associated_with ? `for ${waAlertDsc.associated_with}` : 'DSC expiry notification'}
           isDark={isDark}
           onPhoneSaved={(phone) => {
-            // Optionally save phone back to the DSC record
-            api.patch(`/dsc/${waAlertDsc.id}`, { mobile: phone }).catch(() => {});
+            // Save phone back to the DSC record
+            api.put(`/dsc/${waAlertDsc.id}`, { mobile: phone }).catch(() => {});
           }}
         />
       )}
