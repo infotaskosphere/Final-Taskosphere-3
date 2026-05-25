@@ -45,6 +45,7 @@ from backend.client_portal import router as client_portal_router
 from backend.activity_monitor import router as activity_monitor_router
 from backend.whatsapp_integration import router as whatsapp_router
 from backend.whatsapp_scheduler import wa_birthday_job, wa_dsc_expiry_job, wa_compliance_job
+from backend.whatsapp_integration import wa_scheduled_bulk_job
 
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -502,6 +503,12 @@ async def startup_event():
             'cron', hour=10, minute=0,
             timezone=pytz.timezone("Asia/Kolkata"),
             id="wa_compliance_reminders", replace_existing=True,
+        )
+        # Scheduled bulk send runner — checks every minute for due jobs
+        scheduler.add_job(
+            wa_scheduled_bulk_job,
+            'interval', minutes=1,
+            id="wa_scheduled_bulk", replace_existing=True,
         )
 
         scheduler.start()
