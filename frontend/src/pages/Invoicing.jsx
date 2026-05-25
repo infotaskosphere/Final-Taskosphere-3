@@ -24,7 +24,7 @@ import {
   IndianRupee, CalendarDays, FileCheck, ArrowRightLeft, Layers,
   Upload, Database, FileUp, CheckSquare, AlertTriangle, Phone, Mail,
   FileSpreadsheet, Briefcase, PieChart, Settings, Table, FileDown, BookOpen,
-  ExternalLink, GripVertical} from 'lucide-react';
+  ExternalLink, GripVertical, MessageCircle, Square} from 'lucide-react';
 import InvoiceSettings, { getInvSettings } from './InvoiceSettings';
 import { COLOR_THEMES, INVOICE_TEMPLATES, generateInvoiceHTML } from './InvoiceTemplates';
 import PartyLedger from './PartyLedger';
@@ -4589,6 +4589,7 @@ function Invoicing() {
   const [listViewFilter, setListViewFilter] = useState('all'); // 'all' | 'outstanding' | 'received'
   const [waInvoice, setWaInvoice] = useState(null);
   const [waDialogOpen, setWaDialogOpen] = useState(false);
+  const [bulkWAOpen, setBulkWAOpen] = useState(false);
 
   // ── B. ALL useRef ─────────────────────────────────────────────────────────
   const iframeRef = useRef(null);
@@ -4986,6 +4987,7 @@ const fetchAll = useCallback(async () => {
             <Button variant="outline" onClick={downloadInvoiceTemplate} className="h-9 px-4 text-sm bg-amber-500/20 border-amber-300/40 text-white hover:bg-amber-500/30 rounded-xl gap-2 backdrop-blur-sm font-semibold"><FileDown className="h-4 w-4" /> Template</Button>
             <Button variant="outline" onClick={() => setCatOpen(true)} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm"><Package className="h-4 w-4" /> Catalog</Button>
             <Button variant="outline" onClick={handleExport} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm"><Download className="h-4 w-4" /> Export</Button>
+            <Button variant="outline" onClick={() => setBulkWAOpen(true)} className="h-9 px-4 text-sm bg-emerald-600/30 border-emerald-400/40 text-white hover:bg-emerald-600/50 rounded-xl gap-2 backdrop-blur-sm font-semibold"><MessageCircle className="h-4 w-4" /> Bulk WA</Button>
             <Button onClick={() => { setEditingInv(null); setFormOpen(true); }} className="h-9 px-5 text-sm rounded-xl bg-white text-slate-800 hover:bg-blue-50 shadow-sm gap-2 font-semibold border-0"><Plus className="h-4 w-4" /> New Invoice</Button>
           </div>
         </div>
@@ -5335,8 +5337,364 @@ const fetchAll = useCallback(async () => {
           canSendScreenshot={true}
         />
       )}
+      {/* BULK WA MODAL */}
+      <BulkInvoiceWAModal
+        open={bulkWAOpen}
+        onClose={() => setBulkWAOpen(false)}
+        invoices={enrichedFiltered}
+        isDark={isDark}
+      />
     </div>
     );
 }
+
+// ─── Bulk WhatsApp Modal for Invoices ─────────────────────────────────────────
+const INVOICE_SEND_MODES = { DIRECT: 'direct', WHATSAPP_WEB: 'web', EXPORT: 'export' };
+const WA_GRN = '#25D366';
+const WA_DRK = '#128C7E';
+
+const BulkInvoiceWAModal = React.memo(({ open, onClose, invoices, isDark }) => {
+  const [message, setMessage] = useState('');
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [search, setSearch] = useState('');
+  const [sendMode, setSendMode] = useState(INVOICE_SEND_MODES.DIRECT);
+  const [waConnected, setWaConnected] = useState(null);
+  const [waSessions, setWaSessions] = useState([]);
+  const [waSession, setWaSession] = useState(null);
+  const [sending, setSending] = useState(false);
+  const [progress, setProgress] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const [exportDone, setExportDone] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState('');
+
+  const waSettings = getWASettings();
+
+  // Template options from WA settings
+  const TEMPLATE_OPTIONS = [
+    { label: 'Invoice Reminder', key: 'invoiceTemplate' },
+    { label: 'Client Message', key: 'clientTemplate' },
+  ];
+
+  useEffect(() => {
+    if (!open) return;
+    const withPhone = invoices.filter(i => i.client_phone);
+    setSelectedIds(new Set(withPhone.map(i => i.id)));
+    setSearch(''); setMessage(''); setCopied(false); setExportDone(false);
+    setSendMode(INVOICE_SEND_MODES.DIRECT); setProgress(null); setSending(false);
+    setSelectedTemplate('');
+    api.get('/whatsapp/sessions')
+      .then(r => {
+        const connected = (r.data?.sessions || []).filter(s => s.status === 'connected');
+        setWaConnected(connected.length > 0);
+        setWaSessions(connected);
+        if (connected.length === 1) setWaSession(connected[0].sessionId);
+      })
+      .catch(() => { setWaConnected(false); setWaSessions([]); });
+  }, [open]); // eslint-disable-line
+
+  const displayed = useMemo(() => {
+    if (!search.trim()) return invoices;
+    const q = search.toLowerCase();
+    return invoices.filter(i =>
+      (i.client_name || '').toLowerCase().includes(q) ||
+      (i.invoice_number || '').toLowerCase().includes(q)
+    );
+  }, [invoices, search]);
+
+  const selected = useMemo(() => invoices.filter(i => selectedIds.has(i.id)), [invoices, selectedIds]);
+  const phoneCount = selected.filter(i => i.client_phone).length;
+
+  const toggle = useCallback((id) => {
+    setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }, []);
+
+  const applyTemplate = useCallback((key) => {
+    if (!key) return;
+    const tmpl = waSettings[key] || '';
+    setMessage(tmpl);
+    setSelectedTemplate(key);
+  }, [waSettings]);
+
+  const buildMsg = useCallback((inv) => {
+    const raw = message;
+    const s = waSettings;
+    const lines = [];
+    if (s.includeGreeting) { lines.push((s.greetingTemplate || 'Dear {name},').replace('{name}', inv.client_name || 'Valued Client')); lines.push(''); }
+    if (s.firmName) lines.push(`*${s.firmName}*${s.firmTagline ? ` | ${s.firmTagline}` : ''}`);
+    lines.push('');
+    const body = raw
+      .replace(/\{name\}/gi, inv.client_name || 'Valued Client')
+      .replace(/\{number\}/gi, inv.invoice_number || inv.id || 'N/A')
+      .replace(/\{amount\}/gi, Number(inv.grand_total || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }))
+      .replace(/\{due_date\}/gi, inv.due_date || 'N/A')
+      .replace(/\{status\}/gi, (inv.status || '').replace(/_/g, ' ').toUpperCase());
+    lines.push(body);
+    if (s.includeFooter && s.footerNote) { lines.push(''); lines.push(s.footerNote); }
+    return lines.join('\n');
+  }, [message, waSettings]);
+
+  const handleDirectSend = useCallback(async () => {
+    if (!message.trim()) { toast.error('Write a message first'); return; }
+    const toSend = selected.filter(i => i.client_phone);
+    if (!toSend.length) { toast.error('No selected invoices have a client phone number'); return; }
+    setSending(true); setProgress({ done: 0, total: toSend.length, results: [] });
+    const results = [];
+    for (let i = 0; i < toSend.length; i++) {
+      const inv = toSend[i];
+      const digits = inv.client_phone.replace(/\D/g, '');
+      const waPhone = digits.length === 10 ? `91${digits}` : digits;
+      try {
+        await api.post('/whatsapp/send', { to: waPhone, message: buildMsg(inv), message_type: 'invoice', context_id: inv.id, session_id: waSession || undefined });
+        results.push({ id: inv.id, name: inv.client_name, status: 'sent' });
+      } catch (err) {
+        results.push({ id: inv.id, name: inv.client_name, status: 'failed', error: err?.response?.data?.detail || 'Failed' });
+      }
+      setProgress({ done: i + 1, total: toSend.length, results: [...results] });
+    }
+    setSending(false);
+    const sentCount = results.filter(r => r.status === 'sent').length;
+    const failCount = results.filter(r => r.status === 'failed').length;
+    toast.success(`Sent ${sentCount} messages${failCount > 0 ? `, ${failCount} failed` : ''}`);
+  }, [message, selected, buildMsg, waSession]);
+
+  const handleWebCopy = useCallback(async () => {
+    if (!message.trim()) { toast.error('Write a message first'); return; }
+    await navigator.clipboard.writeText(message.trim()).catch(() => {});
+    setCopied(true);
+    toast.success('Message copied! Opening WhatsApp Web…');
+    setTimeout(() => { window.open('https://web.whatsapp.com', '_blank'); setCopied(false); }, 800);
+  }, [message]);
+
+  const handleExport = useCallback(() => {
+    const withPhone = selected.filter(i => i.client_phone);
+    if (!withPhone.length) { toast.error('No selected invoices have a client phone number'); return; }
+    const rows = [
+      ['Client', 'Invoice #', 'Amount', 'Phone', 'WA Number', 'Message'],
+      ...withPhone.map(i => {
+        const digits = i.client_phone.replace(/\D/g, '');
+        const wa = digits.length === 10 ? `91${digits}` : digits;
+        return [i.client_name || '', i.invoice_number || '', i.grand_total || '', i.client_phone, wa, buildMsg(i)];
+      }),
+    ];
+    const csv = rows.map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+    const a = document.createElement('a'); a.href = url; a.download = `invoice_wa_broadcast.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    const nums = withPhone.map(i => { const d = i.client_phone.replace(/\D/g,''); return d.length===10?`91${d}`:d; }).join('\n');
+    navigator.clipboard.writeText(nums).catch(() => {});
+    setExportDone(true); setTimeout(() => setExportDone(false), 3000);
+    toast.success(`CSV downloaded + ${withPhone.length} numbers copied!`);
+  }, [selected, buildMsg]);
+
+  const bg = isDark ? '#0f172a' : '#fff';
+  const border = isDark ? '#1e3a5f' : '#e2e8f0';
+  const subtle = isDark ? '#0f172a' : '#fafafa';
+  const txt = isDark ? '#e2e8f0' : '#0f172a';
+  const muted = isDark ? '#475569' : '#94a3b8';
+  const row = isDark ? '#1e2d3d' : '#f1f5f9';
+  const sendBtnOk = message.trim() && phoneCount > 0;
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-4xl max-h-[94vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0"
+        style={{ background: bg, borderColor: border }}>
+        <DialogTitle className="sr-only">Bulk WhatsApp — Invoices</DialogTitle>
+
+        {/* Header */}
+        <div className="flex-shrink-0 px-6 py-4 border-b" style={{ background: 'linear-gradient(135deg, #064e3b, #065f46)', borderColor: 'transparent' }}>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(255,255,255,0.15)' }}>
+              <MessageCircle className="h-5 w-5 text-white" />
+            </div>
+            <div className="flex-1">
+              <h2 className="text-base font-bold text-white">Bulk WhatsApp — Invoices</h2>
+              <p className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.65)' }}>Send personalized invoice reminders directly to clients</p>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {waConnected !== null && (
+                <span className="text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5"
+                  style={{ background: waConnected ? 'rgba(37,211,102,0.2)' : 'rgba(239,68,68,0.2)', color: waConnected ? '#4ade80' : '#f87171', border: `1px solid ${waConnected ? 'rgba(37,211,102,0.4)' : 'rgba(239,68,68,0.3)'}` }}>
+                  <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ background: waConnected ? '#4ade80' : '#f87171' }} />
+                  {waConnected ? `WA Connected${waSessions.length > 1 ? ` (${waSessions.length})` : ''}` : 'WA Offline'}
+                </span>
+              )}
+              {waSessions.length > 1 && (
+                <select value={waSession || ''} onChange={e => setWaSession(e.target.value || null)}
+                  style={{ fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 8, background: 'rgba(255,255,255,0.15)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer', outline: 'none' }}>
+                  <option value="" style={{ background: '#0f172a' }}>Auto-pick account</option>
+                  {waSessions.map(s => <option key={s.sessionId} value={s.sessionId} style={{ background: '#0f172a' }}>{s.displayName || `+${s.phoneNumber}`}</option>)}
+                </select>
+              )}
+              <span className="text-xs font-bold px-2.5 py-1 rounded-full" style={{ background: 'rgba(255,255,255,0.15)', color: '#fff' }}>{phoneCount} with phone</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-1 overflow-hidden">
+          {/* Left: invoice list */}
+          <div className="w-64 flex-shrink-0 flex flex-col border-r" style={{ borderColor: row, background: subtle }}>
+            <div className="px-3 py-2 border-b flex-shrink-0" style={{ borderColor: row }}>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                <input className="w-full pl-8 pr-3 h-8 text-xs rounded-lg border focus:outline-none"
+                  style={{ borderColor: isDark ? '#334155' : '#e2e8f0', background: isDark ? '#1e293b' : '#fff', color: txt }}
+                  placeholder="Search invoices…" value={search} onChange={e => setSearch(e.target.value)} />
+              </div>
+            </div>
+            <div className="flex items-center justify-between px-3 py-1.5 border-b flex-shrink-0" style={{ borderColor: row }}>
+              <span className="text-[10px]" style={{ color: muted }}>{selectedIds.size} of {invoices.filter(i => i.client_phone).length} selected</span>
+              <div className="flex gap-2">
+                <button onClick={() => setSelectedIds(new Set(invoices.filter(i => i.client_phone).map(i => i.id)))}
+                  className="text-[10px] font-semibold px-2 py-0.5 rounded border" style={{ borderColor: WA_GRN, color: WA_GRN, background: WA_GRN + '18' }}>Select All</button>
+                <button onClick={() => setSelectedIds(new Set())}
+                  className="text-[10px] font-semibold px-2 py-0.5 rounded border" style={{ borderColor: isDark ? '#334155' : '#e2e8f0', color: muted }}>Clear</button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {displayed.map(inv => {
+                const isSel = selectedIds.has(inv.id);
+                const hasPhone = !!inv.client_phone;
+                return (
+                  <div key={inv.id} onClick={() => hasPhone && toggle(inv.id)}
+                    className="flex items-center gap-2.5 px-3 py-2.5 border-b transition-all"
+                    style={{ borderColor: isDark ? '#1e2d3d' : '#f1f5f9', opacity: hasPhone ? 1 : 0.35, cursor: hasPhone ? 'pointer' : 'not-allowed', background: isSel && hasPhone ? (isDark ? 'rgba(37,211,102,0.06)' : 'rgba(37,211,102,0.05)') : 'transparent' }}>
+                    <span style={{ color: isSel && hasPhone ? WA_GRN : muted }}>
+                      {isSel && hasPhone ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-semibold truncate" style={{ color: txt }}>{inv.client_name || '—'}</p>
+                      <p className="text-[10px] truncate" style={{ color: muted }}>{inv.invoice_number || inv.id} · {inv.client_phone || '— no phone'}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Right: compose + send */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+
+              {/* Template picker */}
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-widest mb-1.5 block" style={{ color: muted }}>Load from WhatsApp Settings Template</label>
+                <div className="flex flex-wrap gap-2">
+                  {TEMPLATE_OPTIONS.map(t => (
+                    <button key={t.key} onClick={() => applyTemplate(t.key)}
+                      className="text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all"
+                      style={{ background: selectedTemplate === t.key ? WA_GRN + '22' : (isDark ? '#1e293b' : '#f8fafc'), borderColor: selectedTemplate === t.key ? WA_GRN : (isDark ? '#334155' : '#e2e8f0'), color: selectedTemplate === t.key ? WA_GRN : (isDark ? '#94a3b8' : '#64748b') }}>
+                      {t.label}
+                    </button>
+                  ))}
+                  <span className="text-[10px] self-center" style={{ color: muted }}>or write your own below</span>
+                </div>
+              </div>
+
+              {/* Message composer */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-widest" style={{ color: muted }}>Message Body</label>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded" style={{ background: isDark ? '#1e293b' : '#f1f5f9', color: muted }}>
+                    Variables: {'{name}'} {'{number}'} {'{amount}'} {'{due_date}'} {'{status}'}
+                  </span>
+                </div>
+                <textarea
+                  className="w-full min-h-[130px] border rounded-xl text-sm p-3.5 resize-none outline-none transition-all leading-relaxed"
+                  style={{ background: isDark ? '#1e293b' : '#f8fafc', borderColor: isDark ? '#334155' : '#e2e8f0', color: txt }}
+                  placeholder={"Your invoice *{number}* for *₹{amount}* is ready.\n\nDue Date: {due_date}\nStatus: {status}\n\nPlease make the payment at your earliest convenience."}
+                  value={message} onChange={e => { setMessage(e.target.value); setSelectedTemplate(''); }} />
+                <p className="text-[10px] mt-1" style={{ color: muted }}>{message.length} chars · greeting & footer from WhatsApp Settings are auto-added</p>
+              </div>
+
+              {/* Send mode tabs */}
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-widest mb-2 block" style={{ color: muted }}>Send Method</label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {[
+                    { key: INVOICE_SEND_MODES.DIRECT, label: '⚡ Direct Send', desc: 'Via WA bridge', color: WA_GRN, req: waConnected },
+                    { key: INVOICE_SEND_MODES.WHATSAPP_WEB, label: '🌐 WA Web', desc: 'Copy & open', color: '#3b82f6', req: true },
+                    { key: INVOICE_SEND_MODES.EXPORT, label: '📤 Export CSV', desc: 'Broadcast list', color: '#8b5cf6', req: true },
+                  ].map(({ key, label, desc, color, req }) => (
+                    <button key={key} onClick={() => setSendMode(key)}
+                      className="flex flex-col items-center gap-0.5 p-2.5 rounded-xl border text-center transition-all"
+                      style={{ background: sendMode === key ? color + '15' : (isDark ? '#1e293b' : '#f8fafc'), borderColor: sendMode === key ? color : (isDark ? '#334155' : '#e2e8f0'), opacity: req === false ? 0.45 : 1 }}>
+                      <span className="text-xs font-bold" style={{ color: sendMode === key ? color : muted }}>{label}</span>
+                      <span className="text-[9px]" style={{ color: muted }}>{desc}</span>
+                      {req === false && <span className="text-[9px] text-red-400">WA offline</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Direct send info */}
+              {sendMode === INVOICE_SEND_MODES.DIRECT && (
+                <div className="rounded-xl border p-4 space-y-2" style={{ background: isDark ? '#0a1628' : '#f0fdf4', borderColor: isDark ? '#1a3a1a' : '#bbf7d0' }}>
+                  <p className="text-xs font-bold" style={{ color: isDark ? '#4ade80' : '#166534' }}>⚡ Direct Send — {phoneCount} invoices with phone</p>
+                  <p className="text-xs" style={{ color: isDark ? '#6ee7b7' : '#15803d' }}>Each client receives a personalized message with their invoice details.</p>
+                  {progress && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs font-semibold" style={{ color: isDark ? '#4ade80' : '#166534' }}>
+                        <span>Sending {progress.done} / {progress.total}</span>
+                        <span>{Math.round(progress.done / progress.total * 100)}%</span>
+                      </div>
+                      <div className="h-2 rounded-full overflow-hidden" style={{ background: isDark ? '#1e3a1e' : '#dcfce7' }}>
+                        <div className="h-full rounded-full transition-all" style={{ width: `${progress.done / progress.total * 100}%`, background: WA_GRN }} />
+                      </div>
+                      <div className="max-h-20 overflow-y-auto space-y-0.5">
+                        {progress.results.slice(-5).map((r, i) => (
+                          <p key={i} className="text-[10px]" style={{ color: r.status === 'sent' ? (isDark ? '#4ade80' : '#166534') : '#ef4444' }}>
+                            {r.status === 'sent' ? '✓' : '✗'} {r.name}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {sendMode === INVOICE_SEND_MODES.WHATSAPP_WEB && (
+                <div className="rounded-xl border p-4" style={{ background: isDark ? '#0a1628' : '#eff6ff', borderColor: isDark ? '#1e3a5f' : '#bfdbfe' }}>
+                  <p className="text-xs font-bold mb-1" style={{ color: isDark ? '#93c5fd' : '#1e40af' }}>🌐 Copy & Open WhatsApp Web</p>
+                  <p className="text-xs" style={{ color: isDark ? '#60a5fa' : '#1d4ed8' }}>Copies message to clipboard and opens WhatsApp Web. Paste and send manually.</p>
+                </div>
+              )}
+              {sendMode === INVOICE_SEND_MODES.EXPORT && (
+                <div className="rounded-xl border-2 border-dashed p-4" style={{ borderColor: isDark ? '#2d4a2d' : '#86efac', background: isDark ? '#0a1a0a' : '#f0fdf4' }}>
+                  <p className="text-sm font-bold mb-1" style={{ color: isDark ? '#4ade80' : '#166534' }}>📤 Export for WhatsApp Broadcast</p>
+                  <p className="text-xs" style={{ color: isDark ? '#6ee7b7' : '#15803d' }}>Downloads a CSV with all phone numbers + personalized messages. Numbers also copied to clipboard.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex-shrink-0 flex items-center justify-between gap-3 px-5 py-3.5 border-t" style={{ borderColor: isDark ? '#1e2d3d' : '#f1f5f9', background: isDark ? '#0a1220' : '#fff' }}>
+              <Button type="button" variant="ghost" onClick={onClose} className="h-10 px-4 text-sm rounded-xl" style={{ color: muted }}>Cancel</Button>
+              {sendMode === INVOICE_SEND_MODES.DIRECT && (
+                <button disabled={!sendBtnOk || sending || !waConnected} onClick={handleDirectSend}
+                  className="flex items-center gap-2 h-10 px-5 rounded-xl text-white text-sm font-bold transition-all disabled:opacity-50"
+                  style={{ background: sendBtnOk && waConnected ? `linear-gradient(135deg, ${WA_DRK}, ${WA_GRN})` : '#94a3b8', boxShadow: sendBtnOk && waConnected ? `0 4px 14px ${WA_GRN}40` : 'none' }}>
+                  {sending ? <><RefreshCw className="h-4 w-4 animate-spin" /> Sending {progress?.done}/{progress?.total}…</> : <><Send className="h-4 w-4" /> Send to {phoneCount} clients</>}
+                </button>
+              )}
+              {sendMode === INVOICE_SEND_MODES.WHATSAPP_WEB && (
+                <button disabled={!message.trim() || !phoneCount} onClick={handleWebCopy}
+                  className="flex items-center gap-2 h-10 px-5 rounded-xl text-white text-sm font-bold transition-all disabled:opacity-50"
+                  style={{ background: message.trim() && phoneCount ? 'linear-gradient(135deg, #1e40af, #3b82f6)' : '#94a3b8' }}>
+                  {copied ? <><CheckCircle2 className="h-4 w-4" /> Copied!</> : <><Copy className="h-4 w-4" /> Copy & Open WA Web</>}
+                </button>
+              )}
+              {sendMode === INVOICE_SEND_MODES.EXPORT && (
+                <button disabled={!phoneCount} onClick={handleExport}
+                  className="flex items-center gap-2 h-10 px-5 rounded-xl text-white text-sm font-bold transition-all disabled:opacity-50"
+                  style={{ background: exportDone ? 'linear-gradient(135deg, #059669, #10b981)' : `linear-gradient(135deg, ${WA_DRK}, ${WA_GRN})` }}>
+                  {exportDone ? <><CheckCircle2 className="h-4 w-4" /> Exported!</> : <><Download className="h-4 w-4" /> Export CSV ({phoneCount} invoices)</>}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+});
 
 export default Invoicing;
