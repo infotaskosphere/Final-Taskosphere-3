@@ -5226,6 +5226,16 @@ const fetchAll = useCallback(async () => {
                         <button onClick={() => { setEditingInv(inv); setFormOpen(true); }} title="Edit" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-blue-900/30' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}><Edit className="h-3.5 w-3.5" /></button>
                         <button onClick={() => handleDuplicateInv(inv)} title="Duplicate" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-purple-400 hover:bg-purple-900/30' : 'text-slate-400 hover:text-purple-600 hover:bg-purple-50'}`}><Copy className="h-3.5 w-3.5" /></button>
                         <button onClick={() => handleDownloadPdf(inv)} title="Download PDF" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/30' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}><Download className="h-3.5 w-3.5" /></button>
+                        <button
+                          onClick={() => handleWhatsAppInvoice(inv)}
+                          title={inv.client_phone ? 'Send Invoice via WhatsApp' : 'Send via WhatsApp (no phone saved)'}
+                          className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors`}
+                          style={{
+                            color: inv.client_phone ? '#25D366' : (isDark ? '#475569' : '#94a3b8'),
+                            background: inv.client_phone ? (isDark ? 'rgba(37,211,102,0.12)' : 'rgba(37,211,102,0.08)') : 'transparent',
+                          }}>
+                          <MessageCircle className="h-3.5 w-3.5" />
+                        </button>
                         <button onClick={() => handleDelete(inv)} title="Delete" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-red-400 hover:bg-red-900/30' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}><Trash2 className="h-3.5 w-3.5" /></button>
                       </div>
                     </td>
