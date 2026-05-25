@@ -10,6 +10,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import api from '@/lib/api';
+import {
+  fetchPassvaultFillForClient,
+  backfillPassvaultFromClient,
+} from '@/lib/clientPassvaultSync';
 import { toast } from 'sonner';
 import { useLocation, useNavigate } from "react-router-dom";
 import {
@@ -3388,6 +3392,11 @@ export default function Clients() {
           });
         } catch { /* non-fatal */ }
       }
+
+      // ── Backfill any blank fields on linked PassVault entries ─────────
+      if (editingClient) {
+        backfillPassvaultFromClient({ ...editingClient, ...payload });
+      }
     } catch (error) {
       const detail = error.response?.data?.detail;
       if (Array.isArray(detail)) toast.error(detail.map(e => `${e.loc?.slice(-1)[0]}: ${e.msg}`).join(' | '));
@@ -3415,6 +3424,33 @@ export default function Clients() {
     const other = client?.services?.find(s => s.startsWith('Other: '));
     setOtherService(other ? other.replace('Other: ', '') : '');
     setDialogOpen(true); setFormErrors({}); setContactErrors([]);
+
+    // ── Autofill any BLANK client fields from linked PassVault entries ──
+    fetchPassvaultFillForClient(client).then(patch => {
+      if (!patch || Object.keys(patch).length === 0) return;
+      setFormData(prev => {
+        const merged = { ...prev };
+        let filled = 0;
+        for (const [k, v] of Object.entries(patch)) {
+          if (k === 'contact_persons') {
+            // merge only blank fields of contact_persons[0]
+            const cps = Array.isArray(prev.contact_persons) ? [...prev.contact_persons] : [];
+            const cur = cps[0] || { name: '', email: '', phone: '', designation: '', birthday: '', din: '' };
+            const incoming = v[0] || {};
+            const next = { ...cur };
+            for (const ck of Object.keys(incoming)) {
+              if (!cur[ck] && incoming[ck]) { next[ck] = incoming[ck]; filled++; }
+            }
+            cps[0] = next;
+            merged.contact_persons = cps;
+          } else if (!merged[k]) {
+            merged[k] = v; filled++;
+          }
+        }
+        if (filled) toast.message(`Auto-filled ${filled} field(s) from PassVault`);
+        return merged;
+      });
+    });
   }, []);
 
   const resetForm = useCallback(() => {
