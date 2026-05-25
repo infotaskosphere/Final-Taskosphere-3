@@ -1,132 +1,405 @@
 // =============================================================================
-// WhatsAppSettings.jsx — Message Templates (localStorage-based, no backend)
-// Theme matches GeneralSettings / rest of the app via useDark()
+// WhatsAppSettings.jsx — Multi-number WhatsApp Web + Message Templates
 // =============================================================================
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useDark } from "@/hooks/useDark";
 import { useAuth } from "@/contexts/AuthContext";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import {
-  MessageCircle, Settings, Save, CheckCircle2,
-  FileText, Users, Shield, Key, Eye, Building2, ChevronDown,
+  MessageCircle, Settings, Save, CheckCircle2, FileText, Users,
+  Shield, Key, Eye, Building2, Plus, Trash2, Smartphone, QrCode,
+  Wifi, WifiOff, RefreshCw, Link, Unlink, ChevronRight, AlertCircle,
+  Pencil, Check, X,
 } from "lucide-react";
 import { getWASettings, saveWASettings } from "@/hooks/useWhatsApp";
 import api from "@/lib/api";
 
-// ─── Brand colours (same palette as rest of app) ─────────────────────────────
-const COLORS = {
-  emeraldGreen: "#128C7E",
-  lightGreen:   "#25D366",
-};
-const GRADIENT     = `linear-gradient(135deg, ${COLORS.emeraldGreen} 0%, ${COLORS.lightGreen} 100%)`;
-const GRADIENT_BTN = `linear-gradient(135deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})`;
+// ─── Brand colours ────────────────────────────────────────────────────────────
+const EMERALD   = "#128C7E";
+const GREEN     = "#25D366";
+const GRADIENT  = `linear-gradient(135deg, ${EMERALD} 0%, ${GREEN} 100%)`;
+const GRAD_BTN  = `linear-gradient(135deg, ${EMERALD}, ${GREEN})`;
 
-// ─── Template definitions ─────────────────────────────────────────────────────
+// ─── Templates ────────────────────────────────────────────────────────────────
 const TEMPLATES = [
-  {
-    key:   "invoiceTemplate",
-    label: "Invoice Reminder",
-    vars:  "{number}  {amount}  {due_date}  {status}",
-    icon:  FileText,
-    color: "#3b82f6",
-    pk:    "invoice",
-    sample: { number: "INV-2024-001", amount: "25,000.00", due_date: "31 May 2026", status: "PENDING" },
-  },
-  {
-    key:   "clientTemplate",
-    label: "Client Message",
-    vars:  "{name}  {firm}  {message}",
-    icon:  Users,
-    color: "#8b5cf6",
-    pk:    "client",
-    sample: { name: "Infosys Ltd", firm: "Your CA Firm", message: "Reminder about pending compliance." },
-  },
-  {
-    key:   "dscTemplate",
-    label: "DSC Expiry Alert",
-    vars:  "{holder}  {expiry}  {days}",
-    icon:  Shield,
-    color: "#f59e0b",
-    pk:    "dsc",
-    sample: { holder: "John Doe", expiry: "15 Jun 2026", days: "22" },
-  },
-  {
-    key:   "passwordTemplate",
-    label: "Password Share",
-    vars:  "{portal}  {username}  {password}",
-    icon:  Key,
-    color: "#ef4444",
-    pk:    "password",
-    sample: { portal: "GST Portal", username: "user@firm.com", password: "••••••••" },
-  },
+  { key: "invoiceTemplate",  label: "Invoice Reminder", vars: "{number}  {amount}  {due_date}  {status}", icon: FileText, color: "#3b82f6", pk: "invoice",  sample: { number: "INV-2024-001", amount: "25,000.00", due_date: "31 May 2026", status: "PENDING" } },
+  { key: "clientTemplate",   label: "Client Message",   vars: "{name}  {firm}  {message}",                icon: Users,    color: "#8b5cf6", pk: "client",   sample: { name: "Infosys Ltd", firm: "Your CA Firm", message: "Reminder about pending compliance." } },
+  { key: "dscTemplate",      label: "DSC Expiry Alert", vars: "{holder}  {expiry}  {days}",               icon: Shield,   color: "#f59e0b", pk: "dsc",      sample: { holder: "John Doe", expiry: "15 Jun 2026", days: "22" } },
+  { key: "passwordTemplate", label: "Password Share",   vars: "{portal}  {username}  {password}",         icon: Key,      color: "#ef4444", pk: "password", sample: { portal: "GST Portal", username: "user@firm.com", password: "••••••••" } },
 ];
 
-// ─── Build live preview text ──────────────────────────────────────────────────
-function buildPreviewText(settings, previewKey) {
+function buildPreviewText(settings, pk) {
   const lines = [];
-  if (settings.includeGreeting) {
-    lines.push((settings.greetingTemplate || "Dear {name},").replace("{name}", "Valued Client"));
-    lines.push("");
-  }
-  if (settings.firmName) {
-    lines.push("*" + settings.firmName + "*" + (settings.firmTagline ? " | " + settings.firmTagline : ""));
-    lines.push("");
-  }
-  const tpl = TEMPLATES.find(t => t.pk === previewKey);
+  if (settings.includeGreeting) { lines.push((settings.greetingTemplate || "Dear {name},").replace("{name}", "Valued Client")); lines.push(""); }
+  if (settings.firmName) { lines.push("*" + settings.firmName + "*" + (settings.firmTagline ? " | " + settings.firmTagline : "")); lines.push(""); }
+  const tpl = TEMPLATES.find(t => t.pk === pk);
   if (tpl) {
     let msg = settings[tpl.key] || "";
-    Object.entries(tpl.sample).forEach(([k, v]) => {
-      msg = msg.replace(new RegExp(`\\{${k}\\}`, "g"), v);
-    });
+    Object.entries(tpl.sample).forEach(([k, v]) => { msg = msg.replace(new RegExp(`\\{${k}\\}`, "g"), v); });
     lines.push(msg);
   }
-  if (settings.includeFooter && settings.footerNote) {
-    lines.push("");
-    lines.push(settings.footerNote);
-  }
+  if (settings.includeFooter && settings.footerNote) { lines.push(""); lines.push(settings.footerNote); }
   return lines.join("\n");
 }
 
-// ─── Toggle switch ────────────────────────────────────────────────────────────
 function Toggle({ on, onChange, isDark }) {
   return (
-    <div
-      onClick={() => onChange(!on)}
-      style={{
-        width: 40, height: 22, borderRadius: 11, cursor: "pointer",
-        background: on ? COLORS.lightGreen : (isDark ? "#334155" : "#cbd5e1"),
-        position: "relative", transition: "background 0.2s", flexShrink: 0,
-      }}
-    >
-      <div style={{
-        position: "absolute", top: 3, left: on ? 20 : 3,
-        width: 16, height: 16, borderRadius: "50%",
-        background: "#fff", transition: "left 0.2s",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-      }} />
+    <div onClick={() => onChange(!on)} style={{ width: 40, height: 22, borderRadius: 11, cursor: "pointer", background: on ? GREEN : (isDark ? "#334155" : "#cbd5e1"), position: "relative", transition: "background 0.2s", flexShrink: 0 }}>
+      <div style={{ position: "absolute", top: 3, left: on ? 20 : 3, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.3)" }} />
+    </div>
+  );
+}
+
+// ─── Status badge ─────────────────────────────────────────────────────────────
+function StatusBadge({ status }) {
+  const map = {
+    connected:     { label: "Connected",     color: "#22c55e", bg: "#dcfce7" },
+    awaiting_scan: { label: "Scan QR",       color: "#f59e0b", bg: "#fef3c7" },
+    connecting:    { label: "Connecting…",   color: "#6366f1", bg: "#ede9fe" },
+    reconnecting:  { label: "Reconnecting",  color: "#f97316", bg: "#ffedd5" },
+    disconnected:  { label: "Disconnected",  color: "#ef4444", bg: "#fee2e2" },
+  };
+  const s = map[status] || { label: status || "Unknown", color: "#6b7280", bg: "#f3f4f6" };
+  return (
+    <span style={{ background: s.bg, color: s.color, padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700 }}>
+      {s.label}
+    </span>
+  );
+}
+
+// ─── QR Modal ─────────────────────────────────────────────────────────────────
+function QRModal({ sessionId, label, onClose, isDark }) {
+  const [qr, setQr]         = useState(null);
+  const [status, setStatus] = useState("loading");
+  const pollRef             = useRef(null);
+
+  const fetchQR = useCallback(async () => {
+    try {
+      const { data } = await api.get(`/whatsapp/sessions/${sessionId}/qr`);
+      if (data.status === "connected") {
+        setStatus("connected");
+        clearInterval(pollRef.current);
+        setTimeout(onClose, 1500);
+        return;
+      }
+      if (data.qr) { setQr(data.qr); setStatus("ready"); }
+      else         { setStatus(data.status || "waiting"); }
+    } catch {
+      setStatus("error");
+    }
+  }, [sessionId, onClose]);
+
+  useEffect(() => {
+    fetchQR();
+    pollRef.current = setInterval(fetchQR, 3000);
+    return () => clearInterval(pollRef.current);
+  }, [fetchQR]);
+
+  const card  = isDark ? "#1e293b" : "#fff";
+  const muted = isDark ? "#94a3b8" : "#64748b";
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(4px)" }} onClick={onClose}>
+      <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} style={{ background: card, borderRadius: 20, padding: 32, maxWidth: 380, width: "90%", boxShadow: "0 24px 80px rgba(0,0,0,0.3)" }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: isDark ? "#f1f5f9" : "#0f172a" }}>Scan QR Code</h3>
+            <p style={{ margin: "4px 0 0", fontSize: 12, color: muted }}>{label}</p>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: muted, padding: 4 }}><X size={18} /></button>
+        </div>
+
+        <div style={{ background: isDark ? "#0f172a" : "#f8fafc", borderRadius: 16, padding: 20, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 280, flexDirection: "column", gap: 12 }}>
+          {status === "connected" && (
+            <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} style={{ textAlign: "center" }}>
+              <CheckCircle2 size={56} color="#22c55e" />
+              <p style={{ color: "#22c55e", fontWeight: 700, marginTop: 12 }}>Connected!</p>
+            </motion.div>
+          )}
+          {status === "ready" && qr && (
+            <motion.img key={qr} initial={{ opacity: 0 }} animate={{ opacity: 1 }} src={qr} alt="WhatsApp QR" style={{ width: 220, height: 220, borderRadius: 8 }} />
+          )}
+          {(status === "loading" || status === "connecting" || status === "waiting") && (
+            <div style={{ textAlign: "center" }}>
+              <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }}>
+                <RefreshCw size={36} color={GREEN} />
+              </motion.div>
+              <p style={{ color: muted, fontSize: 13, marginTop: 12 }}>
+                {status === "loading" ? "Loading QR code…" : "Waiting for QR code…"}
+              </p>
+            </div>
+          )}
+          {status === "error" && (
+            <div style={{ textAlign: "center" }}>
+              <AlertCircle size={36} color="#ef4444" />
+              <p style={{ color: "#ef4444", fontSize: 13, marginTop: 8 }}>Failed to load QR</p>
+              <button onClick={fetchQR} style={{ marginTop: 8, background: GRAD_BTN, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontSize: 13 }}>Retry</button>
+            </div>
+          )}
+        </div>
+
+        {status === "ready" && (
+          <p style={{ textAlign: "center", fontSize: 12, color: muted, marginTop: 16, lineHeight: 1.6 }}>
+            Open WhatsApp on your phone → Linked Devices → Link a Device → Scan this QR code
+          </p>
+        )}
+
+        <p style={{ textAlign: "center", fontSize: 11, color: muted, marginTop: 8 }}>
+          QR refreshes automatically every 3 seconds
+        </p>
+      </motion.div>
+    </div>
+  );
+}
+
+// ─── Connected Numbers Tab ────────────────────────────────────────────────────
+function ConnectedNumbersTab({ isDark }) {
+  const [sessions,    setSessions]    = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [adding,      setAdding]      = useState(false);
+  const [newLabel,    setNewLabel]    = useState("");
+  const [qrSession,   setQrSession]   = useState(null);   // { sessionId, label }
+  const [editingId,   setEditingId]   = useState(null);
+  const [editLabel,   setEditLabel]   = useState("");
+  const [deletingId,  setDeletingId]  = useState(null);
+
+  const card   = isDark ? "bg-slate-800 border-slate-700"  : "bg-white border-slate-200";
+  const inner  = isDark ? "bg-slate-900 border-slate-700"  : "bg-slate-50 border-slate-200";
+  const txt    = isDark ? "text-slate-100"                  : "text-slate-800";
+  const muted  = isDark ? "text-slate-400"                  : "text-slate-500";
+  const inputC = ["w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-400 transition",
+                   isDark ? "bg-slate-900 border-slate-700 text-slate-100 placeholder-slate-600" : "bg-white border-slate-300 text-slate-800 placeholder-slate-400"].join(" ");
+
+  const fetchSessions = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await api.get("/whatsapp/sessions");
+      setSessions(data.sessions || []);
+    } catch {
+      toast.error("Could not reach WhatsApp bridge — is wa-bridge running?");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSessions();
+    const t = setInterval(fetchSessions, 8000);
+    return () => clearInterval(t);
+  }, [fetchSessions]);
+
+  const handleAddSession = async () => {
+    if (!newLabel.trim()) { toast.error("Enter a label for this number"); return; }
+    setAdding(true);
+    try {
+      const { data } = await api.post("/whatsapp/sessions", { label: newLabel.trim() });
+      toast.success("Session started — scan the QR code!");
+      setNewLabel("");
+      await fetchSessions();
+      setQrSession({ sessionId: data.sessionId, label: data.label || newLabel });
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to start session");
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleDelete = async (sessionId) => {
+    setDeletingId(sessionId);
+    try {
+      await api.delete(`/whatsapp/sessions/${sessionId}`);
+      toast.success("WhatsApp number disconnected");
+      await fetchSessions();
+    } catch {
+      toast.error("Failed to remove session");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleSaveLabel = async (sessionId) => {
+    try {
+      await api.patch(`/whatsapp/sessions/${sessionId}/label`, { label: editLabel });
+      setEditingId(null);
+      await fetchSessions();
+    } catch {
+      toast.error("Failed to update label");
+    }
+  };
+
+  const connectedCount = sessions.filter(s => s.status === "connected").length;
+
+  return (
+    <div className="space-y-4">
+      {/* Stats bar */}
+      <div className="grid grid-cols-3 gap-3">
+        {[
+          { label: "Connected",    value: connectedCount,                               color: "#22c55e" },
+          { label: "Total Linked", value: sessions.length,                              color: GREEN },
+          { label: "Pending Scan", value: sessions.filter(s => s.status === "awaiting_scan").length, color: "#f59e0b" },
+        ].map(s => (
+          <div key={s.label} className={`rounded-xl border p-4 text-center ${card}`}>
+            <div style={{ fontSize: 28, fontWeight: 800, color: s.color }}>{s.value}</div>
+            <div className={`text-xs mt-1 ${muted}`}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Add new number */}
+      <div className={`rounded-2xl border shadow-sm p-5 ${card}`}>
+        <div className="flex items-center gap-2 mb-4">
+          <Plus size={16} className="text-emerald-500" />
+          <span className={`text-sm font-bold ${txt}`}>Add WhatsApp Number</span>
+        </div>
+        <div className="flex gap-3">
+          <input
+            className={`${inputC} flex-1`}
+            placeholder='Label e.g. "Office", "Client Line"…'
+            value={newLabel}
+            onChange={e => setNewLabel(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleAddSession()}
+          />
+          <button
+            onClick={handleAddSession}
+            disabled={adding}
+            className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold text-white transition hover:opacity-90 active:scale-95 disabled:opacity-60"
+            style={{ background: GRAD_BTN, whiteSpace: "nowrap" }}
+          >
+            {adding ? <RefreshCw size={14} className="animate-spin" /> : <QrCode size={14} />}
+            {adding ? "Starting…" : "Get QR"}
+          </button>
+        </div>
+        <p className={`text-xs mt-2 ${muted}`}>
+          A QR code will appear — scan it with your WhatsApp to link the number. Multiple numbers can be added.
+        </p>
+      </div>
+
+      {/* Session list */}
+      <div className={`rounded-2xl border shadow-sm ${card}`}>
+        <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: isDark ? "#334155" : "#e2e8f0" }}>
+          <div className="flex items-center gap-2">
+            <Smartphone size={16} className="text-emerald-500" />
+            <span className={`text-sm font-bold ${txt}`}>Linked Numbers</span>
+          </div>
+          <button onClick={fetchSessions} className={`p-1.5 rounded-lg transition hover:bg-slate-100 ${muted}`}>
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+          </button>
+        </div>
+
+        {loading && sessions.length === 0 ? (
+          <div className={`p-8 text-center ${muted} text-sm`}>
+            <RefreshCw size={24} className="animate-spin mx-auto mb-3 opacity-50" />
+            Connecting to bridge…
+          </div>
+        ) : sessions.length === 0 ? (
+          <div className={`p-10 text-center ${muted}`}>
+            <Smartphone size={40} className="mx-auto mb-3 opacity-30" />
+            <p className="text-sm font-medium">No numbers linked yet</p>
+            <p className="text-xs mt-1 opacity-70">Add a number above to get started</p>
+          </div>
+        ) : (
+          <div className="divide-y" style={{ borderColor: isDark ? "#334155" : "#e2e8f0" }}>
+            <AnimatePresence>
+              {sessions.map(s => (
+                <motion.div key={s.sessionId} initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, height: 0 }}
+                  className="flex items-center gap-4 p-4">
+                  {/* Icon */}
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
+                    style={{ background: s.status === "connected" ? "#dcfce7" : (isDark ? "#1e293b" : "#f1f5f9") }}>
+                    {s.status === "connected" ? <Wifi size={18} color="#22c55e" /> : <WifiOff size={18} color="#94a3b8" />}
+                  </div>
+
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    {editingId === s.sessionId ? (
+                      <div className="flex gap-2 items-center">
+                        <input className={`${inputC} py-1 flex-1`} value={editLabel} onChange={e => setEditLabel(e.target.value)} onKeyDown={e => { if (e.key === "Enter") handleSaveLabel(s.sessionId); if (e.key === "Escape") setEditingId(null); }} autoFocus />
+                        <button onClick={() => handleSaveLabel(s.sessionId)} className="p-1 text-emerald-500"><Check size={16} /></button>
+                        <button onClick={() => setEditingId(null)} className={`p-1 ${muted}`}><X size={16} /></button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className={`text-sm font-semibold ${txt} truncate`}>{s.label}</span>
+                        <button onClick={() => { setEditingId(s.sessionId); setEditLabel(s.label); }} className={`opacity-0 group-hover:opacity-100 p-0.5 ${muted} hover:text-slate-600`} style={{ opacity: 0.5 }}><Pencil size={12} /></button>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      <StatusBadge status={s.status} />
+                      {s.phoneNumber && <span className={`text-xs ${muted}`}>{s.phoneNumber}</span>}
+                      {s.displayName && <span className={`text-xs ${muted}`}>· {s.displayName}</span>}
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {(s.status === "awaiting_scan" || s.status === "connecting") && (
+                      <button onClick={() => setQrSession({ sessionId: s.sessionId, label: s.label })}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition"
+                        style={{ background: "#fef3c7", color: "#d97706" }}>
+                        <QrCode size={13} /> Scan QR
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleDelete(s.sessionId)}
+                      disabled={deletingId === s.sessionId}
+                      className="p-2 rounded-lg transition hover:bg-red-50 text-red-400 hover:text-red-600 disabled:opacity-40"
+                    >
+                      {deletingId === s.sessionId ? <RefreshCw size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                    </button>
+                  </div>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+        )}
+      </div>
+
+      {/* How it works */}
+      <div className={`rounded-2xl border shadow-sm p-5 ${card}`}>
+        <div className="flex items-center gap-2 mb-3">
+          <Eye size={15} className="text-emerald-500" />
+          <span className={`text-sm font-bold ${txt}`}>How Multi-Number Works</span>
+        </div>
+        <div className="space-y-2 text-sm">
+          {[
+            { icon: "1", text: "Admin links one or more WhatsApp numbers by scanning a QR code — each number is a separate \"session\"." },
+            { icon: "2", text: "Once linked, any user (with access) can send messages from any of the connected numbers." },
+            { icon: "3", text: "Sessions persist across server restarts — once connected, you don't need to re-scan." },
+            { icon: "4", text: "If a number is logged out on the phone side, reconnect it here by deleting and re-adding." },
+          ].map(item => (
+            <div key={item.icon} className="flex gap-3">
+              <div className="w-6 h-6 rounded-full text-white text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5"
+                style={{ background: GRAD_BTN }}>{item.icon}</div>
+              <p className={muted}>{item.text}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* QR modal */}
+      {qrSession && (
+        <QRModal sessionId={qrSession.sessionId} label={qrSession.label} isDark={isDark}
+          onClose={() => { setQrSession(null); fetchSessions(); }} />
+      )}
     </div>
   );
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 export default function WhatsAppSettings() {
-  const isDark  = useDark();
+  const isDark   = useDark();
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  const isAdmin  = user?.role === "admin";
 
   const [settings,   setSettings]   = useState(getWASettings);
   const [saved,      setSaved]      = useState(false);
   const [previewKey, setPreviewKey] = useState("invoice");
-  const [activeTab,  setActiveTab]  = useState(isAdmin ? "templates" : "info");
+  const [activeTab,  setActiveTab]  = useState(isAdmin ? "numbers" : "templates");
   const [companies,  setCompanies]  = useState([]);
 
-  useEffect(() => {
-    api.get("/companies").then(r => setCompanies(r.data || [])).catch(() => {});
-  }, []);
-
-  // Auto-populate firmName from first company if not yet set
+  useEffect(() => { api.get("/companies").then(r => setCompanies(r.data || [])).catch(() => {}); }, []);
   useEffect(() => {
     if (companies.length > 0 && !settings.firmName) {
       const first = companies[0];
@@ -143,24 +416,18 @@ export default function WhatsAppSettings() {
     setTimeout(() => setSaved(false), 2500);
   };
 
-  // ── Theme-aware class helpers ──────────────────────────────────────────────
-  const card  = isDark ? "bg-slate-800 border-slate-700"  : "bg-white border-slate-200";
-  const inner = isDark ? "bg-slate-900 border-slate-700"  : "bg-slate-50 border-slate-200";
-  const txt   = isDark ? "text-slate-100"                  : "text-slate-800";
-  const muted = isDark ? "text-slate-400"                  : "text-slate-500";
-  const divider = isDark ? "border-slate-700" : "border-slate-200";
+  const card   = isDark ? "bg-slate-800 border-slate-700"  : "bg-white border-slate-200";
+  const inner  = isDark ? "bg-slate-900 border-slate-700"  : "bg-slate-50 border-slate-200";
+  const txt    = isDark ? "text-slate-100"                  : "text-slate-800";
+  const muted  = isDark ? "text-slate-400"                  : "text-slate-500";
+  const divider = isDark ? "border-slate-700"               : "border-slate-200";
 
-  const inputCls = [
-    "w-full rounded-lg border px-3 py-2 text-sm outline-none",
-    "focus:ring-2 focus:ring-emerald-400 transition",
-    isDark
-      ? "bg-slate-900 border-slate-700 text-slate-100 placeholder-slate-600"
-      : "bg-white border-slate-300 text-slate-800 placeholder-slate-400",
-  ].join(" ");
-
+  const inputCls = ["w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-400 transition",
+                     isDark ? "bg-slate-900 border-slate-700 text-slate-100 placeholder-slate-600" : "bg-white border-slate-300 text-slate-800 placeholder-slate-400"].join(" ");
   const labelCls = `block text-[11px] font-semibold uppercase tracking-wider mb-1 ${muted}`;
 
   const TABS = [
+    ...(isAdmin ? [{ id: "numbers",   label: "Connected Numbers", icon: Smartphone  }] : []),
     ...(isAdmin ? [{ id: "templates", label: "Message Templates", icon: MessageCircle }] : []),
     { id: "info", label: "How It Works", icon: Eye },
   ];
@@ -169,45 +436,31 @@ export default function WhatsAppSettings() {
 
   return (
     <div className="space-y-4 w-full min-w-0 overflow-x-hidden">
-
-      {/* ── BANNER ─────────────────────────────────────────────────── */}
+      {/* Banner */}
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
-        <div
-          className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
-          style={{ background: GRADIENT, boxShadow: "0 8px 32px rgba(18,140,126,0.25)" }}
-        >
+        <div className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
+          style={{ background: GRADIENT, boxShadow: "0 8px 32px rgba(18,140,126,0.25)" }}>
           <div className="absolute right-0 top-0 w-48 h-48 rounded-full -mr-16 -mt-16 opacity-10"
             style={{ background: "radial-gradient(circle, white 0%, transparent 70%)" }} />
-
           <div className="relative flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0">
               <MessageCircle className="h-5 w-5 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-white tracking-tight leading-tight">
-                WhatsApp Settings
-              </h1>
+              <h1 className="text-2xl font-bold text-white tracking-tight leading-tight">WhatsApp Settings</h1>
               <p className="text-white/60 text-[10px] font-semibold uppercase tracking-widest mt-0.5">
-                Message templates · Shared across all pages
+                {isAdmin ? "Multi-number connection · Message templates" : "Message templates · Shared across all pages"}
               </p>
             </div>
           </div>
-
-          {/* Tab bar */}
           <div className="relative mt-4 flex flex-wrap gap-1 bg-white/10 p-1 rounded-xl w-fit">
             {TABS.map(t => {
               const I = t.icon;
               const active = activeTab === t.id;
               return (
-                <button
-                  key={t.id}
-                  onClick={() => setActiveTab(t.id)}
-                  className={`flex items-center gap-1.5 px-3 sm:px-4 py-1.5 rounded-lg text-xs font-bold transition ${
-                    active ? "bg-white text-slate-800 shadow" : "text-white/80 hover:text-white"
-                  }`}
-                >
-                  <I className="h-3.5 w-3.5" />
-                  {t.label}
+                <button key={t.id} onClick={() => setActiveTab(t.id)}
+                  className={`flex items-center gap-1.5 px-3 sm:px-4 py-1.5 rounded-lg text-xs font-bold transition ${active ? "bg-white text-slate-800 shadow" : "text-white/80 hover:text-white"}`}>
+                  <I className="h-3.5 w-3.5" />{t.label}
                 </button>
               );
             })}
@@ -215,308 +468,113 @@ export default function WhatsAppSettings() {
         </div>
       </motion.div>
 
-      {/* ── TEMPLATES TAB ──────────────────────────────────────────── */}
+      {/* Connected Numbers Tab */}
+      {activeTab === "numbers" && isAdmin && (
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+          <ConnectedNumbersTab isDark={isDark} />
+        </motion.div>
+      )}
+
+      {/* Templates Tab */}
       {activeTab === "templates" && isAdmin && (
         <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
-
-          {/* LEFT: form (3/5) */}
-          <motion.div
-            initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.05 }}
-            className="xl:col-span-3"
-          >
+          <motion.div initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.05 }} className="xl:col-span-3">
             <div className={`rounded-2xl border shadow-sm p-5 sm:p-6 space-y-5 ${card}`}>
-
               {/* Firm identity */}
               <div>
-                <div className="flex items-center gap-2 mb-3">
-                  <Building2 className="h-4 w-4 text-emerald-500" />
-                  <span className={`text-sm font-bold ${txt}`}>Firm Identity</span>
-                </div>
+                <div className="flex items-center gap-2 mb-3"><Building2 className="h-4 w-4 text-emerald-500" /><span className={`text-sm font-bold ${txt}`}>Firm Identity</span></div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className={labelCls}>Firm Name</label>
                     {companies.length > 0 ? (
                       <div className="flex gap-2">
-                        <input
-                          className={inputCls}
-                          value={settings.firmName || ""}
-                          onChange={e => update("firmName", e.target.value)}
-                          placeholder="Your CA Firm"
-                        />
+                        <input className={inputCls} value={settings.firmName || ""} onChange={e => update("firmName", e.target.value)} placeholder="Your CA Firm" />
                         <div className="relative flex-shrink-0">
-                          <select
-                            className={`${inputCls} pr-7 appearance-none cursor-pointer`}
-                            style={{ width: "auto", minWidth: 32 }}
-                            value=""
-                            onChange={e => { if (e.target.value) update("firmName", e.target.value); }}
-                            title="Pick from your companies"
-                          >
+                          <select className={`${inputCls} pr-7 appearance-none cursor-pointer`} style={{ width: "auto", minWidth: 32 }} value="" onChange={e => { if (e.target.value) update("firmName", e.target.value); }} title="Pick from companies">
                             <option value="">↓</option>
-                            {companies.map(co => (
-                              <option key={co.id} value={co.name || co.trade_name || ""}>
-                                {co.name || co.trade_name}
-                              </option>
-                            ))}
+                            {companies.map(co => (<option key={co.id} value={co.name || co.trade_name || ""}>{co.name || co.trade_name}</option>))}
                           </select>
                         </div>
                       </div>
                     ) : (
-                      <input
-                        className={inputCls}
-                        value={settings.firmName || ""}
-                        onChange={e => update("firmName", e.target.value)}
-                        placeholder="Your CA Firm"
-                      />
+                      <input className={inputCls} value={settings.firmName || ""} onChange={e => update("firmName", e.target.value)} placeholder="Your CA Firm" />
                     )}
-                    {companies.length > 0 && (
-                      <p className={`text-[10px] mt-1 ${muted}`}>Click ↓ to pick from your companies</p>
-                    )}
+                    {companies.length > 0 && <p className={`text-[10px] mt-1 ${muted}`}>Click ↓ to pick from your companies</p>}
                   </div>
                   <div>
                     <label className={labelCls}>Tagline</label>
-                    <input
-                      className={inputCls}
-                      value={settings.firmTagline || ""}
-                      onChange={e => update("firmTagline", e.target.value)}
-                      placeholder="Trusted Compliance Partner"
-                    />
+                    <input className={inputCls} value={settings.firmTagline || ""} onChange={e => update("firmTagline", e.target.value)} placeholder="Trusted Compliance Partner" />
                   </div>
                 </div>
-
                 <div className="flex flex-wrap gap-5 mt-4">
-                  {[
-                    { key: "includeGreeting", label: "Include Greeting" },
-                    { key: "includeFooter",   label: "Include Footer"   },
-                  ].map(({ key, label }) => (
+                  {[{ key: "includeGreeting", label: "Include Greeting" }, { key: "includeFooter", label: "Include Footer" }].map(({ key, label }) => (
                     <label key={key} className={`flex items-center gap-2.5 cursor-pointer text-sm ${muted}`}>
-                      <Toggle on={!!settings[key]} onChange={v => update(key, v)} isDark={isDark} />
-                      {label}
+                      <Toggle on={!!settings[key]} onChange={v => update(key, v)} isDark={isDark} />{label}
                     </label>
                   ))}
                 </div>
-
-                {settings.includeGreeting && (
-                  <div className="mt-3">
-                    <label className={labelCls}>Greeting line <span className="normal-case font-normal opacity-70">(use {"{name}"})</span></label>
-                    <input
-                      className={inputCls}
-                      value={settings.greetingTemplate || ""}
-                      onChange={e => update("greetingTemplate", e.target.value)}
-                      placeholder="Dear {name},"
-                    />
-                  </div>
-                )}
-                {settings.includeFooter && (
-                  <div className="mt-3">
-                    <label className={labelCls}>Footer note</label>
-                    <input
-                      className={inputCls}
-                      value={settings.footerNote || ""}
-                      onChange={e => update("footerNote", e.target.value)}
-                      placeholder="Thank you for your trust."
-                    />
-                  </div>
-                )}
+                {settings.includeGreeting && (<div className="mt-3"><label className={labelCls}>Greeting line <span className="normal-case font-normal opacity-70">(use {"{name}"})</span></label><input className={inputCls} value={settings.greetingTemplate || ""} onChange={e => update("greetingTemplate", e.target.value)} placeholder='Dear {name},' /></div>)}
+                {settings.includeFooter && (<div className="mt-3"><label className={labelCls}>Footer note</label><input className={inputCls} value={settings.footerNote || ""} onChange={e => update("footerNote", e.target.value)} placeholder="Thank you for your trust." /></div>)}
               </div>
-
               <div className={`border-t ${divider}`} />
-
               {/* Templates */}
               <div>
-                <div className="flex items-center gap-2 mb-3">
-                  <MessageCircle className="h-4 w-4 text-emerald-500" />
-                  <span className={`text-sm font-bold ${txt}`}>Message Templates</span>
-                  <span className={`text-xs ml-1 ${muted}`}>— click any field to preview it</span>
-                </div>
-
+                <div className="flex items-center gap-2 mb-3"><MessageCircle className="h-4 w-4 text-emerald-500" /><span className={`text-sm font-bold ${txt}`}>Message Templates</span><span className={`text-xs ml-1 ${muted}`}>— click any field to preview it</span></div>
                 <div className="space-y-4">
                   {TEMPLATES.map(tpl => {
                     const Icon = tpl.icon;
                     const isActive = previewKey === tpl.pk;
                     return (
-                      <div
-                        key={tpl.key}
-                        className={`rounded-xl border p-4 transition ${inner} ${isActive ? "ring-2 ring-emerald-400/40" : ""}`}
-                      >
+                      <div key={tpl.key} className={`rounded-xl border p-4 transition ${inner} ${isActive ? "ring-2 ring-emerald-400/40" : ""}`}>
                         <div className="flex items-center gap-2 mb-2">
-                          <div
-                            className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0"
-                            style={{ background: tpl.color + "22" }}
-                          >
-                            <Icon className="h-3.5 w-3.5" style={{ color: tpl.color }} />
-                          </div>
+                          <div className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0" style={{ background: tpl.color + "22" }}><Icon className="h-3.5 w-3.5" style={{ color: tpl.color }} /></div>
                           <span className={`text-xs font-bold ${txt}`}>{tpl.label}</span>
                           <span className={`text-[10px] ml-auto font-mono opacity-60 ${muted}`}>{tpl.vars}</span>
                         </div>
-                        <textarea
-                          rows={3}
-                          className={`${inputCls} resize-none font-mono text-xs`}
-                          value={settings[tpl.key] || ""}
-                          onChange={e => update(tpl.key, e.target.value)}
-                          onFocus={() => setPreviewKey(tpl.pk)}
-                          placeholder={`Write your ${tpl.label} message here…`}
-                        />
+                        <textarea rows={3} className={`${inputCls} resize-none font-mono text-xs`} value={settings[tpl.key] || ""} onChange={e => update(tpl.key, e.target.value)} onFocus={() => setPreviewKey(tpl.pk)} placeholder={`Write your ${tpl.label} message here…`} />
                       </div>
                     );
                   })}
                 </div>
               </div>
-
-              {/* Save */}
-              <button
-                onClick={handleSave}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold text-white transition hover:opacity-90 active:scale-[0.98]"
-                style={{ background: saved ? "#25D366" : GRADIENT_BTN }}
-              >
-                {saved
-                  ? <><CheckCircle2 className="h-4 w-4" /> Saved to all pages!</>
-                  : <><Save className="h-4 w-4" /> Save Templates</>
-                }
+              <button onClick={handleSave} className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold text-white transition hover:opacity-90 active:scale-[0.98]" style={{ background: saved ? "#25D366" : GRAD_BTN }}>
+                {saved ? <><CheckCircle2 className="h-4 w-4" /> Saved to all pages!</> : <><Save className="h-4 w-4" /> Save Templates</>}
               </button>
             </div>
           </motion.div>
-
-          {/* RIGHT: live preview (2/5) */}
-          <motion.div
-            initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 }}
-            className="xl:col-span-2 flex flex-col gap-4"
-          >
-            {/* WA preview */}
+          <motion.div initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 }} className="xl:col-span-2 flex flex-col gap-4">
             <div className={`rounded-2xl border shadow-sm p-5 flex flex-col gap-4 ${card}`}>
-              <div className="flex items-center gap-2">
-                <MessageCircle className="h-4 w-4 text-emerald-500" />
-                <span className={`text-sm font-bold ${txt}`}>Live Preview</span>
-              </div>
-
+              <div className="flex items-center gap-2"><MessageCircle className="h-4 w-4 text-emerald-500" /><span className={`text-sm font-bold ${txt}`}>Live Preview</span></div>
               <div className="flex flex-wrap gap-1.5">
-                {TEMPLATES.map(t => (
-                  <button
-                    key={t.pk}
-                    onClick={() => setPreviewKey(t.pk)}
-                    className="px-3 py-1 rounded-full text-xs font-semibold border transition"
-                    style={{
-                      borderColor: previewKey === t.pk ? t.color : (isDark ? "#334155" : "#e2e8f0"),
-                      background:  previewKey === t.pk ? t.color + "22" : "transparent",
-                      color:       previewKey === t.pk ? t.color : (isDark ? "#94a3b8" : "#64748b"),
-                    }}
-                  >
-                    {t.label}
-                  </button>
-                ))}
+                {TEMPLATES.map(t => (<button key={t.pk} onClick={() => setPreviewKey(t.pk)} className="px-3 py-1 rounded-full text-xs font-semibold border transition" style={{ borderColor: previewKey === t.pk ? t.color : (isDark ? "#334155" : "#e2e8f0"), background: previewKey === t.pk ? t.color + "22" : "transparent", color: previewKey === t.pk ? t.color : (isDark ? "#94a3b8" : "#64748b") }}>{t.label}</button>))}
               </div>
-
-              {/* Chat bubble */}
-              <div
-                className="rounded-xl p-3 min-h-[160px]"
-                style={{ background: isDark ? "#0b141a" : "#e5ddd5" }}
-              >
-                <div
-                  className="rounded-lg p-3 max-w-[85%] leading-relaxed whitespace-pre-wrap break-words"
-                  style={{
-                    background:   isDark ? "#005c4b" : "#dcf8c6",
-                    color:        isDark ? "#e9edef" : "#111827",
-                    borderRadius: "8px 8px 8px 2px",
-                    fontSize:     12,
-                  }}
-                >
+              <div className="rounded-xl p-3 min-h-[160px]" style={{ background: isDark ? "#0b141a" : "#e5ddd5" }}>
+                <div className="rounded-lg p-3 max-w-[85%] leading-relaxed whitespace-pre-wrap break-words" style={{ background: isDark ? "#005c4b" : "#dcf8c6", color: isDark ? "#e9edef" : "#111827", borderRadius: "8px 8px 8px 2px", fontSize: 12 }}>
                   {previewText || "Configure a template on the left to see the preview here."}
                 </div>
                 <p className={`text-right text-[10px] mt-1 ${muted}`}>Delivered ✓✓</p>
-              </div>
-
-              <div className={`rounded-xl border p-3 text-xs ${inner}`}>
-                <p className={`leading-relaxed ${muted}`}>
-                  <span className={`font-bold ${txt}`}>One page, all pages synced.</span>{" "}
-                  WhatsApp buttons in Clients, Invoicing, DSC & PassVault all use these templates with real data auto-filled.
-                </p>
-              </div>
-            </div>
-
-            {/* Variable reference */}
-            <div className={`rounded-2xl border shadow-sm p-5 ${card}`}>
-              <div className="flex items-center gap-2 mb-3">
-                <Settings className="h-4 w-4 text-emerald-500" />
-                <span className={`text-sm font-bold ${txt}`}>Variable Reference</span>
-              </div>
-              <div className="space-y-2 text-xs">
-                {[
-                  { label: "Invoice",  vars: ["{number}", "{amount}", "{due_date}", "{status}"] },
-                  { label: "Client",   vars: ["{name}", "{firm}", "{message}"]                  },
-                  { label: "DSC",      vars: ["{holder}", "{expiry}", "{days}"]                 },
-                  { label: "Password", vars: ["{portal}", "{username}", "{password}"]           },
-                ].map(row => (
-                  <div key={row.label} className="flex items-start gap-2">
-                    <span className={`w-16 flex-shrink-0 font-semibold ${muted}`}>{row.label}</span>
-                    <div className="flex flex-wrap gap-1">
-                      {row.vars.map(v => (
-                        <code
-                          key={v}
-                          className="px-1.5 py-0.5 rounded font-mono"
-                          style={{
-                            background: isDark ? "#1e3a5f" : "#dbeafe",
-                            color:      isDark ? "#60a5fa" : "#1e40af",
-                            fontSize:   10,
-                          }}
-                        >
-                          {v}
-                        </code>
-                      ))}
-                    </div>
-                  </div>
-                ))}
               </div>
             </div>
           </motion.div>
         </div>
       )}
 
-      {/* ── HOW IT WORKS TAB ───────────────────────────────────────── */}
+      {/* Info tab */}
       {activeTab === "info" && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
           <div className={`rounded-2xl border shadow-sm p-6 max-w-2xl ${card}`}>
-            <div className="flex items-center gap-2 mb-4">
-              <Eye className="h-4 w-4 text-emerald-500" />
-              <span className={`text-base font-bold ${txt}`}>How WhatsApp Integration Works</span>
-            </div>
+            <div className="flex items-center gap-2 mb-4"><Eye className="h-4 w-4 text-emerald-500" /><span className={`text-base font-bold ${txt}`}>How WhatsApp Integration Works</span></div>
             <div className="space-y-4 text-sm">
               {[
-                {
-                  step: "1",
-                  title: "No extra app or API key needed",
-                  desc:  "Messages open in WhatsApp Web or your phone's WhatsApp directly — no third-party service required.",
-                },
-                {
-                  step: "2",
-                  title: "One-click send when phone is available",
-                  desc:  "If a client has a phone number saved, clicking the WhatsApp button pre-fills the message and opens WhatsApp immediately.",
-                },
-                {
-                  step: "3",
-                  title: "Manual entry when phone is missing",
-                  desc:  "If no phone number is saved, a small dialog appears where you can type the number before sending.",
-                },
-                {
-                  step: "4",
-                  title: "Templates auto-fill real data",
-                  desc:  "Variables like {name}, {amount}, {due_date} are replaced with actual values from the record — no manual editing needed.",
-                },
-                {
-                  step: "5",
-                  title: "Available across the whole app",
-                  desc:  "WhatsApp buttons appear in Clients, Invoicing, DSC Register, and Password Vault — all using the same templates set here.",
-                },
+                { step: "1", title: "Admin links WhatsApp numbers via QR",   desc: "Go to 'Connected Numbers' and add a label, then scan the QR code with your WhatsApp — just like WhatsApp Web." },
+                { step: "2", title: "Multiple numbers can be connected",     desc: "You can link as many numbers as needed. Each session is stored and reconnects automatically on restart." },
+                { step: "3", title: "All users share the connected numbers", desc: "Once admin connects a number, every user with WhatsApp access can send messages through it." },
+                { step: "4", title: "Messages are sent directly via bridge", desc: "The wa-bridge service (Node.js) handles the WhatsApp Web protocol — no Meta API or third-party fees." },
+                { step: "5", title: "Full audit trail",                      desc: "Every message sent is logged with sender, recipient, content, and status for compliance." },
               ].map(item => (
                 <div key={item.step} className="flex gap-4">
-                  <div
-                    className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0 mt-0.5"
-                    style={{ background: GRADIENT_BTN }}
-                  >
-                    {item.step}
-                  </div>
-                  <div>
-                    <p className={`font-semibold mb-0.5 ${txt}`}>{item.title}</p>
-                    <p className={muted}>{item.desc}</p>
-                  </div>
+                  <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0 mt-0.5" style={{ background: GRAD_BTN }}>{item.step}</div>
+                  <div><p className={`font-semibold mb-0.5 ${txt}`}>{item.title}</p><p className={muted}>{item.desc}</p></div>
                 </div>
               ))}
             </div>
