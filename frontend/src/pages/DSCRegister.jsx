@@ -25,6 +25,7 @@ import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
 import { detectDscDuplicates } from '@/lib/aiDuplicateEngine';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
+import WhatsAppSendDialog from '@/components/ui/WhatsAppSendDialog';
 import {
   readCertFromUsbToken,
   readCertFromWebSmartCard,
@@ -1361,10 +1362,13 @@ export default function DSCRegister() {
 
   // ── WhatsApp alert handlers ───────────────────────────────────────────────
   // ── WhatsApp alert handlers ───────────────────────────────────────────────
-  // Row WA button: open the detail card — all share actions are in the footer
+  // Row WA button: open the WhatsApp send dialog directly with auto-filled phone
+  const [waAlertDsc, setWaAlertDsc] = useState(null);
+  const [waAlertDialogOpen, setWaAlertDialogOpen] = useState(false);
+
   const handleWhatsAppAlert = (dsc) => {
-    setSelectedDSC(dsc);
-    setLogDialogOpen(true);
+    setWaAlertDsc(dsc);
+    setWaAlertDialogOpen(true);
   };
 
   const sendWhatsAppMessage = (dsc, phone) => {
@@ -2380,7 +2384,7 @@ export default function DSCRegister() {
                       onViewLog={openLogDialog} getDSCStatus={getDSCStatus} type="IN"
                       globalIndexStart={(spIn-1)*rowsPerPage} isDark={isDark}
                       selectedIds={selectedIds} onToggleSelect={toggleSelect} onToggleAll={toggleAll}
-                      onWhatsAppAlert={null} />
+                      onWhatsAppAlert={handleWhatsAppAlert} />
               }
               <PaginationBar currentPage={spIn} totalPages={tpIn} totalItems={inDSC.length} pageSize={rowsPerPage} onPageChange={setCurrentPageIn} isDark={isDark} />
             </div>
@@ -2404,7 +2408,7 @@ export default function DSCRegister() {
                       onViewLog={openLogDialog} getDSCStatus={getDSCStatus} type="OUT"
                       globalIndexStart={(spOut-1)*rowsPerPage} isDark={isDark}
                       selectedIds={selectedIds} onToggleSelect={toggleSelect} onToggleAll={toggleAll}
-                      onWhatsAppAlert={null} />
+                      onWhatsAppAlert={handleWhatsAppAlert} />
               }
               <PaginationBar currentPage={spOut} totalPages={tpOut} totalItems={outDSC.length} pageSize={rowsPerPage} onPageChange={setCurrentPageOut} isDark={isDark} />
             </div>
@@ -2935,7 +2939,25 @@ export default function DSCRegister() {
         </div>
       )}
 
-      {/* ── WhatsApp Phone Entry Dialog ── */}
+      {/* ── WhatsApp Send Dialog for DSC Alerts (replaces old phone entry dialog) ── */}
+      {waAlertDsc && (
+        <WhatsAppSendDialog
+          open={waAlertDialogOpen}
+          onClose={() => { setWaAlertDialogOpen(false); setTimeout(() => setWaAlertDsc(null), 300); }}
+          phone={waAlertDsc.mobile || ''}
+          entityName={waAlertDsc.holder_name}
+          message={buildExpiryAlertText(waAlertDsc, waMsgSettings)}
+          title="Send DSC Expiry Alert"
+          subtitle={waAlertDsc.associated_with ? `for ${waAlertDsc.associated_with}` : 'DSC expiry notification'}
+          isDark={isDark}
+          onPhoneSaved={(phone) => {
+            // Optionally save phone back to the DSC record
+            api.patch(`/dsc/${waAlertDsc.id}`, { mobile: phone }).catch(() => {});
+          }}
+        />
+      )}
+
+      {/* ── Legacy WhatsApp Phone Entry Dialog (kept for automation bulk flow) ── */}
       {waPhoneDialog && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}>
           <div className={`rounded-2xl shadow-2xl w-full max-w-sm p-6 ${isDark ? 'bg-slate-900 border border-slate-700' : 'bg-white border border-slate-200'}`}>
