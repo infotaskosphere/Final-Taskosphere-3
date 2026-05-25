@@ -574,12 +574,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
                 <textarea
                   className="w-full min-h-[140px] border rounded-xl text-sm p-3.5 resize-none outline-none transition-all leading-relaxed"
                   style={{ background: isDark ? '#1e293b' : '#f8fafc', borderColor: isDark ? '#334155' : '#e2e8f0', color: isDark ? '#e2e8f0' : '#0f172a' }}
-                  placeholder={"Dear {name},
-
-GST filing reminder for this month…
-
-Regards,
-Manthan Desai & Associates"}
+                  placeholder={"Dear {name},\n\nGST filing reminder for this month\u2026\n\nRegards,\nManthan Desai & Associates"}
                   value={message} onChange={e => setMessage(e.target.value)} />
                 <p className="text-[10px] mt-1" style={{ color: isDark ? '#475569' : '#94a3b8' }}>{message.length} chars · Use variables above for personalization per client</p>
               </div>
