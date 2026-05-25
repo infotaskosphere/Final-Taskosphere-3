@@ -1,3 +1,4 @@
+[README.md](https://github.com/user-attachments/files/28208146/README.md)
 # wa-bridge — Multi-Session WhatsApp Bridge
 
 Node.js microservice that connects Taskosphere to WhatsApp Web.
