@@ -577,14 +577,30 @@ function WAModal({ open, onClose, entry, isDark }) {
 
   const close_ = () => { setPhone(''); setPw(''); setNote(''); onClose(); };
 
-  const send = () => {
+  const [sending, setSending] = useState(false);
+
+  const send = async () => {
     const p = phone || entry?.mobile;
     if (!p) return toast.error('Enter a phone number');
     const digits = p.replace(/\D/g, '');
     const e164 = digits.startsWith('91') ? digits : `91${digits}`;
-    window.open(`https://web.whatsapp.com/send?phone=${e164}&text=${encodeURIComponent(msg())}`, '_blank');
-    toast.success('Opening WhatsApp Web…');
-    close_();
+    setSending(true);
+    try {
+      // Try direct API send via WA Bridge
+      const res = await api.post('/whatsapp/send', {
+        to: e164, message: msg(), message_type: 'password', context_id: entry?.id
+      }).catch(() => null);
+      if (res?.data?.success) {
+        toast.success('Message sent via WhatsApp ✓');
+      } else {
+        // Fallback to WA Web
+        window.open(`https://wa.me/${e164}?text=${encodeURIComponent(msg())}`, '_blank');
+        toast.success('Opening WhatsApp…');
+      }
+    } finally {
+      setSending(false);
+      close_();
+    }
   };
 
   return (
@@ -615,9 +631,9 @@ function WAModal({ open, onClose, entry, isDark }) {
         </div>
         <DialogFooter className={`px-5 py-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
           <Button variant="ghost" className="rounded-xl" onClick={close_}>Cancel</Button>
-          <Button disabled={!phone && !entry?.mobile || loadPw} onClick={send}
+          <Button disabled={(!phone && !entry?.mobile) || loadPw || sending} onClick={send}
             className="rounded-xl font-bold text-white gap-2" style={{ background: C.whatsapp }}>
-            <Send className="h-4 w-4" /> Send
+            {sending ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending…</> : <><Send className="h-4 w-4" /> Send</>}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -887,14 +903,28 @@ function ShareClientModal({ open, onClose, isDark, entries }) {
     return L.join('\n');
   };
 
-  const send = () => {
+  const [sendingBulk, setSendingBulk] = useState(false);
+
+  const send = async () => {
     if (!selectedClientId) return toast.error('Please select a client');
     if (!phone) return toast.error('Enter a phone number');
     const digits = phone.replace(/\D/g, '');
     const e164 = digits.startsWith('91') ? digits : `91${digits}`;
-    window.open(`https://web.whatsapp.com/send?phone=${e164}&text=${encodeURIComponent(buildMessage())}`, '_blank');
-    toast.success('Opening WhatsApp Web…');
-    onClose();
+    setSendingBulk(true);
+    try {
+      const res = await api.post('/whatsapp/send', {
+        to: e164, message: buildMessage(), message_type: 'password'
+      }).catch(() => null);
+      if (res?.data?.success) {
+        toast.success('All credentials sent via WhatsApp ✓');
+      } else {
+        window.open(`https://wa.me/${e164}?text=${encodeURIComponent(buildMessage())}`, '_blank');
+        toast.success('Opening WhatsApp…');
+      }
+    } finally {
+      setSendingBulk(false);
+      onClose();
+    }
   };
 
   return (
@@ -974,12 +1004,13 @@ function ShareClientModal({ open, onClose, isDark, entries }) {
         <DialogFooter className={`px-5 py-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
           <Button variant="ghost" className="rounded-xl" onClick={onClose}>Cancel</Button>
           <Button
-            disabled={!selectedClientId || !phone || revealing || clientEntries.length === 0}
+            disabled={!selectedClientId || !phone || revealing || clientEntries.length === 0 || sendingBulk}
             onClick={send}
             className="rounded-xl font-bold text-white gap-2"
             style={{ background: C.whatsapp }}>
-            <Send className="h-4 w-4" />
-            Share {clientEntries.length > 0 ? `${clientEntries.length} Credentials` : 'All'}
+            {sendingBulk
+              ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending…</>
+              : <><Send className="h-4 w-4" /> Share {clientEntries.length > 0 ? `${clientEntries.length} Credentials` : 'All'}</>}
           </Button>
         </DialogFooter>
       </DialogContent>
