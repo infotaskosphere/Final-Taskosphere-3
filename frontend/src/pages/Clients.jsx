@@ -258,6 +258,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
   const [scheduledJobs, setScheduledJobs] = useState([]);
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [showVariables, setShowVariables] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState('');
 
   const activeClients = useMemo(() => filteredClients.filter(c => (c?.status || 'active') !== 'inactive'), [filteredClients]);
   const archivedCount = filteredClients.length - activeClients.length;
@@ -266,7 +267,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
     if (open) {
       setClientScope('active');
       setSelectedIds(new Set(activeClients.map(c => c.id)));
-      setMessage(''); setClientSearch(''); setCopied(false); setExportDone(false);
+      setMessage(''); setClientSearch(''); setCopied(false); setExportDone(false); setSelectedTemplate('');
       setSendProgress(null); setSendingBulk(false);
       // Set default schedule to tomorrow 09:00
       const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
@@ -579,6 +580,33 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
           <div className="flex-1 flex flex-col overflow-hidden">
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
 
+              {/* Template picker from WA Settings */}
+              {isWhatsApp && (() => {
+                const waS = getWASettings();
+                const TMPL_OPTS = [
+                  { label: 'Client Message', key: 'clientTemplate' },
+                  { label: 'Invoice Reminder', key: 'invoiceTemplate' },
+                  { label: 'DSC Expiry Alert', key: 'dscTemplate' },
+                  { label: 'Password Share', key: 'passwordTemplate' },
+                ];
+                return (
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-widest mb-1.5 block" style={{ color: isDark ? '#64748b' : '#94a3b8' }}>Load Template from WhatsApp Settings</label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {TMPL_OPTS.map(t => (
+                        <button key={t.key}
+                          onClick={() => { setMessage(waS[t.key] || ''); setSelectedTemplate(t.key); }}
+                          className="text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all"
+                          style={{ background: selectedTemplate === t.key ? accentColor + '22' : (isDark ? '#1e293b' : '#f8fafc'), borderColor: selectedTemplate === t.key ? accentColor : (isDark ? '#334155' : '#e2e8f0'), color: selectedTemplate === t.key ? accentColor : (isDark ? '#94a3b8' : '#64748b') }}>
+                          {t.label}
+                        </button>
+                      ))}
+                      <span className="text-[10px] self-center" style={{ color: isDark ? '#475569' : '#94a3b8' }}>or write your own</span>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Message composer */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
@@ -602,7 +630,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
                   className="w-full min-h-[140px] border rounded-xl text-sm p-3.5 resize-none outline-none transition-all leading-relaxed"
                   style={{ background: isDark ? '#1e293b' : '#f8fafc', borderColor: isDark ? '#334155' : '#e2e8f0', color: isDark ? '#e2e8f0' : '#0f172a' }}
                   placeholder={"Dear {name},\n\nGST filing reminder for this month\u2026\n\nRegards,\nManthan Desai & Associates"}
-                  value={message} onChange={e => setMessage(e.target.value)} />
+                  value={message} onChange={e => { setMessage(e.target.value); setSelectedTemplate(''); }} />
                 <p className="text-[10px] mt-1" style={{ color: isDark ? '#475569' : '#94a3b8' }}>{message.length} chars · Use variables above for personalization per client</p>
               </div>
 
