@@ -1,28 +1,28 @@
 /**
- * WhatsAppSendDialog.jsx
- * Reusable WhatsApp send dialog.
- * - If phone is provided → one-click send button
- * - If phone is missing → show input to manually enter number
- * - Optional image/screenshot attachment hint
- * Used across: Clients, PassVault, DSC, Invoicing pages.
- * All message templates come from /settings/whatsapp (wa_global_settings).
+ * WhatsAppSendDialog.jsx  — Enhanced with:
+ *  1. Auto-send to saved phone number (no extra click when phone is on record)
+ *  2. Multi-account picker: when ≥2 WA sessions are connected, prompt which account to use
+ *  3. Direct send via WA Bridge API when connected; WA Web fallback otherwise
+ *  4. Used across: Clients, PassVault, DSC, Invoicing pages.
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import {
   MessageCircle, Phone, Send, X, ExternalLink, Loader2,
-  CheckCircle2, AlertCircle, Image, Edit2, Link,
+  CheckCircle2, AlertCircle, Image, Edit2, Link, ChevronRight,
+  Smartphone, Wifi, WifiOff, RefreshCw, Copy, Check,
 } from 'lucide-react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { formatPhoneE164, openWhatsApp, getWASettings } from '@/hooks/useWhatsApp';
+import api from '@/lib/api';
 
 const WA_GREEN = '#25D366';
 const WA_DARK  = '#128C7E';
+const WA_LIGHT = '#dcf8c6';
 
-// WhatsApp SVG Icon
+/* ── WhatsApp SVG icon ──────────────────────────────────────────────────────── */
 function WAIcon({ size = 16, color = WA_GREEN }) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill={color}>
@@ -31,20 +31,134 @@ function WAIcon({ size = 16, color = WA_GREEN }) {
   );
 }
 
-/**
- * Props:
- *   open          — boolean
- *   onClose       — () => void
- *   phone         — string | null   (pre-filled phone number)
- *   entityName    — string          (e.g. "Infosys Ltd", "Invoice #INV-001")
- *   message       — string          (pre-built message text)
- *   title         — string          (dialog title)
- *   subtitle      — string          (optional context subtitle)
- *   isDark        — boolean
- *   onPhoneSaved  — (phone) => void (optional: called when user enters a new number)
- *   canSendScreenshot — boolean     (show "send screenshot" tip)
- *   settingsPath  — string          (link to /settings/whatsapp, default)
- */
+/* ── Fetch connected WA sessions from backend ────────────────────────────────── */
+async function fetchConnectedSessions() {
+  try {
+    const { data } = await api.get('/whatsapp/sessions');
+    return (data?.sessions || []).filter(s => s.status === 'connected');
+  } catch {
+    return [];
+  }
+}
+
+/* ── Send directly via WA Bridge API ─────────────────────────────────────────── */
+async function sendViaApi(phone, message, sessionId) {
+  const to = formatPhoneE164(phone);
+  if (!to) return { success: false, error: 'Invalid phone' };
+  try {
+    const { data } = await api.post('/whatsapp/send', {
+      to,
+      message,
+      session_id: sessionId || null,
+      message_type: 'general',
+    });
+    return { success: true, method: 'api', ...data };
+  } catch (err) {
+    return { success: false, error: err?.response?.data?.detail || err.message };
+  }
+}
+
+/* ── Account Picker Card ──────────────────────────────────────────────────────── */
+function AccountCard({ session, selected, onSelect, isDark }) {
+  const initials = (session.displayName || session.phoneNumber || '?')
+    .split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase().slice(0, 2);
+
+  const colors = [
+    ['#25D366', '#128C7E'],
+    ['#4f46e5', '#7c3aed'],
+    ['#0ea5e9', '#0284c7'],
+    ['#f59e0b', '#d97706'],
+  ];
+  const colorIdx = (session.sessionId?.charCodeAt(0) || 0) % colors.length;
+  const [accent, dark] = colors[colorIdx];
+
+  return (
+    <motion.button
+      onClick={() => onSelect(session.sessionId)}
+      whileHover={{ scale: 1.02 }}
+      whileTap={{ scale: 0.98 }}
+      style={{
+        width: '100%', textAlign: 'left', padding: '12px 14px',
+        borderRadius: 12, cursor: 'pointer',
+        border: selected
+          ? `2px solid ${accent}`
+          : `2px solid ${isDark ? 'rgba(255,255,255,0.08)' : '#e2e8f0'}`,
+        background: selected
+          ? (isDark ? `${accent}15` : `${accent}0d`)
+          : (isDark ? 'rgba(255,255,255,0.03)' : '#fafbfc'),
+        display: 'flex', alignItems: 'center', gap: 12,
+        transition: 'all 0.15s', position: 'relative', overflow: 'hidden',
+      }}>
+      {/* Avatar */}
+      <div style={{
+        width: 40, height: 40, borderRadius: 12, flexShrink: 0,
+        background: `linear-gradient(135deg, ${accent}, ${dark})`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 14, fontWeight: 800, color: '#fff', letterSpacing: -0.5,
+        boxShadow: `0 3px 10px ${accent}40`,
+      }}>{initials}</div>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{
+          margin: 0, fontSize: 13, fontWeight: 700,
+          color: isDark ? '#e2e8f0' : '#0f172a',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>{session.displayName || 'Unknown Account'}</p>
+        <p style={{
+          margin: '2px 0 0', fontSize: 11, fontFamily: 'monospace',
+          color: isDark ? '#64748b' : '#94a3b8',
+        }}>+{session.phoneNumber || '—'}</p>
+      </div>
+
+      {/* Connected badge */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0,
+        fontSize: 10, fontWeight: 700, color: WA_GREEN,
+        background: `${WA_GREEN}15`, padding: '3px 8px', borderRadius: 20,
+      }}>
+        <Wifi size={9}/> Live
+      </div>
+
+      {selected && (
+        <div style={{
+          position: 'absolute', top: 8, right: 8,
+          width: 18, height: 18, borderRadius: '50%',
+          background: accent, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <Check size={10} color="#fff" strokeWidth={3}/>
+        </div>
+      )}
+    </motion.button>
+  );
+}
+
+/* ── Message bubble (WhatsApp preview style) ─────────────────────────────────── */
+function MsgBubble({ text, isDark }) {
+  return (
+    <div style={{
+      background: isDark ? '#1e3a2f' : WA_LIGHT,
+      border: `1px solid ${isDark ? '#2d5a3f' : '#b7e4c7'}`,
+      borderRadius: '0 14px 14px 14px',
+      padding: '10px 12px',
+      fontSize: 13, color: isDark ? '#d4edda' : '#1a3a2a',
+      lineHeight: 1.55, whiteSpace: 'pre-wrap',
+      maxHeight: 140, overflowY: 'auto',
+      fontFamily: "'DM Sans', system-ui",
+      position: 'relative',
+    }}>
+      <div style={{
+        position: 'absolute', top: 0, left: -8, width: 0, height: 0,
+        borderTop: `8px solid ${isDark ? '#1e3a2f' : WA_LIGHT}`,
+        borderLeft: '8px solid transparent',
+      }}/>
+      {text || <span style={{ opacity: 0.5, fontStyle: 'italic' }}>No message</span>}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   Main Dialog
+═══════════════════════════════════════════════════════════════════════════════ */
 export default function WhatsAppSendDialog({
   open,
   onClose,
@@ -58,239 +172,449 @@ export default function WhatsAppSendDialog({
   canSendScreenshot = false,
   settingsPath = '/settings/whatsapp',
 }) {
-  const [phone, setPhone]       = useState('');
+  const [phone, setPhone]             = useState('');
   const [editingPhone, setEditingPhone] = useState(false);
-  const [sending, setSending]   = useState(false);
-  const [sent, setSent]         = useState(false);
-  const [editedMsg, setEditedMsg] = useState('');
+  const [editedMsg, setEditedMsg]     = useState('');
   const [showMsgEdit, setShowMsgEdit] = useState(false);
+  const [sending, setSending]         = useState(false);
+  const [sent, setSent]               = useState(false);
+  const [copied, setCopied]           = useState(false);
+
+  // Multi-account
+  const [sessions, setSessions]           = useState([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [selectedSession, setSelectedSession] = useState(null);
+  const [step, setStep]                   = useState('compose'); // 'compose' | 'pick_account'
 
   const settings = getWASettings();
   const hasPhone = !!phone && phone.replace(/\D/g,'').length >= 10;
+  const finalMsg = editedMsg || message;
 
+  /* Load sessions when dialog opens */
   useEffect(() => {
-    if (open) {
-      setPhone(initialPhone || '');
-      setEditingPhone(!initialPhone);
-      setSent(false);
-      setSending(false);
-      setEditedMsg(message);
-      setShowMsgEdit(false);
-    }
+    if (!open) return;
+    setPhone(initialPhone || '');
+    setEditingPhone(!initialPhone);
+    setSent(false);
+    setSending(false);
+    setEditedMsg(message);
+    setShowMsgEdit(false);
+    setStep('compose');
+    setSelectedSession(null);
+
+    setSessionsLoading(true);
+    fetchConnectedSessions().then(list => {
+      setSessions(list);
+      if (list.length === 1) setSelectedSession(list[0].sessionId);
+      setSessionsLoading(false);
+    });
   }, [open, initialPhone, message]);
 
-  const finalMessage = editedMsg || message;
-
-  const doSend = async () => {
-    const digits = phone.replace(/\D/g, '');
+  const handleSend = async () => {
+    const digits = phone.replace(/\D/g,'');
     if (digits.length < 10) { toast.error('Enter a valid 10-digit phone number'); return; }
+
+    // If multiple sessions and none selected yet → go to pick step
+    if (sessions.length > 1 && !selectedSession && step === 'compose') {
+      setStep('pick_account');
+      return;
+    }
+
     setSending(true);
     try {
-      const opened = openWhatsApp(phone, finalMessage);
-      if (opened) {
-        setSent(true);
-        toast.success('WhatsApp opened — message ready to send');
-        if (onPhoneSaved && !initialPhone) { onPhoneSaved(phone); }
-        setTimeout(() => { onClose?.(); setSent(false); }, 2000);
+      // Try API send if connected
+      if (sessions.length > 0) {
+        const result = await sendViaApi(phone, finalMsg, selectedSession);
+        if (result.success) {
+          setSent(true);
+          toast.success('Message sent via WhatsApp ✓');
+          if (onPhoneSaved && !initialPhone) onPhoneSaved(phone);
+          setTimeout(() => { onClose?.(); setSent(false); }, 2200);
+          return;
+        }
+        // API failed — fall through to web
+        console.warn('WA API failed, falling back to web:', result.error);
       }
+      // Fallback: WA Web
+      openWhatsApp(phone, finalMsg);
+      setSent(true);
+      toast.success('WhatsApp Web opened — message ready to send');
+      if (onPhoneSaved && !initialPhone) onPhoneSaved(phone);
+      setTimeout(() => { onClose?.(); setSent(false); }, 2200);
     } finally {
       setSending(false);
     }
   };
 
-  const bg    = isDark ? '#111827' : '#fff';
-  const card  = isDark ? '#1a2236' : '#f8fafc';
-  const border= isDark ? '#1e3a5f' : '#e2e8f0';
-  const text  = isDark ? '#f0f4f8' : '#0f172a';
-  const muted = isDark ? '#8fa3bf' : '#64748b';
+  const handleCopyMsg = () => {
+    navigator.clipboard?.writeText(finalMsg).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    });
+  };
+
+  /* ── Theming ── */
+  const bg     = isDark ? '#0f172a' : '#fff';
+  const card   = isDark ? '#1a2236' : '#f8fafc';
+  const border = isDark ? 'rgba(255,255,255,0.08)' : '#e2e8f0';
+  const text   = isDark ? '#f0f4f8' : '#0f172a';
+  const muted  = isDark ? '#64748b' : '#94a3b8';
+  const label  = isDark ? '#94a3b8' : '#64748b';
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose?.()}>
-      <DialogContent
-        style={{ background: bg, border: `1px solid ${border}`, borderRadius: 20, padding: 0,
-          maxWidth: 440, overflow: 'hidden', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+      <DialogContent style={{
+        background: bg, border: `1px solid ${border}`,
+        borderRadius: 20, padding: 0, maxWidth: 460,
+        overflow: 'hidden', fontFamily: "'DM Sans', system-ui, sans-serif",
+      }}>
 
-        {/* Header */}
-        <div style={{ background: `linear-gradient(135deg, ${WA_DARK}, ${WA_GREEN})`,
-          padding: '20px 24px 18px', display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div style={{ width: 44, height: 44, borderRadius: 12, background: 'rgba(255,255,255,0.2)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <WAIcon size={24} color="#fff" />
+        {/* ── Header ── */}
+        <div style={{
+          background: `linear-gradient(135deg, ${WA_DARK} 0%, ${WA_GREEN} 100%)`,
+          padding: '18px 22px 16px',
+          display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+          <div style={{
+            width: 42, height: 42, borderRadius: 12,
+            background: 'rgba(255,255,255,0.2)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backdropFilter: 'blur(8px)',
+          }}>
+            <WAIcon size={22} color="#fff"/>
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <h2 style={{ margin: 0, color: '#fff', fontSize: 17, fontWeight: 700 }}>{title}</h2>
-            {subtitle && <p style={{ margin: '2px 0 0', color: 'rgba(255,255,255,0.8)', fontSize: 12 }}>{subtitle}</p>}
+            <h2 style={{ margin: 0, color: '#fff', fontSize: 16, fontWeight: 800, letterSpacing: -0.3 }}>
+              {step === 'pick_account' ? 'Choose Account' : title}
+            </h2>
+            {subtitle && (
+              <p style={{ margin: '2px 0 0', color: 'rgba(255,255,255,0.75)', fontSize: 12 }}>{subtitle}</p>
+            )}
           </div>
-          <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.2)', border: 'none',
-            borderRadius: 8, width: 32, height: 32, display: 'flex', alignItems: 'center',
-            justifyContent: 'center', cursor: 'pointer', color: '#fff', flexShrink: 0 }}>
-            <X size={15}/>
+
+          {/* Session pills */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            {sessionsLoading ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4,
+                background: 'rgba(255,255,255,0.15)', borderRadius: 20, padding: '3px 10px',
+                fontSize: 11, color: '#fff' }}>
+                <Loader2 size={10} style={{ animation: 'spin 1s linear infinite' }}/>
+              </div>
+            ) : sessions.length > 0 ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4,
+                background: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: '3px 10px',
+                fontSize: 11, color: '#fff', fontWeight: 700 }}>
+                <Wifi size={10}/>
+                {sessions.length} connected
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4,
+                background: 'rgba(255,255,255,0.15)', borderRadius: 20, padding: '3px 10px',
+                fontSize: 11, color: 'rgba(255,255,255,0.7)' }}>
+                <WifiOff size={10}/> Web mode
+              </div>
+            )}
+          </div>
+
+          <button onClick={onClose} style={{
+            background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 8,
+            width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', color: '#fff', flexShrink: 0, backdropFilter: 'blur(4px)',
+          }}>
+            <X size={14}/>
           </button>
         </div>
 
-        <div style={{ padding: '20px 24px 24px' }}>
+        <AnimatePresence mode="wait">
+          {/* ══ STEP: PICK ACCOUNT ══════════════════════════════════════════════ */}
+          {step === 'pick_account' ? (
+            <motion.div key="pick"
+              initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.2 }}
+              style={{ padding: '20px 22px 22px' }}>
 
-          {/* Entity label */}
-          {entityName && (
-            <div style={{ marginBottom: 16 }}>
-              <p style={{ margin: 0, fontSize: 11, color: muted, textTransform: 'uppercase',
-                letterSpacing: 1, fontWeight: 600, marginBottom: 4 }}>Sending for</p>
-              <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: text }}>{entityName}</p>
-            </div>
-          )}
+              <p style={{ margin: '0 0 14px', fontSize: 13, color: label, lineHeight: 1.5 }}>
+                Multiple WhatsApp accounts are connected. Choose which one to send from:
+              </p>
 
-          {/* Phone section */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              marginBottom: 6 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: muted, textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                WhatsApp Number
-              </label>
-              {hasPhone && !editingPhone && (
-                <button onClick={() => setEditingPhone(true)}
-                  style={{ fontSize: 11, color: WA_GREEN, background: 'none', border: 'none',
-                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3, fontWeight: 600 }}>
-                  <Edit2 size={11}/> Change
-                </button>
-              )}
-            </div>
-
-            {!editingPhone && hasPhone ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10,
-                background: card, border: `1.5px solid ${WA_GREEN}40`, borderRadius: 12,
-                padding: '10px 14px' }}>
-                <WAIcon size={18} color={WA_GREEN} />
-                <span style={{ color: text, fontWeight: 600, fontSize: 15, fontFamily: 'monospace' }}>{phone}</span>
-                <span style={{ marginLeft: 'auto', fontSize: 11, color: WA_GREEN, fontWeight: 600,
-                  background: `${WA_GREEN}15`, padding: '2px 8px', borderRadius: 20 }}>Ready</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+                {sessions.map(s => (
+                  <AccountCard
+                    key={s.sessionId}
+                    session={s}
+                    selected={selectedSession === s.sessionId}
+                    onSelect={setSelectedSession}
+                    isDark={isDark}
+                  />
+                ))}
               </div>
-            ) : (
-              <div style={{ position: 'relative' }}>
-                {!initialPhone && (
-                  <div style={{ background: isDark ? 'rgba(245,158,11,0.1)' : '#fffbeb',
-                    border: `1px solid ${isDark ? 'rgba(245,158,11,0.3)' : '#fde68a'}`,
-                    borderRadius: 10, padding: '8px 12px', marginBottom: 10, fontSize: 12,
-                    color: isDark ? '#fcd34d' : '#92400e', display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-                    <AlertCircle size={13} style={{ flexShrink: 0, marginTop: 1 }}/>
-                    No phone number on record. Enter one below to send, or update the record first.
-                  </div>
-                )}
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <div style={{ position: 'relative', flex: 1 }}>
-                    <Phone size={14} style={{ position: 'absolute', left: 12, top: '50%',
-                      transform: 'translateY(-50%)', color: muted, pointerEvents: 'none' }}/>
-                    <input
-                      type="tel"
-                      placeholder="+91 98765 43210"
-                      value={phone}
-                      onChange={e => setPhone(e.target.value)}
-                      style={{ width: '100%', paddingLeft: 34, paddingRight: 12, height: 42,
-                        border: `1.5px solid ${border}`, borderRadius: 10, fontSize: 14,
-                        background: bg, color: text, outline: 'none', boxSizing: 'border-box',
-                        fontFamily: 'monospace' }}
-                    />
-                  </div>
-                  {editingPhone && initialPhone && (
-                    <button onClick={() => { setPhone(initialPhone); setEditingPhone(false); }}
-                      style={{ background: isDark ? '#1e3a5f' : '#f1f5f9', border: `1px solid ${border}`,
-                        borderRadius: 10, padding: '0 12px', cursor: 'pointer', color: muted, fontSize: 12 }}>
-                      Cancel
+
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={() => setStep('compose')} style={{
+                  flex: 1, padding: '11px 0', borderRadius: 12,
+                  border: `1.5px solid ${border}`, background: 'transparent',
+                  color: label, fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                }}>← Back</button>
+                <motion.button
+                  onClick={handleSend}
+                  disabled={!selectedSession || sending}
+                  whileTap={{ scale: 0.97 }}
+                  style={{
+                    flex: 2, padding: '11px 0', borderRadius: 12, border: 'none',
+                    background: selectedSession
+                      ? `linear-gradient(135deg, ${WA_DARK}, ${WA_GREEN})`
+                      : '#94a3b8',
+                    color: '#fff', fontSize: 14, fontWeight: 700,
+                    cursor: selectedSession ? 'pointer' : 'not-allowed',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                    boxShadow: selectedSession ? `0 4px 14px ${WA_GREEN}40` : 'none',
+                  }}>
+                  {sending
+                    ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }}/> Sending…</>
+                    : <><WAIcon size={16} color="#fff"/> Send Now</>}
+                </motion.button>
+              </div>
+            </motion.div>
+
+          ) : sent ? (
+            /* ══ SENT STATE ════════════════════════════════════════════════════ */
+            <motion.div key="sent"
+              initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0 }}
+              style={{ padding: '32px 22px', display: 'flex', flexDirection: 'column',
+                alignItems: 'center', gap: 12 }}>
+              <div style={{
+                width: 64, height: 64, borderRadius: '50%',
+                background: `${WA_GREEN}15`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <CheckCircle2 size={32} color={WA_GREEN}/>
+              </div>
+              <p style={{ margin: 0, fontSize: 18, fontWeight: 800, color: text }}>Message Sent!</p>
+              <p style={{ margin: 0, fontSize: 13, color: muted }}>
+                Delivered to {phone} via WhatsApp
+              </p>
+            </motion.div>
+
+          ) : (
+            /* ══ COMPOSE STEP ══════════════════════════════════════════════════ */
+            <motion.div key="compose"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }} transition={{ duration: 0.15 }}
+              style={{ padding: '18px 22px 22px' }}>
+
+              {/* Entity */}
+              {entityName && (
+                <div style={{ marginBottom: 14 }}>
+                  <p style={{ margin: 0, fontSize: 10, color: muted, textTransform: 'uppercase',
+                    letterSpacing: 1, fontWeight: 600, marginBottom: 3 }}>Sending for</p>
+                  <p style={{ margin: 0, fontSize: 14, fontWeight: 800, color: text,
+                    letterSpacing: -0.3 }}>{entityName}</p>
+                </div>
+              )}
+
+              {/* Phone */}
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: label,
+                    textTransform: 'uppercase', letterSpacing: 0.8 }}>WhatsApp Number</label>
+                  {hasPhone && !editingPhone && (
+                    <button onClick={() => setEditingPhone(true)} style={{
+                      fontSize: 11, color: WA_GREEN, background: 'none', border: 'none',
+                      cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3, fontWeight: 700,
+                    }}>
+                      <Edit2 size={10}/> Change
                     </button>
                   )}
                 </div>
+
+                {!editingPhone && hasPhone ? (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    background: card, border: `2px solid ${WA_GREEN}35`, borderRadius: 12,
+                    padding: '10px 14px',
+                  }}>
+                    <WAIcon size={16} color={WA_GREEN}/>
+                    <span style={{ color: text, fontWeight: 700, fontSize: 14, fontFamily: 'monospace', flex: 1 }}>
+                      {phone}
+                    </span>
+                    <span style={{
+                      fontSize: 11, color: WA_GREEN, fontWeight: 700,
+                      background: `${WA_GREEN}15`, padding: '2px 8px', borderRadius: 20,
+                    }}>✓ Ready</span>
+                  </div>
+                ) : (
+                  <div>
+                    {!initialPhone && (
+                      <div style={{
+                        background: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb',
+                        border: `1px solid ${isDark ? 'rgba(245,158,11,0.25)' : '#fde68a'}`,
+                        borderRadius: 10, padding: '8px 12px', marginBottom: 8,
+                        fontSize: 12, color: isDark ? '#fcd34d' : '#92400e',
+                        display: 'flex', alignItems: 'flex-start', gap: 6,
+                      }}>
+                        <AlertCircle size={12} style={{ flexShrink: 0, marginTop: 1 }}/>
+                        No phone number on record. Enter one below, or save it to the client record first.
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <div style={{ position: 'relative', flex: 1 }}>
+                        <Phone size={13} style={{
+                          position: 'absolute', left: 12, top: '50%',
+                          transform: 'translateY(-50%)', color: muted, pointerEvents: 'none',
+                        }}/>
+                        <input
+                          type="tel" placeholder="+91 98765 43210"
+                          value={phone} onChange={e => setPhone(e.target.value)}
+                          style={{
+                            width: '100%', paddingLeft: 34, paddingRight: 12, height: 42,
+                            border: `2px solid ${border}`, borderRadius: 10, fontSize: 14,
+                            background: bg, color: text, outline: 'none',
+                            boxSizing: 'border-box', fontFamily: 'monospace',
+                            transition: 'border-color 0.2s',
+                          }}
+                          onFocus={e => e.target.style.borderColor = WA_GREEN}
+                          onBlur={e => e.target.style.borderColor = border}
+                        />
+                      </div>
+                      {editingPhone && initialPhone && (
+                        <button onClick={() => { setPhone(initialPhone); setEditingPhone(false); }} style={{
+                          background: card, border: `1px solid ${border}`,
+                          borderRadius: 10, padding: '0 12px', cursor: 'pointer',
+                          color: muted, fontSize: 12, fontWeight: 600,
+                        }}>Cancel</button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
 
-          {/* Message preview */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: muted, textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                Message Preview
-              </label>
-              <button onClick={() => setShowMsgEdit(v => !v)}
-                style={{ fontSize: 11, color: muted, background: 'none', border: 'none',
-                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3, fontWeight: 600 }}>
-                <Edit2 size={11}/> {showMsgEdit ? 'Done' : 'Edit'}
-              </button>
-            </div>
-            {showMsgEdit ? (
-              <textarea
-                value={editedMsg}
-                onChange={e => setEditedMsg(e.target.value)}
-                rows={6}
-                style={{ width: '100%', border: `1.5px solid ${border}`, borderRadius: 10,
-                  background: card, color: text, fontSize: 13, padding: '10px 12px',
-                  resize: 'vertical', outline: 'none', boxSizing: 'border-box',
-                  fontFamily: "'DM Sans', system-ui", lineHeight: 1.5 }}
-              />
-            ) : (
-              <div style={{ background: card, border: `1px solid ${border}`, borderRadius: 10,
-                padding: '10px 12px', fontSize: 13, color: text, maxHeight: 120, overflowY: 'auto',
-                whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
-                {finalMessage || <span style={{ color: muted, fontStyle: 'italic' }}>No message</span>}
+              {/* Message preview */}
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: label,
+                    textTransform: 'uppercase', letterSpacing: 0.8 }}>Message</label>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={handleCopyMsg} style={{
+                      fontSize: 11, color: muted, background: 'none', border: 'none',
+                      cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3, fontWeight: 600,
+                    }}>
+                      {copied ? <><Check size={10} color={WA_GREEN}/> <span style={{ color: WA_GREEN }}>Copied!</span></> : <><Copy size={10}/> Copy</>}
+                    </button>
+                    <button onClick={() => setShowMsgEdit(v => !v)} style={{
+                      fontSize: 11, color: muted, background: 'none', border: 'none',
+                      cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3, fontWeight: 600,
+                    }}>
+                      <Edit2 size={10}/> {showMsgEdit ? 'Done' : 'Edit'}
+                    </button>
+                  </div>
+                </div>
+
+                {showMsgEdit ? (
+                  <textarea
+                    value={editedMsg} onChange={e => setEditedMsg(e.target.value)} rows={6}
+                    style={{
+                      width: '100%', border: `2px solid ${WA_GREEN}40`, borderRadius: 12,
+                      background: isDark ? '#1e3a2f' : '#f0fdf4', color: text,
+                      fontSize: 13, padding: '10px 12px', resize: 'vertical',
+                      outline: 'none', boxSizing: 'border-box',
+                      fontFamily: "'DM Sans', system-ui", lineHeight: 1.55,
+                    }}
+                  />
+                ) : (
+                  <MsgBubble text={finalMsg} isDark={isDark}/>
+                )}
               </div>
-            )}
-          </div>
 
-          {/* Screenshot tip */}
-          {canSendScreenshot && (
-            <div style={{ background: isDark ? 'rgba(59,130,246,0.08)' : '#eff6ff',
-              border: `1px solid ${isDark ? 'rgba(59,130,246,0.25)' : '#bfdbfe'}`,
-              borderRadius: 10, padding: '8px 12px', marginBottom: 16, fontSize: 12,
-              color: isDark ? '#93c5fd' : '#1d4ed8', display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-              <Image size={13} style={{ flexShrink: 0, marginTop: 1 }}/>
-              Tip: After opening WhatsApp, you can attach a screenshot or PDF from your gallery.
-            </div>
-          )}
+              {/* Screenshot tip */}
+              {canSendScreenshot && (
+                <div style={{
+                  background: isDark ? 'rgba(59,130,246,0.08)' : '#eff6ff',
+                  border: `1px solid ${isDark ? 'rgba(59,130,246,0.2)' : '#bfdbfe'}`,
+                  borderRadius: 10, padding: '8px 12px', marginBottom: 14, fontSize: 12,
+                  color: isDark ? '#93c5fd' : '#1d4ed8', display: 'flex', alignItems: 'flex-start', gap: 6,
+                }}>
+                  <Image size={12} style={{ flexShrink: 0, marginTop: 1 }}/>
+                  After opening WhatsApp, you can attach a screenshot or PDF from your gallery.
+                </div>
+              )}
 
-          {/* Settings link */}
-          <div style={{ marginBottom: 16, fontSize: 12, color: muted, display: 'flex',
-            alignItems: 'center', gap: 4 }}>
-            <Link size={11}/>
-            Message template controlled from{' '}
-            <a href={settingsPath} style={{ color: WA_GREEN, textDecoration: 'none', fontWeight: 600 }}
-              onClick={e => { e.preventDefault(); window.location.href = settingsPath; }}>
-              WhatsApp Settings
-            </a>
-          </div>
+              {/* Account selector (single session — show which one) */}
+              {sessions.length === 1 && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14,
+                  background: isDark ? 'rgba(37,211,102,0.06)' : `${WA_GREEN}08`,
+                  border: `1px solid ${WA_GREEN}25`, borderRadius: 10, padding: '8px 12px',
+                }}>
+                  <Smartphone size={13} color={WA_GREEN}/>
+                  <div style={{ flex: 1 }}>
+                    <span style={{ fontSize: 12, color: isDark ? '#a0aec0' : '#4a5568' }}>
+                      Sending from:{' '}
+                    </span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: text }}>
+                      {sessions[0].displayName || `+${sessions[0].phoneNumber}`}
+                    </span>
+                  </div>
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, color: WA_GREEN,
+                    background: `${WA_GREEN}15`, padding: '2px 7px', borderRadius: 20,
+                  }}>Connected</span>
+                </div>
+              )}
 
-          {/* Send button */}
-          <AnimatePresence mode="wait">
-            {sent ? (
-              <motion.div key="sent" initial={{scale:0.9,opacity:0}} animate={{scale:1,opacity:1}}
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                  background: `${WA_GREEN}15`, border: `1px solid ${WA_GREEN}40`,
-                  borderRadius: 12, padding: '12px 20px', color: WA_GREEN, fontWeight: 700, fontSize: 14 }}>
-                <CheckCircle2 size={18}/> WhatsApp Opened!
-              </motion.div>
-            ) : (
-              <motion.button key="send" onClick={doSend} disabled={sending || !phone}
+              {/* Settings link */}
+              <div style={{ marginBottom: 16, fontSize: 11, color: muted,
+                display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Link size={10}/>
+                Template from{' '}
+                <a href={settingsPath} style={{ color: WA_GREEN, textDecoration: 'none', fontWeight: 700 }}
+                  onClick={e => { e.preventDefault(); window.location.href = settingsPath; }}>
+                  WhatsApp Settings
+                </a>
+              </div>
+
+              {/* Send / Pick Account button */}
+              <motion.button
+                onClick={handleSend}
+                disabled={sending || !hasPhone}
                 whileTap={{ scale: 0.97 }}
-                style={{ width: '100%', padding: '13px 20px',
-                  background: (!phone || sending) ? '#94a3b8' : `linear-gradient(135deg, ${WA_DARK}, ${WA_GREEN})`,
-                  color: '#fff', border: 'none', borderRadius: 12, fontSize: 15, fontWeight: 700,
-                  cursor: (!phone || sending) ? 'not-allowed' : 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                  boxShadow: phone ? `0 4px 14px ${WA_GREEN}40` : 'none', transition: 'all 0.2s' }}>
-                {sending
-                  ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }}/> Opening…</>
-                  : <><WAIcon size={18} color="#fff"/> {hasPhone ? 'Open WhatsApp & Send' : 'Enter number & Send'}</>}
+                style={{
+                  width: '100%', padding: '13px 20px', borderRadius: 14, border: 'none',
+                  background: (!hasPhone || sending)
+                    ? (isDark ? '#1e293b' : '#f1f5f9')
+                    : `linear-gradient(135deg, ${WA_DARK}, ${WA_GREEN})`,
+                  color: (!hasPhone || sending) ? (isDark ? '#475569' : '#94a3b8') : '#fff',
+                  fontSize: 15, fontWeight: 800, letterSpacing: -0.3,
+                  cursor: (!hasPhone || sending) ? 'not-allowed' : 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9,
+                  boxShadow: hasPhone ? `0 4px 18px ${WA_GREEN}45` : 'none',
+                  transition: 'all 0.2s',
+                }}>
+                {sending ? (
+                  <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }}/> Sending…</>
+                ) : sessions.length > 1 && !selectedSession ? (
+                  <><WAIcon size={17} color={hasPhone ? '#fff' : '#94a3b8'}/> Choose Account & Send <ChevronRight size={15}/></>
+                ) : (
+                  <><WAIcon size={17} color={hasPhone ? '#fff' : '#94a3b8'}/>
+                    {hasPhone
+                      ? (sessions.length > 0 ? 'Send via WhatsApp' : 'Open WhatsApp Web')
+                      : 'Enter Number to Send'}</>
+                )}
               </motion.button>
-            )}
-          </AnimatePresence>
-        </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-        <style>{`@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }`}</style>
+        <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
       </DialogContent>
     </Dialog>
   );
 }
 
-/** Inline WhatsApp button — for use in tables/lists */
+/* ── Inline WhatsApp Button — for tables/action columns ─────────────────────── */
 export function WhatsAppButton({
-  phone, message, entityName = '', size = 'sm', isDark = false, disabled = false,
-  onNoPhone, className = '', title: btnTitle = 'Send via WhatsApp',
+  phone, message, entityName = '', size = 'sm',
+  isDark = false, disabled = false, onNoPhone, title: btnTitle,
 }) {
   const [open, setOpen] = useState(false);
   const hasPhone = !!phone && String(phone).replace(/\D/g,'').length >= 10;
@@ -301,40 +625,33 @@ export function WhatsAppButton({
     setOpen(true);
   };
 
-  const sizeMap = { sm: { p: '5px 10px', fs: 12 }, md: { p: '7px 14px', fs: 13 }, lg: { p: '9px 18px', fs: 14 } };
+  const sizeMap = { sm: { p: '5px 9px', fs: 12, icon: 13 }, md: { p: '7px 13px', fs: 13, icon: 15 } };
   const s = sizeMap[size] || sizeMap.sm;
 
   return (
     <>
-      <button
-        onClick={handleClick}
-        disabled={disabled}
-        title={hasPhone ? btnTitle : 'No phone number — click to enter one'}
-        className={className}
+      <button onClick={handleClick} disabled={disabled}
+        title={hasPhone ? (btnTitle || 'Send via WhatsApp') : 'No phone — click to enter one'}
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 5,
-          padding: s.p, fontSize: s.fs, fontWeight: 600, borderRadius: 8, border: 'none',
+          padding: s.p, fontSize: s.fs, fontWeight: 700, borderRadius: 8, border: 'none',
           background: hasPhone
             ? (isDark ? 'rgba(37,211,102,0.15)' : 'rgba(37,211,102,0.12)')
-            : (isDark ? 'rgba(148,163,184,0.1)' : 'rgba(148,163,184,0.12)'),
+            : (isDark ? 'rgba(148,163,184,0.1)' : 'rgba(148,163,184,0.1)'),
           color: hasPhone ? WA_GREEN : (isDark ? '#64748b' : '#94a3b8'),
           cursor: disabled ? 'not-allowed' : 'pointer',
-          transition: 'all 0.2s',
+          transition: 'all 0.15s',
           border: `1px solid ${hasPhone ? WA_GREEN + '30' : 'transparent'}`,
           opacity: disabled ? 0.5 : 1,
         }}>
-        <WAIcon size={13} color={hasPhone ? WA_GREEN : (isDark ? '#64748b' : '#94a3b8')}/>
-        {!hasPhone && <span style={{ fontSize: 10, color: isDark ? '#475569' : '#94a3b8' }}>No #</span>}
+        <WAIcon size={s.icon} color={hasPhone ? WA_GREEN : (isDark ? '#64748b' : '#94a3b8')}/>
+        {!hasPhone && <span style={{ fontSize: 9, opacity: 0.6 }}>No #</span>}
       </button>
 
       <WhatsAppSendDialog
-        open={open}
-        onClose={() => setOpen(false)}
-        phone={phone || ''}
-        entityName={entityName}
-        message={message}
-        title="Send via WhatsApp"
-        isDark={isDark}
+        open={open} onClose={() => setOpen(false)}
+        phone={phone || ''} entityName={entityName}
+        message={message} title="Send via WhatsApp" isDark={isDark}
       />
     </>
   );
