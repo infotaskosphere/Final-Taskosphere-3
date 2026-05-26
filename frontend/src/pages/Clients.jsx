@@ -4180,8 +4180,48 @@ export default function Clients() {
                             if (!cinVal) return;
                             setMcaFetching(true);
                             try {
-                              const res = await api.get(`/clients/fetch-mca-details?cin=${encodeURIComponent(cinVal)}`);
-                              const d = res.data;
+                              const govRes = await fetch(
+                                `https://api.data.gov.in/resource/ec58dab7-d891-4abb-936e-d5d274a6ce9b?api-key=YOUR_NEW_REGENERATED_KEY&format=json&limit=1&filters[CIN]=${encodeURIComponent(cinVal)}`
+                              );
+                              if (!govRes.ok) throw new Error(`API error: ${govRes.status}`);
+                              const govData = await govRes.json();
+                              const records = govData.records || [];
+                              if (!records.length) throw new Error(`No company found for CIN: ${cinVal}`);
+                              const rec = records[0];
+                              
+                              const MCA_CLASS_MAP = {
+                                'private': 'pvt_ltd', 'public': 'public_ltd',
+                                'llp': 'llp', 'section 8': 'section_8',
+                              };
+                              const rawClass = (rec.COMPANY_CLASS || rec.company_class || '').toLowerCase();
+                              const mappedType = Object.entries(MCA_CLASS_MAP).find(([k]) => rawClass.includes(k))?.[1] || formData.client_type;
+                              
+                              let doiIso = '';
+                              const rawDoi = rec.DATE_OF_REGISTRATION || rec.date_of_registration || '';
+                              if (rawDoi) {
+                                try {
+                                  const parts = rawDoi.includes('/') ? rawDoi.split('/') : rawDoi.split('-');
+                                  doiIso = parts.length === 3
+                                    ? (parts[0].length === 4 ? rawDoi : `${parts[2]}-${parts[1]}-${parts[0]}`)
+                                    : rawDoi;
+                                } catch { doiIso = rawDoi; }
+                              }
+                              
+                              const d = {
+                                company_name: rec.COMPANY_NAME || rec.company_name || '',
+                                cin: cinVal,
+                                llpin: null,
+                                client_type: mappedType,
+                                date_of_incorporation: doiIso,
+                                address: rec.REGISTERED_OFFICE_ADDRESS || rec.registered_office_address || '',
+                                city: '',
+                                state: rec.REGISTERED_STATE || rec.registered_state || '',
+                                gst_pin: '',
+                                pan: '',
+                                email: '',
+                                directors: [],
+                                mca_fetch_date: new Date().toISOString().slice(0, 10),
+                              };
                               const MCA_CONSTITUTION_MAP = {
                                 'private limited': 'pvt_ltd', 'private limited company': 'pvt_ltd', pvt_ltd: 'pvt_ltd',
                                 llp: 'llp', 'limited liability partnership': 'llp',
