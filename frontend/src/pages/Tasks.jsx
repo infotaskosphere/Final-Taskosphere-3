@@ -881,11 +881,30 @@ export default function Tasks() {
       setFormData({ ...EMPTY_FORM });
       setDialogOpen(true);
       setSearchParams({}, { replace: true });
+      return;
     }
-    if (searchParams.get('filter') === 'today_new') {
+    const filter = searchParams.get('filter');
+    if (!filter) return;
+    // Reset all filters first so dashboard clicks always start clean
+    setFilterTodayNew(false);
+    setFilterTeamOnly(false);
+    setFilterAssignedByMe(false);
+    setShowMyTasksOnly(false);
+    setFilterStatus('all');
+
+    if (filter === 'today_new') {
       setFilterTodayNew(true);
-      setSearchParams({}, { replace: true });
+    } else if (filter === 'overdue') {
+      setFilterStatus('overdue');
+      setShowMyTasksOnly(true);
+    } else if (filter === 'assigned-to-me' || filter === 'my-tasks') {
+      setShowMyTasksOnly(true);
+    } else if (filter === 'assigned-by-me') {
+      setFilterAssignedByMe(true);
+    } else if (filter === 'team') {
+      setFilterTeamOnly(true);
     }
+    setSearchParams({}, { replace: true });
   }, [searchParams, setSearchParams]);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
