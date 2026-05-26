@@ -459,14 +459,20 @@ async def _run_scheduled_bulk_jobs():
 
 
 def wa_scheduled_bulk_job():
-    """APScheduler sync wrapper — run every minute."""
-    loop = None
+    """APScheduler sync wrapper — run every minute.
+
+    APScheduler calls this from a background thread, but Motor (async MongoDB)
+    is bound to the main Uvicorn event loop.  Creating a *new* event loop here
+    causes "Future attached to a different loop".  Instead we schedule the
+    coroutine on the already-running main loop and block until it finishes.
+    """
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(_run_scheduled_bulk_jobs())
+        # Import here to avoid circular imports at module load time
+        from backend.server import app_event_loop
+        if app_event_loop is None or app_event_loop.is_closed():
+            logger.warning("wa_scheduled_bulk_job: main event loop not available yet, skipping.")
+            return
+        future = asyncio.run_coroutine_threadsafe(_run_scheduled_bulk_jobs(), app_event_loop)
+        future.result(timeout=55)  # wait up to 55 s (job runs every 60 s)
     except Exception as exc:
         logger.error("wa_scheduled_bulk_job failed: %s", exc)
-    finally:
-        if loop and not loop.is_closed():
-            loop.close()
