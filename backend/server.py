@@ -5938,115 +5938,74 @@ async def fetch_mca_details(
     cin: str,
     current_user: User = Depends(get_current_user)
 ):
-    """
-    Fetch company master data from MCA portal API by CIN or LLPIN.
-    Configure MCA_API_KEY and MCA_API_BASE_URL in your .env file.
-    The response is mapped to Taskosphere's client schema.
-    """
     if not cin or len(cin.strip()) < 5:
         raise HTTPException(status_code=400, detail="Please provide a valid CIN or LLPIN.")
     if not MCA_API_KEY:
-        raise HTTPException(
-            status_code=503,
-            detail="MCA API key not configured. Add MCA_API_KEY to your .env file."
-        )
+        raise HTTPException(status_code=503, detail="MCA API key not configured. Add MCA_API_KEY to your .env file.")
+
     cin_clean = cin.strip().upper()
+    RESOURCE_ID = "ec58dab7-d891-4abb-936e-d5d274a6ce9b"
+
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client_http:
-            # ── Try CIN endpoint first, fall back to LLPIN endpoint ──────────
-            url = f"{MCA_API_BASE_URL}/company/{cin_clean}"
-            resp = await client_http.get(
-                url,
-                headers={
-                    "Authorization": f"Bearer {MCA_API_KEY}",
-                    "Accept": "application/json",
+        async with httpx.AsyncClient(timeout=20.0) as http:
+            resp = await http.get(
+                f"https://api.data.gov.in/resource/{RESOURCE_ID}",
+                params={
+                    "api-key": MCA_API_KEY,
+                    "format": "json",
+                    "limit": "1",
+                    "filters[CIN]": cin_clean,
                 }
             )
-            # Some MCA API providers use a different structure – try both patterns
-            if resp.status_code == 404:
-                url2 = f"{MCA_API_BASE_URL}/llp/{cin_clean}"
-                resp2 = await client_http.get(
-                    url2,
-                    headers={"Authorization": f"Bearer {MCA_API_KEY}", "Accept": "application/json"}
-                )
-                if resp2.status_code == 200:
-                    resp = resp2
-                else:
-                    raise HTTPException(status_code=404, detail=f"Company not found for: {cin_clean}")
             resp.raise_for_status()
             data = resp.json()
+
     except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="MCA API timed out. Please try again.")
+        raise HTTPException(status_code=504, detail="data.gov.in API timed out. Please try again.")
     except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=f"MCA API error: {e.response.text[:200]}")
-    except HTTPException:
-        raise
+        raise HTTPException(status_code=e.response.status_code, detail=f"API error: {e.response.text[:300]}")
     except Exception as e:
         logger.error(f"fetch_mca_details error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to fetch from MCA: {str(e)}")
 
-    # ── Normalise field names across common MCA API response formats ─────────
-    # Different API providers may use camelCase or snake_case – handle both.
-    def _g(*keys):
-        for k in keys:
-            v = data.get(k) or data.get(k.lower()) or data.get(k.upper())
-            if v and str(v).strip() not in ("", "-", "nan", "null", "N/A"):
-                return str(v).strip()
-        return None
+    records = data.get("records", [])
+    if not records:
+        raise HTTPException(status_code=404, detail=f"No company found for CIN: {cin_clean}. Verify the CIN is correct.")
 
-    raw_constitution = _g("classOfCompany", "class_of_company", "companyType",
-                          "company_type", "constitution", "entityType") or ""
-    mapped_type = _map_mca_constitution(raw_constitution)
+    r = records[0]
 
-    # Directors: accept both list-of-dicts and list-of-strings
-    raw_directors = data.get("directors") or data.get("signatories") or []
-    directors = []
-    for d in raw_directors:
-        if isinstance(d, dict):
-            directors.append({
-                "name":        (d.get("name") or d.get("directorName") or "").strip(),
-                "din":         (d.get("din") or d.get("DIN") or "").strip(),
-                "designation": (d.get("designation") or d.get("role") or "Director").strip(),
-                "email":       "",
-                "phone":       "",
-                "birthday":    "",
-            })
-        elif isinstance(d, str) and d.strip():
-            directors.append({"name": d.strip(), "din": "", "designation": "Director",
-                               "email": "", "phone": "", "birthday": ""})
+    doi_iso = ""
+    raw_doi = r.get("DATE_OF_REGISTRATION") or r.get("date_of_registration") or ""
+    if raw_doi:
+        try:
+            from dateutil import parser as dp
+            doi_iso = dp.parse(str(raw_doi), dayfirst=True).strftime("%Y-%m-%d")
+        except Exception:
+            doi_iso = str(raw_doi)
 
-    # Address: accept nested object or flat strings
-    addr_obj = data.get("registeredAddress") or data.get("registered_address") or {}
-    if isinstance(addr_obj, dict):
-        street = _g("addressLine1", "address_line1", "address") or addr_obj.get("street", "")
-        city   = addr_obj.get("city") or addr_obj.get("district") or ""
-        state  = addr_obj.get("state") or ""
-        pin    = str(addr_obj.get("pin") or addr_obj.get("pinCode") or "").strip()
-    else:
-        street = _g("registeredAddress", "registered_address", "address")
-        city   = _g("city", "district")
-        state  = _g("state")
-        pin    = _g("pin", "pinCode", "pin_code") or ""
+    raw_class = r.get("COMPANY_CLASS") or r.get("company_class") or ""
+    client_type = _map_mca_constitution(raw_class)
+    address = r.get("REGISTERED_OFFICE_ADDRESS") or r.get("registered_office_address") or ""
+    state   = r.get("REGISTERED_STATE") or r.get("registered_state") or ""
 
     from datetime import date as _date
     return {
-        "company_name":         _g("companyName", "company_name", "llpName", "llp_name"),
-        "cin":                  cin_clean if not cin_clean.startswith("AAA") else None,
-        "llpin":                cin_clean if cin_clean.startswith("AAA") else _g("llpin", "LLPIN"),
-        "client_type":          mapped_type,
-        "constitution_raw":     raw_constitution,
-        "date_of_incorporation": _g("dateOfIncorporation", "date_of_incorporation", "incorporationDate"),
-        "email":                _g("email", "emailId", "email_id"),
-        "address":              street,
-        "city":                 city or "",
-        "state":                state or "",
-        "gst_pin":              pin,
-        "pan":                  _g("pan", "PAN"),
-        "directors":            directors,
-        "mca_fetch_date":       _date.today().isoformat(),
-        "authorized_capital":   _g("authorisedCapital", "authorized_capital"),
-        "paid_up_capital":      _g("paidUpCapital", "paid_up_capital"),
-        "company_status":       _g("companyStatus", "company_status", "status"),
+        "company_name":          r.get("COMPANY_NAME") or r.get("company_name") or "",
+        "cin":                   cin_clean,
+        "llpin":                 None,
+        "client_type":           client_type,
+        "date_of_incorporation": doi_iso,
+        "email":                 "",
+        "address":               address,
+        "city":                  "",
+        "state":                 state,
+        "gst_pin":               "",
+        "pan":                   "",
+        "directors":             [],
+        "company_status":        r.get("COMPANY_STATUS") or r.get("company_status") or "",
+        "authorized_capital":    r.get("AUTHORISED_CAPITAL_IN_INR") or "",
+        "paid_up_capital":       r.get("PAIDUP_CAPITAL_IN_INR") or "",
+        "mca_fetch_date":        _date.today().isoformat(),
     }
 
 
