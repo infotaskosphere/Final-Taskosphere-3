@@ -242,6 +242,112 @@ def _strip_sensitive(doc: dict) -> dict:
         doc["tags"] = []
     return doc
 
+def _match_contact_by_name(contact_persons: list, holder_name: str) -> Optional[dict]:
+    """Find the best-matching contact_person for the given holder_name.
+    Tries exact match first, then partial/contains match (case-insensitive).
+    """
+    if not holder_name or not contact_persons:
+        return None
+    needle = holder_name.strip().lower()
+    # 1. Exact match
+    for cp in contact_persons:
+        if cp.get("name") and cp["name"].strip().lower() == needle:
+            return cp
+    # 2. Contains match
+    for cp in contact_persons:
+        name = (cp.get("name") or "").strip().lower()
+        if name and (needle in name or name in needle):
+            return cp
+    return None
+
+async def _autofill_from_client(
+    client_id: Optional[str],
+    client_name: Optional[str],
+    holder_name: Optional[str],
+    holder_din: Optional[str],
+    mobile: Optional[str],
+    holder_pan: Optional[str],
+    username: Optional[str],
+    trade_name: Optional[str],
+) -> dict:
+    """
+    Fetch the client document and fill any blank fields from client data.
+    Matches holder_name against contact_persons for director-specific DIN/mobile/email.
+    Returns a dict with resolved values (only fills blanks, never overwrites).
+    """
+    result = {
+        "client_name": client_name,
+        "holder_din": holder_din,
+        "mobile": mobile,
+        "holder_pan": holder_pan,
+        "username": username,
+        "trade_name": trade_name,
+    }
+
+    if not client_id:
+        return result
+
+    try:
+        client_doc = await db.clients.find_one(
+            {"id": client_id},
+            {"_id": 0, "company_name": 1, "phone": 1, "email": 1,
+             "pan": 1, "contact_persons": 1}
+        )
+    except Exception as e:
+        logger.warning(f"Could not fetch client {client_id} for autofill: {e}")
+        return result
+
+    if not client_doc:
+        return result
+
+    # Resolve client_name
+    if not result["client_name"]:
+        result["client_name"] = client_doc.get("company_name")
+
+    # Resolve trade_name from company_name
+    if not result["trade_name"]:
+        result["trade_name"] = client_doc.get("company_name")
+
+    contacts = client_doc.get("contact_persons") or []
+
+    # Find the specific contact matching holder_name
+    matched_contact = _match_contact_by_name(contacts, holder_name) if holder_name else None
+    primary_contact = matched_contact or (contacts[0] if contacts else None)
+
+    # Fill holder_din from matched contact > first contact
+    if not result["holder_din"]:
+        din = (matched_contact or {}).get("din") or (primary_contact or {}).get("din")
+        if din:
+            result["holder_din"] = str(din).strip()
+
+    # Fill mobile from matched contact > client phone > first contact phone
+    if not result["mobile"]:
+        phone = (
+            (matched_contact or {}).get("phone")
+            or client_doc.get("phone")
+            or (primary_contact or {}).get("phone")
+        )
+        if phone:
+            result["mobile"] = str(phone).strip()
+
+    # Fill username/email from matched contact > client email > first contact email
+    if not result["username"]:
+        email = (
+            (matched_contact or {}).get("email")
+            or client_doc.get("email")
+            or (primary_contact or {}).get("email")
+        )
+        if email:
+            result["username"] = str(email).strip()
+
+    # Fill holder_pan from matched contact pan > client pan
+    if not result["holder_pan"]:
+        pan = (matched_contact or {}).get("pan") or client_doc.get("pan")
+        if pan:
+            result["holder_pan"] = str(pan).strip().upper()
+
+    return result
+
 def _extract_sheet_id(url: str) -> Optional[str]:
     match = re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)", url)
     return match.group(1) if match else None
@@ -540,10 +646,26 @@ async def bulk_import_passwords(
                 client_id_val = None
             if client_name_val and client_name_val.lower() in ("nan", "none", ""):
                 client_name_val = None
-            if client_id_val and not client_name_val:
-                client_doc = await db.clients.find_one({"id": client_id_val}, {"_id": 0, "company_name": 1})
-                if client_doc:
-                    client_name_val = client_doc.get("company_name")
+
+            holder_name_val = clean(row.get("holder_name"))
+            holder_din_val = clean(row.get("holder_din"))
+            mobile_val = clean(row.get("mobile"))
+            holder_pan_val = clean(row.get("holder_pan"))
+            username_val = clean(row.get("username"))
+            trade_name_val = clean(row.get("trade_name"))
+
+            # ── Autofill from client data (contact_persons matched by holder_name) ──
+            filled = await _autofill_from_client(
+                client_id=client_id_val,
+                client_name=client_name_val,
+                holder_name=holder_name_val,
+                holder_din=holder_din_val,
+                mobile=mobile_val,
+                holder_pan=holder_pan_val,
+                username=username_val,
+                trade_name=trade_name_val,
+            )
+            client_name_val = filled["client_name"]
 
             def clean(v):
                 s = str(v).strip() if v is not None else ""
@@ -553,15 +675,15 @@ async def bulk_import_passwords(
                 "portal_name": str(row.get("portal_name", "")).strip(),
                 "portal_type": str(row.get("portal_type", "OTHER")).upper(),
                 "url": clean(row.get("url")),
-                "username": clean(row.get("username")),
+                "username": filled["username"],
                 "password_plain": clean(row.get("password_plain")),
                 "department": str(row.get("department", "OTHER")).upper(),
                 "holder_type": str(row.get("holder_type", "COMPANY")).upper() if clean(row.get("holder_type")) else "COMPANY",
-                "holder_name": clean(row.get("holder_name")),
-                "holder_pan": clean(row.get("holder_pan")),
-                "holder_din": clean(row.get("holder_din")),
-                "mobile": clean(row.get("mobile")),
-                "trade_name": clean(row.get("trade_name")),
+                "holder_name": holder_name_val,
+                "holder_pan": filled["holder_pan"],
+                "holder_din": filled["holder_din"],
+                "mobile": filled["mobile"],
+                "trade_name": filled["trade_name"],
                 "client_name": client_name_val,
                 "client_id": client_id_val,
                 "notes": clean(row.get("notes")),
@@ -784,18 +906,17 @@ async def create_password(
     if not _can_edit(current_user):
         raise HTTPException(403, "You do not have permission to create passwords")
 
-    client_name = data.client_name
-
-    if data.client_id and not client_name:
-        try:
-            client_doc = await db.clients.find_one(
-                {"id": data.client_id},
-                {"_id": 0, "company_name": 1}
-            )
-            if client_doc:
-                client_name = client_doc.get("company_name")
-        except Exception as e:
-            logger.warning(f"Could not fetch client name for {data.client_id}: {e}")
+    # Autofill missing fields from linked client data (matches holder_name to contact_persons)
+    filled = await _autofill_from_client(
+        client_id=data.client_id,
+        client_name=data.client_name,
+        holder_name=(data.holder_name or "").strip() or None,
+        holder_din=(data.holder_din or "").strip() or None,
+        mobile=(data.mobile or "").strip() or None,
+        holder_pan=(data.holder_pan or "").strip().upper() or None,
+        username=(data.username or "").strip() or None,
+        trade_name=(data.trade_name or "").strip() or None,
+    )
 
     now = datetime.now(timezone.utc).isoformat()
     entry_id = str(uuid.uuid4())
@@ -805,17 +926,17 @@ async def create_password(
         "portal_name": data.portal_name.strip(),
         "portal_type": (data.portal_type or "OTHER").upper(),
         "url": (data.url or "").strip() or None,
-        "username": (data.username or "").strip() or None,
+        "username": filled["username"],
         "password_encrypted": _encrypt(data.password_plain or ""),
         "_password_set": bool(data.password_plain),
         "department": (data.department or "OTHER").upper(),
         "holder_type": (data.holder_type or "COMPANY").upper(),
         "holder_name": (data.holder_name or "").strip() or None,
-        "holder_pan": (data.holder_pan or "").strip().upper() or None,
-        "holder_din": (data.holder_din or "").strip() or None,
-        "mobile": (data.mobile or "").strip() or None,
-        "trade_name": (data.trade_name or "").strip() or None,
-        "client_name": client_name or None,
+        "holder_pan": filled["holder_pan"],
+        "holder_din": filled["holder_din"],
+        "mobile": filled["mobile"],
+        "trade_name": filled["trade_name"],
+        "client_name": filled["client_name"] or None,
         "client_id": data.client_id or None,
         "notes": data.notes or None,
         "tags": data.tags or [],
@@ -928,13 +1049,35 @@ async def update_password_entry(
         updates["trade_name"] = data.trade_name.strip() or None
     if data.client_id is not None:
         updates["client_id"] = data.client_id or None
-        if data.client_id and not data.client_name:
-            try:
-                client_doc = await db.clients.find_one({"id": data.client_id}, {"_id": 0, "company_name": 1})
-                if client_doc:
-                    updates["client_name"] = client_doc.get("company_name")
-            except Exception as e:
-                logger.warning(f"Could not fetch client name during update: {e}")
+        if data.client_id:
+            # Resolve client name + autofill blank fields from contact_persons
+            holder_name_for_fill = (
+                (data.holder_name or "").strip()
+                or existing.get("holder_name", "")
+            ) or None
+            filled = await _autofill_from_client(
+                client_id=data.client_id,
+                client_name=data.client_name or existing.get("client_name"),
+                holder_name=holder_name_for_fill,
+                holder_din=data.holder_din or existing.get("holder_din"),
+                mobile=data.mobile or existing.get("mobile"),
+                holder_pan=data.holder_pan or existing.get("holder_pan"),
+                username=data.username or existing.get("username"),
+                trade_name=data.trade_name or existing.get("trade_name"),
+            )
+            if filled["client_name"] and not data.client_name:
+                updates["client_name"] = filled["client_name"]
+            # Only fill fields that are currently blank (don't overwrite user data)
+            if filled["holder_din"] and not existing.get("holder_din") and data.holder_din is None:
+                updates.setdefault("holder_din", filled["holder_din"])
+            if filled["mobile"] and not existing.get("mobile") and data.mobile is None:
+                updates.setdefault("mobile", filled["mobile"])
+            if filled["holder_pan"] and not existing.get("holder_pan") and data.holder_pan is None:
+                updates.setdefault("holder_pan", filled["holder_pan"])
+            if filled["username"] and not existing.get("username") and data.username is None:
+                updates.setdefault("username", filled["username"])
+            if filled["trade_name"] and not existing.get("trade_name") and data.trade_name is None:
+                updates.setdefault("trade_name", filled["trade_name"])
     if data.client_name is not None:
         updates["client_name"] = data.client_name or None
     if data.notes is not None:
