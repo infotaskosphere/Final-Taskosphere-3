@@ -1884,9 +1884,17 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 <TypePill type={selectedClient.client_type} customLabel={selectedClient.client_type_label} />
                 {selectedClient.status === 'inactive' && <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-1 rounded-full">Archived</span>}
               </div>
-              {selectedClient.birthday && <p className="text-sm text-slate-500"><Calendar className="inline h-3.5 w-3.5 mr-1" />Incorporated: {format(new Date(selectedClient.birthday), 'MMM d, yyyy')}</p>}
-              {selectedClient.referred_by && <p className="text-sm text-slate-500 mt-1"><Share2 className="inline h-3.5 w-3.5 mr-1" />Referred by: <span className="font-medium text-slate-700">{selectedClient.referred_by}</span></p>}
-              {selectedClient.created_at && <p className="text-xs text-slate-400 mt-1"><Calendar className="inline h-3 w-3 mr-1" />Added: {format(new Date(selectedClient.created_at), 'MMM d, yyyy')}</p>}
+              <div className="flex flex-wrap items-center gap-2 mt-1">
+                {selectedClient.birthday && <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 bg-white/70 border border-slate-200 px-2.5 py-1 rounded-full"><Calendar className="h-3 w-3" />Incorporated: {format(new Date(selectedClient.birthday), 'MMM d, yyyy')}</span>}
+                {selectedClient.created_at && <span className="inline-flex items-center gap-1.5 text-xs text-slate-400 bg-white/70 border border-slate-200 px-2.5 py-1 rounded-full"><Calendar className="h-3 w-3" />Added: {format(new Date(selectedClient.created_at), 'MMM d, yyyy')}</span>}
+                {selectedClient.referred_by && (
+                  <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-violet-700 bg-violet-50 border border-violet-200 px-2.5 py-1 rounded-full">
+                    <Share2 className="h-3 w-3" />Referred by: {selectedClient.referred_by}
+                  </span>
+                )}
+                {selectedClient.city && <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 bg-white/70 border border-slate-200 px-2.5 py-1 rounded-full"><MapPin className="h-3 w-3" />{[selectedClient.city, selectedClient.state].filter(Boolean).join(', ')}</span>}
+                {selectedClient.gstin && <span className="inline-flex items-center gap-1.5 text-xs font-mono text-slate-600 bg-white/70 border border-slate-200 px-2.5 py-1 rounded-full">GSTIN: {selectedClient.gstin}</span>}
+              </div>
             </div>
           </div>
         </div>
@@ -2587,6 +2595,39 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
           {activeTab === 'details' && (
             <div className="p-8 space-y-6">
 
+              {/* ── Quick Info Summary Row ── */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {selectedClient.referred_by && (
+                  <div className={`col-span-2 sm:col-span-2 rounded-2xl p-4 border flex items-center gap-3 ${isDark ? 'bg-violet-900/20 border-violet-700/40' : 'bg-violet-50 border-violet-200'}`}>
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${isDark ? 'bg-violet-800/60' : 'bg-violet-100'}`}>
+                      <Share2 className="h-4 w-4 text-violet-600" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-violet-500 mb-0.5">Referred By</p>
+                      <p className={`text-sm font-semibold truncate ${isDark ? 'text-violet-200' : 'text-violet-800'}`}>{selectedClient.referred_by}</p>
+                    </div>
+                  </div>
+                )}
+                {selectedClient.cin && (
+                  <div className={`rounded-2xl p-4 border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">CIN</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className={`text-xs font-mono font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{selectedClient.cin}</p>
+                      <button onClick={() => copyToClipboard(selectedClient.cin, 'CIN')} className="text-slate-300 hover:text-slate-600 flex-shrink-0"><Copy className="h-3 w-3" /></button>
+                    </div>
+                  </div>
+                )}
+                {selectedClient.llpin && (
+                  <div className={`rounded-2xl p-4 border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">LLPIN</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className={`text-xs font-mono font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{selectedClient.llpin}</p>
+                      <button onClick={() => copyToClipboard(selectedClient.llpin, 'LLPIN')} className="text-slate-300 hover:text-slate-600 flex-shrink-0"><Copy className="h-3 w-3" /></button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Contact info */}
               <div className={`border rounded-2xl p-5 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50/60 border-slate-100'}`}>
                 <h3 className={`text-sm font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-4 flex items-center gap-2`}><Mail className="h-4 w-4" /> Contact Information</h3>
@@ -2609,8 +2650,19 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                     <div className="flex items-start gap-3">
                       <MapPin className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5" />
                       <div className="text-slate-700 text-sm">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">Primary Address</p>
                         <p>{selectedClient.address}</p>
-                        {(selectedClient.city || selectedClient.state) && <p className="text-slate-500 text-xs mt-1">{[selectedClient.city, selectedClient.state].filter(Boolean).join(', ')}</p>}
+                        {(selectedClient.city || selectedClient.state) && <p className="text-slate-500 text-xs mt-0.5">{[selectedClient.city, selectedClient.state].filter(Boolean).join(', ')}</p>}
+                      </div>
+                    </div>
+                  )}
+                  {selectedClient.gst_address && (
+                    <div className="flex items-start gap-3">
+                      <MapPin className="h-4 w-4 text-orange-400 flex-shrink-0 mt-0.5" />
+                      <div className="text-slate-700 text-sm">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-0.5">GST Registered Address</p>
+                        <p>{selectedClient.gst_address}</p>
+                        {(selectedClient.gst_city || selectedClient.gst_state) && <p className="text-slate-500 text-xs mt-0.5">{[selectedClient.gst_city, selectedClient.gst_state, selectedClient.gst_pin].filter(Boolean).join(', ')}</p>}
                       </div>
                     </div>
                   )}
@@ -2691,6 +2743,30 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                       <div className={`rounded-xl p-3 border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
                         <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Place of Supply</p>
                         <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{selectedClient.place_of_supply}</p>
+                      </div>
+                    )}
+                    {selectedClient.cin && (
+                      <div className={`rounded-xl p-3 border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">CIN</p>
+                        <div className="flex items-center gap-2">
+                          <p className={`text-xs font-mono font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{selectedClient.cin}</p>
+                          <button onClick={() => copyToClipboard(selectedClient.cin, 'CIN')} className="text-slate-300 hover:text-slate-600 flex-shrink-0"><Copy className="h-3 w-3" /></button>
+                        </div>
+                      </div>
+                    )}
+                    {selectedClient.llpin && (
+                      <div className={`rounded-xl p-3 border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">LLPIN</p>
+                        <div className="flex items-center gap-2">
+                          <p className={`text-xs font-mono font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{selectedClient.llpin}</p>
+                          <button onClick={() => copyToClipboard(selectedClient.llpin, 'LLPIN')} className="text-slate-300 hover:text-slate-600 flex-shrink-0"><Copy className="h-3 w-3" /></button>
+                        </div>
+                      </div>
+                    )}
+                    {selectedClient.mca_fetch_date && (
+                      <div className={`rounded-xl p-3 border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-white border-slate-200'}`}>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">MCA Last Fetched</p>
+                        <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{format(new Date(selectedClient.mca_fetch_date), 'MMM d, yyyy')}</p>
                       </div>
                     )}
                   </div>
@@ -4883,6 +4959,7 @@ export default function Clients() {
             <div className="w-28 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Type</div>
             <div className="w-36 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Phone</div>
             <div className="flex-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Email</div>
+            <div className="w-28 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-violet-400">Referred By</div>
             <div className="w-44 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Services</div>
             <div className="w-32 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Assigned</div>
             <div className="w-24 flex-shrink-0" />
