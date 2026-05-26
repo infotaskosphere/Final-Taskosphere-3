@@ -10,6 +10,7 @@ import api from '@/lib/api';
 import {
   clientToPassvaultPatch,
   fetchClientFillForEntry,
+  refillByHolderName,
 } from '@/lib/clientPassvaultSync';
 import {
   KeyRound, Plus, Search, Eye, EyeOff, Copy, Edit2, Trash2,
@@ -301,10 +302,12 @@ function EditModal({ open, onClose, entry, isDark, onSuccess }) {
   const [busy, setBusy] = useState(false);
   const [clientList, setClientList] = useState([]);
   const [clientMode, setClientMode] = useState('select'); // 'select' | 'manual'
+  const [linkedClient, setLinkedClient] = useState(null); // currently linked client object
   const qc = useQueryClient();
   
   useEffect(() => {
     if (!open) return;
+    setLinkedClient(null);
 
     if (entry) {
       setForm({
@@ -328,8 +331,9 @@ function EditModal({ open, onClose, entry, isDark, onSuccess }) {
         if (entry?.client_id) {
           const found = list.find(c => String(c.id) === String(entry.client_id));
           setClientMode(found ? 'select' : 'manual');
-          // ── Autofill any BLANK fields from the linked client ────────────
           if (found) {
+            setLinkedClient(found);
+            // ── Autofill any BLANK fields from the linked client ────────────
             const patch = clientToPassvaultPatch(found, entry);
             if (Object.keys(patch).length) {
               setForm(prev => ({ ...prev, ...patch }));
@@ -466,7 +470,23 @@ function EditModal({ open, onClose, entry, isDark, onSuccess }) {
               </Select>
             </F>
             <F label="Holder Name">
-              <Input className={ic} value={form.holder_name || ''} onChange={e => set('holder_name', e.target.value)} placeholder="Director / Company name" />
+              <Input
+                className={ic}
+                value={form.holder_name || ''}
+                onChange={e => set('holder_name', e.target.value)}
+                onBlur={e => {
+                  // When holder_name is set and we have a linked client,
+                  // try to auto-fill DIN / mobile / email from matching contact_person
+                  if (linkedClient && e.target.value.trim()) {
+                    const patch = refillByHolderName(linkedClient, { ...form, holder_name: e.target.value.trim() });
+                    if (Object.keys(patch).length) {
+                      setForm(prev => ({ ...prev, ...patch }));
+                      toast.message(`Auto-filled ${Object.keys(patch).length} field(s) from contact "${e.target.value.trim()}"`);
+                    }
+                  }
+                }}
+                placeholder="Director / Company name"
+              />
             </F>
           </div>
           <div className="grid grid-cols-2 gap-4">
@@ -499,10 +519,11 @@ function EditModal({ open, onClose, entry, isDark, onSuccess }) {
               <Select
                 value={form.client_id ? String(form.client_id) : '__none__'}
                 onValueChange={v => {
-                  if (v === '__none__') { set('client_id', ''); set('client_name', ''); }
+                  if (v === '__none__') { set('client_id', ''); set('client_name', ''); setLinkedClient(null); }
                   else {
                     const c = clientList.find(x => String(x.id) === v);
                     if (c) {
+                      setLinkedClient(c);
                       // Link + auto-fill any blank fields from this client
                       setForm(prev => {
                         const base = { ...prev, client_id: String(c.id), client_name: c.company_name };
