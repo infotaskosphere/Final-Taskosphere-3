@@ -1674,7 +1674,7 @@ export default function Dashboard() {
           <motion.div
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
-            onClick={() => navigate('/tasks')}
+            onClick={() => navigate('/tasks?filter=my-tasks')}
             className={`${metricCardCls} ${metricCardDefault}`}
           >
             <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
