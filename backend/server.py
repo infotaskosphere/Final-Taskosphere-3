@@ -120,6 +120,10 @@ india_tz = ZoneInfo("Asia/Kolkata")
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
+# ── MCA Portal API config ─────────────────────────────────────────────────────
+MCA_API_KEY      = os.getenv("MCA_API_KEY", "")
+MCA_API_BASE_URL = os.getenv("MCA_API_BASE_URL", "https://api.mca.gov.in/MCA21/api/v1")
+
 # ── Attendance proof upload directory ─────────────────────────────────────────
 PROOF_UPLOAD_DIR = ROOT_DIR / "uploads" / "attendance_proof"
 PROOF_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -5913,6 +5917,139 @@ async def parse_udyam_pdf(
     return result
 
 
+def _map_mca_constitution(raw: str) -> str:
+    """Map MCA class/constitution string → client_type slug."""
+    r = (raw or "").lower().strip()
+    if "private" in r:
+        return "pvt_ltd"
+    if "llp" in r or "limited liability partnership" in r:
+        return "llp"
+    if "public" in r:
+        return "public_ltd"
+    if "section 8" in r or "section8" in r or "not for profit" in r:
+        return "section_8"
+    if "one person" in r or "opc" in r:
+        return "pvt_ltd"
+    return "other"
+
+
+@api_router.get("/clients/fetch-mca-details")
+async def fetch_mca_details(
+    cin: str,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Fetch company master data from MCA portal API by CIN or LLPIN.
+    Configure MCA_API_KEY and MCA_API_BASE_URL in your .env file.
+    The response is mapped to Taskosphere's client schema.
+    """
+    if not cin or len(cin.strip()) < 5:
+        raise HTTPException(status_code=400, detail="Please provide a valid CIN or LLPIN.")
+    if not MCA_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="MCA API key not configured. Add MCA_API_KEY to your .env file."
+        )
+    cin_clean = cin.strip().upper()
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client_http:
+            # ── Try CIN endpoint first, fall back to LLPIN endpoint ──────────
+            url = f"{MCA_API_BASE_URL}/company/{cin_clean}"
+            resp = await client_http.get(
+                url,
+                headers={
+                    "Authorization": f"Bearer {MCA_API_KEY}",
+                    "Accept": "application/json",
+                }
+            )
+            # Some MCA API providers use a different structure – try both patterns
+            if resp.status_code == 404:
+                url2 = f"{MCA_API_BASE_URL}/llp/{cin_clean}"
+                resp2 = await client_http.get(
+                    url2,
+                    headers={"Authorization": f"Bearer {MCA_API_KEY}", "Accept": "application/json"}
+                )
+                if resp2.status_code == 200:
+                    resp = resp2
+                else:
+                    raise HTTPException(status_code=404, detail=f"Company not found for: {cin_clean}")
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="MCA API timed out. Please try again.")
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"MCA API error: {e.response.text[:200]}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"fetch_mca_details error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch from MCA: {str(e)}")
+
+    # ── Normalise field names across common MCA API response formats ─────────
+    # Different API providers may use camelCase or snake_case – handle both.
+    def _g(*keys):
+        for k in keys:
+            v = data.get(k) or data.get(k.lower()) or data.get(k.upper())
+            if v and str(v).strip() not in ("", "-", "nan", "null", "N/A"):
+                return str(v).strip()
+        return None
+
+    raw_constitution = _g("classOfCompany", "class_of_company", "companyType",
+                          "company_type", "constitution", "entityType") or ""
+    mapped_type = _map_mca_constitution(raw_constitution)
+
+    # Directors: accept both list-of-dicts and list-of-strings
+    raw_directors = data.get("directors") or data.get("signatories") or []
+    directors = []
+    for d in raw_directors:
+        if isinstance(d, dict):
+            directors.append({
+                "name":        (d.get("name") or d.get("directorName") or "").strip(),
+                "din":         (d.get("din") or d.get("DIN") or "").strip(),
+                "designation": (d.get("designation") or d.get("role") or "Director").strip(),
+                "email":       "",
+                "phone":       "",
+                "birthday":    "",
+            })
+        elif isinstance(d, str) and d.strip():
+            directors.append({"name": d.strip(), "din": "", "designation": "Director",
+                               "email": "", "phone": "", "birthday": ""})
+
+    # Address: accept nested object or flat strings
+    addr_obj = data.get("registeredAddress") or data.get("registered_address") or {}
+    if isinstance(addr_obj, dict):
+        street = _g("addressLine1", "address_line1", "address") or addr_obj.get("street", "")
+        city   = addr_obj.get("city") or addr_obj.get("district") or ""
+        state  = addr_obj.get("state") or ""
+        pin    = str(addr_obj.get("pin") or addr_obj.get("pinCode") or "").strip()
+    else:
+        street = _g("registeredAddress", "registered_address", "address")
+        city   = _g("city", "district")
+        state  = _g("state")
+        pin    = _g("pin", "pinCode", "pin_code") or ""
+
+    from datetime import date as _date
+    return {
+        "company_name":         _g("companyName", "company_name", "llpName", "llp_name"),
+        "cin":                  cin_clean if not cin_clean.startswith("AAA") else None,
+        "llpin":                cin_clean if cin_clean.startswith("AAA") else _g("llpin", "LLPIN"),
+        "client_type":          mapped_type,
+        "constitution_raw":     raw_constitution,
+        "date_of_incorporation": _g("dateOfIncorporation", "date_of_incorporation", "incorporationDate"),
+        "email":                _g("email", "emailId", "email_id"),
+        "address":              street,
+        "city":                 city or "",
+        "state":                state or "",
+        "gst_pin":              pin,
+        "pan":                  _g("pan", "PAN"),
+        "directors":            directors,
+        "mca_fetch_date":       _date.today().isoformat(),
+        "authorized_capital":   _g("authorisedCapital", "authorized_capital"),
+        "paid_up_capital":      _g("paidUpCapital", "paid_up_capital"),
+        "company_status":       _g("companyStatus", "company_status", "status"),
+    }
+
+
 def _parse_mca_pdf(pdf_bytes: bytes) -> dict:
     """
     Parse an MCA (Ministry of Corporate Affairs) company information PDF.
@@ -6681,7 +6818,8 @@ async def create_client(payload: dict, current_user: User = Depends(check_module
                     "place_of_supply", "default_payment_terms", "credit_limit",
                     "opening_balance", "opening_balance_type", "tally_ledger_name",
                     "tally_group", "website", "msme_number",
-                    "gst_address", "gst_city", "gst_state", "gst_pin"):
+                    "gst_address", "gst_city", "gst_state", "gst_pin",
+                    "cin", "llpin", "mca_fetch_date"):
             val = payload.get(key)
             if val is not None:
                 doc[key] = val
