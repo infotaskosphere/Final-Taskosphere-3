@@ -747,7 +747,7 @@ class ClientDSC(BaseModel):
 class ClientBase(BaseModel):
     model_config = ConfigDict(extra="ignore")
     company_name: str = Field(..., min_length=3, max_length=255)
-    client_type: str = Field(..., pattern="^(proprietor|pvt_ltd|llp|partnership|huf|trust|other|LLP|PVT_LTD)$")
+    client_type: str = Field(..., pattern="^(proprietor|pvt_ltd|llp|partnership|huf|trust|other|LLP|PVT_LTD|public_ltd|section_8)$")
     client_type_label: Optional[str] = None
     contact_persons: List[ContactPerson] = Field(default_factory=list)
     email: Optional[EmailStr] = None
@@ -785,6 +785,10 @@ class ClientBase(BaseModel):
     gst_city: Optional[str] = None
     gst_state: Optional[str] = None
     gst_pin: Optional[str] = None
+    # ── MCA / ROC fields (fetched from MCA portal API or parsed from MCA PDF) ──
+    cin: Optional[str] = None           # Corporate Identity Number (Pvt/Public Ltd)
+    llpin: Optional[str] = None         # LLP Identification Number
+    mca_fetch_date: Optional[str] = None  # ISO date when MCA data was last fetched
 
     @model_validator(mode="before")
     @classmethod
@@ -797,6 +801,7 @@ class ClientBase(BaseModel):
                 "gstin", "pan", "gst_treatment", "place_of_supply",
                 "tally_ledger_name", "tally_group", "website", "msme_number",
                 "gst_address", "gst_city", "gst_state", "gst_pin",
+                "cin", "llpin", "mca_fetch_date",
             ]
             for field in nullable_fields:
                 if field in data and data[field] == "":
