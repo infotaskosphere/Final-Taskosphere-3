@@ -15,23 +15,61 @@ const pick = (...vals) => {
 
 const looksLikeEmail = (s) => typeof s === 'string' && /\S+@\S+\.\S+/.test(s);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: find the best matching contact_person by holder_name.
+// Uses case-insensitive partial match so "NIRAV ASHOK SHAH" ↔ "Nirav Shah" etc.
+// Returns the matched contact or null.
+// ─────────────────────────────────────────────────────────────────────────────
+function findContactByName(contacts = [], holderName = '') {
+  if (!holderName || !contacts.length) return null;
+  const needle = holderName.trim().toLowerCase();
+  // 1. Exact match
+  let found = contacts.find(
+    (c) => c?.name && c.name.trim().toLowerCase() === needle
+  );
+  if (found) return found;
+  // 2. Contains match (holder_name contains contact name or vice-versa)
+  found = contacts.find(
+    (c) =>
+      c?.name &&
+      (needle.includes(c.name.trim().toLowerCase()) ||
+        c.name.trim().toLowerCase().includes(needle))
+  );
+  return found || null;
+}
+
 /**
  * Map a Client record → partial PassVault fields.
- * Used to fill blanks on a PassVault entry.
+ * When entry.holder_name is set and matches a specific contact_person,
+ * that contact's DIN / phone / email is preferred over the first contact.
  */
 export function clientToPassvaultPatch(client, entry = {}) {
   if (!client) return {};
   const patch = {};
 
-  // mobile  ←  client.phone / first contact phone
+  // Find the contact_person that matches holder_name (if any)
+  const contacts = Array.isArray(client.contact_persons) ? client.contact_persons : [];
+  const matchedContact = findContactByName(contacts, entry.holder_name);
+  // Fallback to first contact if no name match
+  const primaryContact = matchedContact || contacts[0] || null;
+
+  // mobile  ←  matched contact phone > client.phone > first contact phone
   if (isEmpty(entry.mobile)) {
-    const p = pick(client.phone, client.contact_persons?.[0]?.phone);
+    const p = pick(
+      matchedContact?.phone,
+      client.phone,
+      primaryContact?.phone
+    );
     if (!isEmpty(p)) patch.mobile = p;
   }
 
-  // username ← email (only if current username is empty)
+  // username ← matched contact email > client email > first contact email
   if (isEmpty(entry.username)) {
-    const e = pick(client.email, client.contact_persons?.[0]?.email);
+    const e = pick(
+      matchedContact?.email,
+      client.email,
+      primaryContact?.email
+    );
     if (!isEmpty(e)) patch.username = e;
   }
 
@@ -39,19 +77,22 @@ export function clientToPassvaultPatch(client, entry = {}) {
   if (isEmpty(entry.holder_name)) {
     const h =
       entry.holder_type === 'INDIVIDUAL'
-        ? pick(client.contact_persons?.[0]?.name, client.company_name)
-        : pick(client.company_name, client.contact_persons?.[0]?.name);
+        ? pick(primaryContact?.name, client.company_name)
+        : pick(client.company_name, primaryContact?.name);
     if (!isEmpty(h)) patch.holder_name = h;
   }
 
-  // holder_pan  ← client.pan
-  if (isEmpty(entry.holder_pan) && !isEmpty(client.pan)) {
-    patch.holder_pan = String(client.pan).toUpperCase();
+  // holder_pan  ← matched contact pan > client.pan
+  if (isEmpty(entry.holder_pan)) {
+    const pan = pick(matchedContact?.pan, client.pan);
+    if (!isEmpty(pan)) patch.holder_pan = String(pan).toUpperCase();
   }
 
-  // holder_din  ← first contact DIN
+  // holder_din  ← matched contact DIN > any contact DIN
   if (isEmpty(entry.holder_din)) {
-    const d = pick(...(client.contact_persons || []).map((c) => c?.din));
+    const d = !isEmpty(matchedContact?.din)
+      ? matchedContact.din
+      : pick(...contacts.map((c) => c?.din));
     if (!isEmpty(d)) patch.holder_din = d;
   }
 
@@ -66,6 +107,35 @@ export function clientToPassvaultPatch(client, entry = {}) {
   }
   if (isEmpty(entry.client_name) && !isEmpty(client.company_name)) {
     patch.client_name = client.company_name;
+  }
+
+  return patch;
+}
+
+/**
+ * When holder_name changes in the form, re-evaluate which contact_person
+ * to use and return any updated fields (DIN, mobile, email).
+ * Only fills BLANK fields — never overwrites existing user input.
+ */
+export function refillByHolderName(client, currentForm) {
+  if (!client) return {};
+  const contacts = Array.isArray(client.contact_persons) ? client.contact_persons : [];
+  const matchedContact = findContactByName(contacts, currentForm.holder_name);
+  if (!matchedContact) return {};
+
+  const patch = {};
+
+  if (isEmpty(currentForm.holder_din) && !isEmpty(matchedContact.din)) {
+    patch.holder_din = matchedContact.din;
+  }
+  if (isEmpty(currentForm.mobile) && !isEmpty(matchedContact.phone)) {
+    patch.mobile = matchedContact.phone;
+  }
+  if (isEmpty(currentForm.username) && !isEmpty(matchedContact.email)) {
+    patch.username = matchedContact.email;
+  }
+  if (isEmpty(currentForm.holder_pan) && !isEmpty(matchedContact.pan)) {
+    patch.holder_pan = String(matchedContact.pan).toUpperCase();
   }
 
   return patch;
@@ -97,29 +167,53 @@ export function passvaultToClientPatch(entries, client = {}) {
     if (!isEmpty(p)) patch.pan = String(p).toUpperCase();
   }
 
-  // Backfill contact_persons[0] DIN / name / phone / email if entirely missing
+  // Backfill contact_persons entries by matching holder_name
   const cps = Array.isArray(client.contact_persons) ? [...client.contact_persons] : [];
+
+  // For each entry that has a holder_name, find or create the matching contact
+  entries.forEach((e) => {
+    if (!e?.holder_name) return;
+    const idx = cps.findIndex(
+      (c) => c?.name && c.name.trim().toLowerCase() === e.holder_name.trim().toLowerCase()
+    );
+    const cp = idx >= 0 ? { ...cps[idx] } : { name: e.holder_name };
+    let changed = idx < 0; // new contact = changed
+
+    if (isEmpty(cp.din) && !isEmpty(e.holder_din)) { cp.din = e.holder_din; changed = true; }
+    if (isEmpty(cp.phone) && !isEmpty(e.mobile)) { cp.phone = e.mobile; changed = true; }
+    if (isEmpty(cp.email) && looksLikeEmail(e.username)) { cp.email = e.username; changed = true; }
+
+    if (changed) {
+      if (idx >= 0) cps[idx] = cp;
+      else cps.push(cp);
+    }
+  });
+
+  // Legacy: also backfill first contact if no holder_name match
   const cp0 = { ...(cps[0] || { name: '', email: '', phone: '', designation: '', birthday: '', din: '' }) };
+  const origCp0 = cps[0] || {};
+  let cp0Changed = false;
 
   if (isEmpty(cp0.din)) {
     const d = entries.map((e) => e?.holder_din).find((v) => !isEmpty(v));
-    if (!isEmpty(d)) cp0.din = d;
+    if (!isEmpty(d)) { cp0.din = d; cp0Changed = true; }
   }
   if (isEmpty(cp0.name)) {
     const n = entries
       .filter((e) => e?.holder_type === 'INDIVIDUAL')
       .map((e) => e?.holder_name)
       .find((v) => !isEmpty(v));
-    if (!isEmpty(n)) cp0.name = n;
+    if (!isEmpty(n)) { cp0.name = n; cp0Changed = true; }
   }
-  if (isEmpty(cp0.phone) && !isEmpty(patch.phone)) cp0.phone = patch.phone;
-  if (isEmpty(cp0.email) && !isEmpty(patch.email)) cp0.email = patch.email;
+  if (isEmpty(cp0.phone) && !isEmpty(patch.phone)) { cp0.phone = patch.phone; cp0Changed = true; }
+  if (isEmpty(cp0.email) && !isEmpty(patch.email)) { cp0.email = patch.email; cp0Changed = true; }
 
-  // Only emit contact_persons in the patch if we actually changed something
-  const original = cps[0] || {};
-  const changed = ['din', 'name', 'phone', 'email'].some((k) => cp0[k] !== original[k]);
-  if (changed) {
+  const changed = ['din', 'name', 'phone', 'email'].some((k) => cp0[k] !== origCp0[k]);
+  if (cp0Changed || changed) {
     cps[0] = cp0;
+  }
+
+  if (JSON.stringify(cps) !== JSON.stringify(client.contact_persons || [])) {
     patch.contact_persons = cps;
   }
 
