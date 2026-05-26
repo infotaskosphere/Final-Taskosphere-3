@@ -61,6 +61,8 @@ const CLIENT_TYPES = [
   { value: 'proprietor', label: 'Proprietor' },
   { value: 'pvt_ltd', label: 'Private Limited' },
   { value: 'llp', label: 'LLP' },
+  { value: 'public_ltd', label: 'Public Limited' },
+  { value: 'section_8', label: 'Section 8 Company' },
   { value: 'partnership', label: 'Partnership' },
   { value: 'huf', label: 'HUF' },
   { value: 'trust', label: 'Trust' },
@@ -73,13 +75,15 @@ const SERVICES = [
 ];
 
 const TYPE_CONFIG = {
-  pvt_ltd:     { label: 'Pvt Ltd',     bg: '#EFF6FF', text: '#1D4ED8', border: '#BFDBFE', dot: '#2563EB', strip: '#2563EB' },
-  llp:         { label: 'LLP',         bg: '#F5F3FF', text: '#6D28D9', border: '#DDD6FE', dot: '#7C3AED', strip: '#7C3AED' },
-  partnership: { label: 'Partnership', bg: '#FFFBEB', text: '#B45309', border: '#FDE68A', dot: '#D97706', strip: '#D97706' },
-  huf:         { label: 'HUF',         bg: '#F0FDFA', text: '#0F766E', border: '#99F6E4', dot: '#0D9488', strip: '#0D9488' },
-  trust:       { label: 'Trust',       bg: '#FFF1F2', text: '#BE123C', border: '#FECDD3', dot: '#E11D48', strip: '#E11D48' },
-  proprietor:  { label: 'Proprietor',  bg: '#F8FAFC', text: '#475569', border: '#CBD5E1', dot: '#64748B', strip: '#64748B' },
-  other:       { label: 'Other',       bg: '#F0F9FF', text: '#0369A1', border: '#BAE6FD', dot: '#0284C7', strip: '#0284C7' },
+  pvt_ltd:     { label: 'Pvt Ltd',        bg: '#EFF6FF', text: '#1D4ED8', border: '#BFDBFE', dot: '#2563EB', strip: '#2563EB' },
+  llp:         { label: 'LLP',             bg: '#F5F3FF', text: '#6D28D9', border: '#DDD6FE', dot: '#7C3AED', strip: '#7C3AED' },
+  public_ltd:  { label: 'Public Ltd',      bg: '#ECFDF5', text: '#065F46', border: '#A7F3D0', dot: '#059669', strip: '#059669' },
+  section_8:   { label: 'Section 8',       bg: '#FFF7ED', text: '#9A3412', border: '#FED7AA', dot: '#EA580C', strip: '#EA580C' },
+  partnership: { label: 'Partnership',     bg: '#FFFBEB', text: '#B45309', border: '#FDE68A', dot: '#D97706', strip: '#D97706' },
+  huf:         { label: 'HUF',             bg: '#F0FDFA', text: '#0F766E', border: '#99F6E4', dot: '#0D9488', strip: '#0D9488' },
+  trust:       { label: 'Trust',           bg: '#FFF1F2', text: '#BE123C', border: '#FECDD3', dot: '#E11D48', strip: '#E11D48' },
+  proprietor:  { label: 'Proprietor',      bg: '#F8FAFC', text: '#475569', border: '#CBD5E1', dot: '#64748B', strip: '#64748B' },
+  other:       { label: 'Other',           bg: '#F0F9FF', text: '#0369A1', border: '#BAE6FD', dot: '#0284C7', strip: '#0284C7' },
 };
 
 const AVATAR_GRADIENTS = [
@@ -3025,9 +3029,14 @@ export default function Clients() {
     gst_city: '',
     gst_state: '',
     gst_pin: '',       // PIN from GST certificate
+    // MCA / ROC fields
+    cin: '',
+    llpin: '',
+    mca_fetch_date: '',
   });
   const [formErrors, setFormErrors]     = useState({});
   const [contactErrors, setContactErrors] = useState([]);
+  const [mcaFetching, setMcaFetching]   = useState(false);
 
   // ── Refs ────────────────────────────────────────────────────────────────
   const fileInputRef  = useRef(null);
@@ -3341,6 +3350,10 @@ export default function Clients() {
         gst_city:    formData.gst_city?.trim()    || null,
         gst_state:   formData.gst_state?.trim()   || null,
         gst_pin:     formData.gst_pin?.trim()      || null,
+        // MCA / ROC
+        cin:             formData.cin?.trim().toUpperCase()   || null,
+        llpin:           formData.llpin?.trim().toUpperCase() || null,
+        mca_fetch_date:  formData.mca_fetch_date              || null,
       };
       if (!editingClient) {
         // Duplicate check: flag only when GSTIN matches (same tax entity),
@@ -3455,7 +3468,7 @@ export default function Clients() {
 
   const resetForm = useCallback(() => {
     setAddressTab('primary');
-    setFormData({ company_name: '', client_type: 'proprietor', client_type_other: '', contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }], email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [], dsc_details: [], assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '', gstin: '', pan: '', gst_treatment: 'regular', place_of_supply: '', default_payment_terms: 'Due on receipt', credit_limit: '', opening_balance: '', opening_balance_type: 'Dr', tally_ledger_name: '', tally_group: 'Sundry Debtors', website: '', msme_number: '', gst_address: '', gst_city: '', gst_state: '', gst_pin: '' });
+    setFormData({ company_name: '', client_type: 'proprietor', client_type_other: '', contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }], email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [], dsc_details: [], assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '', gstin: '', pan: '', gst_treatment: 'regular', place_of_supply: '', default_payment_terms: 'Due on receipt', credit_limit: '', opening_balance: '', opening_balance_type: 'Dr', tally_ledger_name: '', tally_group: 'Sundry Debtors', website: '', msme_number: '', gst_address: '', gst_city: '', gst_state: '', gst_pin: '', cin: '', llpin: '', mca_fetch_date: '' });
     setOtherService(''); setEditingClient(null); setFormErrors({}); setContactErrors([]); setReferrerInput(''); setReferrerSelectValue('');
     setSmartImportFiles({ gst: null, udyam: null, mca: null });
     setSmartImportError('');
@@ -4123,6 +4136,101 @@ export default function Clients() {
                           <p className="text-xs text-red-700 font-medium">{smartImportError}</p>
                         </div>
                       )}
+                    </div>
+                  )}
+                  {/* ── MCA Live Lookup ──────────────────────────────────────────────────── */}
+                  {['pvt_ltd', 'llp', 'public_ltd', 'section_8'].includes(formData.client_type) && (
+                    <div className={`border-2 rounded-2xl p-5 ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-gradient-to-br from-violet-50/80 to-purple-50/50 border-violet-100'}`}>
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white flex-shrink-0 shadow-sm" style={{ background: 'linear-gradient(135deg, #4F46E5, #7C3AED)' }}>
+                          <svg viewBox="0 0 24 24" className="h-5 w-5 fill-white"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+                        </div>
+                        <div>
+                          <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Auto-fill from MCA Portal</p>
+                          <p className="text-xs text-slate-500 mt-0.5">Enter CIN or LLPIN to fetch company details instantly</p>
+                        </div>
+                        {formData.mca_fetch_date && (
+                          <span className="ml-auto text-[10px] px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 font-medium">
+                            ✓ Fetched {formData.mca_fetch_date}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex gap-2 items-start">
+                        <div className="flex-1">
+                          <input
+                            type="text"
+                            placeholder={formData.client_type === 'llp' ? 'Enter LLPIN (e.g. AAA-1234)' : 'Enter CIN (e.g. U74999GJ2015PTC083870)'}
+                            value={formData.cin || formData.llpin || ''}
+                            onChange={e => {
+                              const v = e.target.value.toUpperCase();
+                              const isLLP = v.startsWith('AAA') || formData.client_type === 'llp';
+                              setFormData(p => ({ ...p, cin: isLLP ? '' : v, llpin: isLLP ? v : '' }));
+                            }}
+                            className={`w-full h-11 px-3 rounded-xl border text-sm font-mono tracking-wide ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder-slate-400' : 'bg-white border-slate-200 text-slate-800 placeholder-slate-400'} focus:outline-none focus:border-violet-400`}
+                          />
+                          {formData.mca_fetch_date && (
+                            <p className="text-[10px] text-slate-400 mt-1">Company data loaded from MCA. You can still edit fields below.</p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          disabled={mcaFetching || (!formData.cin && !formData.llpin)}
+                          onClick={async () => {
+                            const cinVal = (formData.cin || formData.llpin || '').trim().toUpperCase();
+                            if (!cinVal) return;
+                            setMcaFetching(true);
+                            try {
+                              const res = await api.get(`/clients/fetch-mca-details?cin=${encodeURIComponent(cinVal)}`);
+                              const d = res.data;
+                              const MCA_CONSTITUTION_MAP = {
+                                'private limited': 'pvt_ltd', 'private limited company': 'pvt_ltd', pvt_ltd: 'pvt_ltd',
+                                llp: 'llp', 'limited liability partnership': 'llp',
+                                'public limited': 'public_ltd', 'public limited company': 'public_ltd', public_ltd: 'public_ltd',
+                                'section 8': 'section_8', section_8: 'section_8', 'not for profit': 'section_8',
+                              };
+                              const mappedType = MCA_CONSTITUTION_MAP[(d.client_type || '').toLowerCase()] || d.client_type || formData.client_type;
+                              setFormData(p => ({
+                                ...p,
+                                company_name:         d.company_name        || p.company_name,
+                                client_type:          mappedType,
+                                date_of_incorporation: d.date_of_incorporation || p.date_of_incorporation,
+                                address:              d.address             || p.address,
+                                city:                 d.city                || p.city,
+                                state:                d.state               || p.state,
+                                email:                d.email               || p.email,
+                                pan:                  d.pan                 || p.pan,
+                                gst_pin:              d.gst_pin             || p.gst_pin,
+                                cin:                  d.cin                 || p.cin  || '',
+                                llpin:                d.llpin               || p.llpin || '',
+                                mca_fetch_date:       d.mca_fetch_date      || '',
+                                contact_persons:      d.directors?.length
+                                  ? d.directors.map(dir => ({
+                                      name:        dir.name        || '',
+                                      designation: dir.designation || 'Director',
+                                      din:         dir.din         || '',
+                                      email:       '',
+                                      phone:       '',
+                                      birthday:    '',
+                                    }))
+                                  : p.contact_persons,
+                              }));
+                            } catch (err) {
+                              const msg = err?.response?.data?.detail || 'Could not fetch from MCA. Check CIN/LLPIN or configure MCA_API_KEY in .env';
+                              alert(msg);
+                            } finally {
+                              setMcaFetching(false);
+                            }
+                          }}
+                          className="h-11 px-5 rounded-xl text-sm font-medium text-white flex items-center gap-2 flex-shrink-0 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                          style={{ background: mcaFetching ? '#94a3b8' : 'linear-gradient(135deg, #4F46E5, #7C3AED)' }}
+                        >
+                          {mcaFetching ? (
+                            <><div className="w-3.5 h-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" /> Fetching…</>
+                          ) : (
+                            <><svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-white"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg> Fetch from MCA</>
+                          )}
+                        </button>
+                      </div>
                     </div>
                   )}
                   {/* Basic Details */}
