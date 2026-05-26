@@ -124,6 +124,9 @@ load_dotenv(ROOT_DIR / '.env')
 MCA_API_KEY      = os.getenv("MCA_API_KEY", "")
 MCA_API_BASE_URL = os.getenv("MCA_API_BASE_URL", "https://api.mca.gov.in/MCA21/api/v1")
 
+# ── Main event loop reference (set at startup, used by APScheduler sync jobs) ─
+app_event_loop = None
+
 # ── Attendance proof upload directory ─────────────────────────────────────────
 PROOF_UPLOAD_DIR = ROOT_DIR / "uploads" / "attendance_proof"
 PROOF_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -255,21 +258,20 @@ async def _mark_absent_for_date(target_date_str: str) -> dict:
 def mark_absent_users_task():
     """
     Sync wrapper called by APScheduler at 19:00 IST every working day.
-    FIX: Uses a dedicated new event loop instead of asyncio.run() to avoid
-    RuntimeError when called from within an already-running event loop context.
+    Uses run_coroutine_threadsafe so Motor futures stay on the main event loop.
     """
-    loop = None
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        import backend.server as _self
+        loop = _self.app_event_loop
+        if loop is None or loop.is_closed():
+            logger.warning("mark_absent_users_task: main event loop not ready, skipping.")
+            return
         today_str = datetime.now(IST).date().isoformat()
-        result = loop.run_until_complete(_mark_absent_for_date(today_str))
+        future = asyncio.run_coroutine_threadsafe(_mark_absent_for_date(today_str), loop)
+        result = future.result(timeout=120)
         logger.info(f"Scheduled absent job result: {result}")
     except Exception as e:
         logger.error(f"mark_absent_users_task failed: {e}")
-    finally:
-        if loop and not loop.is_closed():
-            loop.close()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -362,24 +364,26 @@ async def _force_punch_out_at_7pm(today_str: str) -> dict:
 def force_punch_out_11pm_task():
     """
     Sync wrapper called by APScheduler at 23:00 IST every day.
-    Back-fills punch_out = 7:00 PM IST for users who forgot to punch out.
+    Uses run_coroutine_threadsafe so Motor futures stay on the main event loop.
     """
-    loop = None
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        import backend.server as _self
+        loop = _self.app_event_loop
+        if loop is None or loop.is_closed():
+            logger.warning("force_punch_out_11pm_task: main event loop not ready, skipping.")
+            return
         today_str = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
-        result = loop.run_until_complete(_force_punch_out_at_7pm(today_str))
+        future = asyncio.run_coroutine_threadsafe(_force_punch_out_at_7pm(today_str), loop)
+        result = future.result(timeout=120)
         logger.info(f"force_punch_out_11pm job result: {result}")
     except Exception as e:
         logger.error(f"force_punch_out_11pm_task failed: {e}")
-    finally:
-        if loop and not loop.is_closed():
-            loop.close()
 
 
 @app.on_event("startup")
 async def startup_event():
+    import backend.server as _self
+    _self.app_event_loop = asyncio.get_event_loop()
     try:
         await db.tasks.create_index("assigned_to")
         await create_compliance_indexes()
@@ -704,55 +708,51 @@ async def calculate_expected_hours(start_date_str: str, end_date_str: str, shift
 
 def fetch_indian_holidays_task():
     """
-    Scheduled job (sync wrapper for BackgroundScheduler) to fetch holidays for the current month.
-    FIX: Uses a dedicated new event loop instead of asyncio.run() to avoid
-    RuntimeError when an event loop is already running.
+    Scheduled job (sync wrapper for BackgroundScheduler) to fetch holidays.
+    Uses run_coroutine_threadsafe so Motor futures stay on the main event loop.
     """
-    loop = None
+    async def _async_fetch():
+        try:
+            now = datetime.now(IST)
+            for year in [now.year, now.year + 1]:
+                url = f"https://date.nager.at/api/v3/PublicHolidays/{year}/IN"
+                response = requests.get(url, timeout=10)
+                if response.status_code != 200:
+                    continue
+                external_holidays = response.json()
+                count = 0
+                for h in external_holidays:
+                    date_str = h['date']
+                    existing = await db.holidays.find_one({"date": date_str}, {"_id": 0})
+                    if not existing:
+                        new_holiday = {
+                            "date": date_str,
+                            "name": h.get('localName') or h.get('name', 'Holiday'),
+                            "status": "confirmed",
+                            "type": "public",
+                            "created_at": datetime.now(IST).isoformat()
+                        }
+                        await db.holidays.insert_one(new_holiday)
+                        count += 1
+                    elif existing.get("status") not in ("confirmed", "rejected"):
+                        await db.holidays.update_one(
+                            {"date": date_str},
+                            {"$set": {"status": "confirmed"}}
+                        )
+                logger.info(f"Auto-synced holidays for {year}: {count} new")
+        except Exception as e:
+            logger.error(f"Holiday Autofetch Failed: {str(e)}")
+
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        async def _async_fetch():
-            try:
-                now = datetime.now(IST)
-                # Sync current + next year so holidays are never missing mid-year
-                for year in [now.year, now.year + 1]:
-                    url = f"https://date.nager.at/api/v3/PublicHolidays/{year}/IN"
-                    response = requests.get(url, timeout=10)
-                    if response.status_code != 200:
-                        continue
-                    external_holidays = response.json()
-                    count = 0
-                    for h in external_holidays:
-                        date_str = h['date']
-                        existing = await db.holidays.find_one({"date": date_str}, {"_id": 0})
-                        if not existing:
-                            new_holiday = {
-                                "date": date_str,
-                                "name": h.get('localName') or h.get('name', 'Holiday'),
-                                "status": "confirmed",
-                                "type": "public",
-                                "created_at": datetime.now(IST).isoformat()
-                            }
-                            await db.holidays.insert_one(new_holiday)
-                            count += 1
-                        elif existing.get("status") not in ("confirmed", "rejected"):
-                            # Upgrade any pending / unset → confirmed automatically
-                            await db.holidays.update_one(
-                                {"date": date_str},
-                                {"$set": {"status": "confirmed"}}
-                            )
-                    logger.info(f"Auto-synced holidays for {year}: {count} new")
-            except Exception as e:
-                logger.error(f"Holiday Autofetch Failed: {str(e)}")
-
-        loop.run_until_complete(_async_fetch())
+        import backend.server as _self
+        loop = _self.app_event_loop
+        if loop is None or loop.is_closed():
+            logger.warning("fetch_indian_holidays_task: main event loop not ready, skipping.")
+            return
+        future = asyncio.run_coroutine_threadsafe(_async_fetch(), loop)
+        future.result(timeout=120)
     except Exception as e:
         logger.error(f"fetch_indian_holidays_task failed: {e}")
-    finally:
-        if loop and not loop.is_closed():
-            loop.close()
 
 
 # ROUTER
