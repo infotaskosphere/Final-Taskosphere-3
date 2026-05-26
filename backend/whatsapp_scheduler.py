@@ -267,42 +267,35 @@ async def _send_compliance_reminders():
 
 # ─── APScheduler-compatible sync wrappers ────────────────────────────────────
 # Pattern mirrors mark_absent_users_task: creates a fresh event loop so
-# APScheduler (which runs jobs in threads) doesn't conflict with FastAPI's loop.
+# APScheduler (which runs jobs in threads) must use the main event loop
+# so that Motor (async MongoDB) futures are not attached to a different loop.
+
+def _run_on_main_loop(coro, timeout=55):
+    """Run an async coroutine on the main FastAPI/Uvicorn event loop from a thread."""
+    from backend.server import app_event_loop
+    if app_event_loop is None or app_event_loop.is_closed():
+        logger.warning("_run_on_main_loop: main event loop not ready, skipping job.")
+        return
+    future = asyncio.run_coroutine_threadsafe(coro, app_event_loop)
+    future.result(timeout=timeout)
+
 
 def wa_birthday_job():
-    loop = None
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(_send_birthday_wishes())
+        _run_on_main_loop(_send_birthday_wishes())
     except Exception as exc:
         logger.error("wa_birthday_job failed: %s", exc)
-    finally:
-        if loop and not loop.is_closed():
-            loop.close()
 
 
 def wa_dsc_expiry_job():
-    loop = None
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(_send_dsc_expiry_alerts())
+        _run_on_main_loop(_send_dsc_expiry_alerts())
     except Exception as exc:
         logger.error("wa_dsc_expiry_job failed: %s", exc)
-    finally:
-        if loop and not loop.is_closed():
-            loop.close()
 
 
 def wa_compliance_job():
-    loop = None
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(_send_compliance_reminders())
+        _run_on_main_loop(_send_compliance_reminders())
     except Exception as exc:
         logger.error("wa_compliance_job failed: %s", exc)
-    finally:
-        if loop and not loop.is_closed():
-            loop.close()
