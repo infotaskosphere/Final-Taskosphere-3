@@ -812,7 +812,7 @@ const ClientSearchCombobox = ({ clients = [], value, onSelect, onAddNew, isDark 
               </div>
               <div>
                 <p className="text-sm font-semibold text-blue-700 dark:text-blue-400">Add New Client</p>
-                <p className="text-[10px] text-slate-400">Opens client form in a new tab</p>
+                <p className="text-[10px] text-slate-400">Quick-add client without leaving this invoice</p>
               </div>
             </button>
           </div>
@@ -3315,6 +3315,157 @@ const ItemRow = React.memo(function ItemRow({
   );
 });
 
+// ════════════════════════════════════════════════════════════════════════════════
+// QUICK ADD CLIENT DIALOG — inline create from inside the Invoice form
+// ════════════════════════════════════════════════════════════════════════════════
+const QuickAddClientDialog = ({ open, onClose, onCreated, isDark }) => {
+  const blank = {
+    company_name: '', client_type: 'proprietor',
+    gstin: '', email: '', phone: '',
+    address: '', city: '', state: '',
+  };
+  const [data, setData] = useState(blank);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { if (open) setData(blank); /* reset each open */ // eslint-disable-next-line
+  }, [open]);
+
+  const setField = (k, v) => setData(p => ({ ...p, [k]: v }));
+
+  const handleSave = async () => {
+    if (!data.company_name.trim()) { toast.error('Client / Company name is required'); return; }
+    const gstin = (data.gstin || '').trim().toUpperCase();
+    if (gstin && gstin.length !== 15) { toast.error('GSTIN must be 15 characters'); return; }
+
+    setSaving(true);
+    try {
+      const payload = {
+        company_name: data.company_name.trim(),
+        client_type: data.client_type || 'proprietor',
+        email: data.email.trim() || null,
+        phone: (data.phone || '').replace(/\D/g, '') || null,
+        address: data.address.trim() || null,
+        city: data.city.trim() || null,
+        state: data.state.trim() || null,
+        gstin: gstin || null,
+        services: [],
+        contact_persons: [],
+        dsc_details: [],
+        assignments: [],
+        assigned_to: null,
+        status: 'active',
+      };
+      const res = await api.post('/clients', payload);
+      let created = res?.data;
+      // Some backends return only an id or a wrapper — make sure we have a usable record
+      if (!created || !created.id) {
+        try {
+          const list = await api.get('/clients');
+          const arr = list?.data || [];
+          created = arr.find(c =>
+            (gstin && (c.gstin || '').toUpperCase() === gstin) ||
+            (c.company_name || '').toLowerCase() === payload.company_name.toLowerCase()
+          ) || created;
+        } catch { /* ignore */ }
+      }
+      if (!created || !created.id) {
+        toast.error('Client saved but could not be auto-selected — please pick it from the list');
+        onClose?.();
+        return;
+      }
+      toast.success(`Client "${created.company_name}" created`);
+      onCreated?.(created);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Failed to create client');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const inputCls = `h-10 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`;
+  const labelCls = `text-[10px] font-bold uppercase tracking-widest mb-1.5 block ${isDark ? 'text-slate-400' : 'text-slate-500'}`;
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && !saving && onClose?.()}>
+      <DialogContent className={`max-w-2xl p-0 overflow-hidden rounded-2xl ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+        <div className="px-6 py-4 text-white" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+          <DialogTitle className="text-lg font-bold flex items-center gap-2">
+            <Plus className="h-5 w-5" /> Quick Add Client
+          </DialogTitle>
+          <DialogDescription className="text-white/80 text-xs mt-1">
+            Add a new client without leaving this invoice. You can edit full details later from the Clients page.
+          </DialogDescription>
+        </div>
+        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[60vh] overflow-y-auto">
+          <div className="md:col-span-2">
+            <label className={labelCls}>Client / Company Name *</label>
+            <Input className={inputCls} autoFocus value={data.company_name}
+              onChange={e => setField('company_name', e.target.value)} placeholder="Acme Pvt Ltd" />
+          </div>
+          <div>
+            <label className={labelCls}>Client Type</label>
+            <Select value={data.client_type} onValueChange={v => setField('client_type', v)}>
+              <SelectTrigger className={inputCls}><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="proprietor">Proprietor</SelectItem>
+                <SelectItem value="partnership">Partnership</SelectItem>
+                <SelectItem value="llp">LLP</SelectItem>
+                <SelectItem value="private_limited">Private Limited</SelectItem>
+                <SelectItem value="public_limited">Public Limited</SelectItem>
+                <SelectItem value="individual">Individual</SelectItem>
+                <SelectItem value="huf">HUF</SelectItem>
+                <SelectItem value="trust">Trust</SelectItem>
+                <SelectItem value="society">Society</SelectItem>
+                <SelectItem value="other">Other</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <label className={labelCls}>GSTIN</label>
+            <Input className={inputCls} value={data.gstin}
+              onChange={e => setField('gstin', e.target.value.toUpperCase())}
+              placeholder="15-digit GSTIN" maxLength={15} />
+          </div>
+          <div>
+            <label className={labelCls}>Email</label>
+            <Input type="email" className={inputCls} value={data.email}
+              onChange={e => setField('email', e.target.value)} placeholder="name@company.com" />
+          </div>
+          <div>
+            <label className={labelCls}>Phone</label>
+            <Input className={inputCls} value={data.phone}
+              onChange={e => setField('phone', e.target.value)} placeholder="10-digit number" />
+          </div>
+          <div className="md:col-span-2">
+            <label className={labelCls}>Address</label>
+            <Textarea
+              className={`rounded-xl text-sm min-h-[64px] resize-none ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`}
+              value={data.address} onChange={e => setField('address', e.target.value)} placeholder="Street, area…" />
+          </div>
+          <div>
+            <label className={labelCls}>City</label>
+            <Input className={inputCls} value={data.city} onChange={e => setField('city', e.target.value)} />
+          </div>
+          <div>
+            <label className={labelCls}>State</label>
+            <Input className={inputCls} value={data.state} onChange={e => setField('state', e.target.value)}
+              placeholder="Maharashtra, Delhi…" />
+          </div>
+        </div>
+        <div className={`px-6 py-4 flex items-center justify-end gap-3 border-t ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-slate-50'}`}>
+          <Button type="button" variant="ghost" onClick={onClose} disabled={saving}
+            className="h-10 px-5 text-sm rounded-xl">Cancel</Button>
+          <Button type="button" onClick={handleSave} disabled={saving}
+            className="h-10 px-6 text-sm rounded-xl text-white font-semibold gap-2"
+            style={{ background: saving ? '#94a3b8' : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+            {saving ? 'Saving…' : (<><Check className="h-4 w-4" /> Save & Use</>)}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onSuccess, isDark }) => {
   const navigate = useNavigate();
   const defaultForm = {
@@ -3339,6 +3490,13 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
   const [focusedItemIdx, setFocusedItemIdx] = useState(-1); // which item description is focused
   const [dragIdx, setDragIdx] = useState(null);             // which item is being dragged
   const [dragOverIdx, setDragOverIdx] = useState(null);     // which item is the drop target
+  // Clients created inline via the Quick-Add dialog (augments the parent `clients` prop)
+  const [localClients, setLocalClients] = useState([]);
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const mergedClients = useMemo(
+    () => [...(clients || []), ...localClients],
+    [clients, localClients]
+  );
 
   // ── useRef ──
   const previewRef = useRef(null);
@@ -3779,10 +3937,10 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                   <div className="mb-4">
                     <label className={labelCls}>Search & Select Client <span className={`font-normal normal-case ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>— auto-fills fields below</span></label>
                     <ClientSearchCombobox
-                      clients={clients || []}
+                      clients={mergedClients}
                       value={form.client_id}
                       onSelect={handleClientSelect}
-                      onAddNew={() => navigate('/clients')}
+                      onAddNew={() => setQuickAddOpen(true)}
                       isDark={isDark}
                     />
                   </div>
@@ -4052,6 +4210,16 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
           </div>
         </div>
       </DialogContent>
+      <QuickAddClientDialog
+        open={quickAddOpen}
+        onClose={() => setQuickAddOpen(false)}
+        isDark={isDark}
+        onCreated={(newClient) => {
+          setLocalClients(prev => [...prev, newClient]);
+          handleClientSelect(newClient);
+          setQuickAddOpen(false);
+        }}
+      />
     </Dialog>
   );
 };
