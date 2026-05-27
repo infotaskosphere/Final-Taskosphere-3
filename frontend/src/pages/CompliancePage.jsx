@@ -1398,13 +1398,12 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
   const saveGovtFee=async(assignmentId,amount,srn)=>{
     setSavingFeeId(assignmentId);
     try{
-      await api.patch(`/compliance/${compliance.id}/assignments/${assignmentId}/govt-fee`,{
-        govt_fees_amount:parseFloat(amount)||0,
-        govt_fees_srn:srn||'',
-        govt_fees_notes:'',
-      });
       const amt = parseFloat(amount)||0;
       const srnVal = (srn||'').trim();
+      await api.patch(`/compliance/${compliance.id}/assignments/${assignmentId}/govt-fee`,{
+        govt_fees_amount:amt,
+        govt_fees_srn:srnVal,
+      });
       const autoFiled = amt > 0 && !!srnVal;
       const today = new Date().toISOString().slice(0,10);
       setItems(prev=>prev.map(a=>a.id===assignmentId
@@ -1417,9 +1416,25 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
         : a));
       setEditingFee(null);
       toast.success(autoFiled ? 'Saved · marked as Filed' : 'Saved');
+      try { window.dispatchEvent(new CustomEvent('compliance:govt-fee-updated', { detail: { assignment_id: assignmentId } })); } catch {}
     }catch{toast.error('Save failed');}
     finally{setSavingFeeId(null);}
   };
+
+  // Persist a reimbursement update (Yes/No + optional amount) for an assignment.
+  const saveReimbursement=async(a,patch)=>{
+    const prevReimbursed = !!a.reimbursed;
+    const prevAmount = a.reimbursed_amount ?? null;
+    setItems(prev=>prev.map(x=>x.id===a.id?{...x,...patch}:x));
+    try{
+      await api.patch(`/compliance/${compliance.id}/assignments/${a.id}/govt-fee`, patch);
+      try { window.dispatchEvent(new CustomEvent('compliance:govt-fee-updated', { detail: { assignment_id: a.id } })); } catch {}
+    }catch{
+      setItems(prev=>prev.map(x=>x.id===a.id?{...x,reimbursed:prevReimbursed,reimbursed_amount:prevAmount}:x));
+      toast.error('Update failed');
+    }
+  };
+
 
   const addComment=async()=>{
     if(!commentText.trim())return;
@@ -1720,7 +1735,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
         {/* Table */}
         <div className="flex-1 overflow-auto" style={{scrollbarWidth:'thin'}}>
           <div className="sticky top-0 z-10 grid px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider border-b"
-            style={{gridTemplateColumns:'36px 48px 1fr 148px 115px 130px 115px 115px 100px 44px 90px 40px',backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
+            style={{gridTemplateColumns:'36px 44px 1fr 140px 110px 120px 110px 110px 200px 44px 84px 36px',backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
             <div className="flex items-center justify-center">
               <button onClick={()=>allSelected?setSelectedIds(new Set()):setSelectedIds(new Set(items.map(a=>a.id)))}
                 className="w-4 h-4 rounded border-2 flex items-center justify-center"
@@ -1761,7 +1776,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                 return(
                   <motion.div key={a.id}
                     className="group grid px-4 py-2.5 items-center gap-2 transition-colors"
-                    style={{gridTemplateColumns:'36px 48px 1fr 148px 115px 130px 115px 115px 100px 44px 90px 40px',backgroundColor:isSel?(isDark?'rgba(59,130,246,0.06)':'#eff6ff'):'transparent'}}
+                    style={{gridTemplateColumns:'36px 44px 1fr 140px 110px 120px 110px 110px 200px 44px 84px 36px',backgroundColor:isSel?(isDark?'rgba(59,130,246,0.06)':'#eff6ff'):'transparent'}}
                     whileHover={{backgroundColor:isDark?'rgba(255,255,255,0.03)':'#fafafa'}}>
                     <div className="flex items-center justify-center">
                       <button onClick={()=>setSelectedIds(prev=>{const s=new Set(prev);isSel?s.delete(a.id):s.add(a.id);return s;})}
@@ -1854,42 +1869,54 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                         </button>
                       )}
                     </div>
-                    {/* Reimbursed cell */}
-                    <div className="min-w-0 flex-shrink-0 flex items-center" onClick={e=>e.stopPropagation()}>
-                      <div className="flex rounded-lg overflow-hidden border text-[10px] font-bold"
+                    {/* Reimbursed cell: Yes/No segmented control + amount input */}
+                    <div className="min-w-0 flex items-center gap-1.5" onClick={e=>e.stopPropagation()}>
+                      <div className="flex rounded-md overflow-hidden border text-[10px] font-bold flex-shrink-0"
                         style={{borderColor:isDark?D.border:'#d1d5db'}}>
                         {[{v:true,l:'Yes'},{v:false,l:'No'}].map(opt=>{
                           const isActive = !!a.reimbursed === opt.v;
                           return(
                             <button key={String(opt.v)}
-                              onClick={async()=>{
+                              onClick={()=>{
                                 const newVal=opt.v;
-                                setItems(prev=>prev.map(x=>x.id===a.id?{...x,reimbursed:newVal}:x));
-                                try{
-                                  await api.patch(`/compliance/${compliance.id}/assignments/${a.id}/govt-fee`,{
-                                    govt_fees_amount:a.govt_fees_amount||0,
-                                    govt_fees_srn:a.govt_fees_srn||'',
-                                    govt_fees_notes:a.govt_fees_notes||'',
-                                    reimbursed:newVal,
-                                    reimbursed_amount:a.reimbursed_amount??null,
-                                  });
-                                  toast.success(newVal?'Marked as reimbursed':'Marked as not reimbursed');
-                                }catch{
-                                  setItems(prev=>prev.map(x=>x.id===a.id?{...x,reimbursed:!newVal}:x));
-                                  toast.error('Update failed');
-                                }
+                                const patch = newVal
+                                  ? { reimbursed:true, reimbursed_amount: a.reimbursed_amount ?? (a.govt_fees_amount||0) }
+                                  : { reimbursed:false };
+                                saveReimbursement(a, patch);
+                                toast.success(newVal?'Marked as reimbursed':'Marked as not reimbursed');
                               }}
                               className="px-2 py-1 transition-colors"
                               style={{
-                                backgroundColor:isActive?(opt.v?'#10b981':'#94a3b8'):(isDark?'transparent':'transparent'),
-                                color:isActive?'#fff':(isDark?D.dimmer:'#94a3b8'),
+                                backgroundColor:isActive?(opt.v?'#10b981':'#64748b'):'transparent',
+                                color:isActive?'#fff':(isDark?D.dimmer:'#64748b'),
                               }}>
                               {opt.l}
                             </button>
                           );
                         })}
                       </div>
+                      {/* Amount input — only when Reimbursed = Yes */}
+                      {a.reimbursed && (
+                        <div className="flex items-center gap-1 flex-1 min-w-0">
+                          <span className="text-[10px] font-semibold" style={{color:isDark?D.dimmer:'#94a3b8'}}>₹</span>
+                          <input
+                            type="number" step="0.01" min="0"
+                            defaultValue={a.reimbursed_amount ?? a.govt_fees_amount ?? ''}
+                            placeholder="0.00"
+                            onClick={e=>e.stopPropagation()}
+                            onBlur={e=>{
+                              const v = e.target.value === '' ? null : parseFloat(e.target.value)||0;
+                              if ((a.reimbursed_amount ?? null) === v) return;
+                              saveReimbursement(a, { reimbursed:true, reimbursed_amount: v });
+                            }}
+                            onKeyDown={e=>{ if(e.key==='Enter') e.currentTarget.blur(); }}
+                            className="w-full min-w-0 px-1.5 py-0.5 border rounded text-[11px] tabular-nums focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                            style={{backgroundColor:isDark?D.raised:'#fff',borderColor:isDark?D.border:'#d1d5db',color:isDark?D.text:'#1e293b'}}
+                          />
+                        </div>
+                      )}
                     </div>
+
                     <div className="flex-shrink-0 flex items-center justify-center" onClick={e=>e.stopPropagation()}>
                       <button
                         onClick={e=>{e.stopPropagation();openCommentPopup(a);}}
