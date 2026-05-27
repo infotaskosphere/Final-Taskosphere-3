@@ -2633,7 +2633,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
               {/* Totals (full list) */}
               {paymentRows.length > 0 && (() => {
                 const totalAmt = paymentRows.reduce((s, row) => s + (row.amount || 0), 0);
-                const totalReimbursed = paymentRows.filter(r => r.reimbursed).reduce((s, row) => s + (row.reimbursed_amount ?? row.amount || 0), 0);
+                const totalReimbursed = paymentRows.filter(r => r.reimbursed).reduce((s, row) => s + ((row.reimbursed_amount ?? row.amount) || 0), 0);
                 const netAmount = totalAmt - totalReimbursed;
                 return (
                   <div className={`flex justify-end gap-6 px-3 py-3 rounded-xl border ${isDark ? 'bg-slate-700/30 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
