@@ -1719,7 +1719,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
         {/* Table */}
         <div className="flex-1 overflow-auto" style={{scrollbarWidth:'thin'}}>
           <div className="sticky top-0 z-10 grid px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider border-b"
-            style={{gridTemplateColumns:'36px 48px 1fr 148px 130px 150px 130px 130px 110px 44px 90px 40px',backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
+            style={{gridTemplateColumns:'36px 48px 1fr 148px 115px 130px 115px 115px 100px 44px 90px 40px',backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
             <div className="flex items-center justify-center">
               <button onClick={()=>allSelected?setSelectedIds(new Set()):setSelectedIds(new Set(items.map(a=>a.id)))}
                 className="w-4 h-4 rounded border-2 flex items-center justify-center"
@@ -1760,7 +1760,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                 return(
                   <motion.div key={a.id}
                     className="group grid px-4 py-2.5 items-center gap-2 transition-colors"
-                    style={{gridTemplateColumns:'36px 48px 1fr 148px 130px 150px 130px 130px 110px 44px 90px 40px',backgroundColor:isSel?(isDark?'rgba(59,130,246,0.06)':'#eff6ff'):'transparent'}}
+                    style={{gridTemplateColumns:'36px 48px 1fr 148px 115px 130px 115px 115px 100px 44px 90px 40px',backgroundColor:isSel?(isDark?'rgba(59,130,246,0.06)':'#eff6ff'):'transparent'}}
                     whileHover={{backgroundColor:isDark?'rgba(255,255,255,0.03)':'#fafafa'}}>
                     <div className="flex items-center justify-center">
                       <button onClick={()=>setSelectedIds(prev=>{const s=new Set(prev);isSel?s.delete(a.id):s.add(a.id);return s;})}
