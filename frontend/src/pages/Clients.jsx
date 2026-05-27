@@ -1769,8 +1769,8 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
   }, [activeTab, selectedClient]);
 
   // Fetch Govt-Fees compliance assignments for this client
-  React.useEffect(() => {
-    if (activeTab !== 'govtfees' || !selectedClient?.id) return;
+  const loadGovtFees = React.useCallback(() => {
+    if (!selectedClient?.id) return;
     setGovtFeesLoading(true);
     api.get(`/compliance/by-client/${selectedClient.id}`, { params: { govt_fees: true } })
       .then(r => {
@@ -1788,8 +1788,22 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
       })
       .catch(() => setGovtFees([]))
       .finally(() => setGovtFeesLoading(false));
+  }, [selectedClient]);
+
+  React.useEffect(() => {
+    if (activeTab !== 'govtfees' || !selectedClient?.id) return;
+    loadGovtFees();
     fetchAdhocFees();
-  }, [activeTab, selectedClient, fetchAdhocFees]);
+  }, [activeTab, selectedClient, fetchAdhocFees, loadGovtFees]);
+
+  // Live-update: re-fetch when the Compliance page (or any other surface) saves a govt-fee row.
+  React.useEffect(() => {
+    if (activeTab !== 'govtfees' || !selectedClient?.id) return;
+    const handler = () => { loadGovtFees(); fetchAdhocFees(); };
+    window.addEventListener('compliance:govt-fee-updated', handler);
+    return () => window.removeEventListener('compliance:govt-fee-updated', handler);
+  }, [activeTab, selectedClient, loadGovtFees, fetchAdhocFees]);
+
 
   // Fetch portal users for this client
   React.useEffect(() => {
@@ -2538,30 +2552,28 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                                 <button key={String(opt.v)}
                                   onClick={async () => {
                                     const newVal = opt.v;
-                                    // update local state via govtFees / adhocFees
+                                    const patch = newVal
+                                      ? { reimbursed: true, reimbursed_amount: row.reimbursed_amount ?? row.amount }
+                                      : { reimbursed: false };
                                     if (row.type === 'linked') {
-                                      setGovtFees(prev => prev.map(x => x.assignment_id === row.assignment_id ? { ...x, reimbursed: newVal } : x));
+                                      setGovtFees(prev => prev.map(x => x.assignment_id === row.assignment_id ? { ...x, ...patch } : x));
                                       try {
-                                        await api.patch(`/compliance/${row.compliance_id}/assignments/${row.assignment_id}/govt-fee`, {
-                                          govt_fees_amount: row.amount,
-                                          govt_fees_srn: row.srn || '',
-                                          govt_fees_notes: '',
-                                          reimbursed: newVal,
-                                          reimbursed_amount: row.reimbursed_amount,
-                                        });
+                                        await api.patch(`/compliance/${row.compliance_id}/assignments/${row.assignment_id}/govt-fee`, patch);
                                         toast.success(newVal ? 'Marked as reimbursed' : 'Marked as not reimbursed');
+                                        window.dispatchEvent(new CustomEvent('compliance:govt-fee-updated', { detail: { assignment_id: row.assignment_id } }));
                                       } catch { toast.error('Update failed'); }
                                     } else {
-                                      setAdhocFees(prev => prev.map(x => x.id === row.raw.id ? { ...x, reimbursed: newVal } : x));
+                                      setAdhocFees(prev => prev.map(x => x.id === row.raw.id ? { ...x, ...patch } : x));
                                       try {
-                                        await api.patch(`/compliance/standalone-govt-fees/${row.raw.id}`, { reimbursed: newVal, reimbursed_amount: row.reimbursed_amount });
+                                        await api.patch(`/compliance/standalone-govt-fees/${row.raw.id}`, patch);
                                         toast.success(newVal ? 'Marked as reimbursed' : 'Marked as not reimbursed');
+                                        window.dispatchEvent(new CustomEvent('compliance:govt-fee-updated', { detail: { adhoc_id: row.raw.id } }));
                                       } catch { toast.error('Update failed'); }
                                     }
                                   }}
                                   className="px-2 py-1 transition-colors"
                                   style={{
-                                    backgroundColor: isActive ? (opt.v ? '#10b981' : '#94a3b8') : 'transparent',
+                                    backgroundColor: isActive ? (opt.v ? '#10b981' : '#64748b') : 'transparent',
                                     color: isActive ? '#fff' : isDark ? '#94a3b8' : '#64748b',
                                   }}>
                                   {opt.l}
@@ -2576,26 +2588,28 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                                 type="number" min="0" step="0.01"
                                 defaultValue={row.reimbursed_amount ?? row.amount}
                                 onBlur={async (e) => {
-                                  const newAmt = parseFloat(e.target.value) || 0;
+                                  const newAmt = e.target.value === '' ? null : parseFloat(e.target.value) || 0;
+                                  const patch = { reimbursed: true, reimbursed_amount: newAmt };
                                   if (row.type === 'linked') {
-                                    setGovtFees(prev => prev.map(x => x.assignment_id === row.assignment_id ? { ...x, reimbursed_amount: newAmt } : x));
+                                    setGovtFees(prev => prev.map(x => x.assignment_id === row.assignment_id ? { ...x, ...patch } : x));
                                     try {
-                                      await api.patch(`/compliance/${row.compliance_id}/assignments/${row.assignment_id}/govt-fee`, {
-                                        govt_fees_amount: row.amount, govt_fees_srn: row.srn || '', govt_fees_notes: '',
-                                        reimbursed: true, reimbursed_amount: newAmt,
-                                      });
+                                      await api.patch(`/compliance/${row.compliance_id}/assignments/${row.assignment_id}/govt-fee`, patch);
+                                      window.dispatchEvent(new CustomEvent('compliance:govt-fee-updated', { detail: { assignment_id: row.assignment_id } }));
                                     } catch { toast.error('Save failed'); }
                                   } else {
-                                    setAdhocFees(prev => prev.map(x => x.id === row.raw.id ? { ...x, reimbursed_amount: newAmt } : x));
+                                    setAdhocFees(prev => prev.map(x => x.id === row.raw.id ? { ...x, ...patch } : x));
                                     try {
-                                      await api.patch(`/compliance/standalone-govt-fees/${row.raw.id}`, { reimbursed: true, reimbursed_amount: newAmt });
+                                      await api.patch(`/compliance/standalone-govt-fees/${row.raw.id}`, patch);
+                                      window.dispatchEvent(new CustomEvent('compliance:govt-fee-updated', { detail: { adhoc_id: row.raw.id } }));
                                     } catch { toast.error('Save failed'); }
                                   }
                                 }}
-                                className={`w-20 px-1.5 py-0.5 text-xs rounded-lg border focus:outline-none focus:ring-1 focus:ring-blue-400 ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100' : 'bg-white border-slate-300'}`}
+                                onKeyDown={e=>{ if(e.key==='Enter') e.currentTarget.blur(); }}
+                                className={`w-24 px-1.5 py-0.5 text-xs rounded-lg border tabular-nums focus:outline-none focus:ring-1 focus:ring-emerald-500 ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100' : 'bg-white border-slate-300'}`}
                               />
                             </div>
                           )}
+
                         </div>
                         <div className="flex justify-end gap-1">
                           {row.type === 'adhoc' ? (
