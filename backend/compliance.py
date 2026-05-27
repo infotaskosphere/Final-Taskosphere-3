@@ -1140,11 +1140,12 @@ async def update_monthly_status(
 # ─────────────────────────────────────────────────────────────────────────────
 
 class GovtFeeUpdate(BaseModel):
-    govt_fees_amount:  float          = 0.0
-    govt_fees_notes:   Optional[str]  = None
-    govt_fees_srn:     Optional[str]  = None
-    reimbursed:        Optional[bool] = None   # True = received from client
-    reimbursed_amount: Optional[float] = None  # editable; defaults to govt_fees_amount
+    # All fields optional so callers can PATCH a subset without wiping the others.
+    govt_fees_amount:  Optional[float] = None
+    govt_fees_notes:   Optional[str]   = None
+    govt_fees_srn:     Optional[str]   = None
+    reimbursed:        Optional[bool]  = None   # True = received from client
+    reimbursed_amount: Optional[float] = None   # editable; defaults to govt_fees_amount
 
 
 @router.get("/by-client/{client_id}")
@@ -1203,35 +1204,52 @@ async def update_assignment_govt_fee(
     data: GovtFeeUpdate,
     current_user: User = Depends(check_module_permission("compliance", "create")),
 ):
-    """Persist the manually entered government-fee amount for a single client/compliance."""
-    amount = float(data.govt_fees_amount or 0)
-    srn    = (data.govt_fees_srn or "").strip()
-    set_doc = {
-        "govt_fees_amount":  amount,
-        "govt_fees_notes":   data.govt_fees_notes,
-        "govt_fees_srn":     srn,
-        "reimbursed":        bool(data.reimbursed) if data.reimbursed is not None else False,
-        "reimbursed_amount": float(data.reimbursed_amount) if data.reimbursed_amount is not None else None,
-        "updated_at":        _now(),
-        "updated_by":        current_user.id,
-    }
-    # Auto-mark as Filed when both SRN and amount are present.
-    # Payment date = today (the day the SRN + amount were saved).
-    if amount > 0 and srn:
+    """Persist a partial update to the government-fee row for a single client/compliance.
+
+    Only fields explicitly supplied in the request body are written, so toggling
+    Reimbursed (or editing the reimbursed amount) no longer wipes the saved
+    amount / SRN, and vice-versa.
+    """
+    payload = data.dict(exclude_unset=True)
+
+    existing = await db.compliance_assignments.find_one(
+        {"id": assignment_id, "compliance_id": compliance_id}, {"_id": 0}
+    )
+    if not existing:
+        raise HTTPException(404, "Assignment not found")
+
+    set_doc: dict = {"updated_at": _now(), "updated_by": current_user.id}
+
+    if "govt_fees_amount" in payload:
+        set_doc["govt_fees_amount"] = float(payload["govt_fees_amount"] or 0)
+    if "govt_fees_notes" in payload:
+        set_doc["govt_fees_notes"] = payload["govt_fees_notes"]
+    if "govt_fees_srn" in payload:
+        set_doc["govt_fees_srn"] = (payload["govt_fees_srn"] or "").strip()
+    if "reimbursed" in payload:
+        set_doc["reimbursed"] = bool(payload["reimbursed"])
+    if "reimbursed_amount" in payload:
+        set_doc["reimbursed_amount"] = (
+            float(payload["reimbursed_amount"])
+            if payload["reimbursed_amount"] is not None else None
+        )
+
+    # Resolve effective amount + srn (post-update) for the auto-filed rule.
+    eff_amount = set_doc.get("govt_fees_amount", existing.get("govt_fees_amount") or 0) or 0
+    eff_srn    = (set_doc.get("govt_fees_srn",  existing.get("govt_fees_srn")    or "") or "").strip()
+    if eff_amount > 0 and eff_srn:
         now = _now()
-        today = now[:10]
         set_doc.update({
             "status":       "filed",
             "filed_at":     now,
             "completed_at": now,
-            "payment_date": today,
+            "payment_date": now[:10],
         })
-    res = await db.compliance_assignments.update_one(
+
+    await db.compliance_assignments.update_one(
         {"id": assignment_id, "compliance_id": compliance_id},
         {"$set": set_doc},
     )
-    if res.matched_count == 0:
-        raise HTTPException(404, "Assignment not found")
     doc = await db.compliance_assignments.find_one({"id": assignment_id}, {"_id": 0})
     return doc
 
