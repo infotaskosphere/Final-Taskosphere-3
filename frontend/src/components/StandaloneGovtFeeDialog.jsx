@@ -39,17 +39,19 @@ export default function StandaloneGovtFeeDialog({
   onSaved,
 }) {
   const empty = {
-    client_id:    clientId || '',
-    title:        '',
-    category:     'OTHER',
-    period_label: '',
-    fy_year:      '',
-    due_date:     '',
-    payment_date: '',
-    amount:       '',
-    srn:          '',
-    notes:        '',
-    status:       'pending',
+    client_id:         clientId || '',
+    title:             '',
+    category:          'OTHER',
+    period_label:      '',
+    fy_year:           '',
+    due_date:          '',
+    payment_date:      '',
+    amount:            '',
+    srn:               '',
+    notes:             '',
+    status:            'pending',
+    reimbursed:        false,
+    reimbursed_amount: '',
   };
   const [form,    setForm]    = useState(empty);
   const [saving,  setSaving]  = useState(false);
@@ -69,6 +71,8 @@ export default function StandaloneGovtFeeDialog({
         srn:          editing.srn          || '',
         notes:        editing.notes        || '',
         status:       editing.status       || 'pending',
+        reimbursed:   !!editing.reimbursed,
+        reimbursed_amount: editing.reimbursed_amount ?? '',
       });
     } else {
       setForm({ ...empty, client_id: clientId || '' });
@@ -91,13 +95,15 @@ export default function StandaloneGovtFeeDialog({
     try {
       const payload = {
         ...form,
-        amount:       parseFloat(form.amount) || 0,
-        due_date:     form.due_date     || null,
-        payment_date: form.payment_date || null,
-        period_label: form.period_label || null,
-        fy_year:      form.fy_year      || null,
-        srn:          form.srn          || null,
-        notes:        form.notes        || null,
+        amount:            parseFloat(form.amount) || 0,
+        due_date:          form.due_date     || null,
+        payment_date:      form.payment_date || null,
+        period_label:      form.period_label || null,
+        fy_year:           form.fy_year      || null,
+        srn:               form.srn          || null,
+        notes:             form.notes        || null,
+        reimbursed:        !!form.reimbursed,
+        reimbursed_amount: form.reimbursed && form.reimbursed_amount !== '' ? parseFloat(form.reimbursed_amount) || 0 : null,
       };
       let res;
       if (editing?.id) {
@@ -236,6 +242,40 @@ export default function StandaloneGovtFeeDialog({
                 onChange={e => set('srn', e.target.value)}
                 placeholder="SRN…"
               />
+            </div>
+
+            {/* Reimbursed — full width */}
+            <div className="col-span-4">
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Reimbursed by Client</label>
+              <div className="flex items-center gap-3 mt-1.5">
+                <div className="flex rounded-lg overflow-hidden border border-slate-200">
+                  {[{ v: true, l: 'Yes — Received' }, { v: false, l: 'No' }].map(opt => (
+                    <button
+                      key={String(opt.v)}
+                      type="button"
+                      onClick={() => set('reimbursed', opt.v)}
+                      className="px-3 py-1.5 text-xs font-semibold transition-colors"
+                      style={{
+                        backgroundColor: form.reimbursed === opt.v ? (opt.v ? '#10b981' : '#94a3b8') : 'transparent',
+                        color: form.reimbursed === opt.v ? '#fff' : '#64748b',
+                      }}>
+                      {opt.l}
+                    </button>
+                  ))}
+                </div>
+                {form.reimbursed && (
+                  <div className="flex items-center gap-2 flex-1">
+                    <span className="text-xs text-slate-500">Amount (₹)</span>
+                    <Input
+                      className="h-9 flex-1"
+                      type="number" min="0" step="0.01"
+                      value={form.reimbursed_amount !== '' ? form.reimbursed_amount : (form.amount || '')}
+                      onChange={e => set('reimbursed_amount', e.target.value)}
+                      placeholder={form.amount || '0.00'}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Notes — full width, compact */}
