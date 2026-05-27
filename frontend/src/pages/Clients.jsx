@@ -2306,6 +2306,10 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 notes: item.govt_fees_notes || '',
                 status: Number(item.govt_fees_amount || 0) > 0 ? 'paid' : 'unpaid',
                 payment_date: item.payment_date || item.paid_on || item.paid_at || '',
+                reimbursed: !!item.reimbursed,
+                reimbursed_amount: item.reimbursed_amount ?? Number(item.govt_fees_amount || 0),
+                assignment_id: item.assignment_id,
+                compliance_id: item.compliance_id,
               })),
               ...(adhocFees || []).map(fee => ({
                 id: `adhoc-${fee.id}`,
@@ -2321,6 +2325,8 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 notes: fee.notes || '',
                 status: fee.status || (fee.payment_date || fee.paid_on || fee.paid_at ? 'paid' : 'unpaid'),
                 payment_date: fee.payment_date || fee.paid_on || fee.paid_at || '',
+                reimbursed: !!fee.reimbursed,
+                reimbursed_amount: fee.reimbursed_amount ?? Number(fee.amount || 0),
               })),
             ];
             const money = (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -2491,19 +2497,20 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 ) : (
                   <>
                     <div className={`grid gap-2 px-3 py-2 text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
-                      style={{ gridTemplateColumns: '120px 2fr 90px 110px 90px 1fr 90px' }}>
+                      style={{ gridTemplateColumns: '120px 2fr 90px 110px 90px 1fr 160px 90px' }}>
                       <div>Source</div>
                       <div>Title</div>
                       <div>FY</div>
                       <div>Due Date</div>
                       <div>Status</div>
                       <div>Amount / SRN</div>
+                      <div>Reimbursed</div>
                       <div className="text-right">Actions</div>
                     </div>
                     {paymentRows.map(row => (
                       <div key={row.id}
                         className={`grid gap-2 items-center px-3 py-2.5 rounded-xl border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-white border-slate-200'}`}
-                        style={{ gridTemplateColumns: '120px 2fr 90px 110px 90px 1fr 90px' }}>
+                        style={{ gridTemplateColumns: '120px 2fr 90px 110px 90px 1fr 160px 90px' }}>
                         <div className="text-[11px] font-bold text-slate-500">{row.source}</div>
                         <div>
                           <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{row.title}</p>
@@ -2520,6 +2527,75 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                         <div>
                           <p className="text-sm font-bold">₹ {money(row.amount)}</p>
                           <p className="text-[11px] font-mono text-slate-500">{row.srn || '—'}</p>
+                        </div>
+                        {/* Reimbursed column */}
+                        <div className="flex flex-col gap-1">
+                          <div className="flex rounded-lg overflow-hidden border text-[10px] font-bold w-fit"
+                            style={{ borderColor: isDark ? '#334155' : '#d1d5db' }}>
+                            {[{ v: true, l: 'Yes' }, { v: false, l: 'No' }].map(opt => {
+                              const isActive = !!row.reimbursed === opt.v;
+                              return (
+                                <button key={String(opt.v)}
+                                  onClick={async () => {
+                                    const newVal = opt.v;
+                                    // update local state via govtFees / adhocFees
+                                    if (row.type === 'linked') {
+                                      setGovtFees(prev => prev.map(x => x.assignment_id === row.assignment_id ? { ...x, reimbursed: newVal } : x));
+                                      try {
+                                        await api.patch(`/compliance/${row.compliance_id}/assignments/${row.assignment_id}/govt-fee`, {
+                                          govt_fees_amount: row.amount,
+                                          govt_fees_srn: row.srn || '',
+                                          govt_fees_notes: '',
+                                          reimbursed: newVal,
+                                          reimbursed_amount: row.reimbursed_amount,
+                                        });
+                                        toast.success(newVal ? 'Marked as reimbursed' : 'Marked as not reimbursed');
+                                      } catch { toast.error('Update failed'); }
+                                    } else {
+                                      setAdhocFees(prev => prev.map(x => x.id === row.raw.id ? { ...x, reimbursed: newVal } : x));
+                                      try {
+                                        await api.patch(`/compliance/standalone-govt-fees/${row.raw.id}`, { reimbursed: newVal, reimbursed_amount: row.reimbursed_amount });
+                                        toast.success(newVal ? 'Marked as reimbursed' : 'Marked as not reimbursed');
+                                      } catch { toast.error('Update failed'); }
+                                    }
+                                  }}
+                                  className="px-2 py-1 transition-colors"
+                                  style={{
+                                    backgroundColor: isActive ? (opt.v ? '#10b981' : '#94a3b8') : 'transparent',
+                                    color: isActive ? '#fff' : isDark ? '#94a3b8' : '#64748b',
+                                  }}>
+                                  {opt.l}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          {row.reimbursed && (
+                            <div className="flex items-center gap-1">
+                              <span className="text-[10px] text-slate-500">₹</span>
+                              <input
+                                type="number" min="0" step="0.01"
+                                defaultValue={row.reimbursed_amount ?? row.amount}
+                                onBlur={async (e) => {
+                                  const newAmt = parseFloat(e.target.value) || 0;
+                                  if (row.type === 'linked') {
+                                    setGovtFees(prev => prev.map(x => x.assignment_id === row.assignment_id ? { ...x, reimbursed_amount: newAmt } : x));
+                                    try {
+                                      await api.patch(`/compliance/${row.compliance_id}/assignments/${row.assignment_id}/govt-fee`, {
+                                        govt_fees_amount: row.amount, govt_fees_srn: row.srn || '', govt_fees_notes: '',
+                                        reimbursed: true, reimbursed_amount: newAmt,
+                                      });
+                                    } catch { toast.error('Save failed'); }
+                                  } else {
+                                    setAdhocFees(prev => prev.map(x => x.id === row.raw.id ? { ...x, reimbursed_amount: newAmt } : x));
+                                    try {
+                                      await api.patch(`/compliance/standalone-govt-fees/${row.raw.id}`, { reimbursed: true, reimbursed_amount: newAmt });
+                                    } catch { toast.error('Save failed'); }
+                                  }
+                                }}
+                                className={`w-20 px-1.5 py-0.5 text-xs rounded-lg border focus:outline-none focus:ring-1 focus:ring-blue-400 ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100' : 'bg-white border-slate-300'}`}
+                              />
+                            </div>
+                          )}
                         </div>
                         <div className="flex justify-end gap-1">
                           {row.type === 'adhoc' ? (
@@ -2555,16 +2631,31 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
               </div>
 
               {/* Totals (full list) */}
-              {paymentRows.length > 0 && (
-                <div className={`flex justify-end px-3 py-3 rounded-xl border ${isDark ? 'bg-slate-700/30 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-                  <p className="text-sm">
-                    <span className="text-slate-500 mr-2">Total listed:</span>
-                    <span className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                      ₹ {money(paymentRows.reduce((s, row) => s + (row.amount || 0), 0))}
-                    </span>
-                  </p>
-                </div>
-              )}
+              {paymentRows.length > 0 && (() => {
+                const totalAmt = paymentRows.reduce((s, row) => s + (row.amount || 0), 0);
+                const totalReimbursed = paymentRows.filter(r => r.reimbursed).reduce((s, row) => s + (row.reimbursed_amount ?? row.amount || 0), 0);
+                const netAmount = totalAmt - totalReimbursed;
+                return (
+                  <div className={`flex justify-end gap-6 px-3 py-3 rounded-xl border ${isDark ? 'bg-slate-700/30 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                    <p className="text-sm">
+                      <span className="text-slate-500 mr-2">Total listed:</span>
+                      <span className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>₹ {money(totalAmt)}</span>
+                    </p>
+                    {totalReimbursed > 0 && (
+                      <>
+                        <p className="text-sm">
+                          <span className="text-slate-500 mr-2">Reimbursed:</span>
+                          <span className="font-bold text-emerald-600">− ₹ {money(totalReimbursed)}</span>
+                        </p>
+                        <p className="text-sm">
+                          <span className="text-slate-500 mr-2">Net:</span>
+                          <span className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>₹ {money(netAmount)}</span>
+                        </p>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Single Add button — placed BELOW the fees/details */}
               <div className="flex justify-center pt-2">
