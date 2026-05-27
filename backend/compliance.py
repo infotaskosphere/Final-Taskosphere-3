@@ -1140,9 +1140,11 @@ async def update_monthly_status(
 # ─────────────────────────────────────────────────────────────────────────────
 
 class GovtFeeUpdate(BaseModel):
-    govt_fees_amount: float = 0.0
-    govt_fees_notes:  Optional[str] = None
-    govt_fees_srn:    Optional[str] = None
+    govt_fees_amount:  float          = 0.0
+    govt_fees_notes:   Optional[str]  = None
+    govt_fees_srn:     Optional[str]  = None
+    reimbursed:        Optional[bool] = None   # True = received from client
+    reimbursed_amount: Optional[float] = None  # editable; defaults to govt_fees_amount
 
 
 @router.get("/by-client/{client_id}")
@@ -1187,6 +1189,8 @@ async def list_compliance_for_client(
             "govt_fees_amount": a.get("govt_fees_amount", 0) or 0,
             "govt_fees_notes":  a.get("govt_fees_notes", "") or "",
             "govt_fees_srn":    a.get("govt_fees_srn", "") or "",
+            "reimbursed":       a.get("reimbursed", False) or False,
+            "reimbursed_amount": a.get("reimbursed_amount"),   # None = use govt_fees_amount
         })
     items.sort(key=lambda x: (x.get("fy_year") or "", x.get("name") or ""))
     return {"items": items}
@@ -1203,11 +1207,13 @@ async def update_assignment_govt_fee(
     amount = float(data.govt_fees_amount or 0)
     srn    = (data.govt_fees_srn or "").strip()
     set_doc = {
-        "govt_fees_amount": amount,
-        "govt_fees_notes":  data.govt_fees_notes,
-        "govt_fees_srn":    srn,
-        "updated_at":       _now(),
-        "updated_by":       current_user.id,
+        "govt_fees_amount":  amount,
+        "govt_fees_notes":   data.govt_fees_notes,
+        "govt_fees_srn":     srn,
+        "reimbursed":        bool(data.reimbursed) if data.reimbursed is not None else False,
+        "reimbursed_amount": float(data.reimbursed_amount) if data.reimbursed_amount is not None else None,
+        "updated_at":        _now(),
+        "updated_by":        current_user.id,
     }
     # Auto-mark as Filed when both SRN and amount are present.
     # Payment date = today (the day the SRN + amount were saved).
@@ -1237,30 +1243,34 @@ async def update_assignment_govt_fee(
 # ─────────────────────────────────────────────────────────────────────────────
 
 class StandaloneGovtFeeIn(BaseModel):
-    client_id:    str
-    title:        str
-    category:     Optional[str] = "OTHER"
-    period_label: Optional[str] = None
-    fy_year:      Optional[str] = None
-    due_date:     Optional[str] = None
-    payment_date: Optional[str] = None
-    amount:       float = 0.0
-    srn:          Optional[str] = None
-    notes:        Optional[str] = None
-    status:       Optional[str] = "pending"   # pending | paid
+    client_id:         str
+    title:             str
+    category:          Optional[str]   = "OTHER"
+    period_label:      Optional[str]   = None
+    fy_year:           Optional[str]   = None
+    due_date:          Optional[str]   = None
+    payment_date:      Optional[str]   = None
+    amount:            float           = 0.0
+    srn:               Optional[str]   = None
+    notes:             Optional[str]   = None
+    status:            Optional[str]   = "pending"   # pending | paid
+    reimbursed:        Optional[bool]  = False
+    reimbursed_amount: Optional[float] = None   # defaults to amount when not set
 
 
 class StandaloneGovtFeeUpdate(BaseModel):
-    title:        Optional[str]   = None
-    category:     Optional[str]   = None
-    period_label: Optional[str]   = None
-    fy_year:      Optional[str]   = None
-    due_date:     Optional[str]   = None
-    payment_date: Optional[str]   = None
-    amount:       Optional[float] = None
-    srn:          Optional[str]   = None
-    notes:        Optional[str]   = None
-    status:       Optional[str]   = None
+    title:             Optional[str]   = None
+    category:          Optional[str]   = None
+    period_label:      Optional[str]   = None
+    fy_year:           Optional[str]   = None
+    due_date:          Optional[str]   = None
+    payment_date:      Optional[str]   = None
+    amount:            Optional[float] = None
+    srn:               Optional[str]   = None
+    notes:             Optional[str]   = None
+    status:            Optional[str]   = None
+    reimbursed:        Optional[bool]  = None
+    reimbursed_amount: Optional[float] = None
 
 
 @router.get("/standalone-govt-fees")
@@ -1314,6 +1324,8 @@ async def create_standalone_govt_fee(
         "notes":        data.notes,
         "status":       data.status or "pending",
         "is_standalone": True,
+        "reimbursed":        bool(data.reimbursed) if data.reimbursed is not None else False,
+        "reimbursed_amount": float(data.reimbursed_amount) if data.reimbursed_amount is not None else None,
         "created_at":   _now(),
         "updated_at":   _now(),
         "created_by":   current_user.id,
