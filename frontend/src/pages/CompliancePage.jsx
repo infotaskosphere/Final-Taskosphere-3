@@ -1719,7 +1719,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
         {/* Table */}
         <div className="flex-1 overflow-auto" style={{scrollbarWidth:'thin'}}>
           <div className="sticky top-0 z-10 grid px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider border-b"
-            style={{gridTemplateColumns:'36px 48px 1fr 148px 130px 150px 130px 130px 44px 90px 40px',backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
+            style={{gridTemplateColumns:'36px 48px 1fr 148px 130px 150px 130px 130px 110px 44px 90px 40px',backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
             <div className="flex items-center justify-center">
               <button onClick={()=>allSelected?setSelectedIds(new Set()):setSelectedIds(new Set(items.map(a=>a.id)))}
                 className="w-4 h-4 rounded border-2 flex items-center justify-center"
@@ -1734,6 +1734,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
             <div>Notes</div>
             <div>Govt Fee (₹)</div>
             <div>SRN</div>
+            <div>Reimbursed</div>
             <div className="text-center">Cmts</div>
             <div>Updated</div>
             <div/>
@@ -1759,7 +1760,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                 return(
                   <motion.div key={a.id}
                     className="group grid px-4 py-2.5 items-center gap-2 transition-colors"
-                    style={{gridTemplateColumns:'36px 48px 1fr 148px 130px 150px 130px 130px 44px 90px 40px',backgroundColor:isSel?(isDark?'rgba(59,130,246,0.06)':'#eff6ff'):'transparent'}}
+                    style={{gridTemplateColumns:'36px 48px 1fr 148px 130px 150px 130px 130px 110px 44px 90px 40px',backgroundColor:isSel?(isDark?'rgba(59,130,246,0.06)':'#eff6ff'):'transparent'}}
                     whileHover={{backgroundColor:isDark?'rgba(255,255,255,0.03)':'#fafafa'}}>
                     <div className="flex items-center justify-center">
                       <button onClick={()=>setSelectedIds(prev=>{const s=new Set(prev);isSel?s.delete(a.id):s.add(a.id);return s;})}
@@ -1851,6 +1852,42 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                           {a.govt_fees_srn||<span className="italic font-sans text-[10px]">add SRN</span>}
                         </button>
                       )}
+                    </div>
+                    {/* Reimbursed cell */}
+                    <div className="min-w-0 flex-shrink-0 flex items-center" onClick={e=>e.stopPropagation()}>
+                      <div className="flex rounded-lg overflow-hidden border text-[10px] font-bold"
+                        style={{borderColor:isDark?D.border:'#d1d5db'}}>
+                        {[{v:true,l:'Yes'},{v:false,l:'No'}].map(opt=>{
+                          const isActive = !!a.reimbursed === opt.v;
+                          return(
+                            <button key={String(opt.v)}
+                              onClick={async()=>{
+                                const newVal=opt.v;
+                                setItems(prev=>prev.map(x=>x.id===a.id?{...x,reimbursed:newVal}:x));
+                                try{
+                                  await api.patch(`/compliance/${compliance.id}/assignments/${a.id}/govt-fee`,{
+                                    govt_fees_amount:a.govt_fees_amount||0,
+                                    govt_fees_srn:a.govt_fees_srn||'',
+                                    govt_fees_notes:a.govt_fees_notes||'',
+                                    reimbursed:newVal,
+                                    reimbursed_amount:a.reimbursed_amount??null,
+                                  });
+                                  toast.success(newVal?'Marked as reimbursed':'Marked as not reimbursed');
+                                }catch{
+                                  setItems(prev=>prev.map(x=>x.id===a.id?{...x,reimbursed:!newVal}:x));
+                                  toast.error('Update failed');
+                                }
+                              }}
+                              className="px-2 py-1 transition-colors"
+                              style={{
+                                backgroundColor:isActive?(opt.v?'#10b981':'#94a3b8'):(isDark?'transparent':'transparent'),
+                                color:isActive?'#fff':(isDark?D.dimmer:'#94a3b8'),
+                              }}>
+                              {opt.l}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                     <div className="flex-shrink-0 flex items-center justify-center" onClick={e=>e.stopPropagation()}>
                       <button
