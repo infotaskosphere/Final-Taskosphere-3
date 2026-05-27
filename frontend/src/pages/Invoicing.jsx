@@ -5034,6 +5034,54 @@ const fetchAll = useCallback(async () => {
     }
   }, [companies]);
 
+  // Direct Print from actions column — opens print dialog without download flow
+  const handlePrintInvoice = useCallback(async (inv) => {
+    try {
+      toast.info('Preparing print…', { duration: 1200 });
+      const invData = (inv.items?.length || 0) > 0
+        ? inv
+        : (await api.get(`/invoices/${inv.id}`)).data;
+      const baseCompany = (companies || []).find(c => c.id === invData.company_id) || {};
+      const invSettings = getInvSettings(invData.company_id);
+      const company = {
+        ...baseCompany,
+        bank_name:        baseCompany.bank_name        || invSettings.bank_name        || '',
+        bank_account_no:  baseCompany.bank_account_no  || invSettings.bank_account_no  || '',
+        bank_account:     baseCompany.bank_account     || invSettings.bank_account_no  || '',
+        bank_ifsc:        baseCompany.bank_ifsc        || invSettings.bank_ifsc        || '',
+        bank_branch:      baseCompany.bank_branch      || invSettings.bank_branch      || '',
+        upi_id:           baseCompany.upi_id           || invSettings.upi_id           || '',
+        show_qr_code:     invSettings.show_qr_code     ?? true,
+        invoice_title:    invSettings.invoice_title    || 'Tax Invoice',
+        signatory_name:   invSettings.signatory_name   || '',
+        signatory_label:  invSettings.signatory_label  || 'Authorised Signatory',
+        footer_line:      invSettings.footer_line      || '',
+        signature_image:  baseCompany.signature_image  || invSettings.signature_image  || '',
+        logo_url:         baseCompany.logo_url         || baseCompany.logo             || '',
+      };
+      const html = generateInvoiceHTML(invData, {
+        company,
+        template:    invData.invoice_template     || invSettings.template     || 'classic',
+        theme:       invData.invoice_theme        || invSettings.theme        || 'classic_blue',
+        customColor: invData.invoice_custom_color || invSettings.custom_color || '#0D3B66',
+      });
+      const win = window.open('', '_blank', 'width=900,height=700');
+      if (!win) { toast.error('Allow pop-ups to print'); return; }
+      win.document.write(html);
+      win.document.close();
+      win.onload = () => {
+        const clientSlug = (invData.client_name || '').replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '_');
+        const invoiceSlug = (invData.invoice_no || '').replace(/[\/\s]/g, '_');
+        win.document.title = clientSlug ? `${clientSlug}_${invoiceSlug}` : invoiceSlug;
+        win.focus();
+        win.print();
+      };
+    } catch (err) {
+      console.error('Print error:', err);
+      toast.error('Print failed');
+    }
+  }, [companies]);
+
   const handleMarkSent = useCallback(async (inv) => {
     try { await api.post(`/invoices/${inv.id}/mark-sent`); fetchAll(); toast.success('Marked as sent'); } catch { toast.error('Failed'); }
   }, [fetchAll]);
@@ -5396,6 +5444,7 @@ const fetchAll = useCallback(async () => {
                         <button onClick={() => { setEditingInv(inv); setFormOpen(true); }} title="Edit" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-blue-900/30' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}><Edit className="h-3.5 w-3.5" /></button>
                         <button onClick={() => handleDuplicateInv(inv)} title="Duplicate" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-purple-400 hover:bg-purple-900/30' : 'text-slate-400 hover:text-purple-600 hover:bg-purple-50'}`}><Copy className="h-3.5 w-3.5" /></button>
                         <button onClick={() => handleDownloadPdf(inv)} title="Download PDF" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/30' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}><Download className="h-3.5 w-3.5" /></button>
+                        <button onClick={() => handlePrintInvoice(inv)} title="Print Invoice" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-indigo-400 hover:bg-indigo-900/30' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}><Printer className="h-3.5 w-3.5" /></button>
                         <button
                           onClick={() => handleWhatsAppInvoice(inv)}
                           title={inv.client_phone ? 'Send Invoice via WhatsApp' : 'Send via WhatsApp (no phone saved)'}
