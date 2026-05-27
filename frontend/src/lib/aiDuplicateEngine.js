@@ -547,33 +547,43 @@ export const detectDscDuplicates = (dscs) =>
   );
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// TASKS
+// TODOS
 // ═══════════════════════════════════════════════════════════════════════════════
 /**
- * TRUE DUPLICATE DEFINITION FOR TASKS
+ * TRUE DUPLICATE DEFINITION FOR TODOS
  * ─────────────────────────────────────
- * A task is a duplicate only when the SAME piece of work has been created more
- * than once in the system for the same client and the same team member.
+ * Todos in this system have: id, user_id, title, description, due_date, status.
+ * There are NO department, assigned_to, or client_name fields on todos.
  *
- * WHY TITLE ALONE IS NOT ENOUGH:
- *   "Trademark Application" is a common task title — there will be hundreds of
- *   them across different clients, assignees, and time periods. None of those
- *   are duplicates of each other.
+ * A todo is a duplicate when:
  *
- * REQUIRED COMBINATION for a true task duplicate:
- *   (A) Title similarity ≥ 70%     [the work description]
- *   AND
- *   (B) Same department/service    [the same area of work]
- *   AND
- *   (C) Same assignee              [the same person doing it]
- *   AND
- *   (D) Same client OR notes ≥ 50% similar [the same subject matter]
+ * TIER 1 — Exact duplicate (score ≥ 95):
+ *   Exact title match (normalised) for the same user → same task entered twice.
  *
- *   If (A)+(B)+(C) all match but (D) doesn't → POSSIBLE duplicate, low score.
- *   If (A)+(B)+(C)+(D) all match → HIGH confidence duplicate.
+ * TIER 2 — Near-duplicate (score ≥ 60):
+ *   Title similarity ≥ 75% for the same user, OR
+ *   Title similarity ≥ 85% across any users (admin view — same work entered by
+ *   two different people).
  *
- * THRESHOLD: 75
+ * TIER 3 — Possible duplicate (score ≥ 50):
+ *   Title similarity ≥ 60% for the same user AND description is also similar.
+ *
+ * Cross-user duplicates are allowed so that admins can catch cases where two
+ * team members added the same todo item (e.g. synced email tasks).
+ *
+ * NUMBER/ID extraction: titles containing an application number like
+ * "6749931" are treated as EXACT duplicates if the extracted number matches,
+ * regardless of surrounding text differences (e.g. different TM class suffix).
+ *
+ * THRESHOLD: 50
  */
+
+/** Extract all standalone number sequences of ≥ 5 digits from a string */
+const extractNumbers = (s) => {
+  const matches = (s || '').match(/\b\d{5,}\b/g);
+  return matches ? matches.map((n) => n.trim()) : [];
+};
+
 export const detectTodoDuplicates = (todos) =>
   groupDuplicates(
     todos,
@@ -581,93 +591,93 @@ export const detectTodoDuplicates = (todos) =>
       const reasons = [];
       let score = 0;
 
-      // ── (A) Title similarity — must be ≥ 70% ─────────────────────────────
-      const titleSim  = jaccardSim(a.title, b.title);
-      const titleTri  = trigramSim(a.title, b.title);
-      const titleBest = Math.max(titleSim, titleTri);
-      const exactTitle = norm(a.title || '') === norm(b.title || '');
+      const titleA = norm(a.title || '');
+      const titleB = norm(b.title || '');
+      if (!titleA || !titleB) return { score: 0, reasons: [], exact: false };
+
+      // ── DEFINITIVE: shared application/reference numbers in title ─────────
+      // e.g. "Examination Report — TM App No. 6749931 (Cl..." appear twice →
+      // same application number = same underlying work = definite duplicate.
+      const numsA = extractNumbers(a.title || '');
+      const numsB = extractNumbers(b.title || '');
+      const sharedNums = numsA.filter((n) => numsB.includes(n));
+      if (sharedNums.length > 0) {
+        // Shared number is a very strong signal — mark as exact duplicate
+        return {
+          score: 97,
+          reasons: [`Shared reference/application number: ${sharedNums.join(', ')}`],
+          exact: true,
+        };
+      }
+
+      // ── Title similarity ───────────────────────────────────────────────────
+      const exactTitle = titleA === titleB;
+      const titleSim   = Math.max(jaccardSim(a.title, b.title), trigramSim(a.title, b.title));
+
+      const sameUser = a.user_id && b.user_id && String(a.user_id) === String(b.user_id);
 
       if (exactTitle) {
-        score += 35; reasons.push('Exact title match');
-      } else if (titleBest >= 0.80) {
-        score += Math.round(titleBest * 32); reasons.push(`Title ${Math.round(titleBest * 100)}% similar`);
-      } else if (titleBest >= 0.70) {
-        score += Math.round(titleBest * 24); reasons.push(`Title ${Math.round(titleBest * 100)}% similar`);
+        score += 60;
+        reasons.push('Exact title match');
+      } else if (titleSim >= 0.85) {
+        score += Math.round(titleSim * 52);
+        reasons.push(`Title ${Math.round(titleSim * 100)}% similar`);
+      } else if (titleSim >= 0.70) {
+        score += Math.round(titleSim * 38);
+        reasons.push(`Title ${Math.round(titleSim * 100)}% similar`);
+      } else if (titleSim >= 0.55 && sameUser) {
+        // Lower threshold but only for same user — reduces false positives
+        score += Math.round(titleSim * 24);
+        reasons.push(`Title ${Math.round(titleSim * 100)}% similar (same owner)`);
       } else {
-        // Title not similar enough — not a duplicate regardless of other fields
+        // Title not similar enough — not worth flagging
         return { score: 0, reasons: [], exact: false };
       }
 
-      // ── (B) Department / service must match ───────────────────────────────
-      const deptA = norm(a.department || a.service || a.category || '');
-      const deptB = norm(b.department || b.service || b.category || '');
-
-      if (!deptA || !deptB || deptA !== deptB) {
-        // Different departments = different work areas = NOT a duplicate
-        // (e.g. "Trademark Application" in GST dept vs Trademark dept are different)
-        return { score: 0, reasons: [], exact: false };
+      // ── Same owner boosts confidence ──────────────────────────────────────
+      if (sameUser) {
+        score += 18;
+        reasons.push('Same owner — likely entered twice');
       }
-      score += 22; reasons.push(`Same department (${a.department || a.service || a.category})`);
 
-      // ── (C) Same assignee ─────────────────────────────────────────────────
-      const assigneeA = norm(a.assigned_to || String(a.user_id || ''));
-      const assigneeB = norm(b.assigned_to || String(b.user_id || ''));
-      const sameAssignee = assigneeA && assigneeB && assigneeA === assigneeB;
-
-      if (!sameAssignee) {
-        // Different people doing same-titled work in same dept is coordination, not duplication
-        return { score: 0, reasons: [], exact: false };
-      }
-      score += 20; reasons.push('Same assignee');
-
-      // ── (D) Client OR notes must corroborate ──────────────────────────────
-      let dCorroborated = false;
-
-      // Client name match
-      const clientA = normEntity(a.client_name || a.associated_with || a.client || '');
-      const clientB = normEntity(b.client_name || b.associated_with || b.client || '');
-      if (clientA && clientB) {
-        const cSim = bestSim(clientA, clientB);
-        if (cSim >= 0.65) {
-          score += Math.round(cSim * 18);
-          reasons.push(`Same client (${Math.round(cSim * 100)}% similar)`);
-          dCorroborated = true;
+      // ── Description / notes similarity ────────────────────────────────────
+      const descA = (a.description || a.notes || '').trim();
+      const descB = (b.description || b.notes || '').trim();
+      if (descA && descB) {
+        const dSim = Math.max(jaccardSim(descA, descB), trigramSim(descA, descB));
+        if (dSim >= 0.70) {
+          score += Math.round(dSim * 20);
+          reasons.push(`Description ${Math.round(dSim * 100)}% similar`);
+        } else if (dSim >= 0.45) {
+          score += Math.round(dSim * 12);
+          reasons.push(`Description partially similar (${Math.round(dSim * 100)}%)`);
         }
       }
 
-      // Notes / description overlap
-      const notesA = (a.notes || a.description || '').trim();
-      const notesB = (b.notes || b.description || '').trim();
-      if (notesA && notesB) {
-        const nSim = jaccardSim(notesA, notesB);
-        if (nSim >= 0.50) {
-          score += Math.round(nSim * 15);
-          reasons.push(`Notes ${Math.round(nSim * 100)}% similar`);
-          dCorroborated = true;
-        }
+      // ── Same due date ─────────────────────────────────────────────────────
+      if (a.due_date && b.due_date) {
+        try {
+          const dA = new Date(a.due_date).toDateString();
+          const dB = new Date(b.due_date).toDateString();
+          if (dA === dB && dA !== 'Invalid Date') {
+            score += 10;
+            reasons.push('Same due date');
+          }
+        } catch (_) { /* ignore invalid dates */ }
       }
 
-      // If neither client nor notes corroborated → cap score below threshold
-      if (!dCorroborated) {
-        // Title + dept + assignee match but we can't confirm same work subject
-        // Cap at 70 which is below the 75 threshold — won't be flagged
-        score = Math.min(score, 70);
+      // ── Same status (both pending or both completed) ──────────────────────
+      const stA = norm(a.status || '');
+      const stB = norm(b.status || '');
+      if (stA && stB && stA === stB) {
+        score += 5;
+        reasons.push(`Same status (${a.status})`);
       }
 
-      // ── Minor bonus signals ───────────────────────────────────────────────
-      const sameDate =
-        a.due_date && b.due_date &&
-        new Date(a.due_date).toDateString() === new Date(b.due_date).toDateString();
-      if (sameDate) { score += 6; reasons.push('Same due date'); }
-
-      if (a.priority && b.priority && norm(a.priority) === norm(b.priority)) {
-        score += 4; reasons.push(`Same priority (${a.priority})`);
-      }
-
-      const exact = exactTitle && sameAssignee && deptA === deptB && dCorroborated;
+      const exact = exactTitle && sameUser;
       return { score, reasons, exact };
     },
-    75  // Title + dept + assignee + (client or notes) all required
+    50  // Lower threshold — todos have fewer fields; title + owner is sufficient
   );
 
 // ═══════════════════════════════════════════════════════════════════════════════
