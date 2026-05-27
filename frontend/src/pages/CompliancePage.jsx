@@ -1276,6 +1276,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
   // Inline govt fee & SRN editing in tracker table
   const[editingFee,setEditingFee]=useState(null); // {id, amount, srn}
   const[savingFeeId,setSavingFeeId]=useState(null);
+  const[editingReimb,setEditingReimb]=useState(null); // {id, amount}
 
   const userMap=useMemo(()=>{const m={};(allUsers||[]).forEach(u=>{m[u.id]=u.full_name;});return m;},[allUsers]);
 
