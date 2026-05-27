@@ -2497,20 +2497,20 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 ) : (
                   <>
                     <div className={`grid gap-2 px-3 py-2 text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
-                      style={{ gridTemplateColumns: '120px 2fr 90px 110px 90px 1fr 160px 90px' }}>
+                      style={{ gridTemplateColumns: '100px 1fr 65px 100px 75px 120px 155px 75px' }}>
                       <div>Source</div>
                       <div>Title</div>
                       <div>FY</div>
                       <div>Due Date</div>
                       <div>Status</div>
-                      <div>Amount / SRN</div>
+                      <div>Amt / SRN</div>
                       <div>Reimbursed</div>
                       <div className="text-right">Actions</div>
                     </div>
                     {paymentRows.map(row => (
                       <div key={row.id}
                         className={`grid gap-2 items-center px-3 py-2.5 rounded-xl border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-white border-slate-200'}`}
-                        style={{ gridTemplateColumns: '120px 2fr 90px 110px 90px 1fr 160px 90px' }}>
+                        style={{ gridTemplateColumns: '100px 1fr 65px 100px 75px 120px 155px 75px' }}>
                         <div className="text-[11px] font-bold text-slate-500">{row.source}</div>
                         <div>
                           <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{row.title}</p>
