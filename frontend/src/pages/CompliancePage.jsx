@@ -8,7 +8,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import { format, parseISO, isPast } from 'date-fns';
+import { format, parseISO, isPast, differenceInDays } from 'date-fns';
 import {
   CheckCircle2, X, Plus, Upload, Search, ChevronDown,
   Users, Trash2, Edit2, Loader2, RefreshCw, ChevronRight,
@@ -2483,6 +2483,292 @@ function ComplianceCard({item,onClick,onEdit,onDelete,isDark,viewMode='board'}){
           <div className="flex items-center gap-1 text-[10px] font-bold" style={{color:cfg.color}}>Open<ChevronRight className="w-3 h-3"/></div>
         </div>
       </div>
+    </motion.div>
+  );
+}
+
+// ── Compliance Calendar Panel (embedded in Tracker) ─────────────────────────
+const CAL_STATUS_STYLES = {
+  pending:   { bg:'bg-amber-50 dark:bg-amber-900/20',   text:'text-amber-700',   border:'border-amber-200',   dot:'bg-amber-400',   label:'Pending'   },
+  completed: { bg:'bg-emerald-50 dark:bg-emerald-900/20',text:'text-emerald-700',border:'border-emerald-200',dot:'bg-emerald-400',label:'Completed' },
+  overdue:   { bg:'bg-red-50 dark:bg-red-900/20',        text:'text-red-700',     border:'border-red-200',     dot:'bg-red-400',     label:'Overdue'   },
+  upcoming:  { bg:'bg-blue-50 dark:bg-blue-900/20',      text:'text-blue-700',    border:'border-blue-200',    dot:'bg-blue-400',    label:'Upcoming'  },
+};
+
+function ComplianceCalendarPanel({ isDark }) {
+  const { user } = useAuth();
+  const [dueDates, setDueDates]       = useState([]);
+  const [calLoading, setCalLoading]   = useState(false);
+  const [collapsed, setCollapsed]     = useState(false);
+  const [calFilter, setCalFilter]     = useState('all');
+  const [calSearch, setCalSearch]     = useState('');
+  const [showAddCal, setShowAddCal]   = useState(false);
+  const [calForm, setCalForm]         = useState({ title:'', due_date:'', category:'Other', department:'OTHER', status:'pending', description:'' });
+  const [savingCal, setSavingCal]     = useState(false);
+  const [clients, setClients]         = useState([]);
+
+  const getCalStatus = useCallback((dd) => {
+    if (dd.status === 'completed') return 'completed';
+    const d = differenceInDays(new Date(dd.due_date), new Date());
+    return d < 0 ? 'overdue' : d <= 7 ? 'upcoming' : 'pending';
+  }, []);
+
+  const fetchCal = useCallback(async () => {
+    setCalLoading(true);
+    try { const r = await api.get('/duedates'); setDueDates(Array.isArray(r.data) ? r.data : []); }
+    catch { }
+    finally { setCalLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchCal(); api.get('/clients').then(r => setClients(r.data||[])).catch(()=>{}); }, [fetchCal]);
+
+  const calStats = useMemo(() => ({
+    total: dueDates.length,
+    upcoming: dueDates.filter(d => { const x = differenceInDays(new Date(d.due_date), new Date()); return d.status !== 'completed' && x >= 0 && x <= 7; }).length,
+    pending:  dueDates.filter(d => { const x = differenceInDays(new Date(d.due_date), new Date()); return d.status !== 'completed' && x > 7; }).length,
+    overdue:  dueDates.filter(d => { const x = differenceInDays(new Date(d.due_date), new Date()); return d.status !== 'completed' && x < 0; }).length,
+    completed: dueDates.filter(d => d.status === 'completed').length,
+  }), [dueDates]);
+
+  const filteredCal = useMemo(() => dueDates.filter(dd => {
+    const mq  = !calSearch || dd.title.toLowerCase().includes(calSearch.toLowerCase());
+    const mst = calFilter === 'all' || getCalStatus(dd) === calFilter;
+    return mq && mst;
+  }), [dueDates, calSearch, calFilter, getCalStatus]);
+
+  const handleSaveCal = async () => {
+    if (!calForm.title || !calForm.due_date) { toast.error('Title and due date are required'); return; }
+    setSavingCal(true);
+    try {
+      await api.post('/duedates', { ...calForm, due_date: new Date(calForm.due_date).toISOString(), reminder_days: 30 });
+      toast.success('Due date added!');
+      setShowAddCal(false);
+      setCalForm({ title:'', due_date:'', category:'Other', department:'OTHER', status:'pending', description:'' });
+      fetchCal();
+    } catch { toast.error('Failed to save due date'); }
+    finally { setSavingCal(false); }
+  };
+
+  const handleMarkDone = async (dd) => {
+    try {
+      await api.put(`/duedates/${dd.id}`, { ...dd, status: 'completed', due_date: new Date(dd.due_date).toISOString() });
+      fetchCal();
+      toast.success('Marked as completed');
+    } catch { toast.error('Failed to update'); }
+  };
+
+  return (
+    <motion.div variants={itemVariants} className="rounded-2xl border overflow-hidden"
+      style={{ backgroundColor: isDark ? D.card : '#fff', borderColor: isDark ? D.border : '#e2e8f0' }}>
+
+      {/* Panel Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b cursor-pointer"
+        style={{ backgroundColor: isDark ? D.raised : '#f8fafc', borderColor: isDark ? D.border : '#e2e8f0' }}
+        onClick={() => setCollapsed(c => !c)}>
+        <div className="flex items-center gap-2.5">
+          <div className="p-1.5 rounded-lg" style={{ backgroundColor: isDark ? 'rgba(31,111,178,0.2)' : '#dbeafe' }}>
+            <Calendar className="w-4 h-4" style={{ color: '#1F6FB2' }} />
+          </div>
+          <div>
+            <h3 className="font-bold text-sm" style={{ color: isDark ? D.text : '#0f172a' }}>Compliance Calendar</h3>
+            <p className="text-[11px]" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+              {calStats.total} deadlines · {calStats.overdue > 0 ? <span style={{color:'#EF4444'}}>{calStats.overdue} overdue</span> : 'none overdue'} · {calStats.upcoming} due soon
+            </p>
+          </div>
+          {calStats.overdue > 0 && (
+            <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-red-500 text-white">{calStats.overdue}</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={e => { e.stopPropagation(); setShowAddCal(true); }}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold text-white"
+            style={{ background: 'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
+            <Plus className="w-3 h-3" /> New Due Date
+          </button>
+          <ChevronDown className={`w-4 h-4 transition-transform ${collapsed ? '-rotate-90' : ''}`}
+            style={{ color: isDark ? D.dimmer : '#94a3b8' }} />
+        </div>
+      </div>
+
+      <AnimatePresence>
+        {!collapsed && (
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.25, ease: 'easeInOut' }}
+            style={{ overflow: 'hidden' }}>
+
+            {/* Stats row */}
+            <div className="grid grid-cols-5 divide-x border-b"
+              style={{ borderColor: isDark ? D.border : '#f1f5f9', divideColor: isDark ? D.border : '#f1f5f9' }}>
+              {[
+                { label: 'Total', val: calStats.total, color: '#1F6FB2', status: 'all' },
+                { label: 'Upcoming', val: calStats.upcoming, color: '#3B82F6', status: 'upcoming' },
+                { label: 'Pending', val: calStats.pending, color: '#F59E0B', status: 'pending' },
+                { label: 'Overdue', val: calStats.overdue, color: '#EF4444', status: 'overdue' },
+                { label: 'Completed', val: calStats.completed, color: '#1FAF5A', status: 'completed' },
+              ].map(s => (
+                <button key={s.status} onClick={() => setCalFilter(f => f === s.status ? 'all' : s.status)}
+                  className="flex flex-col items-center py-2.5 transition-all hover:opacity-80"
+                  style={{ backgroundColor: calFilter === s.status ? `${s.color}10` : 'transparent' }}>
+                  <span className="text-lg font-black tabular-nums" style={{ color: s.color }}>{s.val}</span>
+                  <span className="text-[10px] font-semibold" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>{s.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Search + filter bar */}
+            <div className="flex items-center gap-2 px-4 py-2 border-b" style={{ borderColor: isDark ? D.border : '#f1f5f9' }}>
+              <div className="relative flex-1 max-w-xs">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: isDark ? D.dimmer : '#94a3b8' }} />
+                <input value={calSearch} onChange={e => setCalSearch(e.target.value)} placeholder="Search due dates…"
+                  className="w-full pl-8 pr-3 py-1.5 border rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.text : '#1e293b' }} />
+              </div>
+              {['all','upcoming','overdue','pending','completed'].map(s => (
+                <button key={s} onClick={() => setCalFilter(f => f === s ? 'all' : s)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all capitalize ${calFilter===s?'border-blue-400':''}`}
+                  style={{
+                    backgroundColor: calFilter === s ? '#1F6FB215' : (isDark ? D.card : '#fff'),
+                    borderColor: calFilter === s ? '#1F6FB2' : (isDark ? D.border : '#e2e8f0'),
+                    color: calFilter === s ? '#1F6FB2' : (isDark ? D.dimmer : '#64748b'),
+                  }}>
+                  {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
+                </button>
+              ))}
+              <button onClick={fetchCal} className="p-1.5 rounded-lg ml-auto" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                <RefreshCw className={`w-3.5 h-3.5 ${calLoading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+
+            {/* Due dates list */}
+            <div style={{ maxHeight: 300, overflowY: 'auto', scrollbarWidth: 'thin' }}>
+              {calLoading && dueDates.length === 0 ? (
+                <div className="flex items-center justify-center py-10"><Loader2 className="w-5 h-5 text-blue-500 animate-spin" /></div>
+              ) : filteredCal.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 gap-2">
+                  <Calendar className="w-8 h-8" style={{ color: isDark ? D.border : '#d1d5db' }} />
+                  <p className="text-sm font-semibold" style={{ color: isDark ? D.muted : '#64748b' }}>No due dates found</p>
+                </div>
+              ) : filteredCal.map(dd => {
+                const ds = getCalStatus(dd);
+                const dLeft = differenceInDays(new Date(dd.due_date), new Date());
+                const sty = CAL_STATUS_STYLES[ds];
+                const stripeColor = ds === 'overdue' ? '#DC2626' : ds === 'upcoming' ? '#F59E0B' : ds === 'completed' ? '#1FAF5A' : '#94a3b8';
+                const rowBg = ds === 'overdue' ? (isDark ? 'rgba(220,38,38,0.06)' : '#fef2f2') :
+                              ds === 'upcoming' ? (isDark ? 'rgba(245,158,11,0.06)' : '#fffbeb') :
+                              ds === 'completed' ? (isDark ? 'rgba(31,175,90,0.04)' : '#f0fdf4') : 'transparent';
+                return (
+                  <div key={dd.id} className="relative flex items-center gap-3 px-4 py-2 border-b hover:opacity-90 transition-opacity"
+                    style={{ backgroundColor: rowBg, borderColor: isDark ? D.border : '#f1f5f9' }}>
+                    <div className="absolute left-0 top-0 h-full w-1 rounded-r" style={{ backgroundColor: stripeColor }} />
+                    <div className="flex-1 min-w-0 pl-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'} ${ds === 'completed' ? 'line-through opacity-60' : ''}`}>{dd.title}</p>
+                        <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${sty.bg} ${sty.text} ${sty.border}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${sty.dot}`} />{sty.label}
+                        </span>
+                        {dd.category && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: '#1F6FB215', color: '#1F6FB2' }}>{dd.category}</span>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs flex-shrink-0">
+                      <div className="flex items-center gap-1" style={{ color: isDark ? D.muted : '#64748b' }}>
+                        <Calendar className="w-3 h-3" />
+                        <span className="font-semibold">{format(new Date(dd.due_date), 'dd MMM yyyy')}</span>
+                      </div>
+                      {dd.status !== 'completed' ? (
+                        <span className={`font-bold tabular-nums text-[11px] ${dLeft < 0 ? 'text-red-500' : dLeft <= 7 ? 'text-amber-500' : (isDark ? 'text-slate-400' : 'text-slate-600')}`}>
+                          {dLeft < 0 ? `${Math.abs(dLeft)}d over` : `${dLeft}d left`}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold text-emerald-500">Done</span>
+                      )}
+                      {dd.status !== 'completed' && user?.role === 'admin' && (
+                        <button onClick={() => handleMarkDone(dd)}
+                          className="p-1 rounded-lg hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-colors" title="Mark as completed">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-between px-4 py-2.5 border-t"
+              style={{ backgroundColor: isDark ? D.raised : '#f8fafc', borderColor: isDark ? D.border : '#e2e8f0' }}>
+              <span className="text-xs" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                Showing <strong style={{ color: isDark ? D.text : '#0f172a' }}>{filteredCal.length}</strong> of <strong style={{ color: isDark ? D.text : '#0f172a' }}>{dueDates.length}</strong> due dates
+              </span>
+              {calFilter !== 'all' || calSearch ? (
+                <button onClick={() => { setCalFilter('all'); setCalSearch(''); }}
+                  className="flex items-center gap-1 text-xs font-semibold text-red-500 hover:text-red-700">
+                  <X className="w-3 h-3" /> Clear filters
+                </button>
+              ) : null}
+            </div>
+
+            {/* Add Due Date inline modal */}
+            <AnimatePresence>
+              {showAddCal && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-50 flex items-center justify-center p-4"
+                  style={{ backgroundColor: 'rgba(0,0,0,0.4)' }}
+                  onClick={() => setShowAddCal(false)}>
+                  <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+                    className="w-full max-w-md rounded-2xl border shadow-2xl p-6 space-y-4"
+                    style={{ backgroundColor: isDark ? D.card : '#fff', borderColor: isDark ? D.border : '#e2e8f0' }}
+                    onClick={e => e.stopPropagation()}>
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-bold text-base" style={{ color: isDark ? D.text : '#0f172a' }}>Add New Due Date</h3>
+                      <button onClick={() => setShowAddCal(false)} className="p-1 rounded-lg hover:opacity-70"><X className="w-4 h-4" style={{ color: isDark ? D.muted : '#64748b' }} /></button>
+                    </div>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-[11px] font-bold uppercase tracking-wider block mb-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Title *</label>
+                        <input value={calForm.title} onChange={e => setCalForm(f => ({ ...f, title: e.target.value }))} placeholder="e.g. GST Return Q4"
+                          className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.text : '#1e293b' }} />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[11px] font-bold uppercase tracking-wider block mb-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Due Date *</label>
+                          <input type="date" value={calForm.due_date} onChange={e => setCalForm(f => ({ ...f, due_date: e.target.value }))}
+                            className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.text : '#1e293b' }} />
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-bold uppercase tracking-wider block mb-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Category</label>
+                          <select value={calForm.category} onChange={e => setCalForm(f => ({ ...f, category: e.target.value }))}
+                            className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.text : '#1e293b' }}>
+                            {['GST','Income Tax','TDS','ROC','Audit','Trademark','RERA','FEMA','Other'].map(c => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold uppercase tracking-wider block mb-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Description</label>
+                        <textarea value={calForm.description} onChange={e => setCalForm(f => ({ ...f, description: e.target.value }))} rows={2} placeholder="Optional notes…"
+                          className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                          style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.text : '#1e293b' }} />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2 pt-2">
+                      <button onClick={() => setShowAddCal(false)} className="px-4 py-2 rounded-xl text-sm font-semibold border"
+                        style={{ borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.muted : '#64748b' }}>Cancel</button>
+                      <button onClick={handleSaveCal} disabled={savingCal || !calForm.title || !calForm.due_date}
+                        className="px-5 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-50"
+                        style={{ background: 'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
+                        {savingCal ? 'Saving…' : 'Add Due Date'}
+                      </button>
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
