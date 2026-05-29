@@ -51,6 +51,12 @@ class ReminderUpdate(BaseModel):
     priority: Optional[str] = None
     reminder_type: Optional[str] = None
     status: Optional[str] = None
+    # Trademark Hearing outcome fields
+    brand_name: Optional[str] = None
+    hearing_attended: Optional[str] = None   # "yes" | "no"
+    hearing_decision: Optional[str] = None   # "favourable" | "unfavourable"
+    hearing_adjourned: Optional[bool] = None
+    hearing_notes: Optional[str] = None
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
