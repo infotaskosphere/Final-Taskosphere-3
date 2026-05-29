@@ -591,7 +591,7 @@ export default function Reminders() {
           : undefined,
       };
       // Include TM Hearing fields if this is a trademark hearing
-      if (isTmHearing(formTitle)) {
+      if (isTmHearing(formTitle, editingReminder)) {
         payload.brand_name        = formBrandName.trim();
         payload.hearing_attended  = formAttended;
         payload.hearing_decision  = formDecision;
@@ -626,9 +626,17 @@ export default function Reminders() {
   };
 
   // Detect if a reminder is a Trademark Hearing (based on title keywords)
-  const isTmHearing = (title = "") => {
+  // Show TM/Hearing extra fields for ANY email-auto reminder, or any reminder whose
+  // title contains trademark/hearing keywords. Also accepts the reminder object directly.
+  const isTmHearing = (title = "", reminderObj = null) => {
+    if (reminderObj?.source === "email_auto") return true;
     const t = (title || "").toLowerCase();
-    return t.includes("trademark") || t.includes("hearing") || t.includes("tm app") || t.includes("show cause");
+    return (
+      t.includes("trademark") || t.includes("hearing") ||
+      t.includes("tm app")    || t.includes("show cause") ||
+      t.includes("registration certificate") || t.includes("certificate") ||
+      t.includes("ip india")  || t.includes("tmr.gov")
+    );
   };
 
   const resetForm = () => {
@@ -1369,7 +1377,7 @@ export default function Reminders() {
                 </div>
 
                 {/* ── Trademark Hearing Fields — shown only for TM hearing reminders ── */}
-                {isTmHearing(formTitle) && (
+                {isTmHearing(formTitle, editingReminder) && (
                   <>
                     {/* Divider */}
                     <div className="flex items-center gap-2 pt-1">
