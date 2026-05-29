@@ -20,7 +20,6 @@ const Attendance        = lazy(() => import("@/pages/Attendance.jsx"));
 const Reports           = lazy(() => import("@/pages/Reports.jsx"));
 const Clients           = lazy(() => import("@/pages/Clients.jsx"));
 const Users             = lazy(() => import("@/pages/Users.jsx"));
-const DueDates          = lazy(() => import("@/pages/DueDates.jsx"));
 const LeadsPage         = lazy(() => import("@/pages/Leads.jsx"));
 const VisitsPage        = lazy(() => import("@/pages/VisitsPage.jsx"));
 const EmailSettings     = lazy(() => import("@/components/EmailSettings.jsx"));
@@ -148,7 +147,8 @@ function AppRoutes() {
 
 
       {/* ── COMPLIANCE GROUP ── */}
-      <Route path="/duedates"           element={<Protected><PageLoader><DueDates /></PageLoader></Protected>} />
+      {/* /duedates now redirects to unified Compliance Tracker (calendar is embedded) */}
+      <Route path="/duedates"           element={<Navigate to="/compliance" replace />} />
       <Route path="/compliance"         element={<Permission permission="can_view_compliance"><PageLoader><CompliancePage /></PageLoader></Permission>} />
       <Route path="/gst-reconciliation" element={<Permission permission="can_view_gst_reconciliation"><PageLoader><GSTReconciliation /></PageLoader></Permission>} />
       <Route path="/trademark-sphere" element={<Permission permission="can_view_trademark_sphere"><PageLoader><TrademarkSphere /></PageLoader></Permission>} />
