@@ -145,10 +145,17 @@ async def update_reminder(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid reminder ID")
 
-    # Build update dict from non-None fields
+    # Build update dict from explicitly-set fields.
+    # For boolean hearing fields (e.g. hearing_adjourned=False) and string fields
+    # that may be intentionally set to empty (""), we must NOT skip them — only
+    # skip fields that were never sent (excluded by exclude_unset=True).
+    ALLOW_FALSY_FIELDS = {
+        "hearing_adjourned", "hearing_attended", "hearing_decision",
+        "hearing_notes", "brand_name",
+    }
     update_fields = {}
     for field, value in body.dict(exclude_unset=True).items():
-        if value is not None:
+        if value is not None or field in ALLOW_FALSY_FIELDS:
             update_fields[field] = value
 
     if not update_fields:
