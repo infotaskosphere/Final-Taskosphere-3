@@ -115,6 +115,19 @@ const emptyItem = () => ({
   item_details: '',
 });
 
+// Maps compliance category codes → invoice item description prefix
+// Used when auto-populating invoice items from compliance govt fees
+const COMPLIANCE_CATEGORY_LABELS = {
+  ROC:     'ROC',
+  GST:     'GST',
+  ITR:     'IT',
+  TDS:     'IT',
+  AUDIT:   'Audit',
+  PF_ESIC: 'PF/ESIC',
+  PT:      'PT',
+  OTHER:   'Other',
+};
+
 // Pure helper — no hooks, safe to call anywhere
 const fyRange = (year) => {
   if (!year || year === 'all') return null;
@@ -3633,7 +3646,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
     });
   }, []);
 
-  const handleClientSelect = useCallback((client) => {
+  const handleClientSelect = useCallback(async (client) => {
     if (!client) { setForm(p => ({ ...p, client_id: '', client_name: '', client_email: '', client_phone: '', client_address: '', client_state: '', client_gstin: '' })); return; }
     const addressParts = [client.address, client.city, client.state].filter(Boolean).join(', ');
     setForm(p => ({
@@ -3643,7 +3656,69 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
       client_gstin: client.client_gstin || client.gstin || '',
       is_interstate: p.supply_state ? (p.supply_state.toLowerCase() !== (client.state || '').toLowerCase()) : p.is_interstate,
     }));
-    toast.success(`Auto-filled from "${client.company_name}"`, { duration: 1500 });
+
+    // ── Auto-populate compliance govt fees into invoice items ──────────────────
+    // Fetch all compliance assignments for this client that have a govt fee amount + SRN
+    try {
+      const res = await api.get(`/compliance/by-client/${client.id}`, { params: { govt_fees: true } });
+      const complianceItems = (res.data?.items || []).filter(
+        item => item.govt_fees_amount > 0 && item.govt_fees_srn
+      );
+
+      if (complianceItems.length > 0) {
+        // Build invoice line items from compliance data
+        const newItems = complianceItems.map(item => {
+          const categoryLabel = COMPLIANCE_CATEGORY_LABELS[item.category] || item.category || 'Compliance';
+          const complianceName = item.name || '';
+          const srn = item.govt_fees_srn || '';
+          const amount = parseFloat(item.govt_fees_amount) || 0;
+
+          // Description: e.g. "ROC Filing Fees" / "GST Filing Fees" / "IT Filing Fees"
+          const description = `${categoryLabel} Filing Fees`;
+          // Item notes: compliance name + SRN
+          const item_details = [complianceName, srn ? `SRN: ${srn}` : ''].filter(Boolean).join(' | ');
+
+          return {
+            ...emptyItem(),
+            description,
+            unit_price: amount,
+            gst_rate: 0,      // Govt fees are typically not subject to GST
+            cgst_rate: 0,
+            sgst_rate: 0,
+            igst_rate: 0,
+            item_details,
+          };
+        });
+
+        // Calculate total reimbursed amount → goes into advance_received
+        const totalReimbursed = complianceItems.reduce((sum, item) => {
+          if (item.reimbursed) {
+            return sum + (parseFloat(item.reimbursed_amount ?? item.govt_fees_amount) || 0);
+          }
+          return sum;
+        }, 0);
+
+        setForm(p => ({
+          ...p,
+          // Keep any manually-added items; only replace the default blank item
+          items: (p.items.length === 1 && !p.items[0].description && p.items[0].unit_price === 0)
+            ? newItems
+            : [...newItems, ...p.items.filter(it => it.description || it.unit_price > 0)],
+          ...(totalReimbursed > 0 ? { advance_received: totalReimbursed } : {}),
+        }));
+
+        toast.success(
+          `Auto-filled ${newItems.length} compliance item${newItems.length > 1 ? 's' : ''}${totalReimbursed > 0 ? ` • ₹${totalReimbursed.toLocaleString('en-IN')} advance` : ''} from compliance`,
+          { duration: 3000 }
+        );
+      } else {
+        toast.success(`Auto-filled from "${client.company_name}"`, { duration: 1500 });
+      }
+    } catch (err) {
+      // Compliance fetch failed — still show the basic client fill toast
+      console.warn('Could not fetch compliance fees for client:', err);
+      toast.success(`Auto-filled from "${client.company_name}"`, { duration: 1500 });
+    }
   }, [clients]);
 
   const fillFromProduct = useCallback((idx, productId) => {
