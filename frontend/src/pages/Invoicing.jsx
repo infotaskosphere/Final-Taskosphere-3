@@ -3666,17 +3666,18 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
       );
 
       if (complianceItems.length > 0) {
-        // Build invoice line items from compliance data
+        // Build invoice line items from compliance data — one line per compliance entry
         const newItems = complianceItems.map(item => {
           const categoryLabel = COMPLIANCE_CATEGORY_LABELS[item.category] || item.category || 'Compliance';
           const complianceName = item.name || '';
           const srn = item.govt_fees_srn || '';
           const amount = parseFloat(item.govt_fees_amount) || 0;
 
-          // Description: e.g. "ROC Filing Fees" / "GST Filing Fees" / "IT Filing Fees"
-          const description = `${categoryLabel} Filing Fees`;
-          // Item notes: compliance name + SRN
-          const item_details = [complianceName, srn ? `SRN: ${srn}` : ''].filter(Boolean).join(' | ');
+          // Description: use the compliance tracker's own name as description
+          // e.g. "AOC-4 Filing", "MGT-7 / MGT-7A Filing", "GSTR-1 Monthly" — exactly as entered in compliance
+          const description = complianceName || `${categoryLabel} Govt Fees`;
+          // Item notes: category label + SRN
+          const item_details = [`${categoryLabel} Govt Fees`, srn ? `SRN: ${srn}` : ''].filter(Boolean).join(' | ');
 
           return {
             ...emptyItem(),
