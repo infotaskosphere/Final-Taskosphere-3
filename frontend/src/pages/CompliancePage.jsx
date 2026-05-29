@@ -16,7 +16,7 @@ import {
   ArrowLeft, StickyNote, ShieldCheck, AlertTriangle,
   Info, Repeat, LayoutGrid, List, MessageSquare, Send,
   BarChart3, ChevronLeft, TrendingUp, Settings2, Sparkles,
-  IndianRupee, Download, FileSpreadsheet,
+  IndianRupee, Download, FileSpreadsheet, Filter,
 } from 'lucide-react';
 import LayoutCustomizer from '@/components/layout/LayoutCustomizer';
 import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
@@ -1606,6 +1606,22 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
               className="w-full pl-8 pr-3 py-1.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.text:'#1e293b'}}/>
           </div>
+          {/* ── Status Filter Dropdown ── */}
+          <div className="relative">
+            <select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}
+              className="appearance-none pl-8 pr-3 py-1.5 border rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+              style={{
+                backgroundColor: statusFilter!=='all'?`${catCfg?.color||'#1F6FB2'}12`:(isDark?D.raised:'#f8fafc'),
+                borderColor: statusFilter!=='all'?(catCfg?.color||'#1F6FB2'):(isDark?D.border:'#e2e8f0'),
+                color: statusFilter!=='all'?(catCfg?.color||'#1F6FB2'):(isDark?D.muted:'#374151'),
+                minWidth: 130,
+              }}>
+              <option value="all">All Status</option>
+              {STATUSES.map(s=><option key={s} value={s}>{STATUS_CFG[s]?.label||s}</option>)}
+            </select>
+            <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none"
+              style={{color:statusFilter!=='all'?(catCfg?.color||'#1F6FB2'):(isDark?D.dimmer:'#94a3b8')}}/>
+          </div>
 {/* placeholder — bulk bar is rendered as floating overlay below */}
           <button onClick={()=>setShowAssign(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold border hover:opacity-80"
             style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.muted:'#374151'}}>
@@ -1776,8 +1792,8 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                 return(
                   <motion.div key={a.id}
                     className="group grid px-4 py-2.5 items-center gap-2 transition-colors"
-                    style={{gridTemplateColumns:'36px 44px 1fr 140px 110px 120px 110px 110px 200px 44px 84px 36px',backgroundColor:isSel?(isDark?'rgba(59,130,246,0.06)':'#eff6ff'):'transparent'}}
-                    whileHover={{backgroundColor:isDark?'rgba(255,255,255,0.03)':'#fafafa'}}>
+                    style={{gridTemplateColumns:'36px 44px 1fr 140px 110px 120px 110px 110px 200px 44px 84px 36px',backgroundColor:isSel?(isDark?'rgba(59,130,246,0.06)':'#eff6ff'):a.status==='filed'?(isDark?'rgba(31,175,90,0.10)':'#f0fdf4'):'transparent',borderLeft:a.status==='filed'?'3px solid #1FAF5A':'3px solid transparent'}}
+                    whileHover={{backgroundColor:a.status==='filed'?(isDark?'rgba(31,175,90,0.14)':'#dcfce7'):(isDark?'rgba(255,255,255,0.03)':'#fafafa')}}>
                     <div className="flex items-center justify-center">
                       <button onClick={()=>setSelectedIds(prev=>{const s=new Set(prev);isSel?s.delete(a.id):s.add(a.id);return s;})}
                         className="w-4 h-4 rounded border-2 flex items-center justify-center"
@@ -3594,6 +3610,10 @@ export default function CompliancePage(){
           /* ── CONTENT ── */
            if (sectionId === 'content') return (
             <React.Fragment key="content">
+              {/* ── Compliance Calendar embedded panel ── */}
+              {pageView === 'compliance' && (
+                <ComplianceCalendarPanel isDark={isDark} />
+              )}
               {pageView === 'govtfees' ? (
                 <motion.div variants={itemVariants} className="relative rounded-2xl border overflow-hidden"
                   style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0'}}>
