@@ -2511,17 +2511,21 @@ const CAL_STATUS_STYLES = {
   upcoming:  { bg:'bg-blue-50 dark:bg-blue-900/20',      text:'text-blue-700',    border:'border-blue-200',    dot:'bg-blue-400',    label:'Upcoming'  },
 };
 
-function ComplianceCalendarPanel({ isDark }) {
+function ComplianceCalendarPanel({ isDark, showAddCal, setShowAddCal }) {
   const { user } = useAuth();
-  const [dueDates, setDueDates]       = useState([]);
-  const [calLoading, setCalLoading]   = useState(false);
-  const [collapsed, setCollapsed]     = useState(false);
-  const [calFilter, setCalFilter]     = useState('all');
-  const [calSearch, setCalSearch]     = useState('');
-  const [showAddCal, setShowAddCal]   = useState(false);
-  const [calForm, setCalForm]         = useState({ title:'', due_date:'', category:'Other', department:'OTHER', status:'pending', description:'' });
-  const [savingCal, setSavingCal]     = useState(false);
-  const [clients, setClients]         = useState([]);
+  const [dueDates, setDueDates]     = useState([]);
+  const [calLoading, setCalLoading] = useState(false);
+  const [collapsed, setCollapsed]   = useState(false);
+  const [calFilter, setCalFilter]   = useState('all');
+  const [calSearch, setCalSearch]   = useState('');
+  const [calForm, setCalForm]       = useState({ title:'', due_date:'', category:'Other', department:'OTHER', status:'pending', description:'' });
+  const [savingCal, setSavingCal]   = useState(false);
+  // Calendar navigation
+  const [viewYear,  setViewYear]    = useState(() => new Date().getFullYear());
+  const [viewMonth, setViewMonth]   = useState(() => new Date().getMonth()); // 0-indexed
+
+  const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const DAY_NAMES   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
   const getCalStatus = useCallback((dd) => {
     if (dd.status === 'completed') return 'completed';
@@ -2532,25 +2536,49 @@ function ComplianceCalendarPanel({ isDark }) {
   const fetchCal = useCallback(async () => {
     setCalLoading(true);
     try { const r = await api.get('/duedates'); setDueDates(Array.isArray(r.data) ? r.data : []); }
-    catch { }
+    catch {}
     finally { setCalLoading(false); }
   }, []);
 
-  useEffect(() => { fetchCal(); api.get('/clients').then(r => setClients(r.data||[])).catch(()=>{}); }, [fetchCal]);
+  useEffect(() => { fetchCal(); }, [fetchCal]);
 
   const calStats = useMemo(() => ({
-    total: dueDates.length,
-    upcoming: dueDates.filter(d => { const x = differenceInDays(new Date(d.due_date), new Date()); return d.status !== 'completed' && x >= 0 && x <= 7; }).length,
-    pending:  dueDates.filter(d => { const x = differenceInDays(new Date(d.due_date), new Date()); return d.status !== 'completed' && x > 7; }).length,
-    overdue:  dueDates.filter(d => { const x = differenceInDays(new Date(d.due_date), new Date()); return d.status !== 'completed' && x < 0; }).length,
+    total:     dueDates.length,
+    upcoming:  dueDates.filter(d => { const x = differenceInDays(new Date(d.due_date), new Date()); return d.status !== 'completed' && x >= 0 && x <= 7; }).length,
+    pending:   dueDates.filter(d => { const x = differenceInDays(new Date(d.due_date), new Date()); return d.status !== 'completed' && x > 7; }).length,
+    overdue:   dueDates.filter(d => { const x = differenceInDays(new Date(d.due_date), new Date()); return d.status !== 'completed' && x < 0; }).length,
     completed: dueDates.filter(d => d.status === 'completed').length,
   }), [dueDates]);
 
+  // Group due dates by "YYYY-MM-DD" key for fast calendar lookup
+  const dateMap = useMemo(() => {
+    const m = {};
+    dueDates.forEach(dd => {
+      const key = dd.due_date ? String(dd.due_date).slice(0, 10) : null;
+      if (!key) return;
+      if (!m[key]) m[key] = [];
+      m[key].push(dd);
+    });
+    return m;
+  }, [dueDates]);
+
+  // Filtered list for the sidebar (search + status filter)
   const filteredCal = useMemo(() => dueDates.filter(dd => {
     const mq  = !calSearch || dd.title.toLowerCase().includes(calSearch.toLowerCase());
     const mst = calFilter === 'all' || getCalStatus(dd) === calFilter;
     return mq && mst;
   }), [dueDates, calSearch, calFilter, getCalStatus]);
+
+  // Due dates for current viewed month (for sidebar when no filter active)
+  const monthDueDates = useMemo(() => {
+    return dueDates.filter(dd => {
+      if (!dd.due_date) return false;
+      const d = new Date(dd.due_date);
+      return d.getFullYear() === viewYear && d.getMonth() === viewMonth;
+    }).sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
+  }, [dueDates, viewYear, viewMonth]);
+
+  const displayList = calSearch || calFilter !== 'all' ? filteredCal : monthDueDates;
 
   const handleSaveCal = async () => {
     if (!calForm.title || !calForm.due_date) { toast.error('Title and due date are required'); return; }
@@ -2573,12 +2601,27 @@ function ComplianceCalendarPanel({ isDark }) {
     } catch { toast.error('Failed to update'); }
   };
 
+  // Build calendar grid cells
+  const firstDayOfMonth = new Date(viewYear, viewMonth, 1).getDay();
+  const daysInMonth     = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const today           = new Date();
+  const cells = [];
+  for (let i = 0; i < firstDayOfMonth; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const prevMonth = () => { if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1); } else setViewMonth(m => m - 1); };
+  const nextMonth = () => { if (viewMonth === 11) { setViewMonth(0); setViewYear(y => y + 1); } else setViewMonth(m => m + 1); };
+  const goToday   = () => { setViewYear(today.getFullYear()); setViewMonth(today.getMonth()); };
+
+  const STATUS_DOT_COLOR = { overdue: '#EF4444', upcoming: '#F59E0B', pending: '#94a3b8', completed: '#1FAF5A' };
+
   return (
     <motion.div variants={itemVariants} className="rounded-2xl border overflow-hidden"
       style={{ backgroundColor: isDark ? D.card : '#fff', borderColor: isDark ? D.border : '#e2e8f0' }}>
 
       {/* Panel Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b cursor-pointer"
+      <div className="flex items-center justify-between px-4 py-3 border-b cursor-pointer select-none"
         style={{ backgroundColor: isDark ? D.raised : '#f8fafc', borderColor: isDark ? D.border : '#e2e8f0' }}
         onClick={() => setCollapsed(c => !c)}>
         <div className="flex items-center gap-2.5">
@@ -2588,18 +2631,18 @@ function ComplianceCalendarPanel({ isDark }) {
           <div>
             <h3 className="font-bold text-sm" style={{ color: isDark ? D.text : '#0f172a' }}>Compliance Calendar</h3>
             <p className="text-[11px]" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
-              {calStats.total} deadlines · {calStats.overdue > 0 ? <span style={{color:'#EF4444'}}>{calStats.overdue} overdue</span> : 'none overdue'} · {calStats.upcoming} due soon
+              {calStats.total} deadlines · {calStats.overdue > 0
+                ? <span style={{ color: '#EF4444' }}>{calStats.overdue} overdue</span>
+                : 'none overdue'} · {calStats.upcoming} due soon
             </p>
           </div>
           {calStats.overdue > 0 && (
             <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-red-500 text-white">{calStats.overdue}</span>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={e => { e.stopPropagation(); setShowAddCal(true); }}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold text-white"
-            style={{ background: 'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
-            <Plus className="w-3 h-3" /> New Due Date
+        <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+          <button onClick={fetchCal} className="p-1.5 rounded-lg hover:opacity-70" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+            <RefreshCw className={`w-3.5 h-3.5 ${calLoading ? 'animate-spin' : ''}`} />
           </button>
           <ChevronDown className={`w-4 h-4 transition-transform ${collapsed ? '-rotate-90' : ''}`}
             style={{ color: isDark ? D.dimmer : '#94a3b8' }} />
@@ -2613,175 +2656,310 @@ function ComplianceCalendarPanel({ isDark }) {
             style={{ overflow: 'hidden' }}>
 
             {/* Stats row */}
-            <div className="grid grid-cols-5 divide-x border-b"
-              style={{ borderColor: isDark ? D.border : '#f1f5f9', divideColor: isDark ? D.border : '#f1f5f9' }}>
+            <div className="grid grid-cols-5 border-b" style={{ borderColor: isDark ? D.border : '#f1f5f9' }}>
               {[
-                { label: 'Total', val: calStats.total, color: '#1F6FB2', status: 'all' },
-                { label: 'Upcoming', val: calStats.upcoming, color: '#3B82F6', status: 'upcoming' },
-                { label: 'Pending', val: calStats.pending, color: '#F59E0B', status: 'pending' },
-                { label: 'Overdue', val: calStats.overdue, color: '#EF4444', status: 'overdue' },
+                { label: 'Total',     val: calStats.total,     color: '#1F6FB2', status: 'all'       },
+                { label: 'Upcoming',  val: calStats.upcoming,  color: '#3B82F6', status: 'upcoming'  },
+                { label: 'Pending',   val: calStats.pending,   color: '#F59E0B', status: 'pending'   },
+                { label: 'Overdue',   val: calStats.overdue,   color: '#EF4444', status: 'overdue'   },
                 { label: 'Completed', val: calStats.completed, color: '#1FAF5A', status: 'completed' },
-              ].map(s => (
+              ].map((s, i) => (
                 <button key={s.status} onClick={() => setCalFilter(f => f === s.status ? 'all' : s.status)}
                   className="flex flex-col items-center py-2.5 transition-all hover:opacity-80"
-                  style={{ backgroundColor: calFilter === s.status ? `${s.color}10` : 'transparent' }}>
+                  style={{
+                    backgroundColor: calFilter === s.status ? `${s.color}12` : 'transparent',
+                    borderRight: i < 4 ? `1px solid ${isDark ? D.border : '#f1f5f9'}` : 'none',
+                  }}>
                   <span className="text-lg font-black tabular-nums" style={{ color: s.color }}>{s.val}</span>
                   <span className="text-[10px] font-semibold" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>{s.label}</span>
                 </button>
               ))}
             </div>
 
-            {/* Search + filter bar */}
-            <div className="flex items-center gap-2 px-4 py-2 border-b" style={{ borderColor: isDark ? D.border : '#f1f5f9' }}>
-              <div className="relative flex-1 max-w-xs">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: isDark ? D.dimmer : '#94a3b8' }} />
-                <input value={calSearch} onChange={e => setCalSearch(e.target.value)} placeholder="Search due dates…"
-                  className="w-full pl-8 pr-3 py-1.5 border rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.text : '#1e293b' }} />
-              </div>
-              {['all','upcoming','overdue','pending','completed'].map(s => (
-                <button key={s} onClick={() => setCalFilter(f => f === s ? 'all' : s)}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all capitalize ${calFilter===s?'border-blue-400':''}`}
-                  style={{
-                    backgroundColor: calFilter === s ? '#1F6FB215' : (isDark ? D.card : '#fff'),
-                    borderColor: calFilter === s ? '#1F6FB2' : (isDark ? D.border : '#e2e8f0'),
-                    color: calFilter === s ? '#1F6FB2' : (isDark ? D.dimmer : '#64748b'),
-                  }}>
-                  {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
-                </button>
-              ))}
-              <button onClick={fetchCal} className="p-1.5 rounded-lg ml-auto" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
-                <RefreshCw className={`w-3.5 h-3.5 ${calLoading ? 'animate-spin' : ''}`} />
-              </button>
-            </div>
+            {/* ── CALENDAR GRID + SIDEBAR ── */}
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px]" style={{ minHeight: 340 }}>
 
-            {/* Due dates list */}
-            <div style={{ maxHeight: 300, overflowY: 'auto', scrollbarWidth: 'thin' }}>
-              {calLoading && dueDates.length === 0 ? (
-                <div className="flex items-center justify-center py-10"><Loader2 className="w-5 h-5 text-blue-500 animate-spin" /></div>
-              ) : filteredCal.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-10 gap-2">
-                  <Calendar className="w-8 h-8" style={{ color: isDark ? D.border : '#d1d5db' }} />
-                  <p className="text-sm font-semibold" style={{ color: isDark ? D.muted : '#64748b' }}>No due dates found</p>
-                </div>
-              ) : filteredCal.map(dd => {
-                const ds = getCalStatus(dd);
-                const dLeft = differenceInDays(new Date(dd.due_date), new Date());
-                const sty = CAL_STATUS_STYLES[ds];
-                const stripeColor = ds === 'overdue' ? '#DC2626' : ds === 'upcoming' ? '#F59E0B' : ds === 'completed' ? '#1FAF5A' : '#94a3b8';
-                const rowBg = ds === 'overdue' ? (isDark ? 'rgba(220,38,38,0.06)' : '#fef2f2') :
-                              ds === 'upcoming' ? (isDark ? 'rgba(245,158,11,0.06)' : '#fffbeb') :
-                              ds === 'completed' ? (isDark ? 'rgba(31,175,90,0.04)' : '#f0fdf4') : 'transparent';
-                return (
-                  <div key={dd.id} className="relative flex items-center gap-3 px-4 py-2 border-b hover:opacity-90 transition-opacity"
-                    style={{ backgroundColor: rowBg, borderColor: isDark ? D.border : '#f1f5f9' }}>
-                    <div className="absolute left-0 top-0 h-full w-1 rounded-r" style={{ backgroundColor: stripeColor }} />
-                    <div className="flex-1 min-w-0 pl-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'} ${ds === 'completed' ? 'line-through opacity-60' : ''}`}>{dd.title}</p>
-                        <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${sty.bg} ${sty.text} ${sty.border}`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${sty.dot}`} />{sty.label}
-                        </span>
-                        {dd.category && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: '#1F6FB215', color: '#1F6FB2' }}>{dd.category}</span>}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3 text-xs flex-shrink-0">
-                      <div className="flex items-center gap-1" style={{ color: isDark ? D.muted : '#64748b' }}>
-                        <Calendar className="w-3 h-3" />
-                        <span className="font-semibold">{format(new Date(dd.due_date), 'dd MMM yyyy')}</span>
-                      </div>
-                      {dd.status !== 'completed' ? (
-                        <span className={`font-bold tabular-nums text-[11px] ${dLeft < 0 ? 'text-red-500' : dLeft <= 7 ? 'text-amber-500' : (isDark ? 'text-slate-400' : 'text-slate-600')}`}>
-                          {dLeft < 0 ? `${Math.abs(dLeft)}d over` : `${dLeft}d left`}
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-bold text-emerald-500">Done</span>
-                      )}
-                      {dd.status !== 'completed' && user?.role === 'admin' && (
-                        <button onClick={() => handleMarkDone(dd)}
-                          className="p-1 rounded-lg hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-colors" title="Mark as completed">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
+              {/* LEFT: Calendar Grid */}
+              <div className="border-r" style={{ borderColor: isDark ? D.border : '#f1f5f9' }}>
+
+                {/* Month navigation */}
+                <div className="flex items-center justify-between px-4 py-2.5 border-b"
+                  style={{ borderColor: isDark ? D.border : '#f1f5f9', backgroundColor: isDark ? D.raised : '#fafafa' }}>
+                  <button onClick={prevMonth}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center hover:opacity-70 transition-opacity border"
+                    style={{ backgroundColor: isDark ? D.card : '#fff', borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.muted : '#64748b' }}>
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-sm" style={{ color: isDark ? D.text : '#0f172a' }}>
+                      {MONTH_NAMES[viewMonth]} {viewYear}
+                    </span>
+                    <button onClick={goToday}
+                      className="px-2 py-0.5 rounded-md text-[10px] font-bold border transition-all hover:opacity-80"
+                      style={{ backgroundColor: isDark ? 'rgba(31,111,178,0.15)' : '#eff6ff', borderColor: '#1F6FB230', color: '#1F6FB2' }}>
+                      Today
+                    </button>
                   </div>
-                );
-              })}
-            </div>
 
-            {/* Footer */}
-            <div className="flex items-center justify-between px-4 py-2.5 border-t"
-              style={{ backgroundColor: isDark ? D.raised : '#f8fafc', borderColor: isDark ? D.border : '#e2e8f0' }}>
-              <span className="text-xs" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
-                Showing <strong style={{ color: isDark ? D.text : '#0f172a' }}>{filteredCal.length}</strong> of <strong style={{ color: isDark ? D.text : '#0f172a' }}>{dueDates.length}</strong> due dates
-              </span>
-              {calFilter !== 'all' || calSearch ? (
-                <button onClick={() => { setCalFilter('all'); setCalSearch(''); }}
-                  className="flex items-center gap-1 text-xs font-semibold text-red-500 hover:text-red-700">
-                  <X className="w-3 h-3" /> Clear filters
-                </button>
-              ) : null}
-            </div>
+                  <button onClick={nextMonth}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center hover:opacity-70 transition-opacity border"
+                    style={{ backgroundColor: isDark ? D.card : '#fff', borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.muted : '#64748b' }}>
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
 
-            {/* Add Due Date inline modal */}
-            <AnimatePresence>
-              {showAddCal && (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                  className="fixed inset-0 z-50 flex items-center justify-center p-4"
-                  style={{ backgroundColor: 'rgba(0,0,0,0.4)' }}
-                  onClick={() => setShowAddCal(false)}>
-                  <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-                    className="w-full max-w-md rounded-2xl border shadow-2xl p-6 space-y-4"
-                    style={{ backgroundColor: isDark ? D.card : '#fff', borderColor: isDark ? D.border : '#e2e8f0' }}
-                    onClick={e => e.stopPropagation()}>
-                    <div className="flex items-center justify-between">
-                      <h3 className="font-bold text-base" style={{ color: isDark ? D.text : '#0f172a' }}>Add New Due Date</h3>
-                      <button onClick={() => setShowAddCal(false)} className="p-1 rounded-lg hover:opacity-70"><X className="w-4 h-4" style={{ color: isDark ? D.muted : '#64748b' }} /></button>
-                    </div>
-                    <div className="space-y-3">
-                      <div>
-                        <label className="text-[11px] font-bold uppercase tracking-wider block mb-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Title *</label>
-                        <input value={calForm.title} onChange={e => setCalForm(f => ({ ...f, title: e.target.value }))} placeholder="e.g. GST Return Q4"
-                          className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.text : '#1e293b' }} />
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="text-[11px] font-bold uppercase tracking-wider block mb-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Due Date *</label>
-                          <input type="date" value={calForm.due_date} onChange={e => setCalForm(f => ({ ...f, due_date: e.target.value }))}
-                            className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.text : '#1e293b' }} />
+                {/* Day headers */}
+                <div className="grid grid-cols-7 border-b" style={{ borderColor: isDark ? D.border : '#f1f5f9' }}>
+                  {DAY_NAMES.map(d => (
+                    <div key={d} className="text-center py-1.5 text-[10px] font-black uppercase tracking-wider"
+                      style={{ color: isDark ? D.dimmer : '#94a3b8' }}>{d}</div>
+                  ))}
+                </div>
+
+                {/* Calendar cells */}
+                <div className="grid grid-cols-7">
+                  {cells.map((day, idx) => {
+                    if (!day) return (
+                      <div key={`empty-${idx}`} className="min-h-[60px] border-b border-r"
+                        style={{ borderColor: isDark ? D.border + '60' : '#f1f5f9' }} />
+                    );
+
+                    const mm  = String(viewMonth + 1).padStart(2, '0');
+                    const dd  = String(day).padStart(2, '0');
+                    const key = `${viewYear}-${mm}-${dd}`;
+                    const events = dateMap[key] || [];
+                    const isToday = today.getFullYear() === viewYear && today.getMonth() === viewMonth && today.getDate() === day;
+                    const isWeekend = (idx % 7 === 0) || (idx % 7 === 6);
+
+                    return (
+                      <div key={key}
+                        className="min-h-[60px] border-b border-r p-1 flex flex-col gap-0.5 transition-colors hover:opacity-90"
+                        style={{
+                          borderColor: isDark ? D.border + '60' : '#f1f5f9',
+                          backgroundColor: isToday
+                            ? isDark ? 'rgba(31,111,178,0.12)' : '#eff6ff'
+                            : isWeekend
+                            ? isDark ? 'rgba(255,255,255,0.01)' : '#fafafa'
+                            : 'transparent',
+                        }}>
+                        {/* Day number */}
+                        <div className="flex justify-end">
+                          <span className={`text-[11px] font-bold w-5 h-5 flex items-center justify-center rounded-full ${
+                            isToday ? 'bg-blue-600 text-white' : ''
+                          }`}
+                            style={{ color: isToday ? '#fff' : isWeekend ? (isDark ? '#64748b' : '#94a3b8') : (isDark ? D.muted : '#475569') }}>
+                            {day}
+                          </span>
                         </div>
-                        <div>
-                          <label className="text-[11px] font-bold uppercase tracking-wider block mb-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Category</label>
-                          <select value={calForm.category} onChange={e => setCalForm(f => ({ ...f, category: e.target.value }))}
-                            className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.text : '#1e293b' }}>
-                            {['GST','Income Tax','TDS','ROC','Audit','Trademark','RERA','FEMA','Other'].map(c => <option key={c} value={c}>{c}</option>)}
-                          </select>
+
+                        {/* Event chips */}
+                        <div className="flex flex-col gap-0.5 overflow-hidden">
+                          {events.slice(0, 2).map(ev => {
+                            const evStatus = getCalStatus(ev);
+                            const chipColor = evStatus === 'overdue' ? '#EF4444' : evStatus === 'upcoming' ? '#F59E0B' : evStatus === 'completed' ? '#1FAF5A' : '#1F6FB2';
+                            return (
+                              <div key={ev.id}
+                                title={ev.title}
+                                className="truncate text-[9px] font-bold px-1 py-0.5 rounded"
+                                style={{ backgroundColor: `${chipColor}18`, color: chipColor, lineHeight: '1.2' }}>
+                                {ev.title}
+                              </div>
+                            );
+                          })}
+                          {events.length > 2 && (
+                            <div className="text-[9px] font-bold px-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                              +{events.length - 2} more
+                            </div>
+                          )}
                         </div>
                       </div>
-                      <div>
-                        <label className="text-[11px] font-bold uppercase tracking-wider block mb-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Description</label>
-                        <textarea value={calForm.description} onChange={e => setCalForm(f => ({ ...f, description: e.target.value }))} rows={2} placeholder="Optional notes…"
-                          className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                          style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.text : '#1e293b' }} />
-                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Legend */}
+                <div className="flex items-center gap-4 px-4 py-2 border-t" style={{ borderColor: isDark ? D.border : '#f1f5f9' }}>
+                  {[
+                    { color: '#EF4444', label: 'Overdue'   },
+                    { color: '#F59E0B', label: 'Due soon'  },
+                    { color: '#1F6FB2', label: 'Pending'   },
+                    { color: '#1FAF5A', label: 'Completed' },
+                  ].map(l => (
+                    <div key={l.label} className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ backgroundColor: `${l.color}80` }} />
+                      <span className="text-[10px] font-semibold" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>{l.label}</span>
                     </div>
-                    <div className="flex justify-end gap-2 pt-2">
-                      <button onClick={() => setShowAddCal(false)} className="px-4 py-2 rounded-xl text-sm font-semibold border"
-                        style={{ borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.muted : '#64748b' }}>Cancel</button>
-                      <button onClick={handleSaveCal} disabled={savingCal || !calForm.title || !calForm.due_date}
-                        className="px-5 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-50"
-                        style={{ background: 'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
-                        {savingCal ? 'Saving…' : 'Add Due Date'}
+                  ))}
+                </div>
+              </div>
+
+              {/* RIGHT: Sidebar — due dates for current month (or filtered) */}
+              <div className="flex flex-col">
+                {/* Sidebar search + filter */}
+                <div className="px-3 py-2 border-b space-y-1.5" style={{ borderColor: isDark ? D.border : '#f1f5f9' }}>
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3" style={{ color: isDark ? D.dimmer : '#94a3b8' }} />
+                    <input value={calSearch} onChange={e => setCalSearch(e.target.value)} placeholder="Search…"
+                      className="w-full pl-7 pr-3 py-1.5 border rounded-lg text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.text : '#1e293b' }} />
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {['all','upcoming','overdue','pending','completed'].map(s => (
+                      <button key={s} onClick={() => setCalFilter(f => f === s ? 'all' : s)}
+                        className="px-2 py-0.5 rounded text-[10px] font-bold border capitalize transition-all"
+                        style={{
+                          backgroundColor: calFilter === s ? '#1F6FB215' : 'transparent',
+                          borderColor:     calFilter === s ? '#1F6FB2' : (isDark ? D.border : '#e2e8f0'),
+                          color:           calFilter === s ? '#1F6FB2' : (isDark ? D.dimmer : '#64748b'),
+                        }}>
+                        {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
                       </button>
-                    </div>
-                  </motion.div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+                    ))}
+                  </div>
+                </div>
 
+                {/* Sidebar heading */}
+                <div className="px-3 py-1.5 border-b" style={{ borderColor: isDark ? D.border : '#f1f5f9', backgroundColor: isDark ? D.raised + '80' : '#fafafa' }}>
+                  <p className="text-[10px] font-black uppercase tracking-wider" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                    {calSearch || calFilter !== 'all'
+                      ? `${filteredCal.length} matching`
+                      : `${MONTH_NAMES[viewMonth]} — ${monthDueDates.length} deadline${monthDueDates.length !== 1 ? 's' : ''}`}
+                  </p>
+                </div>
+
+                {/* Sidebar list */}
+                <div className="flex-1 overflow-y-auto" style={{ maxHeight: 340, scrollbarWidth: 'thin' }}>
+                  {calLoading && dueDates.length === 0 ? (
+                    <div className="flex items-center justify-center py-10">
+                      <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
+                    </div>
+                  ) : displayList.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-8 gap-2">
+                      <Calendar className="w-6 h-6" style={{ color: isDark ? D.border : '#d1d5db' }} />
+                      <p className="text-[11px] font-semibold text-center px-3" style={{ color: isDark ? D.muted : '#94a3b8' }}>
+                        {calSearch || calFilter !== 'all' ? 'No matching due dates' : `No deadlines in ${MONTH_NAMES[viewMonth]}`}
+                      </p>
+                    </div>
+                  ) : displayList.map(dd => {
+                    const ds = getCalStatus(dd);
+                    const dLeft = differenceInDays(new Date(dd.due_date), new Date());
+                    const dotColor = STATUS_DOT_COLOR[ds];
+                    const sty = CAL_STATUS_STYLES[ds];
+                    return (
+                      <div key={dd.id}
+                        className="flex items-start gap-2.5 px-3 py-2.5 border-b hover:opacity-90 transition-opacity"
+                        style={{ borderColor: isDark ? D.border + '60' : '#f1f5f9' }}>
+                        <div className="flex-shrink-0 mt-1 w-1.5 h-1.5 rounded-full" style={{ backgroundColor: dotColor }} />
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-[11px] font-semibold truncate ${isDark ? 'text-slate-200' : 'text-slate-800'} ${ds === 'completed' ? 'line-through opacity-50' : ''}`}>
+                            {dd.title}
+                          </p>
+                          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                            <span className="text-[10px]" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                              {format(new Date(dd.due_date), 'dd MMM')}
+                            </span>
+                            <span className={`inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${sty.bg} ${sty.text} ${sty.border}`}>
+                              <span className={`w-1 h-1 rounded-full ${sty.dot}`} />{sty.label}
+                            </span>
+                            {dd.category && (
+                              <span className="text-[9px] font-bold px-1 py-0.5 rounded" style={{ background: '#1F6FB215', color: '#1F6FB2' }}>{dd.category}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex-shrink-0 flex flex-col items-end gap-1">
+                          <span className={`text-[10px] font-bold tabular-nums ${dLeft < 0 ? 'text-red-500' : dLeft <= 7 ? 'text-amber-500' : (isDark ? 'text-slate-500' : 'text-slate-400')}`}>
+                            {dd.status === 'completed' ? '✓' : dLeft < 0 ? `${Math.abs(dLeft)}d over` : `${dLeft}d`}
+                          </span>
+                          {dd.status !== 'completed' && (user?.role === 'admin' || user?.role === 'manager') && (
+                            <button onClick={() => handleMarkDone(dd)}
+                              className="p-0.5 rounded hover:bg-emerald-50 text-slate-300 hover:text-emerald-600 transition-colors" title="Mark done">
+                              <CheckCircle2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Sidebar footer */}
+                <div className="px-3 py-2 border-t flex items-center justify-between"
+                  style={{ borderColor: isDark ? D.border : '#f1f5f9', backgroundColor: isDark ? D.raised + '80' : '#fafafa' }}>
+                  <span className="text-[10px]" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                    {dueDates.length} total
+                  </span>
+                  {(calFilter !== 'all' || calSearch) && (
+                    <button onClick={() => { setCalFilter('all'); setCalSearch(''); }}
+                      className="flex items-center gap-0.5 text-[10px] font-semibold text-red-500 hover:text-red-700">
+                      <X className="w-2.5 h-2.5" /> Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Add Due Date Modal — triggered from banner button */}
+      <AnimatePresence>
+        {showAddCal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ backgroundColor: 'rgba(0,0,0,0.4)' }}
+            onClick={() => setShowAddCal(false)}>
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-md rounded-2xl border shadow-2xl p-6 space-y-4"
+              style={{ backgroundColor: isDark ? D.card : '#fff', borderColor: isDark ? D.border : '#e2e8f0' }}
+              onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-base" style={{ color: isDark ? D.text : '#0f172a' }}>Add New Due Date</h3>
+                <button onClick={() => setShowAddCal(false)} className="p-1 rounded-lg hover:opacity-70">
+                  <X className="w-4 h-4" style={{ color: isDark ? D.muted : '#64748b' }} />
+                </button>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-wider block mb-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Title *</label>
+                  <input value={calForm.title} onChange={e => setCalForm(f => ({ ...f, title: e.target.value }))} placeholder="e.g. GST Return Q4"
+                    className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.text : '#1e293b' }} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider block mb-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Due Date *</label>
+                    <input type="date" value={calForm.due_date} onChange={e => setCalForm(f => ({ ...f, due_date: e.target.value }))}
+                      className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.text : '#1e293b' }} />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider block mb-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Category</label>
+                    <select value={calForm.category} onChange={e => setCalForm(f => ({ ...f, category: e.target.value }))}
+                      className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.text : '#1e293b' }}>
+                      {['GST','Income Tax','TDS','ROC','Audit','Trademark','RERA','FEMA','Other'].map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-wider block mb-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Description</label>
+                  <textarea value={calForm.description} onChange={e => setCalForm(f => ({ ...f, description: e.target.value }))} rows={2} placeholder="Optional notes…"
+                    className="w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                    style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.text : '#1e293b' }} />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button onClick={() => setShowAddCal(false)} className="px-4 py-2 rounded-xl text-sm font-semibold border"
+                  style={{ borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.muted : '#64748b' }}>Cancel</button>
+                <button onClick={handleSaveCal} disabled={savingCal || !calForm.title || !calForm.due_date}
+                  className="px-5 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-50"
+                  style={{ background: 'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
+                  {savingCal ? 'Saving…' : 'Add Due Date'}
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -2819,6 +2997,8 @@ export default function CompliancePage(){
   const [showDupDialog,  setShowDupDialog]  = useState(false);
   const [dupGroups,      setDupGroups]      = useState([]);
   const [detectingDups,  setDetectingDups]  = useState(false);
+  // Calendar "Add Due Date" modal — lifted from panel so banner button can trigger it
+  const [showAddCal,     setShowAddCal]     = useState(false);
 
   // ── Top-level page view: compliance types vs standalone Govt Fees ──
   const [pageView,        setPageView]        = useState('compliance'); // 'compliance' | 'govtfees'
@@ -3289,6 +3469,10 @@ export default function CompliancePage(){
                         <Plus className="w-4 h-4"/>Add Compliance
                       </button>
                     )}
+                    <button onClick={()=>setShowAddCal(true)}
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white border border-white/30 hover:bg-white/15 transition-all">
+                      <Calendar className="w-4 h-4"/>Add Due Date
+                    </button>
                     <button
                       onClick={handleDetectDuplicates}
                       disabled={detectingDups || compliance.length === 0}
@@ -3612,7 +3796,7 @@ export default function CompliancePage(){
             <React.Fragment key="content">
               {/* ── Compliance Calendar embedded panel ── */}
               {pageView === 'compliance' && (
-                <ComplianceCalendarPanel isDark={isDark} />
+                <ComplianceCalendarPanel isDark={isDark} showAddCal={showAddCal} setShowAddCal={setShowAddCal} />
               )}
               {pageView === 'govtfees' ? (
                 <motion.div variants={itemVariants} className="relative rounded-2xl border overflow-hidden"
