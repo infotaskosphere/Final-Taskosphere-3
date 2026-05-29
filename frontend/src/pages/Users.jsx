@@ -148,7 +148,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_view_all_clients: false,    // admin-granted only
       can_view_all_dsc: false,        // admin-granted only
       can_view_documents: false,      // admin-granted only
-      can_view_all_duedates: true,    // Compliance Calendar → VIEW (Own + Team)
+      can_view_all_duedates: true,    // Compliance Tracker (Calendar panel) → VIEW (Own + Team)
       can_view_reports: true,         // Reports → VIEW (Own + Team)
       can_view_attendance: true,      // Attendance → VIEW (Own + Team)
       can_view_all_leads: false,      // admin-granted only (Leads Pipeline not in default spec)
@@ -156,7 +156,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_edit_clients: false,        // admin-granted only
       can_edit_dsc: false,            // admin-granted only
       can_edit_documents: false,      // admin-granted only
-      can_edit_due_dates: true,       // Compliance Calendar → EDIT/UPDATE (Own + Team)
+      can_edit_due_dates: true,       // Compliance Tracker (Calendar panel) → EDIT/UPDATE (Own + Team)
       can_edit_users: false,          // admin-granted only
       can_download_reports: true,     // Reports → VIEW includes export (Own + Team)
       can_manage_users: false,        // admin-granted only
@@ -202,7 +202,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_view_all_clients: false,    // admin-granted only
       can_view_all_dsc: false,        // admin-granted only
       can_view_documents: false,      // admin-granted only
-      can_view_all_duedates: true,    // Compliance Calendar → VIEW (Own)
+      can_view_all_duedates: true,    // Compliance Tracker (Calendar panel) → VIEW (Own)
       can_view_reports: true,         // Reports → VIEW (Own)
       can_view_attendance: true,      // Attendance → VIEW (Own)
       can_view_all_leads: false,      // admin-granted only (Leads Pipeline not in default spec)
@@ -210,7 +210,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_edit_clients: false,        // admin-granted only
       can_edit_dsc: false,            // admin-granted only
       can_edit_documents: false,      // admin-granted only
-      can_edit_due_dates: true,       // Compliance Calendar → EDIT/UPDATE (Own)
+      can_edit_due_dates: true,       // Compliance Tracker (Calendar panel) → EDIT/UPDATE (Own)
       can_edit_users: false,          // admin-granted only
       can_download_reports: true,     // Reports → VIEW includes export (Own)
       can_manage_users: false,        // admin-granted only
@@ -278,7 +278,7 @@ const GLOBAL_PERMS = [
   { key: 'can_view_all_clients',             label: 'Master Client List',           desc: 'View all company legal entities',                        icon: Briefcase   },
   { key: 'can_view_all_dsc',                label: 'DSC Vault Access',             desc: 'View all Digital Signature Certificates',                icon: Fingerprint },
   { key: 'can_view_documents',              label: 'Document Library',             desc: 'Access physical document register',                      icon: FileText    },
-  { key: 'can_view_all_duedates',           label: 'Compliance Roadmap',           desc: 'View all upcoming statutory due dates',                  icon: Calendar    },
+  { key: 'can_view_all_duedates',           label: 'Compliance Calendar',           desc: 'View compliance due dates (embedded in Compliance Tracker)',            icon: Calendar    },
   { key: 'can_view_reports',               label: 'Analytics Dashboard',           desc: 'View performance and system-wide reports',               icon: BarChart2   },
   { key: 'can_view_todo_dashboard',         label: 'Todo Dashboard',               desc: 'Access global team todo overview',                       icon: CheckCircle },
   { key: 'can_view_audit_logs',             label: 'System Audit Trail',           desc: 'View activity logs and record histories',                icon: Activity    },
@@ -317,7 +317,7 @@ const EDIT_PERMS = [
   { key: 'can_edit_clients',   label: 'Modify Clients',   desc: 'Update client master data records',        icon: Edit        },
   { key: 'can_edit_dsc',       label: 'Modify DSC',       desc: 'Update certificate details and metadata',  icon: Fingerprint },
   { key: 'can_edit_documents', label: 'Modify Documents', desc: 'Change document records',                  icon: FileText    },
-  { key: 'can_edit_due_dates', label: 'Modify Due Dates', desc: 'Edit statutory compliance timelines',      icon: Calendar    },
+  { key: 'can_edit_due_dates', label: 'Modify Due Dates', desc: 'Add, edit & delete due dates in the Compliance Calendar panel',      icon: Calendar    },
   { key: 'can_edit_users',     label: 'Modify Users',     desc: 'Update user profiles and settings',        icon: UserIcon    },
 ];
 
