@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext.jsx';
 import { useActivityTracker } from '@/hooks/useActivityTracker';
 import {
   LayoutDashboard, CheckSquare, FileText, Clock, BarChart3,
-  Users, LogOut, Menu, Calendar, Activity, ChevronDown,
+  Users, LogOut, Menu, Activity, ChevronDown,
   PanelLeftClose, PanelLeftOpen, Target, Sun, Moon, MapPin,
   Settings, Mail, Receipt, X, KeyRound, BrainCircuit,
   CreditCard, Fingerprint, Bell, Shield, ShieldCheck, ArrowLeftRight, MessageCircle,
@@ -50,7 +50,7 @@ const NAV_GROUPS = [
     id: 'compliance',
     dividerLabel: 'Compliance',
     items: [
-      { path: '/duedates',           icon: Calendar,       label: 'Compliance Calendar' },
+      // Compliance Calendar is now embedded inside Compliance Tracker — single unified page
       { path: '/compliance',         icon: ShieldCheck,    label: 'Compliance Tracker',  permission: 'can_view_compliance' },
       { path: '/gst-reconciliation', icon: ArrowLeftRight, label: 'GST Reconciliation', permission: 'can_view_gst_reconciliation' },
       { path: '/trademark-sphere', icon: Shield, label: 'Trademark Sphere', permission: 'can_view_trademark_sphere' },
