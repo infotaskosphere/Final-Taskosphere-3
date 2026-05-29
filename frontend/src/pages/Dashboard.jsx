@@ -417,7 +417,7 @@ function DeadlineDetailModal({ due, onClose, navigate, isDark }) {
       headerTitle={due.title || 'Untitled Deadline'}
       footer={
         <FooterBtn isDark={isDark} muted icon={ArrowUpRight} label="View All Deadlines"
-          onClick={() => { onClose(); navigate('/duedates'); }} />
+          onClick={() => { onClose(); navigate('/compliance'); }} />
       }>
       <div className="flex flex-wrap gap-2">
         <Chip label={daysLeft <= 0 ? `${Math.abs(daysLeft)}d overdue` : `${daysLeft} days left`} color={chipColor} />
@@ -1999,7 +1999,7 @@ export default function Dashboard() {
               title="Upcoming Deadlines"
               subtitle="Overdue pinned · Next 30 days"
               badge={overdueDeadlineCount || undefined}
-              action={<Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-orange-400 hover:text-orange-300' : 'text-orange-500'}`} onClick={() => navigate('/duedates')}>View All</Button>}
+              action={<Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-orange-400 hover:text-orange-300' : 'text-orange-500'}`} onClick={() => navigate('/compliance')}>View All</Button>}
             />
             <div className="p-3">
               {sortedDueDates.length === 0
@@ -2402,7 +2402,7 @@ export default function Dashboard() {
               sub:'DSC Certs',
             },
             {
-              path:'/duedates',
+              path:'/compliance',
               icon:<CalendarIcon className={`h-4 w-4 ${stats?.upcoming_due_dates > 0 ? 'text-amber-500' : isDark ? 'text-slate-400' : 'text-slate-400'}`} />,
               iconBg: stats?.upcoming_due_dates > 0 ? isDark ? 'rgba(245,158,11,0.2)' : '#fffbeb' : isDark ? 'rgba(255,255,255,0.06)' : '#f8fafc',
               label:String(stats?.upcoming_due_dates || 0),
