@@ -241,7 +241,12 @@ function ReminderDetailPopup({ rem, isDark, isViewingOther, onClose, onEdit, onD
         <div
           className="px-8 py-7 relative overflow-hidden"
           style={{
-            background: `linear-gradient(135deg, ${isDue ? COLORS.coral : COLORS.purple}, ${COLORS.mediumBlue})`,
+            background: (() => {
+              if (rem.hearing_adjourned) return `linear-gradient(135deg, #ef4444, #b91c1c)`;       // Red — adjourned
+              if (rem.hearing_decision === "unfavourable") return `linear-gradient(135deg, #f59e0b, #d97706)`; // Amber — unfavourable
+              if (rem.hearing_decision === "favourable")   return `linear-gradient(135deg, #10b981, #059669)`; // Green — favourable
+              return `linear-gradient(135deg, ${isDue ? COLORS.coral : COLORS.purple}, ${COLORS.mediumBlue})`;
+            })(),
           }}
         >
           <div className="flex items-center justify-between">
@@ -274,7 +279,7 @@ function ReminderDetailPopup({ rem, isDark, isViewingOther, onClose, onEdit, onD
         </div>
 
         {/* Popup Body */}
-        <div className="px-8 py-6 space-y-5">
+        <div className="px-8 py-6 space-y-5 max-h-[65vh] overflow-y-auto">
           {/* Date & Time */}
           <div className={`flex items-start gap-3 p-4 rounded-2xl ${isDark ? "bg-slate-700/50" : "bg-slate-50"}`}>
             <Clock className={`h-5 w-5 flex-shrink-0 mt-0.5 ${isDue ? "text-red-500" : isDark ? "text-purple-400" : "text-purple-500"}`} />
@@ -297,6 +302,72 @@ function ReminderDetailPopup({ rem, isDark, isViewingOther, onClose, onEdit, onD
               <p className={`text-sm leading-relaxed ${isDark ? "text-slate-200" : "text-slate-700"}`}>
                 {stripHtml(rem.description)}
               </p>
+            </div>
+          )}
+
+          {/* ── Trademark / Hearing Outcome Details ── */}
+          {(rem.brand_name || rem.hearing_attended || rem.hearing_decision || rem.hearing_adjourned || rem.hearing_notes) && (
+            <div className={`rounded-2xl overflow-hidden border ${isDark ? "border-slate-600" : "border-slate-200"}`}>
+              {/* Section header */}
+              <div className={`px-4 py-2.5 flex items-center gap-2 ${isDark ? "bg-slate-700" : "bg-slate-100"}`}>
+                <span className="text-base">™</span>
+                <span className={`text-xs font-bold uppercase tracking-widest ${isDark ? "text-purple-300" : "text-purple-600"}`}>
+                  Hearing Outcome
+                </span>
+              </div>
+              <div className={`px-4 py-4 space-y-3 ${isDark ? "bg-slate-700/30" : "bg-white"}`}>
+                {/* Brand Name */}
+                {rem.brand_name && (
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Brand Name</span>
+                    <span className={`text-sm font-bold ${isDark ? "text-slate-100" : "text-slate-800"}`}>{rem.brand_name}</span>
+                  </div>
+                )}
+                {/* Attended */}
+                {rem.hearing_attended && (
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Attended</span>
+                    <span className={`text-xs font-bold px-3 py-1 rounded-full ${
+                      rem.hearing_attended === "yes"
+                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                        : "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300"
+                    }`}>
+                      {rem.hearing_attended === "yes" ? "✓ Yes" : "✗ No"}
+                    </span>
+                  </div>
+                )}
+                {/* Decision */}
+                {rem.hearing_decision && (
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Decision</span>
+                    <span className={`text-xs font-bold px-3 py-1 rounded-full ${
+                      rem.hearing_decision === "favourable"
+                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                        : "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                    }`}>
+                      {rem.hearing_decision === "favourable" ? "👍 Favourable" : "👎 Unfavourable"}
+                    </span>
+                  </div>
+                )}
+                {/* Adjourned */}
+                {rem.hearing_adjourned && (
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Adjourned</span>
+                    <span className="text-xs font-bold px-3 py-1 rounded-full bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                      📅 Yes — Adjourned
+                    </span>
+                  </div>
+                )}
+                {/* Hearing Notes */}
+                {rem.hearing_notes && (
+                  <div>
+                    <span className={`text-xs font-semibold block mb-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}>Hearing Notes</span>
+                    <p className={`text-sm leading-relaxed rounded-xl p-3 ${isDark ? "bg-slate-700 text-slate-200" : "bg-slate-50 text-slate-700"}`}>
+                      {rem.hearing_notes}
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -978,6 +1049,9 @@ export default function Reminders() {
                         const hasOverdue = dayReminders.some((r) =>
                           isPast(new Date(r.remind_at)),
                         );
+                        const hasAdjourned     = dayReminders.some(r => r.hearing_adjourned);
+                        const hasUnfavourable  = dayReminders.some(r => r.hearing_decision === "unfavourable");
+                        const hasFavourable    = dayReminders.some(r => r.hearing_decision === "favourable");
                         return (
                           <motion.div
                             key={dateKey}
@@ -1015,7 +1089,13 @@ export default function Reminders() {
                               {dayReminders.length > 0 && (
                                 <span
                                   className={`text-[9px] font-bold px-1 py-0.5 rounded-full ${
-                                    hasOverdue
+                                    hasAdjourned
+                                      ? "bg-red-500 text-white"
+                                    : hasUnfavourable
+                                      ? "bg-amber-500 text-white"
+                                    : hasFavourable
+                                      ? "bg-emerald-500 text-white"
+                                    : hasOverdue
                                       ? "bg-red-500 text-white"
                                       : "bg-purple-500 text-white"
                                   }`}
@@ -1034,13 +1114,15 @@ export default function Reminders() {
                                     openDetailPopup(rem);
                                   }}
                                   className={`text-[9px] sm:text-[10px] font-semibold px-1.5 py-0.5 rounded-md truncate cursor-pointer transition-all hover:opacity-80 ${
-                                    isPast(new Date(rem.remind_at))
-                                      ? isDark
-                                        ? "bg-red-900/30 text-red-400"
-                                        : "bg-red-100 text-red-600"
-                                      : isDark
-                                        ? "bg-purple-900/30 text-purple-400"
-                                        : "bg-purple-100 text-purple-700"
+                                    rem.hearing_adjourned
+                                      ? isDark ? "bg-red-900/40 text-red-300" : "bg-red-100 text-red-600"
+                                    : rem.hearing_decision === "unfavourable"
+                                      ? isDark ? "bg-amber-900/40 text-amber-300" : "bg-amber-100 text-amber-700"
+                                    : rem.hearing_decision === "favourable"
+                                      ? isDark ? "bg-emerald-900/40 text-emerald-300" : "bg-emerald-100 text-emerald-700"
+                                    : isPast(new Date(rem.remind_at))
+                                      ? isDark ? "bg-red-900/30 text-red-400" : "bg-red-100 text-red-600"
+                                      : isDark ? "bg-purple-900/30 text-purple-400" : "bg-purple-100 text-purple-700"
                                   }`}
                                 >
                                   {rem.title}
