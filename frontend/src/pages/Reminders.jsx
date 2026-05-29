@@ -418,7 +418,8 @@ function ReminderDetailPopup({ rem, isDark, isViewingOther, onClose, onEdit, onD
             <>
               <button
                 onClick={() => {
-                  onClose();
+                  // Don't call onClose() here — we want activePopupReminder to remain
+                  // set so the popup can re-open automatically once the edit is saved.
                   onEdit(rem);
                 }}
                 className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold border transition-colors ${
@@ -670,10 +671,15 @@ export default function Reminders() {
         payload.hearing_adjourned = formAdjourned;          // boolean — always send
         payload.hearing_notes     = formHearingNotes.trim() || null;
       }
-      await api.patch(`/email/reminders/${remId}`, payload);
+      const { data: savedReminder } = await api.patch(`/email/reminders/${remId}`, payload);
       toast.success("Reminder updated");
+      // Re-open the detail popup with the freshly-saved data immediately (no flicker).
+      // resetForm closes the edit sheet; then we restore the popup using the PATCH response.
+      const normalized = normalizeReminder(savedReminder);
       resetForm();
-      await fetchReminders();
+      setActivePopupReminder(normalized);
+      // Also refresh the full list in the background so calendar/list stay in sync
+      fetchReminders();
     } catch {
       toast.error("Failed to update reminder");
     }
@@ -722,6 +728,9 @@ export default function Reminders() {
     setFormDecision("");
     setFormAdjourned(false);
     setFormHearingNotes("");
+    // Note: activePopupReminder is intentionally NOT cleared here.
+    // After a save, handleUpdate sets it to the fresh API response.
+    // After a cancel, it remains as-is so the popup re-appears.
   };
 
   const startEdit = (rem) => {
