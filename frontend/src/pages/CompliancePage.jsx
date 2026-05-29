@@ -2520,6 +2520,10 @@ function ComplianceCalendarPanel({ isDark, showAddCal, setShowAddCal }) {
   const [calSearch, setCalSearch]   = useState('');
   const [calForm, setCalForm]       = useState({ title:'', due_date:'', category:'Other', department:'OTHER', status:'pending', description:'' });
   const [savingCal, setSavingCal]   = useState(false);
+  // Quick-add from calendar cell click
+  const [clickedDate, setClickedDate] = useState(null); // 'YYYY-MM-DD' string
+  const [quickForm, setQuickForm]   = useState({ title:'', category:'Other', description:'' });
+  const [savingQuick, setSavingQuick] = useState(false);
   // Calendar navigation
   const [viewYear,  setViewYear]    = useState(() => new Date().getFullYear());
   const [viewMonth, setViewMonth]   = useState(() => new Date().getMonth()); // 0-indexed
@@ -2578,7 +2582,9 @@ function ComplianceCalendarPanel({ isDark, showAddCal, setShowAddCal }) {
     }).sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
   }, [dueDates, viewYear, viewMonth]);
 
-  const displayList = calSearch || calFilter !== 'all' ? filteredCal : monthDueDates;
+  const displayList = clickedDate
+    ? (dateMap[clickedDate] || [])
+    : calSearch || calFilter !== 'all' ? filteredCal : monthDueDates;
 
   const handleSaveCal = async () => {
     if (!calForm.title || !calForm.due_date) { toast.error('Title and due date are required'); return; }
@@ -2599,6 +2605,27 @@ function ComplianceCalendarPanel({ isDark, showAddCal, setShowAddCal }) {
       fetchCal();
       toast.success('Marked as completed');
     } catch { toast.error('Failed to update'); }
+  };
+
+  const handleSaveQuick = async () => {
+    if (!quickForm.title || !clickedDate) { toast.error('Title is required'); return; }
+    setSavingQuick(true);
+    try {
+      await api.post('/duedates', {
+        title: quickForm.title,
+        due_date: new Date(clickedDate).toISOString(),
+        category: quickForm.category,
+        department: 'OTHER',
+        status: 'pending',
+        description: quickForm.description || '',
+        reminder_days: 30,
+      });
+      toast.success('Due date added!');
+      setClickedDate(null);
+      setQuickForm({ title:'', category:'Other', description:'' });
+      fetchCal();
+    } catch { toast.error('Failed to save due date'); }
+    finally { setSavingQuick(false); }
   };
 
   // Build calendar grid cells
@@ -2731,25 +2758,41 @@ function ComplianceCalendarPanel({ isDark, showAddCal, setShowAddCal }) {
                     const events = dateMap[key] || [];
                     const isToday = today.getFullYear() === viewYear && today.getMonth() === viewMonth && today.getDate() === day;
                     const isWeekend = (idx % 7 === 0) || (idx % 7 === 6);
+                    const isClickedDate = clickedDate === key;
 
                     return (
                       <div key={key}
-                        className="min-h-[60px] border-b border-r p-1 flex flex-col gap-0.5 transition-colors hover:opacity-90"
+                        className="min-h-[60px] border-b border-r p-1 flex flex-col gap-0.5 transition-all cursor-pointer group/cell"
+                        title={`Click to add compliance on ${key}`}
+                        onClick={() => {
+                          setClickedDate(key);
+                          setQuickForm({ title:'', category:'Other', description:'' });
+                        }}
                         style={{
                           borderColor: isDark ? D.border + '60' : '#f1f5f9',
-                          backgroundColor: isToday
+                          backgroundColor: isClickedDate
+                            ? isDark ? 'rgba(31,111,178,0.22)' : '#dbeafe'
+                            : isToday
                             ? isDark ? 'rgba(31,111,178,0.12)' : '#eff6ff'
                             : isWeekend
                             ? isDark ? 'rgba(255,255,255,0.01)' : '#fafafa'
                             : 'transparent',
+                          outline: isClickedDate ? '2px solid #1F6FB2' : 'none',
+                          outlineOffset: '-1px',
                         }}>
-                        {/* Day number */}
-                        <div className="flex justify-end">
+                        {/* Day number row */}
+                        <div className="flex items-center justify-between">
                           <span className={`text-[11px] font-bold w-5 h-5 flex items-center justify-center rounded-full ${
                             isToday ? 'bg-blue-600 text-white' : ''
                           }`}
                             style={{ color: isToday ? '#fff' : isWeekend ? (isDark ? '#64748b' : '#94a3b8') : (isDark ? D.muted : '#475569') }}>
                             {day}
+                          </span>
+                          {/* + button on hover */}
+                          <span
+                            className="opacity-0 group-hover/cell:opacity-100 transition-opacity w-4 h-4 rounded flex items-center justify-center text-[10px] font-black"
+                            style={{ backgroundColor: '#1F6FB220', color: '#1F6FB2' }}>
+                            +
                           </span>
                         </div>
 
@@ -2778,8 +2821,9 @@ function ComplianceCalendarPanel({ isDark, showAddCal, setShowAddCal }) {
                   })}
                 </div>
 
-                {/* Legend */}
-                <div className="flex items-center gap-4 px-4 py-2 border-t" style={{ borderColor: isDark ? D.border : '#f1f5f9' }}>
+                {/* Legend + hint */}
+                <div className="flex items-center justify-between px-4 py-2 border-t" style={{ borderColor: isDark ? D.border : '#f1f5f9' }}>
+                  <div className="flex items-center gap-4">
                   {[
                     { color: '#EF4444', label: 'Overdue'   },
                     { color: '#F59E0B', label: 'Due soon'  },
@@ -2791,6 +2835,10 @@ function ComplianceCalendarPanel({ isDark, showAddCal, setShowAddCal }) {
                       <span className="text-[10px] font-semibold" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>{l.label}</span>
                     </div>
                   ))}
+                  </div>
+                  <span className="text-[10px] font-semibold flex items-center gap-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                    <Plus className="w-3 h-3" /> Click any date to add
+                  </span>
                 </div>
               </div>
 
@@ -2820,12 +2868,19 @@ function ComplianceCalendarPanel({ isDark, showAddCal, setShowAddCal }) {
                 </div>
 
                 {/* Sidebar heading */}
-                <div className="px-3 py-1.5 border-b" style={{ borderColor: isDark ? D.border : '#f1f5f9', backgroundColor: isDark ? D.raised + '80' : '#fafafa' }}>
+                <div className="px-3 py-1.5 border-b flex items-center justify-between" style={{ borderColor: isDark ? D.border : '#f1f5f9', backgroundColor: isDark ? D.raised + '80' : '#fafafa' }}>
                   <p className="text-[10px] font-black uppercase tracking-wider" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
-                    {calSearch || calFilter !== 'all'
+                    {clickedDate
+                      ? (() => { try { const [y,m,d]=clickedDate.split('-'); return new Date(Number(y),Number(m)-1,Number(d)).toLocaleDateString('en-IN',{day:'numeric',month:'short'}); } catch { return clickedDate; } })() + ` — ${(dateMap[clickedDate]||[]).length} event${(dateMap[clickedDate]||[]).length!==1?'s':''}`
+                      : calSearch || calFilter !== 'all'
                       ? `${filteredCal.length} matching`
                       : `${MONTH_NAMES[viewMonth]} — ${monthDueDates.length} deadline${monthDueDates.length !== 1 ? 's' : ''}`}
                   </p>
+                  {clickedDate && (
+                    <button onClick={() => setClickedDate(null)} className="text-[10px] font-bold hover:opacity-70 flex items-center gap-0.5" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                      <X className="w-2.5 h-2.5" /> Clear
+                    </button>
+                  )}
                 </div>
 
                 {/* Sidebar list */}
@@ -2838,8 +2893,16 @@ function ComplianceCalendarPanel({ isDark, showAddCal, setShowAddCal }) {
                     <div className="flex flex-col items-center justify-center py-8 gap-2">
                       <Calendar className="w-6 h-6" style={{ color: isDark ? D.border : '#d1d5db' }} />
                       <p className="text-[11px] font-semibold text-center px-3" style={{ color: isDark ? D.muted : '#94a3b8' }}>
-                        {calSearch || calFilter !== 'all' ? 'No matching due dates' : `No deadlines in ${MONTH_NAMES[viewMonth]}`}
+                        {clickedDate ? 'No events on this date' : calSearch || calFilter !== 'all' ? 'No matching due dates' : `No deadlines in ${MONTH_NAMES[viewMonth]}`}
                       </p>
+                      {clickedDate && (
+                        <button
+                          onClick={() => { /* already open via state */ }}
+                          className="flex items-center gap-1 text-[11px] font-bold px-3 py-1.5 rounded-lg transition-all hover:opacity-80"
+                          style={{ backgroundColor: '#1F6FB215', color: '#1F6FB2', border: '1px solid #1F6FB230' }}>
+                          <Plus className="w-3 h-3" /> Add compliance for this date
+                        </button>
+                      )}
                     </div>
                   ) : displayList.map(dd => {
                     const ds = getCalStatus(dd);
@@ -2889,12 +2952,22 @@ function ComplianceCalendarPanel({ isDark, showAddCal, setShowAddCal }) {
                   <span className="text-[10px]" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
                     {dueDates.length} total
                   </span>
-                  {(calFilter !== 'all' || calSearch) && (
-                    <button onClick={() => { setCalFilter('all'); setCalSearch(''); }}
-                      className="flex items-center gap-0.5 text-[10px] font-semibold text-red-500 hover:text-red-700">
-                      <X className="w-2.5 h-2.5" /> Clear
-                    </button>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {clickedDate && (
+                      <button
+                        onClick={() => { /* Quick add modal already open */ }}
+                        className="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all hover:opacity-80"
+                        style={{ backgroundColor: '#1F6FB215', color: '#1F6FB2', border: '1px solid #1F6FB230' }}>
+                        <Plus className="w-3 h-3" /> Add for this date
+                      </button>
+                    )}
+                    {(calFilter !== 'all' || calSearch) && (
+                      <button onClick={() => { setCalFilter('all'); setCalSearch(''); }}
+                        className="flex items-center gap-0.5 text-[10px] font-semibold text-red-500 hover:text-red-700">
+                        <X className="w-2.5 h-2.5" /> Clear
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -2958,6 +3031,106 @@ function ComplianceCalendarPanel({ isDark, showAddCal, setShowAddCal }) {
                   style={{ background: 'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
                   {savingCal ? 'Saving…' : 'Add Due Date'}
                 </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Quick-Add modal: triggered by clicking a calendar date ── */}
+      <AnimatePresence>
+        {clickedDate && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+            style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
+            onClick={() => setClickedDate(null)}>
+            <motion.div
+              initial={{ scale: 0.93, y: 16, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.93, y: 16, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 260, damping: 22 }}
+              className="w-full max-w-sm rounded-2xl border shadow-2xl overflow-hidden"
+              style={{ backgroundColor: isDark ? D.card : '#fff', borderColor: isDark ? D.border : '#e2e8f0' }}
+              onClick={e => e.stopPropagation()}>
+              {/* Header */}
+              <div className="px-5 py-4 text-white flex items-center justify-between"
+                style={{ background: 'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <Calendar className="w-4 h-4 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-blue-200 mb-0.5">Add Compliance</p>
+                    <h3 className="text-base font-black">
+                      {(() => {
+                        try {
+                          const [y, m, d] = clickedDate.split('-');
+                          return new Date(Number(y), Number(m)-1, Number(d)).toLocaleDateString('en-IN', { day:'numeric', month:'long', year:'numeric' });
+                        } catch { return clickedDate; }
+                      })()}
+                    </h3>
+                  </div>
+                </div>
+                <button onClick={() => setClickedDate(null)} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center">
+                  <X className="w-4 h-4 text-white" />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="p-5 space-y-4">
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-wider block mb-1.5" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Title *</label>
+                  <input
+                    autoFocus
+                    value={quickForm.title}
+                    onChange={e => setQuickForm(f => ({ ...f, title: e.target.value }))}
+                    onKeyDown={e => { if (e.key === 'Enter' && quickForm.title) handleSaveQuick(); }}
+                    placeholder="e.g. GST Return Q4, FORM 11…"
+                    className="w-full px-3.5 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                    style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#d1d5db', color: isDark ? D.text : '#1e293b' }} />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-wider block mb-1.5" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Category</label>
+                  <select value={quickForm.category} onChange={e => setQuickForm(f => ({ ...f, category: e.target.value }))}
+                    className="w-full px-3.5 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                    style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#d1d5db', color: isDark ? D.text : '#1e293b' }}>
+                    {['GST','Income Tax','TDS','ROC','Audit','Trademark','RERA','FEMA','Other'].map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-wider block mb-1.5" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Notes (optional)</label>
+                  <textarea value={quickForm.description} onChange={e => setQuickForm(f => ({ ...f, description: e.target.value }))}
+                    rows={2} placeholder="Any notes…"
+                    className="w-full px-3.5 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none transition-all"
+                    style={{ backgroundColor: isDark ? D.raised : '#fff', borderColor: isDark ? D.border : '#d1d5db', color: isDark ? D.text : '#1e293b' }} />
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="px-5 py-4 border-t flex items-center justify-between"
+                style={{ borderColor: isDark ? D.border : '#f1f5f9', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
+                <button onClick={() => setClickedDate(null)}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold border transition-all hover:opacity-80"
+                  style={{ borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.muted : '#64748b', backgroundColor: 'transparent' }}>
+                  Cancel
+                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setShowAddCal(true);
+                      setCalForm(f => ({ ...f, due_date: clickedDate, title: quickForm.title, category: quickForm.category, description: quickForm.description }));
+                      setClickedDate(null);
+                    }}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold border transition-all hover:opacity-80"
+                    style={{ borderColor: isDark ? 'rgba(31,111,178,0.4)' : '#bfdbfe', color: '#1F6FB2', backgroundColor: isDark ? 'rgba(31,111,178,0.1)' : '#eff6ff' }}>
+                    More Options
+                  </button>
+                  <button onClick={handleSaveQuick} disabled={savingQuick || !quickForm.title}
+                    className="px-5 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-50 flex items-center gap-2 transition-all hover:shadow-md"
+                    style={{ background: 'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
+                    {savingQuick ? <><Loader2 className="w-4 h-4 animate-spin" />Saving…</> : <><CheckCircle2 className="w-4 h-4" />Add</>}
+                  </button>
+                </div>
               </div>
             </motion.div>
           </motion.div>
