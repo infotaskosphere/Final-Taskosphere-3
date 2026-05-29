@@ -661,13 +661,14 @@ export default function Reminders() {
           ? new Date(formDatetime).toISOString()
           : undefined,
       };
-      // Include TM Hearing fields if this is a trademark hearing
+      // Include TM Hearing fields if this is a trademark hearing.
+      // Always send these — even empty/false — so the backend can clear old values.
       if (isTmHearing(formTitle, editingReminder)) {
-        payload.brand_name        = formBrandName.trim();
-        payload.hearing_attended  = formAttended;
-        payload.hearing_decision  = formDecision;
-        payload.hearing_adjourned = formAdjourned;
-        payload.hearing_notes     = formHearingNotes.trim();
+        payload.brand_name        = formBrandName.trim()   || null;
+        payload.hearing_attended  = formAttended           || null;
+        payload.hearing_decision  = formDecision           || null;
+        payload.hearing_adjourned = formAdjourned;          // boolean — always send
+        payload.hearing_notes     = formHearingNotes.trim() || null;
       }
       await api.patch(`/email/reminders/${remId}`, payload);
       toast.success("Reminder updated");
