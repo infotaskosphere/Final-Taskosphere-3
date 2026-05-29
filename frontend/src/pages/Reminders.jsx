@@ -414,6 +414,13 @@ export default function Reminders() {
   const [formDesc, setFormDesc] = useState("");
   const [formDatetime, setFormDatetime] = useState("");
 
+  // Trademark Hearing extra fields (only shown when reminder title contains trademark/hearing keywords)
+  const [formBrandName, setFormBrandName] = useState("");
+  const [formAttended, setFormAttended] = useState("");       // "yes" | "no" | ""
+  const [formDecision, setFormDecision] = useState("");       // "favourable" | "unfavourable" | ""
+  const [formAdjourned, setFormAdjourned] = useState(false);
+  const [formHearingNotes, setFormHearingNotes] = useState("");
+
   // Layout customizer
   const REM_SECTIONS = ["overview", "calendar_view", "reminders_list"];
   const REM_LABELS = {
@@ -576,13 +583,22 @@ export default function Reminders() {
       return;
     }
     try {
-      await api.patch(`/email/reminders/${remId}`, {
+      const payload = {
         title: formTitle.trim(),
         description: formDesc.trim(),
         remind_at: formDatetime
           ? new Date(formDatetime).toISOString()
           : undefined,
-      });
+      };
+      // Include TM Hearing fields if this is a trademark hearing
+      if (isTmHearing(formTitle)) {
+        payload.brand_name        = formBrandName.trim();
+        payload.hearing_attended  = formAttended;
+        payload.hearing_decision  = formDecision;
+        payload.hearing_adjourned = formAdjourned;
+        payload.hearing_notes     = formHearingNotes.trim();
+      }
+      await api.patch(`/email/reminders/${remId}`, payload);
       toast.success("Reminder updated");
       resetForm();
       await fetchReminders();
@@ -609,12 +625,23 @@ export default function Reminders() {
     }
   };
 
+  // Detect if a reminder is a Trademark Hearing (based on title keywords)
+  const isTmHearing = (title = "") => {
+    const t = (title || "").toLowerCase();
+    return t.includes("trademark") || t.includes("hearing") || t.includes("tm app") || t.includes("show cause");
+  };
+
   const resetForm = () => {
     setShowForm(false);
     setEditingReminder(null);
     setFormTitle("");
     setFormDesc("");
     setFormDatetime("");
+    setFormBrandName("");
+    setFormAttended("");
+    setFormDecision("");
+    setFormAdjourned(false);
+    setFormHearingNotes("");
   };
 
   const startEdit = (rem) => {
@@ -626,6 +653,12 @@ export default function Reminders() {
     } catch {
       setFormDatetime("");
     }
+    // Populate Trademark Hearing fields if previously saved
+    setFormBrandName(rem.brand_name || "");
+    setFormAttended(rem.hearing_attended || "");
+    setFormDecision(rem.hearing_decision || "");
+    setFormAdjourned(rem.hearing_adjourned || false);
+    setFormHearingNotes(rem.hearing_notes || "");
     setShowForm(true);
   };
 
@@ -1293,7 +1326,7 @@ export default function Reminders() {
               </div>
 
               {/* Modal Body */}
-              <div className="px-6 py-5 space-y-4">
+              <div className="px-6 py-5 space-y-4 max-h-[70vh] overflow-y-auto">
                 <div>
                   <label
                     className={`text-xs font-semibold mb-1.5 block ${isDark ? "text-slate-300" : "text-slate-600"}`}
@@ -1334,6 +1367,121 @@ export default function Reminders() {
                     className={`rounded-xl ${isDark ? "bg-slate-700 border-slate-600" : ""}`}
                   />
                 </div>
+
+                {/* ── Trademark Hearing Fields — shown only for TM hearing reminders ── */}
+                {isTmHearing(formTitle) && (
+                  <>
+                    {/* Divider */}
+                    <div className="flex items-center gap-2 pt-1">
+                      <div className={`flex-1 h-px ${isDark ? "bg-slate-600" : "bg-slate-200"}`} />
+                      <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${isDark ? "bg-slate-700 text-purple-300" : "bg-purple-50 text-purple-600"}`}>
+                        ™ Hearing Details
+                      </span>
+                      <div className={`flex-1 h-px ${isDark ? "bg-slate-600" : "bg-slate-200"}`} />
+                    </div>
+
+                    {/* Brand Name */}
+                    <div>
+                      <label className={`text-xs font-semibold mb-1.5 block ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                        Brand Name
+                      </label>
+                      <Input
+                        value={formBrandName}
+                        onChange={(e) => setFormBrandName(e.target.value)}
+                        placeholder="e.g. TASKOSPHERE, ZARA, etc."
+                        className={`rounded-xl ${isDark ? "bg-slate-700 border-slate-600" : ""}`}
+                      />
+                    </div>
+
+                    {/* Attended */}
+                    <div>
+                      <label className={`text-xs font-semibold mb-2 block ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                        Attended
+                      </label>
+                      <div className="flex gap-2">
+                        {[{val:"yes", label:"✓  Yes"}, {val:"no", label:"✗  No"}].map(opt => (
+                          <button
+                            key={opt.val}
+                            type="button"
+                            onClick={() => setFormAttended(prev => prev === opt.val ? "" : opt.val)}
+                            className={`flex-1 py-2 rounded-xl text-sm font-semibold border transition-all
+                              ${formAttended === opt.val
+                                ? opt.val === "yes"
+                                  ? "bg-emerald-500 border-emerald-500 text-white"
+                                  : "bg-rose-500 border-rose-500 text-white"
+                                : isDark
+                                  ? "bg-slate-700 border-slate-600 text-slate-300 hover:border-slate-400"
+                                  : "bg-white border-slate-200 text-slate-600 hover:border-slate-400"
+                              }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Decision */}
+                    <div>
+                      <label className={`text-xs font-semibold mb-2 block ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                        Decision
+                      </label>
+                      <div className="flex gap-2">
+                        {[{val:"favourable", label:"👍  Favourable"}, {val:"unfavourable", label:"👎  Unfavourable"}].map(opt => (
+                          <button
+                            key={opt.val}
+                            type="button"
+                            onClick={() => setFormDecision(prev => prev === opt.val ? "" : opt.val)}
+                            className={`flex-1 py-2 rounded-xl text-sm font-semibold border transition-all
+                              ${formDecision === opt.val
+                                ? opt.val === "favourable"
+                                  ? "bg-emerald-500 border-emerald-500 text-white"
+                                  : "bg-rose-500 border-rose-500 text-white"
+                                : isDark
+                                  ? "bg-slate-700 border-slate-600 text-slate-300 hover:border-slate-400"
+                                  : "bg-white border-slate-200 text-slate-600 hover:border-slate-400"
+                              }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Adjourned */}
+                    <div>
+                      <label className={`text-xs font-semibold mb-2 block ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                        Adjourned
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setFormAdjourned(prev => !prev)}
+                        className={`w-full py-2 rounded-xl text-sm font-semibold border transition-all
+                          ${formAdjourned
+                            ? "bg-amber-500 border-amber-500 text-white"
+                            : isDark
+                              ? "bg-slate-700 border-slate-600 text-slate-300 hover:border-slate-400"
+                              : "bg-white border-slate-200 text-slate-600 hover:border-slate-400"
+                          }`}
+                      >
+                        {formAdjourned ? "📅  Yes — Adjourned" : "📅  Mark as Adjourned"}
+                      </button>
+                    </div>
+
+                    {/* Hearing Notes */}
+                    <div>
+                      <label className={`text-xs font-semibold mb-1.5 block ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                        Hearing Notes
+                      </label>
+                      <Textarea
+                        value={formHearingNotes}
+                        onChange={(e) => setFormHearingNotes(e.target.value)}
+                        placeholder="Enter any notes about the hearing outcome, next steps, officer remarks..."
+                        rows={3}
+                        className={`rounded-xl ${isDark ? "bg-slate-700 border-slate-600" : ""}`}
+                      />
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* Modal Footer */}
