@@ -6645,6 +6645,240 @@ async def parse_mds_excel_for_client_form(
         "sheets_parsed": excel.sheet_names,
     }
 
+# ==============================================================
+# GENERAL CLIENT PDF PARSER  (used by Add-New-Client panel)
+# ==============================================================
+@api_router.post("/clients/parse-pdf")
+async def parse_client_pdf(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Generic client-info extractor from any PDF document.
+    Tries GST cert first, then Udyam cert, then falls back to
+    heuristic regex across all text.  Returns whichever fields it
+    can find (company_name, email, phone, pan, gstin, cin, llpin,
+    client_type, address, city, state).
+    """
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+
+    content = await file.read()
+    if len(content) > 15 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="PDF too large — max 15 MB.")
+
+    result: dict = {}
+
+    try:
+        import pdfplumber, re as _re
+
+        with pdfplumber.open(BytesIO(content)) as pdf:
+            full_text = "\n".join(
+                (page.extract_text() or "") for page in pdf.pages
+            )
+
+        text = full_text
+
+        # ── Helper regexes ──────────────────────────────────────
+        def first(pattern, flags=0):
+            m = _re.search(pattern, text, flags | _re.IGNORECASE)
+            return m.group(1).strip() if m else ""
+
+        # GSTIN  (15-char alphanum starting with 2 digits)
+        gstin = first(r"\b([0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z])\b")
+        if gstin:
+            result["gstin"] = gstin
+            # State code → state name
+            STATE_CODE_MAP = {
+                "01": "Jammu and Kashmir", "02": "Himachal Pradesh", "03": "Punjab",
+                "04": "Chandigarh", "05": "Uttarakhand", "06": "Haryana",
+                "07": "Delhi", "08": "Rajasthan", "09": "Uttar Pradesh",
+                "10": "Bihar", "11": "Sikkim", "12": "Arunachal Pradesh",
+                "13": "Nagaland", "14": "Manipur", "15": "Mizoram",
+                "16": "Tripura", "17": "Meghalaya", "18": "Assam",
+                "19": "West Bengal", "20": "Jharkhand", "21": "Odisha",
+                "22": "Chhattisgarh", "23": "Madhya Pradesh", "24": "Gujarat",
+                "25": "Dadra and Nagar Haveli and Daman and Diu", "26": "Dadra and Nagar Haveli and Daman and Diu",
+                "27": "Maharashtra", "28": "Andhra Pradesh", "29": "Karnataka",
+                "30": "Goa", "31": "Lakshadweep", "32": "Kerala",
+                "33": "Tamil Nadu", "34": "Puducherry", "35": "Andaman and Nicobar Islands",
+                "36": "Telangana", "37": "Andhra Pradesh",
+            }
+            state_code = gstin[:2]
+            if state_code in STATE_CODE_MAP and not result.get("state"):
+                result["state"] = STATE_CODE_MAP[state_code]
+
+        # PAN  (10-char: AAAAA0000A)
+        pan = first(r"\b([A-Z]{5}[0-9]{4}[A-Z])\b")
+        if pan:
+            result["pan"] = pan
+
+        # CIN  (21-char company registration)
+        cin = first(r"\b([UL][0-9]{5}[A-Z]{2}[0-9]{4}(?:PTC|PLC|OPC|FLC|GAP|AAP|MTC|NPL|NPC|GAT|FTC)[0-9]{6})\b")
+        if cin:
+            result["cin"] = cin
+
+        # LLPIN  (AAA-0000 style)
+        llpin = first(r"\b([A-Z]{3}-[0-9]{4,6})\b")
+        if llpin:
+            result["llpin"] = llpin
+
+        # Email
+        email = first(r"\b([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\b")
+        if email:
+            result["email"] = email.lower()
+
+        # Phone (Indian mobile / landline)
+        phone_m = _re.search(r"\b((?:\+91[\s\-]?)?[6-9][0-9]{9})\b", text)
+        if phone_m:
+            result["phone"] = _re.sub(r"\D", "", phone_m.group(1))[-10:]
+
+        # Company name heuristics
+        for pattern in [
+            r"(?:Legal Name|Trade Name|Business Name|Name of Business|Company Name)[:\s]+([A-Z][A-Z0-9\s&.,'\-]{3,80})",
+            r"(?:M/s\.?|To,\s*)([A-Z][A-Z0-9\s&.,'\-]{3,60}(?:PVT\.?\s*LTD\.?|LLP|LIMITED|PROPRIETOR|PARTNERSHIP|HUF|TRUST))",
+        ]:
+            name = first(pattern)
+            if name:
+                result["company_name"] = name.strip().rstrip(".,")
+                break
+
+        # Auto-detect entity type from name
+        if result.get("company_name") and not result.get("client_type"):
+            n = result["company_name"].lower()
+            if any(x in n for x in ["private limited", "pvt ltd", "pvt. ltd"]):
+                result["client_type"] = "pvt_ltd"
+            elif "llp" in n or "limited liability" in n:
+                result["client_type"] = "llp"
+            elif any(x in n for x in [" limited", " ltd"]):
+                result["client_type"] = "public_ltd"
+            elif "partnership" in n:
+                result["client_type"] = "partnership"
+            elif "huf" in n:
+                result["client_type"] = "huf"
+            elif "trust" in n:
+                result["client_type"] = "trust"
+
+        # Address block (rough)
+        addr_m = _re.search(
+            r"(?:Address|Principal Place of Business|Registered Office)[:\s]+([^\n]{10,120})",
+            text, _re.IGNORECASE
+        )
+        if addr_m:
+            result["address"] = addr_m.group(1).strip()
+
+        # City / State from text
+        if not result.get("city"):
+            city_m = _re.search(r"\b(Mumbai|Delhi|Surat|Ahmedabad|Bangalore|Bengaluru|Chennai|Hyderabad|Kolkata|Pune|Jaipur|Lucknow|Indore|Bhopal|Nagpur|Vadodara|Rajkot|Coimbatore|Visakhapatnam|Patna|Chandigarh)\b", text, _re.IGNORECASE)
+            if city_m:
+                result["city"] = city_m.group(1).title()
+
+    except Exception as e:
+        logger.error(f"parse_client_pdf error: {e}", exc_info=True)
+        raise HTTPException(status_code=422, detail="Could not parse PDF. Please fill in the details manually.")
+
+    if not result:
+        raise HTTPException(status_code=422, detail="No recognizable client data found in this PDF.")
+
+    return result
+
+
+# ==============================================================
+# GENERAL CLIENT EXCEL ROW PARSER  (used by Add-New-Client panel)
+# ==============================================================
+@api_router.post("/clients/parse-excel-row")
+async def parse_client_excel_row(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Import client data from the first data row of an Excel / CSV file.
+    Accepts .xlsx, .xls, .csv.
+    Looks for columns: company_name / name, client_type, email, phone,
+    pan, gstin, cin, llpin, address, city, state.
+    Returns a dict of whatever it finds.
+    """
+    fname = file.filename.lower()
+    if not any(fname.endswith(ext) for ext in (".xlsx", ".xls", ".csv")):
+        raise HTTPException(status_code=400, detail="Only .xlsx, .xls, or .csv files are supported.")
+
+    content = await file.read()
+
+    import re as _re
+
+    try:
+        if fname.endswith(".csv"):
+            df = pd.read_csv(BytesIO(content), dtype=str).fillna("")
+        else:
+            df = pd.read_excel(BytesIO(content), dtype=str).fillna("")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read file: {str(e)}")
+
+    if df.empty:
+        raise HTTPException(status_code=422, detail="File is empty.")
+
+    # Normalise column headers
+    col_map: dict[str, str] = {}
+    for col in df.columns:
+        norm = col.strip().lower().replace(" ", "_").replace("/", "_")
+        col_map[norm] = col
+
+    def get(keys: list[str]) -> str:
+        for k in keys:
+            if k in col_map:
+                val = str(df.iloc[0][col_map[k]]).strip()
+                if val and val.lower() != "nan":
+                    return val
+        return ""
+
+    def detect_type(name: str) -> str:
+        n = name.lower()
+        if any(x in n for x in ["private limited", "pvt ltd", "pvt. ltd"]):
+            return "pvt_ltd"
+        if "llp" in n or "limited liability" in n:
+            return "llp"
+        if any(x in n for x in [" limited", " ltd"]):
+            return "public_ltd"
+        if "partnership" in n:
+            return "partnership"
+        if "huf" in n:
+            return "huf"
+        if "trust" in n:
+            return "trust"
+        return "proprietor"
+
+    company_name = get(["company_name", "name", "client_name", "business_name", "entity_name"])
+    client_type  = get(["client_type", "entity_type", "type"]) or (detect_type(company_name) if company_name else "")
+    email        = get(["email", "email_id", "email_address"])
+    raw_phone    = get(["phone", "mobile", "phone_no", "mobile_no", "contact"])
+    phone        = _re.sub(r"\D", "", raw_phone)[-10:] if raw_phone else ""
+    pan          = get(["pan", "pan_no", "pan_number"]).upper()
+    gstin        = get(["gstin", "gst", "gst_number", "gstin_no"]).upper()
+    cin          = get(["cin", "cin_no", "company_identification_number"]).upper()
+    llpin        = get(["llpin", "llp_in", "llp_registration"]).upper()
+    address      = get(["address", "addr", "registered_address", "office_address"])
+    city         = get(["city", "town"])
+    state        = get(["state", "state_name"])
+
+    result = {}
+    if company_name: result["company_name"] = company_name
+    if client_type:  result["client_type"]  = client_type
+    if email:        result["email"]         = email.lower()
+    if phone:        result["phone"]         = phone
+    if pan:          result["pan"]           = pan
+    if gstin:        result["gstin"]         = gstin
+    if cin:          result["cin"]           = cin
+    if llpin:        result["llpin"]         = llpin
+    if address:      result["address"]       = address
+    if city:         result["city"]          = city
+    if state:        result["state"]         = state
+
+    if not result:
+        raise HTTPException(status_code=422, detail="No recognizable client columns found in this file.")
+
+    return result
+
+
 @api_router.post("/clients/import")
 async def import_clients_from_csv(
     file: UploadFile = File(...),
