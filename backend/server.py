@@ -6792,11 +6792,20 @@ async def parse_client_excel_row(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Import client data from the first data row of an Excel / CSV file.
+    Smart client-data extractor from Excel / CSV files.
+    Handles two layouts automatically:
+
+    1. COLUMN-HEADER format  — first row = headers, second row = data
+       (e.g. your own bulk-import template)
+
+    2. VERTICAL KEY-VALUE format — col A = field name, col B = value
+       (e.g. MCA MDS export: 'LLP Name' | 'AARIYA SPECTRUM LLP')
+       Reads ALL sheets named MasterData / master / company etc.
+
     Accepts .xlsx, .xls, .csv.
-    Looks for columns: company_name / name, client_type, email, phone,
-    pan, gstin, cin, llpin, address, city, state.
-    Returns a dict of whatever it finds.
+    Returns a dict with whatever it can extract:
+      company_name, client_type, email, phone, pan, gstin,
+      cin, llpin, address, city, state.
     """
     fname = file.filename.lower()
     if not any(fname.endswith(ext) for ext in (".xlsx", ".xls", ".csv")):
@@ -6806,34 +6815,10 @@ async def parse_client_excel_row(
 
     import re as _re
 
-    try:
-        if fname.endswith(".csv"):
-            df = pd.read_csv(BytesIO(content), dtype=str).fillna("")
-        else:
-            df = pd.read_excel(BytesIO(content), dtype=str).fillna("")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Could not read file: {str(e)}")
-
-    if df.empty:
-        raise HTTPException(status_code=422, detail="File is empty.")
-
-    # Normalise column headers
-    col_map: dict[str, str] = {}
-    for col in df.columns:
-        norm = col.strip().lower().replace(" ", "_").replace("/", "_")
-        col_map[norm] = col
-
-    def get(keys: list[str]) -> str:
-        for k in keys:
-            if k in col_map:
-                val = str(df.iloc[0][col_map[k]]).strip()
-                if val and val.lower() != "nan":
-                    return val
-        return ""
-
-    def detect_type(name: str) -> str:
-        n = name.lower()
-        if any(x in n for x in ["private limited", "pvt ltd", "pvt. ltd"]):
+    # ── Helpers ────────────────────────────────────────────────────────────
+    def detect_entity_type(name: str) -> str:
+        n = (name or "").lower()
+        if any(x in n for x in ["private limited", "pvt ltd", "pvt. ltd", "pvt.ltd"]):
             return "pvt_ltd"
         if "llp" in n or "limited liability" in n:
             return "llp"
@@ -6847,34 +6832,263 @@ async def parse_client_excel_row(
             return "trust"
         return "proprietor"
 
-    company_name = get(["company_name", "name", "client_name", "business_name", "entity_name"])
-    client_type  = get(["client_type", "entity_type", "type"]) or (detect_type(company_name) if company_name else "")
-    email        = get(["email", "email_id", "email_address"])
-    raw_phone    = get(["phone", "mobile", "phone_no", "mobile_no", "contact"])
-    phone        = _re.sub(r"\D", "", raw_phone)[-10:] if raw_phone else ""
-    pan          = get(["pan", "pan_no", "pan_number"]).upper()
-    gstin        = get(["gstin", "gst", "gst_number", "gstin_no"]).upper()
-    cin          = get(["cin", "cin_no", "company_identification_number"]).upper()
-    llpin        = get(["llpin", "llp_in", "llp_registration"]).upper()
-    address      = get(["address", "addr", "registered_address", "office_address"])
-    city         = get(["city", "town"])
-    state        = get(["state", "state_name"])
+    def clean_email(raw: str) -> str:
+        """Handles obfuscated emails like user[at]gmail[dot]com"""
+        v = (raw or "").strip()
+        v = v.replace("[at]", "@").replace("[dot]", ".").replace(" at ", "@").replace(" dot ", ".")
+        return v.lower() if "@" in v else ""
 
-    result = {}
-    if company_name: result["company_name"] = company_name
-    if client_type:  result["client_type"]  = client_type
-    if email:        result["email"]         = email.lower()
-    if phone:        result["phone"]         = phone
-    if pan:          result["pan"]           = pan
-    if gstin:        result["gstin"]         = gstin
-    if cin:          result["cin"]           = cin
-    if llpin:        result["llpin"]         = llpin
-    if address:      result["address"]       = address
-    if city:         result["city"]          = city
-    if state:        result["state"]         = state
+    def clean_phone(raw: str) -> str:
+        digits = _re.sub(r"\D", "", str(raw or ""))
+        if len(digits) == 12 and digits.startswith("91"):
+            digits = digits[2:]
+        return digits[-10:] if len(digits) >= 10 else digits
+
+    def parse_address(raw: str):
+        """
+        Split a full address string like:
+        'Shop 8, XYZ Complex, Varachha Road, Surat, Surat City, Gujarat, India, 395006'
+        into address / city / state.
+        """
+        INDIAN_STATES_SET = {
+            "andhra pradesh","arunachal pradesh","assam","bihar","chhattisgarh","goa","gujarat",
+            "haryana","himachal pradesh","jharkhand","karnataka","kerala","madhya pradesh",
+            "maharashtra","manipur","meghalaya","mizoram","nagaland","odisha","punjab","rajasthan",
+            "sikkim","tamil nadu","telangana","tripura","uttar pradesh","uttarakhand","west bengal",
+            "andaman and nicobar islands","chandigarh","dadra and nagar haveli","daman and diu",
+            "delhi","jammu and kashmir","ladakh","lakshadweep","puducherry",
+        }
+        # Common Indian cities for positive identification
+        KNOWN_CITIES = {
+            "mumbai","delhi","surat","ahmedabad","bangalore","bengaluru","chennai","hyderabad",
+            "kolkata","pune","jaipur","lucknow","indore","bhopal","nagpur","vadodara","rajkot",
+            "coimbatore","visakhapatnam","patna","chandigarh","thane","pimpri","nashik","faridabad",
+            "meerut","agra","varanasi","srinagar","ludhiana","amritsar","allahabad","prayagraj",
+            "vijayawada","madurai","raipur","kota","aurangabad","dhanbad","jodhpur","guwahati",
+            "ranchi","gwalior","jabalpur","tiruchirappalli","tirupur","hubli","mysore","mysuru",
+            "bareilly","aligarh","moradabad","noida","gurugram","gurgaon","navi mumbai","kalyan",
+            "solapur","jalandhar","bhubaneswar","cuttack","thiruvananthapuram","kozhikode","kochi",
+            "ernakulam","mangaluru","belagavi","davangere","bellary","hospet","shimla","dehradun",
+            "haridwar","rishikesh","udaipur","ajmer","bikaner","alwar","bhilwara","sikar",
+        }
+        parts = [p.strip() for p in raw.split(",") if p.strip() and p.strip().lower() not in ("india","nan","")]
+        # Remove PIN code part
+        parts = [p for p in parts if not _re.match(r"^\d{6}$", p)]
+        # Remove "X City" duplicates (e.g. "Surat City" when "Surat" already present)
+        deduped = []
+        seen_lower = set()
+        for p in parts:
+            pl = p.lower()
+            # Remove " city" / " district" suffix for dedup check
+            base = _re.sub(r"\s+(city|district|taluka|tehsil)$", "", pl).strip()
+            if base not in seen_lower:
+                seen_lower.add(base)
+                deduped.append(p)
+        parts = deduped
+
+        city = ""
+        state = ""
+        addr_parts = []
+        for p in parts:
+            pl = _re.sub(r"\s+(city|district|taluka|tehsil)$", "", p.lower()).strip()
+            if p.lower() in INDIAN_STATES_SET:
+                state = p.title()
+            elif pl in KNOWN_CITIES and not city:
+                city = pl.title()
+            else:
+                addr_parts.append(p)
+        # Fallback: if no known city found, take second-to-last non-state part
+        if not city and len(addr_parts) > 1:
+            city = addr_parts.pop()
+        address = ", ".join(addr_parts)
+        return address, city, state
+
+    def norm_key(k: str) -> str:
+        return str(k or "").strip().lower()
+
+    # ── Load workbook (all sheets) ─────────────────────────────────────────
+    try:
+        if fname.endswith(".csv"):
+            sheets = {"Sheet1": pd.read_csv(BytesIO(content), dtype=str, header=None).fillna("")}
+        elif fname.endswith(".xls"):
+            xl = pd.ExcelFile(BytesIO(content), engine="xlrd")
+            sheets = {s: pd.read_excel(xl, sheet_name=s, dtype=str, header=None).fillna("") for s in xl.sheet_names}
+        else:
+            xl = pd.ExcelFile(BytesIO(content), engine="openpyxl")
+            sheets = {s: pd.read_excel(xl, sheet_name=s, dtype=str, header=None).fillna("") for s in xl.sheet_names}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read file: {str(e)}")
+
+    if not sheets:
+        raise HTTPException(status_code=422, detail="File appears to be empty.")
+
+    # ── Detect layout: vertical KV vs horizontal header ───────────────────
+    # Heuristic: if col-0 of row-0 looks like a section header and col-1
+    # of row-1 looks like a value (not a typical column name), it's KV.
+    def is_kv_sheet(df: pd.DataFrame) -> bool:
+        if df.shape[1] < 2 or df.shape[0] < 3:
+            return False
+        col0_vals = [str(v).strip() for v in df.iloc[:8, 0] if str(v).strip() and str(v).strip().lower() != "nan"]
+        # KV sheets have field-name-like strings in col 0 (mixed case, spaces)
+        kv_like = sum(1 for v in col0_vals if " " in v or len(v) > 12)
+        return kv_like >= 2
+
+    # ── Strategy 1: Vertical KV (MCA MDS, Tally exports, etc.) ───────────
+    def extract_from_kv_sheets(sheets: dict) -> dict:
+        kv: dict = {}
+        # Prefer MasterData sheet; fall back to all sheets
+        priority = [s for s in sheets if "master" in s.lower() or "company" in s.lower() or "llp" in s.lower()]
+        ordered  = priority + [s for s in sheets if s not in priority]
+        for sname in ordered:
+            df = sheets[sname]
+            if not is_kv_sheet(df):
+                continue
+            for _, row in df.iterrows():
+                k = norm_key(row.iloc[0])
+                v = str(row.iloc[1]).strip() if df.shape[1] > 1 else ""
+                if not k or k == "nan" or not v or v == "nan":
+                    continue
+                kv[k] = v
+        return kv
+
+    kv_data = extract_from_kv_sheets(sheets)
+
+    result: dict = {}
+
+    if kv_data:
+        # Map KV keys → client fields
+        KV_NAME_KEYS = [
+            "llp name","company name","name of company","name of llp","business name",
+            "trade name","legal name","firm name","entity name",
+        ]
+        KV_EMAIL_KEYS  = ["email id","email","email address","e-mail","e mail"]
+        KV_PHONE_KEYS  = ["phone","mobile","contact","phone no","mobile no","telephone"]
+        KV_PAN_KEYS    = ["pan","pan no","pan number","permanent account number"]
+        KV_GSTIN_KEYS  = ["gstin","gst number","gst no","gstin no"]
+        KV_CIN_KEYS    = ["cin","cin no","company identification number"]
+        KV_LLPIN_KEYS  = ["llpin","llp identification number","llp in"]
+        KV_ADDR_KEYS   = ["registered address","principal place of business","office address","address"]
+        KV_CITY_KEYS   = ["city","town"]
+        KV_STATE_KEYS  = ["state","state name"]
+
+        def kv_get(keys: list[str]) -> str:
+            for k in keys:
+                if k in kv_data:
+                    return kv_data[k]
+            # partial match
+            for search_k in keys:
+                for actual_k, v in kv_data.items():
+                    if search_k in actual_k:
+                        return v
+            return ""
+
+        company_name = kv_get(KV_NAME_KEYS)
+        email_raw    = kv_get(KV_EMAIL_KEYS)
+        phone_raw    = kv_get(KV_PHONE_KEYS)
+        pan          = kv_get(KV_PAN_KEYS).upper()
+        gstin        = kv_get(KV_GSTIN_KEYS).upper()
+        cin          = kv_get(KV_CIN_KEYS).upper()
+        llpin        = kv_get(KV_LLPIN_KEYS).upper()
+        addr_raw     = kv_get(KV_ADDR_KEYS)
+        city         = kv_get(KV_CITY_KEYS)
+        state        = kv_get(KV_STATE_KEYS)
+
+        email = clean_email(email_raw)
+        phone = clean_phone(phone_raw)
+
+        # If address is a full string (MCA style), split it
+        if addr_raw and "," in addr_raw and not city:
+            parsed_addr, parsed_city, parsed_state = parse_address(addr_raw)
+            if not city:   city   = parsed_city
+            if not state:  state  = parsed_state
+            addr_raw = parsed_addr or addr_raw
+
+        client_type = detect_entity_type(company_name)
+        # Extra hint: if LLPIN is present, it's definitely an LLP
+        if llpin and llpin != "-":
+            client_type = "llp"
+
+        if company_name: result["company_name"] = company_name.strip()
+        if client_type:  result["client_type"]  = client_type
+        if email:        result["email"]         = email
+        if phone:        result["phone"]         = phone
+        if pan and pan != "-":    result["pan"]   = pan
+        if gstin and gstin != "-": result["gstin"] = gstin
+        if cin and cin != "-":    result["cin"]   = cin
+        if llpin and llpin != "-": result["llpin"] = llpin
+        if addr_raw:     result["address"]        = addr_raw.strip()
+        if city:         result["city"]           = city.strip()
+        if state:        result["state"]          = state.strip()
+
+    # ── Strategy 2: Horizontal header row (fallback) ───────────────────────
+    if not result:
+        # Try each sheet; pick first that looks like column-header format
+        for sname, df_raw in sheets.items():
+            if df_raw.shape[0] < 2:
+                continue
+            # Try using first row as header
+            df = df_raw.copy()
+            df.columns = [str(c).strip() for c in df.iloc[0]]
+            df = df.iloc[1:].reset_index(drop=True).fillna("")
+            if df.empty:
+                continue
+
+            col_map: dict[str, str] = {}
+            for col in df.columns:
+                norm = col.strip().lower().replace(" ", "_").replace("/", "_")
+                col_map[norm] = col
+
+            def get_col(keys: list[str]) -> str:
+                for k in keys:
+                    if k in col_map:
+                        val = str(df.iloc[0][col_map[k]]).strip()
+                        if val and val.lower() not in ("nan", "", "-"):
+                            return val
+                return ""
+
+            company_name = get_col(["company_name","name","client_name","business_name","entity_name","llp_name","company"])
+            if not company_name:
+                continue  # not the right sheet
+
+            client_type  = get_col(["client_type","entity_type","type"]) or detect_entity_type(company_name)
+            email        = clean_email(get_col(["email","email_id","email_address","e-mail"]))
+            phone        = clean_phone(get_col(["phone","mobile","phone_no","mobile_no","contact"]))
+            pan          = get_col(["pan","pan_no","pan_number"]).upper()
+            gstin        = get_col(["gstin","gst","gst_number","gstin_no"]).upper()
+            cin          = get_col(["cin","cin_no","company_identification_number"]).upper()
+            llpin        = get_col(["llpin","llp_in","llp_registration"]).upper()
+            addr_raw     = get_col(["address","addr","registered_address","office_address"])
+            city         = get_col(["city","town"])
+            state        = get_col(["state","state_name"])
+
+            if addr_raw and "," in addr_raw and not city:
+                addr_raw, city, state = parse_address(addr_raw)
+
+            if llpin:
+                client_type = "llp"
+
+            if company_name: result["company_name"] = company_name
+            if client_type:  result["client_type"]  = client_type
+            if email:        result["email"]         = email
+            if phone:        result["phone"]         = phone
+            if pan:          result["pan"]           = pan
+            if gstin:        result["gstin"]         = gstin
+            if cin:          result["cin"]           = cin
+            if llpin:        result["llpin"]         = llpin
+            if addr_raw:     result["address"]       = addr_raw
+            if city:         result["city"]          = city
+            if state:        result["state"]         = state
+            break  # found a usable sheet
 
     if not result:
-        raise HTTPException(status_code=422, detail="No recognizable client columns found in this file.")
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "No recognizable client data found in this file. "
+                "Expected either an MCA MDS export (key-value format) or a "
+                "spreadsheet with column headers: company_name, email, phone, pan, gstin, etc."
+            )
+        )
 
     return result
 
