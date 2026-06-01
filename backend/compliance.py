@@ -540,6 +540,28 @@ async def close_compliance_master(
         {"id": compliance_id},
         {"$set": {"is_closed": new_closed, "closed_at": _now() if new_closed else None, "updated_at": _now()}},
     )
+
+    # ── Also sync the linked due_dates calendar entry so the dashboard
+    #    "Upcoming Deadlines" widget immediately stops showing this item.
+    #    When re-opened we restore status → "pending" so it reappears.
+    linked_cal_id = existing.get("calendar_due_date_id")
+    if linked_cal_id:
+        new_due_date_status = "closed" if new_closed else "pending"
+        await db.due_dates.update_one(
+            {"id": linked_cal_id},
+            {"$set": {"status": new_due_date_status}},
+        )
+    else:
+        # No explicit link — try matching by name so manually-created items
+        # (FORM 11, PAS 6, TDS Return Q4 etc.) are also hidden.
+        compliance_name = existing.get("name", "")
+        if compliance_name:
+            new_due_date_status = "closed" if new_closed else "pending"
+            await db.due_dates.update_many(
+                {"title": compliance_name, "status": {"$in": ["pending", "closed"]}},
+                {"$set": {"status": new_due_date_status}},
+            )
+
     doc = await db.compliance_masters.find_one({"id": compliance_id}, {"_id": 0})
     return await _enrich(doc)
 
