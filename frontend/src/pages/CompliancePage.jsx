@@ -16,7 +16,7 @@ import {
   ArrowLeft, StickyNote, ShieldCheck, AlertTriangle,
   Info, Repeat, LayoutGrid, List, MessageSquare, Send,
   BarChart3, ChevronLeft, TrendingUp, Settings2, Sparkles,
-  IndianRupee, Download, FileSpreadsheet, Filter, EyeOff,
+  IndianRupee, Download, FileSpreadsheet, Filter,
 } from 'lucide-react';
 import LayoutCustomizer from '@/components/layout/LayoutCustomizer';
 import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
@@ -3290,7 +3290,6 @@ export default function CompliancePage(){
   const[catFilter,setCatFilter]=useState('all');
   const[fyFilter,setFyFilter]=useState('all');
   const[searchQ,setSearchQ]=useState('');
-  const[showClosed,setShowClosed]=useState(false); // toggle to show/hide closed compliance items
   const[showAddModal,setShowAddModal]=useState(false);
   const[editingItem,setEditingItem]=useState(null);
   const[detailItem,setDetailItem]=useState(null);
@@ -3725,11 +3724,10 @@ export default function CompliancePage(){
 
   const filtered=useMemo(()=>{
     let list=compliance;
-    if(!showClosed) list=list.filter(c=>!c.is_closed);
     if(!searchQ.trim())return list;
     const q=searchQ.toLowerCase();
     return list.filter(c=>c.name.toLowerCase().includes(q)||(CATEGORY_CFG[c.category]?.label||'').toLowerCase().includes(q));
-  },[compliance,searchQ,showClosed]);
+  },[compliance,searchQ]);
 
   const fyYears=useMemo(()=>[...new Set(compliance.map(c=>c.fy_year).filter(Boolean))],[compliance]);
 
@@ -4086,20 +4084,6 @@ export default function CompliancePage(){
                 style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.muted:'#64748b'}}>
                 <RefreshCw className={`w-4 h-4 ${loading?'animate-spin':''}`}/>
               </button>
-              {/* Show Closed toggle — only appears when there are closed items */}
-              {compliance.some(c=>c.is_closed)&&(
-                <button onClick={()=>setShowClosed(v=>!v)}
-                  title={showClosed?'Hide closed compliance':'Show closed compliance'}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition-all"
-                  style={{
-                    backgroundColor:showClosed?'rgba(100,116,139,0.12)':(isDark?D.card:'#fff'),
-                    borderColor:showClosed?'#64748b':(isDark?D.border:'#e2e8f0'),
-                    color:showClosed?'#64748b':(isDark?D.dimmer:'#94a3b8'),
-                  }}>
-                  {showClosed?<CheckCircle2 className="w-3.5 h-3.5"/>:<EyeOff className="w-3.5 h-3.5"/>}
-                  <span className="hidden sm:inline">{showClosed?'Hide Closed':'Show Closed'}</span>
-                </button>
-              )}
               <div className="flex items-center border rounded-xl overflow-hidden flex-shrink-0"
                 style={{borderColor:isDark?D.border:'#e2e8f0',backgroundColor:isDark?D.card:'#fff'}}>
                 <button onClick={()=>setViewMode('board')} title="Board View"
@@ -4246,14 +4230,10 @@ export default function CompliancePage(){
                     <ShieldCheck className="w-8 h-8" style={{color:isDark?D.dimmer:'#cbd5e1'}}/>
                   </div>
                   <div className="text-center">
-                    <p className="text-lg font-bold" style={{color:isDark?D.text:'#0f172a'}}>
-                      {searchQ||catFilter!=='all'?'No matching compliance':!showClosed&&compliance.some(c=>c.is_closed)?'All active compliance closed':'No compliance defined yet'}
-                    </p>
-                    <p className="text-sm mt-1" style={{color:isDark?D.muted:'#64748b'}}>
-                      {searchQ||catFilter!=='all'?'Adjust filters':!showClosed&&compliance.some(c=>c.is_closed)?'Toggle "Show Closed" to view closed items':canManage?'Add a compliance type to start tracking':'No compliance items found for your department'}
-                    </p>
+                    <p className="text-lg font-bold" style={{color:isDark?D.text:'#0f172a'}}>{searchQ||catFilter!=='all'?'No matching compliance':'No compliance defined yet'}</p>
+                    <p className="text-sm mt-1" style={{color:isDark?D.muted:'#64748b'}}>{searchQ||catFilter!=='all'?'Adjust filters':canManage?'Add a compliance type to start tracking':'No compliance items found for your department'}</p>
                   </div>
-                  {!searchQ&&catFilter==='all'&&canManage&&!compliance.some(c=>c.is_closed)&&(
+                  {!searchQ&&catFilter==='all'&&canManage&&(
                     <button onClick={()=>setShowAddModal(true)} className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white" style={{backgroundColor:'#1F6FB2'}}>
                       <Plus className="w-4 h-4"/>Add First Compliance
                     </button>
