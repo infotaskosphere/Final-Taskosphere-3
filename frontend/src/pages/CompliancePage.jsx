@@ -3615,6 +3615,9 @@ export default function CompliancePage(){
     if(!confirm(`${action} "${item.name}"? ${isClosed?'It will reappear on the dashboard.':'It will be hidden from the dashboard overdue/upcoming counters but remain visible here.'}`))return;
     try{
       const updated=await api.patch(`/compliance/${item.id}/close`);
+      // Clear the dashboard session cache so the next dashboard visit re-fetches
+      // fresh due_dates data and the item disappears / reappears immediately.
+      try{ sessionStorage.removeItem('dashboard_cache_v1'); }catch{}
       toast.success(`"${item.name}" ${updated.data?.is_closed?'closed — hidden from dashboard':'re-opened'}`);
       setRefreshKey(k=>k+1);
     }catch(e){toast.error(e?.response?.data?.detail||`${action} failed`);}
