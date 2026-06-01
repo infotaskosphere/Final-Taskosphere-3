@@ -427,8 +427,10 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
   const[saving,setSaving]=useState(false);
   const[templates,setTemplates]=useState([]);
   const[calendarOpen,setCalendarOpen]=useState(false);
+  const[calendarPos,setCalendarPos]=useState({top:0,left:0});
   const[applicablePeriods,setApplicablePeriods]=useState(()=>existing?.applicable_periods||[]);
   const calendarRef=useRef(null);
+  const calendarBtnRef=useRef(null);
 
   const isRecurring=['monthly','quarterly','half_yearly'].includes(frequency);
 
@@ -452,7 +454,22 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
 
   useEffect(()=>{
     if(!calendarOpen) return;
-    const fn=(e)=>{if(calendarRef.current&&!calendarRef.current.contains(e.target))setCalendarOpen(false);};
+    // Compute fixed position from button bounding rect so dropdown escapes overflow-y-auto
+    if(calendarBtnRef.current){
+      const r=calendarBtnRef.current.getBoundingClientRect();
+      const spaceBelow=window.innerHeight-r.bottom;
+      const calH=320; // approx calendar height
+      if(spaceBelow>=calH){
+        setCalendarPos({top:r.bottom+6,left:r.left});
+      } else {
+        setCalendarPos({top:r.top-calH-6,left:r.left});
+      }
+    }
+    const fn=(e)=>{
+      const inBtn=calendarBtnRef.current&&calendarBtnRef.current.contains(e.target);
+      const inCal=calendarRef.current&&calendarRef.current.contains(e.target);
+      if(!inBtn&&!inCal)setCalendarOpen(false);
+    };
     document.addEventListener('mousedown',fn);
     return()=>document.removeEventListener('mousedown',fn);
   },[calendarOpen]);
@@ -785,8 +802,9 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
                       {frequency==='annual'?'Annual Filing Due Date':'One-Time Due Date'}
                     </p>
                   )}
-                  <div className="relative" ref={calendarRef}>
+                  <div className="relative">
                     <button
+                      ref={calendarBtnRef}
                       onClick={()=>setCalendarOpen(o=>!o)}
                       className="w-full flex items-center gap-3 px-4 py-2.5 border rounded-xl text-sm font-semibold transition-all hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       style={{
@@ -801,7 +819,14 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
                     </button>
                     <AnimatePresence>
                       {calendarOpen&&(
-                        <motion.div className="absolute left-0 top-full mt-1.5 z-[10000]"
+                        <motion.div
+                          ref={calendarRef}
+                          style={{
+                            position:'fixed',
+                            top:calendarPos.top,
+                            left:calendarPos.left,
+                            zIndex:99999,
+                          }}
                           initial={{opacity:0,y:-8,scale:0.97}} animate={{opacity:1,y:0,scale:1}}
                           exit={{opacity:0,y:-8,scale:0.97}} transition={{duration:0.15,ease:'easeOut'}}>
                           <CalendarPicker value={dueDate} onChange={setDueDate} isDark={isDark} onClose={()=>setCalendarOpen(false)}/>
@@ -2238,6 +2263,62 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                     </div>
                   )}
                 </div>
+                {/* Fee Amount + SRN */}
+                {(detailRow.govt_fees_amount>0||detailRow.govt_fees_srn)&&(
+                  <div className="grid grid-cols-2 gap-3">
+                    {detailRow.govt_fees_amount>0&&(
+                      <div className="rounded-xl p-3 border" style={{backgroundColor:isDark?'rgba(245,158,11,0.08)':'#fffbeb',borderColor:isDark?'rgba(245,158,11,0.3)':'#fde68a'}}>
+                        <p className="text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{color:'#D97706'}}>Fee Paid</p>
+                        <p className="text-sm font-black" style={{color:isDark?D.text:'#0f172a'}}>₹{Number(detailRow.govt_fees_amount).toLocaleString('en-IN')}</p>
+                        {detailRow.payment_date&&<p className="text-[10px] mt-0.5" style={{color:isDark?D.dimmer:'#94a3b8'}}>{fmtDate(detailRow.payment_date,'dd MMM yyyy')}</p>}
+                      </div>
+                    )}
+                    {detailRow.govt_fees_srn&&(
+                      <div className="rounded-xl p-3 border" style={{backgroundColor:isDark?'rgba(16,185,129,0.08)':'#f0fdf4',borderColor:isDark?'rgba(16,185,129,0.3)':'#a7f3d0'}}>
+                        <p className="text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{color:'#059669'}}>SRN</p>
+                        <p className="text-sm font-black font-mono break-all" style={{color:isDark?D.text:'#0f172a'}}>{detailRow.govt_fees_srn}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {/* Fee / SRN Change History */}
+                {Array.isArray(detailRow.fee_history)&&detailRow.fee_history.length>0&&(
+                  <div className="rounded-xl border overflow-hidden" style={{borderColor:isDark?D.border:'#e2e8f0'}}>
+                    <div className="px-3 py-2 flex items-center gap-2" style={{backgroundColor:isDark?D.raised:'#f8fafc',borderBottom:`1px solid ${isDark?D.border:'#e2e8f0'}`}}>
+                      <span className="text-[10px] font-black uppercase tracking-wider" style={{color:isDark?D.dimmer:'#94a3b8'}}>Fee / SRN Update Log</span>
+                    </div>
+                    <div className="divide-y" style={{divideColor:isDark?D.border:'#f1f5f9'}}>
+                      {[...detailRow.fee_history].reverse().map((h,i)=>(
+                        <div key={i} className="px-3 py-2.5 flex items-start gap-3">
+                          <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 text-[10px] font-black"
+                            style={{backgroundColor:isDark?'rgba(31,111,178,0.2)':'#dbeafe',color:'#1F6FB2'}}>
+                            {(h.user_name||'?').charAt(0).toUpperCase()}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2 mb-0.5">
+                              <span className="text-xs font-bold truncate" style={{color:isDark?D.text:'#0f172a'}}>{h.user_name||'Unknown'}</span>
+                              <span className="text-[10px] flex-shrink-0" style={{color:isDark?D.dimmer:'#94a3b8'}}>{fmtDate(h.ts,'dd MMM yy · HH:mm')}</span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5 mt-1">
+                              {'amount' in h&&(
+                                <span className="text-[10px] px-2 py-0.5 rounded-md font-semibold"
+                                  style={{backgroundColor:isDark?'rgba(245,158,11,0.15)':'#fef3c7',color:'#D97706'}}>
+                                  ₹{Number(h.prev_amount||0).toLocaleString('en-IN')} → ₹{Number(h.amount||0).toLocaleString('en-IN')}
+                                </span>
+                              )}
+                              {'srn' in h&&(
+                                <span className="text-[10px] px-2 py-0.5 rounded-md font-mono font-semibold"
+                                  style={{backgroundColor:isDark?'rgba(16,185,129,0.15)':'#d1fae5',color:'#059669'}}>
+                                  {h.prev_srn?`${h.prev_srn} → `:''}SRN: {h.srn||'—'}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {/* Notes */}
                 <div className="rounded-xl p-3.5 border" style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0'}}>
                   <p className="text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{color:isDark?D.dimmer:'#94a3b8'}}>Notes</p>
