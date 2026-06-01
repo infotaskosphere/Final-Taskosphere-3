@@ -127,6 +127,7 @@ class ComplianceMasterUpdate(BaseModel):
     description:   Optional[str]            = None
     applicable_entity_types: Optional[List[str]] = None
     govt_fees:     Optional[bool]           = None   # NEW
+    is_closed:     Optional[bool]           = None   # Mark compliance as closed (hides from dashboard)
 
 
 class AssignmentCreate(BaseModel):
@@ -370,9 +371,11 @@ async def compliance_dashboard(current_user: User = Depends(check_module_permiss
     cat_pipeline = [{"$match": scope_filter}, {"$group": {"_id": "$category", "count": {"$sum": 1}}}]
     by_cat = await db.compliance_masters.aggregate(cat_pipeline).to_list(20)
 
+    # Exclude closed compliance items from overdue / due-this-month dashboard counters
+    not_closed_filter = {"is_closed": {"$ne": True}}
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     overdue = await db.compliance_masters.count_documents({
-        **scope_filter, "due_date": {"$lt": now_str, "$ne": None},
+        **scope_filter, **not_closed_filter, "due_date": {"$lt": now_str, "$ne": None},
     })
 
     import calendar as cal
@@ -380,7 +383,7 @@ async def compliance_dashboard(current_user: User = Depends(check_module_permiss
     month_end   = f"{now.year}-{now.month:02d}-{cal.monthrange(now.year, now.month)[1]:02d}"
     month_start = f"{now.year}-{now.month:02d}-01"
     due_this_month = await db.compliance_masters.count_documents({
-        **scope_filter, "due_date": {"$gte": month_start, "$lte": month_end},
+        **scope_filter, **not_closed_filter, "due_date": {"$gte": month_start, "$lte": month_end},
     })
 
     return {
@@ -510,6 +513,35 @@ async def delete_compliance_master(
     deleted_asgn = await db.compliance_assignments.delete_many({"compliance_id": compliance_id})
     return {"deleted": True, "assignments_removed": deleted_asgn.deleted_count}
 
+
+
+
+@router.patch("/{compliance_id}/close")
+async def close_compliance_master(
+    compliance_id: str,
+    current_user: User = Depends(check_module_permission("compliance", "create")),
+):
+    """
+    Toggle a compliance as closed/re-opened.
+    Closed items are hidden from the dashboard overdue/upcoming counters
+    but remain fully visible in the Compliance Tracker page.
+    """
+    perms = current_user.permissions if isinstance(current_user.permissions, dict) else \
+            (current_user.permissions.model_dump() if hasattr(current_user.permissions, "model_dump") else {})
+    if current_user.role != "admin" and not perms.get("can_manage_compliance", False):
+        raise HTTPException(403, "You do not have permission to close compliance items")
+
+    existing = await db.compliance_masters.find_one({"id": compliance_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Compliance not found")
+
+    new_closed = not existing.get("is_closed", False)
+    await db.compliance_masters.update_one(
+        {"id": compliance_id},
+        {"$set": {"is_closed": new_closed, "closed_at": _now() if new_closed else None, "updated_at": _now()}},
+    )
+    doc = await db.compliance_masters.find_one({"id": compliance_id}, {"_id": 0})
+    return await _enrich(doc)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ASSIGNMENTS
