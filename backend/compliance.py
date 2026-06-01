@@ -1246,25 +1246,58 @@ async def update_assignment_govt_fee(
             "payment_date": now[:10],
         })
 
-    # Build a history entry capturing what changed
-    history_entry: dict = {
-        "ts":         _now(),
-        "updated_by": current_user.id,
-        "user_name":  getattr(current_user, "full_name", None) or getattr(current_user, "email", ""),
-    }
-    if "govt_fees_amount" in set_doc:
-        history_entry["amount"] = set_doc["govt_fees_amount"]
-        history_entry["prev_amount"] = existing.get("govt_fees_amount") or 0
-    if "govt_fees_srn" in set_doc:
-        history_entry["srn"] = set_doc["govt_fees_srn"]
-        history_entry["prev_srn"] = existing.get("govt_fees_srn") or ""
+    # ── Build fee_history entries ────────────────────────────────────────────
+    user_name = getattr(current_user, "full_name", None) or getattr(current_user, "email", "")
+    ts_now = _now()
+    existing_history = existing.get("fee_history") or []
+    entries_to_push: list = []
+
+    # If this is the very first save and there is already data on the record
+    # (saved before history tracking existed), synthesise a seed entry so the
+    # log always shows at least the original value.
+    if not existing_history:
+        seed_amount = existing.get("govt_fees_amount") or 0
+        seed_srn    = (existing.get("govt_fees_srn") or "").strip()
+        if seed_amount or seed_srn:
+            seed: dict = {
+                "ts":         existing.get("updated_at") or ts_now,
+                "updated_by": existing.get("updated_by") or current_user.id,
+                "user_name":  "(prior save)",
+            }
+            if seed_amount:
+                seed["amount"]      = float(seed_amount)
+                seed["prev_amount"] = 0.0
+            if seed_srn:
+                seed["srn"]      = seed_srn
+                seed["prev_srn"] = ""
+            entries_to_push.append(seed)
+
+    # Current change entry — record every change to amount or SRN
+    prev_amount = existing.get("govt_fees_amount") or 0
+    prev_srn    = (existing.get("govt_fees_srn") or "").strip()
+    new_amount  = set_doc.get("govt_fees_amount")
+    new_srn_val = set_doc.get("govt_fees_srn")
+
+    amount_changed = (new_amount is not None) and (float(new_amount) != float(prev_amount))
+    srn_changed    = (new_srn_val is not None) and (new_srn_val.strip() != prev_srn)
+
+    if amount_changed or srn_changed:
+        change_entry: dict = {
+            "ts":         ts_now,
+            "updated_by": current_user.id,
+            "user_name":  user_name,
+        }
+        if amount_changed:
+            change_entry["amount"]      = float(new_amount)
+            change_entry["prev_amount"] = float(prev_amount)
+        if srn_changed:
+            change_entry["srn"]      = new_srn_val.strip()
+            change_entry["prev_srn"] = prev_srn
+        entries_to_push.append(change_entry)
 
     update_op: dict = {"$set": set_doc}
-    # Only push a history entry when amount or SRN actually changed
-    amount_changed = "amount" in history_entry and history_entry["amount"] != history_entry.get("prev_amount")
-    srn_changed    = "srn"    in history_entry and history_entry["srn"]    != history_entry.get("prev_srn")
-    if amount_changed or srn_changed:
-        update_op["$push"] = {"fee_history": {"$each": [history_entry], "$slice": -50}}
+    if entries_to_push:
+        update_op["$push"] = {"fee_history": {"$each": entries_to_push, "$slice": -100}}
 
     await db.compliance_assignments.update_one(
         {"id": assignment_id, "compliance_id": compliance_id},
