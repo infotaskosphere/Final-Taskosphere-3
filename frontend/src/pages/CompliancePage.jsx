@@ -2474,12 +2474,13 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
   );
 }
 
-function ComplianceCard({item,onClick,onEdit,onDelete,isDark,viewMode='board'}){
+function ComplianceCard({item,onClick,onEdit,onDelete,onClose,isDark,viewMode='board'}){
   const cfg=CATEGORY_CFG[item.category]||CATEGORY_CFG.OTHER;
   const stats=item._stats||{};
   const freqLabel=FREQUENCIES.find(f=>f.value===item.frequency)?.label||item.frequency;
   const overdue=item.due_date&&isPast(safeDate(item.due_date))&&(stats.done||0)<(stats.total||0);
   const dueLabel=item.period_label||(item.due_date?`Due ${fmtDate(item.due_date)}`:null);
+  const isClosed=!!item.is_closed;
 
   // ── LIST ROW ──────────────────────────────────────────────────────────────
   if(viewMode==='list'){
@@ -2531,6 +2532,13 @@ function ComplianceCard({item,onClick,onEdit,onDelete,isDark,viewMode='board'}){
         </div>
         {/* Actions */}
         <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e=>e.stopPropagation()}>
+          {onClose&&(
+            <button onClick={()=>onClose(item)} title={isClosed?'Re-open':'Close (hide from dashboard)'}
+              className="w-7 h-7 rounded-lg flex items-center justify-center hover:opacity-100 opacity-60"
+              style={{backgroundColor:isClosed?'rgba(31,175,90,0.12)':isDark?D.raised:'#f1f5f9'}}>
+              {isClosed?<CheckCircle2 className="w-3.5 h-3.5 text-green-500"/>:<X className="w-3.5 h-3.5" style={{color:'#64748b'}}/>}
+            </button>
+          )}
           <button onClick={onEdit} className="w-7 h-7 rounded-lg flex items-center justify-center hover:opacity-100 opacity-60"
             style={{backgroundColor:isDark?D.raised:'#f1f5f9'}}><Edit2 className="w-3.5 h-3.5" style={{color:isDark?D.muted:'#64748b'}}/></button>
           <button onClick={onDelete} className="w-7 h-7 rounded-lg flex items-center justify-center hover:opacity-100 opacity-60"
@@ -2557,6 +2565,8 @@ function ComplianceCard({item,onClick,onEdit,onDelete,isDark,viewMode='board'}){
                 style={{backgroundColor:isDark?'rgba(31,111,178,0.12)':'#eff6ff',color:'#1F6FB2'}}>FY {item.fy_year}</span>}
               {overdue&&<span className="text-[9px] font-black px-1.5 py-0.5 rounded text-red-500 flex-shrink-0"
                 style={{backgroundColor:'rgba(239,68,68,0.12)'}}>OVERDUE</span>}
+              {isClosed&&<span className="text-[9px] font-black px-1.5 py-0.5 rounded flex-shrink-0"
+                style={{backgroundColor:'rgba(100,116,139,0.12)',color:'#64748b'}}>CLOSED</span>}
             </div>
             <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e=>e.stopPropagation()}>
               <button onClick={onEdit} className="w-6 h-6 rounded-lg flex items-center justify-center hover:opacity-100 opacity-60"
@@ -2600,7 +2610,22 @@ function ComplianceCard({item,onClick,onEdit,onDelete,isDark,viewMode='board'}){
         <div className="px-4 py-2 border-t flex items-center justify-between flex-shrink-0"
           style={{borderColor:isDark?D.border:'#f9fafb',backgroundColor:isDark?'rgba(255,255,255,0.02)':'#fafafa'}}>
           <span className="text-[10px] font-semibold" style={{color:isDark?D.dimmer:'#94a3b8'}}>{stats.total||0} clients</span>
-          <div className="flex items-center gap-1 text-[10px] font-bold" style={{color:cfg.color}}>Open<ChevronRight className="w-3 h-3"/></div>
+          <div className="flex items-center gap-2">
+            {onClose&&(
+              <button
+                onClick={e=>{e.stopPropagation();onClose(item);}}
+                title={isClosed?'Re-open compliance':'Close compliance (hide from dashboard)'}
+                className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border transition-colors"
+                style={{
+                  color:isClosed?'#1FAF5A':'#64748b',
+                  borderColor:isClosed?'#1FAF5A':'#cbd5e1',
+                  backgroundColor:isClosed?'rgba(31,175,90,0.08)':'transparent',
+                }}>
+                {isClosed?<><CheckCircle2 className="w-3 h-3"/>Re-open</>:<><X className="w-3 h-3"/>Close</>}
+              </button>
+            )}
+            <div className="flex items-center gap-1 text-[10px] font-bold" style={{color:cfg.color}}>Open<ChevronRight className="w-3 h-3"/></div>
+          </div>
         </div>
       </div>
     </motion.div>
@@ -3584,6 +3609,17 @@ export default function CompliancePage(){
     catch(e){toast.error(e?.response?.data?.detail||'Delete failed');}
   };
 
+  const handleClose=async(item)=>{
+    const isClosed=!!item.is_closed;
+    const action=isClosed?'Re-open':'Close';
+    if(!confirm(`${action} "${item.name}"? ${isClosed?'It will reappear on the dashboard.':'It will be hidden from the dashboard overdue/upcoming counters but remain visible here.'}`))return;
+    try{
+      const updated=await api.patch(`/compliance/${item.id}/close`);
+      toast.success(`"${item.name}" ${updated.data?.is_closed?'closed — hidden from dashboard':'re-opened'}`);
+      setRefreshKey(k=>k+1);
+    }catch(e){toast.error(e?.response?.data?.detail||`${action} failed`);}
+  };
+
   // AI Duplicate handler — uses Grok → Gemini → local fallback; excludes completed/filed items
   const handleDetectDuplicates = () => {
     if (detectingDups) return;
@@ -4217,7 +4253,8 @@ export default function CompliancePage(){
                       canManage={canManage}
                       onClick={()=>setDetailItem(item)}
                       onEdit={canManage?(e=>{e&&e.stopPropagation();setEditingItem(item);}):undefined}
-                      onDelete={canManage?(e=>{e&&e.stopPropagation();handleDelete(item.id,item.name);}):undefined}/>
+                      onDelete={canManage?(e=>{e&&e.stopPropagation();handleDelete(item.id,item.name);}):undefined}
+                      onClose={canManage?handleClose:undefined}/>
                   ))}
                 </motion.div>
               ):(
@@ -4227,7 +4264,8 @@ export default function CompliancePage(){
                       canManage={canManage}
                       onClick={()=>setDetailItem(item)}
                       onEdit={canManage?(e=>{e&&e.stopPropagation();setEditingItem(item);}):undefined}
-                      onDelete={canManage?(e=>{e&&e.stopPropagation();handleDelete(item.id,item.name);}):undefined}/>
+                      onDelete={canManage?(e=>{e&&e.stopPropagation();handleDelete(item.id,item.name);}):undefined}
+                      onClose={canManage?handleClose:undefined}/>
                   ))}
                 </motion.div>
               )}
