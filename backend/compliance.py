@@ -1246,9 +1246,29 @@ async def update_assignment_govt_fee(
             "payment_date": now[:10],
         })
 
+    # Build a history entry capturing what changed
+    history_entry: dict = {
+        "ts":         _now(),
+        "updated_by": current_user.id,
+        "user_name":  getattr(current_user, "full_name", None) or getattr(current_user, "email", ""),
+    }
+    if "govt_fees_amount" in set_doc:
+        history_entry["amount"] = set_doc["govt_fees_amount"]
+        history_entry["prev_amount"] = existing.get("govt_fees_amount") or 0
+    if "govt_fees_srn" in set_doc:
+        history_entry["srn"] = set_doc["govt_fees_srn"]
+        history_entry["prev_srn"] = existing.get("govt_fees_srn") or ""
+
+    update_op: dict = {"$set": set_doc}
+    # Only push a history entry when amount or SRN actually changed
+    amount_changed = "amount" in history_entry and history_entry["amount"] != history_entry.get("prev_amount")
+    srn_changed    = "srn"    in history_entry and history_entry["srn"]    != history_entry.get("prev_srn")
+    if amount_changed or srn_changed:
+        update_op["$push"] = {"fee_history": {"$each": [history_entry], "$slice": -50}}
+
     await db.compliance_assignments.update_one(
         {"id": assignment_id, "compliance_id": compliance_id},
-        {"$set": set_doc},
+        update_op,
     )
     doc = await db.compliance_assignments.find_one({"id": assignment_id}, {"_id": 0})
     return doc
