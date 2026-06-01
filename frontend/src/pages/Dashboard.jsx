@@ -1124,17 +1124,19 @@ export default function Dashboard() {
   }, [hasCrossVisibility, crossVisibilityUserIds, tasks, user?.id]);
 
   const sortedDueDates = useMemo(() => {
-    return [...upcomingDueDates].sort((a, b) => {
-      const aOD = (a.days_remaining ?? 0) <= 0;
-      const bOD = (b.days_remaining ?? 0) <= 0;
-      if (aOD && !bOD) return -1;
-      if (!aOD && bOD) return 1;
-      return (a.days_remaining ?? 0) - (b.days_remaining ?? 0);
-    });
+    return [...upcomingDueDates]
+      .filter(d => d.status !== 'closed')
+      .sort((a, b) => {
+        const aOD = (a.days_remaining ?? 0) <= 0;
+        const bOD = (b.days_remaining ?? 0) <= 0;
+        if (aOD && !bOD) return -1;
+        if (!aOD && bOD) return 1;
+        return (a.days_remaining ?? 0) - (b.days_remaining ?? 0);
+      });
   }, [upcomingDueDates]);
 
   const overdueDeadlineCount = useMemo(
-    () => upcomingDueDates.filter(d => (d.days_remaining ?? 0) < 0).length,
+    () => upcomingDueDates.filter(d => d.status !== 'closed' && (d.days_remaining ?? 0) < 0).length,
     [upcomingDueDates]
   );
 
