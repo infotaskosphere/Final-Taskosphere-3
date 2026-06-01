@@ -1425,20 +1425,25 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
     try{
       const amt = parseFloat(amount)||0;
       const srnVal = (srn||'').trim();
-      await api.patch(`/compliance/${compliance.id}/assignments/${assignmentId}/govt-fee`,{
+      const res = await api.patch(`/compliance/${compliance.id}/assignments/${assignmentId}/govt-fee`,{
         govt_fees_amount:amt,
         govt_fees_srn:srnVal,
       });
+      // Merge full server response (includes fee_history) back into items
+      const updated = res.data || {};
       const autoFiled = amt > 0 && !!srnVal;
       const today = new Date().toISOString().slice(0,10);
       setItems(prev=>prev.map(a=>a.id===assignmentId
         ? {
             ...a,
+            ...updated,
             govt_fees_amount: amt,
             govt_fees_srn: srnVal,
             ...(autoFiled ? { status:'filed', payment_date: today, filed_at: new Date().toISOString() } : {}),
           }
         : a));
+      // Also refresh detailRow if it's open for this assignment
+      setDetailRow(prev=>prev&&prev.id===assignmentId ? {...prev,...updated,govt_fees_amount:amt,govt_fees_srn:srnVal,...(autoFiled?{status:'filed',payment_date:today,filed_at:new Date().toISOString()}:{})} : prev);
       setEditingFee(null);
       toast.success(autoFiled ? 'Saved · marked as Filed' : 'Saved');
       try { window.dispatchEvent(new CustomEvent('compliance:govt-fee-updated', { detail: { assignment_id: assignmentId } })); } catch {}
@@ -2281,29 +2286,46 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                     )}
                   </div>
                 )}
-                {/* Fee / SRN Change History */}
-                {Array.isArray(detailRow.fee_history)&&detailRow.fee_history.length>0&&(
+                {/* Fee / SRN Change History — always visible when fee data exists */}
+                {(detailRow.govt_fees_amount>0||detailRow.govt_fees_srn)&&(()=>{
+                  // Build display list: real history + synthetic current-state entry if no history yet
+                  const hist = Array.isArray(detailRow.fee_history) ? [...detailRow.fee_history] : [];
+                  const hasCurrent = hist.length>0 && (
+                    ('amount' in hist[hist.length-1] && hist[hist.length-1].amount===detailRow.govt_fees_amount) ||
+                    ('srn' in hist[hist.length-1] && hist[hist.length-1].srn===detailRow.govt_fees_srn)
+                  );
+                  const displayList = hist.length===0 ? [{
+                    ts: detailRow.updated_at,
+                    user_name: detailRow.assigned_to_name||'—',
+                    ...(detailRow.govt_fees_amount>0 ? {amount:detailRow.govt_fees_amount,prev_amount:0} : {}),
+                    ...(detailRow.govt_fees_srn ? {srn:detailRow.govt_fees_srn,prev_srn:''} : {}),
+                    _synthetic: true,
+                  }] : [...hist].reverse();
+                  return (
                   <div className="rounded-xl border overflow-hidden" style={{borderColor:isDark?D.border:'#e2e8f0'}}>
-                    <div className="px-3 py-2 flex items-center gap-2" style={{backgroundColor:isDark?D.raised:'#f8fafc',borderBottom:`1px solid ${isDark?D.border:'#e2e8f0'}`}}>
+                    <div className="px-3 py-2 flex items-center justify-between" style={{backgroundColor:isDark?D.raised:'#f8fafc',borderBottom:`1px solid ${isDark?D.border:'#e2e8f0'}`}}>
                       <span className="text-[10px] font-black uppercase tracking-wider" style={{color:isDark?D.dimmer:'#94a3b8'}}>Fee / SRN Update Log</span>
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{backgroundColor:isDark?'rgba(31,111,178,0.15)':'#dbeafe',color:'#1F6FB2'}}>{displayList.length} {displayList.length===1?'entry':'entries'}</span>
                     </div>
-                    <div className="divide-y" style={{divideColor:isDark?D.border:'#f1f5f9'}}>
-                      {[...detailRow.fee_history].reverse().map((h,i)=>(
-                        <div key={i} className="px-3 py-2.5 flex items-start gap-3">
+                    <div style={{borderColor:isDark?D.border:'#f1f5f9'}}>
+                      {displayList.map((h,i)=>(
+                        <div key={i} className="px-3 py-2.5 flex items-start gap-3" style={{borderTop:i>0?`1px solid ${isDark?D.border:'#f1f5f9'}`:'none'}}>
                           <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 text-[10px] font-black"
-                            style={{backgroundColor:isDark?'rgba(31,111,178,0.2)':'#dbeafe',color:'#1F6FB2'}}>
-                            {(h.user_name||'?').charAt(0).toUpperCase()}
+                            style={{backgroundColor:h._synthetic?(isDark?'rgba(148,163,184,0.2)':'#f1f5f9'):isDark?'rgba(31,111,178,0.2)':'#dbeafe',color:h._synthetic?(isDark?D.dimmer:'#94a3b8'):'#1F6FB2'}}>
+                            {h._synthetic?'·':(h.user_name||'?').charAt(0).toUpperCase()}
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between gap-2 mb-0.5">
-                              <span className="text-xs font-bold truncate" style={{color:isDark?D.text:'#0f172a'}}>{h.user_name||'Unknown'}</span>
+                              <span className="text-xs font-bold truncate" style={{color:h._synthetic?(isDark?D.muted:'#64748b'):isDark?D.text:'#0f172a'}}>
+                                {h._synthetic?'Recorded (no edit history)':h.user_name||'Unknown'}
+                              </span>
                               <span className="text-[10px] flex-shrink-0" style={{color:isDark?D.dimmer:'#94a3b8'}}>{fmtDate(h.ts,'dd MMM yy · HH:mm')}</span>
                             </div>
                             <div className="flex flex-wrap gap-1.5 mt-1">
                               {'amount' in h&&(
                                 <span className="text-[10px] px-2 py-0.5 rounded-md font-semibold"
                                   style={{backgroundColor:isDark?'rgba(245,158,11,0.15)':'#fef3c7',color:'#D97706'}}>
-                                  ₹{Number(h.prev_amount||0).toLocaleString('en-IN')} → ₹{Number(h.amount||0).toLocaleString('en-IN')}
+                                  {h.prev_amount>0?`₹${Number(h.prev_amount).toLocaleString('en-IN')} → `:''}₹{Number(h.amount||0).toLocaleString('en-IN')}
                                 </span>
                               )}
                               {'srn' in h&&(
@@ -2318,7 +2340,8 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                       ))}
                     </div>
                   </div>
-                )}
+                  );
+                })()}
                 {/* Notes */}
                 <div className="rounded-xl p-3.5 border" style={{backgroundColor:isDark?D.raised:'#f8fafc',borderColor:isDark?D.border:'#e2e8f0'}}>
                   <p className="text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{color:isDark?D.dimmer:'#94a3b8'}}>Notes</p>
