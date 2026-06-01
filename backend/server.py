@@ -4867,9 +4867,25 @@ async def get_upcoming_due_dates(
             return []
 
     due_dates = await db.due_dates.find(query, {"_id": 0}).to_list(1000)
+
+    # Build a set of compliance names/titles that are closed so we can
+    # exclude their matching due_dates entries from the dashboard widget.
+    closed_masters = await db.compliance_masters.find(
+        {"is_closed": True}, {"_id": 0, "name": 1, "calendar_due_date_id": 1}
+    ).to_list(1000)
+    closed_names = {m["name"].strip().lower() for m in closed_masters if m.get("name")}
+    closed_cal_ids = {m["calendar_due_date_id"] for m in closed_masters if m.get("calendar_due_date_id")}
+
     results = []
 
     for dd in due_dates:
+        # Skip if this due_date is directly linked to a closed compliance master
+        if dd.get("id") in closed_cal_ids:
+            continue
+        # Skip if the title matches a closed compliance master name (case-insensitive)
+        if dd.get("title", "").strip().lower() in closed_names:
+            continue
+
         dd_date = (
             datetime.fromisoformat(dd["due_date"])
             if isinstance(dd["due_date"], str)
@@ -4879,9 +4895,6 @@ async def get_upcoming_due_dates(
         if dd_date.tzinfo is None:
             dd_date = dd_date.replace(tzinfo=IST)
 
-        # ── FIX: include overdue items (dd_date < now) AND upcoming items ──
-        # Old code: if now <= dd_date <= future_date   ← excluded overdue
-        # New code: if dd_date <= future_date           ← includes overdue
         if dd_date <= future_date:
             dd["due_date"] = dd_date
             dd["days_remaining"] = (dd_date - now).days   # negative = overdue
@@ -7816,8 +7829,19 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     if current_user.role != "admin" and current_user.departments:
         due_date_query["department"] = {"$in": current_user.departments}
 
+    # Exclude due_dates whose compliance master is marked closed
+    closed_masters_stat = await db.compliance_masters.find(
+        {"is_closed": True}, {"_id": 0, "name": 1, "calendar_due_date_id": 1}
+    ).to_list(1000)
+    closed_names_stat = {m["name"].strip().lower() for m in closed_masters_stat if m.get("name")}
+    closed_cal_ids_stat = {m["calendar_due_date_id"] for m in closed_masters_stat if m.get("calendar_due_date_id")}
+
     due_dates = await db.due_dates.find(due_date_query, {"_id": 0}).to_list(1000)
     for dd in due_dates:
+        if dd.get("id") in closed_cal_ids_stat:
+            continue
+        if dd.get("title", "").strip().lower() in closed_names_stat:
+            continue
         try:
             dd_date = datetime.fromisoformat(dd["due_date"]) if isinstance(dd["due_date"], str) else dd["due_date"]
             days_until_due = (dd_date - now).days
