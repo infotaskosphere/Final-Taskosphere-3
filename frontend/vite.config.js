@@ -34,6 +34,14 @@ export default defineConfig({
     chunkSizeWarningLimit: 2000,
     rollupOptions: {
       output: {
+        entryFileNames: 'assets/[name]-[hash].js',
+        chunkFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: (assetInfo) => {
+          if (assetInfo.name && assetInfo.name.endsWith('.css')) {
+            return 'assets/[name]-[hash].css';
+          }
+          return 'assets/[name]-[hash][extname]';
+        },
         manualChunks: {
           'react-core': ['react', 'react-dom', 'react-router-dom'],
           'framer':     ['framer-motion'],
