@@ -1,8 +1,9 @@
 // =============================================================================
 // AssignedClientsPanel.jsx
-// View clients assigned to a user — with Quick-Edit so admins/managers can
-// update services, status, contact details and billing info right from the
-// General Settings page without leaving the page.
+// View clients assigned to a user — with Quick-Edit AND Bulk Assignment so
+// admins/managers can manage assignments right from General Settings.
+// Bulk assignment uses the same API pattern as Clients.jsx BulkAssignModal
+// so both pages stay in sync (PUT /clients/{id} with assignments payload).
 // =============================================================================
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -13,6 +14,7 @@ import {
   Loader2, CheckCircle2, ChevronDown, LayoutGrid, List as ListIcon,
   Building2, Filter, X, Download, Edit2, Save,
   FileText, CreditCard, User, ChevronRight,
+  UserPlus, CheckSquare, Square, MinusSquare, AlertCircle, UserCheck,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -56,14 +58,21 @@ function hueFor(label = "") {
   return SERVICE_HUES[h % SERVICE_HUES.length];
 }
 
+function getAvatarBg(name = "") {
+  const palette = ["#0D3B66","#065f46","#7c2d12","#4c1d95","#831843","#1F6FB2","#0E7490","#92400e"];
+  return palette[(name?.charCodeAt(0) || 0) % palette.length];
+}
+
 // ─── Shared sub-components ────────────────────────────────────────────────────
-function Avatar({ name }) {
+function Avatar({ name, size = "md" }) {
   const initial = (name || "?").trim().charAt(0).toUpperCase();
-  const palette = ["#0D3B66","#065f46","#7c2d12","#4c1d95","#831843","#1F6FB2","#0E7490"];
-  const bg = palette[(name?.charCodeAt(0) || 0) % palette.length];
+  const bg = getAvatarBg(name);
+  const cls = size === "sm"
+    ? "w-7 h-7 rounded-lg text-xs"
+    : "w-10 h-10 rounded-xl text-sm";
   return (
     <div
-      className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-black flex-shrink-0"
+      className={`${cls} flex items-center justify-center text-white font-black flex-shrink-0`}
       style={{ background: `linear-gradient(135deg, ${bg}, ${COLORS.mediumBlue})` }}
     >
       {initial}
@@ -87,11 +96,17 @@ function StatusPill({ status, isDark }) {
   );
 }
 
-function ServiceChips({ services }) {
-  if (!services?.length) return <span className="text-[11px] italic text-slate-400">No specific services</span>;
+function ServiceChips({ services, allClientServices }) {
+  // If assigned_services is ["All services"] (legacy fallback), resolve to actual
+  // client-level services so the card accurately reflects what was saved.
+  const resolved =
+    services?.length === 1 && services[0] === "All services"
+      ? (allClientServices?.length ? allClientServices : services)
+      : services;
+  if (!resolved?.length) return <span className="text-[11px] italic text-slate-400">No specific services</span>;
   return (
     <div className="flex flex-wrap gap-1">
-      {services.map((s) => {
+      {resolved.map((s) => {
         const h = hueFor(s);
         return (
           <span key={s} className="px-2 py-0.5 rounded-md text-[10px] font-bold" style={{ background: h.bg, color: h.text }}>
@@ -118,11 +133,16 @@ function exportCsv(rows, userName) {
   const headers = ["Company","Type","Email","Phone","City","State","Status","Assigned Services","All Services"];
   const csv = [
     headers.join(","),
-    ...rows.map(r => [
-      r.company_name||"", r.client_type_label||r.client_type||"",
-      r.email||"", r.phone||"", r.city||"", r.state||"",
-      r.status||"active", (r.assigned_services||[]).join("; "), (r.services||[]).join("; "),
-    ].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(","))
+    ...rows.map(r => {
+      const assignedSvcs = (r.assigned_services?.length === 1 && r.assigned_services[0] === "All services")
+        ? (r.services || [])
+        : (r.assigned_services || []);
+      return [
+        r.company_name||"", r.client_type_label||r.client_type||"",
+        r.email||"", r.phone||"", r.city||"", r.state||"",
+        r.status||"active", assignedSvcs.join("; "), (r.services||[]).join("; "),
+      ].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",");
+    })
   ].join("\n");
   const blob = new Blob([csv],{type:"text/csv;charset=utf-8;"});
   const url  = URL.createObjectURL(blob);
@@ -132,11 +152,383 @@ function exportCsv(rows, userName) {
   URL.revokeObjectURL(url);
 }
 
+// ─── Bulk Assign Modal ────────────────────────────────────────────────────────
+// Mirrors BulkAssignModal in Clients.jsx — same API pattern (PUT /clients/{id}
+// with assignments payload) so both pages stay in sync.
+function BulkAssignModal({ open, allClients, users, isDark, onClose, onComplete }) {
+  const [selectedIds, setSelectedIds]       = useState(new Set());
+  const [clientSearch, setClientSearch]     = useState("");
+  const [targetUserId, setTargetUserId]     = useState("");
+  const [selectedServices, setSelectedServices] = useState([]);
+  const [mode, setMode]                     = useState("add"); // 'add' | 'replace'
+  const [saving, setSaving]                 = useState(false);
+  const [userSearch, setUserSearch]         = useState("");
+  const [scope, setScope]                   = useState("active");
+
+  const activeClients = useMemo(() =>
+    allClients.filter(c => (c?.status || "active") === "active"),
+    [allClients]
+  );
+
+  // Reset state when opened
+  useEffect(() => {
+    if (!open) return;
+    setScope("active");
+    setSelectedIds(new Set(activeClients.map(c => c.id)));
+    setClientSearch("");
+    setTargetUserId("");
+    setSelectedServices([]);
+    setMode("add");
+    setSaving(false);
+    setUserSearch("");
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const displayedClients = useMemo(() => {
+    const q = clientSearch.trim().toLowerCase();
+    const base = scope === "active" ? activeClients : allClients;
+    if (!q) return base;
+    return base.filter(c =>
+      (c?.company_name || "").toLowerCase().includes(q) ||
+      (c?.phone || "").includes(q) ||
+      (c?.email || "").toLowerCase().includes(q)
+    );
+  }, [allClients, activeClients, clientSearch, scope]);
+
+  const filteredUsers = useMemo(() => {
+    const q = userSearch.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter(u =>
+      (u.full_name || "").toLowerCase().includes(q) ||
+      (u.email || "").toLowerCase().includes(q)
+    );
+  }, [users, userSearch]);
+
+  const selectedClients = useMemo(() =>
+    allClients.filter(c => selectedIds.has(c.id)),
+    [allClients, selectedIds]
+  );
+
+  const targetUser = users.find(u => u.id === targetUserId);
+
+  const allDisplayedSelected = displayedClients.length > 0 && displayedClients.every(c => selectedIds.has(c.id));
+  const someDisplayedSelected = !allDisplayedSelected && displayedClients.some(c => selectedIds.has(c.id));
+
+  const toggleClient = useCallback((id) => {
+    setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }, []);
+
+  const toggleAll = useCallback(() => {
+    if (allDisplayedSelected) {
+      setSelectedIds(prev => { const n = new Set(prev); displayedClients.forEach(c => n.delete(c.id)); return n; });
+    } else {
+      setSelectedIds(prev => { const n = new Set(prev); displayedClients.forEach(c => n.add(c.id)); return n; });
+    }
+  }, [allDisplayedSelected, displayedClients]);
+
+  const handleScopeChange = useCallback((s) => {
+    setScope(s);
+    const base = s === "active" ? activeClients : allClients;
+    setSelectedIds(new Set(base.map(c => c.id)));
+  }, [activeClients, allClients]);
+
+  const toggleService = useCallback((svc) => {
+    setSelectedServices(prev => prev.includes(svc) ? prev.filter(s => s !== svc) : [...prev, svc]);
+  }, []);
+
+  const handleAssign = useCallback(async () => {
+    if (!targetUserId || selectedClients.length === 0) return;
+    setSaving(true);
+    let ok = 0, fail = 0;
+    for (const client of selectedClients) {
+      try {
+        let newAssignments;
+        if (mode === "replace") {
+          newAssignments = [{ user_id: targetUserId, services: selectedServices }];
+        } else {
+          const existing = client.assignments || [];
+          const alreadyAssigned = existing.find(a => a.user_id === targetUserId);
+          if (alreadyAssigned) {
+            const merged = [...new Set([...(alreadyAssigned.services || []), ...selectedServices])];
+            newAssignments = existing.map(a => a.user_id === targetUserId ? { ...a, services: merged } : a);
+          } else {
+            newAssignments = [...existing, { user_id: targetUserId, services: selectedServices }];
+          }
+        }
+        await api.put(`/clients/${client.id}`, { assignments: newAssignments });
+        ok++;
+      } catch {
+        fail++;
+      }
+    }
+    setSaving(false);
+    if (ok > 0) {
+      toast.success(`Assigned ${targetUser?.full_name || "user"} to ${ok} client${ok !== 1 ? "s" : ""}${fail > 0 ? ` (${fail} failed)` : ""}`);
+      onComplete();
+    } else {
+      toast.error("Assignment failed. Please try again.");
+    }
+    onClose();
+  }, [targetUserId, selectedClients, mode, selectedServices, targetUser, onComplete, onClose]);
+
+  if (!open) return null;
+
+  const inp = `h-9 w-full rounded-xl text-xs px-3 border outline-none focus:ring-2 transition-all ${isDark ? "bg-slate-700 border-slate-600 text-slate-100 focus:ring-blue-500/30 focus:border-blue-500" : "bg-white border-slate-200 text-slate-800 focus:ring-blue-100 focus:border-blue-400"}`;
+
+  return (
+    <div className="fixed inset-0 z-[300] flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <motion.div
+        initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 40 }}
+        transition={{ duration: 0.22, ease: "easeOut" }}
+        className={`relative w-full sm:max-w-4xl rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col max-h-[92vh] ${isDark ? "bg-slate-900 border border-slate-700" : "bg-white border border-slate-200"}`}
+      >
+        {/* ── Header ── */}
+        <div className="flex-shrink-0 flex items-center gap-3 px-6 py-4 rounded-t-3xl" style={{ background: GRADIENT }}>
+          <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0">
+            <UserCheck className="h-5 w-5 text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-white font-bold text-base leading-tight">Bulk Assign Clients</h2>
+            <p className="text-white/65 text-xs mt-0.5">Select clients and assign them to a team member in one shot</p>
+          </div>
+          <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-white/20 text-white flex-shrink-0">
+            {selectedIds.size} selected
+          </span>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-xl bg-white/15 hover:bg-white/25 text-white transition flex-shrink-0">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* ── Body (2-column) ── */}
+        <div className="flex flex-1 overflow-hidden min-h-0">
+
+          {/* LEFT: Client list */}
+          <div className={`w-72 flex-shrink-0 flex flex-col border-r ${isDark ? "border-slate-700 bg-slate-800/50" : "border-slate-100 bg-slate-50/40"}`}>
+            {/* Scope toggle */}
+            <div className="flex gap-1 px-3 pt-3 pb-2 flex-shrink-0">
+              {[
+                { id: "active", label: `Active (${activeClients.length})` },
+                { id: "all",    label: `All (${allClients.length})` },
+              ].map(s => (
+                <button key={s.id} onClick={() => handleScopeChange(s.id)}
+                  className="flex-1 h-7 rounded-lg text-[10px] font-bold transition-all"
+                  style={scope === s.id
+                    ? { background: GRADIENT, color: "#fff" }
+                    : { background: isDark ? "rgba(255,255,255,0.07)" : "#f1f5f9", color: isDark ? "#94a3b8" : "#64748b" }}>
+                  {s.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Search */}
+            <div className={`flex items-center gap-1.5 px-3 py-2 border-b flex-shrink-0 ${isDark ? "border-slate-700" : "border-slate-100"}`}>
+              <Search className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+              <input
+                className={`flex-1 text-xs bg-transparent outline-none placeholder:text-slate-400 ${isDark ? "text-slate-200" : "text-slate-700"}`}
+                placeholder="Search clients…"
+                value={clientSearch}
+                onChange={e => setClientSearch(e.target.value)}
+              />
+              {clientSearch && <button onClick={() => setClientSearch("")}><X className="h-3 w-3 text-slate-400 hover:text-slate-600" /></button>}
+            </div>
+
+            {/* Select-all row */}
+            <div className={`flex items-center gap-2 px-3 py-2 border-b text-[10px] font-bold uppercase tracking-widest flex-shrink-0 ${isDark ? "border-slate-700 text-slate-400" : "border-slate-100 text-slate-400"}`}>
+              <button onClick={toggleAll} className="flex items-center gap-1.5 hover:text-blue-600 transition-colors">
+                {allDisplayedSelected
+                  ? <CheckSquare className="h-3.5 w-3.5 text-blue-600" />
+                  : someDisplayedSelected
+                    ? <MinusSquare className="h-3.5 w-3.5 text-blue-400" />
+                    : <Square className="h-3.5 w-3.5" />}
+                {allDisplayedSelected ? "Deselect All" : "Select All"}
+              </button>
+              <span className="ml-auto">{displayedClients.length} shown</span>
+            </div>
+
+            {/* Client rows */}
+            <div className="flex-1 overflow-y-auto">
+              {displayedClients.map(c => {
+                const checked = selectedIds.has(c.id);
+                const inactive = (c?.status || "active") === "inactive";
+                return (
+                  <div
+                    key={c.id}
+                    onClick={() => toggleClient(c.id)}
+                    className={`flex items-center gap-2.5 px-3 py-2.5 cursor-pointer transition-colors border-b last:border-0 ${isDark ? "border-slate-700/60" : "border-slate-50"} ${checked ? (isDark ? "bg-blue-900/20" : "bg-blue-50/60") : (isDark ? "hover:bg-slate-700/50" : "hover:bg-slate-50")}`}
+                  >
+                    {checked
+                      ? <CheckSquare className="h-3.5 w-3.5 text-blue-600 flex-shrink-0" />
+                      : <Square className="h-3.5 w-3.5 text-slate-300 flex-shrink-0" />}
+                    <div
+                      className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
+                      style={{ background: `linear-gradient(135deg, ${getAvatarBg(c.company_name)}, ${COLORS.mediumBlue})`, opacity: inactive ? 0.5 : 1 }}
+                    >
+                      {c.company_name?.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-xs font-semibold truncate leading-tight ${inactive ? "text-slate-400" : isDark ? "text-slate-200" : "text-slate-800"}`}>
+                        {c.company_name}
+                        {inactive && <span className="ml-1 text-[9px] text-amber-500 font-bold">INACTIVE</span>}
+                      </p>
+                      <p className="text-[10px] text-slate-400 truncate">{c.phone || c.email || "—"}</p>
+                    </div>
+                  </div>
+                );
+              })}
+              {displayedClients.length === 0 && (
+                <div className="flex items-center justify-center h-20 text-xs text-slate-400">No clients found</div>
+              )}
+            </div>
+          </div>
+
+          {/* RIGHT: Assignment config */}
+          <div className="flex-1 flex flex-col overflow-y-auto min-w-0">
+            <div className="p-5 space-y-5">
+
+              {/* 1. Pick user */}
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2 block">
+                  Assign To <span className="text-rose-400">*</span>
+                </label>
+                {/* User search */}
+                <div className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border mb-2 ${isDark ? "bg-slate-800 border-slate-600" : "bg-slate-50 border-slate-200"}`}>
+                  <Search className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                  <input
+                    className={`flex-1 text-xs bg-transparent outline-none placeholder:text-slate-400 ${isDark ? "text-slate-200" : "text-slate-700"}`}
+                    placeholder="Search team member…"
+                    value={userSearch}
+                    onChange={e => setUserSearch(e.target.value)}
+                  />
+                  {userSearch && <button onClick={() => setUserSearch("")}><X className="h-3 w-3 text-slate-400" /></button>}
+                </div>
+                <div className="grid grid-cols-1 gap-2 max-h-44 overflow-y-auto pr-1">
+                  {filteredUsers.length === 0 && (
+                    <p className="text-xs text-slate-400 italic px-1">No team members found.</p>
+                  )}
+                  {filteredUsers.map(u => {
+                    const isSel = targetUserId === u.id;
+                    return (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => setTargetUserId(u.id)}
+                        className={`flex items-center gap-3 px-4 py-2.5 rounded-xl border text-left transition-all ${isSel
+                          ? "border-blue-300 shadow-sm"
+                          : isDark ? "border-slate-600 bg-slate-800/40 hover:border-slate-500" : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"}`}
+                        style={isSel ? { background: "linear-gradient(135deg, #eff6ff, #dbeafe)", borderColor: "#93c5fd" } : {}}
+                      >
+                        <Avatar name={u.full_name || u.name || u.email} size="sm" />
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm font-semibold truncate ${isDark ? "text-slate-100" : "text-slate-800"}`}>
+                            {u.full_name || u.name || u.email}
+                          </p>
+                          {u.departments?.length > 0 && (
+                            <p className="text-[10px] text-slate-400 truncate">{u.departments.join(", ")}</p>
+                          )}
+                        </div>
+                        {isSel && <CheckCircle2 className="h-4 w-4 text-blue-600 flex-shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 2. Services */}
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2 block">
+                  Services <span className={`font-normal normal-case ${isDark ? "text-slate-500" : "text-slate-400"}`}>(optional — leave blank for all)</span>
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {SERVICES.map(svc => {
+                    const isSel = selectedServices.includes(svc);
+                    return (
+                      <button key={svc} type="button" onClick={() => toggleService(svc)}
+                        className={`px-3 py-1 text-xs font-semibold rounded-xl border transition-all ${isSel ? "text-white border-transparent" : isDark ? "bg-slate-700 text-slate-300 border-slate-600 hover:border-slate-500" : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50"}`}
+                        style={isSel ? { background: GRADIENT } : {}}>
+                        {svc}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 3. Mode */}
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2 block">Assignment Mode</label>
+                <div className={`flex rounded-xl border overflow-hidden ${isDark ? "border-slate-600" : "border-slate-200"}`}>
+                  {[
+                    { value: "add",     label: "Add to existing",   desc: "Keep current assignments + add this user" },
+                    { value: "replace", label: "Replace all",       desc: "Remove existing, set only this user" },
+                  ].map(opt => (
+                    <button key={opt.value} type="button" onClick={() => setMode(opt.value)}
+                      className={`flex-1 px-4 py-3 text-left transition-all border-r last:border-r-0 ${isDark ? "border-slate-600" : "border-slate-200"}`}
+                      style={mode === opt.value ? { background: GRADIENT } : { background: isDark ? "rgba(255,255,255,0.04)" : "#f8fafc" }}>
+                      <p className={`text-xs font-bold ${mode === opt.value ? "text-white" : isDark ? "text-slate-200" : "text-slate-700"}`}>{opt.label}</p>
+                      <p className={`text-[10px] mt-0.5 ${mode === opt.value ? "text-blue-100" : "text-slate-400"}`}>{opt.desc}</p>
+                    </button>
+                  ))}
+                </div>
+                {mode === "replace" && (
+                  <div className="flex items-start gap-2 mt-2 px-3 py-2 rounded-xl border border-amber-200 bg-amber-50">
+                    <AlertCircle className="h-3.5 w-3.5 text-amber-500 flex-shrink-0 mt-0.5" />
+                    <p className="text-[10px] text-amber-700 font-medium">
+                      This will replace ALL existing assignments for the selected clients with only this user.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* 4. Summary */}
+              {targetUserId && selectedClients.length > 0 && (
+                <div className="rounded-xl border p-4" style={{ background: "linear-gradient(135deg, #f0fdf4, #dcfce7)", borderColor: "#bbf7d0" }}>
+                  <p className="text-xs font-semibold text-emerald-800">
+                    ✓ Ready to {mode === "replace" ? "replace assignments and assign" : "assign"}{" "}
+                    <strong>{targetUser?.full_name || targetUser?.name}</strong>{" "}
+                    to <strong>{selectedClients.length}</strong> client{selectedClients.length !== 1 ? "s" : ""}
+                    {selectedServices.length > 0 && <> for <strong>{selectedServices.join(", ")}</strong></>}
+                    {selectedServices.length === 0 && <> for <strong>all services</strong></>}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Footer ── */}
+        <div className={`flex-shrink-0 flex items-center justify-between gap-3 px-6 py-4 border-t rounded-b-3xl ${isDark ? "border-slate-700 bg-slate-900" : "border-slate-100 bg-white"}`}>
+          <button
+            onClick={onClose}
+            className={`px-4 py-2 rounded-xl text-sm font-semibold border transition ${isDark ? "border-slate-600 text-slate-400 hover:bg-slate-800" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}
+          >
+            Cancel
+          </button>
+          <div className="flex items-center gap-3">
+            {!targetUserId && <span className="text-xs text-amber-600 font-medium">← Select a team member first</span>}
+            {targetUserId && selectedClients.length === 0 && <span className="text-xs text-amber-600 font-medium">← Select at least one client</span>}
+            <button
+              type="button"
+              disabled={!targetUserId || selectedClients.length === 0 || saving}
+              onClick={handleAssign}
+              className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold text-white shadow disabled:opacity-50 transition-all active:scale-95"
+              style={{ background: (!targetUserId || selectedClients.length === 0 || saving) ? "#94a3b8" : GRADIENT }}
+            >
+              {saving
+                ? <><Loader2 className="h-4 w-4 animate-spin" />Assigning…</>
+                : <><UserCheck className="h-4 w-4" />Assign {selectedClients.length > 0 ? `(${selectedClients.length})` : ""}</>
+              }
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 // ─── Quick-Edit Modal ─────────────────────────────────────────────────────────
 function QuickEditModal({ client, isDark, onClose, onSaved }) {
-  const [tab, setTab]     = useState("basic");
+  const [tab, setTab]       = useState("basic");
   const [saving, setSaving] = useState(false);
-  const [form, setForm]   = useState({
+  const [form, setForm]     = useState({
     company_name:          client.company_name || "",
     client_type:           client.client_type || "proprietor",
     client_type_other:     client.client_type === "other" ? (client.client_type_label || "") : "",
@@ -206,8 +598,8 @@ function QuickEditModal({ client, isDark, onClose, onSaved }) {
     }
   };
 
-  const inp = `h-10 w-full rounded-xl text-sm px-3 border outline-none focus:ring-2 transition-all ${isDark ? "bg-slate-700 border-slate-600 text-slate-100 focus:ring-blue-500/30 focus:border-blue-500" : "bg-white border-slate-200 text-slate-800 focus:ring-blue-100 focus:border-blue-400"}`;
-  const lbl = "block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5";
+  const inp  = `h-10 w-full rounded-xl text-sm px-3 border outline-none focus:ring-2 transition-all ${isDark ? "bg-slate-700 border-slate-600 text-slate-100 focus:ring-blue-500/30 focus:border-blue-500" : "bg-white border-slate-200 text-slate-800 focus:ring-blue-100 focus:border-blue-400"}`;
+  const lbl  = "block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5";
   const card = `rounded-2xl border p-5 ${isDark ? "bg-slate-800/80 border-slate-700" : "bg-white border-slate-100"}`;
 
   return (
@@ -248,7 +640,6 @@ function QuickEditModal({ client, isDark, onClose, onSaved }) {
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-4 py-4">
-
           {tab === "basic" && (
             <div className="space-y-4">
               <div className={card}>
@@ -427,7 +818,9 @@ export default function AssignedClientsPanel({ isDark }) {
   const [view, setView]                     = useState("grid");
   const [userPickerOpen, setUserPickerOpen] = useState(false);
   const [editingClient, setEditingClient]   = useState(null);
+  const [bulkAssignOpen, setBulkAssignOpen] = useState(false);
 
+  // Fetch all users (admins/managers only)
   useEffect(() => {
     if (!isPriv) return;
     api.get("/users")
@@ -454,7 +847,13 @@ export default function AssignedClientsPanel({ isDark }) {
 
   const allServices = useMemo(() => {
     const set = new Set();
-    (data.clients || []).forEach(c => (c.assigned_services || []).forEach(s => set.add(s)));
+    (data.clients || []).forEach(c => {
+      const effective =
+        (c.assigned_services?.length === 1 && c.assigned_services[0] === "All services")
+          ? (c.services || [])
+          : (c.assigned_services || []);
+      effective.forEach(s => set.add(s));
+    });
     return Array.from(set).sort();
   }, [data]);
 
@@ -462,9 +861,19 @@ export default function AssignedClientsPanel({ isDark }) {
     const q = search.trim().toLowerCase();
     return (data.clients || []).filter(c => {
       if (statusFilter !== "all" && (c.status || "active").toLowerCase() !== statusFilter) return false;
-      if (serviceFilter !== "all" && !(c.assigned_services || []).includes(serviceFilter)) return false;
+      if (serviceFilter !== "all") {
+        const effectiveServices =
+          (c.assigned_services?.length === 1 && c.assigned_services[0] === "All services")
+            ? (c.services || [])
+            : (c.assigned_services || []);
+        if (!effectiveServices.includes(serviceFilter)) return false;
+      }
       if (!q) return true;
-      const hay = [c.company_name, c.email, c.phone, c.city, c.state, c.gstin, c.pan, ...(c.assigned_services || [])].filter(Boolean).join(" ").toLowerCase();
+      const effectiveSearchSvcs =
+        (c.assigned_services?.length === 1 && c.assigned_services[0] === "All services")
+          ? (c.services || [])
+          : (c.assigned_services || []);
+      const hay = [c.company_name, c.email, c.phone, c.city, c.state, c.gstin, c.pan, ...effectiveSearchSvcs].filter(Boolean).join(" ").toLowerCase();
       return hay.includes(q);
     });
   }, [data, search, serviceFilter, statusFilter]);
@@ -479,15 +888,33 @@ export default function AssignedClientsPanel({ isDark }) {
   const handleSaved = useCallback((updated) => {
     setData(prev => ({
       ...prev,
-      clients: prev.clients.map(c => c.id === updated.id ? { ...c, ...updated } : c),
+      clients: prev.clients.map(c => {
+        if (c.id !== updated.id) return c;
+        // If services changed and assigned_services was the legacy "All services" fallback,
+        // update assigned_services to reflect the new client-level services.
+        let assigned_services = c.assigned_services;
+        if (
+          assigned_services?.length === 1 &&
+          assigned_services[0] === "All services" &&
+          updated.services
+        ) {
+          assigned_services = updated.services;
+        }
+        return { ...c, ...updated, assigned_services };
+      }),
     }));
   }, []);
+
+  // After bulk assign, reload the current user's clients so the panel is up-to-date
+  const handleBulkComplete = useCallback(() => {
+    loadClients();
+  }, [loadClients]);
 
   return (
     <div className="space-y-4">
       {/* HEADER */}
       <div className={`rounded-2xl border ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"}`}>
-        <div className="px-5 py-4 flex flex-wrap items-center gap-4 rounded-t-2xl" style={{ background: GRADIENT }}>
+        <div className="px-5 py-4 flex flex-wrap items-center gap-3 rounded-t-2xl" style={{ background: GRADIENT }}>
           <div className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0">
             <UsersIcon className="h-5 w-5 text-white" />
           </div>
@@ -498,6 +925,18 @@ export default function AssignedClientsPanel({ isDark }) {
             </p>
           </div>
 
+          {/* Bulk Assign button — admin/manager only */}
+          {isPriv && (
+            <button
+              onClick={() => setBulkAssignOpen(true)}
+              className="flex items-center gap-2 bg-white/15 hover:bg-white/25 transition px-3 py-2 rounded-xl text-white text-sm font-semibold flex-shrink-0"
+              title="Bulk assign clients to a user"
+            >
+              <UserPlus className="h-4 w-4" />
+              <span className="hidden sm:inline">Bulk Assign</span>
+            </button>
+          )}
+
           {/* User picker */}
           {isPriv && (
             <div className="relative">
@@ -505,9 +944,9 @@ export default function AssignedClientsPanel({ isDark }) {
                 onClick={() => setUserPickerOpen(o => !o)}
                 className="flex items-center gap-2 bg-white/15 hover:bg-white/25 transition px-3 py-2 rounded-xl text-white text-sm font-semibold"
               >
-                <Avatar name={selectedUser?.full_name} />
+                <Avatar name={selectedUser?.full_name} size="sm" />
                 <div className="text-left leading-tight pr-1">
-                  <div className="text-[13px] font-bold truncate max-w-[180px]">{selectedUser?.full_name || "Select user"}</div>
+                  <div className="text-[13px] font-bold truncate max-w-[150px]">{selectedUser?.full_name || "Select user"}</div>
                   <div className="text-[10px] uppercase tracking-wider text-white/70">{selectedUser?.role || "—"}</div>
                 </div>
                 <ChevronDown className="h-4 w-4 text-white/80" />
@@ -524,7 +963,7 @@ export default function AssignedClientsPanel({ isDark }) {
                         <button key={u.id} onClick={() => { setSelectedId(u.id); setUserPickerOpen(false); }}
                           className={`w-full text-left flex items-center gap-2.5 px-3 py-2 text-sm border-b last:border-b-0 transition ${isDark?"border-slate-700 hover:bg-slate-700/50":"border-slate-100 hover:bg-slate-50"} ${sel?(isDark?"bg-slate-700/70":"bg-blue-50/70"):""}`}
                         >
-                          <Avatar name={u.full_name} />
+                          <Avatar name={u.full_name} size="sm" />
                           <div className="flex-1 min-w-0">
                             <div className={`font-semibold truncate ${isDark?"text-slate-100":"text-slate-800"}`}>{u.full_name}</div>
                             <div className="text-[11px] text-slate-400 truncate">{u.email}</div>
@@ -580,7 +1019,7 @@ export default function AssignedClientsPanel({ isDark }) {
             </button>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className={`flex items-center gap-1 px-2 h-10 rounded-xl border ${isDark?"bg-slate-900 border-slate-700":"bg-slate-50 border-slate-200"}`}>
             <Filter className="h-3.5 w-3.5 text-slate-400" />
             <select value={serviceFilter} onChange={e=>setServiceFilter(e.target.value)} className={`bg-transparent text-xs font-semibold outline-none pr-1 ${isDark?"text-slate-200":"text-slate-700"}`}>
@@ -619,8 +1058,21 @@ export default function AssignedClientsPanel({ isDark }) {
             {search||serviceFilter!=="all"||statusFilter!=="all" ? "No clients match your filters" : "No clients assigned to this user"}
           </p>
           <p className="text-xs text-slate-400 mt-1">
-            {search||serviceFilter!=="all"||statusFilter!=="all" ? "Try clearing search or filters." : "Assign clients (or specific services on a client) to this user from the Clients page."}
+            {search||serviceFilter!=="all"||statusFilter!=="all"
+              ? "Try clearing search or filters."
+              : isPriv
+                ? "Use Bulk Assign above to assign clients to this user, or manage from the Clients page."
+                : "Clients assigned to you will appear here."}
           </p>
+          {isPriv && !search && serviceFilter === "all" && statusFilter === "all" && (
+            <button
+              onClick={() => setBulkAssignOpen(true)}
+              className="mt-4 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white shadow"
+              style={{ background: GRADIENT }}
+            >
+              <UserPlus className="h-4 w-4" /> Bulk Assign Clients
+            </button>
+          )}
         </div>
       ) : view === "grid" ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -637,7 +1089,6 @@ export default function AssignedClientsPanel({ isDark }) {
                     {c.client_type_label && <span className="text-[10px] font-semibold text-slate-400">{c.client_type_label}</span>}
                   </div>
                 </div>
-                {/* Edit button — appears on hover */}
                 <button onClick={()=>setEditingClient(c)}
                   className={`flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all ${isDark?"bg-slate-700 text-slate-300 hover:bg-blue-600 hover:text-white":"bg-slate-100 text-slate-500 hover:bg-blue-600 hover:text-white"}`}
                   title="Quick Edit"
@@ -662,7 +1113,7 @@ export default function AssignedClientsPanel({ isDark }) {
                     className={`text-[10px] font-semibold flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition ${isDark?"text-blue-400 hover:text-blue-300":"text-blue-500 hover:text-blue-700"}`}
                   >Edit <ChevronRight className="h-3 w-3" /></button>
                 </div>
-                <ServiceChips services={c.assigned_services} />
+                <ServiceChips services={c.assigned_services} allClientServices={c.services} />
               </div>
             </motion.div>
           ))}
@@ -695,7 +1146,7 @@ export default function AssignedClientsPanel({ isDark }) {
                 <div className="truncate text-slate-400">{c.phone||"—"}</div>
               </div>
               <div className="col-span-2 truncate text-slate-500 dark:text-slate-400">{[c.city,c.state].filter(Boolean).join(", ")||"—"}</div>
-              <div className="col-span-2"><ServiceChips services={c.assigned_services} /></div>
+              <div className="col-span-2"><ServiceChips services={c.assigned_services} allClientServices={c.services} /></div>
               <div className="col-span-1 flex justify-end">
                 <button onClick={()=>setEditingClient(c)}
                   className={`w-7 h-7 rounded-lg flex items-center justify-center transition ${isDark?"text-slate-400 hover:bg-blue-600 hover:text-white":"text-slate-400 hover:bg-blue-600 hover:text-white"}`}
@@ -718,6 +1169,21 @@ export default function AssignedClientsPanel({ isDark }) {
             isDark={isDark}
             onClose={() => setEditingClient(null)}
             onSaved={handleSaved}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* BULK ASSIGN MODAL */}
+      <AnimatePresence>
+        {bulkAssignOpen && (
+          <BulkAssignModal
+            key="bulk-assign"
+            open={bulkAssignOpen}
+            allClients={data.clients || []}
+            users={users}
+            isDark={isDark}
+            onClose={() => setBulkAssignOpen(false)}
+            onComplete={handleBulkComplete}
           />
         )}
       </AnimatePresence>
