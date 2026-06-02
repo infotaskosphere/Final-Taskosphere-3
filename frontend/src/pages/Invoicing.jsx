@@ -4734,51 +4734,85 @@ const InvoiceDetailPanel = ({
 // ════════════════════════════════════════════════════════════════════════════════
 const ServiceMasterModal = ({ open, onClose, isDark, invoices = [] }) => {
   const STORAGE_KEY = 'inv_service_master';
+  const CATEGORY_COLORS = ['#3b82f6','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4','#ec4899','#84cc16'];
+
   const getServices = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch { return []; } };
   const persistServices = (list) => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch {} };
 
-  const [services, setServices] = React.useState([]);
-  const [form, setForm] = React.useState({ description: '', unit_price: 0, gst_rate: 18, unit: 'service', hsn_sac: '' });
-  const [editing, setEditing] = React.useState(null); // id of item being edited
-  const [search, setSearch] = React.useState('');
-  const [importDone, setImportDone] = React.useState(false);
+  const blankForm = { description: '', unit_price: 0, gst_rate: 18, unit: 'service', hsn_sac: '', category: '', notes: '' };
 
-  // Load from localStorage when opened
+  const [services, setServices] = React.useState([]);
+  const [form, setForm] = React.useState(blankForm);
+  const [editing, setEditing] = React.useState(null);
+  const [search, setSearch] = React.useState('');
+  const [categoryFilter, setCategoryFilter] = React.useState('all');
+  const [sortBy, setSortBy] = React.useState('name'); // name | price | usage
+  const [viewMode, setViewMode] = React.useState('list'); // list | grid
+  const [tab, setTab] = React.useState('services'); // services | import | export
+  const [csvText, setCsvText] = React.useState('');
+  const [importPreview, setImportPreview] = React.useState([]);
+  const [importError, setImportError] = React.useState('');
+
   React.useEffect(() => {
-    if (open) { setServices(getServices()); setImportDone(false); setSearch(''); }
+    if (open) { setServices(getServices()); setSearch(''); setCategoryFilter('all'); setTab('services'); setEditing(null); setForm(blankForm); }
   }, [open]);
 
   const saveAndSet = (list) => { setServices(list); persistServices(list); };
+  const resetForm = () => { setForm(blankForm); setEditing(null); };
 
-  const resetForm = () => { setForm({ description: '', unit_price: 0, gst_rate: 18, unit: 'service', hsn_sac: '' }); setEditing(null); };
+  // Derived
+  const categories = React.useMemo(() => {
+    const cats = [...new Set(services.map(s => s.category || 'General').filter(Boolean))];
+    return ['all', ...cats.sort()];
+  }, [services]);
+
+  // Usage count from invoices
+  const usageMap = React.useMemo(() => {
+    const map = {};
+    (invoices || []).forEach(inv => (inv.items || []).forEach(it => {
+      const k = (it.description || '').trim().toLowerCase();
+      if (k) map[k] = (map[k] || 0) + 1;
+    }));
+    return map;
+  }, [invoices]);
+
+  const filtered = React.useMemo(() => {
+    let list = services.map((s, i) => ({ ...s, _idx: i, _usage: usageMap[(s.description || '').trim().toLowerCase()] || 0 }));
+    if (search) list = list.filter(s => s.description.toLowerCase().includes(search.toLowerCase()) || (s.category || '').toLowerCase().includes(search.toLowerCase()) || (s.hsn_sac || '').includes(search));
+    if (categoryFilter !== 'all') list = list.filter(s => (s.category || 'General') === categoryFilter);
+    if (sortBy === 'price') list.sort((a, b) => b.unit_price - a.unit_price);
+    else if (sortBy === 'usage') list.sort((a, b) => b._usage - a._usage);
+    else list.sort((a, b) => a.description.localeCompare(b.description));
+    return list;
+  }, [services, search, categoryFilter, sortBy, usageMap]);
 
   const handleSave = () => {
     const desc = (form.description || '').trim();
     if (!desc) { toast.error('Service name is required'); return; }
+    const cat = (form.category || '').trim() || 'General';
+    const entry = { ...form, description: desc, category: cat };
     if (editing !== null) {
-      const updated = services.map((s, i) => i === editing ? { ...form, description: desc } : s);
+      const updated = services.map((s, i) => i === editing ? entry : s);
       saveAndSet(updated);
       toast.success('Service updated');
     } else {
       if (services.some(s => s.description.toLowerCase() === desc.toLowerCase())) { toast.error('Service already exists'); return; }
-      saveAndSet([...services, { ...form, description: desc }]);
+      saveAndSet([...services, entry]);
       toast.success('Service added');
     }
     resetForm();
   };
 
-  const handleEdit = (idx) => {
-    setEditing(idx);
-    setForm({ ...services[idx] });
+  const handleEdit = (idx) => { setEditing(idx); setForm({ ...blankForm, ...services[idx] }); };
+  const handleDelete = (idx) => { saveAndSet(services.filter((_, i) => i !== idx)); if (editing === idx) resetForm(); toast.success('Deleted'); };
+
+  const handleDuplicate = (idx) => {
+    const s = { ...services[idx], description: services[idx].description + ' (copy)' };
+    saveAndSet([...services, s]);
+    toast.success('Duplicated');
   };
 
-  const handleDelete = (idx) => {
-    saveAndSet(services.filter((_, i) => i !== idx));
-    if (editing === idx) resetForm();
-    toast.success('Deleted');
-  };
-
-  // Import unique services from all past invoices
+  // Import from past invoices
   const handleImportFromInvoices = () => {
     const existing = new Set(services.map(s => s.description.trim().toLowerCase()));
     const toAdd = [];
@@ -4786,132 +4820,297 @@ const ServiceMasterModal = ({ open, onClose, isDark, invoices = [] }) => {
       const desc = (it.description || '').trim();
       if (desc && !existing.has(desc.toLowerCase())) {
         existing.add(desc.toLowerCase());
-        toAdd.push({ description: desc, unit_price: it.unit_price || 0, gst_rate: it.gst_rate || 18, unit: it.unit || 'service', hsn_sac: it.hsn_sac || '' });
+        toAdd.push({ description: desc, unit_price: it.unit_price || 0, gst_rate: it.gst_rate || 18, unit: it.unit || 'service', hsn_sac: it.hsn_sac || '', category: 'Imported', notes: '' });
       }
     }));
     if (toAdd.length === 0) { toast.info('No new services found in invoices'); return; }
     const merged = [...services, ...toAdd];
     saveAndSet(merged);
-    // Also sync to inv_item_memory for autocomplete
     saveItemMemory(toAdd);
-    setImportDone(true);
     toast.success(`Imported ${toAdd.length} service${toAdd.length > 1 ? 's' : ''} from past invoices`);
+    setTab('services');
   };
 
-  const filtered = services.filter(s => !search || s.description.toLowerCase().includes(search.toLowerCase()));
+  // CSV Export
+  const handleExportCSV = () => {
+    const header = 'Name,Unit Price,GST %,Unit,HSN/SAC,Category,Notes';
+    const rows = services.map(s => [s.description, s.unit_price, s.gst_rate, s.unit, s.hsn_sac || '', s.category || '', s.notes || ''].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
+    const csv = [header, ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'service_master.csv'; a.click();
+    URL.revokeObjectURL(url);
+    toast.success('Exported to CSV');
+  };
 
-  const inputCls = `h-9 rounded-xl text-sm border-slate-200 dark:border-slate-600 focus:border-blue-400 ${isDark ? 'bg-slate-700 text-slate-100 border-slate-600' : 'bg-white'}`;
+  // CSV Import parse
+  const handleParseCsv = (text) => {
+    setCsvText(text); setImportError(''); setImportPreview([]);
+    if (!text.trim()) return;
+    try {
+      const lines = text.trim().split('\n');
+      const isHeader = lines[0].toLowerCase().includes('name') || lines[0].toLowerCase().includes('description');
+      const dataLines = isHeader ? lines.slice(1) : lines;
+      const preview = dataLines.map(line => {
+        const cols = line.split(',').map(c => c.trim().replace(/^"|"$/g, '').replace(/""/g, '"'));
+        return { description: cols[0] || '', unit_price: parseFloat(cols[1]) || 0, gst_rate: parseFloat(cols[2]) || 18, unit: cols[3] || 'service', hsn_sac: cols[4] || '', category: cols[5] || 'Imported', notes: cols[6] || '' };
+      }).filter(r => r.description);
+      if (preview.length === 0) { setImportError('No valid rows found. Ensure column order: Name, Unit Price, GST%, Unit, HSN/SAC, Category, Notes'); return; }
+      setImportPreview(preview);
+    } catch (e) { setImportError('Failed to parse CSV. Check formatting.'); }
+  };
+
+  const handleImportCsv = () => {
+    if (!importPreview.length) return;
+    const existing = new Set(services.map(s => s.description.trim().toLowerCase()));
+    const toAdd = importPreview.filter(r => !existing.has(r.description.trim().toLowerCase()));
+    const skipped = importPreview.length - toAdd.length;
+    saveAndSet([...services, ...toAdd]);
+    saveItemMemory(toAdd);
+    setCsvText(''); setImportPreview([]);
+    toast.success(`Added ${toAdd.length} services${skipped ? `, skipped ${skipped} duplicates` : ''}`);
+    setTab('services');
+  };
+
+  // GST preview
+  const gstAmt = form.unit_price * (form.gst_rate / 100);
+  const totalAmt = form.unit_price + gstAmt;
+
+  const inputCls = `h-9 rounded-xl text-sm border-slate-200 focus:border-blue-400 outline-none px-3 w-full transition-colors ${isDark ? 'bg-slate-700 text-slate-100 border-slate-600' : 'bg-white border-slate-200'}`;
+  const catColorMap = {};
+  categories.filter(c => c !== 'all').forEach((c, i) => { catColorMap[c] = CATEGORY_COLORS[i % CATEGORY_COLORS.length]; });
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className={`max-w-3xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white'}`}>
+      <DialogContent className={`max-w-4xl max-h-[92vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white'}`}>
         <DialogTitle className="sr-only">Service Master</DialogTitle>
         <DialogDescription className="sr-only">Manage services for auto-complete in invoices</DialogDescription>
 
-        {/* Header */}
-        <div className={`px-6 py-4 border-b flex items-center justify-between ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+        {/* ── Header ── */}
+        <div className={`px-6 py-4 border-b flex items-center justify-between flex-shrink-0 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-lg" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
               <Layers className="h-5 w-5" />
             </div>
             <div>
-              <h2 className={`font-bold text-lg ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Service Master</h2>
-              <p className="text-xs text-slate-400">Auto-complete source · {services.length} services stored</p>
+              <h2 className={`font-bold text-lg leading-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Service Master</h2>
+              <p className="text-xs text-slate-400">{services.length} services · auto-fill source for invoices</p>
             </div>
           </div>
-          <Button size="sm" variant="outline" onClick={handleImportFromInvoices}
-            className={`h-8 px-3 text-xs rounded-xl gap-1.5 ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : ''}`}>
-            <Download className="h-3.5 w-3.5" /> Import from Invoices
-          </Button>
+          <div className="flex items-center gap-2">
+            <button onClick={handleExportCSV} title="Export CSV" className={`h-8 px-3 text-xs rounded-xl border gap-1.5 flex items-center font-medium transition-colors ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+              <Download className="h-3.5 w-3.5" /> Export CSV
+            </button>
+            <button onClick={() => setTab(tab === 'import' ? 'services' : 'import')} className={`h-8 px-3 text-xs rounded-xl border gap-1.5 flex items-center font-medium transition-colors ${tab === 'import' ? 'bg-blue-500 text-white border-blue-500' : (isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50')}`}>
+              <Upload className="h-3.5 w-3.5" /> Import
+            </button>
+          </div>
         </div>
 
-        <div className="flex-1 overflow-hidden flex">
-          {/* LEFT: Add / Edit form */}
-          <div className={`w-72 flex-shrink-0 p-5 border-r overflow-y-auto ${isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-100 bg-slate-50/50'}`}>
-            <h4 className={`text-xs font-bold uppercase tracking-widest mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{editing !== null ? 'Edit Service' : 'Add New Service'}</h4>
-            <div className="space-y-2.5">
-              <div>
-                <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Service Name *</label>
-                <input className={`${inputCls} w-full px-3 mt-1`} placeholder="e.g. GST Filing, Website Design" value={form.description}
-                  onChange={e => setForm(p => ({ ...p, description: e.target.value }))} />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Unit Price (₹)</label>
-                  <input type="number" min="0" step="any" className={`${inputCls} w-full px-3 mt-1`} placeholder="0" value={form.unit_price}
-                    onChange={e => setForm(p => ({ ...p, unit_price: parseFloat(e.target.value) || 0 }))} />
+        {/* ── Tab: Import ── */}
+        {tab === 'import' && (
+          <div className={`flex-1 overflow-y-auto p-6 space-y-4 ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+            <div className={`rounded-xl border p-4 ${isDark ? 'border-slate-700 bg-slate-700/40' : 'border-blue-100 bg-blue-50'}`}>
+              <p className={`text-xs font-bold mb-1 ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>📋 Auto-import from past invoices</p>
+              <p className={`text-xs mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Scans all your invoice line items and adds unique services automatically.</p>
+              <button onClick={handleImportFromInvoices} className="h-9 px-4 text-sm rounded-xl text-white font-semibold flex items-center gap-2 transition-all" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                <RefreshCw className="h-4 w-4" /> Import from {invoices.length} Invoices
+              </button>
+            </div>
+            <div>
+              <p className={`text-xs font-bold uppercase tracking-widest mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Paste CSV Data</p>
+              <p className={`text-[11px] mb-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Columns: Name, Unit Price, GST %, Unit, HSN/SAC, Category, Notes</p>
+              <textarea
+                className={`w-full h-40 rounded-xl border text-xs p-3 font-mono resize-none outline-none transition-colors ${isDark ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                placeholder={"GST Filing,3000,18,service,998311,Compliance,Monthly filing\nWebsite Design,25000,18,project,,Design,"}
+                value={csvText}
+                onChange={e => handleParseCsv(e.target.value)}
+              />
+              {importError && <p className="text-red-500 text-xs mt-1">{importError}</p>}
+              {importPreview.length > 0 && (
+                <div className="mt-3">
+                  <p className={`text-xs font-semibold mb-2 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Preview: {importPreview.length} rows</p>
+                  <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                    {importPreview.slice(0, 6).map((r, i) => (
+                      <div key={i} className={`flex items-center gap-3 px-4 py-2.5 text-xs border-b last:border-0 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                        <span className={`flex-1 font-medium ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{r.description}</span>
+                        <span className="text-slate-400">₹{r.unit_price.toLocaleString('en-IN')}</span>
+                        <span className="text-slate-400">{r.gst_rate}% GST</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium`} style={{ background: catColorMap[r.category] + '20', color: catColorMap[r.category] || '#6b7280' }}>{r.category}</span>
+                      </div>
+                    ))}
+                    {importPreview.length > 6 && <div className="px-4 py-2 text-xs text-slate-400">+{importPreview.length - 6} more rows…</div>}
+                  </div>
+                  <button onClick={handleImportCsv} className="mt-3 h-9 px-5 text-sm rounded-xl text-white font-semibold flex items-center gap-2" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                    <Save className="h-4 w-4" /> Import {importPreview.length} Services
+                  </button>
                 </div>
-                <div>
-                  <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">GST %</label>
-                  <Select value={String(form.gst_rate)} onValueChange={v => setForm(p => ({ ...p, gst_rate: parseFloat(v) }))}>
-                    <SelectTrigger className={`${inputCls} mt-1`}><SelectValue /></SelectTrigger>
-                    <SelectContent>{GST_RATES.map(r => <SelectItem key={r} value={String(r)}>{r}%</SelectItem>)}</SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">HSN/SAC</label>
-                  <input className={`${inputCls} w-full px-3 mt-1`} placeholder="998311" value={form.hsn_sac}
-                    onChange={e => setForm(p => ({ ...p, hsn_sac: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Unit</label>
-                  <Select value={form.unit} onValueChange={v => setForm(p => ({ ...p, unit: v }))}>
-                    <SelectTrigger className={`${inputCls} mt-1`}><SelectValue /></SelectTrigger>
-                    <SelectContent>{UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="flex gap-2 pt-1">
-                <Button size="sm" onClick={handleSave} className="flex-1 h-9 rounded-xl text-white text-xs font-semibold gap-1"
-                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-                  <Save className="h-3.5 w-3.5" />{editing !== null ? 'Update' : 'Add Service'}
-                </Button>
-                {editing !== null && (
-                  <Button type="button" variant="ghost" size="sm" className="h-9 rounded-xl text-xs" onClick={resetForm}>Cancel</Button>
-                )}
-              </div>
+              )}
             </div>
           </div>
+        )}
 
-          {/* RIGHT: service list */}
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <div className={`px-4 py-3 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-              <input className={`${inputCls} w-full px-3`} placeholder="Search services…" value={search} onChange={e => setSearch(e.target.value)} />
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              {filtered.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full py-16 text-slate-400">
-                  <Layers className="h-10 w-10 mb-3 opacity-30" />
-                  <p className="text-sm font-medium">{services.length === 0 ? 'No services yet' : 'No matches'}</p>
-                  <p className="text-xs mt-1 text-center px-4">{services.length === 0 ? 'Add services above or import from past invoices' : 'Try a different search term'}</p>
-                </div>
-              ) : filtered.map((s, i) => {
-                const realIdx = services.indexOf(s);
-                return (
-                  <div key={i} className={`flex items-center gap-3 px-4 py-3 border-b group transition-colors ${editing === realIdx ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50') : (isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-100 hover:bg-slate-50')}`}>
-                    <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-white text-[10px] font-bold"
-                      style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>S</div>
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{s.description}</p>
-                      <p className="text-xs text-slate-400">{s.unit} · ₹{(s.unit_price || 0).toLocaleString('en-IN')} · GST {s.gst_rate}%{s.hsn_sac ? ` · ${s.hsn_sac}` : ''}</p>
+        {/* ── Tab: Services ── */}
+        {tab === 'services' && (
+          <div className="flex-1 overflow-hidden flex">
+            {/* LEFT: Add/Edit form */}
+            <div className={`w-72 flex-shrink-0 border-r overflow-y-auto flex flex-col ${isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-100 bg-slate-50/50'}`}>
+              <div className="p-4 flex-1">
+                <h4 className={`text-[10px] font-bold uppercase tracking-widest mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{editing !== null ? '✏️ Edit Service' : '➕ Add New Service'}</h4>
+                <div className="space-y-2.5">
+                  <div>
+                    <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide block mb-1">Service Name *</label>
+                    <input className={inputCls} placeholder="e.g. GST Filing, Website Design" value={form.description}
+                      onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && handleSave()} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide block mb-1">Unit Price (₹)</label>
+                      <input type="number" min="0" step="any" className={inputCls} placeholder="0" value={form.unit_price || ''}
+                        onChange={e => setForm(p => ({ ...p, unit_price: parseFloat(e.target.value) || 0 }))} />
                     </div>
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                      <button onClick={() => handleEdit(realIdx)} className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"><Edit className="h-3.5 w-3.5" /></button>
-                      <button onClick={() => handleDelete(realIdx)} className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide block mb-1">GST %</label>
+                      <Select value={String(form.gst_rate)} onValueChange={v => setForm(p => ({ ...p, gst_rate: parseFloat(v) }))}>
+                        <SelectTrigger className={`h-9 rounded-xl text-sm border ${isDark ? 'bg-slate-700 text-slate-100 border-slate-600' : 'bg-white border-slate-200'}`}><SelectValue /></SelectTrigger>
+                        <SelectContent>{GST_RATES.map(r => <SelectItem key={r} value={String(r)}>{r}%</SelectItem>)}</SelectContent>
+                      </Select>
                     </div>
                   </div>
-                );
-              })}
-            </div>
-            {services.length > 0 && (
-              <div className={`px-4 py-2.5 border-t text-[10px] text-slate-400 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-                {filtered.length} of {services.length} services · These appear as autocomplete suggestions when creating invoices
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide block mb-1">HSN/SAC</label>
+                      <input className={inputCls} placeholder="998311" value={form.hsn_sac}
+                        onChange={e => setForm(p => ({ ...p, hsn_sac: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide block mb-1">Unit</label>
+                      <Select value={form.unit} onValueChange={v => setForm(p => ({ ...p, unit: v }))}>
+                        <SelectTrigger className={`h-9 rounded-xl text-sm border ${isDark ? 'bg-slate-700 text-slate-100 border-slate-600' : 'bg-white border-slate-200'}`}><SelectValue /></SelectTrigger>
+                        <SelectContent>{UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide block mb-1">Category</label>
+                    <input className={inputCls} placeholder="e.g. Compliance, Design, Consulting" value={form.category}
+                      onChange={e => setForm(p => ({ ...p, category: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide block mb-1">Internal Notes</label>
+                    <input className={inputCls} placeholder="Optional notes…" value={form.notes}
+                      onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} />
+                  </div>
+
+                  {/* GST Preview */}
+                  {form.unit_price > 0 && (
+                    <div className={`rounded-xl p-3 border text-xs space-y-1 ${isDark ? 'border-slate-700 bg-slate-700/50' : 'border-blue-100 bg-blue-50'}`}>
+                      <p className={`font-bold text-[10px] uppercase tracking-wide ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>Price Preview</p>
+                      <div className="flex justify-between"><span className={isDark ? 'text-slate-400' : 'text-slate-500'}>Base:</span><span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>₹{form.unit_price.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span></div>
+                      <div className="flex justify-between"><span className={isDark ? 'text-slate-400' : 'text-slate-500'}>GST ({form.gst_rate}%):</span><span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>₹{gstAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span></div>
+                      <div className={`flex justify-between border-t pt-1 font-bold ${isDark ? 'border-slate-600 text-blue-300' : 'border-blue-200 text-blue-700'}`}><span>Total:</span><span>₹{totalAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span></div>
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 pt-1">
+                    <button onClick={handleSave} className="flex-1 h-9 rounded-xl text-white text-xs font-semibold gap-1.5 flex items-center justify-center transition-all hover:opacity-90"
+                      style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                      <Save className="h-3.5 w-3.5" />{editing !== null ? 'Update' : 'Add Service'}
+                    </button>
+                    {editing !== null && (
+                      <button onClick={resetForm} className={`h-9 px-3 rounded-xl text-xs font-medium transition-colors ${isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-slate-500 hover:bg-slate-100'}`}>Cancel</button>
+                    )}
+                  </div>
+                </div>
               </div>
-            )}
+            </div>
+
+            {/* RIGHT: service list */}
+            <div className="flex-1 flex flex-col overflow-hidden">
+              {/* Filters bar */}
+              <div className={`px-4 py-3 border-b flex items-center gap-2 flex-wrap ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                <input className={`h-8 rounded-xl text-sm border px-3 flex-1 min-w-0 outline-none transition-colors ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`}
+                  placeholder="Search services, categories, HSN…" value={search} onChange={e => setSearch(e.target.value)} />
+                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                  <SelectTrigger className={`h-8 w-36 rounded-xl text-xs border ${isDark ? 'bg-slate-700 border-slate-600 text-slate-300' : 'bg-white border-slate-200'}`}><SelectValue placeholder="All categories" /></SelectTrigger>
+                  <SelectContent>{categories.map(c => <SelectItem key={c} value={c}>{c === 'all' ? 'All Categories' : c}</SelectItem>)}</SelectContent>
+                </Select>
+                <Select value={sortBy} onValueChange={setSortBy}>
+                  <SelectTrigger className={`h-8 w-28 rounded-xl text-xs border ${isDark ? 'bg-slate-700 border-slate-600 text-slate-300' : 'bg-white border-slate-200'}`}><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="name">Sort: Name</SelectItem>
+                    <SelectItem value="price">Sort: Price</SelectItem>
+                    <SelectItem value="usage">Sort: Usage</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Category pills */}
+              {categories.length > 2 && (
+                <div className={`px-4 py-2 flex gap-1.5 flex-wrap border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                  {categories.map(c => {
+                    const active = categoryFilter === c;
+                    const color = c === 'all' ? COLORS.deepBlue : (catColorMap[c] || '#6b7280');
+                    return (
+                      <button key={c} onClick={() => setCategoryFilter(c)}
+                        className="px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all"
+                        style={{ background: active ? color : color + '15', color: active ? '#fff' : color, border: `1px solid ${color}30` }}>
+                        {c === 'all' ? `All (${services.length})` : `${c} (${services.filter(s => (s.category || 'General') === c).length})`}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* List */}
+              <div className="flex-1 overflow-y-auto">
+                {filtered.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-full py-16 text-slate-400">
+                    <Layers className="h-10 w-10 mb-3 opacity-30" />
+                    <p className="text-sm font-medium">{services.length === 0 ? 'No services yet' : 'No matches'}</p>
+                    <p className="text-xs mt-1 text-center px-4">{services.length === 0 ? 'Add a service using the form, or import from past invoices' : 'Try adjusting your search or category filter'}</p>
+                  </div>
+                ) : filtered.map((s) => {
+                  const catColor = catColorMap[s.category || 'General'] || '#6b7280';
+                  const isEditing = editing === s._idx;
+                  return (
+                    <div key={s._idx} className={`flex items-center gap-3 px-4 py-3 border-b group transition-colors ${isEditing ? (isDark ? 'bg-blue-900/20 border-blue-900/40' : 'bg-blue-50 border-blue-100') : (isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-100 hover:bg-slate-50')}`}>
+                      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 text-white text-[11px] font-bold shadow-sm"
+                        style={{ background: `linear-gradient(135deg, ${catColor}, ${catColor}bb)` }}>
+                        {(s.description || '?')[0].toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{s.description}</p>
+                          {s._usage > 0 && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${isDark ? 'bg-emerald-900/40 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>Used {s._usage}×</span>}
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                          <span className="text-xs text-slate-400">{s.unit} · ₹{(s.unit_price || 0).toLocaleString('en-IN')} · GST {s.gst_rate}%{s.hsn_sac ? ` · ${s.hsn_sac}` : ''}</span>
+                          {s.category && <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{ background: catColor + '18', color: catColor }}>{s.category}</span>}
+                        </div>
+                        {s.notes && <p className={`text-[11px] mt-0.5 truncate ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{s.notes}</p>}
+                      </div>
+                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                        <button onClick={() => handleDuplicate(s._idx)} title="Duplicate" className={`w-7 h-7 flex items-center justify-center rounded-lg transition-colors ${isDark ? 'text-slate-400 hover:bg-slate-600 hover:text-slate-100' : 'text-slate-400 hover:bg-slate-100'}`}><Copy className="h-3.5 w-3.5" /></button>
+                        <button onClick={() => handleEdit(s._idx)} className={`w-7 h-7 flex items-center justify-center rounded-lg text-blue-500 transition-colors ${isDark ? 'hover:bg-blue-900/30' : 'hover:bg-blue-50'}`}><Edit className="h-3.5 w-3.5" /></button>
+                        <button onClick={() => handleDelete(s._idx)} className={`w-7 h-7 flex items-center justify-center rounded-lg text-red-500 transition-colors ${isDark ? 'hover:bg-red-900/30' : 'hover:bg-red-50'}`}><Trash2 className="h-3.5 w-3.5" /></button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Footer */}
+              {services.length > 0 && (
+                <div className={`px-4 py-2.5 border-t text-[10px] text-slate-400 flex items-center justify-between ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                  <span>{filtered.length} of {services.length} services shown</span>
+                  <span>These auto-fill when creating invoices</span>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </DialogContent>
     </Dialog>
   );
