@@ -135,7 +135,7 @@ const fyRange = (year) => {
   return { from: `${y}-04-01`, to: `${y + 1}-03-31` };
 };
 
-// ─── Item Memory (localStorage) ───────────────────────────────────────────────
+// ─── Item Memory (localStorage + live invoices) ────────────────────────────────
 const getItemMemory = () => {
   try { return JSON.parse(localStorage.getItem('inv_item_memory') || '{}'); }
   catch { return {}; }
@@ -149,6 +149,20 @@ const saveItemMemory = (items = []) => {
     });
     localStorage.setItem('inv_item_memory', JSON.stringify(mem));
   } catch {}
+};
+// Build merged suggestion list from localStorage + live invoice items
+const buildItemSuggestions = (liveInvoices = []) => {
+  const mem = getItemMemory(); // from localStorage (saved on submit)
+  // Also seed from live invoices so autocomplete works across sessions/devices
+  (liveInvoices || []).forEach(inv => {
+    (inv.items || []).forEach(it => {
+      const key = (it.description || '').trim().toLowerCase();
+      if (key && !mem[key]) {
+        mem[key] = { description: it.description, unit_price: it.unit_price || 0, gst_rate: it.gst_rate || 18, unit: it.unit || 'service', hsn_sac: it.hsn_sac || '' };
+      }
+    });
+  });
+  return mem;
 };
 const computeItem = (item, isInter) => {
   const disc = item.unit_price * item.quantity * (item.discount_pct / 100);
@@ -2668,6 +2682,9 @@ const EnhancedRevenueTrend = ({ invoices = [], isDark }) => {
     return Array.from(s).slice(0, 30);
   }, [invoices]);
 
+  // ── useMemo: itemSuggestions — merged localStorage + live invoices for autocomplete ──
+  const itemSuggestions = useMemo(() => buildItemSuggestions(invoices), [invoices]);
+
   // ── useMemo: currentData ──
   const currentData = useMemo(() => {
     const { start, end } = getRange();
@@ -3168,9 +3185,10 @@ const ItemRow = React.memo(function ItemRow({
   focusedItemIdx, setFocusedItemIdx,
   dragIdx, dragOverIdx, setDragIdx, setDragOverIdx,
   reorderItems, itemCount,
+  itemSuggestions,
 }) {
   const comp = computeItem(item, isInterstate);
-  const mem  = getItemMemory();
+  const mem  = itemSuggestions || getItemMemory();
 
   // Local state so number inputs don't cause full-form re-renders while typing
   const [localQty,   setLocalQty]   = React.useState(String(item.quantity));
@@ -4072,6 +4090,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                     setDragOverIdx={setDragOverIdx}
                     reorderItems={reorderItems}
                     itemCount={form.items.length}
+                    itemSuggestions={itemSuggestions}
                   />
                 ))}
                 <Button type="button" variant="outline" onClick={addItem} className="w-full h-10 rounded-xl border-dashed text-xs gap-2"><Plus className="h-3.5 w-3.5" /> Add Another Item</Button>
@@ -4711,6 +4730,194 @@ const InvoiceDetailPanel = ({
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
+// SERVICE MASTER MODAL
+// ════════════════════════════════════════════════════════════════════════════════
+const ServiceMasterModal = ({ open, onClose, isDark, invoices = [] }) => {
+  const STORAGE_KEY = 'inv_service_master';
+  const getServices = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch { return []; } };
+  const persistServices = (list) => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch {} };
+
+  const [services, setServices] = React.useState([]);
+  const [form, setForm] = React.useState({ description: '', unit_price: 0, gst_rate: 18, unit: 'service', hsn_sac: '' });
+  const [editing, setEditing] = React.useState(null); // id of item being edited
+  const [search, setSearch] = React.useState('');
+  const [importDone, setImportDone] = React.useState(false);
+
+  // Load from localStorage when opened
+  React.useEffect(() => {
+    if (open) { setServices(getServices()); setImportDone(false); setSearch(''); }
+  }, [open]);
+
+  const saveAndSet = (list) => { setServices(list); persistServices(list); };
+
+  const resetForm = () => { setForm({ description: '', unit_price: 0, gst_rate: 18, unit: 'service', hsn_sac: '' }); setEditing(null); };
+
+  const handleSave = () => {
+    const desc = (form.description || '').trim();
+    if (!desc) { toast.error('Service name is required'); return; }
+    if (editing !== null) {
+      const updated = services.map((s, i) => i === editing ? { ...form, description: desc } : s);
+      saveAndSet(updated);
+      toast.success('Service updated');
+    } else {
+      if (services.some(s => s.description.toLowerCase() === desc.toLowerCase())) { toast.error('Service already exists'); return; }
+      saveAndSet([...services, { ...form, description: desc }]);
+      toast.success('Service added');
+    }
+    resetForm();
+  };
+
+  const handleEdit = (idx) => {
+    setEditing(idx);
+    setForm({ ...services[idx] });
+  };
+
+  const handleDelete = (idx) => {
+    saveAndSet(services.filter((_, i) => i !== idx));
+    if (editing === idx) resetForm();
+    toast.success('Deleted');
+  };
+
+  // Import unique services from all past invoices
+  const handleImportFromInvoices = () => {
+    const existing = new Set(services.map(s => s.description.trim().toLowerCase()));
+    const toAdd = [];
+    (invoices || []).forEach(inv => (inv.items || []).forEach(it => {
+      const desc = (it.description || '').trim();
+      if (desc && !existing.has(desc.toLowerCase())) {
+        existing.add(desc.toLowerCase());
+        toAdd.push({ description: desc, unit_price: it.unit_price || 0, gst_rate: it.gst_rate || 18, unit: it.unit || 'service', hsn_sac: it.hsn_sac || '' });
+      }
+    }));
+    if (toAdd.length === 0) { toast.info('No new services found in invoices'); return; }
+    const merged = [...services, ...toAdd];
+    saveAndSet(merged);
+    // Also sync to inv_item_memory for autocomplete
+    saveItemMemory(toAdd);
+    setImportDone(true);
+    toast.success(`Imported ${toAdd.length} service${toAdd.length > 1 ? 's' : ''} from past invoices`);
+  };
+
+  const filtered = services.filter(s => !search || s.description.toLowerCase().includes(search.toLowerCase()));
+
+  const inputCls = `h-9 rounded-xl text-sm border-slate-200 dark:border-slate-600 focus:border-blue-400 ${isDark ? 'bg-slate-700 text-slate-100 border-slate-600' : 'bg-white'}`;
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className={`max-w-3xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white'}`}>
+        <DialogTitle className="sr-only">Service Master</DialogTitle>
+        <DialogDescription className="sr-only">Manage services for auto-complete in invoices</DialogDescription>
+
+        {/* Header */}
+        <div className={`px-6 py-4 border-b flex items-center justify-between ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+              <Layers className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className={`font-bold text-lg ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Service Master</h2>
+              <p className="text-xs text-slate-400">Auto-complete source · {services.length} services stored</p>
+            </div>
+          </div>
+          <Button size="sm" variant="outline" onClick={handleImportFromInvoices}
+            className={`h-8 px-3 text-xs rounded-xl gap-1.5 ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : ''}`}>
+            <Download className="h-3.5 w-3.5" /> Import from Invoices
+          </Button>
+        </div>
+
+        <div className="flex-1 overflow-hidden flex">
+          {/* LEFT: Add / Edit form */}
+          <div className={`w-72 flex-shrink-0 p-5 border-r overflow-y-auto ${isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-100 bg-slate-50/50'}`}>
+            <h4 className={`text-xs font-bold uppercase tracking-widest mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{editing !== null ? 'Edit Service' : 'Add New Service'}</h4>
+            <div className="space-y-2.5">
+              <div>
+                <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Service Name *</label>
+                <input className={`${inputCls} w-full px-3 mt-1`} placeholder="e.g. GST Filing, Website Design" value={form.description}
+                  onChange={e => setForm(p => ({ ...p, description: e.target.value }))} />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Unit Price (₹)</label>
+                  <input type="number" min="0" step="any" className={`${inputCls} w-full px-3 mt-1`} placeholder="0" value={form.unit_price}
+                    onChange={e => setForm(p => ({ ...p, unit_price: parseFloat(e.target.value) || 0 }))} />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">GST %</label>
+                  <Select value={String(form.gst_rate)} onValueChange={v => setForm(p => ({ ...p, gst_rate: parseFloat(v) }))}>
+                    <SelectTrigger className={`${inputCls} mt-1`}><SelectValue /></SelectTrigger>
+                    <SelectContent>{GST_RATES.map(r => <SelectItem key={r} value={String(r)}>{r}%</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">HSN/SAC</label>
+                  <input className={`${inputCls} w-full px-3 mt-1`} placeholder="998311" value={form.hsn_sac}
+                    onChange={e => setForm(p => ({ ...p, hsn_sac: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Unit</label>
+                  <Select value={form.unit} onValueChange={v => setForm(p => ({ ...p, unit: v }))}>
+                    <SelectTrigger className={`${inputCls} mt-1`}><SelectValue /></SelectTrigger>
+                    <SelectContent>{UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <Button size="sm" onClick={handleSave} className="flex-1 h-9 rounded-xl text-white text-xs font-semibold gap-1"
+                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                  <Save className="h-3.5 w-3.5" />{editing !== null ? 'Update' : 'Add Service'}
+                </Button>
+                {editing !== null && (
+                  <Button type="button" variant="ghost" size="sm" className="h-9 rounded-xl text-xs" onClick={resetForm}>Cancel</Button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* RIGHT: service list */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className={`px-4 py-3 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+              <input className={`${inputCls} w-full px-3`} placeholder="Search services…" value={search} onChange={e => setSearch(e.target.value)} />
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {filtered.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full py-16 text-slate-400">
+                  <Layers className="h-10 w-10 mb-3 opacity-30" />
+                  <p className="text-sm font-medium">{services.length === 0 ? 'No services yet' : 'No matches'}</p>
+                  <p className="text-xs mt-1 text-center px-4">{services.length === 0 ? 'Add services above or import from past invoices' : 'Try a different search term'}</p>
+                </div>
+              ) : filtered.map((s, i) => {
+                const realIdx = services.indexOf(s);
+                return (
+                  <div key={i} className={`flex items-center gap-3 px-4 py-3 border-b group transition-colors ${editing === realIdx ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50') : (isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-100 hover:bg-slate-50')}`}>
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-white text-[10px] font-bold"
+                      style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>S</div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{s.description}</p>
+                      <p className="text-xs text-slate-400">{s.unit} · ₹{(s.unit_price || 0).toLocaleString('en-IN')} · GST {s.gst_rate}%{s.hsn_sac ? ` · ${s.hsn_sac}` : ''}</p>
+                    </div>
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                      <button onClick={() => handleEdit(realIdx)} className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"><Edit className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => handleDelete(realIdx)} className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {services.length > 0 && (
+              <div className={`px-4 py-2.5 border-t text-[10px] text-slate-400 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                {filtered.length} of {services.length} services · These appear as autocomplete suggestions when creating invoices
+              </div>
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+// ════════════════════════════════════════════════════════════════════════════════
 // PRODUCT MODAL
 // ════════════════════════════════════════════════════════════════════════════════
 const ProductModal = ({ open, onClose, isDark, onSaved }) => {
@@ -4812,6 +5019,7 @@ function Invoicing() {
   const [payInv, setPayInv] = useState(null);
   const [payOpen, setPayOpen] = useState(false);
   const [catOpen, setCatOpen] = useState(false);
+  const [serviceMasterOpen, setServiceMasterOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [gstOpen, setGstOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -5278,6 +5486,7 @@ const fetchAll = useCallback(async () => {
             <Button variant="outline" onClick={() => setImportOpen(true)} className="h-9 px-4 text-sm bg-emerald-500/20 border-emerald-300/40 text-white hover:bg-emerald-500/30 rounded-xl gap-2 backdrop-blur-sm font-semibold"><Database className="h-4 w-4" /> Import</Button>
             <Button variant="outline" onClick={downloadInvoiceTemplate} className="h-9 px-4 text-sm bg-amber-500/20 border-amber-300/40 text-white hover:bg-amber-500/30 rounded-xl gap-2 backdrop-blur-sm font-semibold"><FileDown className="h-4 w-4" /> Template</Button>
             <Button variant="outline" onClick={() => setCatOpen(true)} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm"><Package className="h-4 w-4" /> Catalog</Button>
+            <Button variant="outline" onClick={() => setServiceMasterOpen(true)} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm font-semibold"><Layers className="h-4 w-4" /> Service Master</Button>
             <Button variant="outline" onClick={handleExport} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm"><Download className="h-4 w-4" /> Export</Button>
             <Button variant="outline" onClick={() => setBulkWAOpen(true)} className="h-9 px-4 text-sm bg-emerald-600/30 border-emerald-400/40 text-white hover:bg-emerald-600/50 rounded-xl gap-2 backdrop-blur-sm font-semibold"><MessageCircle className="h-4 w-4" /> Bulk WA</Button>
             <Button onClick={() => { setEditingInv(null); setFormOpen(true); }} className="h-9 px-5 text-sm rounded-xl bg-white text-slate-800 hover:bg-blue-50 shadow-sm gap-2 font-semibold border-0"><Plus className="h-4 w-4" /> New Invoice</Button>
