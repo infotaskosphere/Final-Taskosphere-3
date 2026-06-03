@@ -3438,6 +3438,7 @@ export default function Clients() {
   const [assignedToFilter, setAssignedToFilter] = useState('all');
   const [clientTypeFilter, setClientTypeFilter] = useState('all');
   const [referredByFilter, setReferredByFilter] = useState('all');
+  const [itrTabActive, setItrTabActive] = useState(false);
 
   // Debounced search — inlined to avoid custom hook bundler issues
   const [searchTerm, setSearchTerm] = useState('');
@@ -3563,11 +3564,23 @@ export default function Clients() {
 
   // ── Filter & sort ────────────────────────────────────────────────────────
   const filteredClients = useMemo(() => clients.filter(c => {
+    // ITR tab: show only ITR clients
+    if (itrTabActive && !c?.is_itr_client) return false;
+
     const q = searchTerm.toLowerCase();
-    if (q && !(c?.company_name || '').toLowerCase().includes(q) && !(c?.email || '').toLowerCase().includes(q) && !(c?.phone || '').includes(searchTerm)) return false;
+    if (q) {
+      const nameMatch = (c?.company_name || '').toLowerCase().includes(q);
+      const emailMatch = (c?.email || '').toLowerCase().includes(q);
+      const phoneMatch = (c?.phone || '').includes(searchTerm);
+      // Also match linked company names stored in itr_data.company_links
+      const linkedMatch = (c?.itr_data?.company_links || []).some(l =>
+        (l.company_name || '').toLowerCase().includes(q)
+      );
+      if (!nameMatch && !emailMatch && !phoneMatch && !linkedMatch) return false;
+    }
     if (serviceFilter !== 'all' && !(c?.services ?? []).some(s => (s || '').toLowerCase().includes(serviceFilter.toLowerCase()))) return false;
     if (statusFilter !== 'all' && (c?.status || 'active') !== statusFilter) return false;
-    if (clientTypeFilter !== 'all' && (c?.client_type || 'proprietor') !== clientTypeFilter) return false;
+    if (!itrTabActive && clientTypeFilter !== 'all' && (c?.client_type || 'proprietor') !== clientTypeFilter) return false;
     if (referredByFilter !== 'all' && (c?.referred_by || '') !== referredByFilter) return false;
     if (assignedToFilter !== 'all') {
       const assignments = c?.assignments || [];
@@ -3576,7 +3589,7 @@ export default function Clients() {
       if (!matched) return false;
     }
     return true;
-  }), [clients, searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter, referredByFilter]);
+  }), [clients, searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter, referredByFilter, itrTabActive]);
 
   const sortedClients = useMemo(() => {
     const arr = [...filteredClients];
@@ -3589,7 +3602,7 @@ export default function Clients() {
     });
   }, [filteredClients, sortOrder]);
 
-  useEffect(() => { setBoardPage(1); setListPage(1); }, [searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter, referredByFilter, sortOrder, clients]);
+  useEffect(() => { setBoardPage(1); setListPage(1); }, [searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter, referredByFilter, sortOrder, clients, itrTabActive]);
 
   // ── Stats ────────────────────────────────────────────────────────────────
   const stats = useMemo(() => {
@@ -4265,7 +4278,7 @@ export default function Clients() {
 
   // ── List row — using itemData pattern so it doesn't recreate per-render ──
   const ListRow = useCallback(({ index, style, data }) => {
-    const { pageClients: pc, pageStart: ps } = data;
+    const { pageClients: pc, pageStart: ps, itrTabActive } = data;
     const client = pc[index];
     if (!client) return null;
     const globalIndex = ps + index;
@@ -4273,6 +4286,8 @@ export default function Clients() {
     const isArchived = client.status === 'inactive';
     const serviceCount = client.services?.length || 0;
     const clientAssignments = getClientAssignments(client);
+    const companyLinks = client.itr_data?.company_links || [];
+
     return (
       <div style={{ ...style, paddingTop: 2, paddingBottom: 2, paddingLeft: 4, paddingRight: 4 }}>
         <div
@@ -4280,7 +4295,7 @@ export default function Clients() {
             ${isArchived ? 'opacity-60' : ''}
             ${isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-500 hover:shadow-sm' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm'}`}
           onClick={() => { setSelectedClient(client); setDetailDialogOpen(true); }}>
-          <div className="absolute left-0 top-0 h-full w-1" style={{ background: cfg.strip }} />
+          <div className="absolute left-0 top-0 h-full w-1" style={{ background: itrTabActive ? 'linear-gradient(180deg, #0f3460, #0d7377)' : cfg.strip }} />
           <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-sm font-bold flex-shrink-0" style={{ background: getAvatarGradient(client.company_name) }}>
             {client.company_name?.charAt(0).toUpperCase() || '?'}
           </div>
@@ -4288,18 +4303,44 @@ export default function Clients() {
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] font-mono text-slate-300">#{getClientNumber(globalIndex)}</span>
               {isArchived && <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">Archived</span>}
+              {client.is_itr_client && !itrTabActive && <span className="text-[9px] font-bold px-1 py-0.5 rounded" style={{ background: '#ccfbf1', color: '#0f766e' }}>ITR</span>}
             </div>
             <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{client.company_name}</p>
           </div>
           <div className="w-28 flex-shrink-0"><TypePill type={client.client_type} customLabel={client.client_type_label} /></div>
-          <div className="w-36 flex-shrink-0">
-            <p
-              className={`text-xs font-medium cursor-copy ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
-              onClick={client.phone ? e => { e.stopPropagation(); copyToClipboard(client.phone, 'Phone'); } : undefined}
-              title={client.phone ? 'Click to copy' : ''}>
-              {client.phone || '—'}
-            </p>
-          </div>
+          {itrTabActive ? (
+            /* ── Linked Company column ── */
+            <div className="w-52 flex-shrink-0 min-w-0">
+              {companyLinks.length === 0 ? (
+                <span className="text-[10px] text-slate-300 italic">No linked company</span>
+              ) : (
+                <div className="flex flex-col gap-0.5">
+                  {companyLinks.slice(0, 2).map((link, i) => {
+                    const roleColors = { director: '#1e40af', partner: '#166534', proprietor: '#9a3412', shareholder: '#6b21a8', trustee: '#713f12', karta: '#9f1239', member: '#075985' };
+                    return (
+                      <div key={i} className="flex items-center gap-1 min-w-0">
+                        <span className={`text-xs font-semibold truncate ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>{link.company_name}</span>
+                        <span className="text-[9px] font-bold px-1 py-0.5 rounded flex-shrink-0 capitalize"
+                          style={{ background: (roleColors[link.role] || '#475569') + '18', color: roleColors[link.role] || '#475569' }}>
+                          {link.role}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {companyLinks.length > 2 && <span className="text-[9px] text-slate-400">+{companyLinks.length - 2} more</span>}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="w-36 flex-shrink-0">
+              <p
+                className={`text-xs font-medium cursor-copy ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
+                onClick={client.phone ? e => { e.stopPropagation(); copyToClipboard(client.phone, 'Phone'); } : undefined}
+                title={client.phone ? 'Click to copy' : ''}>
+                {client.phone || '—'}
+              </p>
+            </div>
+          )}
           <div className="flex-1 min-w-0">
             <p
               className={`text-xs truncate cursor-copy ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
@@ -5201,6 +5242,25 @@ export default function Clients() {
               </button>
             </>
           )}
+          {/* ITR Clients tab */}
+          <div className={`w-px h-6 flex-shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
+          <button
+            onClick={() => setItrTabActive(v => !v)}
+            className={`flex items-center gap-1.5 h-9 px-3 rounded-xl border text-xs font-semibold whitespace-nowrap flex-shrink-0 transition-all ${
+              itrTabActive
+                ? 'text-white border-transparent shadow-sm'
+                : isDark ? 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600' : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-teal-50 hover:border-teal-300 hover:text-teal-700'
+            }`}
+            style={itrTabActive ? { background: 'linear-gradient(135deg, #0f3460, #0d7377)' } : {}}
+          >
+            <FileText className="h-3.5 w-3.5 flex-shrink-0" />
+            <span>ITR Clients</span>
+            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+              itrTabActive ? 'bg-white/20 text-white' : isDark ? 'bg-slate-600 text-slate-300' : 'bg-teal-100 text-teal-700'
+            }`}>
+              {clients.filter(c => c.is_itr_client).length}
+            </span>
+          </button>
           <div className={`w-px h-6 flex-shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
           {/* Sort */}
           <div className={`flex items-center border rounded-xl overflow-hidden flex-shrink-0 ${isDark ? 'border-slate-600 bg-slate-700' : 'border-slate-200 bg-slate-50'}`}>
@@ -5252,6 +5312,18 @@ export default function Clients() {
       </div>
 
       {/* BOARD / LIST */}
+      {/* ITR mode banner */}
+      {itrTabActive && (
+        <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl border"
+          style={{ background: 'linear-gradient(135deg, rgba(15,52,96,0.08), rgba(13,115,119,0.08))', borderColor: '#99f6e4' }}>
+          <FileText className="h-4 w-4 flex-shrink-0" style={{ color: '#0d7377' }} />
+          <p className="text-xs font-semibold" style={{ color: '#0f766e' }}>
+            ITR Clients view — showing {sortedClients.length} ITR client{sortedClients.length !== 1 ? 's' : ''} · <span className="font-normal">Linked Company column visible in list view</span>
+          </p>
+          <button onClick={() => setItrTabActive(false)} className="ml-auto text-xs font-semibold text-teal-600 hover:text-teal-800 hover:underline flex-shrink-0">✕ Clear</button>
+        </div>
+      )}
+
       {clientsLoading ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(255px, 1fr))', gap: 10 }}>
           {Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} isDark={isDark} />)}
@@ -5259,10 +5331,10 @@ export default function Clients() {
       ) : sortedClients.length === 0 ? (
         <div className="rounded-2xl border flex flex-col items-center justify-center shadow-sm" style={{ minHeight: 320, background: isDark ? '#1e293b' : '#F8FAFC', borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' }}>
           <div className={`w-14 h-14 rounded-2xl border flex items-center justify-center mb-4 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-100'}`}><Users className="h-7 w-7 opacity-30" /></div>
-          <p className="text-base font-semibold text-slate-500">No clients match your filters</p>
-          <p className="mt-1 text-sm text-slate-400">Try changing your search or filters</p>
-          {(searchInput || statusFilter !== 'all' || clientTypeFilter !== 'all' || serviceFilter !== 'all' || assignedToFilter !== 'all' || referredByFilter !== 'all') && (
-            <button onClick={clearAllFilters} className="mt-3 text-sm font-semibold text-blue-600 hover:underline">Clear all filters</button>
+          <p className="text-base font-semibold text-slate-500">{itrTabActive ? 'No ITR clients found' : 'No clients match your filters'}</p>
+          <p className="mt-1 text-sm text-slate-400">{itrTabActive ? 'Create ITR clients using the "+ ITR Client" button' : 'Try changing your search or filters'}</p>
+          {(searchInput || statusFilter !== 'all' || clientTypeFilter !== 'all' || serviceFilter !== 'all' || assignedToFilter !== 'all' || referredByFilter !== 'all' || itrTabActive) && (
+            <button onClick={() => { clearAllFilters(); setItrTabActive(false); }} className="mt-3 text-sm font-semibold text-blue-600 hover:underline">Clear all filters</button>
           )}
         </div>
       ) : viewMode === 'board' ? (
@@ -5328,7 +5400,11 @@ export default function Clients() {
             <div className="w-8 flex-shrink-0" />
             <div className="w-56 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Company</div>
             <div className="w-28 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Type</div>
-            <div className="w-36 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Phone</div>
+            {itrTabActive ? (
+              <div className="w-52 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest" style={{ color: '#0d7377' }}>Linked Company</div>
+            ) : (
+              <div className="w-36 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Phone</div>
+            )}
             <div className="flex-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Email</div>
             <div className="w-28 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-violet-400">Referred By</div>
             <div className="w-44 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Services</div>
@@ -5336,7 +5412,7 @@ export default function Clients() {
             <div className="w-24 flex-shrink-0" />
           </div>
           <div style={{ height: Math.max(listHeight, LIST_ROW_HEIGHT) }}>
-            <FixedSizeList height={Math.max(listHeight, LIST_ROW_HEIGHT)} width="100%" itemCount={listPageClients.length} itemSize={LIST_ROW_HEIGHT} itemData={{ pageClients: listPageClients, pageStart: listPageStart }}>
+            <FixedSizeList height={Math.max(listHeight, LIST_ROW_HEIGHT)} width="100%" itemCount={listPageClients.length} itemSize={LIST_ROW_HEIGHT} itemData={{ pageClients: listPageClients, pageStart: listPageStart, itrTabActive }}>
               {ListRow}
             </FixedSizeList>
           </div>
