@@ -277,20 +277,33 @@ export default function ITRClientDialog({
   const companySearchTimer = React.useRef(null);
 
   const searchCompanies = React.useCallback(async (query) => {
-    if (!query || query.trim().length < 2) { setCompanyResults([]); return; }
     setCompanySearching(true);
     try {
-      const r = await api.get('/clients', { params: { search: query, page_size: 15, client_type: 'company,llp,partnership,pvt_ltd' } });
-      const all = r.data?.clients || r.data?.items || [];
-      setCompanyResults(all.filter(c => !['proprietor', 'individual'].includes(c.client_type)));
+      const params = { page_size: 20 };
+      if (query && query.trim().length >= 1) params.search = query.trim();
+      const r = await api.get('/clients', { params });
+      const all = r.data?.clients || r.data?.items || r.data || [];
+      // Exclude this ITR client itself and pure individuals/proprietors
+      const exclude = ['proprietor'];
+      setCompanyResults(all.filter(c =>
+        !exclude.includes(c.client_type) &&
+        c.id !== (editingClient?.id)
+      ));
     } catch { setCompanyResults([]); }
     finally { setCompanySearching(false); }
-  }, []);
+  }, [editingClient?.id]);
+
+  // Load initial list when section becomes active
+  React.useEffect(() => {
+    if (activeSection === 'companies' && companyResults.length === 0 && !companySearch) {
+      searchCompanies('');
+    }
+  }, [activeSection]); // eslint-disable-line
 
   const handleCompanySearchInput = (val) => {
     setCompanySearch(val);
     clearTimeout(companySearchTimer.current);
-    companySearchTimer.current = setTimeout(() => searchCompanies(val), 350);
+    companySearchTimer.current = setTimeout(() => searchCompanies(val), 300);
   };
 
   const addCompanyLink = (company) => {
@@ -1039,15 +1052,15 @@ export default function ITRClientDialog({
                         </div>
                         <span className="text-[10px] font-bold px-2 py-1 rounded-lg flex-shrink-0"
                           style={{ background: '#eff6ff', color: '#1e40af' }}>
-                          + Add as {pendingRole}
+                          + {pendingRole}
                         </span>
                       </button>
                     ))}
                   </div>
                 )}
 
-                {companySearch.length >= 2 && !companySearching && companyResults.length === 0 && (
-                  <p className="text-xs text-slate-400 px-1">No companies found matching "{companySearch}"</p>
+                {companySearch.length >= 1 && !companySearching && companyResults.length === 0 && (
+                  <p className="text-xs text-slate-400 px-1">No clients found matching "{companySearch}"</p>
                 )}
               </div>
 
