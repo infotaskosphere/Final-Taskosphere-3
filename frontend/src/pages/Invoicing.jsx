@@ -5475,6 +5475,9 @@ function Invoicing() {
 
   // ── E. ALL useMemo: DERIVED DATA ──────────────────────────────────────────
 
+  // ── useMemo: itemSuggestions — merged localStorage + live invoices for autocomplete ──
+  const itemSuggestions = useMemo(() => buildItemSuggestions(invoices), [invoices]);
+
   const filtered = useMemo(() => {
     const fy = fyRange(yearFilter === 'all' ? null : yearFilter);
     return (invoices || []).filter(inv => {
