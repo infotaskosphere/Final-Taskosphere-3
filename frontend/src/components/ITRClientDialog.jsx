@@ -13,9 +13,10 @@
  *  - Filing status + remarks
  *  - Aadhaar number
  *  - Seamlessly saved as a regular client with ITR flag
+ *  - Upload ITR Computation PDF → auto-fill all fields via backend parser
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,7 +25,8 @@ import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import {
   FileText, User, IndianRupee, Calendar, Shield,
-  CheckCircle2, ChevronDown, Plus, X, Loader2
+  CheckCircle2, ChevronDown, Plus, X, Loader2,
+  Upload, Sparkles, AlertCircle
 } from 'lucide-react';
 import api from '@/lib/api';
 
@@ -72,6 +74,46 @@ const validateAadhaar = (v) => {
   return digits.length === 12 && /^\d+$/.test(digits);
 };
 
+// ── Parse result → form mapping ───────────────────────────────────────────
+function mapParsedToForm(parsed) {
+  const mapped = {};
+  if (parsed.company_name) mapped.company_name = parsed.company_name;
+  if (parsed.pan)          mapped.pan = parsed.pan.toUpperCase();
+  if (parsed.email)        mapped.email = parsed.email;
+  if (parsed.phone)        mapped.phone = parsed.phone;
+  if (parsed.address)      mapped.address = parsed.address;
+  if (parsed.city)         mapped.city = parsed.city;
+  if (parsed.state)        mapped.state = parsed.state;
+  if (parsed.date_of_birth) mapped.date_of_birth = parsed.date_of_birth;
+  // ITR fields
+  if (parsed.itr_type)         mapped.itr_type = parsed.itr_type;
+  if (parsed.assessment_year)  mapped.assessment_year = parsed.assessment_year;
+  if (parsed.filing_status)    mapped.filing_status = parsed.filing_status;
+  if (parsed.filing_date)      mapped.filing_date = parsed.filing_date;
+  if (parsed.acknowledgement_no) mapped.acknowledgement_no = parsed.acknowledgement_no;
+  if (parsed.tax_payable != null) mapped.tax_payable = String(parsed.tax_payable);
+  if (parsed.refund_amount != null) mapped.refund_amount = String(parsed.refund_amount);
+  // Income
+  if (parsed.income_salary != null)         mapped.income_salary = String(parsed.income_salary);
+  if (parsed.income_house_property != null) mapped.income_house_property = String(parsed.income_house_property);
+  if (parsed.income_business != null)       mapped.income_business = String(parsed.income_business);
+  if (parsed.income_capital_gains != null)  mapped.income_capital_gains = String(parsed.income_capital_gains);
+  if (parsed.income_other_sources != null)  mapped.income_other_sources = String(parsed.income_other_sources);
+  // Bank / extra
+  if (parsed.bank_name) mapped.bank_name = parsed.bank_name;
+  if (parsed.ifsc_code) mapped.ifsc_code = parsed.ifsc_code;
+  if (parsed.account_no) mapped.account_no = parsed.account_no;
+  // Build remarks from extra info
+  const extras = [];
+  if (parsed.ward)               extras.push(`Ward: ${parsed.ward}`);
+  if (parsed.gender)             extras.push(`Gender: ${parsed.gender.charAt(0).toUpperCase() + parsed.gender.slice(1)}`);
+  if (parsed.residential_status) extras.push(`Status: ${parsed.residential_status}`);
+  if (parsed.opted_115bac != null) extras.push(`115BAC: ${parsed.opted_115bac ? 'Yes' : 'No'}`);
+  if (parsed.total_income)       extras.push(`Total Income: ₹${Number(parsed.total_income).toLocaleString('en-IN')}`);
+  if (extras.length) mapped.remarks = extras.join(' | ');
+  return mapped;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 export default function ITRClientDialog({
   open,
@@ -85,6 +127,12 @@ export default function ITRClientDialog({
   const [loading, setLoading] = useState(false);
   const [activeSection, setActiveSection] = useState('basic');
 
+  // ── PDF Upload state ──────────────────────────────────────────────────
+  const [pdfUploading, setPdfUploading] = useState(false);
+  const [pdfFileName, setPdfFileName] = useState('');
+  const [autoFillFields, setAutoFillFields] = useState([]);  // fields auto-filled from PDF
+  const fileInputRef = useRef(null);
+
   const [form, setForm] = useState(() => getDefaultForm(editingClient));
 
   // Reset when dialog opens/closes
@@ -92,6 +140,8 @@ export default function ITRClientDialog({
     if (open) {
       setForm(getDefaultForm(editingClient));
       setActiveSection('basic');
+      setPdfFileName('');
+      setAutoFillFields([]);
     }
   }, [open, editingClient]);
 
@@ -109,6 +159,10 @@ export default function ITRClientDialog({
         city: client.city || '',
         state: client.state || '',
         status: client.status || 'active',
+        date_of_birth: client.date_of_birth || '',
+        bank_name: itr.bank_name || '',
+        ifsc_code: itr.ifsc_code || '',
+        account_no: itr.account_no || '',
         // ITR Specific
         itr_type: itr.itr_type || 'ITR-1',
         assessment_year: itr.assessment_year || ASSESSMENT_YEARS[0].value,
@@ -132,6 +186,7 @@ export default function ITRClientDialog({
     return {
       company_name: '', pan: '', aadhaar: '', email: '', phone: '',
       address: '', city: '', state: '', status: 'active',
+      date_of_birth: '', bank_name: '', ifsc_code: '', account_no: '',
       itr_type: 'ITR-1', assessment_year: ASSESSMENT_YEARS[0].value,
       filing_status: 'pending', filing_date: '', acknowledgement_no: '',
       refund_amount: '', tax_payable: '', remarks: '',
@@ -142,6 +197,71 @@ export default function ITRClientDialog({
   }
 
   const set = useCallback((field, value) => setForm(p => ({ ...p, [field]: value })), []);
+
+  // ── Handle PDF Upload & Auto-fill ──────────────────────────────────────
+  const handlePdfUpload = useCallback(async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      toast.error('Please upload a PDF file (ITR Computation of Income)');
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      toast.error('File too large — max 20 MB');
+      return;
+    }
+
+    setPdfUploading(true);
+    setPdfFileName(file.name);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await api.post('/clients/parse-itr-computation-pdf', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+
+      const parsed = response.data;
+      const mapped = mapParsedToForm(parsed);
+      const filledKeys = Object.keys(mapped);
+
+      if (filledKeys.length === 0) {
+        toast.warning('Could not extract data from this PDF. Please fill in manually.');
+        return;
+      }
+
+      // Merge into form — only fill empty fields unless it's a new form
+      setForm(prev => {
+        const next = { ...prev };
+        for (const [k, v] of Object.entries(mapped)) {
+          if (!isEdit || !prev[k]) {
+            next[k] = v;
+          }
+        }
+        return next;
+      });
+
+      setAutoFillFields(filledKeys);
+
+      const fieldCount = filledKeys.length;
+      toast.success(`✅ Auto-filled ${fieldCount} field${fieldCount > 1 ? 's' : ''} from ITR computation`);
+
+      // Switch to the section that has most data
+      if (mapped.income_salary || mapped.income_business || mapped.income_capital_gains) {
+        setActiveSection('income');
+      } else {
+        setActiveSection('basic');
+      }
+    } catch (err) {
+      const detail = err?.response?.data?.detail;
+      toast.error(detail || 'Could not parse this PDF. Please upload a valid ITR Computation PDF.');
+      setPdfFileName('');
+    } finally {
+      setPdfUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }, [isEdit]);
 
   // ── Validate ────────────────────────────────────────────────────────────
   const [errors, setErrors] = useState({});
@@ -193,6 +313,10 @@ export default function ITRClientDialog({
         income_other_sources: form.income_other_sources ? parseFloat(form.income_other_sources) : null,
         it_portal_user: form.it_portal_user || null,
         it_portal_password: form.it_portal_password || null,
+        // Bank details
+        bank_name: form.bank_name || null,
+        ifsc_code: form.ifsc_code || null,
+        account_no: form.account_no || null,
       };
 
       const payload = {
@@ -205,7 +329,7 @@ export default function ITRClientDialog({
         city: form.city?.trim() || null,
         state: form.state?.trim() || null,
         status: form.status,
-        services: ['Income Tax'],
+        services: ['Income Tax'],   // always set Income Tax service
         is_itr_client: true,
         itr_data,
         notes: form.remarks || null,
@@ -246,6 +370,8 @@ export default function ITRClientDialog({
     form.income_capital_gains, form.income_other_sources,
   ].reduce((s, v) => s + (parseFloat(v) || 0), 0);
 
+  const isAutoFilled = (field) => autoFillFields.includes(field);
+
   // ── Render ─────────────────────────────────────────────────────────────
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -284,8 +410,46 @@ export default function ITRClientDialog({
             </div>
           </div>
 
+          {/* ── PDF Upload / Auto-fill Bar ── */}
+          <div className="mt-4 flex items-center gap-3">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf"
+              className="hidden"
+              onChange={handlePdfUpload}
+            />
+            <button
+              type="button"
+              disabled={pdfUploading}
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all disabled:opacity-60"
+              style={{ background: 'rgba(255,255,255,0.18)', color: '#fff', border: '1.5px solid rgba(255,255,255,0.3)' }}
+            >
+              {pdfUploading
+                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Parsing PDF…</>
+                : <><Upload className="h-3.5 w-3.5" /> Upload Computation PDF</>
+              }
+            </button>
+            {pdfFileName && !pdfUploading && (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs" style={{ background: 'rgba(16,185,129,0.2)', color: '#6ee7b7' }}>
+                <Sparkles className="h-3 w-3" />
+                <span className="truncate max-w-[160px]">{pdfFileName}</span>
+                <span>· {autoFillFields.length} fields filled</span>
+                <button onClick={() => { setPdfFileName(''); setAutoFillFields([]); }} className="ml-1 hover:text-white">
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            )}
+            {!pdfFileName && (
+              <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                Upload ITR Computation PDF to auto-fill all fields instantly
+              </span>
+            )}
+          </div>
+
           {/* Section nav */}
-          <div className="flex gap-1 mt-4">
+          <div className="flex gap-1 mt-3">
             {SECTIONS.map(sec => (
               <button
                 key={sec.key}
@@ -314,9 +478,10 @@ export default function ITRClientDialog({
                 <div className="col-span-2">
                   <label className={labelCls}>
                     Full Name / Assessee Name <span className="text-red-400">*</span>
+                    {isAutoFilled('company_name') && <AutoFilledBadge />}
                   </label>
                   <Input
-                    className={`${fieldCls} ${errors.company_name ? 'border-red-400' : ''}`}
+                    className={`${fieldCls} ${errors.company_name ? 'border-red-400' : ''} ${isAutoFilled('company_name') ? 'border-emerald-300 bg-emerald-50' : ''}`}
                     placeholder="As per PAN card"
                     value={form.company_name}
                     onChange={e => set('company_name', e.target.value)}
@@ -328,9 +493,10 @@ export default function ITRClientDialog({
                 <div>
                   <label className={labelCls}>
                     PAN Number <span className="text-red-400">*</span>
+                    {isAutoFilled('pan') && <AutoFilledBadge />}
                   </label>
                   <Input
-                    className={`${fieldCls} font-mono uppercase ${errors.pan ? 'border-red-400' : form.pan && validatePAN(form.pan) ? 'border-emerald-400' : ''}`}
+                    className={`${fieldCls} font-mono uppercase ${errors.pan ? 'border-red-400' : form.pan && validatePAN(form.pan) ? 'border-emerald-400' : ''} ${isAutoFilled('pan') ? 'bg-emerald-50' : ''}`}
                     placeholder="ABCDE1234F"
                     maxLength={10}
                     value={form.pan}
@@ -361,9 +527,12 @@ export default function ITRClientDialog({
 
                 {/* Email */}
                 <div>
-                  <label className={labelCls}>Email Address</label>
+                  <label className={labelCls}>
+                    Email Address
+                    {isAutoFilled('email') && <AutoFilledBadge />}
+                  </label>
                   <Input
-                    className={`${fieldCls} ${errors.email ? 'border-red-400' : ''}`}
+                    className={`${fieldCls} ${errors.email ? 'border-red-400' : ''} ${isAutoFilled('email') ? 'border-emerald-300 bg-emerald-50' : ''}`}
                     type="email"
                     value={form.email}
                     onChange={e => set('email', e.target.value)}
@@ -373,9 +542,12 @@ export default function ITRClientDialog({
 
                 {/* Phone */}
                 <div>
-                  <label className={labelCls}>Phone Number</label>
+                  <label className={labelCls}>
+                    Phone Number
+                    {isAutoFilled('phone') && <AutoFilledBadge />}
+                  </label>
                   <Input
-                    className={fieldCls}
+                    className={`${fieldCls} ${isAutoFilled('phone') ? 'border-emerald-300 bg-emerald-50' : ''}`}
                     value={form.phone}
                     onChange={e => set('phone', e.target.value)}
                   />
@@ -383,19 +555,63 @@ export default function ITRClientDialog({
 
                 {/* Address */}
                 <div className="col-span-2">
-                  <label className={labelCls}>Address</label>
-                  <Input className={fieldCls} value={form.address} onChange={e => set('address', e.target.value)} />
+                  <label className={labelCls}>
+                    Address
+                    {isAutoFilled('address') && <AutoFilledBadge />}
+                  </label>
+                  <Input
+                    className={`${fieldCls} ${isAutoFilled('address') ? 'border-emerald-300 bg-emerald-50' : ''}`}
+                    value={form.address}
+                    onChange={e => set('address', e.target.value)}
+                  />
                 </div>
 
                 <div>
-                  <label className={labelCls}>City</label>
-                  <Input className={fieldCls} value={form.city} onChange={e => set('city', e.target.value)} />
+                  <label className={labelCls}>
+                    City
+                    {isAutoFilled('city') && <AutoFilledBadge />}
+                  </label>
+                  <Input
+                    className={`${fieldCls} ${isAutoFilled('city') ? 'border-emerald-300 bg-emerald-50' : ''}`}
+                    value={form.city}
+                    onChange={e => set('city', e.target.value)}
+                  />
                 </div>
 
                 <div>
-                  <label className={labelCls}>State</label>
-                  <Input className={fieldCls} value={form.state} onChange={e => set('state', e.target.value)} />
+                  <label className={labelCls}>
+                    State
+                    {isAutoFilled('state') && <AutoFilledBadge />}
+                  </label>
+                  <Input
+                    className={`${fieldCls} ${isAutoFilled('state') ? 'border-emerald-300 bg-emerald-50' : ''}`}
+                    value={form.state}
+                    onChange={e => set('state', e.target.value)}
+                  />
                 </div>
+
+                {/* Bank Details (auto-filled from PDF) */}
+                {(form.bank_name || form.ifsc_code || form.account_no) && (
+                  <div className="col-span-2 rounded-xl border p-4 space-y-3" style={{ background: isDark ? '#1e293b' : '#f0fdf4', borderColor: isDark ? '#166534' : '#bbf7d0' }}>
+                    <p className="text-xs font-bold text-emerald-700 flex items-center gap-1.5">
+                      <Sparkles className="h-3.5 w-3.5" /> Bank Details (from Computation PDF)
+                    </p>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className={labelCls}>Bank Name</label>
+                        <Input className={fieldCls} value={form.bank_name} onChange={e => set('bank_name', e.target.value)} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>IFSC Code</label>
+                        <Input className={`${fieldCls} font-mono`} value={form.ifsc_code} onChange={e => set('ifsc_code', e.target.value.toUpperCase())} />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Account Number</label>
+                        <Input className={`${fieldCls} font-mono`} value={form.account_no} onChange={e => set('account_no', e.target.value)} />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -407,7 +623,10 @@ export default function ITRClientDialog({
 
                 {/* ITR Type */}
                 <div className="col-span-2">
-                  <label className={labelCls}>ITR Form Type</label>
+                  <label className={labelCls}>
+                    ITR Form Type
+                    {isAutoFilled('itr_type') && <AutoFilledBadge />}
+                  </label>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {ITR_TYPES.slice(0, 4).map(t => (
                       <button
@@ -446,9 +665,12 @@ export default function ITRClientDialog({
 
                 {/* Assessment Year */}
                 <div>
-                  <label className={labelCls}>Assessment Year</label>
+                  <label className={labelCls}>
+                    Assessment Year
+                    {isAutoFilled('assessment_year') && <AutoFilledBadge />}
+                  </label>
                   <Select value={form.assessment_year} onValueChange={v => set('assessment_year', v)}>
-                    <SelectTrigger className="h-11 rounded-xl text-sm border-slate-200">
+                    <SelectTrigger className={`h-11 rounded-xl text-sm border-slate-200 ${isAutoFilled('assessment_year') ? 'border-emerald-300 bg-emerald-50' : ''}`}>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -461,7 +683,10 @@ export default function ITRClientDialog({
 
                 {/* Filing Status */}
                 <div>
-                  <label className={labelCls}>Filing Status</label>
+                  <label className={labelCls}>
+                    Filing Status
+                    {isAutoFilled('filing_status') && <AutoFilledBadge />}
+                  </label>
                   <div className="flex flex-wrap gap-1.5">
                     {FILING_STATUS.map(s => (
                       <button
@@ -482,9 +707,12 @@ export default function ITRClientDialog({
 
                 {/* Filing Date */}
                 <div>
-                  <label className={labelCls}>Filing Date</label>
+                  <label className={labelCls}>
+                    Filing Date
+                    {isAutoFilled('filing_date') && <AutoFilledBadge />}
+                  </label>
                   <Input
-                    className={fieldCls}
+                    className={`${fieldCls} ${isAutoFilled('filing_date') ? 'border-emerald-300 bg-emerald-50' : ''}`}
                     type="date"
                     value={form.filing_date}
                     onChange={e => set('filing_date', e.target.value)}
@@ -493,9 +721,12 @@ export default function ITRClientDialog({
 
                 {/* Acknowledgement No */}
                 <div>
-                  <label className={labelCls}>Acknowledgement Number</label>
+                  <label className={labelCls}>
+                    Acknowledgement Number
+                    {isAutoFilled('acknowledgement_no') && <AutoFilledBadge />}
+                  </label>
                   <Input
-                    className={`${fieldCls} font-mono`}
+                    className={`${fieldCls} font-mono ${isAutoFilled('acknowledgement_no') ? 'border-emerald-300 bg-emerald-50' : ''}`}
                     placeholder="15-digit ACK no."
                     value={form.acknowledgement_no}
                     onChange={e => set('acknowledgement_no', e.target.value)}
@@ -504,9 +735,12 @@ export default function ITRClientDialog({
 
                 {/* Refund Amount */}
                 <div>
-                  <label className={labelCls}>Refund Amount (₹)</label>
+                  <label className={labelCls}>
+                    Refund Amount (₹)
+                    {isAutoFilled('refund_amount') && <AutoFilledBadge />}
+                  </label>
                   <Input
-                    className={fieldCls}
+                    className={`${fieldCls} ${isAutoFilled('refund_amount') ? 'border-emerald-300 bg-emerald-50' : ''}`}
                     type="number"
                     min="0"
                     placeholder="0.00"
@@ -517,9 +751,12 @@ export default function ITRClientDialog({
 
                 {/* Tax Payable */}
                 <div>
-                  <label className={labelCls}>Tax Payable / Demand (₹)</label>
+                  <label className={labelCls}>
+                    Tax Payable / Demand (₹)
+                    {isAutoFilled('tax_payable') && <AutoFilledBadge />}
+                  </label>
                   <Input
-                    className={fieldCls}
+                    className={`${fieldCls} ${isAutoFilled('tax_payable') ? 'border-emerald-300 bg-emerald-50' : ''}`}
                     type="number"
                     min="0"
                     placeholder="0.00"
@@ -530,9 +767,12 @@ export default function ITRClientDialog({
 
                 {/* Remarks */}
                 <div className="col-span-2">
-                  <label className={labelCls}>Remarks / Notes</label>
+                  <label className={labelCls}>
+                    Remarks / Notes
+                    {isAutoFilled('remarks') && <AutoFilledBadge />}
+                  </label>
                   <textarea
-                    className="w-full min-h-[80px] rounded-xl border text-sm px-3.5 py-2.5 resize-none outline-none transition-all border-slate-200 focus:border-blue-400"
+                    className={`w-full min-h-[80px] rounded-xl border text-sm px-3.5 py-2.5 resize-none outline-none transition-all border-slate-200 focus:border-blue-400 ${isAutoFilled('remarks') ? 'border-emerald-300 bg-emerald-50' : ''}`}
                     style={{ background: isDark ? '#1e293b' : '#f8fafc', color: isDark ? '#e2e8f0' : '#0f172a' }}
                     placeholder="Documents collected, pending items, notes…"
                     value={form.remarks}
@@ -546,6 +786,17 @@ export default function ITRClientDialog({
           {/* ════ INCOME DETAILS ════ */}
           {activeSection === 'income' && (
             <div className="space-y-4">
+              {/* Auto-fill notice */}
+              {autoFillFields.some(f => f.startsWith('income_')) && (
+                <div className="rounded-xl p-3 border flex items-start gap-2.5" style={{ background: '#f0fdf4', borderColor: '#bbf7d0' }}>
+                  <Sparkles className="h-4 w-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-bold text-emerald-700">Income auto-filled from ITR Computation PDF</p>
+                    <p className="text-xs text-emerald-600 mt-0.5">Green highlighted fields were extracted from your document. Review and adjust if needed.</p>
+                  </div>
+                </div>
+              )}
+
               {/* Total income summary */}
               {totalIncome > 0 && (
                 <div className="rounded-2xl p-4 border" style={{ background: '#f0fdf4', borderColor: '#bbf7d0' }}>
@@ -562,11 +813,12 @@ export default function ITRClientDialog({
                     <label className="text-sm font-medium w-44 flex-shrink-0"
                       style={{ color: isDark ? '#94a3b8' : '#64748b' }}>
                       {label}
+                      {isAutoFilled(`income_${key}`) && <AutoFilledBadge inline />}
                     </label>
                     <div className="flex-1 relative">
                       <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">₹</span>
                       <Input
-                        className="pl-8 h-11 rounded-xl border-slate-200 focus:border-blue-400 text-sm"
+                        className={`pl-8 h-11 rounded-xl border-slate-200 focus:border-blue-400 text-sm ${isAutoFilled(`income_${key}`) ? 'border-emerald-300 bg-emerald-50' : ''}`}
                         type="number"
                         min="0"
                         step="0.01"
@@ -697,5 +949,17 @@ export default function ITRClientDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ── Small helper badge for auto-filled fields ──────────────────────────────
+function AutoFilledBadge({ inline = false }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${inline ? 'ml-1.5' : 'ml-2'}`}
+      style={{ background: '#d1fae5', color: '#065f46' }}
+    >
+      <Sparkles className="h-2.5 w-2.5" /> AUTO
+    </span>
   );
 }
