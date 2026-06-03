@@ -1736,6 +1736,46 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
   const [clientInvoices, setClientInvoices] = React.useState([]);
   const [invoicesLoading, setInvoicesLoading] = React.useState(false);
 
+  // ── Assign Task tab state ──
+  const TASK_EMPTY = { title: '', description: '', assigned_to: 'unassigned', due_date: '', priority: 'medium', category: 'other' };
+  const [taskForm, setTaskForm] = React.useState({ ...TASK_EMPTY });
+  const [taskSaving, setTaskSaving] = React.useState(false);
+  const [clientTasks, setClientTasks] = React.useState([]);
+  const [clientTasksLoading, setClientTasksLoading] = React.useState(false);
+
+  const fetchClientTasks = React.useCallback(async () => {
+    if (!selectedClient?.id) return;
+    setClientTasksLoading(true);
+    try {
+      const r = await api.get('/tasks', { params: { client_id: selectedClient.id, page_size: 50 } });
+      setClientTasks(r.data?.tasks || r.data || []);
+    } catch { setClientTasks([]); }
+    finally { setClientTasksLoading(false); }
+  }, [selectedClient?.id]);
+
+  React.useEffect(() => {
+    if (activeTab !== 'tasks' || !selectedClient?.id) return;
+    fetchClientTasks();
+  }, [activeTab, selectedClient, fetchClientTasks]);
+
+  const handleTaskSubmit = async () => {
+    if (!taskForm.title.trim()) { toast.error('Task title is required'); return; }
+    setTaskSaving(true);
+    try {
+      const payload = {
+        ...taskForm,
+        assigned_to: taskForm.assigned_to === 'unassigned' ? null : taskForm.assigned_to,
+        client_id: selectedClient.id,
+        due_date: taskForm.due_date || null,
+      };
+      await api.post('/tasks', payload);
+      toast.success('Task assigned successfully!');
+      setTaskForm({ ...TASK_EMPTY });
+      fetchClientTasks();
+    } catch { toast.error('Failed to assign task'); }
+    finally { setTaskSaving(false); }
+  };
+
   // Portal access state
   const [portalUsers, setPortalUsers] = React.useState([]);
   const [portalLoading, setPortalLoading] = React.useState(false);
@@ -1785,6 +1825,8 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
     setShowAdhocDialog(false);
     setPortalUsers([]);
     setShowPortalManager(false);
+    setTaskForm({ title: '', description: '', assigned_to: 'unassigned', due_date: '', priority: 'medium', category: 'other' });
+    setClientTasks([]);
   }, [selectedClient?.id]);
 
   React.useEffect(() => {
@@ -1968,6 +2010,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
             { key: 'reconciliation', label: 'GST Recon',   icon: <ArrowLeftRight className="h-3.5 w-3.5" /> },
             { key: 'govtfees',       label: 'Govt Fees',   icon: <IndianRupee className="h-3.5 w-3.5" /> },
             { key: 'portal',         label: 'Portal',      icon: <Globe className="h-3.5 w-3.5" /> },
+            { key: 'tasks',          label: 'Assign Task', icon: <CheckSquare className="h-3.5 w-3.5" /> },
           ].map(tab => (
             <button
               key={tab.key}
@@ -1998,6 +2041,11 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
               {tab.key === 'portal' && portalUsers.length > 0 && (
                 <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold" style={{ background: activeTab === 'portal' ? 'rgba(255,255,255,0.25)' : '#dcfce7', color: activeTab === 'portal' ? '#fff' : '#166534' }}>
                   {portalUsers.length}
+                </span>
+              )}
+              {tab.key === 'tasks' && clientTasks.length > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold" style={{ background: activeTab === 'tasks' ? 'rgba(255,255,255,0.25)' : '#fef3c7', color: activeTab === 'tasks' ? '#fff' : '#92400e' }}>
+                  {clientTasks.length}
                 </span>
               )}
             </button>
@@ -3065,12 +3113,169 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
           )}
           {/* ════════════════ END DETAILS TAB ════════════════ */}
 
+          {/* ════════════════ ASSIGN TASK TAB ════════════════ */}
+          {activeTab === 'tasks' && (
+            <div className="p-6 space-y-6">
+
+              {/* ── New Task Form ── */}
+              <div className={`rounded-2xl border p-5 space-y-4 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-amber-50/60 border-amber-200'}`}>
+                <h3 className={`text-sm font-bold uppercase tracking-widest flex items-center gap-2 ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>
+                  <CheckSquare className="h-4 w-4" /> Assign New Task for {selectedClient?.company_name}
+                </h3>
+
+                {/* Title */}
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Task Title <span className="text-red-500">*</span></label>
+                  <Input
+                    value={taskForm.title}
+                    onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))}
+                    placeholder="e.g. File GST Return for Q1"
+                    className={`h-9 text-sm ${isDark ? 'bg-slate-800 border-slate-600 text-white' : 'bg-white border-slate-200'}`}
+                  />
+                </div>
+
+                {/* Description */}
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Description</label>
+                  <Textarea
+                    value={taskForm.description}
+                    onChange={e => setTaskForm(p => ({ ...p, description: e.target.value }))}
+                    placeholder="Add details about this task..."
+                    rows={2}
+                    className={`text-sm resize-none ${isDark ? 'bg-slate-800 border-slate-600 text-white' : 'bg-white border-slate-200'}`}
+                  />
+                </div>
+
+                {/* Row: Assign To + Due Date */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={`block text-xs font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Assign To</label>
+                    <select
+                      value={taskForm.assigned_to}
+                      onChange={e => setTaskForm(p => ({ ...p, assigned_to: e.target.value }))}
+                      className={`w-full h-9 text-sm rounded-lg border px-3 outline-none ${isDark ? 'bg-slate-800 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                    >
+                      <option value="unassigned">Unassigned</option>
+                      {(users || []).map(u => (
+                        <option key={u.id} value={u.id}>{u.name || u.email}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={`block text-xs font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Due Date</label>
+                    <Input
+                      type="date"
+                      value={taskForm.due_date}
+                      onChange={e => setTaskForm(p => ({ ...p, due_date: e.target.value }))}
+                      className={`h-9 text-sm ${isDark ? 'bg-slate-800 border-slate-600 text-white' : 'bg-white border-slate-200'}`}
+                    />
+                  </div>
+                </div>
+
+                {/* Row: Priority + Category */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={`block text-xs font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Priority</label>
+                    <select
+                      value={taskForm.priority}
+                      onChange={e => setTaskForm(p => ({ ...p, priority: e.target.value }))}
+                      className={`w-full h-9 text-sm rounded-lg border px-3 outline-none ${isDark ? 'bg-slate-800 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                    >
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                      <option value="critical">Critical</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className={`block text-xs font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Category</label>
+                    <select
+                      value={taskForm.category}
+                      onChange={e => setTaskForm(p => ({ ...p, category: e.target.value }))}
+                      className={`w-full h-9 text-sm rounded-lg border px-3 outline-none ${isDark ? 'bg-slate-800 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                    >
+                      <option value="other">Other</option>
+                      <option value="gst">GST</option>
+                      <option value="itr">ITR</option>
+                      <option value="roc">ROC</option>
+                      <option value="audit">Audit</option>
+                      <option value="trademark">Trademark</option>
+                      <option value="compliance">Compliance</option>
+                      <option value="accounting">Accounting</option>
+                    </select>
+                  </div>
+                </div>
+
+                <Button
+                  onClick={handleTaskSubmit}
+                  disabled={taskSaving || !taskForm.title.trim()}
+                  className="w-full h-10 text-sm font-semibold rounded-xl text-white gap-2"
+                  style={{ background: taskSaving || !taskForm.title.trim() ? '#94a3b8' : 'linear-gradient(135deg, #d97706, #f59e0b)' }}
+                >
+                  {taskSaving ? <><Loader2 className="h-4 w-4 animate-spin" /> Assigning...</> : <><CheckSquare className="h-4 w-4" /> Assign Task</>}
+                </Button>
+              </div>
+
+              {/* ── Existing Tasks for this client ── */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className={`text-sm font-bold uppercase tracking-widest flex items-center gap-2 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                    <Clock className="h-4 w-4" /> Existing Tasks
+                    {clientTasks.length > 0 && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: '#fef3c7', color: '#92400e' }}>{clientTasks.length}</span>
+                    )}
+                  </h3>
+                  <button onClick={fetchClientTasks} className="text-slate-400 hover:text-slate-600 transition-colors"><RefreshCw className="h-3.5 w-3.5" /></button>
+                </div>
+                {clientTasksLoading ? (
+                  <div className="flex justify-center py-8"><Loader2 className={`h-6 w-6 animate-spin ${isDark ? 'text-slate-400' : 'text-slate-300'}`} /></div>
+                ) : clientTasks.length === 0 ? (
+                  <div className={`text-center py-8 rounded-2xl border-dashed border-2 ${isDark ? 'border-slate-600 text-slate-500' : 'border-slate-200 text-slate-400'}`}>
+                    <CheckSquare className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                    <p className="text-sm">No tasks assigned to this client yet</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {clientTasks.map(task => {
+                      const isOverdue = task.due_date && task.status !== 'completed' && new Date(task.due_date) < new Date();
+                      const priorityColors = { critical: '#ef4444', high: '#f97316', medium: '#eab308', low: '#22c55e' };
+                      const statusColors = { completed: '#22c55e', in_progress: '#3b82f6', pending: '#94a3b8', on_hold: '#f59e0b' };
+                      const assignedUser = (users || []).find(u => u.id === task.assigned_to);
+                      return (
+                        <div key={task.id} className={`rounded-xl border p-3 flex items-start gap-3 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-white border-slate-200'}`}>
+                          <div className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ background: priorityColors[task.priority] || '#94a3b8' }} />
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'} ${task.status === 'completed' ? 'line-through opacity-60' : ''}`}>{task.title}</p>
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              <span className="text-[10px] px-1.5 py-0.5 rounded font-bold uppercase" style={{ background: statusColors[task.status] + '22', color: statusColors[task.status] }}>{(task.status || 'pending').replace('_', ' ')}</span>
+                              {assignedUser && <span className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>→ {assignedUser.name || assignedUser.email}</span>}
+                              {task.due_date && <span className={`text-[10px] font-medium ${isOverdue ? 'text-red-500' : isDark ? 'text-slate-400' : 'text-slate-500'}`}>{isOverdue ? '⚠ ' : ''}{format(new Date(task.due_date), 'dd MMM yyyy')}</span>}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+            </div>
+          )}
+          {/* ════════════════ END ASSIGN TASK TAB ════════════════ */}
+
         </div>
 
         {/* ── Footer ── */}
         <div className={`sticky bottom-0 flex items-center justify-between gap-2 p-6 border-t flex-shrink-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
           <Button type="button" variant="ghost" onClick={() => setDetailDialogOpen(false)} className="h-10 px-5 text-sm rounded-xl text-slate-500">Close</Button>
           <div className="flex gap-2">
+            <Button
+              onClick={() => setActiveTab('tasks')}
+              className="h-10 px-4 text-sm rounded-xl text-white gap-2"
+              style={{ background: 'linear-gradient(135deg, #d97706, #f59e0b)' }}
+            >
+              <CheckSquare className="h-4 w-4" /> Assign Task
+            </Button>
             <Button
               onClick={() => setActiveTab('portal')}
               className="h-10 px-4 text-sm rounded-xl text-white gap-2"
