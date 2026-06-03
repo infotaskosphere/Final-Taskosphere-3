@@ -3497,7 +3497,7 @@ const QuickAddClientDialog = ({ open, onClose, onCreated, isDark }) => {
   );
 };
 
-const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onSuccess, isDark }) => {
+const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onSuccess, isDark, itemSuggestions }) => {
   const navigate = useNavigate();
   const defaultForm = {
     invoice_type: 'tax_invoice', company_id: '', client_id: '', lead_id: '',
@@ -5944,6 +5944,7 @@ const fetchAll = useCallback(async () => {
         leads={leads}
         onSuccess={fetchAll}
         isDark={isDark}
+        itemSuggestions={itemSuggestions}
       />
       <InvoiceDetailPanel
         invoice={detailInv}
