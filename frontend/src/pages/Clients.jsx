@@ -5166,23 +5166,26 @@ export default function Clients() {
         </div>
       )}
 
-      {/* STATS — shown for all roles; values reflect only clients visible to this user.
-           Admin → all clients. Manager/User → assigned/scoped clients only. */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[
-            { label: 'Total Clients',  value: stats.totalClients,  icon: <Users className="h-5 w-5" />,    iconBg: 'rgba(13,59,102,0.1)',   iconColor: '#0D3B66', bar: '#1F6FB2' },
-            { label: 'Active',         value: stats.activeClients, icon: <Briefcase className="h-5 w-5" />, iconBg: 'rgba(31,175,90,0.1)',   iconColor: '#1FAF5A', bar: '#059669' },
-            { label: 'Archived',       value: stats.totalClients - stats.activeClients, icon: <Archive className="h-5 w-5" />, iconBg: 'rgba(245,158,11,0.1)', iconColor: '#D97706', bar: '#D97706' },
-            { label: 'Top Service',    value: Object.entries(stats.serviceCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A', icon: <BarChart3 className="h-5 w-5" />, iconBg: 'rgba(124,58,237,0.1)', iconColor: '#7c3aed', bar: '#7c3aed', isText: true },
-          ].map((s, i) => (
-            <div key={i} className={`rounded-2xl border p-5 hover:shadow-md transition-all hover:-translate-y-0.5 relative overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
-              <div className="absolute left-0 top-4 bottom-4 w-[3px] rounded-r-full" style={{ background: s.bar }} />
-              <div className="flex items-start justify-between mb-3 pl-2"><div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: s.iconBg, color: s.iconColor }}>{s.icon}</div></div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1 pl-2">{s.label}</p>
-              <p className={`font-bold pl-2 ${s.isText ? 'text-base truncate' : 'text-3xl tracking-tight'} ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{s.value}</p>
+      {/* STATS */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: 'Total Clients',  value: stats.totalClients,  icon: <Users className="h-5 w-5" />, grad: 'linear-gradient(135deg, #0D3B66, #1F6FB2)', light: '#eff6ff', iconC: '#1d4ed8' },
+          { label: 'Active',         value: stats.activeClients, icon: <Briefcase className="h-5 w-5" />, grad: 'linear-gradient(135deg, #059669, #10b981)', light: '#f0fdf4', iconC: '#059669' },
+          { label: 'Archived',       value: stats.totalClients - stats.activeClients, icon: <Archive className="h-5 w-5" />, grad: 'linear-gradient(135deg, #d97706, #f59e0b)', light: '#fffbeb', iconC: '#d97706' },
+          { label: 'Top Service',    value: Object.entries(stats.serviceCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A', icon: <BarChart3 className="h-5 w-5" />, grad: 'linear-gradient(135deg, #7c3aed, #a855f7)', light: '#fdf4ff', iconC: '#7c3aed', isText: true },
+        ].map((s, i) => (
+          <div key={i} className={`rounded-2xl border overflow-hidden transition-all hover:shadow-lg hover:-translate-y-0.5 ${isDark ? 'bg-slate-800 border-slate-700/60' : 'bg-white border-slate-100'}`}>
+            <div className="h-1 w-full" style={{ background: s.grad }} />
+            <div className="p-5">
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: isDark ? 'rgba(255,255,255,0.07)' : s.light, color: s.iconC }}>{s.icon}</div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{s.label}</p>
+              </div>
+              <p className={`font-bold leading-none ${s.isText ? 'text-lg truncate' : 'text-3xl tracking-tight'} ${isDark ? 'text-white' : 'text-slate-900'}`}>{s.value}</p>
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
+      </div>
 
       {/* FILTERS + SORT + VIEW TOGGLE */}
       <div className={`rounded-2xl border shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
