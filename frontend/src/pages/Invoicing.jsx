@@ -3352,16 +3352,83 @@ const ItemRow = React.memo(function ItemRow({
 const QuickAddClientDialog = ({ open, onClose, onCreated, isDark }) => {
   const blank = {
     company_name: '', client_type: 'proprietor',
-    gstin: '', email: '', phone: '',
+    gstin: '', pan: '', email: '', phone: '',
     address: '', city: '', state: '',
+    msme_number: '',
   };
   const [data, setData] = useState(blank);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { if (open) setData(blank); /* reset each open */ // eslint-disable-next-line
+  // ── Smart Document Import state ──
+  const [smartFiles, setSmartFiles]       = useState({ gst: null, udyam: null, mca: null });
+  const [smartLoading, setSmartLoading]   = useState(false);
+  const [smartError, setSmartError]       = useState('');
+  const [smartExtracted, setSmartExtracted] = useState(false); // shows success badge
+
+  useEffect(() => {
+    if (open) {
+      setData(blank);
+      setSmartFiles({ gst: null, udyam: null, mca: null });
+      setSmartLoading(false);
+      setSmartError('');
+      setSmartExtracted(false);
+    }
+  // eslint-disable-next-line
   }, [open]);
 
   const setField = (k, v) => setData(p => ({ ...p, [k]: v }));
+
+  // ── Constitution map (same as Clients page) ──
+  const constitutionMap = {
+    proprietorship: 'proprietor', proprietor: 'proprietor', 'sole proprietorship': 'proprietor',
+    'private limited': 'pvt_ltd', 'private limited company': 'pvt_ltd', pvt_ltd: 'pvt_ltd', 'pvt ltd': 'pvt_ltd',
+    llp: 'llp', 'limited liability partnership': 'llp',
+    partnership: 'partnership', 'partnership firm': 'partnership',
+    huf: 'huf', 'hindu undivided family': 'huf',
+    trust: 'trust', 'public limited': 'pvt_ltd', 'public limited company': 'pvt_ltd',
+  };
+
+  // ── Extract & Fill from uploaded documents ──
+  const handleExtract = async () => {
+    if (!smartFiles.gst && !smartFiles.udyam && !smartFiles.mca) return;
+    setSmartLoading(true);
+    setSmartError('');
+    setSmartExtracted(false);
+    try {
+      const fd = new FormData();
+      if (smartFiles.gst)   fd.append('files', smartFiles.gst);
+      if (smartFiles.udyam) fd.append('files', smartFiles.udyam);
+      if (smartFiles.mca)   fd.append('files', smartFiles.mca);
+      const res = await api.post('/clients/parse-multi-documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const parsed = res.data;
+      const mappedConstitution = parsed.constitution && parsed.constitution !== 'other'
+        ? parsed.constitution
+        : constitutionMap[(parsed.constitution_raw || '').toLowerCase().trim()] || 'other';
+      setData(prev => ({
+        ...prev,
+        company_name:  parsed.company_name || prev.company_name,
+        client_type:   mappedConstitution,
+        gstin:         parsed.gstin        || prev.gstin,
+        pan:           parsed.pan          || prev.pan,
+        email:         parsed.email        || prev.email,
+        phone:         parsed.phone        || prev.phone,
+        address:       parsed.address      || prev.address,
+        city:          parsed.city         || prev.city,
+        state:         parsed.state        || prev.state,
+        msme_number:   parsed.udyam_number || prev.msme_number,
+      }));
+      setSmartFiles({ gst: null, udyam: null, mca: null });
+      setSmartExtracted(true);
+      const docTypes = parsed.doc_types_found?.join(' + ') || 'document';
+      toast.success(`Data extracted from ${docTypes}! Review and save.`, { duration: 5000 });
+    } catch (err) {
+      const msg = err?.response?.data?.detail || err.message || 'Failed to parse documents';
+      setSmartError(msg);
+      toast.error(msg);
+    } finally {
+      setSmartLoading(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!data.company_name.trim()) { toast.error('Client / Company name is required'); return; }
@@ -3372,13 +3439,15 @@ const QuickAddClientDialog = ({ open, onClose, onCreated, isDark }) => {
     try {
       const payload = {
         company_name: data.company_name.trim(),
-        client_type: data.client_type || 'proprietor',
-        email: data.email.trim() || null,
-        phone: (data.phone || '').replace(/\D/g, '') || null,
-        address: data.address.trim() || null,
-        city: data.city.trim() || null,
-        state: data.state.trim() || null,
-        gstin: gstin || null,
+        client_type:  data.client_type || 'proprietor',
+        email:        data.email.trim() || null,
+        phone:        (data.phone || '').replace(/\D/g, '') || null,
+        address:      data.address.trim() || null,
+        city:         data.city.trim() || null,
+        state:        data.state.trim() || null,
+        gstin:        gstin || null,
+        pan:          (data.pan || '').trim().toUpperCase() || null,
+        msme_number:  (data.msme_number || '').trim() || null,
         services: [],
         contact_persons: [],
         dsc_details: [],
@@ -3388,7 +3457,6 @@ const QuickAddClientDialog = ({ open, onClose, onCreated, isDark }) => {
       };
       const res = await api.post('/clients', payload);
       let created = res?.data;
-      // Some backends return only an id or a wrapper — make sure we have a usable record
       if (!created || !created.id) {
         try {
           const list = await api.get('/clients');
@@ -3416,9 +3484,45 @@ const QuickAddClientDialog = ({ open, onClose, onCreated, isDark }) => {
   const inputCls = `h-10 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`;
   const labelCls = `text-[10px] font-bold uppercase tracking-widest mb-1.5 block ${isDark ? 'text-slate-400' : 'text-slate-500'}`;
 
+  const anyFile = smartFiles.gst || smartFiles.udyam || smartFiles.mca;
+
+  // ── Drop zone sub-component ──
+  const DropZone = ({ fileKey, label, sublabel, hoverColor, icon, accept }) => {
+    const file = smartFiles[fileKey];
+    return (
+      <div
+        className={`relative border-2 border-dashed rounded-xl p-3 flex flex-col items-center gap-1.5 cursor-pointer transition-all ${
+          file
+            ? 'border-emerald-400 bg-emerald-50/60'
+            : `border-slate-200 bg-white/60 ${hoverColor}`
+        }`}
+        onClick={() => document.getElementById(`_qi_${fileKey}`)?.click()}
+      >
+        {file ? (
+          <>
+            <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
+              <svg viewBox="0 0 24 24" className="h-4 w-4 fill-emerald-600"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+            </div>
+            <p className="text-[10px] font-bold text-emerald-700 text-center leading-tight">{file.name.length > 18 ? file.name.slice(0, 16) + '…' : file.name}</p>
+            <button type="button" onClick={e => { e.stopPropagation(); setSmartFiles(p => ({ ...p, [fileKey]: null })); }} className="text-[9px] text-red-400 hover:text-red-600 font-medium">Remove</button>
+          </>
+        ) : (
+          <>
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center`} style={{ background: icon.bg }}>{icon.svg}</div>
+            <p className="text-[10px] font-bold text-slate-600">{label}</p>
+            <p className="text-[9px] text-slate-400">{sublabel}</p>
+          </>
+        )}
+        <input id={`_qi_${fileKey}`} type="file" accept={accept} className="hidden"
+          onChange={e => { if (e.target.files[0]) setSmartFiles(p => ({ ...p, [fileKey]: e.target.files[0] })); e.target.value = ''; }} />
+      </div>
+    );
+  };
+
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && !saving && onClose?.()}>
+    <Dialog open={open} onOpenChange={(v) => !v && !saving && !smartLoading && onClose?.()}>
       <DialogContent className={`max-w-2xl p-0 overflow-hidden rounded-2xl ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+        {/* Header */}
         <div className="px-6 py-4 text-white" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
           <DialogTitle className="text-lg font-bold flex items-center gap-2">
             <Plus className="h-5 w-5" /> Quick Add Client
@@ -3427,68 +3531,153 @@ const QuickAddClientDialog = ({ open, onClose, onCreated, isDark }) => {
             Add a new client without leaving this invoice. You can edit full details later from the Clients page.
           </DialogDescription>
         </div>
-        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[60vh] overflow-y-auto">
-          <div className="md:col-span-2">
-            <label className={labelCls}>Client / Company Name *</label>
-            <Input className={inputCls} autoFocus value={data.company_name}
-              onChange={e => setField('company_name', e.target.value)} placeholder="Acme Pvt Ltd" />
+
+        <div className="max-h-[72vh] overflow-y-auto">
+          {/* ── Smart Document Import Panel ── */}
+          <div className={`mx-6 mt-5 mb-4 border-2 rounded-2xl p-4 ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-gradient-to-br from-blue-50/80 to-indigo-50/50 border-blue-100'}`}>
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white flex-shrink-0 shadow-sm" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+                <svg viewBox="0 0 24 24" className="h-4 w-4 fill-white"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/></svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className={`text-xs font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Auto-fill from Documents</p>
+                <p className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Upload GST Certificate, Udyam, or MCA Master Data — form fills automatically</p>
+              </div>
+              {smartExtracted && (
+                <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-100 border border-emerald-200">
+                  <svg viewBox="0 0 24 24" className="h-3 w-3 fill-emerald-600"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                  <span className="text-[9px] font-bold text-emerald-700">Filled!</span>
+                </div>
+              )}
+            </div>
+
+            {/* Drop zones */}
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              <DropZone
+                fileKey="gst" label="GST Certificate" sublabel="Form GST REG-06 PDF"
+                hoverColor="hover:border-blue-400 hover:bg-blue-50/60" accept=".pdf"
+                icon={{ bg: '#EFF6FF', svg: <svg viewBox="0 0 24 24" className="h-4 w-4 fill-blue-600"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5z"/></svg> }}
+              />
+              <DropZone
+                fileKey="udyam" label="Udyam Certificate" sublabel="Udyam Registration PDF"
+                hoverColor="hover:border-orange-400 hover:bg-orange-50/60" accept=".pdf"
+                icon={{ bg: '#FFF7ED', svg: <svg viewBox="0 0 24 24" className="h-4 w-4 fill-orange-600"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg> }}
+              />
+              <DropZone
+                fileKey="mca" label="MCA Master Data" sublabel="Excel (.xlsx) or MCA PDF"
+                hoverColor="hover:border-violet-400 hover:bg-violet-50/60" accept=".xlsx,.xls,.pdf"
+                icon={{ bg: '#F5F3FF', svg: <svg viewBox="0 0 24 24" className="h-4 w-4 fill-violet-600"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 3c1.93 0 3.5 1.57 3.5 3.5S13.93 13 12 13s-3.5-1.57-3.5-3.5S10.07 6 12 6zm7 13H5v-.23c0-.62.28-1.2.76-1.58C7.47 15.82 9.64 15 12 15s4.53.82 6.24 2.19c.48.38.76.97.76 1.58V19z"/></svg> }}
+              />
+            </div>
+
+            {/* Extract button */}
+            {anyFile && (
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  disabled={smartLoading}
+                  onClick={handleExtract}
+                  className="h-8 px-4 text-xs rounded-xl text-white font-semibold shadow-sm disabled:opacity-50 flex items-center gap-1.5 transition-all"
+                  style={{ background: smartLoading ? '#94a3b8' : 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
+                >
+                  {smartLoading ? (
+                    <><div className="w-3 h-3 rounded-full border-2 border-white/40 border-t-white animate-spin" /> Extracting…</>
+                  ) : (
+                    <><svg viewBox="0 0 24 24" className="h-3 w-3 fill-white"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg> Extract &amp; Fill</>
+                  )}
+                </button>
+                <p className="text-[10px] text-slate-400">
+                  {[smartFiles.gst && 'GST', smartFiles.udyam && 'Udyam', smartFiles.mca && 'MCA'].filter(Boolean).join(' + ')} ready
+                </p>
+              </div>
+            )}
+
+            {smartError && (
+              <div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-xl border border-red-200 bg-red-50">
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-red-500 flex-shrink-0"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+                <p className="text-xs text-red-700 font-medium">{smartError}</p>
+              </div>
+            )}
           </div>
-          <div>
-            <label className={labelCls}>Client Type</label>
-            <Select value={data.client_type} onValueChange={v => setField('client_type', v)}>
-              <SelectTrigger className={inputCls}><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="proprietor">Proprietor</SelectItem>
-                <SelectItem value="partnership">Partnership</SelectItem>
-                <SelectItem value="llp">LLP</SelectItem>
-                <SelectItem value="private_limited">Private Limited</SelectItem>
-                <SelectItem value="public_limited">Public Limited</SelectItem>
-                <SelectItem value="individual">Individual</SelectItem>
-                <SelectItem value="huf">HUF</SelectItem>
-                <SelectItem value="trust">Trust</SelectItem>
-                <SelectItem value="society">Society</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <label className={labelCls}>GSTIN</label>
-            <Input className={inputCls} value={data.gstin}
-              onChange={e => setField('gstin', e.target.value.toUpperCase())}
-              placeholder="15-digit GSTIN" maxLength={15} />
-          </div>
-          <div>
-            <label className={labelCls}>Email</label>
-            <Input type="email" className={inputCls} value={data.email}
-              onChange={e => setField('email', e.target.value)} placeholder="name@company.com" />
-          </div>
-          <div>
-            <label className={labelCls}>Phone</label>
-            <Input className={inputCls} value={data.phone}
-              onChange={e => setField('phone', e.target.value)} placeholder="10-digit number" />
-          </div>
-          <div className="md:col-span-2">
-            <label className={labelCls}>Address</label>
-            <Textarea
-              className={`rounded-xl text-sm min-h-[64px] resize-none ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`}
-              value={data.address} onChange={e => setField('address', e.target.value)} placeholder="Street, area…" />
-          </div>
-          <div>
-            <label className={labelCls}>City</label>
-            <Input className={inputCls} value={data.city} onChange={e => setField('city', e.target.value)} />
-          </div>
-          <div>
-            <label className={labelCls}>State</label>
-            <Input className={inputCls} value={data.state} onChange={e => setField('state', e.target.value)}
-              placeholder="Maharashtra, Delhi…" />
+
+          {/* ── Manual Fields ── */}
+          <div className="px-6 pb-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="md:col-span-2">
+              <label className={labelCls}>Client / Company Name *</label>
+              <Input className={inputCls} autoFocus value={data.company_name}
+                onChange={e => setField('company_name', e.target.value)} placeholder="Acme Pvt Ltd" />
+            </div>
+            <div>
+              <label className={labelCls}>Client Type</label>
+              <Select value={data.client_type} onValueChange={v => setField('client_type', v)}>
+                <SelectTrigger className={inputCls}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="proprietor">Proprietor</SelectItem>
+                  <SelectItem value="partnership">Partnership</SelectItem>
+                  <SelectItem value="llp">LLP</SelectItem>
+                  <SelectItem value="pvt_ltd">Private Limited</SelectItem>
+                  <SelectItem value="public_ltd">Public Limited</SelectItem>
+                  <SelectItem value="individual">Individual</SelectItem>
+                  <SelectItem value="huf">HUF</SelectItem>
+                  <SelectItem value="trust">Trust</SelectItem>
+                  <SelectItem value="society">Society</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className={labelCls}>GSTIN</label>
+              <Input className={inputCls} value={data.gstin}
+                onChange={e => setField('gstin', e.target.value.toUpperCase())}
+                placeholder="15-digit GSTIN" maxLength={15} />
+            </div>
+            <div>
+              <label className={labelCls}>PAN</label>
+              <Input className={inputCls} value={data.pan}
+                onChange={e => setField('pan', e.target.value.toUpperCase())}
+                placeholder="ABCDE1234F" maxLength={10} />
+            </div>
+            <div>
+              <label className={labelCls}>MSME / Udyam No.</label>
+              <Input className={inputCls} value={data.msme_number}
+                onChange={e => setField('msme_number', e.target.value)}
+                placeholder="UDYAM-XX-00-0000000" />
+            </div>
+            <div>
+              <label className={labelCls}>Email</label>
+              <Input type="email" className={inputCls} value={data.email}
+                onChange={e => setField('email', e.target.value)} placeholder="name@company.com" />
+            </div>
+            <div>
+              <label className={labelCls}>Phone</label>
+              <Input className={inputCls} value={data.phone}
+                onChange={e => setField('phone', e.target.value)} placeholder="10-digit number" />
+            </div>
+            <div className="md:col-span-2">
+              <label className={labelCls}>Address</label>
+              <Textarea
+                className={`rounded-xl text-sm min-h-[64px] resize-none ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`}
+                value={data.address} onChange={e => setField('address', e.target.value)} placeholder="Street, area…" />
+            </div>
+            <div>
+              <label className={labelCls}>City</label>
+              <Input className={inputCls} value={data.city} onChange={e => setField('city', e.target.value)} />
+            </div>
+            <div>
+              <label className={labelCls}>State</label>
+              <Input className={inputCls} value={data.state} onChange={e => setField('state', e.target.value)}
+                placeholder="Maharashtra, Delhi…" />
+            </div>
           </div>
         </div>
+
+        {/* Footer */}
         <div className={`px-6 py-4 flex items-center justify-end gap-3 border-t ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-slate-50'}`}>
-          <Button type="button" variant="ghost" onClick={onClose} disabled={saving}
+          <Button type="button" variant="ghost" onClick={onClose} disabled={saving || smartLoading}
             className="h-10 px-5 text-sm rounded-xl">Cancel</Button>
-          <Button type="button" onClick={handleSave} disabled={saving}
+          <Button type="button" onClick={handleSave} disabled={saving || smartLoading}
             className="h-10 px-6 text-sm rounded-xl text-white font-semibold gap-2"
-            style={{ background: saving ? '#94a3b8' : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+            style={{ background: (saving || smartLoading) ? '#94a3b8' : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
             {saving ? 'Saving…' : (<><Check className="h-4 w-4" /> Save & Use</>)}
           </Button>
         </div>
