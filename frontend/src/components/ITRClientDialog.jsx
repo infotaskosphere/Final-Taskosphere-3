@@ -26,7 +26,7 @@ import { toast } from 'sonner';
 import {
   FileText, User, IndianRupee, Calendar, Shield,
   CheckCircle2, ChevronDown, Plus, X, Loader2,
-  Upload, Sparkles, AlertCircle
+  Upload, Sparkles, AlertCircle, Building2, Link, Search, Trash2
 } from 'lucide-react';
 import api from '@/lib/api';
 
@@ -181,6 +181,8 @@ export default function ITRClientDialog({
         // Portal access
         it_portal_user: itr.it_portal_user || '',
         it_portal_password: itr.it_portal_password || '',
+        // Company links
+        company_links: itr.company_links || [],
       };
     }
     return {
@@ -193,6 +195,7 @@ export default function ITRClientDialog({
       income_salary: '', income_house_property: '', income_business: '',
       income_capital_gains: '', income_other_sources: '',
       it_portal_user: '', it_portal_password: '',
+      company_links: [],
     };
   }
 
@@ -266,6 +269,53 @@ export default function ITRClientDialog({
   // ── Validate ────────────────────────────────────────────────────────────
   const [errors, setErrors] = useState({});
 
+  // ── Company Links (Director / Partner / Proprietor) ──────────────────────
+  const [companySearch, setCompanySearch] = useState('');
+  const [companyResults, setCompanyResults] = useState([]);
+  const [companySearching, setCompanySearching] = useState(false);
+  const [pendingRole, setPendingRole] = useState('director');
+  const companySearchTimer = React.useRef(null);
+
+  const searchCompanies = React.useCallback(async (query) => {
+    if (!query || query.trim().length < 2) { setCompanyResults([]); return; }
+    setCompanySearching(true);
+    try {
+      const r = await api.get('/clients', { params: { search: query, page_size: 15, client_type: 'company,llp,partnership,pvt_ltd' } });
+      const all = r.data?.clients || r.data?.items || [];
+      setCompanyResults(all.filter(c => !['proprietor', 'individual'].includes(c.client_type)));
+    } catch { setCompanyResults([]); }
+    finally { setCompanySearching(false); }
+  }, []);
+
+  const handleCompanySearchInput = (val) => {
+    setCompanySearch(val);
+    clearTimeout(companySearchTimer.current);
+    companySearchTimer.current = setTimeout(() => searchCompanies(val), 350);
+  };
+
+  const addCompanyLink = (company) => {
+    if (form.company_links.some(l => l.client_id === company.id)) {
+      toast.info('This company is already linked');
+      return;
+    }
+    set('company_links', [...form.company_links, {
+      client_id: company.id,
+      company_name: company.company_name,
+      client_type: company.client_type || '',
+      role: pendingRole,
+    }]);
+    setCompanySearch('');
+    setCompanyResults([]);
+  };
+
+  const removeCompanyLink = (clientId) => {
+    set('company_links', form.company_links.filter(l => l.client_id !== clientId));
+  };
+
+  const updateLinkRole = (clientId, role) => {
+    set('company_links', form.company_links.map(l => l.client_id === clientId ? { ...l, role } : l));
+  };
+
   const validate = useCallback(() => {
     const e = {};
     if (!form.company_name?.trim() || form.company_name.trim().length < 2) {
@@ -317,6 +367,8 @@ export default function ITRClientDialog({
         bank_name: form.bank_name || null,
         ifsc_code: form.ifsc_code || null,
         account_no: form.account_no || null,
+        // Company links
+        company_links: form.company_links || [],
       };
 
       const payload = {
@@ -359,10 +411,11 @@ export default function ITRClientDialog({
 
   // ── Section nav ────────────────────────────────────────────────────────
   const SECTIONS = [
-    { key: 'basic',    label: 'Personal',  icon: <User className="h-3.5 w-3.5" /> },
-    { key: 'itr',      label: 'ITR Info',  icon: <FileText className="h-3.5 w-3.5" /> },
-    { key: 'income',   label: 'Income',    icon: <IndianRupee className="h-3.5 w-3.5" /> },
-    { key: 'portal',   label: 'IT Portal', icon: <Shield className="h-3.5 w-3.5" /> },
+    { key: 'basic',    label: 'Personal',      icon: <User className="h-3.5 w-3.5" /> },
+    { key: 'itr',      label: 'ITR Info',      icon: <FileText className="h-3.5 w-3.5" /> },
+    { key: 'income',   label: 'Income',        icon: <IndianRupee className="h-3.5 w-3.5" /> },
+    { key: 'portal',   label: 'IT Portal',     icon: <Shield className="h-3.5 w-3.5" /> },
+    { key: 'companies', label: 'Companies',    icon: <Building2 className="h-3.5 w-3.5" /> },
   ];
 
   const totalIncome = [
@@ -462,6 +515,12 @@ export default function ITRClientDialog({
               >
                 {sec.icon}
                 {sec.label}
+                {sec.key === 'companies' && form.company_links.length > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold"
+                    style={{ background: 'rgba(255,255,255,0.3)', color: '#fff' }}>
+                    {form.company_links.length}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -900,6 +959,175 @@ export default function ITRClientDialog({
               </div>
             </div>
           )}
+
+          {/* ════ COMPANY LINKS ════ */}
+          {activeSection === 'companies' && (
+            <div className="space-y-5">
+
+              {/* Info banner */}
+              <div className="rounded-2xl p-4 border flex items-start gap-3"
+                style={{ background: isDark ? '#1e2d1e' : '#f0fdf4', borderColor: isDark ? '#166534' : '#bbf7d0' }}>
+                <Building2 className="h-4 w-4 mt-0.5 flex-shrink-0 text-emerald-600" />
+                <div>
+                  <p className="text-xs font-bold text-emerald-700">Link Individual to Companies</p>
+                  <p className="text-xs text-emerald-600 mt-0.5">
+                    Associate this individual with companies where they hold a role — Director, Partner, or Proprietor.
+                    This helps track compliance obligations across all linked entities.
+                  </p>
+                </div>
+              </div>
+
+              {/* Search + Role selector */}
+              <div className="space-y-3">
+                <label className={labelCls}>Search & Add Company</label>
+                <div className="flex gap-2">
+                  {/* Role selector */}
+                  <select
+                    value={pendingRole}
+                    onChange={e => setPendingRole(e.target.value)}
+                    className="h-11 px-3 rounded-xl border text-xs font-semibold outline-none flex-shrink-0"
+                    style={{
+                      background: isDark ? '#1e293b' : '#f8fafc',
+                      borderColor: isDark ? '#334155' : '#e2e8f0',
+                      color: isDark ? '#94a3b8' : '#475569',
+                      minWidth: 130,
+                    }}
+                  >
+                    <option value="director">Director</option>
+                    <option value="partner">Partner</option>
+                    <option value="proprietor">Proprietor</option>
+                    <option value="shareholder">Shareholder</option>
+                    <option value="trustee">Trustee</option>
+                    <option value="karta">Karta (HUF)</option>
+                    <option value="member">Member</option>
+                  </select>
+
+                  {/* Search input */}
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                    <Input
+                      className={`${fieldCls} pl-9`}
+                      placeholder="Search company by name…"
+                      value={companySearch}
+                      onChange={e => handleCompanySearchInput(e.target.value)}
+                    />
+                    {companySearching && (
+                      <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-slate-400" />
+                    )}
+                  </div>
+                </div>
+
+                {/* Search results dropdown */}
+                {companyResults.length > 0 && (
+                  <div className="rounded-xl border overflow-hidden shadow-lg"
+                    style={{ borderColor: isDark ? '#334155' : '#e2e8f0', background: isDark ? '#1e293b' : '#fff' }}>
+                    {companyResults.map(company => (
+                      <button
+                        key={company.id}
+                        type="button"
+                        onClick={() => addCompanyLink(company)}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-left transition-all hover:bg-blue-50 border-b last:border-b-0"
+                        style={{ borderColor: isDark ? '#2d3748' : '#f1f5f9' }}
+                      >
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-sm font-bold text-white"
+                          style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+                          {(company.company_name || '?')[0].toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{company.company_name}</p>
+                          <p className="text-[10px] text-slate-500 capitalize">{(company.client_type || 'Company').replace(/_/g, ' ')} {company.city ? `· ${company.city}` : ''}</p>
+                        </div>
+                        <span className="text-[10px] font-bold px-2 py-1 rounded-lg flex-shrink-0"
+                          style={{ background: '#eff6ff', color: '#1e40af' }}>
+                          + Add as {pendingRole}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {companySearch.length >= 2 && !companySearching && companyResults.length === 0 && (
+                  <p className="text-xs text-slate-400 px-1">No companies found matching "{companySearch}"</p>
+                )}
+              </div>
+
+              {/* Linked companies list */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className={labelCls}>
+                    Linked Companies
+                    {form.company_links.length > 0 && (
+                      <span className="ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-bold"
+                        style={{ background: '#eff6ff', color: '#1e40af' }}>
+                        {form.company_links.length}
+                      </span>
+                    )}
+                  </label>
+                </div>
+
+                {form.company_links.length === 0 ? (
+                  <div className="rounded-2xl border-2 border-dashed flex flex-col items-center justify-center py-10 gap-2"
+                    style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                    <Building2 className="h-8 w-8 text-slate-300" />
+                    <p className="text-sm text-slate-400">No companies linked yet</p>
+                    <p className="text-xs text-slate-400">Search above to link this individual to a company</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {form.company_links.map(link => {
+                      const roleColors = {
+                        director: { bg: '#eff6ff', text: '#1e40af', border: '#bfdbfe' },
+                        partner: { bg: '#f0fdf4', text: '#166534', border: '#bbf7d0' },
+                        proprietor: { bg: '#fff7ed', text: '#9a3412', border: '#fed7aa' },
+                        shareholder: { bg: '#fdf4ff', text: '#6b21a8', border: '#e9d5ff' },
+                        trustee: { bg: '#fefce8', text: '#713f12', border: '#fef08a' },
+                        karta: { bg: '#fff1f2', text: '#9f1239', border: '#fecdd3' },
+                        member: { bg: '#f0f9ff', text: '#075985', border: '#bae6fd' },
+                      };
+                      const rc = roleColors[link.role] || roleColors.member;
+                      return (
+                        <div key={link.client_id}
+                          className="flex items-center gap-3 p-3 rounded-xl border"
+                          style={{ background: isDark ? '#1e293b' : '#fafafa', borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                          <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 text-sm font-bold text-white"
+                            style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+                            {(link.company_name || '?')[0].toUpperCase()}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{link.company_name}</p>
+                            <p className="text-[10px] text-slate-500 capitalize">{(link.client_type || 'Company').replace(/_/g, ' ')}</p>
+                          </div>
+                          {/* Role selector for this link */}
+                          <select
+                            value={link.role}
+                            onChange={e => updateLinkRole(link.client_id, e.target.value)}
+                            className="h-8 px-2 rounded-lg border text-xs font-bold outline-none"
+                            style={{ background: rc.bg, borderColor: rc.border, color: rc.text, minWidth: 110 }}
+                          >
+                            <option value="director">Director</option>
+                            <option value="partner">Partner</option>
+                            <option value="proprietor">Proprietor</option>
+                            <option value="shareholder">Shareholder</option>
+                            <option value="trustee">Trustee</option>
+                            <option value="karta">Karta (HUF)</option>
+                            <option value="member">Member</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => removeCompanyLink(link.client_id)}
+                            className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+            </div>
+          )}
         </div>
 
         {/* ── Footer ── */}
@@ -923,7 +1151,7 @@ export default function ITRClientDialog({
           </div>
 
           <div className="flex items-center gap-2">
-            {activeSection !== 'portal' && (
+            {activeSection !== 'companies' && (
               <Button type="button"
                 onClick={() => {
                   const idx = SECTIONS.findIndex(s => s.key === activeSection);
