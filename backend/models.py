@@ -789,6 +789,9 @@ class ClientBase(BaseModel):
     cin: Optional[str] = None           # Corporate Identity Number (Pvt/Public Ltd)
     llpin: Optional[str] = None         # LLP Identification Number
     mca_fetch_date: Optional[str] = None  # ISO date when MCA data was last fetched
+    # ── ITR Client fields ──────────────────────────────────────────────────────
+    is_itr_client: Optional[bool] = False   # True when this client is an ITR-only client
+    itr_data: Optional[Dict[str, Any]] = None  # JSON blob: itr_type, AY, filing_status, income, etc.
 
     @model_validator(mode="before")
     @classmethod
