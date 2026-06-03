@@ -31,6 +31,7 @@ import { detectClientDuplicates } from '@/lib/aiDuplicateEngine';
 import StandaloneGovtFeeDialog from '@/components/StandaloneGovtFeeDialog';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
 import ClientPortalManager from '@/components/ClientPortalManager';
+import ITRClientDialog from '@/components/ITRClientDialog';
 import DSCLinkerSection from '@/components/DSCLinkerSection';
 import { format, startOfDay, differenceInDays } from 'date-fns';
 import WhatsAppSendDialog from '@/components/ui/WhatsAppSendDialog';
@@ -254,6 +255,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
   const [copied, setCopied] = useState(false);
   const [exportDone, setExportDone] = useState(false);
   const [clientScope, setClientScope] = useState('active'); // 'active' | 'all'
+  const [waServiceFilter, setWaServiceFilter] = useState('all'); // service filter inside WA popup
   // Direct send & scheduling state
   const [sendMode, setSendMode] = useState(SEND_MODES.DIRECT); // direct | web | export | schedule
   const [waConnected, setWaConnected] = useState(null); // null=loading, true, false
@@ -274,6 +276,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
   useEffect(() => {
     if (open) {
       setClientScope('active');
+      setWaServiceFilter('all');
       setSelectedIds(new Set(activeClients.map(c => c.id)));
       setMessage(''); setClientSearch(''); setCopied(false); setExportDone(false); setSelectedTemplate('');
       setSendProgress(null); setSendingBulk(false);
@@ -308,14 +311,19 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
 
   // Always show ALL clients — archived ones appear dimmed/unchecked in Active mode
   const displayedClients = useMemo(() => {
-    if (!clientSearch.trim()) return filteredClients;
+    let base = filteredClients;
+    // Apply service filter
+    if (waServiceFilter !== 'all') {
+      base = base.filter(c => (c?.services ?? []).some(s => (s || '').toLowerCase().includes(waServiceFilter.toLowerCase())));
+    }
+    if (!clientSearch.trim()) return base;
     const q = clientSearch.toLowerCase();
-    return filteredClients.filter(c =>
+    return base.filter(c =>
       (c?.company_name || '').toLowerCase().includes(q) ||
       (c?.phone || '').includes(q) ||
       (c?.email || '').toLowerCase().includes(q)
     );
-  }, [filteredClients, clientSearch]);
+  }, [filteredClients, clientSearch, waServiceFilter]);
 
   const selectedClients = useMemo(() => filteredClients.filter(c => selectedIds.has(c.id)), [filteredClients, selectedIds]);
 
@@ -543,6 +551,45 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
                   style={{ borderColor: isDark ? '#334155' : '#e2e8f0', background: isDark ? '#1e293b' : '#fff', color: isDark ? '#f1f5f9' : '#0f172a' }}
                   placeholder="Search clients…" value={clientSearch} onChange={e => setClientSearch(e.target.value)} />
               </div>
+            </div>
+            {/* Service filter */}
+            <div className="px-3 py-2 border-b flex-shrink-0" style={{ borderColor: isDark ? '#1e3a5f' : '#f1f5f9' }}>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] font-bold uppercase tracking-widest flex-shrink-0" style={{ color: isDark ? '#475569' : '#94a3b8' }}>Service</span>
+                <select
+                  value={waServiceFilter}
+                  onChange={e => {
+                    setWaServiceFilter(e.target.value);
+                    // Auto-select visible clients after filter change
+                    setTimeout(() => {
+                      setSelectedIds(prev => {
+                        const next = new Set(prev);
+                        // We'll let selectAllVisible handle this on next render
+                        return next;
+                      });
+                    }, 0);
+                  }}
+                  className="flex-1 h-7 text-[10px] font-semibold rounded-lg border px-2 focus:outline-none"
+                  style={{ borderColor: waServiceFilter !== 'all' ? accentColor : (isDark ? '#334155' : '#e2e8f0'), background: waServiceFilter !== 'all' ? accentColor + '15' : (isDark ? '#1e293b' : '#fff'), color: waServiceFilter !== 'all' ? accentColor : (isDark ? '#94a3b8' : '#64748b') }}
+                >
+                  <option value="all">All Services</option>
+                  {SERVICES.map(svc => (
+                    <option key={svc} value={svc}>{svc}</option>
+                  ))}
+                </select>
+                {waServiceFilter !== 'all' && (
+                  <button onClick={() => setWaServiceFilter('all')}
+                    className="text-[9px] font-bold px-1.5 py-0.5 rounded"
+                    style={{ background: isDark ? '#334155' : '#f1f5f9', color: isDark ? '#94a3b8' : '#64748b' }}>
+                    ✕
+                  </button>
+                )}
+              </div>
+              {waServiceFilter !== 'all' && (
+                <p className="text-[9px] mt-1" style={{ color: isDark ? '#475569' : '#94a3b8' }}>
+                  {displayedClients.length} client{displayedClients.length !== 1 ? 's' : ''} with "{waServiceFilter}"
+                </p>
+              )}
             </div>
             {/* Select/clear */}
             <div className="flex items-center justify-between px-3 py-1.5 border-b flex-shrink-0" style={{ borderColor: isDark ? '#1e3a5f' : '#f1f5f9' }}>
@@ -3129,6 +3176,9 @@ export default function Clients() {
   const [showDupDialog,    setShowDupDialog]    = useState(false);
   const [dupGroups,        setDupGroups]        = useState([]);
   const [detectingDups,    setDetectingDups]    = useState(false);
+  // ── ITR Client state ─────────────────────────────────────────────────────
+  const [itrDialogOpen,    setItrDialogOpen]    = useState(false);
+  const [editingItrClient, setEditingItrClient] = useState(null);
   const [dialogOpen, setDialogOpen]     = useState(false);
   const [editingClient, setEditingClient] = useState(null);
   const [otherService, setOtherService] = useState('');
@@ -4114,6 +4164,17 @@ export default function Clients() {
                 ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Scanning…</>
                 : <><Sparkles className="h-3.5 w-3.5" /> AI Duplicates</>}
             </Button>
+            {/* ── ITR Client Button ── */}
+            {canEditClients && (
+              <Button
+                variant="outline"
+                onClick={() => { setEditingItrClient(null); setItrDialogOpen(true); }}
+                className="h-9 px-4 text-sm rounded-xl gap-2 backdrop-blur-sm font-semibold transition-all"
+                style={{ backgroundColor: 'rgba(13,115,119,0.25)', borderColor: 'rgba(20,184,166,0.6)', color: '#ccfbf1' }}
+              >
+                <FileText className="h-3.5 w-3.5" /> + ITR Client
+              </Button>
+            )}
             <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
               {canEditClients && (
               <DialogTrigger asChild>
@@ -5414,6 +5475,15 @@ export default function Clients() {
           } catch { toast.error('Failed to delete client'); }
         }}
         onView={(c) => { setSelectedClient(c); setClientDetailOpen(true); setShowDupDialog(false); }}
+      />
+
+      {/* ── ITR Client Dialog ──────────────────────────────────────────── */}
+      <ITRClientDialog
+        open={itrDialogOpen}
+        onClose={() => { setItrDialogOpen(false); setEditingItrClient(null); }}
+        onSaved={() => { fetchClients(); setItrDialogOpen(false); setEditingItrClient(null); }}
+        editingClient={editingItrClient}
+        isDark={isDark}
       />
     </div>
   );
