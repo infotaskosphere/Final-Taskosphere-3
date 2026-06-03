@@ -3117,6 +3117,25 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
           {activeTab === 'tasks' && (
             <div className="p-6 space-y-6">
 
+              {/* ── Quick Navigation Tabs ── */}
+              <div className={`flex items-center gap-1 flex-wrap rounded-xl p-1.5 ${isDark ? 'bg-slate-700/60' : 'bg-slate-100/80'}`}>
+                {[
+                  { key: 'details',        label: 'Details',     icon: <User className="h-3 w-3" /> },
+                  { key: 'invoices',       label: 'Invoices',    icon: <FileText className="h-3 w-3" /> },
+                  { key: 'reconciliation', label: 'GST Recon',   icon: <ArrowLeftRight className="h-3 w-3" /> },
+                  { key: 'govtfees',       label: 'Govt Fees',   icon: <IndianRupee className="h-3 w-3" /> },
+                  { key: 'portal',         label: 'Portal',      icon: <Globe className="h-3 w-3" /> },
+                ].map(tab => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setActiveTab(tab.key)}
+                    className={`flex items-center gap-1 h-7 px-3 rounded-lg text-[11px] font-semibold transition-all ${isDark ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-600' : 'text-slate-500 hover:text-slate-700 hover:bg-white hover:shadow-sm'}`}
+                  >
+                    {tab.icon}{tab.label}
+                  </button>
+                ))}
+              </div>
+
               {/* ── New Task Form ── */}
               <div className={`rounded-2xl border p-5 space-y-4 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-amber-50/60 border-amber-200'}`}>
                 <h3 className={`text-sm font-bold uppercase tracking-widest flex items-center gap-2 ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>
@@ -3157,7 +3176,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                     >
                       <option value="unassigned">Unassigned</option>
                       {(users || []).map(u => (
-                        <option key={u.id} value={u.id}>{u.name || u.email}</option>
+                        <option key={u.id} value={u.id}>{u.full_name || u.name || u.email}</option>
                       ))}
                     </select>
                   </div>
@@ -3216,48 +3235,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 </Button>
               </div>
 
-              {/* ── Existing Tasks for this client ── */}
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className={`text-sm font-bold uppercase tracking-widest flex items-center gap-2 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                    <Clock className="h-4 w-4" /> Existing Tasks
-                    {clientTasks.length > 0 && (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: '#fef3c7', color: '#92400e' }}>{clientTasks.length}</span>
-                    )}
-                  </h3>
-                  <button onClick={fetchClientTasks} className="text-slate-400 hover:text-slate-600 transition-colors"><RefreshCw className="h-3.5 w-3.5" /></button>
-                </div>
-                {clientTasksLoading ? (
-                  <div className="flex justify-center py-8"><Loader2 className={`h-6 w-6 animate-spin ${isDark ? 'text-slate-400' : 'text-slate-300'}`} /></div>
-                ) : clientTasks.length === 0 ? (
-                  <div className={`text-center py-8 rounded-2xl border-dashed border-2 ${isDark ? 'border-slate-600 text-slate-500' : 'border-slate-200 text-slate-400'}`}>
-                    <CheckSquare className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                    <p className="text-sm">No tasks assigned to this client yet</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {clientTasks.map(task => {
-                      const isOverdue = task.due_date && task.status !== 'completed' && new Date(task.due_date) < new Date();
-                      const priorityColors = { critical: '#ef4444', high: '#f97316', medium: '#eab308', low: '#22c55e' };
-                      const statusColors = { completed: '#22c55e', in_progress: '#3b82f6', pending: '#94a3b8', on_hold: '#f59e0b' };
-                      const assignedUser = (users || []).find(u => u.id === task.assigned_to);
-                      return (
-                        <div key={task.id} className={`rounded-xl border p-3 flex items-start gap-3 ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-white border-slate-200'}`}>
-                          <div className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ background: priorityColors[task.priority] || '#94a3b8' }} />
-                          <div className="flex-1 min-w-0">
-                            <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'} ${task.status === 'completed' ? 'line-through opacity-60' : ''}`}>{task.title}</p>
-                            <div className="flex items-center gap-2 mt-1 flex-wrap">
-                              <span className="text-[10px] px-1.5 py-0.5 rounded font-bold uppercase" style={{ background: statusColors[task.status] + '22', color: statusColors[task.status] }}>{(task.status || 'pending').replace('_', ' ')}</span>
-                              {assignedUser && <span className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>→ {assignedUser.name || assignedUser.email}</span>}
-                              {task.due_date && <span className={`text-[10px] font-medium ${isOverdue ? 'text-red-500' : isDark ? 'text-slate-400' : 'text-slate-500'}`}>{isOverdue ? '⚠ ' : ''}{format(new Date(task.due_date), 'dd MMM yyyy')}</span>}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+
 
             </div>
           )}
