@@ -5929,6 +5929,307 @@ async def parse_udyam_pdf(
         )
     return result
 
+# ── ITR Computation PDF parser ────────────────────────────────────────────────
+def _parse_itr_computation_pdf(pdf_bytes: bytes) -> dict:
+    """
+    Parse an ITR Computation of Income PDF and extract all ITR client fields.
+    Handles the standard CA software computation format (e.g. EasyOffice, Winman, Saral TaxOffice).
+    Returns a dict with:
+      - client fields: company_name, pan, email, phone, address, city, state, date_of_birth
+      - itr_data fields: itr_type, assessment_year, acknowledgement_no, filing_date,
+                         income_salary, income_house_property, income_business,
+                         income_capital_gains, income_other_sources,
+                         tax_payable, refund_amount, filing_status
+    """
+    import pdfplumber
+    import re as _re
+
+    with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+        full_text = "\n".join((page.extract_text() or "") for page in pdf.pages)
+
+    text = full_text
+    result = {}
+
+    def first(pattern, flags=0, group=1):
+        m = _re.search(pattern, text, flags | _re.IGNORECASE)
+        if m:
+            try:
+                return m.group(group).strip()
+            except IndexError:
+                return ""
+        return ""
+
+    def to_float(s):
+        if not s:
+            return None
+        cleaned = _re.sub(r"[^0-9.\-]", "", str(s).replace(",", ""))
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+
+    # ── Assessee Name ──────────────────────────────────────────────────────
+    name = first(r"NAME\s+OF\s+ASSESSEE\s*[:\-]?\s*([A-Z][A-Z\s]+?)(?:\n|PAN|$)")
+    if not name:
+        name = first(r"ASSESSEE\s*[:\-]\s*([A-Z][A-Z\s]+?)(?:\n|PAN|$)")
+    if name:
+        result["company_name"] = name.strip()
+
+    # ── PAN ────────────────────────────────────────────────────────────────
+    pan = first(r"\bPAN\s*[:\-]?\s*([A-Z]{5}[0-9]{4}[A-Z])\b")
+    if pan:
+        result["pan"] = pan.upper()
+
+    # ── Assessment Year ────────────────────────────────────────────────────
+    ay = first(r"ASSESSMENT\s+YEAR\s*[:\-]?\s*(\d{4}\s*[-–]\s*\d{2,4})")
+    if ay:
+        # Normalise to "2025-26" format
+        ay_clean = _re.sub(r"\s", "", ay)
+        m_ay = _re.match(r"(\d{4})[-–](\d{2,4})", ay_clean)
+        if m_ay:
+            yr = m_ay.group(1)
+            suffix = m_ay.group(2)[-2:]
+            result["assessment_year"] = f"{yr}-{suffix}"
+
+    # ── Financial Year (fallback for AY) ───────────────────────────────────
+    if not result.get("assessment_year"):
+        fy = first(r"FINANCIAL\s+YEAR\s*[:\-]?\s*(\d{4}\s*[-–]\s*\d{2,4})")
+        if fy:
+            fy_clean = _re.sub(r"\s", "", fy)
+            m_fy = _re.match(r"(\d{4})[-–](\d{2,4})", fy_clean)
+            if m_fy:
+                # AY = FY + 1
+                yr = int(m_fy.group(1)) + 1
+                suffix = str(yr)[-2:]
+                result["assessment_year"] = f"{yr}-{suffix}"
+
+    # ── ITR Type ───────────────────────────────────────────────────────────
+    itr_type = first(r"\bRETURN\s*[:\-]?\s*(ITR[-\s]?[1-7U])\b")
+    if not itr_type:
+        itr_type = first(r"\b(ITR[-\s]?[1-7U])\b")
+    if itr_type:
+        # Normalise "ITR3" → "ITR-3"
+        itr_norm = _re.sub(r"ITR\s*", "ITR-", itr_type.upper()).replace("--", "-")
+        result["itr_type"] = itr_norm
+
+    # ── Filing Date ────────────────────────────────────────────────────────
+    filing_date = first(r"(?:FILING\s+DATE|DATE\s+OF\s+FILING)\s*[:\-]?\s*(\d{2}[/\-]\d{2}[/\-]\d{4})")
+    if filing_date:
+        # Convert DD/MM/YYYY or DD-MM-YYYY → YYYY-MM-DD
+        parts = _re.split(r"[/\-]", filing_date)
+        if len(parts) == 3 and len(parts[2]) == 4:
+            result["filing_date"] = f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+
+    # ── Acknowledgement Number ─────────────────────────────────────────────
+    ack = first(r"(?:ACK(?:NOWLEDGEMENT)?\.?\s*NO(?:\.)?|NO\.\s*[:\-])\s*[:\-]?\s*(\d{12,15})")
+    if not ack:
+        ack = first(r"\b(\d{15})\b")  # 15-digit standalone
+    if ack:
+        result["acknowledgement_no"] = ack
+
+    # ── Email ──────────────────────────────────────────────────────────────
+    email = first(r"\b([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\b")
+    if email:
+        result["email"] = email.lower()
+
+    # ── Phone ──────────────────────────────────────────────────────────────
+    phone_m = _re.search(r"\b((?:\+91[\s\-]?)?[6-9][0-9]{9})\b", text)
+    if phone_m:
+        result["phone"] = _re.sub(r"\D", "", phone_m.group(1))[-10:]
+
+    # ── Address ────────────────────────────────────────────────────────────
+    addr = first(r"RESIDENTIAL\s+ADDRESS\s*[:\-]?\s*([^\n]{10,200})")
+    if addr:
+        # Multi-line addresses may be joined by commas
+        result["address"] = addr.strip().rstrip(",")
+
+    # Extract city / state / pin from address
+    if result.get("address"):
+        addr_text = result["address"]
+        # PIN code
+        pin_m = _re.search(r"\b(\d{6})\b", addr_text)
+        if pin_m:
+            result["pin"] = pin_m.group(1)
+        # State (common Indian states)
+        state_m = _re.search(
+            r"\b(Gujarat|Maharashtra|Rajasthan|Madhya Pradesh|Uttar Pradesh|Karnataka|Tamil Nadu|"
+            r"Kerala|West Bengal|Delhi|Haryana|Punjab|Andhra Pradesh|Telangana|Odisha|Bihar|"
+            r"Jharkhand|Chhattisgarh|Uttarakhand|Himachal Pradesh|Assam|Goa)\b",
+            addr_text, _re.IGNORECASE
+        )
+        if state_m:
+            result["state"] = state_m.group(1).title()
+        # City heuristic
+        city_m = _re.search(
+            r"\b(Surat|Ahmedabad|Mumbai|Delhi|Pune|Bangalore|Bengaluru|Chennai|Hyderabad|"
+            r"Kolkata|Jaipur|Vadodara|Rajkot|Indore|Bhopal|Nagpur|Lucknow|Patna|Chandigarh|"
+            r"Coimbatore|Visakhapatnam)\b",
+            addr_text, _re.IGNORECASE
+        )
+        if city_m:
+            result["city"] = city_m.group(1).title()
+
+    # ── Date of Birth ──────────────────────────────────────────────────────
+    dob = first(r"DATE\s+OF\s+BIRTH\s*[:\-]?\s*(\d{2}[/\-]\d{2}[/\-]\d{4})")
+    if dob:
+        parts = _re.split(r"[/\-]", dob)
+        if len(parts) == 3 and len(parts[2]) == 4:
+            result["date_of_birth"] = f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+
+    # ── Ward / Circle ──────────────────────────────────────────────────────
+    ward = first(r"WARD\s*(?:NO\.?|NUMBER)?\s*[:\-]?\s*([A-Z0-9\s\(\)/,]+?)(?:\n|FINANCIAL|GENDER|$)")
+    if ward:
+        result["ward"] = ward.strip()
+
+    # ── Gender ─────────────────────────────────────────────────────────────
+    gender = first(r"GENDER\s*[:\-]?\s*(MALE|FEMALE|OTHER)")
+    if gender:
+        result["gender"] = gender.lower()
+
+    # ── Residential Status ─────────────────────────────────────────────────
+    res_status = first(r"RESIDENTIAL\s+STATUS\s*[:\-]?\s*(RESIDENT|NON.RESIDENT|NRI|RNOR)")
+    if res_status:
+        result["residential_status"] = res_status.upper()
+
+    # ── Bank Details ───────────────────────────────────────────────────────
+    bank_name = first(r"NAME\s+OF\s+BANK\s*[:\-]?\s*([A-Z][A-Z\s&.]+?)(?:\n|MICR|IFSC|ACCOUNT|$)")
+    if bank_name:
+        result["bank_name"] = bank_name.strip()
+
+    ifsc = first(r"IFSC\s+CODE\s*[:\-]?\s*([A-Z]{4}0[A-Z0-9]{6})")
+    if ifsc:
+        result["ifsc_code"] = ifsc.upper()
+
+    account_no = first(r"ACCOUNT\s+NO\.?\s*[:\-]?\s*(\d{8,20})")
+    if account_no:
+        result["account_no"] = account_no
+
+    # ── Income Heads ───────────────────────────────────────────────────────
+    # Salary
+    salary = first(r"TAXABLE\s+SALARY\s+(\d[\d,]+)")
+    if not salary:
+        salary = first(r"SALARIES\s+(\d[\d,]+)")
+    if salary:
+        v = to_float(salary.replace(",", ""))
+        if v is not None and v > 0:
+            result["income_salary"] = v
+
+    # Business / Profession (u/s 44AD etc)
+    biz = first(r"PROFITS\s+AND\s+GAINS\s+FROM\s+BUSINESS\s+(?:OR\s+PROFESSION\s+)?(\d[\d,]+)")
+    if not biz:
+        biz = first(r"PROFIT\s+(?:DECLARED|HIGHER\s+OF\s+THE\s+ABOVE)\s+(?:U/S\s+44AD[^\d]*)(\d[\d,]+)")
+    if biz:
+        v = to_float(biz.replace(",", ""))
+        if v is not None and v > 0:
+            result["income_business"] = v
+
+    # Capital Gains
+    cg = first(r"(?:TOTAL\s+)?CAPITAL\s+GAINS?\s+(\d[\d,]+)")
+    if not cg:
+        # Sum short-term + long-term from doc
+        stcg_vals = _re.findall(r"SHORT\s+TERM\s+CAPITAL\s+GAIN\s+@\s*\d+%[^0-9\-]*(-?\d[\d,]*)", text, _re.IGNORECASE)
+        ltcg_vals = _re.findall(r"LONG\s+TERM\s+CAPITAL\s+GAIN\s+@\s*\d+%[^0-9\-]*(-?\d[\d,]*)", text, _re.IGNORECASE)
+        all_cg = stcg_vals + ltcg_vals
+        if all_cg:
+            total_cg = sum(to_float(v.replace(",", "")) or 0 for v in all_cg)
+            if total_cg != 0:
+                result["income_capital_gains"] = round(total_cg, 2)
+    else:
+        v = to_float(cg.replace(",", ""))
+        if v is not None:
+            result["income_capital_gains"] = v
+
+    # Other Sources
+    other_src = first(r"INCOME\s+FROM\s+OTHER\s+SOURCES\s+(\d[\d,]+)")
+    if not other_src:
+        other_src = first(r"OTHER\s+SOURCES[^\d]*(\d[\d,]+)")
+    if other_src:
+        v = to_float(other_src.replace(",", ""))
+        if v is not None and v > 0:
+            result["income_other_sources"] = v
+
+    # ── Gross Total Income ─────────────────────────────────────────────────
+    gti = first(r"GROSS\s+TOTAL\s+INCOME\s+(\d[\d,]+)")
+    if gti:
+        v = to_float(gti.replace(",", ""))
+        if v:
+            result["gross_total_income"] = v
+
+    # ── Total Income ───────────────────────────────────────────────────────
+    total_income = first(r"TOTAL\s+INCOME\s+ROUNDED\s+OFF[^\d]*(\d[\d,]+)")
+    if not total_income:
+        total_income = first(r"TOTAL\s+INCOME\s+(\d[\d,]+)")
+    if total_income:
+        v = to_float(total_income.replace(",", ""))
+        if v:
+            result["total_income"] = v
+
+    # ── Tax Payable ────────────────────────────────────────────────────────
+    tax_payable_raw = first(r"TAX\s+PAYABLE\s+(\d[\d,]+|NIL)")
+    if tax_payable_raw and tax_payable_raw.upper() != "NIL":
+        v = to_float(tax_payable_raw.replace(",", ""))
+        result["tax_payable"] = v if v is not None else 0.0
+    else:
+        result["tax_payable"] = 0.0
+
+    # Refund
+    refund_raw = first(r"REFUND\s+(?:AMOUNT\s+)?(\d[\d,]+)")
+    if refund_raw:
+        v = to_float(refund_raw.replace(",", ""))
+        if v and v > 0:
+            result["refund_amount"] = v
+
+    # ── Filing Status heuristic ────────────────────────────────────────────
+    if result.get("acknowledgement_no") and result.get("filing_date"):
+        result["filing_status"] = "filed"
+    else:
+        result["filing_status"] = "pending"
+
+    # ── Section 115BAC ────────────────────────────────────────────────────
+    bac_m = _re.search(r"(?:OPTED\s+FOR\s+TAXATION\s+U/S\s+115BAC|115BAC)[^\n]*(YES|NO)", text, _re.IGNORECASE)
+    if bac_m:
+        result["opted_115bac"] = bac_m.group(1).upper() == "YES"
+
+    return result
+
+
+@api_router.post("/clients/parse-itr-computation-pdf")
+async def parse_itr_computation_pdf(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Parse an ITR Computation of Income PDF.
+    Returns extracted fields: assessee name, PAN, AY, income heads,
+    tax payable, refund, bank details, address, etc.
+    Used to auto-fill the ITR Client form.
+    """
+    filename = (file.filename or "").lower()
+    if not filename.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+
+    content = await file.read()
+    if len(content) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="PDF too large — max 20 MB.")
+
+    try:
+        result = _parse_itr_computation_pdf(content)
+    except Exception as e:
+        logger.error(f"parse_itr_computation_pdf error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=422,
+            detail="Could not parse this PDF. Please ensure it is an ITR Computation of Income document."
+        )
+
+    if not result.get("pan") and not result.get("company_name"):
+        raise HTTPException(
+            status_code=422,
+            detail="No ITR data found. Please upload a valid ITR Computation of Income PDF."
+        )
+
+    return result
+
+
 
 def _map_mca_constitution(raw: str) -> str:
     """Map MCA class/constitution string → client_type slug."""
