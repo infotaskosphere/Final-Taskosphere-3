@@ -7239,7 +7239,8 @@ async def create_client(payload: dict, current_user: User = Depends(check_module
                     "opening_balance", "opening_balance_type", "tally_ledger_name",
                     "tally_group", "website", "msme_number",
                     "gst_address", "gst_city", "gst_state", "gst_pin",
-                    "cin", "llpin", "mca_fetch_date"):
+                    "cin", "llpin", "mca_fetch_date",
+                    "is_itr_client", "itr_data"):
             val = payload.get(key)
             if val is not None:
                 doc[key] = val
@@ -7508,6 +7509,10 @@ async def update_client(
         "opening_balance_type", "tally_ledger_name", "tally_group",
         "website", "msme_number", "gst_address",
         "gst_city", "gst_state", "gst_pin",
+        # MCA / ROC
+        "cin", "llpin", "mca_fetch_date",
+        # ITR Client
+        "is_itr_client", "itr_data",
     }
     update_data = {k: v for k, v in client_data.items() if k in ALLOWED_FIELDS}
  
