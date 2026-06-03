@@ -7,6 +7,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import api from '@/lib/api';
@@ -25,7 +28,7 @@ import {
   Copy, ExternalLink, CheckSquare, Square, MinusSquare,
   Shield, Download, UserCheck, AlertCircle, Sparkles, Loader2,
   ArrowLeftRight, RefreshCw, FileSpreadsheet, ExternalLink as ExternalLinkIcon,
-  IndianRupee, Save as SaveIcon, Globe, Settings, Clock, Send,
+  IndianRupee, Save as SaveIcon, Globe, Settings, Clock, Send, Repeat,
 } from 'lucide-react';
 import { detectClientDuplicates } from '@/lib/aiDuplicateEngine';
 import StandaloneGovtFeeDialog from '@/components/StandaloneGovtFeeDialog';
@@ -40,6 +43,25 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { saveAs } from 'file-saver';
+
+const CLIENT_TASK_DEPARTMENTS = [
+  { value: 'gst',          label: 'GST' },
+  { value: 'income_tax',   label: 'INCOME TAX' },
+  { value: 'accounts',     label: 'ACCOUNTS' },
+  { value: 'tds',          label: 'TDS' },
+  { value: 'roc',          label: 'ROC' },
+  { value: 'trademark',    label: 'TRADEMARK' },
+  { value: 'msme_smadhan', label: 'MSME SMADHAN' },
+  { value: 'fema',         label: 'FEMA' },
+  { value: 'dsc',          label: 'DSC' },
+  { value: 'other',        label: 'OTHER' },
+];
+const CLIENT_TASK_RECURRENCE = [
+  { value: 'daily',   label: 'Daily' },
+  { value: 'weekly',  label: 'Weekly' },
+  { value: 'monthly', label: 'Monthly' },
+  { value: 'yearly',  label: 'Yearly' },
+];
 
 const FixedSizeList = ({ children, height, itemCount, itemSize, width, itemData }) =>
   React.createElement(
@@ -1737,7 +1759,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
   const [invoicesLoading, setInvoicesLoading] = React.useState(false);
 
   // ── Assign Task tab state ──
-  const TASK_EMPTY = { title: '', description: '', assigned_to: 'unassigned', due_date: '', priority: 'medium', category: 'other' };
+  const TASK_EMPTY = { title: '', description: '', assigned_to: 'unassigned', sub_assignees: [], due_date: '', priority: 'medium', status: 'pending', category: 'other', is_recurring: false, recurrence_pattern: 'monthly', recurrence_interval: 1 };
   const [taskForm, setTaskForm] = React.useState({ ...TASK_EMPTY });
   const [taskSaving, setTaskSaving] = React.useState(false);
   const [clientTasks, setClientTasks] = React.useState([]);
@@ -1825,7 +1847,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
     setShowAdhocDialog(false);
     setPortalUsers([]);
     setShowPortalManager(false);
-    setTaskForm({ title: '', description: '', assigned_to: 'unassigned', due_date: '', priority: 'medium', category: 'other' });
+    setTaskForm({ title: '', description: '', assigned_to: 'unassigned', sub_assignees: [], due_date: '', priority: 'medium', status: 'pending', category: 'other', is_recurring: false, recurrence_pattern: 'monthly', recurrence_interval: 1 });
     setClientTasks([]);
   }, [selectedClient?.id]);
 
@@ -3143,86 +3165,160 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 </h3>
 
                 {/* Title */}
-                <div>
-                  <label className={`block text-xs font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Task Title <span className="text-red-500">*</span></label>
+                <div className="space-y-1.5">
+                  <Label className={`text-xs font-semibold uppercase tracking-wide ${isDark ? 'text-slate-300' : 'text-slate-500'}`}>Task Title <span className="text-red-500">*</span></Label>
                   <Input
                     value={taskForm.title}
                     onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))}
-                    placeholder="e.g. File GST Return for Q1"
-                    className={`h-9 text-sm ${isDark ? 'bg-slate-800 border-slate-600 text-white' : 'bg-white border-slate-200'}`}
+                    placeholder="Enter task title"
+                    className={`h-10 text-sm ${isDark ? 'bg-slate-800 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
                   />
                 </div>
 
                 {/* Description */}
-                <div>
-                  <label className={`block text-xs font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Description</label>
+                <div className="space-y-1.5">
+                  <Label className={`text-xs font-semibold uppercase tracking-wide ${isDark ? 'text-slate-300' : 'text-slate-500'}`}>Description</Label>
                   <Textarea
                     value={taskForm.description}
                     onChange={e => setTaskForm(p => ({ ...p, description: e.target.value }))}
-                    placeholder="Add details about this task..."
-                    rows={2}
-                    className={`text-sm resize-none ${isDark ? 'bg-slate-800 border-slate-600 text-white' : 'bg-white border-slate-200'}`}
+                    placeholder="Describe the task (use - for checklist items)..."
+                    rows={3}
+                    className={`text-sm resize-none ${isDark ? 'bg-slate-800 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
                   />
                 </div>
 
-                {/* Row: Assign To + Due Date */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className={`block text-xs font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Assign To</label>
-                    <select
-                      value={taskForm.assigned_to}
-                      onChange={e => setTaskForm(p => ({ ...p, assigned_to: e.target.value }))}
-                      className={`w-full h-9 text-sm rounded-lg border px-3 outline-none ${isDark ? 'bg-slate-800 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
-                    >
-                      <option value="unassigned">Unassigned</option>
-                      {(users || []).map(u => (
-                        <option key={u.id} value={u.id}>{u.full_name || u.name || u.email}</option>
-                      ))}
-                    </select>
+                {/* Row: Assignee + Due Date */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className={`text-xs font-semibold uppercase tracking-wide ${isDark ? 'text-slate-300' : 'text-slate-500'}`}>Assignee</Label>
+                    <Select value={taskForm.assigned_to} onValueChange={v => setTaskForm(p => ({ ...p, assigned_to: v }))}>
+                      <SelectTrigger className={`h-10 text-sm ${isDark ? 'bg-slate-800 border-slate-600 text-white' : 'border-slate-300'}`}><SelectValue /></SelectTrigger>
+                      <SelectContent className="max-h-52 overflow-y-auto">
+                        <SelectItem value="unassigned">Unassigned</SelectItem>
+                        {(users || []).map(u => <SelectItem key={u.id} value={u.id}>{u.full_name || u.name || u.email}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
                   </div>
-                  <div>
-                    <label className={`block text-xs font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Due Date</label>
+                  <div className="space-y-1.5">
+                    <Label className={`text-xs font-semibold uppercase tracking-wide ${isDark ? 'text-slate-300' : 'text-slate-500'}`}>Co-assignees</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className={`w-full h-10 text-sm justify-between ${isDark ? 'bg-slate-800 border-slate-600 text-white hover:bg-slate-700' : 'border-slate-300'}`}>
+                          {taskForm.sub_assignees.length > 0 ? `${taskForm.sub_assignees.length} selected` : 'Select…'}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-64 max-h-52 overflow-y-auto">
+                        <div className="space-y-2">
+                          {(users || []).filter(u => u.id !== taskForm.assigned_to).map(u => (
+                            <label key={u.id} className="flex items-center gap-2 cursor-pointer">
+                              <Checkbox
+                                checked={taskForm.sub_assignees.includes(u.id)}
+                                onCheckedChange={() => setTaskForm(p => ({
+                                  ...p,
+                                  sub_assignees: p.sub_assignees.includes(u.id)
+                                    ? p.sub_assignees.filter(id => id !== u.id)
+                                    : [...p.sub_assignees, u.id]
+                                }))}
+                              />
+                              <span className="text-sm text-slate-700">{u.full_name || u.name || u.email}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                </div>
+
+                {/* Due Date + Status */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className={`text-xs font-semibold uppercase tracking-wide ${isDark ? 'text-slate-300' : 'text-slate-500'}`}>Due Date</Label>
                     <Input
                       type="date"
                       value={taskForm.due_date}
                       onChange={e => setTaskForm(p => ({ ...p, due_date: e.target.value }))}
-                      className={`h-9 text-sm ${isDark ? 'bg-slate-800 border-slate-600 text-white' : 'bg-white border-slate-200'}`}
+                      className={`h-10 text-sm ${isDark ? 'bg-slate-800 border-slate-600 text-white' : 'border-slate-300'}`}
                     />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className={`text-xs font-semibold uppercase tracking-wide ${isDark ? 'text-slate-300' : 'text-slate-500'}`}>Status</Label>
+                    <Select value={taskForm.status} onValueChange={v => setTaskForm(p => ({ ...p, status: v }))}>
+                      <SelectTrigger className={`h-10 text-sm ${isDark ? 'bg-slate-800 border-slate-600 text-white' : 'border-slate-300'}`}><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="pending">📋 To Do</SelectItem>
+                        <SelectItem value="in_progress">⚡ In Progress</SelectItem>
+                        <SelectItem value="completed">✅ Completed</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
 
-                {/* Row: Priority + Category */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className={`block text-xs font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Priority</label>
-                    <select
-                      value={taskForm.priority}
-                      onChange={e => setTaskForm(p => ({ ...p, priority: e.target.value }))}
-                      className={`w-full h-9 text-sm rounded-lg border px-3 outline-none ${isDark ? 'bg-slate-800 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
-                    >
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                      <option value="critical">Critical</option>
-                    </select>
+                {/* Department (Category) */}
+                <div className="space-y-1.5">
+                  <Label className={`text-xs font-semibold uppercase tracking-wide ${isDark ? 'text-slate-300' : 'text-slate-500'}`}>Department</Label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {CLIENT_TASK_DEPARTMENTS.map(dept => (
+                      <button key={dept.value} type="button"
+                        onClick={() => setTaskForm(p => ({ ...p, category: dept.value }))}
+                        className={`h-7 px-3 rounded-lg text-xs font-semibold transition-all ${taskForm.category === dept.value ? 'text-white shadow-sm' : (isDark ? 'bg-slate-600 text-slate-300 hover:bg-slate-500' : 'bg-slate-100 text-slate-600 hover:bg-slate-200')}`}
+                        style={taskForm.category === dept.value ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' } : {}}>
+                        {dept.label}
+                      </button>
+                    ))}
                   </div>
-                  <div>
-                    <label className={`block text-xs font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Category</label>
-                    <select
-                      value={taskForm.category}
-                      onChange={e => setTaskForm(p => ({ ...p, category: e.target.value }))}
-                      className={`w-full h-9 text-sm rounded-lg border px-3 outline-none ${isDark ? 'bg-slate-800 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
-                    >
-                      <option value="other">Other</option>
-                      <option value="gst">GST</option>
-                      <option value="itr">ITR</option>
-                      <option value="roc">ROC</option>
-                      <option value="audit">Audit</option>
-                      <option value="trademark">Trademark</option>
-                      <option value="compliance">Compliance</option>
-                      <option value="accounting">Accounting</option>
-                    </select>
+                </div>
+
+                {/* Priority */}
+                <div className="space-y-1.5">
+                  <Label className={`text-xs font-semibold uppercase tracking-wide ${isDark ? 'text-slate-300' : 'text-slate-500'}`}>Priority</Label>
+                  <Select value={taskForm.priority} onValueChange={v => setTaskForm(p => ({ ...p, priority: v }))}>
+                    <SelectTrigger className={`h-10 text-sm ${isDark ? 'bg-slate-800 border-slate-600 text-white' : 'border-slate-300'}`}><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="low">🟢 Low</SelectItem>
+                      <SelectItem value="medium">🟡 Medium</SelectItem>
+                      <SelectItem value="high">🔴 High</SelectItem>
+                      <SelectItem value="critical">🚨 Critical</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Recurring Task */}
+                <div className={`border rounded-xl p-4 space-y-3 ${isDark ? 'border-slate-600 bg-slate-700/40' : 'border-slate-200 bg-slate-50'}`}
+                  style={{ borderColor: taskForm.is_recurring ? '#1F6FB240' : undefined }}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Repeat className="h-4 w-4 text-slate-500" />
+                      <Label className="font-semibold text-sm">Recurring Task</Label>
+                    </div>
+                    <Switch checked={taskForm.is_recurring} onCheckedChange={c => setTaskForm(p => ({ ...p, is_recurring: c }))} />
                   </div>
+                  {taskForm.is_recurring && (
+                    <div className={`grid grid-cols-2 gap-3 pt-3 border-t ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
+                      <div className="space-y-1.5">
+                        <Label className={`text-xs font-semibold uppercase tracking-wide ${isDark ? 'text-slate-300' : 'text-slate-500'}`}>Repeat</Label>
+                        <Select value={taskForm.recurrence_pattern} onValueChange={v => setTaskForm(p => ({ ...p, recurrence_pattern: v }))}>
+                          <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                          <SelectContent>{CLIENT_TASK_RECURRENCE.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className={`text-xs font-semibold uppercase tracking-wide ${isDark ? 'text-slate-300' : 'text-slate-500'}`}>Every (interval)</Label>
+                        <div className="flex items-center gap-2">
+                          <Input type="number" min="1" max="365"
+                            value={taskForm.recurrence_interval}
+                            onChange={e => setTaskForm(p => ({ ...p, recurrence_interval: parseInt(e.target.value) || 1 }))}
+                            className="w-20 h-9 text-sm"
+                          />
+                          <span className="text-xs text-slate-500">
+                            {taskForm.recurrence_pattern === 'daily' && 'day(s)'}
+                            {taskForm.recurrence_pattern === 'weekly' && 'week(s)'}
+                            {taskForm.recurrence_pattern === 'monthly' && 'month(s)'}
+                            {taskForm.recurrence_pattern === 'yearly' && 'year(s)'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <Button
