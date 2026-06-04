@@ -1754,11 +1754,71 @@ function gstExportExcel(results, company, period) {
 const GST_TREATMENT_LABELS = { regular: 'Regular Taxpayer', composition: 'Composition Scheme', unregistered: 'Unregistered', consumer: 'Consumer (B2C)', overseas: 'Overseas / SEZ' };
 const INV_STATUS_COLORS = { paid: { bg: '#f0fdf4', text: '#166534', border: '#bbf7d0' }, sent: { bg: '#eff6ff', text: '#1e40af', border: '#bfdbfe' }, draft: { bg: '#f8fafc', text: '#475569', border: '#e2e8f0' }, overdue: { bg: '#fef2f2', text: '#dc2626', border: '#fecaca' }, partially_paid: { bg: '#fefce8', text: '#92400e', border: '#fde68a' }, cancelled: { bg: '#fafafa', text: '#9ca3af', border: '#e5e7eb' } };
 
-const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDetailDialogOpen, isDark, users, getClientAssignments, openWhatsApp, handleEdit, canEditClients, navigate }) => {
+const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDetailDialogOpen, isDark, users, getClientAssignments, openWhatsApp, handleEdit, canEditClients, navigate, allClients = [], onMergeClients }) => {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
 
   const [activeTab, setActiveTab] = React.useState('details');
+
+  // ── Merge tab state ────────────────────────────────────────────────────────
+  const [mergeSearch,      setMergeSearch]      = React.useState('');
+  const [mergeTargetId,    setMergeTargetId]    = React.useState(null);
+  const [mergeFieldChoice, setMergeFieldChoice] = React.useState({}); // { field: 'primary' | 'secondary' }
+  const [mergeLoading,     setMergeLoading]     = React.useState(false);
+
+  const MERGE_FIELDS_DEF = [
+    { key: 'email',       label: 'Email' },
+    { key: 'phone',       label: 'Phone' },
+    { key: 'address',     label: 'Address' },
+    { key: 'city',        label: 'City' },
+    { key: 'state',       label: 'State' },
+    { key: 'gstin',       label: 'GSTIN' },
+    { key: 'pan',         label: 'PAN' },
+    { key: 'website',     label: 'Website' },
+    { key: 'referred_by', label: 'Referred By' },
+    { key: 'cin',         label: 'CIN' },
+    { key: 'notes',       label: 'Notes' },
+  ];
+
+  // Candidates for merge — all clients except the current one
+  const mergeCandidates = React.useMemo(() => {
+    if (!selectedClient) return [];
+    const q = mergeSearch.toLowerCase().trim();
+    return allClients
+      .filter(c => c.id !== selectedClient.id)
+      .filter(c => !q || (c.company_name || '').toLowerCase().includes(q) || (c.phone || '').includes(mergeSearch) || (c.email || '').toLowerCase().includes(q))
+      .slice(0, 30);
+  }, [allClients, selectedClient, mergeSearch]);
+
+  const mergeTarget = React.useMemo(() => allClients.find(c => c.id === mergeTargetId), [allClients, mergeTargetId]);
+
+  // Fields that differ between primary and target
+  const mergeConflicts = React.useMemo(() => {
+    if (!selectedClient || !mergeTarget) return [];
+    return MERGE_FIELDS_DEF.filter(f => {
+      const pv = (selectedClient[f.key] || '').toString().trim();
+      const tv = (mergeTarget[f.key] || '').toString().trim();
+      return tv && tv !== pv;
+    });
+  }, [selectedClient, mergeTarget]);
+
+  // Build field overrides from choices
+  const buildOverrides = React.useCallback(() => {
+    const overrides = {};
+    mergeConflicts.forEach(f => {
+      if (mergeFieldChoice[f.key] === 'secondary' && mergeTarget) {
+        overrides[f.key] = mergeTarget[f.key];
+      }
+    });
+    return overrides;
+  }, [mergeConflicts, mergeFieldChoice, mergeTarget]);
+
+  // Reset merge state when dialog closes or client changes
+  React.useEffect(() => {
+    setMergeSearch('');
+    setMergeTargetId(null);
+    setMergeFieldChoice({});
+  }, [selectedClient?.id]);
   const [clientInvoices, setClientInvoices] = React.useState([]);
   const [invoicesLoading, setInvoicesLoading] = React.useState(false);
 
@@ -2029,7 +2089,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
         </div>
 
         {/* ── Tab Bar ── */}
-        <div className={`flex items-center gap-1 px-8 py-2.5 border-b flex-shrink-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+        <div className={`flex items-center gap-1 px-8 py-2.5 border-b flex-shrink-0 overflow-x-auto scrollbar-none ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
           {[
             { key: 'details',        label: 'Details',     icon: <User className="h-3.5 w-3.5" /> },
             { key: 'invoices',       label: 'Invoices',    icon: <FileText className="h-3.5 w-3.5" /> },
@@ -2037,16 +2097,17 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
             { key: 'govtfees',       label: 'Govt Fees',   icon: <IndianRupee className="h-3.5 w-3.5" /> },
             { key: 'portal',         label: 'Portal',      icon: <Globe className="h-3.5 w-3.5" /> },
             { key: 'tasks',          label: 'Assign Task', icon: <CheckSquare className="h-3.5 w-3.5" /> },
+            ...(canEditClients ? [{ key: 'merge', label: 'Merge', icon: <Merge className="h-3.5 w-3.5" />, accent: '#7C3AED' }] : []),
           ].map(tab => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`flex items-center gap-1.5 h-8 px-4 rounded-xl text-xs font-semibold transition-all ${
+              className={`flex items-center gap-1.5 h-8 px-4 rounded-xl text-xs font-semibold transition-all flex-shrink-0 ${
                 activeTab === tab.key
                   ? 'text-white shadow-sm'
                   : isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-slate-500 hover:bg-slate-100'
               }`}
-              style={activeTab === tab.key ? { background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' } : {}}>
+              style={activeTab === tab.key ? { background: tab.accent || 'linear-gradient(135deg, #0D3B66, #1F6FB2)' } : {}}>
               {tab.icon}
               <span className="ml-1">{tab.label}</span>
               {tab.key === 'invoices' && clientInvoices.length > 0 && (
@@ -3340,6 +3401,213 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
             </div>
           )}
           {/* ════════════════ END ASSIGN TASK TAB ════════════════ */}
+
+          {/* ════════════════ MERGE TAB ════════════════ */}
+          {activeTab === 'merge' && canEditClients && (
+            <div className="p-6 space-y-5">
+
+              {/* Intro banner */}
+              <div className={`flex items-start gap-3 p-4 rounded-2xl border ${isDark ? 'bg-violet-900/20 border-violet-700/50' : 'bg-violet-50 border-violet-200'}`}>
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg, #4F46E5, #7C3AED)' }}>
+                  <Merge className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <p className={`text-sm font-bold ${isDark ? 'text-violet-200' : 'text-violet-800'}`}>Manual Client Merge</p>
+                  <p className={`text-xs mt-0.5 ${isDark ? 'text-violet-300/70' : 'text-violet-600'}`}>
+                    <strong>{selectedClient.company_name}</strong> will be kept as the primary. Search for a duplicate client below, review conflicting fields, then confirm the merge.
+                  </p>
+                </div>
+              </div>
+
+              {/* Step 1 — search for target */}
+              <div>
+                <p className={`text-xs font-bold uppercase tracking-widest mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Step 1 — Find the duplicate client</p>
+                <div className="relative mb-2">
+                  <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-slate-400" />
+                  <input
+                    value={mergeSearch}
+                    onChange={e => { setMergeSearch(e.target.value); setMergeTargetId(null); setMergeFieldChoice({}); }}
+                    placeholder="Search by name, phone or email…"
+                    className={`w-full pl-9 pr-4 py-2 text-sm rounded-xl border outline-none transition-colors ${
+                      isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder-slate-400 focus:border-violet-400' : 'bg-white border-slate-200 text-slate-700 placeholder-slate-400 focus:border-violet-400'
+                    }`}
+                  />
+                </div>
+
+                {/* Candidate list */}
+                {mergeSearch.trim().length > 0 && (
+                  <div className={`rounded-xl border overflow-hidden divide-y max-h-52 overflow-y-auto ${isDark ? 'border-slate-600 divide-slate-700' : 'border-slate-200 divide-slate-100'}`}>
+                    {mergeCandidates.length === 0 && (
+                      <p className="text-xs text-slate-400 text-center py-4">No clients found</p>
+                    )}
+                    {mergeCandidates.map(c => {
+                      const isSelected = c.id === mergeTargetId;
+                      const cfg2 = TYPE_CONFIG[c.client_type] || TYPE_CONFIG.proprietor;
+                      return (
+                        <button
+                          key={c.id}
+                          onClick={() => { setMergeTargetId(c.id); setMergeFieldChoice({}); }}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-all ${
+                            isSelected
+                              ? isDark ? 'bg-violet-900/40' : 'bg-violet-50'
+                              : isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                            style={{ background: getAvatarGradient(c.company_name) }}>
+                            {c.company_name?.charAt(0).toUpperCase() || '?'}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{c.company_name}</p>
+                            <p className="text-[10px] text-slate-400 truncate">{[c.phone, c.email, c.city].filter(Boolean).join(' · ')}</p>
+                          </div>
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+                              style={{ background: cfg2.bg, color: cfg2.text, border: `1px solid ${cfg2.border}` }}>
+                              {cfg2.label}
+                            </span>
+                            {isSelected && (
+                              <span className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: '#7C3AED' }}>
+                                <Check className="w-3 h-3 text-white" />
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Step 2 — side-by-side comparison */}
+              {mergeTarget && (
+                <>
+                  <div>
+                    <p className={`text-xs font-bold uppercase tracking-widest mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Step 2 — Review &amp; choose values</p>
+
+                    {/* Primary vs Secondary header */}
+                    <div className={`grid grid-cols-2 gap-3 mb-3`}>
+                      <div className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border-2 border-blue-400 ${isDark ? 'bg-blue-900/20' : 'bg-blue-50'}`}>
+                        <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                          style={{ background: getAvatarGradient(selectedClient.company_name) }}>
+                          {selectedClient.company_name?.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <p className={`text-xs font-bold truncate ${isDark ? 'text-blue-200' : 'text-blue-800'}`}>{selectedClient.company_name}</p>
+                          <p className="text-[9px] font-bold text-blue-500 uppercase tracking-wide">✓ PRIMARY — will be kept</p>
+                        </div>
+                      </div>
+                      <div className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border-2 border-rose-300 ${isDark ? 'bg-rose-900/20' : 'bg-rose-50'}`}>
+                        <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                          style={{ background: getAvatarGradient(mergeTarget.company_name) }}>
+                          {mergeTarget.company_name?.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <p className={`text-xs font-bold truncate ${isDark ? 'text-rose-200' : 'text-rose-800'}`}>{mergeTarget.company_name}</p>
+                          <p className="text-[9px] font-bold text-rose-400 uppercase tracking-wide">✗ DUPLICATE — will be deleted</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* No conflicts */}
+                    {mergeConflicts.length === 0 && (
+                      <div className={`flex items-center gap-2 p-3 rounded-xl ${isDark ? 'bg-emerald-900/20 text-emerald-300' : 'bg-emerald-50 text-emerald-700'}`}>
+                        <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                        <p className="text-xs font-semibold">No conflicting fields — all data from the duplicate will be merged into the primary automatically.</p>
+                      </div>
+                    )}
+
+                    {/* Conflict table */}
+                    {mergeConflicts.length > 0 && (
+                      <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                        <div className={`grid grid-cols-[100px_1fr_1fr] text-[10px] font-bold uppercase tracking-widest px-3 py-2 ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-50 text-slate-500'}`}>
+                          <span>Field</span>
+                          <span className="text-blue-500">Primary (keep)</span>
+                          <span className="text-rose-400">Duplicate</span>
+                        </div>
+                        {mergeConflicts.map((f, fi) => {
+                          const pv = (selectedClient[f.key] || '').toString().trim() || '—';
+                          const tv = (mergeTarget[f.key] || '').toString().trim() || '—';
+                          const choice = mergeFieldChoice[f.key] || 'primary';
+                          return (
+                            <div key={f.key} className={`grid grid-cols-[100px_1fr_1fr] gap-2 px-3 py-2.5 items-start ${fi !== 0 ? `border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}` : ''}`}>
+                              <span className={`text-[10px] font-bold pt-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{f.label}</span>
+                              <button
+                                onClick={() => setMergeFieldChoice(prev => ({ ...prev, [f.key]: 'primary' }))}
+                                className={`text-left px-2.5 py-1.5 rounded-lg border text-xs transition-all ${
+                                  choice === 'primary'
+                                    ? isDark ? 'border-blue-400 bg-blue-900/40 text-blue-200 font-semibold' : 'border-blue-400 bg-blue-50 text-blue-700 font-semibold'
+                                    : isDark ? 'border-slate-600 text-slate-400 hover:border-blue-500' : 'border-slate-200 text-slate-500 hover:border-blue-300'
+                                }`}
+                              >
+                                {choice === 'primary' && <Check className="w-3 h-3 inline mr-1 flex-shrink-0" />}{pv}
+                              </button>
+                              <button
+                                onClick={() => setMergeFieldChoice(prev => ({ ...prev, [f.key]: 'secondary' }))}
+                                className={`text-left px-2.5 py-1.5 rounded-lg border text-xs transition-all ${
+                                  choice === 'secondary'
+                                    ? isDark ? 'border-rose-400 bg-rose-900/40 text-rose-200 font-semibold' : 'border-rose-400 bg-rose-50 text-rose-700 font-semibold'
+                                    : isDark ? 'border-slate-600 text-slate-400 hover:border-rose-400' : 'border-slate-200 text-slate-500 hover:border-rose-300'
+                                }`}
+                              >
+                                {choice === 'secondary' && <Check className="w-3 h-3 inline mr-1 flex-shrink-0" />}{tv}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* What will be merged automatically */}
+                  <div className={`p-3 rounded-xl text-xs border ${isDark ? 'bg-slate-700/40 border-slate-600 text-slate-300' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+                    <p className="font-bold mb-1">Auto-merged (no conflict):</p>
+                    <p className="opacity-80">Services • DSC details • Contact persons • Assignments • Tasks • Notes (appended)</p>
+                  </div>
+
+                  {/* Step 3 — confirm */}
+                  <div>
+                    <p className={`text-xs font-bold uppercase tracking-widest mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Step 3 — Confirm merge</p>
+                    <button
+                      disabled={mergeLoading}
+                      onClick={async () => {
+                        if (!window.confirm(`Merge "${mergeTarget.company_name}" INTO "${selectedClient.company_name}"?\n\nThe duplicate will be permanently deleted.`)) return;
+                        setMergeLoading(true);
+                        try {
+                          await onMergeClients(selectedClient.id, [mergeTarget.id], buildOverrides());
+                          setDetailDialogOpen(false);
+                        } catch (e) {
+                          toast.error(e?.response?.data?.detail || 'Merge failed');
+                        } finally {
+                          setMergeLoading(false);
+                        }
+                      }}
+                      className="w-full flex items-center justify-center gap-2 h-11 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 disabled:opacity-50"
+                      style={{ background: mergeLoading ? '#9CA3AF' : 'linear-gradient(135deg, #4F46E5, #7C3AED)' }}
+                    >
+                      {mergeLoading
+                        ? <><Loader2 className="w-4 h-4 animate-spin" /> Merging…</>
+                        : <><Merge className="w-4 h-4" /> Merge "{mergeTarget.company_name}" into "{selectedClient.company_name}"</>
+                      }
+                    </button>
+                    <p className={`text-[10px] text-center mt-1.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                      This action cannot be undone · "{mergeTarget.company_name}" will be permanently deleted
+                    </p>
+                  </div>
+                </>
+              )}
+
+              {/* Empty state — no search yet */}
+              {!mergeSearch.trim() && !mergeTarget && (
+                <div className={`flex flex-col items-center justify-center py-12 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                  <Search className="w-10 h-10 mb-3 opacity-30" />
+                  <p className="text-sm font-semibold">Search for a duplicate client above</p>
+                  <p className="text-xs mt-1 opacity-70">Type a name, phone, or email to find the duplicate</p>
+                </div>
+              )}
+            </div>
+          )}
+          {/* ════════════════ END MERGE TAB ════════════════ */}
 
         </div>
 
