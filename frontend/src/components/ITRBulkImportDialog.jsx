@@ -3,61 +3,18 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * Bulk-import ITR clients from the standard Income Tax software Excel export.
  *
- * SUPPORTED FORMAT  (auto-detected, row-index based):
- *   Row 0  – Title  e.g. "List of All Assessee's Returns for A.Y. '2025-26'"
- *   Row 1  – blank
- *   Row 2  – Headers: SN | Code | Name | PAN | Group | Status | ...
- *   Row 3  – Filter row  "(All)" values — SKIPPED automatically
- *   Row 4+ – Data rows
- *
- * Column mapping (0-based index):
- *   0  SN            → ignored
- *   1  Code          → stored in itr_data.code
- *   2  Name          → company_name / full_name
- *   3  PAN           → pan
- *   4  Group         → itr_data.group
- *   5  Status        → client_type  (Individual→proprietor, HUF→huf, Firm→partnership,
- *                                    Firm (Limited Liability)→llp, Private Ltd.→pvt_ltd,
- *                                    AOP (TRUST)→trust)
- *   6  Residential Status → itr_data.residential_status
- *   7  Ward          → itr_data.ward
- *   8  TAN           → itr_data.tan
- *   9  AADHAAR       → itr_data.aadhaar
- *  10  PAN-AADHAAR Linked → itr_data.pan_aadhaar_linked
- *  11  GSTIN         → gstin
- *  12  Father/Husband→ itr_data.father_husband
- *  13  DOB/DOI       → birthday  (DD/MM/YYYY → YYYY-MM-DD)
- *  14  Gender        → itr_data.gender
- *  15  Address       → address (full), city+state parsed from last segment
- *  16  Phone         → phone (fallback)
- *  17  Mobile        → phone (primary)
- *  18  EMail         → email
- *  19  A/c No        → itr_data.bank_account_no
- *  20  Bank Name     → itr_data.bank_name
- *  21  IFSC          → itr_data.ifsc_code
- *  22  No. of Bank   → ignored
- *  23  Passport      → itr_data.passport
- *  24  UserID        → itr_data.it_portal_user
- *  25  Password      → itr_data.it_portal_password
- *  26  Category      → itr_data.category
- *  27  Remark        → notes / itr_data.remarks
- *  28  AADHAAR Linked Mobile → ignored
- *  29  DIN           → itr_data.din
- *
- * Assessment Year is extracted from the title row (Row 0) when present,
- * defaulting to the current AY.
- *
- * Also handles any generic Excel/CSV with column headers mapping known fields.
+ * UPDATE: Preview step now shows ALL parsed rows (not just first 100),
+ * with search, inline edit, and delete-row support before import.
  */
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useMemo } from 'react';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import {
   FileSpreadsheet, Upload, Download, CheckCircle2,
   XCircle, Loader2, AlertCircle, ChevronDown, ChevronUp,
-  X, FileText, Eye
+  X, FileText, Eye, Pencil, Trash2, Search, Save
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import api from '@/lib/api';
@@ -82,6 +39,15 @@ const STATUS_TO_CLIENT_TYPE = {
   'llp':                     'llp',
 };
 
+const CLIENT_TYPES = [
+  { v: 'proprietor', l: 'Individual' },
+  { v: 'huf',        l: 'HUF' },
+  { v: 'partnership',l: 'Firm' },
+  { v: 'llp',        l: 'LLP' },
+  { v: 'pvt_ltd',    l: 'Pvt Ltd' },
+  { v: 'trust',      l: 'Trust' },
+];
+
 const INDIAN_CITIES = [
   'SURAT','AHMEDABAD','MUMBAI','DELHI','PUNE','VADODARA','BARODA','RAJKOT',
   'NAVSARI','BHARUCH','ANAND','GANDHINAGAR','NADIAD','VALSAD','BILIMORA',
@@ -93,7 +59,6 @@ const INDIAN_CITIES = [
 // Parsing helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** DD/MM/YYYY or DD-MM-YYYY  →  YYYY-MM-DD (or null) */
 function parseDOB(raw) {
   if (!raw) return null;
   const s = String(raw).trim();
@@ -103,7 +68,6 @@ function parseDOB(raw) {
   return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
 }
 
-/** Clean phone: strip non-digits, drop leading 91 if 12 digits, return last 10 */
 function cleanPhone(raw) {
   if (!raw) return null;
   const d = String(raw).replace(/\D/g,'');
@@ -111,7 +75,6 @@ function cleanPhone(raw) {
   return d.length >= 10 ? d.slice(-10) : (d || null);
 }
 
-/** Format Aadhaar as XXXX XXXX XXXX */
 function formatAadhaar(raw) {
   if (!raw) return null;
   const d = String(raw).replace(/\D/g,'');
@@ -119,38 +82,21 @@ function formatAadhaar(raw) {
   return `${d.slice(0,4)} ${d.slice(4,8)} ${d.slice(8,12)}`;
 }
 
-/**
- * Parse address string into { address, city, state, pincode }.
- * Handles the Income Tax software format:
- *   "STREET, AREA, CITY, Locality S.O-PINCODE"
- *   "STREET, CITY-PINCODE"
- */
 function parseAddress(raw) {
   if (!raw) return { address: '', city: 'Surat', state: 'Gujarat', pincode: '' };
   const s = String(raw).trim();
-
-  // Extract 6-digit pincode at end (preceded by - or space)
   const pinMatch = s.match(/[- ](\d{6})\s*$/);
   const pincode = pinMatch ? pinMatch[1] : '';
-
-  // Remove trailing "Locality S.O-PINCODE" or "CityName-PINCODE" segment
   let clean = s.replace(/,?\s*[\w\s\.\(\)\/\\-]+[- ]\d{6}\s*$/, '').trim().replace(/,\s*$/, '').trim();
-
-  // Detect city
   let city = '';
   const upper = s.toUpperCase();
   for (const c of INDIAN_CITIES) {
     if (upper.includes(c)) { city = c.charAt(0) + c.slice(1).toLowerCase(); break; }
   }
-  if (!city) city = 'Surat'; // default for this CA's client base
-
+  if (!city) city = 'Surat';
   return { address: clean, city, state: 'Gujarat', pincode };
 }
 
-/**
- * Extract Assessment Year from the title string.
- * e.g. "List of All Assessee's Returns for A.Y. '2025-26'" → "2025-26"
- */
 function extractAY(title) {
   if (!title) return null;
   const m = String(title).match(/A\.?Y\.?\s*['\u2018\u2019]?(\d{4}-\d{2,4})/i);
@@ -158,7 +104,52 @@ function extractAY(title) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Core parser: reads the standard IT-software Excel format
+// Import validation
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PAN_RE     = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+const EMAIL_RE   = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const GSTIN_RE   = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z][Z][0-9A-Z]$/;
+const AADHAAR_RE = /^\d{4}\s?\d{4}\s?\d{4}$/;
+const PIN_RE     = /^\d{6}$/;
+const PHONE_RE   = /^[6-9]\d{9}$/;
+
+function validateRow(row) {
+  const errors = {};
+  const warnings = {};
+
+  const name = (row.company_name || '').trim();
+  if (!name) errors.company_name = 'Name is required';
+  else if (name.length < 2) errors.company_name = 'Name too short';
+  else if (name.length > 150) errors.company_name = 'Name exceeds 150 chars';
+
+  const pan = (row.pan || '').trim().toUpperCase();
+  if (!pan) errors.pan = 'PAN is required';
+  else if (!PAN_RE.test(pan)) errors.pan = 'Invalid PAN (expected AAAAA9999A)';
+
+  if (row.email && !EMAIL_RE.test(String(row.email).trim())) errors.email = 'Invalid email format';
+
+  if (row.phone) {
+    const p = String(row.phone).replace(/\D/g, '');
+    if (!PHONE_RE.test(p)) errors.phone = 'Mobile must be 10 digits, start 6-9';
+  }
+
+  if (row.gstin) {
+    const g = String(row.gstin).trim().toUpperCase();
+    if (!GSTIN_RE.test(g)) warnings.gstin = 'Invalid GSTIN format';
+  }
+
+  const aadhaar = row.itr_data?.aadhaar;
+  if (aadhaar && !AADHAAR_RE.test(String(aadhaar).trim())) warnings.aadhaar = 'Aadhaar must be 12 digits';
+
+  const pin = row.itr_data?.pincode;
+  if (pin && !PIN_RE.test(String(pin).trim())) warnings.pincode = 'Pincode must be 6 digits';
+
+  return { errors, warnings, valid: Object.keys(errors).length === 0 };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Core parser
 // ─────────────────────────────────────────────────────────────────────────────
 
 function parseITRExcel(workbook) {
@@ -167,61 +158,49 @@ function parseITRExcel(workbook) {
 
   for (const sheetName of workbook.SheetNames) {
     const ws = workbook.Sheets[sheetName];
-    // Use header:1 to get raw array-of-arrays
     const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
     if (rawRows.length < 3) continue;
 
-    // Row 0: title → extract AY
     const titleCell = String(rawRows[0]?.[0] || '');
     if (!detectedAY) detectedAY = extractAY(titleCell);
 
-    // Row 2: headers  (0-indexed)
     const headerRow = rawRows[2] || [];
     const isStandardFormat = headerRow.some(h =>
       String(h).replace(/\s+/g,'').toLowerCase().includes('pan')
     );
 
     if (isStandardFormat) {
-      // Standard IT-software format: columns by fixed index (rows 4+)
-      // Row 3 is the "(All)" filter row — skip it
       for (let ri = 4; ri < rawRows.length; ri++) {
         const r = rawRows[ri];
         const name = String(r[2] || '').trim();
         const pan  = String(r[3] || '').trim().toUpperCase();
-
-        // Skip blank or filter rows
         if (!name && !pan) continue;
         if (pan === '(ALL)' || name === '(ALL)') continue;
 
         const rawStatus = String(r[5] || '').trim().toLowerCase();
         const clientType = STATUS_TO_CLIENT_TYPE[rawStatus] || 'proprietor';
-
         const mobile = cleanPhone(r[17]) || cleanPhone(r[16]);
         const { address, city, state, pincode } = parseAddress(r[15]);
         const aadhaar = formatAadhaar(r[9]);
         const dob = parseDOB(r[13]);
 
         results.push({
-          // Core fields
           company_name: name,
           pan,
           client_type: clientType,
           email: String(r[18] || '').trim().toLowerCase() || null,
           phone: mobile,
-          address,
-          city,
-          state,
+          address, city, state,
           birthday: dob,
           gstin: String(r[11] || '').trim() || null,
           notes: String(r[27] || '').trim() || null,
           status: 'active',
           services: ['Income Tax'],
           is_itr_client: true,
-          // ITR-specific data
           itr_data: {
             assessment_year: detectedAY || '2025-26',
-            itr_type: 'ITR-1',         // default; user can edit after import
-            filing_status: 'pending',   // default
+            itr_type: 'ITR-1',
+            filing_status: 'pending',
             aadhaar,
             code: String(r[1] || '').trim() || null,
             group: String(r[4] || '').trim() || null,
@@ -246,7 +225,6 @@ function parseITRExcel(workbook) {
         });
       }
     } else {
-      // Generic format: map by header name
       const colMap = {};
       headerRow.forEach((h, i) => {
         const key = String(h).toLowerCase().replace(/[\s\-_\/\r\n]+/g, '_').trim();
@@ -279,9 +257,7 @@ function parseITRExcel(workbook) {
           client_type: clientType,
           email: g(r,'email','email_address').toLowerCase() || null,
           phone: mobile,
-          address,
-          city,
-          state,
+          address, city, state,
           birthday: parseDOB(g(r,'dob','date_of_birth','dob_doi')),
           gstin: g(r,'gstin') || null,
           notes: g(r,'remark','remarks','notes') || null,
@@ -314,6 +290,131 @@ function parseITRExcel(workbook) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Edit Row Modal
+// ─────────────────────────────────────────────────────────────────────────────
+
+function EditRowModal({ row, isDark, onSave, onCancel }) {
+  const [form, setForm] = useState({
+    company_name: row.company_name || '',
+    pan: row.pan || '',
+    client_type: row.client_type || 'proprietor',
+    phone: row.phone || '',
+    email: row.email || '',
+    city: row.city || '',
+    address: row.address || '',
+    gstin: row.gstin || '',
+    it_portal_user: row.itr_data?.it_portal_user || '',
+    it_portal_password: row.itr_data?.it_portal_password || '',
+  });
+
+  const bg          = isDark ? '#0f172a' : '#ffffff';
+  const border      = isDark ? '#1e3a5f' : '#e2e8f0';
+  const textPrimary = isDark ? '#e2e8f0' : '#0f172a';
+  const textMuted   = isDark ? '#94a3b8' : '#64748b';
+  const inputBg     = isDark ? '#1e293b' : '#f8fafc';
+
+  const field = (label, key, type = 'text') => (
+    <div className="space-y-1">
+      <label className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: textMuted }}>
+        {label}
+      </label>
+      <input
+        type={type}
+        value={form[key]}
+        onChange={(e) => setForm(f => ({ ...f, [key]: e.target.value }))}
+        className="w-full px-2.5 py-1.5 rounded-md text-xs border outline-none focus:border-teal-500"
+        style={{ background: inputBg, borderColor: border, color: textPrimary }}
+      />
+    </div>
+  );
+
+  const save = () => {
+    onSave({
+      ...row,
+      company_name: form.company_name.trim(),
+      pan: form.pan.trim().toUpperCase() || null,
+      client_type: form.client_type,
+      phone: form.phone.trim() || null,
+      email: form.email.trim().toLowerCase() || null,
+      city: form.city.trim(),
+      address: form.address.trim(),
+      gstin: form.gstin.trim() || null,
+      itr_data: {
+        ...(row.itr_data || {}),
+        it_portal_user: form.it_portal_user.trim() || null,
+        it_portal_password: form.it_portal_password.trim() || null,
+      },
+    });
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.5)' }}
+      onClick={onCancel}
+    >
+      <div
+        className="rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+        style={{ background: bg, border: `1px solid ${border}` }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          className="flex items-center justify-between px-5 py-3"
+          style={{ background: 'linear-gradient(135deg, #0f766e 0%, #0369a1 100%)' }}
+        >
+          <p className="text-white font-semibold text-sm">Edit Client</p>
+          <button onClick={onCancel} className="p-1 rounded hover:bg-white/20">
+            <X className="h-4 w-4 text-white" />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-3 max-h-[70vh] overflow-y-auto">
+          {field('Name', 'company_name')}
+          <div className="grid grid-cols-2 gap-3">
+            {field('PAN', 'pan')}
+            <div className="space-y-1">
+              <label className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: textMuted }}>
+                Client Type
+              </label>
+              <select
+                value={form.client_type}
+                onChange={(e) => setForm(f => ({ ...f, client_type: e.target.value }))}
+                className="w-full px-2.5 py-1.5 rounded-md text-xs border outline-none focus:border-teal-500"
+                style={{ background: inputBg, borderColor: border, color: textPrimary }}
+              >
+                {CLIENT_TYPES.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {field('Mobile', 'phone')}
+            {field('Email', 'email', 'email')}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {field('City', 'city')}
+            {field('GSTIN', 'gstin')}
+          </div>
+          {field('Address', 'address')}
+          <div className="grid grid-cols-2 gap-3">
+            {field('IT Portal User', 'it_portal_user')}
+            {field('IT Portal Password', 'it_portal_password')}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t"
+          style={{ borderColor: border, background: isDark ? '#1e293b' : '#f8fafc' }}>
+          <Button variant="ghost" size="sm" onClick={onCancel} style={{ color: textMuted }}>Cancel</Button>
+          <Button size="sm" onClick={save} className="gap-1.5"
+            style={{ background: 'linear-gradient(135deg, #0f766e, #0369a1)', color: '#fff', border: 'none' }}>
+            <Save className="h-3.5 w-3.5" /> Save
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main component
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -326,8 +427,10 @@ export default function ITRBulkImportDialog({ open, onClose, onImported, isDark 
   const [results, setResults] = useState({ created: 0, skipped: 0, errors: [] });
   const [showErrors, setShowErrors] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [search, setSearch] = useState('');
+  const [editingIdx, setEditingIdx] = useState(null);
+  const [errorFilter, setErrorFilter] = useState('all'); // all | errors | warnings | valid
 
-  // ── Reset ────────────────────────────────────────────────────────────────
   const reset = useCallback(() => {
     setStep('upload');
     setFileName('');
@@ -336,6 +439,9 @@ export default function ITRBulkImportDialog({ open, onClose, onImported, isDark 
     setResults({ created: 0, skipped: 0, errors: [] });
     setShowErrors(false);
     setProgress(0);
+    setSearch('');
+    setEditingIdx(null);
+    setErrorFilter('all');
   }, []);
 
   const handleClose = useCallback(() => {
@@ -343,7 +449,6 @@ export default function ITRBulkImportDialog({ open, onClose, onImported, isDark 
     onClose?.();
   }, [reset, onClose]);
 
-  // ── File handling ────────────────────────────────────────────────────────
   const handleFile = useCallback((file) => {
     if (!file) return;
     const ext = file.name.split('.').pop().toLowerCase();
@@ -385,16 +490,97 @@ export default function ITRBulkImportDialog({ open, onClose, onImported, isDark 
     handleFile(e.dataTransfer.files?.[0]);
   }, [handleFile]);
 
+  // ── Validation (per-row + duplicate PAN within batch) ───────────────────
+  const validations = useMemo(() => {
+    const panCount = {};
+    parsedRows.forEach(r => {
+      const p = (r.pan || '').toUpperCase();
+      if (p) panCount[p] = (panCount[p] || 0) + 1;
+    });
+    return parsedRows.map(r => {
+      const v = validateRow(r);
+      const p = (r.pan || '').toUpperCase();
+      if (p && panCount[p] > 1) v.warnings.pan_duplicate = `PAN appears ${panCount[p]}× in file`;
+      return v;
+    });
+  }, [parsedRows]);
+
+  const validationStats = useMemo(() => {
+    let errors = 0, warnings = 0, valid = 0;
+    validations.forEach(v => {
+      if (!v.valid) errors++;
+      else if (Object.keys(v.warnings).length) warnings++;
+      else valid++;
+    });
+    return { errors, warnings, valid };
+  }, [validations]);
+
+  // ── Filtered list ────────────────────────────────────────────────────────
+  const filteredRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return parsedRows
+      .map((r, i) => ({ row: r, originalIdx: i, v: validations[i] }))
+      .filter(({ row: r, v }) => {
+        if (errorFilter === 'errors' && v.valid) return false;
+        if (errorFilter === 'warnings' && (!v.valid || !Object.keys(v.warnings).length)) return false;
+        if (errorFilter === 'valid' && (!v.valid || Object.keys(v.warnings).length)) return false;
+        if (!q) return true;
+        return (r.company_name || '').toLowerCase().includes(q) ||
+               (r.pan || '').toLowerCase().includes(q) ||
+               (r.phone || '').toLowerCase().includes(q) ||
+               (r.email || '').toLowerCase().includes(q) ||
+               (r.city || '').toLowerCase().includes(q);
+      });
+  }, [parsedRows, validations, search, errorFilter]);
+
+  // ── Row edit / delete ───────────────────────────────────────────────────
+  const deleteRow = useCallback((idx) => {
+    setParsedRows(rows => rows.filter((_, i) => i !== idx));
+  }, []);
+
+  const saveEdit = useCallback((updated) => {
+    setParsedRows(rows => rows.map((r, i) => (i === editingIdx ? updated : r)));
+    setEditingIdx(null);
+    toast.success('Row updated');
+  }, [editingIdx]);
+
   // ── Import ────────────────────────────────────────────────────────────────
   const runImport = useCallback(async () => {
+    // Block invalid rows from being sent to the API
+    const invalidIdxs = validations
+      .map((v, i) => (!v.valid ? i : -1))
+      .filter(i => i !== -1);
+
+    if (invalidIdxs.length === parsedRows.length) {
+      toast.error('All rows have validation errors. Fix them before importing.');
+      return;
+    }
+    if (invalidIdxs.length > 0) {
+      const ok = confirm(
+        `${invalidIdxs.length} row(s) have validation errors and will be skipped.\n` +
+        `Proceed and import the ${parsedRows.length - invalidIdxs.length} valid row(s)?`
+      );
+      if (!ok) return;
+    }
+
     setStep('importing');
     setProgress(0);
     let created = 0, skipped = 0;
     const errors = [];
 
-    for (let i = 0; i < parsedRows.length; i++) {
-      setProgress(Math.round(((i + 1) / parsedRows.length) * 100));
+    // Pre-record validation skips so user sees them on the done step
+    invalidIdxs.forEach(i => {
       const row = parsedRows[i];
+      const msgs = Object.entries(validations[i].errors).map(([k, m]) => `${k}: ${m}`).join('; ');
+      errors.push({ row: i + 1, name: row.company_name || row.pan || `Row ${i+1}`, error: `Validation: ${msgs}` });
+      skipped++;
+    });
+
+    const toImport = parsedRows.filter((_, i) => validations[i].valid);
+
+    for (let i = 0; i < toImport.length; i++) {
+      setProgress(Math.round(((i + 1) / toImport.length) * 100));
+      const row = toImport[i];
       try {
         await api.post('/clients', row);
         created++;
@@ -405,7 +591,6 @@ export default function ITRBulkImportDialog({ open, onClose, onImported, isDark 
           ? detail.map(d => d.msg).join(', ')
           : (typeof detail === 'string' ? detail : (err.message || 'Unknown error'));
 
-        // 409 = duplicate → soft-skip
         if (status === 409 || msg.toLowerCase().includes('duplicate') || msg.toLowerCase().includes('already exists')) {
           skipped++;
         } else {
@@ -424,7 +609,7 @@ export default function ITRBulkImportDialog({ open, onClose, onImported, isDark 
     } else {
       toast.warning('No new clients were imported.');
     }
-  }, [parsedRows, onImported]);
+  }, [parsedRows, validations, onImported]);
 
   // ── Styles ────────────────────────────────────────────────────────────────
   const bg          = isDark ? '#0f172a' : '#ffffff';
@@ -433,25 +618,23 @@ export default function ITRBulkImportDialog({ open, onClose, onImported, isDark 
   const textMuted   = isDark ? '#94a3b8' : '#64748b';
   const cardBg      = isDark ? '#1e293b' : '#f8fafc';
   const rowAlt      = isDark ? '#162032' : '#f1f5f9';
+  const inputBg     = isDark ? '#1e293b' : '#ffffff';
 
-  // Client type badge colors
   const typeBadge = (t) => {
     const map = {
       proprietor: ['#dbeafe','#1d4ed8'], huf: ['#ede9fe','#7c3aed'],
       partnership: ['#fce7f3','#be185d'], llp: ['#fef3c7','#b45309'],
       pvt_ltd: ['#dcfce7','#15803d'], trust: ['#ffedd5','#c2410c'],
     };
-    const [bg, color] = map[t] || ['#f1f5f9','#475569'];
-    return isDark
-      ? { background: color + '33', color }
-      : { background: bg, color };
+    const [bgC, color] = map[t] || ['#f1f5f9','#475569'];
+    return isDark ? { background: color + '33', color } : { background: bgC, color };
   };
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent
         className="p-0 overflow-hidden rounded-2xl shadow-2xl"
-        style={{ maxWidth: 680, width: '95vw', background: bg, borderColor: border }}
+        style={{ maxWidth: 900, width: '95vw', background: bg, borderColor: border }}
       >
         <DialogTitle className="sr-only">Bulk Import ITR Clients</DialogTitle>
         <DialogDescription className="sr-only">Upload Income Tax Excel to import clients</DialogDescription>
@@ -480,12 +663,11 @@ export default function ITRBulkImportDialog({ open, onClose, onImported, isDark 
         </div>
 
         {/* ── Body ── */}
-        <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+        <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
 
           {/* ── STEP: upload ── */}
           {step === 'upload' && (
             <>
-              {/* Format hint */}
               <div
                 className="rounded-xl p-3 border text-xs space-y-1"
                 style={{ background: isDark ? '#0c1a2e' : '#f0f9ff', borderColor: isDark ? '#1e3a5f' : '#bae6fd', color: isDark ? '#93c5fd' : '#0369a1' }}
@@ -498,7 +680,6 @@ export default function ITRBulkImportDialog({ open, onClose, onImported, isDark 
                 </p>
               </div>
 
-              {/* Drop zone */}
               <div
                 className="border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all hover:border-teal-400 hover:bg-teal-50/5"
                 style={{ borderColor: isDark ? '#334155' : '#cbd5e1', background: cardBg }}
@@ -522,7 +703,6 @@ export default function ITRBulkImportDialog({ open, onClose, onImported, isDark 
                 />
               </div>
 
-              {/* What gets imported */}
               <div className="rounded-xl border p-3" style={{ borderColor: border, background: cardBg }}>
                 <p className="text-xs font-semibold mb-2" style={{ color: textMuted }}>
                   Fields imported from each row:
@@ -559,10 +739,7 @@ export default function ITRBulkImportDialog({ open, onClose, onImported, isDark 
                     {detectedAY ? ` · Assessment Year: ${detectedAY}` : ''}
                   </p>
                 </div>
-                <button
-                  onClick={reset}
-                  className="p-1 rounded hover:bg-red-500/20 transition-colors shrink-0"
-                >
+                <button onClick={reset} className="p-1 rounded hover:bg-red-500/20 transition-colors shrink-0">
                   <X className="h-3.5 w-3.5" style={{ color: isDark ? '#f87171' : '#ef4444' }} />
                 </button>
               </div>
@@ -584,13 +761,60 @@ export default function ITRBulkImportDialog({ open, onClose, onImported, isDark 
                 );
               })()}
 
-              {/* Preview table */}
+              {/* Validation summary + filter chips */}
+              <div className="flex flex-wrap items-center gap-2">
+                {[
+                  { key: 'all',      label: `All ${parsedRows.length}`,                   color: '#64748b' },
+                  { key: 'valid',    label: `✓ Valid ${validationStats.valid}`,           color: '#16a34a' },
+                  { key: 'warnings', label: `⚠ Warnings ${validationStats.warnings}`,     color: '#d97706' },
+                  { key: 'errors',   label: `✕ Errors ${validationStats.errors}`,         color: '#dc2626' },
+                ].map(c => {
+                  const active = errorFilter === c.key;
+                  return (
+                    <button
+                      key={c.key}
+                      onClick={() => setErrorFilter(c.key)}
+                      className="text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-all"
+                      style={{
+                        borderColor: active ? c.color : border,
+                        background: active ? c.color + (isDark ? '33' : '22') : 'transparent',
+                        color: active ? c.color : textMuted,
+                      }}
+                    >
+                      {c.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Search bar */}
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5" style={{ color: textMuted }} />
+                <input
+                  type="text"
+                  placeholder="Search by name, PAN, mobile, email, city…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="w-full pl-8 pr-3 py-2 rounded-lg text-xs border outline-none focus:border-teal-500"
+                  style={{ background: inputBg, borderColor: border, color: textPrimary }}
+                />
+                {search && (
+                  <button
+                    onClick={() => setSearch('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-black/10"
+                  >
+                    <X className="h-3 w-3" style={{ color: textMuted }} />
+                  </button>
+                )}
+              </div>
+
+              {/* Preview table — ALL rows, scrollable */}
               <div className="rounded-xl border overflow-hidden" style={{ borderColor: border }}>
-                <div className="overflow-x-auto">
+                <div className="overflow-auto" style={{ maxHeight: '50vh' }}>
                   <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
-                    <thead>
+                    <thead className="sticky top-0 z-10">
                       <tr style={{ background: isDark ? '#1e293b' : '#f1f5f9' }}>
-                        {['#','Name','PAN','Type','Mobile','City','IT Portal'].map(h => (
+                        {['#','Status','Name','PAN','Type','Mobile','City','IT Portal','Actions'].map(h => (
                           <th key={h} className="text-left px-3 py-2 font-semibold uppercase text-[10px] tracking-wide whitespace-nowrap"
                             style={{ color: textMuted, borderBottom: `1px solid ${border}` }}>
                             {h}
@@ -599,13 +823,46 @@ export default function ITRBulkImportDialog({ open, onClose, onImported, isDark 
                       </tr>
                     </thead>
                     <tbody>
-                      {parsedRows.slice(0, 100).map((r, i) => (
-                        <tr key={i} style={{ background: i % 2 === 0 ? bg : rowAlt }}>
-                          <td className="px-3 py-1.5 text-[10px]" style={{ color: textMuted }}>{i+1}</td>
-                          <td className="px-3 py-1.5 font-medium max-w-[180px] truncate" style={{ color: textPrimary }} title={r.company_name}>
+                      {filteredRows.length === 0 && (
+                        <tr>
+                          <td colSpan={9} className="text-center py-8 text-xs" style={{ color: textMuted }}>
+                            No rows match your filter.
+                          </td>
+                        </tr>
+                      )}
+                      {filteredRows.map(({ row: r, originalIdx, v }) => {
+                        const errList = Object.entries(v.errors).map(([,m]) => m);
+                        const warnList = Object.entries(v.warnings).map(([,m]) => m);
+                        const statusTitle = [
+                          errList.length ? 'Errors:\n• ' + errList.join('\n• ') : '',
+                          warnList.length ? 'Warnings:\n• ' + warnList.join('\n• ') : '',
+                        ].filter(Boolean).join('\n\n') || 'Valid';
+                        return (
+                        <tr key={originalIdx} style={{ background: originalIdx % 2 === 0 ? bg : rowAlt }}>
+                          <td className="px-3 py-1.5 text-[10px]" style={{ color: textMuted }}>{originalIdx + 1}</td>
+                          <td className="px-3 py-1.5" title={statusTitle}>
+                            {!v.valid ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                                style={{ background: isDark ? '#7f1d1d55' : '#fee2e2', color: isDark ? '#fca5a5' : '#b91c1c' }}>
+                                <XCircle className="h-3 w-3" /> {errList.length}
+                              </span>
+                            ) : warnList.length ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                                style={{ background: isDark ? '#78350f55' : '#fef3c7', color: isDark ? '#fcd34d' : '#b45309' }}>
+                                <AlertCircle className="h-3 w-3" /> {warnList.length}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                                style={{ background: isDark ? '#14532d55' : '#dcfce7', color: isDark ? '#86efac' : '#15803d' }}>
+                                <CheckCircle2 className="h-3 w-3" />
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-1.5 font-medium max-w-[220px] truncate" style={{ color: textPrimary }} title={r.company_name}>
                             {r.company_name}
                           </td>
-                          <td className="px-3 py-1.5 font-mono text-[11px]" style={{ color: textMuted }}>
+                          <td className="px-3 py-1.5 font-mono text-[11px]"
+                            style={{ color: v.errors.pan ? (isDark ? '#fca5a5' : '#b91c1c') : textMuted }}>
                             {r.pan || '—'}
                           </td>
                           <td className="px-3 py-1.5">
@@ -614,27 +871,46 @@ export default function ITRBulkImportDialog({ open, onClose, onImported, isDark 
                               {r.client_type}
                             </span>
                           </td>
-                          <td className="px-3 py-1.5" style={{ color: textMuted }}>
+                          <td className="px-3 py-1.5"
+                            style={{ color: v.errors.phone ? (isDark ? '#fca5a5' : '#b91c1c') : textMuted }}>
                             {r.phone || '—'}
                           </td>
-                          <td className="px-3 py-1.5" style={{ color: textMuted }}>
-                            {r.city || '—'}
-                          </td>
+                          <td className="px-3 py-1.5" style={{ color: textMuted }}>{r.city || '—'}</td>
                           <td className="px-3 py-1.5">
                             {r.itr_data?.it_portal_user
                               ? <span className="text-[10px] text-emerald-600">✓</span>
                               : <span className="text-[10px]" style={{ color: textMuted }}>—</span>}
                           </td>
+                          <td className="px-3 py-1.5">
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => setEditingIdx(originalIdx)}
+                                className="p-1 rounded hover:bg-teal-500/20 transition-colors"
+                                title="Edit"
+                              >
+                                <Pencil className="h-3.5 w-3.5" style={{ color: isDark ? '#5eead4' : '#0d9488' }} />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (confirm(`Remove "${r.company_name}" from import?`)) deleteRow(originalIdx);
+                                }}
+                                className="p-1 rounded hover:bg-red-500/20 transition-colors"
+                                title="Delete"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" style={{ color: isDark ? '#f87171' : '#ef4444' }} />
+                              </button>
+                            </div>
+                          </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
-                {parsedRows.length > 100 && (
-                  <div className="px-4 py-2 text-center text-[10px] border-t" style={{ borderColor: border, color: textMuted, background: cardBg }}>
-                    Showing first 100 of {parsedRows.length} rows
-                  </div>
-                )}
+                <div className="px-4 py-2 text-center text-[10px] border-t"
+                  style={{ borderColor: border, color: textMuted, background: cardBg }}>
+                  Showing {filteredRows.length} of {parsedRows.length} rows
+                </div>
               </div>
             </>
           )}
@@ -731,10 +1007,13 @@ export default function ITRBulkImportDialog({ open, onClose, onImported, isDark 
               <Button variant="ghost" size="sm" onClick={reset} style={{ color: textMuted }}>
                 ← Change File
               </Button>
-              <Button size="sm" onClick={runImport} className="gap-2"
+              <Button size="sm" onClick={runImport}
+                disabled={parsedRows.length === 0 || (validationStats.valid + validationStats.warnings) === 0}
+                className="gap-2"
                 style={{ background: 'linear-gradient(135deg, #0f766e, #0369a1)', color: '#fff', border: 'none' }}>
                 <Upload className="h-3.5 w-3.5" />
-                Import {parsedRows.length} Client{parsedRows.length !== 1 ? 's' : ''}
+                Import {validationStats.valid + validationStats.warnings} Valid
+                {validationStats.errors > 0 ? ` (skip ${validationStats.errors} invalid)` : ''}
               </Button>
             </>
           )}
@@ -757,6 +1036,16 @@ export default function ITRBulkImportDialog({ open, onClose, onImported, isDark 
             </>
           )}
         </div>
+
+        {/* ── Edit row modal ── */}
+        {editingIdx !== null && parsedRows[editingIdx] && (
+          <EditRowModal
+            row={parsedRows[editingIdx]}
+            isDark={isDark}
+            onCancel={() => setEditingIdx(null)}
+            onSave={saveEdit}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );
