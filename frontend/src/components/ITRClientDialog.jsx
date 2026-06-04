@@ -26,7 +26,7 @@ import { toast } from 'sonner';
 import {
   FileText, User, IndianRupee, Calendar, Shield,
   CheckCircle2, ChevronDown, Plus, X, Loader2,
-  Upload, Sparkles, AlertCircle, Building2, Link, Search, Trash2
+  Upload, Sparkles, AlertCircle, Building2, Link, Search, Trash2, FileSpreadsheet
 } from 'lucide-react';
 import api from '@/lib/api';
 
@@ -121,6 +121,7 @@ export default function ITRClientDialog({
   onSaved,
   editingClient = null,
   isDark = false,
+  onBulkImport = null,
 }) {
   const isEdit = !!editingClient;
 
@@ -477,7 +478,7 @@ export default function ITRClientDialog({
           </div>
 
           {/* ── PDF Upload / Auto-fill Bar ── */}
-          <div className="mt-4 flex items-center gap-3">
+          <div className="mt-4 flex items-center gap-3 flex-wrap">
             <input
               ref={fileInputRef}
               type="file"
@@ -485,6 +486,7 @@ export default function ITRClientDialog({
               className="hidden"
               onChange={handlePdfUpload}
             />
+            {/* Upload PDF */}
             <button
               type="button"
               disabled={pdfUploading}
@@ -497,6 +499,17 @@ export default function ITRClientDialog({
                 : <><Upload className="h-3.5 w-3.5" /> Upload Computation PDF</>
               }
             </button>
+            {/* Bulk Import Excel — opens parent's bulk import dialog */}
+            {onBulkImport && (
+              <button
+                type="button"
+                onClick={onBulkImport}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all"
+                style={{ background: 'rgba(255,255,255,0.12)', color: '#99f6e4', border: '1.5px solid rgba(20,184,166,0.45)' }}
+              >
+                <FileSpreadsheet className="h-3.5 w-3.5" /> Bulk Import Excel
+              </button>
+            )}
             {pdfFileName && !pdfUploading && (
               <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs" style={{ background: 'rgba(16,185,129,0.2)', color: '#6ee7b7' }}>
                 <Sparkles className="h-3 w-3" />
