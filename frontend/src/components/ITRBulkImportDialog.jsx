@@ -395,7 +395,19 @@ export default function ITRBulkImportDialog({ open, onClose, onImported, isDark 
         results.created++;
       } catch (err) {
         const detail = err?.response?.data?.detail;
-        const msg = typeof detail === 'string' ? detail : `Row ${row._rowNum}: ${row.company_name}`;
+        let msg;
+        if (typeof detail === 'string') {
+          msg = `Row ${row._rowNum}: ${row.company_name} — ${detail}`;
+        } else if (Array.isArray(detail) && detail.length > 0) {
+          // Pydantic v2 ValidationError: [{loc:[...], msg:'...', type:'...'}]
+          const fieldErrors = detail.map(e => {
+            const loc = Array.isArray(e.loc) ? e.loc.join('.') : '';
+            return loc ? `${loc}: ${e.msg}` : e.msg;
+          }).join('; ');
+          msg = `Row ${row._rowNum}: ${row.company_name} — ${fieldErrors}`;
+        } else {
+          msg = `Row ${row._rowNum}: ${row.company_name} — HTTP ${err?.response?.status || 'error'}`;
+        }
         results.errors.push(msg);
       }
 
