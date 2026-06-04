@@ -9244,6 +9244,265 @@ api_router.include_router(client_portal_router)
 api_router.include_router(reminders_router)
 api_router.include_router(whatsapp_router)
 app.include_router(google_auth_router)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CLIENT MERGE — merge two or more duplicate clients into one
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@api_router.post("/clients/merge")
+async def merge_clients(
+    payload: dict,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Merge multiple duplicate clients into a primary client.
+    payload: { primary_id: str, secondary_ids: [str], field_overrides: {field: value} }
+    - Copies all non-null fields from secondaries into primary (primary wins on conflict unless overridden).
+    - Merges services, dsc_details, assignments, contact_persons arrays.
+    - Deletes secondary clients after merge.
+    - Requires can_edit_clients permission.
+    """
+    perms = get_user_permissions(current_user)
+    if current_user.role != "admin" and not perms.get("can_edit_clients", False):
+        raise HTTPException(status_code=403, detail="Permission denied: cannot merge clients")
+
+    primary_id = payload.get("primary_id")
+    secondary_ids = payload.get("secondary_ids", [])
+    field_overrides = payload.get("field_overrides", {})
+
+    if not primary_id or not secondary_ids:
+        raise HTTPException(status_code=400, detail="primary_id and secondary_ids are required")
+
+    primary = await db.clients.find_one({"id": primary_id})
+    if not primary:
+        raise HTTPException(status_code=404, detail="Primary client not found")
+
+    secondaries = []
+    for sid in secondary_ids:
+        sc = await db.clients.find_one({"id": sid})
+        if sc:
+            secondaries.append(sc)
+
+    if not secondaries:
+        raise HTTPException(status_code=404, detail="No secondary clients found")
+
+    # Build merged document — primary wins unless field is blank
+    merged = dict(primary)
+
+    # Scalar fields: fill from secondaries if primary field is empty
+    scalar_fields = [
+        "email", "phone", "birthday", "address", "city", "state",
+        "gstin", "pan", "gst_treatment", "place_of_supply",
+        "referred_by", "notes", "website", "msme_number",
+        "gst_address", "gst_city", "gst_state", "gst_pin",
+        "cin", "llpin", "tally_ledger_name", "tally_group",
+        "credit_limit", "opening_balance", "default_payment_terms",
+    ]
+    for sc in secondaries:
+        for f in scalar_fields:
+            if not merged.get(f) and sc.get(f):
+                merged[f] = sc[f]
+
+    # Array merges — deduplicate
+    # services
+    all_services = list(merged.get("services") or [])
+    for sc in secondaries:
+        for s in (sc.get("services") or []):
+            if s and s not in all_services:
+                all_services.append(s)
+    merged["services"] = all_services
+
+    # dsc_details
+    existing_dsc = list(merged.get("dsc_details") or [])
+    seen_dsc = {d.get("pan") or d.get("name") for d in existing_dsc}
+    for sc in secondaries:
+        for d in (sc.get("dsc_details") or []):
+            key = d.get("pan") or d.get("name")
+            if key not in seen_dsc:
+                existing_dsc.append(d)
+                seen_dsc.add(key)
+    merged["dsc_details"] = existing_dsc
+
+    # contact_persons
+    existing_contacts = list(merged.get("contact_persons") or [])
+    seen_cp = {(c.get("name") or "").lower() for c in existing_contacts if c.get("name")}
+    for sc in secondaries:
+        for cp in (sc.get("contact_persons") or []):
+            key = (cp.get("name") or "").lower()
+            if key and key not in seen_cp:
+                existing_contacts.append(cp)
+                seen_cp.add(key)
+    merged["contact_persons"] = existing_contacts
+
+    # assignments
+    existing_assignments = list(merged.get("assignments") or [])
+    seen_assignments = {a.get("user_id") for a in existing_assignments}
+    for sc in secondaries:
+        for a in (sc.get("assignments") or []):
+            uid = a.get("user_id")
+            if uid and uid not in seen_assignments:
+                existing_assignments.append(a)
+                seen_assignments.add(uid)
+            elif uid and uid in seen_assignments:
+                # merge services into existing assignment
+                for ea in existing_assignments:
+                    if ea.get("user_id") == uid:
+                        ea["services"] = list(set((ea.get("services") or []) + (a.get("services") or [])))
+    merged["assignments"] = existing_assignments
+
+    # Apply manual field overrides (user chose to take value from secondary)
+    for f, v in field_overrides.items():
+        if f not in ("id", "created_by", "created_at", "_id"):
+            merged[f] = v
+
+    # Notes — concatenate if both have notes
+    primary_notes = (primary.get("notes") or "").strip()
+    secondary_notes_parts = [
+        (sc.get("notes") or "").strip()
+        for sc in secondaries
+        if (sc.get("notes") or "").strip() and (sc.get("notes") or "").strip() != primary_notes
+    ]
+    if secondary_notes_parts:
+        merged["notes"] = "\n\n---\n\n".join([primary_notes] + secondary_notes_parts) if primary_notes else "\n\n---\n\n".join(secondary_notes_parts)
+
+    merged["merged_from"] = secondary_ids
+    merged["merged_at"] = datetime.now(timezone.utc).isoformat()
+
+    # Update primary
+    merged.pop("_id", None)
+    await db.clients.update_one({"id": primary_id}, {"$set": merged})
+
+    # Migrate tasks/leads that reference secondary clients to primary
+    for sid in secondary_ids:
+        await db.tasks.update_many({"client_id": sid}, {"$set": {"client_id": primary_id}})
+        await db.leads.update_many({"converted_client_id": sid}, {"$set": {"converted_client_id": primary_id}})
+
+    # Delete secondaries
+    for sid in secondary_ids:
+        await db.clients.delete_one({"id": sid})
+
+    # Return updated primary
+    updated = await db.clients.find_one({"id": primary_id})
+    if updated:
+        updated.pop("_id", None)
+    return {"success": True, "merged_client": updated, "deleted_ids": secondary_ids}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CLIENT GROUPS — group clients under a named label
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@api_router.get("/client-groups")
+async def list_client_groups(current_user: User = Depends(get_current_user)):
+    """Return all client groups for this org (stored in client_groups collection)."""
+    groups = await db.client_groups.find({}).to_list(length=500)
+    for g in groups:
+        g.pop("_id", None)
+    return groups
+
+
+@api_router.post("/client-groups")
+async def create_client_group(payload: dict, current_user: User = Depends(get_current_user)):
+    """Create a new client group. payload: { name, description?, color? }"""
+    perms = get_user_permissions(current_user)
+    if current_user.role != "admin" and not perms.get("can_edit_clients", False):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Group name is required")
+
+    existing = await db.client_groups.find_one({"name": {"$regex": f"^{name}$", "$options": "i"}})
+    if existing:
+        raise HTTPException(status_code=409, detail="A group with this name already exists")
+
+    group = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "description": payload.get("description", ""),
+        "color": payload.get("color", "#0D3B66"),
+        "client_ids": [],
+        "created_by": current_user.id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.client_groups.insert_one(group)
+    group.pop("_id", None)
+    return group
+
+
+@api_router.put("/client-groups/{group_id}")
+async def update_client_group(group_id: str, payload: dict, current_user: User = Depends(get_current_user)):
+    """Update group name/description/color or replace client_ids list."""
+    perms = get_user_permissions(current_user)
+    if current_user.role != "admin" and not perms.get("can_edit_clients", False):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    update_fields = {}
+    for f in ("name", "description", "color", "client_ids"):
+        if f in payload:
+            update_fields[f] = payload[f]
+
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    await db.client_groups.update_one({"id": group_id}, {"$set": update_fields})
+    updated = await db.client_groups.find_one({"id": group_id})
+    if not updated:
+        raise HTTPException(status_code=404, detail="Group not found")
+    updated.pop("_id", None)
+    return updated
+
+
+@api_router.delete("/client-groups/{group_id}")
+async def delete_client_group(group_id: str, current_user: User = Depends(get_current_user)):
+    """Delete a client group (does NOT delete the clients themselves)."""
+    perms = get_user_permissions(current_user)
+    if current_user.role != "admin" and not perms.get("can_edit_clients", False):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    result = await db.client_groups.delete_one({"id": group_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Group not found")
+    return {"success": True}
+
+
+@api_router.post("/client-groups/{group_id}/members")
+async def add_clients_to_group(group_id: str, payload: dict, current_user: User = Depends(get_current_user)):
+    """Add client_ids to a group. payload: { client_ids: [str] }"""
+    perms = get_user_permissions(current_user)
+    if current_user.role != "admin" and not perms.get("can_edit_clients", False):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    ids_to_add = payload.get("client_ids", [])
+    await db.client_groups.update_one(
+        {"id": group_id},
+        {"$addToSet": {"client_ids": {"$each": ids_to_add}}}
+    )
+    updated = await db.client_groups.find_one({"id": group_id})
+    if not updated:
+        raise HTTPException(status_code=404, detail="Group not found")
+    updated.pop("_id", None)
+    return updated
+
+
+@api_router.delete("/client-groups/{group_id}/members")
+async def remove_clients_from_group(group_id: str, payload: dict, current_user: User = Depends(get_current_user)):
+    """Remove client_ids from a group. payload: { client_ids: [str] }"""
+    perms = get_user_permissions(current_user)
+    if current_user.role != "admin" and not perms.get("can_edit_clients", False):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    ids_to_remove = payload.get("client_ids", [])
+    await db.client_groups.update_one(
+        {"id": group_id},
+        {"$pull": {"client_ids": {"$in": ids_to_remove}}}
+    )
+    updated = await db.client_groups.find_one({"id": group_id})
+    if not updated:
+        raise HTTPException(status_code=404, detail="Group not found")
+    updated.pop("_id", None)
+    return updated
+
 app.include_router(api_router)
 
 # ── ADMS machine root-level routes ───────────────────────────────────────────
