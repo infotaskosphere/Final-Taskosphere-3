@@ -3460,7 +3460,6 @@ export default function Clients() {
   const [itrDialogOpen,    setItrDialogOpen]    = useState(false);
   const [editingItrClient, setEditingItrClient] = useState(null);
   const [itrBulkImportOpen, setItrBulkImportOpen] = useState(false);
-  const [itrSplitOpen, setItrSplitOpen] = useState(false);
   const [dialogOpen, setDialogOpen]     = useState(false);
   const [editingClient, setEditingClient] = useState(null);
   const [otherService, setOtherService] = useState('');
@@ -4484,9 +4483,9 @@ export default function Clients() {
               <p className="text-sm text-blue-200 mt-0.5">Central hub for all client relationships · <kbd className="px-1.5 py-0.5 rounded text-[10px] bg-white/20 font-mono">Ctrl+K</kbd> search · <kbd className="px-1.5 py-0.5 rounded text-[10px] bg-white/20 font-mono">N</kbd> new</p>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={downloadTemplate} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm"><FileText className="h-4 w-4" /> CSV Template</Button>
-            {canEditClients && <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importLoading} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl backdrop-blur-sm">{importLoading ? 'Importing…' : 'Import CSV'}</Button>}
+          <div className="flex flex-nowrap items-center gap-2">
+            <Button variant="outline" onClick={downloadTemplate} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl gap-2 backdrop-blur-sm whitespace-nowrap"><FileText className="h-4 w-4" /> CSV Template</Button>
+            {canEditClients && <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importLoading} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl backdrop-blur-sm whitespace-nowrap">{importLoading ? 'Importing…' : 'Import CSV'}</Button>}
 
             {/* ── AI Duplicate Detector ── */}
             <Button
@@ -4500,62 +4499,16 @@ export default function Clients() {
                 ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Scanning…</>
                 : <><Sparkles className="h-3.5 w-3.5" /> AI Duplicates</>}
             </Button>
-            {/* ── ITR Client split-button (+ ITR Client | ▾ Bulk Import) ── */}
+            {/* ── ITR Client Button ── */}
             {canEditClients && (
-              <div className="relative flex items-center" style={{ isolation: 'isolate' }}>
-                {/* Main action */}
-                <button
-                  onClick={() => { setEditingItrClient(null); setItrDialogOpen(true); setItrSplitOpen(false); }}
-                  className="flex items-center gap-2 h-9 pl-4 pr-3 text-sm font-semibold rounded-l-xl backdrop-blur-sm transition-all"
-                  style={{ backgroundColor: 'rgba(13,115,119,0.25)', borderWidth: '1px', borderStyle: 'solid', borderColor: 'rgba(20,184,166,0.6)', color: '#ccfbf1', borderRight: 'none' }}
-                >
-                  <FileText className="h-3.5 w-3.5" /> + ITR Client
-                </button>
-                {/* Divider + dropdown toggle */}
-                <button
-                  onClick={() => setItrSplitOpen(p => !p)}
-                  className="flex items-center justify-center h-9 w-8 rounded-r-xl backdrop-blur-sm transition-all"
-                  style={{ backgroundColor: 'rgba(13,115,119,0.35)', borderWidth: '1px', borderStyle: 'solid', borderColor: 'rgba(20,184,166,0.6)', color: '#ccfbf1', borderLeft: '1px solid rgba(20,184,166,0.3)' }}
-                >
-                  <ChevronDown className="h-3.5 w-3.5" />
-                </button>
-                {/* Dropdown */}
-                {itrSplitOpen && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setItrSplitOpen(false)} />
-                    <div className="absolute top-full right-0 mt-1.5 z-50 rounded-xl shadow-xl border overflow-hidden min-w-[180px]"
-                      style={{ background: isDark ? '#1e293b' : '#fff', borderColor: isDark ? '#334155' : '#e2e8f0' }}>
-                      <button
-                        onClick={() => { setEditingItrClient(null); setItrDialogOpen(true); setItrSplitOpen(false); }}
-                        className="w-full flex items-center gap-2.5 px-4 py-3 text-sm font-semibold text-left transition-colors"
-                        style={{ color: isDark ? '#ccfbf1' : '#0f766e' }}
-                        onMouseEnter={e => e.currentTarget.style.background = isDark ? 'rgba(13,115,119,0.2)' : '#f0fdf4'}
-                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                      >
-                        <FileText className="h-4 w-4 flex-shrink-0" />
-                        <div>
-                          <p className="text-xs font-bold">+ ITR Client</p>
-                          <p className="text-[10px] opacity-60 font-normal">Add single client</p>
-                        </div>
-                      </button>
-                      <div style={{ height: 1, background: isDark ? '#334155' : '#f1f5f9' }} />
-                      <button
-                        onClick={() => { setItrBulkImportOpen(true); setItrSplitOpen(false); }}
-                        className="w-full flex items-center gap-2.5 px-4 py-3 text-sm font-semibold text-left transition-colors"
-                        style={{ color: isDark ? '#99f6e4' : '#0f766e' }}
-                        onMouseEnter={e => e.currentTarget.style.background = isDark ? 'rgba(13,115,119,0.2)' : '#f0fdf4'}
-                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                      >
-                        <FileSpreadsheet className="h-4 w-4 flex-shrink-0" />
-                        <div>
-                          <p className="text-xs font-bold">Bulk Import Excel</p>
-                          <p className="text-[10px] opacity-60 font-normal">Import from spreadsheet</p>
-                        </div>
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
+              <Button
+                variant="outline"
+                onClick={() => { setEditingItrClient(null); setItrDialogOpen(true); }}
+                className="h-9 px-4 text-sm rounded-xl gap-2 backdrop-blur-sm font-semibold transition-all"
+                style={{ backgroundColor: 'rgba(13,115,119,0.25)', borderColor: 'rgba(20,184,166,0.6)', color: '#ccfbf1' }}
+              >
+                <FileText className="h-3.5 w-3.5" /> + ITR Client
+              </Button>
             )}
             <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
               {canEditClients && (
@@ -5904,6 +5857,7 @@ export default function Clients() {
         onSaved={() => { fetchClients(); setItrDialogOpen(false); setEditingItrClient(null); }}
         editingClient={editingItrClient}
         isDark={isDark}
+        onBulkImport={() => { setItrDialogOpen(false); setEditingItrClient(null); setItrBulkImportOpen(true); }}
       />
 
       {/* ── ITR Bulk Import Dialog ─────────────────────────────────────── */}
