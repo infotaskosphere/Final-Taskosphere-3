@@ -28,13 +28,14 @@ import {
   Copy, ExternalLink, CheckSquare, Square, MinusSquare,
   Shield, Download, UserCheck, AlertCircle, Sparkles, Loader2,
   ArrowLeftRight, RefreshCw, FileSpreadsheet, ExternalLink as ExternalLinkIcon,
-  IndianRupee, Save as SaveIcon, Globe, Settings, Clock, Send, Repeat,
+  IndianRupee, Save as SaveIcon, Globe, Settings, Clock, Send, Repeat, Link,
 } from 'lucide-react';
 import { detectClientDuplicates } from '@/lib/aiDuplicateEngine';
 import StandaloneGovtFeeDialog from '@/components/StandaloneGovtFeeDialog';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
 import ClientPortalManager from '@/components/ClientPortalManager';
 import ITRClientDialog from '@/components/ITRClientDialog';
+import ITRBulkImportDialog from '@/components/ITRBulkImportDialog';
 import DSCLinkerSection from '@/components/DSCLinkerSection';
 import { format, startOfDay, differenceInDays } from 'date-fns';
 import WhatsAppSendDialog from '@/components/ui/WhatsAppSendDialog';
@@ -3458,6 +3459,8 @@ export default function Clients() {
   // ── ITR Client state ─────────────────────────────────────────────────────
   const [itrDialogOpen,    setItrDialogOpen]    = useState(false);
   const [editingItrClient, setEditingItrClient] = useState(null);
+  const [itrBulkImportOpen, setItrBulkImportOpen] = useState(false);
+  const [itrSplitOpen, setItrSplitOpen] = useState(false);
   const [dialogOpen, setDialogOpen]     = useState(false);
   const [editingClient, setEditingClient] = useState(null);
   const [otherService, setOtherService] = useState('');
@@ -4433,6 +4436,19 @@ export default function Clients() {
           </div>
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
             <button onClick={e => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors"><MessageCircle className="h-3.5 w-3.5" /></button>
+            {/* Link Company — only shown in ITR tab */}
+            {itrTabActive && canEditClients && (
+              <button
+                onClick={e => { e.stopPropagation(); setEditingItrClient(client); setItrDialogOpen(true); setTimeout(() => {}, 50); }}
+                className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors"
+                title="Link Company"
+                style={{ color: '#0d7377' }}
+                onMouseEnter={e => e.currentTarget.style.background = 'rgba(13,115,119,0.12)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              >
+                <Link className="h-3.5 w-3.5" />
+              </button>
+            )}
             {canEditClients && <button onClick={e => { e.stopPropagation(); handleEdit(client); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-600 hover:bg-blue-50 transition-colors"><Edit className="h-3.5 w-3.5" /></button>}
             {canDeleteData && <button onClick={e => { e.stopPropagation(); handleDelete(client); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>}
           </div>
@@ -4484,16 +4500,62 @@ export default function Clients() {
                 ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Scanning…</>
                 : <><Sparkles className="h-3.5 w-3.5" /> AI Duplicates</>}
             </Button>
-            {/* ── ITR Client Button ── */}
+            {/* ── ITR Client split-button (+ ITR Client | ▾ Bulk Import) ── */}
             {canEditClients && (
-              <Button
-                variant="outline"
-                onClick={() => { setEditingItrClient(null); setItrDialogOpen(true); }}
-                className="h-9 px-4 text-sm rounded-xl gap-2 backdrop-blur-sm font-semibold transition-all"
-                style={{ backgroundColor: 'rgba(13,115,119,0.25)', borderColor: 'rgba(20,184,166,0.6)', color: '#ccfbf1' }}
-              >
-                <FileText className="h-3.5 w-3.5" /> + ITR Client
-              </Button>
+              <div className="relative flex items-center" style={{ isolation: 'isolate' }}>
+                {/* Main action */}
+                <button
+                  onClick={() => { setEditingItrClient(null); setItrDialogOpen(true); setItrSplitOpen(false); }}
+                  className="flex items-center gap-2 h-9 pl-4 pr-3 text-sm font-semibold rounded-l-xl backdrop-blur-sm transition-all"
+                  style={{ backgroundColor: 'rgba(13,115,119,0.25)', borderWidth: '1px', borderStyle: 'solid', borderColor: 'rgba(20,184,166,0.6)', color: '#ccfbf1', borderRight: 'none' }}
+                >
+                  <FileText className="h-3.5 w-3.5" /> + ITR Client
+                </button>
+                {/* Divider + dropdown toggle */}
+                <button
+                  onClick={() => setItrSplitOpen(p => !p)}
+                  className="flex items-center justify-center h-9 w-8 rounded-r-xl backdrop-blur-sm transition-all"
+                  style={{ backgroundColor: 'rgba(13,115,119,0.35)', borderWidth: '1px', borderStyle: 'solid', borderColor: 'rgba(20,184,166,0.6)', color: '#ccfbf1', borderLeft: '1px solid rgba(20,184,166,0.3)' }}
+                >
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </button>
+                {/* Dropdown */}
+                {itrSplitOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setItrSplitOpen(false)} />
+                    <div className="absolute top-full right-0 mt-1.5 z-50 rounded-xl shadow-xl border overflow-hidden min-w-[180px]"
+                      style={{ background: isDark ? '#1e293b' : '#fff', borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                      <button
+                        onClick={() => { setEditingItrClient(null); setItrDialogOpen(true); setItrSplitOpen(false); }}
+                        className="w-full flex items-center gap-2.5 px-4 py-3 text-sm font-semibold text-left transition-colors"
+                        style={{ color: isDark ? '#ccfbf1' : '#0f766e' }}
+                        onMouseEnter={e => e.currentTarget.style.background = isDark ? 'rgba(13,115,119,0.2)' : '#f0fdf4'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <FileText className="h-4 w-4 flex-shrink-0" />
+                        <div>
+                          <p className="text-xs font-bold">+ ITR Client</p>
+                          <p className="text-[10px] opacity-60 font-normal">Add single client</p>
+                        </div>
+                      </button>
+                      <div style={{ height: 1, background: isDark ? '#334155' : '#f1f5f9' }} />
+                      <button
+                        onClick={() => { setItrBulkImportOpen(true); setItrSplitOpen(false); }}
+                        className="w-full flex items-center gap-2.5 px-4 py-3 text-sm font-semibold text-left transition-colors"
+                        style={{ color: isDark ? '#99f6e4' : '#0f766e' }}
+                        onMouseEnter={e => e.currentTarget.style.background = isDark ? 'rgba(13,115,119,0.2)' : '#f0fdf4'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <FileSpreadsheet className="h-4 w-4 flex-shrink-0" />
+                        <div>
+                          <p className="text-xs font-bold">Bulk Import Excel</p>
+                          <p className="text-[10px] opacity-60 font-normal">Import from spreadsheet</p>
+                        </div>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             )}
             <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
               {canEditClients && (
@@ -5395,7 +5457,7 @@ export default function Clients() {
           style={{ background: 'linear-gradient(135deg, rgba(15,52,96,0.08), rgba(13,115,119,0.08))', borderColor: '#99f6e4' }}>
           <FileText className="h-4 w-4 flex-shrink-0" style={{ color: '#0d7377' }} />
           <p className="text-xs font-semibold" style={{ color: '#0f766e' }}>
-            ITR Clients view — showing {sortedClients.length} ITR client{sortedClients.length !== 1 ? 's' : ''} · <span className="font-normal">Linked Company column visible in list view</span>
+            ITR Clients view — showing {sortedClients.length} ITR client{sortedClients.length !== 1 ? 's' : ''} · <span className="font-normal">Linked Company column visible · <span className="opacity-75">🔗 Link icon in action column</span></span>
           </p>
           <button onClick={() => setItrTabActive(false)} className="ml-auto text-xs font-semibold text-teal-600 hover:text-teal-800 hover:underline flex-shrink-0">✕ Clear</button>
         </div>
@@ -5841,6 +5903,14 @@ export default function Clients() {
         onClose={() => { setItrDialogOpen(false); setEditingItrClient(null); }}
         onSaved={() => { fetchClients(); setItrDialogOpen(false); setEditingItrClient(null); }}
         editingClient={editingItrClient}
+        isDark={isDark}
+      />
+
+      {/* ── ITR Bulk Import Dialog ─────────────────────────────────────── */}
+      <ITRBulkImportDialog
+        open={itrBulkImportOpen}
+        onClose={() => setItrBulkImportOpen(false)}
+        onImported={() => { fetchClients(); }}
         isDark={isDark}
       />
     </div>
