@@ -399,6 +399,12 @@ async def startup_event():
         await db.tasks.create_index("created_at")
         await db.referrers.create_index("name")
         await db.clients.create_index("assigned_to")
+        # Performance: faster paginated list + merge search
+        await db.clients.create_index("company_name")
+        await db.clients.create_index("created_by")
+        await db.clients.create_index([("assignments.user_id", 1)])
+        await db.clients.create_index("status")
+        await db.clients.create_index([("company_name", 1), ("status", 1)])
         await db.dsc_register.create_index("expiry_date")
         await db.todos.create_index([("user_id", 1), ("created_at", -1)])
         await db.attendance.create_index([("user_id", 1), ("date", -1)])
@@ -7668,59 +7674,119 @@ async def get_user_assigned_clients(
     return {"user_id": user_id, "count": len(results), "clients": results}
 
 
-@api_router.get("/clients", response_model=List[Client])
-async def get_clients(current_user: User = Depends(check_module_permission("clients", "view"))):
-    permissions = get_user_permissions(current_user)
-
-    # Issue #2 + #5: Admin=all; can_view_all_clients=all; Manager=assigned+team; Staff=own only
+def _build_clients_access_query(current_user, permissions, team_ids=None):
+    """Helper: build the MongoDB access-control query for a given user."""
     if current_user.role == "admin" or permissions.get("can_view_all_clients", False):
-        query = {}
+        return {}
 
-    elif current_user.role == "manager":
-        # Manager sees own + team members' assigned clients (cross_visibility via team)
+    extra_clients = permissions.get("assigned_clients", []) or []
+    or_clauses = [
+        {"assigned_to": current_user.id},
+        {"created_by": current_user.id},
+        {"assignments.user_id": current_user.id},
+    ]
+    if extra_clients:
+        or_clauses.append({"id": {"$in": extra_clients}})
+    if current_user.role == "manager" and team_ids:
+        or_clauses.append({"assigned_to": {"$in": team_ids}})
+        or_clauses.append({"assignments.user_id": {"$in": team_ids}})
+    return {"$or": or_clauses}
+
+
+def _normalize_client_dates(client: dict) -> dict:
+    """Coerce created_at/birthday strings to proper types in-place."""
+    if isinstance(client.get("created_at"), str):
+        try:
+            client["created_at"] = datetime.fromisoformat(client["created_at"])
+        except ValueError:
+            client["created_at"] = None
+    if client.get("birthday") and isinstance(client["birthday"], str):
+        try:
+            client["birthday"] = date.fromisoformat(client["birthday"])
+        except ValueError:
+            client["birthday"] = None
+    return client
+
+
+@api_router.get("/clients", response_model=List[Client])
+async def get_clients(
+    current_user: User = Depends(check_module_permission("clients", "view")),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=500),
+):
+    """
+    Return clients with pagination so the first page renders fast.
+    Default page_size=100 keeps initial payload small; callers can pass
+    page_size=500 (or loop pages) when they need the full list (e.g. export).
+    """
+    permissions = get_user_permissions(current_user)
+    team_ids = None
+    if current_user.role == "manager":
         team_ids = await get_team_user_ids(current_user.id)
-        extra_clients = permissions.get("assigned_clients", []) or []
-        or_clauses = [
-            {"assigned_to": current_user.id},
-            {"created_by": current_user.id},
-            # Per-service multi-user assignments
-            {"assignments.user_id": current_user.id},
-        ]
-        if team_ids:
-            or_clauses.append({"assigned_to": {"$in": team_ids}})
-            or_clauses.append({"assignments.user_id": {"$in": team_ids}})
-        if extra_clients:
-            or_clauses.append({"id": {"$in": extra_clients}})
-        query = {"$or": or_clauses}
 
+    query = _build_clients_access_query(current_user, permissions, team_ids)
+
+    skip = (page - 1) * page_size
+    clients = (
+        await db.clients.find(query, {"_id": 0})
+        .sort("company_name", 1)
+        .skip(skip)
+        .limit(page_size)
+        .to_list(page_size)
+    )
+
+    return [_normalize_client_dates(c) for c in clients]
+
+
+@api_router.get("/clients/search")
+async def search_clients(
+    q: str = Query("", min_length=0),
+    limit: int = Query(30, ge=1, le=100),
+    current_user: User = Depends(check_module_permission("clients", "view")),
+):
+    """
+    Fast server-side search used by the Merge dialog (and anywhere else that
+    needs a quick typeahead).  Returns only the fields needed for display so
+    the payload stays tiny.
+    """
+    permissions = get_user_permissions(current_user)
+    team_ids = None
+    if current_user.role == "manager":
+        team_ids = await get_team_user_ids(current_user.id)
+
+    access_query = _build_clients_access_query(current_user, permissions, team_ids)
+
+    # Build text filter (regex — fast enough for ≤10 k docs)
+    search_filter: dict = {}
+    if q.strip():
+        regex = {"$regex": q.strip(), "$options": "i"}
+        search_filter = {"$or": [
+            {"company_name": regex},
+            {"phone": regex},
+            {"email": regex},
+            {"gstin": regex},
+        ]}
+
+    # Combine access control + text filter
+    if access_query and search_filter:
+        combined = {"$and": [access_query, search_filter]}
+    elif search_filter:
+        combined = search_filter
     else:
-        # Issue #3: Staff - own only (no cross_visibility)
-        extra_clients = permissions.get("assigned_clients", []) or []
-        or_clauses = [
-            {"assigned_to": current_user.id},
-            {"created_by": current_user.id},
-            # Per-service multi-user assignments
-            {"assignments.user_id": current_user.id},
-        ]
-        if extra_clients:
-            or_clauses.append({"id": {"$in": extra_clients}})
-        query = {"$or": or_clauses}
+        combined = access_query
 
-    clients = await db.clients.find(query, {"_id": 0}).to_list(1000)
+    # Minimal projection — only what the Merge dialog renders
+    projection = {
+        "_id": 0, "id": 1, "company_name": 1, "client_type": 1,
+        "phone": 1, "email": 1, "gstin": 1, "status": 1,
+    }
 
-    for client in clients:
-        if isinstance(client.get("created_at"), str):
-            try:
-                client["created_at"] = datetime.fromisoformat(client["created_at"])
-            except ValueError:
-                client["created_at"] = None
-
-        if client.get("birthday") and isinstance(client["birthday"], str):
-            try:
-                client["birthday"] = date.fromisoformat(client["birthday"])
-            except ValueError:
-                client["birthday"] = None
-
+    clients = (
+        await db.clients.find(combined, projection)
+        .sort("company_name", 1)
+        .limit(limit)
+        .to_list(limit)
+    )
     return clients
 
 @api_router.get("/clients/{client_id}", response_model=Client)
