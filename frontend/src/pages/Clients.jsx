@@ -1780,17 +1780,37 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
     { key: 'notes',       label: 'Notes' },
   ];
 
-  // Candidates for merge — all clients except the current one
-  const mergeCandidates = React.useMemo(() => {
-    if (!selectedClient) return [];
-    const q = mergeSearch.toLowerCase().trim();
-    return allClients
-      .filter(c => c.id !== selectedClient.id)
-      .filter(c => !q || (c.company_name || '').toLowerCase().includes(q) || (c.phone || '').includes(mergeSearch) || (c.email || '').toLowerCase().includes(q))
-      .slice(0, 30);
-  }, [allClients, selectedClient, mergeSearch]);
+  // Merge search: hit the server so the full 1000-client list never blocks the UI
+  const [mergeCandidates, setMergeCandidates] = React.useState([]);
+  const [mergeSearching, setMergeSearching] = React.useState(false);
+  const mergeSearchTimerRef = React.useRef(null);
 
-  const mergeTarget = React.useMemo(() => allClients.find(c => c.id === mergeTargetId), [allClients, mergeTargetId]);
+  React.useEffect(() => {
+    if (!mergeSearch.trim()) { setMergeCandidates([]); return; }
+    clearTimeout(mergeSearchTimerRef.current);
+    mergeSearchTimerRef.current = setTimeout(async () => {
+      setMergeSearching(true);
+      try {
+        const r = await api.get('/clients/search', { params: { q: mergeSearch.trim(), limit: 30 } });
+        setMergeCandidates((r.data || []).filter(c => c.id !== selectedClient?.id));
+      } catch { /* silently ignore */ }
+      finally { setMergeSearching(false); }
+    }, 250); // 250 ms debounce
+    return () => clearTimeout(mergeSearchTimerRef.current);
+  }, [mergeSearch, selectedClient]);
+
+  // mergeTarget comes from local state once user picks (fetched above)
+  const [mergeTargetFull, setMergeTargetFull] = React.useState(null);
+  React.useEffect(() => {
+    if (!mergeTargetId) { setMergeTargetFull(null); return; }
+    // Try local cache first (already fetched clients list)
+    const cached = allClients.find(c => c.id === mergeTargetId);
+    if (cached) { setMergeTargetFull(cached); return; }
+    // Fallback: fetch individually
+    api.get(`/clients/${mergeTargetId}`).then(r => setMergeTargetFull(r.data)).catch(() => {});
+  }, [mergeTargetId, allClients]);
+
+  const mergeTarget = mergeTargetFull;
 
   // Fields that differ between primary and target
   const mergeConflicts = React.useMemo(() => {
@@ -3437,7 +3457,10 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 {/* Candidate list */}
                 {mergeSearch.trim().length > 0 && (
                   <div className={`rounded-xl border overflow-hidden divide-y max-h-52 overflow-y-auto ${isDark ? 'border-slate-600 divide-slate-700' : 'border-slate-200 divide-slate-100'}`}>
-                    {mergeCandidates.length === 0 && (
+                    {mergeSearching && (
+                      <p className="text-xs text-slate-400 text-center py-4 animate-pulse">Searching…</p>
+                    )}
+                    {!mergeSearching && mergeCandidates.length === 0 && (
                       <p className="text-xs text-slate-400 text-center py-4">No clients found</p>
                     )}
                     {mergeCandidates.map(c => {
@@ -3867,11 +3890,49 @@ export default function Clients() {
   }, [dialogOpen, detailDialogOpen, bulkMsgOpen]);
 
   // ── Data fetching ────────────────────────────────────────────────────────
+  // ── Paginated client loader ─────────────────────────────────────────────
+  // Page 1 (100 clients) loads immediately so the list is interactive fast.
+  // Pages 2+ are fetched silently in the background.
+  const [allClientsFetched, setAllClientsFetched] = useState(false);
+  const PAGE_SIZE = 100;
+
   const fetchClients = useCallback(async () => {
     setClientsLoading(true);
-    try { const r = await api.get('/clients'); setClients(r.data || []); }
-    catch { toast.error('Failed to fetch clients'); }
-    finally { setClientsLoading(false); }
+    setAllClientsFetched(false);
+    try {
+      // First page — render immediately
+      const r1 = await api.get('/clients', { params: { page: 1, page_size: PAGE_SIZE } });
+      const firstPage = r1.data || [];
+      setClients(firstPage);
+      setClientsLoading(false);
+
+      if (firstPage.length < PAGE_SIZE) {
+        setAllClientsFetched(true);
+        return;
+      }
+
+      // Background: fetch remaining pages
+      let page = 2;
+      while (true) {
+        const r = await api.get('/clients', { params: { page, page_size: PAGE_SIZE } });
+        const batch = r.data || [];
+        if (batch.length > 0) {
+          setClients(prev => {
+            const existingIds = new Set(prev.map(c => c.id));
+            const fresh = batch.filter(c => !existingIds.has(c.id));
+            return fresh.length ? [...prev, ...fresh] : prev;
+          });
+        }
+        if (batch.length < PAGE_SIZE) {
+          setAllClientsFetched(true);
+          break;
+        }
+        page++;
+      }
+    } catch {
+      toast.error('Failed to fetch clients');
+      setClientsLoading(false);
+    }
   }, []);
 
   const fetchUsers = useCallback(async () => {
