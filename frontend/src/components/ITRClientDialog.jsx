@@ -275,36 +275,64 @@ export default function ITRClientDialog({
   const [companyResults, setCompanyResults] = useState([]);
   const [companySearching, setCompanySearching] = useState(false);
   const [pendingRole, setPendingRole] = useState('director');
+  const [typeFilter, setTypeFilter] = useState('all');
+  // Cache the full list so we can filter client-side without re-fetching
+  const allCompaniesCache = React.useRef([]);
   const companySearchTimer = React.useRef(null);
 
-  const searchCompanies = React.useCallback(async (query) => {
+  // Apply client-side search + type filter against the cached list
+  const applyCompanyFilter = React.useCallback((query, type, cache) => {
+    const q = (query || '').toLowerCase().trim();
+    const list = cache || allCompaniesCache.current;
+    const selfId = editingClient?.id;
+    return list.filter(c => {
+      if (c.client_type === 'proprietor') return false; // never show pure individuals
+      if (c.id === selfId) return false;
+      if (type !== 'all' && c.client_type !== type) return false;
+      if (q.length >= 1) {
+        const name = (c.company_name || '').toLowerCase();
+        const pan  = (c.pan  || '').toLowerCase();
+        const city = (c.city || '').toLowerCase();
+        if (!name.includes(q) && !pan.includes(q) && !city.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [editingClient?.id]);
+
+  const loadAllCompanies = React.useCallback(async () => {
+    if (allCompaniesCache.current.length > 0) return; // already loaded
     setCompanySearching(true);
     try {
-      const params = { page_size: 20 };
-      if (query && query.trim().length >= 1) params.search = query.trim();
-      const r = await api.get('/clients', { params });
+      const r = await api.get('/clients');
       const all = r.data?.clients || r.data?.items || r.data || [];
-      // Exclude this ITR client itself and pure individuals/proprietors
-      const exclude = ['proprietor'];
-      setCompanyResults(all.filter(c =>
-        !exclude.includes(c.client_type) &&
-        c.id !== (editingClient?.id)
-      ));
+      allCompaniesCache.current = all;
+      setCompanyResults(applyCompanyFilter('', 'all', all));
     } catch { setCompanyResults([]); }
     finally { setCompanySearching(false); }
-  }, [editingClient?.id]);
+  }, [applyCompanyFilter]);
 
   // Load initial list when section becomes active
   React.useEffect(() => {
-    if (activeSection === 'companies' && companyResults.length === 0 && !companySearch) {
-      searchCompanies('');
+    if (activeSection === 'companies') {
+      if (allCompaniesCache.current.length === 0) {
+        loadAllCompanies();
+      } else {
+        setCompanyResults(applyCompanyFilter(companySearch, typeFilter));
+      }
     }
   }, [activeSection]); // eslint-disable-line
 
   const handleCompanySearchInput = (val) => {
     setCompanySearch(val);
     clearTimeout(companySearchTimer.current);
-    companySearchTimer.current = setTimeout(() => searchCompanies(val), 300);
+    companySearchTimer.current = setTimeout(() => {
+      setCompanyResults(applyCompanyFilter(val, typeFilter));
+    }, 150);
+  };
+
+  const handleTypeFilterChange = (val) => {
+    setTypeFilter(val);
+    setCompanyResults(applyCompanyFilter(companySearch, val));
   };
 
   const addCompanyLink = (company) => {
@@ -1006,6 +1034,8 @@ export default function ITRClientDialog({
               {/* Search + Role selector */}
               <div className="space-y-3">
                 <label className={labelCls}>Search & Add Company</label>
+
+                {/* Row 1: Role selector + Search input */}
                 <div className="flex gap-2">
                   {/* Role selector */}
                   <select
@@ -1033,7 +1063,7 @@ export default function ITRClientDialog({
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                     <Input
                       className={`${fieldCls} pl-9`}
-                      placeholder="Search company by name…"
+                      placeholder="Search by name, PAN or city…"
                       value={companySearch}
                       onChange={e => handleCompanySearchInput(e.target.value)}
                     />
@@ -1043,37 +1073,124 @@ export default function ITRClientDialog({
                   </div>
                 </div>
 
+                {/* Row 2: Type filter chips */}
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { value: 'all',         label: 'All Types' },
+                    { value: 'pvt_ltd',     label: 'Pvt Ltd' },
+                    { value: 'llp',         label: 'LLP' },
+                    { value: 'partnership', label: 'Partnership' },
+                    { value: 'huf',         label: 'HUF' },
+                    { value: 'trust',       label: 'Trust' },
+                    { value: 'public_ltd',  label: 'Public Ltd' },
+                    { value: 'section_8',   label: 'Section 8' },
+                    { value: 'other',       label: 'Other' },
+                  ].map(opt => {
+                    const active = typeFilter === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => handleTypeFilterChange(opt.value)}
+                        className="px-3 py-1 rounded-full text-[11px] font-semibold border transition-all"
+                        style={{
+                          background: active ? '#1e40af' : (isDark ? '#1e293b' : '#f1f5f9'),
+                          borderColor: active ? '#1e40af' : (isDark ? '#334155' : '#e2e8f0'),
+                          color: active ? '#fff' : (isDark ? '#94a3b8' : '#64748b'),
+                        }}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Results count hint */}
+                {!companySearching && allCompaniesCache.current.length > 0 && (
+                  <p className="text-[11px] px-1" style={{ color: isDark ? '#64748b' : '#94a3b8' }}>
+                    {companyResults.length} compan{companyResults.length === 1 ? 'y' : 'ies'} found
+                    {typeFilter !== 'all' ? ` · filtered by ${typeFilter.replace(/_/g, ' ')}` : ''}
+                  </p>
+                )}
+
                 {/* Search results dropdown */}
                 {companyResults.length > 0 && (
-                  <div className="rounded-xl border overflow-hidden shadow-lg"
+                  <div className="rounded-xl border overflow-hidden shadow-lg max-h-64 overflow-y-auto"
                     style={{ borderColor: isDark ? '#334155' : '#e2e8f0', background: isDark ? '#1e293b' : '#fff' }}>
-                    {companyResults.map(company => (
-                      <button
-                        key={company.id}
-                        type="button"
-                        onClick={() => addCompanyLink(company)}
-                        className="w-full flex items-center gap-3 px-4 py-3 text-left transition-all hover:bg-blue-50 border-b last:border-b-0"
-                        style={{ borderColor: isDark ? '#2d3748' : '#f1f5f9' }}
-                      >
-                        <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-sm font-bold text-white"
-                          style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
-                          {(company.company_name || '?')[0].toUpperCase()}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{company.company_name}</p>
-                          <p className="text-[10px] text-slate-500 capitalize">{(company.client_type || 'Company').replace(/_/g, ' ')} {company.city ? `· ${company.city}` : ''}</p>
-                        </div>
-                        <span className="text-[10px] font-bold px-2 py-1 rounded-lg flex-shrink-0"
-                          style={{ background: '#eff6ff', color: '#1e40af' }}>
-                          + {pendingRole}
-                        </span>
-                      </button>
-                    ))}
+                    {companyResults.map(company => {
+                      const typeLabel = (company.client_type || 'company').replace(/_/g, ' ');
+                      const typeColors = {
+                        pvt_ltd:     { bg: '#fef3c7', color: '#92400e' },
+                        llp:         { bg: '#ede9fe', color: '#4c1d95' },
+                        partnership: { bg: '#fce7f3', color: '#831843' },
+                        huf:         { bg: '#d1fae5', color: '#065f46' },
+                        trust:       { bg: '#fee2e2', color: '#991b1b' },
+                        public_ltd:  { bg: '#dbeafe', color: '#1e3a8a' },
+                        section_8:   { bg: '#e0f2fe', color: '#075985' },
+                        other:       { bg: '#f1f5f9', color: '#475569' },
+                      };
+                      const tc = typeColors[company.client_type] || typeColors.other;
+                      const alreadyLinked = form.company_links.some(l => l.client_id === company.id);
+                      return (
+                        <button
+                          key={company.id}
+                          type="button"
+                          onClick={() => !alreadyLinked && addCompanyLink(company)}
+                          disabled={alreadyLinked}
+                          className="w-full flex items-center gap-3 px-4 py-3 text-left transition-all border-b last:border-b-0"
+                          style={{
+                            borderColor: isDark ? '#2d3748' : '#f1f5f9',
+                            background: alreadyLinked ? (isDark ? '#172033' : '#f8fafc') : 'transparent',
+                            cursor: alreadyLinked ? 'default' : 'pointer',
+                            opacity: alreadyLinked ? 0.6 : 1,
+                          }}
+                          onMouseEnter={e => { if (!alreadyLinked) e.currentTarget.style.background = isDark ? '#1e3a5f' : '#eff6ff'; }}
+                          onMouseLeave={e => { if (!alreadyLinked) e.currentTarget.style.background = 'transparent'; }}
+                        >
+                          <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-sm font-bold text-white"
+                            style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+                            {(company.company_name || '?')[0].toUpperCase()}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                              {company.company_name}
+                            </p>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded capitalize"
+                                style={{ background: tc.bg, color: tc.color }}>
+                                {typeLabel}
+                              </span>
+                              {company.city && (
+                                <span className="text-[10px] text-slate-400">· {company.city}</span>
+                              )}
+                              {company.pan && (
+                                <span className="text-[10px] text-slate-400 font-mono">· {company.pan}</span>
+                              )}
+                            </div>
+                          </div>
+                          {alreadyLinked ? (
+                            <span className="text-[10px] font-bold px-2 py-1 rounded-lg flex-shrink-0"
+                              style={{ background: '#d1fae5', color: '#065f46' }}>
+                              ✓ Linked
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold px-2 py-1 rounded-lg flex-shrink-0"
+                              style={{ background: '#eff6ff', color: '#1e40af' }}>
+                              + {pendingRole}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
 
-                {companySearch.length >= 1 && !companySearching && companyResults.length === 0 && (
-                  <p className="text-xs text-slate-400 px-1">No clients found matching "{companySearch}"</p>
+                {!companySearching && allCompaniesCache.current.length > 0 && companyResults.length === 0 && (
+                  <p className="text-xs text-slate-400 px-1">
+                    No companies found
+                    {companySearch ? ` matching "${companySearch}"` : ''}
+                    {typeFilter !== 'all' ? ` with type "${typeFilter.replace(/_/g, ' ')}"` : ''}
+                  </p>
                 )}
               </div>
 
