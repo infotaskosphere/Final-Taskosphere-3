@@ -1,1336 +1,763 @@
 /**
- * ITRClientDialog.jsx
+ * ITRBulkImportDialog.jsx
  * ─────────────────────────────────────────────────────────────────────────────
- * A dedicated ITR (Income Tax Return) client form dialog.
- * Seamlessly integrated with the existing client system — ITR clients are
- * stored as regular clients with is_itr_client=true and ITR-specific metadata.
+ * Bulk-import ITR clients from the standard Income Tax software Excel export.
  *
- * Features:
- *  - PAN-centric: PAN is the primary identifier for ITR clients
- *  - ITR type selector (ITR-1 through ITR-7)
- *  - Assessment Year tracking
- *  - Income details (salary, business, capital gains, other)
- *  - Filing status + remarks
- *  - Aadhaar number
- *  - Seamlessly saved as a regular client with ITR flag
- *  - Upload ITR Computation PDF → auto-fill all fields via backend parser
+ * SUPPORTED FORMAT  (auto-detected, row-index based):
+ *   Row 0  – Title  e.g. "List of All Assessee's Returns for A.Y. '2025-26'"
+ *   Row 1  – blank
+ *   Row 2  – Headers: SN | Code | Name | PAN | Group | Status | ...
+ *   Row 3  – Filter row  "(All)" values — SKIPPED automatically
+ *   Row 4+ – Data rows
+ *
+ * Column mapping (0-based index):
+ *   0  SN            → ignored
+ *   1  Code          → stored in itr_data.code
+ *   2  Name          → company_name / full_name
+ *   3  PAN           → pan
+ *   4  Group         → itr_data.group
+ *   5  Status        → client_type  (Individual→proprietor, HUF→huf, Firm→partnership,
+ *                                    Firm (Limited Liability)→llp, Private Ltd.→pvt_ltd,
+ *                                    AOP (TRUST)→trust)
+ *   6  Residential Status → itr_data.residential_status
+ *   7  Ward          → itr_data.ward
+ *   8  TAN           → itr_data.tan
+ *   9  AADHAAR       → itr_data.aadhaar
+ *  10  PAN-AADHAAR Linked → itr_data.pan_aadhaar_linked
+ *  11  GSTIN         → gstin
+ *  12  Father/Husband→ itr_data.father_husband
+ *  13  DOB/DOI       → birthday  (DD/MM/YYYY → YYYY-MM-DD)
+ *  14  Gender        → itr_data.gender
+ *  15  Address       → address (full), city+state parsed from last segment
+ *  16  Phone         → phone (fallback)
+ *  17  Mobile        → phone (primary)
+ *  18  EMail         → email
+ *  19  A/c No        → itr_data.bank_account_no
+ *  20  Bank Name     → itr_data.bank_name
+ *  21  IFSC          → itr_data.ifsc_code
+ *  22  No. of Bank   → ignored
+ *  23  Passport      → itr_data.passport
+ *  24  UserID        → itr_data.it_portal_user
+ *  25  Password      → itr_data.it_portal_password
+ *  26  Category      → itr_data.category
+ *  27  Remark        → notes / itr_data.remarks
+ *  28  AADHAAR Linked Mobile → ignored
+ *  29  DIN           → itr_data.din
+ *
+ * Assessment Year is extracted from the title row (Row 0) when present,
+ * defaulting to the current AY.
+ *
+ * Also handles any generic Excel/CSV with column headers mapping known fields.
  */
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import {
-  FileText, User, IndianRupee, Calendar, Shield,
-  CheckCircle2, ChevronDown, Plus, X, Loader2,
-  Upload, Sparkles, AlertCircle, Building2, Link, Search, Trash2, FileSpreadsheet
+  FileSpreadsheet, Upload, Download, CheckCircle2,
+  XCircle, Loader2, AlertCircle, ChevronDown, ChevronUp,
+  X, FileText, Eye
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import api from '@/lib/api';
 
-// ── Constants ──────────────────────────────────────────────────────────────
-const ITR_TYPES = [
-  { value: 'ITR-1', label: 'ITR-1 (Sahaj)', desc: 'Salary, one house property, other sources' },
-  { value: 'ITR-2', label: 'ITR-2', desc: 'Capital gains, multiple properties' },
-  { value: 'ITR-3', label: 'ITR-3', desc: 'Business/profession income' },
-  { value: 'ITR-4', label: 'ITR-4 (Sugam)', desc: 'Presumptive income (44AD/44ADA/44AE)' },
-  { value: 'ITR-5', label: 'ITR-5', desc: 'Firms, LLPs, AOPs' },
-  { value: 'ITR-6', label: 'ITR-6', desc: 'Companies' },
-  { value: 'ITR-7', label: 'ITR-7', desc: 'Trusts, political parties, etc.' },
-];
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────────────────
 
-const FILING_STATUS = [
-  { value: 'pending', label: 'Pending', color: '#f59e0b' },
-  { value: 'in_progress', label: 'In Progress', color: '#3b82f6' },
-  { value: 'filed', label: 'Filed', color: '#10b981' },
-  { value: 'defective', label: 'Defective', color: '#ef4444' },
-  { value: 'revised', label: 'Revised', color: '#8b5cf6' },
-];
-
-const ASSESSMENT_YEARS = Array.from({ length: 6 }, (_, i) => {
-  const y = 2024 + i;
-  return { value: `${y}-${String(y + 1).slice(2)}`, label: `AY ${y}-${String(y + 1).slice(2)}` };
-});
-
-const INCOME_HEADS = [
-  { key: 'salary', label: 'Salary / Pension' },
-  { key: 'house_property', label: 'House Property' },
-  { key: 'business', label: 'Business / Profession' },
-  { key: 'capital_gains', label: 'Capital Gains' },
-  { key: 'other_sources', label: 'Other Sources' },
-];
-
-const labelCls = 'text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block';
-const fieldCls = 'h-11 rounded-xl text-sm border-slate-200 focus:border-blue-400 focus:ring-blue-50 transition-colors';
-
-// ── Validate PAN ──────────────────────────────────────────────────────────
-const validatePAN = (pan) => /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(pan?.toUpperCase() || '');
-
-// ── Validate Aadhaar ──────────────────────────────────────────────────────
-const validateAadhaar = (v) => {
-  const digits = (v || '').replace(/\s/g, '');
-  return digits.length === 12 && /^\d+$/.test(digits);
+const STATUS_TO_CLIENT_TYPE = {
+  'individual':              'proprietor',
+  'huf':                     'huf',
+  'firm':                    'partnership',
+  'firm (limited liability)':'llp',
+  'private ltd.':            'pvt_ltd',
+  'private limited':         'pvt_ltd',
+  'pvt ltd':                 'pvt_ltd',
+  'aop (trust)':             'trust',
+  'aop':                     'trust',
+  'trust':                   'trust',
+  'proprietor':              'proprietor',
+  'partnership':             'partnership',
+  'llp':                     'llp',
 };
 
-// ── Parse result → form mapping ───────────────────────────────────────────
-function mapParsedToForm(parsed) {
-  const mapped = {};
-  if (parsed.company_name) mapped.company_name = parsed.company_name;
-  if (parsed.pan)          mapped.pan = parsed.pan.toUpperCase();
-  if (parsed.email)        mapped.email = parsed.email;
-  if (parsed.phone)        mapped.phone = parsed.phone;
-  if (parsed.address)      mapped.address = parsed.address;
-  if (parsed.city)         mapped.city = parsed.city;
-  if (parsed.state)        mapped.state = parsed.state;
-  if (parsed.date_of_birth) mapped.date_of_birth = parsed.date_of_birth;
-  // ITR fields
-  if (parsed.itr_type)         mapped.itr_type = parsed.itr_type;
-  if (parsed.assessment_year)  mapped.assessment_year = parsed.assessment_year;
-  if (parsed.filing_status)    mapped.filing_status = parsed.filing_status;
-  if (parsed.filing_date)      mapped.filing_date = parsed.filing_date;
-  if (parsed.acknowledgement_no) mapped.acknowledgement_no = parsed.acknowledgement_no;
-  if (parsed.tax_payable != null) mapped.tax_payable = String(parsed.tax_payable);
-  if (parsed.refund_amount != null) mapped.refund_amount = String(parsed.refund_amount);
-  // Income
-  if (parsed.income_salary != null)         mapped.income_salary = String(parsed.income_salary);
-  if (parsed.income_house_property != null) mapped.income_house_property = String(parsed.income_house_property);
-  if (parsed.income_business != null)       mapped.income_business = String(parsed.income_business);
-  if (parsed.income_capital_gains != null)  mapped.income_capital_gains = String(parsed.income_capital_gains);
-  if (parsed.income_other_sources != null)  mapped.income_other_sources = String(parsed.income_other_sources);
-  // Bank / extra
-  if (parsed.bank_name) mapped.bank_name = parsed.bank_name;
-  if (parsed.ifsc_code) mapped.ifsc_code = parsed.ifsc_code;
-  if (parsed.account_no) mapped.account_no = parsed.account_no;
-  // Build remarks from extra info
-  const extras = [];
-  if (parsed.ward)               extras.push(`Ward: ${parsed.ward}`);
-  if (parsed.gender)             extras.push(`Gender: ${parsed.gender.charAt(0).toUpperCase() + parsed.gender.slice(1)}`);
-  if (parsed.residential_status) extras.push(`Status: ${parsed.residential_status}`);
-  if (parsed.opted_115bac != null) extras.push(`115BAC: ${parsed.opted_115bac ? 'Yes' : 'No'}`);
-  if (parsed.total_income)       extras.push(`Total Income: ₹${Number(parsed.total_income).toLocaleString('en-IN')}`);
-  if (extras.length) mapped.remarks = extras.join(' | ');
-  return mapped;
+const INDIAN_CITIES = [
+  'SURAT','AHMEDABAD','MUMBAI','DELHI','PUNE','VADODARA','BARODA','RAJKOT',
+  'NAVSARI','BHARUCH','ANAND','GANDHINAGAR','NADIAD','VALSAD','BILIMORA',
+  'KOLKATA','CHENNAI','HYDERABAD','BENGALURU','BANGALORE','JAIPUR','LUCKNOW',
+  'INDORE','BHOPAL','NAGPUR','COIMBATORE','PATNA','CHANDIGARH','THANE',
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Parsing helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** DD/MM/YYYY or DD-MM-YYYY  →  YYYY-MM-DD (or null) */
+function parseDOB(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (!m) return null;
+  const [, dd, mm, yyyy] = m;
+  return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+}
+
+/** Clean phone: strip non-digits, drop leading 91 if 12 digits, return last 10 */
+function cleanPhone(raw) {
+  if (!raw) return null;
+  const d = String(raw).replace(/\D/g,'');
+  if (d.length === 12 && d.startsWith('91')) return d.slice(2);
+  return d.length >= 10 ? d.slice(-10) : (d || null);
+}
+
+/** Format Aadhaar as XXXX XXXX XXXX */
+function formatAadhaar(raw) {
+  if (!raw) return null;
+  const d = String(raw).replace(/\D/g,'');
+  if (d.length !== 12) return d || null;
+  return `${d.slice(0,4)} ${d.slice(4,8)} ${d.slice(8,12)}`;
+}
+
+/**
+ * Parse address string into { address, city, state, pincode }.
+ * Handles the Income Tax software format:
+ *   "STREET, AREA, CITY, Locality S.O-PINCODE"
+ *   "STREET, CITY-PINCODE"
+ */
+function parseAddress(raw) {
+  if (!raw) return { address: '', city: 'Surat', state: 'Gujarat', pincode: '' };
+  const s = String(raw).trim();
+
+  // Extract 6-digit pincode at end (preceded by - or space)
+  const pinMatch = s.match(/[- ](\d{6})\s*$/);
+  const pincode = pinMatch ? pinMatch[1] : '';
+
+  // Remove trailing "Locality S.O-PINCODE" or "CityName-PINCODE" segment
+  let clean = s.replace(/,?\s*[\w\s\.\(\)\/\\-]+[- ]\d{6}\s*$/, '').trim().replace(/,\s*$/, '').trim();
+
+  // Detect city
+  let city = '';
+  const upper = s.toUpperCase();
+  for (const c of INDIAN_CITIES) {
+    if (upper.includes(c)) { city = c.charAt(0) + c.slice(1).toLowerCase(); break; }
+  }
+  if (!city) city = 'Surat'; // default for this CA's client base
+
+  return { address: clean, city, state: 'Gujarat', pincode };
+}
+
+/**
+ * Extract Assessment Year from the title string.
+ * e.g. "List of All Assessee's Returns for A.Y. '2025-26'" → "2025-26"
+ */
+function extractAY(title) {
+  if (!title) return null;
+  const m = String(title).match(/A\.?Y\.?\s*['\u2018\u2019]?(\d{4}-\d{2,4})/i);
+  return m ? m[1] : null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-export default function ITRClientDialog({
-  open,
-  onClose,
-  onSaved,
-  editingClient = null,
-  isDark = false,
-  onBulkImport = null,
-}) {
-  const isEdit = !!editingClient;
+// Core parser: reads the standard IT-software Excel format
+// ─────────────────────────────────────────────────────────────────────────────
 
-  const [loading, setLoading] = useState(false);
-  const [activeSection, setActiveSection] = useState('basic');
+function parseITRExcel(workbook) {
+  const results = [];
+  let detectedAY = null;
 
-  // ── PDF Upload state ──────────────────────────────────────────────────
-  const [pdfUploading, setPdfUploading] = useState(false);
-  const [pdfFileName, setPdfFileName] = useState('');
-  const [autoFillFields, setAutoFillFields] = useState([]);  // fields auto-filled from PDF
-  const fileInputRef = useRef(null);
+  for (const sheetName of workbook.SheetNames) {
+    const ws = workbook.Sheets[sheetName];
+    // Use header:1 to get raw array-of-arrays
+    const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    if (rawRows.length < 3) continue;
 
-  const [form, setForm] = useState(() => getDefaultForm(editingClient));
+    // Row 0: title → extract AY
+    const titleCell = String(rawRows[0]?.[0] || '');
+    if (!detectedAY) detectedAY = extractAY(titleCell);
 
-  // Reset when dialog opens/closes
-  React.useEffect(() => {
-    if (open) {
-      setForm(getDefaultForm(editingClient));
-      setActiveSection('basic');
-      setPdfFileName('');
-      setAutoFillFields([]);
-    }
-  }, [open, editingClient]);
+    // Row 2: headers  (0-indexed)
+    const headerRow = rawRows[2] || [];
+    const isStandardFormat = headerRow.some(h =>
+      String(h).replace(/\s+/g,'').toLowerCase().includes('pan')
+    );
 
-  function getDefaultForm(client) {
-    if (client) {
-      const itr = client.itr_data || {};
-      return {
-        // Basic
-        company_name: client.company_name || '',
-        pan: client.pan || '',
-        aadhaar: itr.aadhaar || '',
-        email: client.email || '',
-        phone: client.phone || '',
-        address: client.address || '',
-        city: client.city || '',
-        state: client.state || '',
-        status: client.status || 'active',
-        date_of_birth: client.date_of_birth || '',
-        bank_name: itr.bank_name || '',
-        ifsc_code: itr.ifsc_code || '',
-        account_no: itr.account_no || '',
-        // ITR Specific
-        itr_type: itr.itr_type || 'ITR-1',
-        assessment_year: itr.assessment_year || ASSESSMENT_YEARS[0].value,
-        filing_status: itr.filing_status || 'pending',
-        filing_date: itr.filing_date || '',
-        acknowledgement_no: itr.acknowledgement_no || '',
-        refund_amount: itr.refund_amount || '',
-        tax_payable: itr.tax_payable || '',
-        remarks: itr.remarks || '',
-        // Income heads
-        income_salary: itr.income_salary || '',
-        income_house_property: itr.income_house_property || '',
-        income_business: itr.income_business || '',
-        income_capital_gains: itr.income_capital_gains || '',
-        income_other_sources: itr.income_other_sources || '',
-        // Portal access
-        it_portal_user: itr.it_portal_user || '',
-        it_portal_password: itr.it_portal_password || '',
-        // Company links
-        company_links: itr.company_links || [],
-      };
-    }
-    return {
-      company_name: '', pan: '', aadhaar: '', email: '', phone: '',
-      address: '', city: '', state: '', status: 'active',
-      date_of_birth: '', bank_name: '', ifsc_code: '', account_no: '',
-      itr_type: 'ITR-1', assessment_year: ASSESSMENT_YEARS[0].value,
-      filing_status: 'pending', filing_date: '', acknowledgement_no: '',
-      refund_amount: '', tax_payable: '', remarks: '',
-      income_salary: '', income_house_property: '', income_business: '',
-      income_capital_gains: '', income_other_sources: '',
-      it_portal_user: '', it_portal_password: '',
-      company_links: [],
-    };
-  }
+    if (isStandardFormat) {
+      // Standard IT-software format: columns by fixed index (rows 4+)
+      // Row 3 is the "(All)" filter row — skip it
+      for (let ri = 4; ri < rawRows.length; ri++) {
+        const r = rawRows[ri];
+        const name = String(r[2] || '').trim();
+        const pan  = String(r[3] || '').trim().toUpperCase();
 
-  const set = useCallback((field, value) => setForm(p => ({ ...p, [field]: value })), []);
+        // Skip blank or filter rows
+        if (!name && !pan) continue;
+        if (pan === '(ALL)' || name === '(ALL)') continue;
 
-  // ── Handle PDF Upload & Auto-fill ──────────────────────────────────────
-  const handlePdfUpload = useCallback(async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
-      toast.error('Please upload a PDF file (ITR Computation of Income)');
-      return;
-    }
-    if (file.size > 20 * 1024 * 1024) {
-      toast.error('File too large — max 20 MB');
-      return;
-    }
+        const rawStatus = String(r[5] || '').trim().toLowerCase();
+        const clientType = STATUS_TO_CLIENT_TYPE[rawStatus] || 'proprietor';
 
-    setPdfUploading(true);
-    setPdfFileName(file.name);
+        const mobile = cleanPhone(r[17]) || cleanPhone(r[16]);
+        const { address, city, state, pincode } = parseAddress(r[15]);
+        const aadhaar = formatAadhaar(r[9]);
+        const dob = parseDOB(r[13]);
 
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await api.post('/clients/parse-itr-computation-pdf', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-
-      const parsed = response.data;
-      const mapped = mapParsedToForm(parsed);
-      const filledKeys = Object.keys(mapped);
-
-      if (filledKeys.length === 0) {
-        toast.warning('Could not extract data from this PDF. Please fill in manually.');
-        return;
+        results.push({
+          // Core fields
+          company_name: name,
+          pan,
+          client_type: clientType,
+          email: String(r[18] || '').trim().toLowerCase() || null,
+          phone: mobile,
+          address,
+          city,
+          state,
+          birthday: dob,
+          gstin: String(r[11] || '').trim() || null,
+          notes: String(r[27] || '').trim() || null,
+          status: 'active',
+          services: ['Income Tax'],
+          is_itr_client: true,
+          // ITR-specific data
+          itr_data: {
+            assessment_year: detectedAY || '2025-26',
+            itr_type: 'ITR-1',         // default; user can edit after import
+            filing_status: 'pending',   // default
+            aadhaar,
+            code: String(r[1] || '').trim() || null,
+            group: String(r[4] || '').trim() || null,
+            residential_status: String(r[6] || '').trim() || null,
+            ward: String(r[7] || '').trim() || null,
+            tan: String(r[8] || '').trim() || null,
+            pan_aadhaar_linked: String(r[10] || '').trim() || null,
+            father_husband: String(r[12] || '').trim() || null,
+            gender: String(r[14] || '').trim() || null,
+            passport: String(r[23] || '').trim() || null,
+            it_portal_user: String(r[24] || '').trim() || null,
+            it_portal_password: String(r[25] || '').trim() || null,
+            category: String(r[26] || '').trim() || null,
+            remarks: String(r[27] || '').trim() || null,
+            din: String(r[29] || '').trim() || null,
+            bank_account_no: String(r[19] || '').trim() || null,
+            bank_name: String(r[20] || '').trim() || null,
+            ifsc_code: String(r[21] || '').trim() || null,
+            pincode,
+            company_links: [],
+          },
+        });
       }
-
-      // Merge into form — only fill empty fields unless it's a new form
-      setForm(prev => {
-        const next = { ...prev };
-        for (const [k, v] of Object.entries(mapped)) {
-          if (!isEdit || !prev[k]) {
-            next[k] = v;
+    } else {
+      // Generic format: map by header name
+      const colMap = {};
+      headerRow.forEach((h, i) => {
+        const key = String(h).toLowerCase().replace(/[\s\-_\/\r\n]+/g, '_').trim();
+        colMap[key] = i;
+      });
+      const g = (row, ...keys) => {
+        for (const k of keys) {
+          if (colMap[k] !== undefined) {
+            const v = String(row[colMap[k]] || '').trim();
+            if (v) return v;
           }
         }
-        return next;
-      });
-
-      setAutoFillFields(filledKeys);
-
-      const fieldCount = filledKeys.length;
-      toast.success(`✅ Auto-filled ${fieldCount} field${fieldCount > 1 ? 's' : ''} from ITR computation`);
-
-      // Switch to the section that has most data
-      if (mapped.income_salary || mapped.income_business || mapped.income_capital_gains) {
-        setActiveSection('income');
-      } else {
-        setActiveSection('basic');
-      }
-    } catch (err) {
-      const detail = err?.response?.data?.detail;
-      toast.error(detail || 'Could not parse this PDF. Please upload a valid ITR Computation PDF.');
-      setPdfFileName('');
-    } finally {
-      setPdfUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  }, [isEdit]);
-
-  // ── Validate ────────────────────────────────────────────────────────────
-  const [errors, setErrors] = useState({});
-
-  // ── Company Links (Director / Partner / Proprietor) ──────────────────────
-  const [companySearch, setCompanySearch] = useState('');
-  const [companyResults, setCompanyResults] = useState([]);
-  const [companySearching, setCompanySearching] = useState(false);
-  const [pendingRole, setPendingRole] = useState('director');
-  const [typeFilter, setTypeFilter] = useState('all');
-  // Cache the full list so we can filter client-side without re-fetching
-  const allCompaniesCache = React.useRef([]);
-  const companySearchTimer = React.useRef(null);
-
-  // Apply client-side search + type filter against the cached list
-  const applyCompanyFilter = React.useCallback((query, type, cache) => {
-    const q = (query || '').toLowerCase().trim();
-    const list = cache || allCompaniesCache.current;
-    const selfId = editingClient?.id;
-    return list.filter(c => {
-      if (c.client_type === 'proprietor') return false; // never show pure individuals
-      if (c.id === selfId) return false;
-      if (type !== 'all' && c.client_type !== type) return false;
-      if (q.length >= 1) {
-        const name = (c.company_name || '').toLowerCase();
-        const pan  = (c.pan  || '').toLowerCase();
-        const city = (c.city || '').toLowerCase();
-        if (!name.includes(q) && !pan.includes(q) && !city.includes(q)) return false;
-      }
-      return true;
-    });
-  }, [editingClient?.id]);
-
-  const loadAllCompanies = React.useCallback(async () => {
-    if (allCompaniesCache.current.length > 0) return; // already loaded
-    setCompanySearching(true);
-    try {
-      const r = await api.get('/clients');
-      const all = r.data?.clients || r.data?.items || r.data || [];
-      allCompaniesCache.current = all;
-      setCompanyResults(applyCompanyFilter('', 'all', all));
-    } catch { setCompanyResults([]); }
-    finally { setCompanySearching(false); }
-  }, [applyCompanyFilter]);
-
-  // Load initial list when section becomes active
-  React.useEffect(() => {
-    if (activeSection === 'companies') {
-      if (allCompaniesCache.current.length === 0) {
-        loadAllCompanies();
-      } else {
-        setCompanyResults(applyCompanyFilter(companySearch, typeFilter));
-      }
-    }
-  }, [activeSection]); // eslint-disable-line
-
-  const handleCompanySearchInput = (val) => {
-    setCompanySearch(val);
-    clearTimeout(companySearchTimer.current);
-    companySearchTimer.current = setTimeout(() => {
-      setCompanyResults(applyCompanyFilter(val, typeFilter));
-    }, 150);
-  };
-
-  const handleTypeFilterChange = (val) => {
-    setTypeFilter(val);
-    setCompanyResults(applyCompanyFilter(companySearch, val));
-  };
-
-  const addCompanyLink = (company) => {
-    if (form.company_links.some(l => l.client_id === company.id)) {
-      toast.info('This company is already linked');
-      return;
-    }
-    set('company_links', [...form.company_links, {
-      client_id: company.id,
-      company_name: company.company_name,
-      client_type: company.client_type || '',
-      role: pendingRole,
-    }]);
-    setCompanySearch('');
-    setCompanyResults([]);
-  };
-
-  const removeCompanyLink = (clientId) => {
-    set('company_links', form.company_links.filter(l => l.client_id !== clientId));
-  };
-
-  const updateLinkRole = (clientId, role) => {
-    set('company_links', form.company_links.map(l => l.client_id === clientId ? { ...l, role } : l));
-  };
-
-  const validate = useCallback(() => {
-    const e = {};
-    if (!form.company_name?.trim() || form.company_name.trim().length < 2) {
-      e.company_name = 'Name required (min 2 chars)';
-    }
-    if (!form.pan?.trim()) {
-      e.pan = 'PAN is required for ITR clients';
-    } else if (!validatePAN(form.pan)) {
-      e.pan = 'Invalid PAN format (e.g. ABCDE1234F)';
-    }
-    if (form.aadhaar && !validateAadhaar(form.aadhaar)) {
-      e.aadhaar = 'Aadhaar must be 12 digits';
-    }
-    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
-      e.email = 'Invalid email format';
-    }
-    setErrors(e);
-    return Object.keys(e).length === 0;
-  }, [form]);
-
-  // ── Submit ────────────────────────────────────────────────────────────
-  const handleSubmit = useCallback(async () => {
-    if (!validate()) {
-      toast.error('Please fix the highlighted errors');
-      return;
-    }
-    setLoading(true);
-
-    try {
-      // ITR-specific metadata stored in a JSON field `itr_data`
-      const itr_data = {
-        itr_type: form.itr_type,
-        assessment_year: form.assessment_year,
-        filing_status: form.filing_status,
-        filing_date: form.filing_date || null,
-        acknowledgement_no: form.acknowledgement_no || null,
-        refund_amount: form.refund_amount ? parseFloat(form.refund_amount) : null,
-        tax_payable: form.tax_payable ? parseFloat(form.tax_payable) : null,
-        remarks: form.remarks || null,
-        aadhaar: form.aadhaar || null,
-        income_salary: form.income_salary ? parseFloat(form.income_salary) : null,
-        income_house_property: form.income_house_property ? parseFloat(form.income_house_property) : null,
-        income_business: form.income_business ? parseFloat(form.income_business) : null,
-        income_capital_gains: form.income_capital_gains ? parseFloat(form.income_capital_gains) : null,
-        income_other_sources: form.income_other_sources ? parseFloat(form.income_other_sources) : null,
-        it_portal_user: form.it_portal_user || null,
-        it_portal_password: form.it_portal_password || null,
-        // Bank details
-        bank_name: form.bank_name || null,
-        ifsc_code: form.ifsc_code || null,
-        account_no: form.account_no || null,
-        // Company links
-        company_links: form.company_links || [],
+        return '';
       };
 
-      const payload = {
-        company_name: form.company_name.trim(),
-        client_type: 'proprietor', // ITR clients are always individual/proprietor
-        email: form.email?.trim() || null,
-        phone: form.phone?.replace(/\D/g, '') || null,
-        pan: form.pan?.trim().toUpperCase() || null,
-        address: form.address?.trim() || null,
-        city: form.city?.trim() || null,
-        state: form.state?.trim() || null,
-        status: form.status,
-        services: ['Income Tax'],   // always set Income Tax service
-        is_itr_client: true,
-        itr_data,
-        notes: form.remarks || null,
-        dsc_details: [],
-        assignments: [],
-        contact_persons: [],
-      };
+      for (let ri = 1; ri < rawRows.length; ri++) {
+        const r = rawRows[ri];
+        const name = g(r,'name','full_name','assessee_name');
+        const pan  = g(r,'pan','pan_number','pan_no').toUpperCase();
+        if (!name && !pan) continue;
 
-      if (isEdit) {
-        await api.put(`/clients/${editingClient.id}`, payload);
-        toast.success('ITR client updated!');
-      } else {
-        await api.post('/clients', payload);
-        toast.success('ITR client created!');
+        const rawStatus = g(r,'status','client_type').toLowerCase();
+        const clientType = STATUS_TO_CLIENT_TYPE[rawStatus] || 'proprietor';
+        const mobile = cleanPhone(g(r,'mobile','phone','mobile_number','phone_number'));
+        const { address, city, state, pincode } = parseAddress(g(r,'address'));
+
+        results.push({
+          company_name: name || pan,
+          pan: pan || null,
+          client_type: clientType,
+          email: g(r,'email','email_address').toLowerCase() || null,
+          phone: mobile,
+          address,
+          city,
+          state,
+          birthday: parseDOB(g(r,'dob','date_of_birth','dob_doi')),
+          gstin: g(r,'gstin') || null,
+          notes: g(r,'remark','remarks','notes') || null,
+          status: 'active',
+          services: ['Income Tax'],
+          is_itr_client: true,
+          itr_data: {
+            assessment_year: detectedAY || '2025-26',
+            itr_type: g(r,'itr_type','return_type') || 'ITR-1',
+            filing_status: g(r,'filing_status') || 'pending',
+            aadhaar: formatAadhaar(g(r,'aadhaar','aadhaar_number','aadhar')),
+            it_portal_user: g(r,'userid','user_id','portal_user') || null,
+            it_portal_password: g(r,'password','portal_password') || null,
+            bank_name: g(r,'bank_name','bank') || null,
+            bank_account_no: g(r,'a_c_no','account_no','ac_no') || null,
+            ifsc_code: g(r,'ifsc','ifsc_code') || null,
+            group: g(r,'group') || null,
+            ward: g(r,'ward') || null,
+            tan: g(r,'tan') || null,
+            remarks: g(r,'remark','remarks','notes') || null,
+            pincode,
+            company_links: [],
+          },
+        });
       }
-
-      onSaved?.();
-      onClose();
-    } catch (err) {
-      const detail = err?.response?.data?.detail;
-      if (Array.isArray(detail)) toast.error(detail.map(e => e.msg).join(' | '));
-      else toast.error(detail || 'Failed to save ITR client');
-    } finally {
-      setLoading(false);
     }
-  }, [form, validate, isEdit, editingClient, onSaved, onClose]);
+  }
 
-  // ── Section nav ────────────────────────────────────────────────────────
-  const SECTIONS = [
-    { key: 'basic',    label: 'Personal',      icon: <User className="h-3.5 w-3.5" /> },
-    { key: 'itr',      label: 'ITR Info',      icon: <FileText className="h-3.5 w-3.5" /> },
-    { key: 'income',   label: 'Income',        icon: <IndianRupee className="h-3.5 w-3.5" /> },
-    { key: 'portal',   label: 'IT Portal',     icon: <Shield className="h-3.5 w-3.5" /> },
-    { key: 'companies', label: 'Companies',    icon: <Building2 className="h-3.5 w-3.5" /> },
-  ];
+  return { rows: results, detectedAY };
+}
 
-  const totalIncome = [
-    form.income_salary, form.income_house_property, form.income_business,
-    form.income_capital_gains, form.income_other_sources,
-  ].reduce((s, v) => s + (parseFloat(v) || 0), 0);
+// ─────────────────────────────────────────────────────────────────────────────
+// Main component
+// ─────────────────────────────────────────────────────────────────────────────
 
-  const isAutoFilled = (field) => autoFillFields.includes(field);
+export default function ITRBulkImportDialog({ open, onClose, onImported, isDark = false }) {
+  const fileInputRef = useRef(null);
+  const [step, setStep] = useState('upload'); // upload | preview | importing | done
+  const [fileName, setFileName] = useState('');
+  const [parsedRows, setParsedRows] = useState([]);
+  const [detectedAY, setDetectedAY] = useState(null);
+  const [results, setResults] = useState({ created: 0, skipped: 0, errors: [] });
+  const [showErrors, setShowErrors] = useState(false);
+  const [progress, setProgress] = useState(0);
 
-  // ── Render ─────────────────────────────────────────────────────────────
+  // ── Reset ────────────────────────────────────────────────────────────────
+  const reset = useCallback(() => {
+    setStep('upload');
+    setFileName('');
+    setParsedRows([]);
+    setDetectedAY(null);
+    setResults({ created: 0, skipped: 0, errors: [] });
+    setShowErrors(false);
+    setProgress(0);
+  }, []);
+
+  const handleClose = useCallback(() => {
+    reset();
+    onClose?.();
+  }, [reset, onClose]);
+
+  // ── File handling ────────────────────────────────────────────────────────
+  const handleFile = useCallback((file) => {
+    if (!file) return;
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!['xlsx', 'xls', 'csv'].includes(ext)) {
+      toast.error('Please upload an .xlsx, .xls, or .csv file.');
+      return;
+    }
+    setFileName(file.name);
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, { type: 'array', cellDates: false, raw: true });
+        const { rows, detectedAY: ay } = parseITRExcel(wb);
+
+        if (rows.length === 0) {
+          toast.error('No valid client rows found. Make sure the file has Name and PAN columns.');
+          setFileName('');
+          return;
+        }
+
+        setParsedRows(rows);
+        setDetectedAY(ay);
+        setStep('preview');
+        toast.success(`Parsed ${rows.length} client${rows.length !== 1 ? 's' : ''} from ${wb.SheetNames.length} sheet${wb.SheetNames.length > 1 ? 's' : ''}.${ay ? ` AY ${ay} detected.` : ''}`);
+      } catch (err) {
+        console.error('Parse error:', err);
+        toast.error('Failed to parse file: ' + (err.message || 'Unknown error'));
+        setFileName('');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }, []);
+
+  const onInputChange = useCallback((e) => handleFile(e.target.files?.[0]), [handleFile]);
+  const onDrop = useCallback((e) => {
+    e.preventDefault();
+    handleFile(e.dataTransfer.files?.[0]);
+  }, [handleFile]);
+
+  // ── Import ────────────────────────────────────────────────────────────────
+  const runImport = useCallback(async () => {
+    setStep('importing');
+    setProgress(0);
+    let created = 0, skipped = 0;
+    const errors = [];
+
+    for (let i = 0; i < parsedRows.length; i++) {
+      setProgress(Math.round(((i + 1) / parsedRows.length) * 100));
+      const row = parsedRows[i];
+      try {
+        await api.post('/clients', row);
+        created++;
+      } catch (err) {
+        const status = err?.response?.status;
+        const detail = err?.response?.data?.detail;
+        const msg = Array.isArray(detail)
+          ? detail.map(d => d.msg).join(', ')
+          : (typeof detail === 'string' ? detail : (err.message || 'Unknown error'));
+
+        // 409 = duplicate → soft-skip
+        if (status === 409 || msg.toLowerCase().includes('duplicate') || msg.toLowerCase().includes('already exists')) {
+          skipped++;
+        } else {
+          errors.push({ row: i + 1, name: row.company_name || row.pan || `Row ${i+1}`, error: msg });
+          skipped++;
+        }
+      }
+    }
+
+    setResults({ created, skipped, errors });
+    setStep('done');
+
+    if (created > 0) {
+      toast.success(`${created} ITR client${created !== 1 ? 's' : ''} imported successfully!`);
+      onImported?.();
+    } else {
+      toast.warning('No new clients were imported.');
+    }
+  }, [parsedRows, onImported]);
+
+  // ── Styles ────────────────────────────────────────────────────────────────
+  const bg          = isDark ? '#0f172a' : '#ffffff';
+  const border      = isDark ? '#1e3a5f' : '#e2e8f0';
+  const textPrimary = isDark ? '#e2e8f0' : '#0f172a';
+  const textMuted   = isDark ? '#94a3b8' : '#64748b';
+  const cardBg      = isDark ? '#1e293b' : '#f8fafc';
+  const rowAlt      = isDark ? '#162032' : '#f1f5f9';
+
+  // Client type badge colors
+  const typeBadge = (t) => {
+    const map = {
+      proprietor: ['#dbeafe','#1d4ed8'], huf: ['#ede9fe','#7c3aed'],
+      partnership: ['#fce7f3','#be185d'], llp: ['#fef3c7','#b45309'],
+      pvt_ltd: ['#dcfce7','#15803d'], trust: ['#ffedd5','#c2410c'],
+    };
+    const [bg, color] = map[t] || ['#f1f5f9','#475569'];
+    return isDark
+      ? { background: color + '33', color }
+      : { background: bg, color };
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onClose}>
+    <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent
-        className="max-w-3xl max-h-[92vh] overflow-hidden flex flex-col rounded-2xl border shadow-2xl p-0"
-        style={{ background: isDark ? '#0f172a' : '#fff', borderColor: isDark ? '#1e3a5f' : '#e2e8f0' }}
+        className="p-0 overflow-hidden rounded-2xl shadow-2xl"
+        style={{ maxWidth: 680, width: '95vw', background: bg, borderColor: border }}
       >
-        <DialogTitle className="sr-only">ITR Client</DialogTitle>
-        <DialogDescription className="sr-only">Income Tax Return client form</DialogDescription>
+        <DialogTitle className="sr-only">Bulk Import ITR Clients</DialogTitle>
+        <DialogDescription className="sr-only">Upload Income Tax Excel to import clients</DialogDescription>
 
         {/* ── Header ── */}
         <div
-          className="flex-shrink-0 px-7 py-5 border-b"
-          style={{ background: 'linear-gradient(135deg, #0f3460 0%, #16213e 60%, #0d7377 100%)', borderColor: 'transparent' }}
+          className="flex items-center justify-between px-6 py-4"
+          style={{ background: 'linear-gradient(135deg, #0f766e 0%, #0369a1 100%)' }}
         >
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0"
-              style={{ background: 'rgba(255,255,255,0.15)' }}>
-              <FileText className="h-5 w-5 text-white" />
+            <div className="p-2 rounded-xl bg-white/20">
+              <FileSpreadsheet className="h-5 w-5 text-white" />
             </div>
-            <div className="flex-1">
-              <h2 className="text-lg font-bold text-white">
-                {isEdit ? `Edit ITR Client — ${editingClient.company_name}` : 'New ITR Client'}
-              </h2>
-              <p className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.6)' }}>
-                Income Tax Return filing client · PAN-based identity
+            <div>
+              <p className="text-white font-semibold text-sm">Bulk Import ITR Clients</p>
+              <p className="text-white/70 text-xs">
+                {step === 'preview' && parsedRows.length > 0
+                  ? `${parsedRows.length} clients ready${detectedAY ? ` · AY ${detectedAY}` : ''}`
+                  : 'Upload Income Tax software Excel export (.xlsx)'}
               </p>
             </div>
-            {/* Status toggle */}
-            <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: 'rgba(255,255,255,0.1)' }}>
-              <span className="text-[10px] font-bold text-white/60 uppercase tracking-wider">Active</span>
-              <Switch
-                checked={form.status === 'active'}
-                onCheckedChange={v => set('status', v ? 'active' : 'inactive')}
-              />
-            </div>
           </div>
-
-          {/* ── PDF Upload / Auto-fill Bar ── */}
-          <div className="mt-4 flex items-center gap-3 flex-wrap">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf"
-              className="hidden"
-              onChange={handlePdfUpload}
-            />
-            {/* Upload PDF */}
-            <button
-              type="button"
-              disabled={pdfUploading}
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all disabled:opacity-60"
-              style={{ background: 'rgba(255,255,255,0.18)', color: '#fff', border: '1.5px solid rgba(255,255,255,0.3)' }}
-            >
-              {pdfUploading
-                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Parsing PDF…</>
-                : <><Upload className="h-3.5 w-3.5" /> Upload Computation PDF</>
-              }
-            </button>
-            {/* Bulk Import Excel — opens parent's bulk import dialog */}
-            {onBulkImport && (
-              <button
-                type="button"
-                onClick={onBulkImport}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all"
-                style={{ background: 'rgba(255,255,255,0.12)', color: '#99f6e4', border: '1.5px solid rgba(20,184,166,0.45)' }}
-              >
-                <FileSpreadsheet className="h-3.5 w-3.5" /> Bulk Import Excel
-              </button>
-            )}
-            {pdfFileName && !pdfUploading && (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs" style={{ background: 'rgba(16,185,129,0.2)', color: '#6ee7b7' }}>
-                <Sparkles className="h-3 w-3" />
-                <span className="truncate max-w-[160px]">{pdfFileName}</span>
-                <span>· {autoFillFields.length} fields filled</span>
-                <button onClick={() => { setPdfFileName(''); setAutoFillFields([]); }} className="ml-1 hover:text-white">
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            )}
-            {!pdfFileName && (
-              <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.45)' }}>
-                Upload ITR Computation PDF to auto-fill all fields instantly
-              </span>
-            )}
-          </div>
-
-          {/* Section nav */}
-          <div className="flex gap-1 mt-3">
-            {SECTIONS.map(sec => (
-              <button
-                key={sec.key}
-                onClick={() => setActiveSection(sec.key)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
-                style={activeSection === sec.key
-                  ? { background: 'rgba(255,255,255,0.25)', color: '#fff' }
-                  : { background: 'transparent', color: 'rgba(255,255,255,0.55)' }
-                }
-              >
-                {sec.icon}
-                {sec.label}
-                {sec.key === 'companies' && form.company_links.length > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold"
-                    style={{ background: 'rgba(255,255,255,0.3)', color: '#fff' }}>
-                    {form.company_links.length}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
+          <button onClick={handleClose} className="p-1.5 rounded-lg hover:bg-white/20 transition-colors">
+            <X className="h-4 w-4 text-white" />
+          </button>
         </div>
 
         {/* ── Body ── */}
-        <div className="flex-1 overflow-y-auto p-7 space-y-5">
+        <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
 
-          {/* ════ PERSONAL DETAILS ════ */}
-          {activeSection === 'basic' && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                {/* Full Name */}
-                <div className="col-span-2">
-                  <label className={labelCls}>
-                    Full Name / Assessee Name <span className="text-red-400">*</span>
-                    {isAutoFilled('company_name') && <AutoFilledBadge />}
-                  </label>
-                  <Input
-                    className={`${fieldCls} ${errors.company_name ? 'border-red-400' : ''} ${isAutoFilled('company_name') ? 'border-emerald-300 bg-emerald-50' : ''}`}
-                    placeholder="As per PAN card"
-                    value={form.company_name}
-                    onChange={e => set('company_name', e.target.value)}
-                  />
-                  {errors.company_name && <p className="text-red-500 text-xs mt-1">{errors.company_name}</p>}
+          {/* ── STEP: upload ── */}
+          {step === 'upload' && (
+            <>
+              {/* Format hint */}
+              <div
+                className="rounded-xl p-3 border text-xs space-y-1"
+                style={{ background: isDark ? '#0c1a2e' : '#f0f9ff', borderColor: isDark ? '#1e3a5f' : '#bae6fd', color: isDark ? '#93c5fd' : '#0369a1' }}
+              >
+                <p className="font-semibold">✅ Supported format: Income Tax software Excel export</p>
+                <p style={{ color: textMuted }}>
+                  The file should have: Row 1 = Title (A.Y. year), Row 3 = Column headers
+                  (SN, Code, Name, PAN, Group, Status …), Row 4 = data rows.
+                  Both sheets are imported automatically.
+                </p>
+              </div>
+
+              {/* Drop zone */}
+              <div
+                className="border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all hover:border-teal-400 hover:bg-teal-50/5"
+                style={{ borderColor: isDark ? '#334155' : '#cbd5e1', background: cardBg }}
+                onClick={() => fileInputRef.current?.click()}
+                onDrop={onDrop}
+                onDragOver={e => e.preventDefault()}
+              >
+                <Upload className="h-9 w-9 mx-auto mb-3" style={{ color: textMuted }} />
+                <p className="text-sm font-semibold" style={{ color: textPrimary }}>
+                  Click to upload or drag & drop
+                </p>
+                <p className="text-xs mt-1" style={{ color: textMuted }}>
+                  .xlsx · .xls · .csv — Income Tax software export
+                </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  className="hidden"
+                  onChange={onInputChange}
+                />
+              </div>
+
+              {/* What gets imported */}
+              <div className="rounded-xl border p-3" style={{ borderColor: border, background: cardBg }}>
+                <p className="text-xs font-semibold mb-2" style={{ color: textMuted }}>
+                  Fields imported from each row:
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  {['Name','PAN','AADHAAR','Email','Mobile','Address','DOB','GSTIN',
+                    'IT Portal UserID','IT Portal Password','Bank A/c','IFSC','Ward',
+                    'Group','Status→Client Type','Remark'].map(f => (
+                    <span key={f} className="text-[10px] px-1.5 py-0.5 rounded font-medium"
+                      style={{ background: isDark ? '#0f172a' : '#e2e8f0', color: textMuted }}>
+                      {f}
+                    </span>
+                  ))}
                 </div>
+              </div>
+            </>
+          )}
 
-                {/* PAN */}
-                <div>
-                  <label className={labelCls}>
-                    PAN Number <span className="text-red-400">*</span>
-                    {isAutoFilled('pan') && <AutoFilledBadge />}
-                  </label>
-                  <Input
-                    className={`${fieldCls} font-mono uppercase ${errors.pan ? 'border-red-400' : form.pan && validatePAN(form.pan) ? 'border-emerald-400' : ''} ${isAutoFilled('pan') ? 'bg-emerald-50' : ''}`}
-                    placeholder="ABCDE1234F"
-                    maxLength={10}
-                    value={form.pan}
-                    onChange={e => set('pan', e.target.value.toUpperCase())}
-                  />
-                  {errors.pan
-                    ? <p className="text-red-500 text-xs mt-1">{errors.pan}</p>
-                    : form.pan && validatePAN(form.pan) && (
-                      <p className="text-emerald-600 text-xs mt-1 flex items-center gap-1">
-                        <CheckCircle2 className="h-3 w-3" /> Valid PAN
-                      </p>
-                    )
-                  }
+          {/* ── STEP: preview ── */}
+          {step === 'preview' && (
+            <>
+              {/* File badge */}
+              <div
+                className="flex items-center gap-2 rounded-xl p-3 border"
+                style={{ borderColor: isDark ? '#166534' : '#bbf7d0', background: isDark ? '#1e293b' : '#f0fdf4' }}
+              >
+                <FileText className="h-4 w-4 shrink-0" style={{ color: isDark ? '#4ade80' : '#16a34a' }} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold truncate" style={{ color: isDark ? '#4ade80' : '#16a34a' }}>
+                    {fileName}
+                  </p>
+                  <p className="text-[10px]" style={{ color: textMuted }}>
+                    {parsedRows.length} clients detected
+                    {detectedAY ? ` · Assessment Year: ${detectedAY}` : ''}
+                  </p>
                 </div>
+                <button
+                  onClick={reset}
+                  className="p-1 rounded hover:bg-red-500/20 transition-colors shrink-0"
+                >
+                  <X className="h-3.5 w-3.5" style={{ color: isDark ? '#f87171' : '#ef4444' }} />
+                </button>
+              </div>
 
-                {/* Aadhaar */}
-                <div>
-                  <label className={labelCls}>Aadhaar Number</label>
-                  <Input
-                    className={`${fieldCls} font-mono ${errors.aadhaar ? 'border-red-400' : form.aadhaar && validateAadhaar(form.aadhaar) ? 'border-emerald-400' : ''}`}
-                    placeholder="XXXX XXXX XXXX"
-                    maxLength={14}
-                    value={form.aadhaar}
-                    onChange={e => set('aadhaar', e.target.value.replace(/[^\d\s]/g, ''))}
-                  />
-                  {errors.aadhaar && <p className="text-red-500 text-xs mt-1">{errors.aadhaar}</p>}
+              {/* Type breakdown */}
+              {(() => {
+                const counts = {};
+                parsedRows.forEach(r => { counts[r.client_type] = (counts[r.client_type]||0)+1; });
+                const labels = { proprietor:'Individual', huf:'HUF', partnership:'Firm', llp:'LLP', pvt_ltd:'Pvt Ltd', trust:'Trust' };
+                return (
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(counts).map(([type, count]) => (
+                      <span key={type} className="text-[11px] font-semibold px-2.5 py-1 rounded-full"
+                        style={typeBadge(type)}>
+                        {labels[type] || type}: {count}
+                      </span>
+                    ))}
+                  </div>
+                );
+              })()}
+
+              {/* Preview table */}
+              <div className="rounded-xl border overflow-hidden" style={{ borderColor: border }}>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: isDark ? '#1e293b' : '#f1f5f9' }}>
+                        {['#','Name','PAN','Type','Mobile','City','IT Portal'].map(h => (
+                          <th key={h} className="text-left px-3 py-2 font-semibold uppercase text-[10px] tracking-wide whitespace-nowrap"
+                            style={{ color: textMuted, borderBottom: `1px solid ${border}` }}>
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {parsedRows.slice(0, 100).map((r, i) => (
+                        <tr key={i} style={{ background: i % 2 === 0 ? bg : rowAlt }}>
+                          <td className="px-3 py-1.5 text-[10px]" style={{ color: textMuted }}>{i+1}</td>
+                          <td className="px-3 py-1.5 font-medium max-w-[180px] truncate" style={{ color: textPrimary }} title={r.company_name}>
+                            {r.company_name}
+                          </td>
+                          <td className="px-3 py-1.5 font-mono text-[11px]" style={{ color: textMuted }}>
+                            {r.pan || '—'}
+                          </td>
+                          <td className="px-3 py-1.5">
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap"
+                              style={typeBadge(r.client_type)}>
+                              {r.client_type}
+                            </span>
+                          </td>
+                          <td className="px-3 py-1.5" style={{ color: textMuted }}>
+                            {r.phone || '—'}
+                          </td>
+                          <td className="px-3 py-1.5" style={{ color: textMuted }}>
+                            {r.city || '—'}
+                          </td>
+                          <td className="px-3 py-1.5">
+                            {r.itr_data?.it_portal_user
+                              ? <span className="text-[10px] text-emerald-600">✓</span>
+                              : <span className="text-[10px]" style={{ color: textMuted }}>—</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-
-                {/* Email */}
-                <div>
-                  <label className={labelCls}>
-                    Email Address
-                    {isAutoFilled('email') && <AutoFilledBadge />}
-                  </label>
-                  <Input
-                    className={`${fieldCls} ${errors.email ? 'border-red-400' : ''} ${isAutoFilled('email') ? 'border-emerald-300 bg-emerald-50' : ''}`}
-                    type="email"
-                    value={form.email}
-                    onChange={e => set('email', e.target.value)}
-                  />
-                  {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email}</p>}
-                </div>
-
-                {/* Phone */}
-                <div>
-                  <label className={labelCls}>
-                    Phone Number
-                    {isAutoFilled('phone') && <AutoFilledBadge />}
-                  </label>
-                  <Input
-                    className={`${fieldCls} ${isAutoFilled('phone') ? 'border-emerald-300 bg-emerald-50' : ''}`}
-                    value={form.phone}
-                    onChange={e => set('phone', e.target.value)}
-                  />
-                </div>
-
-                {/* Address */}
-                <div className="col-span-2">
-                  <label className={labelCls}>
-                    Address
-                    {isAutoFilled('address') && <AutoFilledBadge />}
-                  </label>
-                  <Input
-                    className={`${fieldCls} ${isAutoFilled('address') ? 'border-emerald-300 bg-emerald-50' : ''}`}
-                    value={form.address}
-                    onChange={e => set('address', e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className={labelCls}>
-                    City
-                    {isAutoFilled('city') && <AutoFilledBadge />}
-                  </label>
-                  <Input
-                    className={`${fieldCls} ${isAutoFilled('city') ? 'border-emerald-300 bg-emerald-50' : ''}`}
-                    value={form.city}
-                    onChange={e => set('city', e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className={labelCls}>
-                    State
-                    {isAutoFilled('state') && <AutoFilledBadge />}
-                  </label>
-                  <Input
-                    className={`${fieldCls} ${isAutoFilled('state') ? 'border-emerald-300 bg-emerald-50' : ''}`}
-                    value={form.state}
-                    onChange={e => set('state', e.target.value)}
-                  />
-                </div>
-
-                {/* Bank Details (auto-filled from PDF) */}
-                {(form.bank_name || form.ifsc_code || form.account_no) && (
-                  <div className="col-span-2 rounded-xl border p-4 space-y-3" style={{ background: isDark ? '#1e293b' : '#f0fdf4', borderColor: isDark ? '#166534' : '#bbf7d0' }}>
-                    <p className="text-xs font-bold text-emerald-700 flex items-center gap-1.5">
-                      <Sparkles className="h-3.5 w-3.5" /> Bank Details (from Computation PDF)
-                    </p>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div>
-                        <label className={labelCls}>Bank Name</label>
-                        <Input className={fieldCls} value={form.bank_name} onChange={e => set('bank_name', e.target.value)} />
-                      </div>
-                      <div>
-                        <label className={labelCls}>IFSC Code</label>
-                        <Input className={`${fieldCls} font-mono`} value={form.ifsc_code} onChange={e => set('ifsc_code', e.target.value.toUpperCase())} />
-                      </div>
-                      <div>
-                        <label className={labelCls}>Account Number</label>
-                        <Input className={`${fieldCls} font-mono`} value={form.account_no} onChange={e => set('account_no', e.target.value)} />
-                      </div>
-                    </div>
+                {parsedRows.length > 100 && (
+                  <div className="px-4 py-2 text-center text-[10px] border-t" style={{ borderColor: border, color: textMuted, background: cardBg }}>
+                    Showing first 100 of {parsedRows.length} rows
                   </div>
                 )}
               </div>
-            </div>
+            </>
           )}
 
-          {/* ════ ITR INFO ════ */}
-          {activeSection === 'itr' && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-
-                {/* ITR Type */}
-                <div className="col-span-2">
-                  <label className={labelCls}>
-                    ITR Form Type
-                    {isAutoFilled('itr_type') && <AutoFilledBadge />}
-                  </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {ITR_TYPES.slice(0, 4).map(t => (
-                      <button
-                        key={t.value}
-                        type="button"
-                        onClick={() => set('itr_type', t.value)}
-                        className="p-3 rounded-xl border text-left transition-all"
-                        style={form.itr_type === t.value
-                          ? { background: '#eff6ff', borderColor: '#3b82f6', color: '#1e40af' }
-                          : { background: isDark ? '#1e293b' : '#f8fafc', borderColor: isDark ? '#334155' : '#e2e8f0', color: isDark ? '#94a3b8' : '#64748b' }
-                        }
-                      >
-                        <p className="text-xs font-bold">{t.value}</p>
-                        <p className="text-[10px] mt-0.5 leading-tight opacity-70">{t.desc}</p>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2">
-                    {ITR_TYPES.slice(4).map(t => (
-                      <button
-                        key={t.value}
-                        type="button"
-                        onClick={() => set('itr_type', t.value)}
-                        className="p-3 rounded-xl border text-left transition-all"
-                        style={form.itr_type === t.value
-                          ? { background: '#eff6ff', borderColor: '#3b82f6', color: '#1e40af' }
-                          : { background: isDark ? '#1e293b' : '#f8fafc', borderColor: isDark ? '#334155' : '#e2e8f0', color: isDark ? '#94a3b8' : '#64748b' }
-                        }
-                      >
-                        <p className="text-xs font-bold">{t.value}</p>
-                        <p className="text-[10px] mt-0.5 leading-tight opacity-70">{t.desc}</p>
-                      </button>
-                    ))}
-                  </div>
+          {/* ── STEP: importing ── */}
+          {step === 'importing' && (
+            <div className="flex flex-col items-center justify-center py-12 gap-5">
+              <Loader2 className="h-10 w-10 animate-spin" style={{ color: '#0d9488' }} />
+              <div className="w-full max-w-xs space-y-2">
+                <div className="flex justify-between text-xs" style={{ color: textMuted }}>
+                  <span>Importing clients…</span>
+                  <span>{progress}%</span>
                 </div>
-
-                {/* Assessment Year */}
-                <div>
-                  <label className={labelCls}>
-                    Assessment Year
-                    {isAutoFilled('assessment_year') && <AutoFilledBadge />}
-                  </label>
-                  <Select value={form.assessment_year} onValueChange={v => set('assessment_year', v)}>
-                    <SelectTrigger className={`h-11 rounded-xl text-sm border-slate-200 ${isAutoFilled('assessment_year') ? 'border-emerald-300 bg-emerald-50' : ''}`}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {ASSESSMENT_YEARS.map(y => (
-                        <SelectItem key={y.value} value={y.value}>{y.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Filing Status */}
-                <div>
-                  <label className={labelCls}>
-                    Filing Status
-                    {isAutoFilled('filing_status') && <AutoFilledBadge />}
-                  </label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {FILING_STATUS.map(s => (
-                      <button
-                        key={s.value}
-                        type="button"
-                        onClick={() => set('filing_status', s.value)}
-                        className="px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all"
-                        style={form.filing_status === s.value
-                          ? { background: s.color + '20', borderColor: s.color, color: s.color }
-                          : { background: isDark ? '#1e293b' : '#f8fafc', borderColor: isDark ? '#334155' : '#e2e8f0', color: isDark ? '#94a3b8' : '#64748b' }
-                        }
-                      >
-                        {s.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Filing Date */}
-                <div>
-                  <label className={labelCls}>
-                    Filing Date
-                    {isAutoFilled('filing_date') && <AutoFilledBadge />}
-                  </label>
-                  <Input
-                    className={`${fieldCls} ${isAutoFilled('filing_date') ? 'border-emerald-300 bg-emerald-50' : ''}`}
-                    type="date"
-                    value={form.filing_date}
-                    onChange={e => set('filing_date', e.target.value)}
+                <div className="w-full rounded-full h-2" style={{ background: isDark ? '#1e293b' : '#e2e8f0' }}>
+                  <div
+                    className="h-2 rounded-full transition-all"
+                    style={{ width: `${progress}%`, background: 'linear-gradient(90deg, #0f766e, #0369a1)' }}
                   />
                 </div>
-
-                {/* Acknowledgement No */}
-                <div>
-                  <label className={labelCls}>
-                    Acknowledgement Number
-                    {isAutoFilled('acknowledgement_no') && <AutoFilledBadge />}
-                  </label>
-                  <Input
-                    className={`${fieldCls} font-mono ${isAutoFilled('acknowledgement_no') ? 'border-emerald-300 bg-emerald-50' : ''}`}
-                    placeholder="15-digit ACK no."
-                    value={form.acknowledgement_no}
-                    onChange={e => set('acknowledgement_no', e.target.value)}
-                  />
-                </div>
-
-                {/* Refund Amount */}
-                <div>
-                  <label className={labelCls}>
-                    Refund Amount (₹)
-                    {isAutoFilled('refund_amount') && <AutoFilledBadge />}
-                  </label>
-                  <Input
-                    className={`${fieldCls} ${isAutoFilled('refund_amount') ? 'border-emerald-300 bg-emerald-50' : ''}`}
-                    type="number"
-                    min="0"
-                    placeholder="0.00"
-                    value={form.refund_amount}
-                    onChange={e => set('refund_amount', e.target.value)}
-                  />
-                </div>
-
-                {/* Tax Payable */}
-                <div>
-                  <label className={labelCls}>
-                    Tax Payable / Demand (₹)
-                    {isAutoFilled('tax_payable') && <AutoFilledBadge />}
-                  </label>
-                  <Input
-                    className={`${fieldCls} ${isAutoFilled('tax_payable') ? 'border-emerald-300 bg-emerald-50' : ''}`}
-                    type="number"
-                    min="0"
-                    placeholder="0.00"
-                    value={form.tax_payable}
-                    onChange={e => set('tax_payable', e.target.value)}
-                  />
-                </div>
-
-                {/* Remarks */}
-                <div className="col-span-2">
-                  <label className={labelCls}>
-                    Remarks / Notes
-                    {isAutoFilled('remarks') && <AutoFilledBadge />}
-                  </label>
-                  <textarea
-                    className={`w-full min-h-[80px] rounded-xl border text-sm px-3.5 py-2.5 resize-none outline-none transition-all border-slate-200 focus:border-blue-400 ${isAutoFilled('remarks') ? 'border-emerald-300 bg-emerald-50' : ''}`}
-                    style={{ background: isDark ? '#1e293b' : '#f8fafc', color: isDark ? '#e2e8f0' : '#0f172a' }}
-                    placeholder="Documents collected, pending items, notes…"
-                    value={form.remarks}
-                    onChange={e => set('remarks', e.target.value)}
-                  />
-                </div>
+                <p className="text-[10px] text-center" style={{ color: textMuted }}>
+                  Do not close this window
+                </p>
               </div>
             </div>
           )}
 
-          {/* ════ INCOME DETAILS ════ */}
-          {activeSection === 'income' && (
+          {/* ── STEP: done ── */}
+          {step === 'done' && (
             <div className="space-y-4">
-              {/* Auto-fill notice */}
-              {autoFillFields.some(f => f.startsWith('income_')) && (
-                <div className="rounded-xl p-3 border flex items-start gap-2.5" style={{ background: '#f0fdf4', borderColor: '#bbf7d0' }}>
-                  <Sparkles className="h-4 w-4 text-emerald-600 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-xs font-bold text-emerald-700">Income auto-filled from ITR Computation PDF</p>
-                    <p className="text-xs text-emerald-600 mt-0.5">Green highlighted fields were extracted from your document. Review and adjust if needed.</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Total income summary */}
-              {totalIncome > 0 && (
-                <div className="rounded-2xl p-4 border" style={{ background: '#f0fdf4', borderColor: '#bbf7d0' }}>
-                  <p className="text-xs font-bold text-emerald-700 mb-1">Gross Total Income</p>
-                  <p className="text-2xl font-bold text-emerald-800">
-                    ₹{totalIncome.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                  </p>
-                </div>
-              )}
-
-              <div className="space-y-3">
-                {INCOME_HEADS.map(({ key, label }) => (
-                  <div key={key} className="flex items-center gap-4">
-                    <label className="text-sm font-medium w-44 flex-shrink-0"
-                      style={{ color: isDark ? '#94a3b8' : '#64748b' }}>
-                      {label}
-                      {isAutoFilled(`income_${key}`) && <AutoFilledBadge inline />}
-                    </label>
-                    <div className="flex-1 relative">
-                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">₹</span>
-                      <Input
-                        className={`pl-8 h-11 rounded-xl border-slate-200 focus:border-blue-400 text-sm ${isAutoFilled(`income_${key}`) ? 'border-emerald-300 bg-emerald-50' : ''}`}
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="0.00"
-                        value={form[`income_${key}`]}
-                        onChange={e => set(`income_${key}`, e.target.value)}
-                      />
-                    </div>
+              <div className="grid grid-cols-3 gap-3">
+                {[
+                  { icon: CheckCircle2, label: 'Imported',  value: results.created, light: ['#f0fdf4','#bbf7d0','#16a34a'], dark: '#4ade80' },
+                  { icon: AlertCircle,  label: 'Skipped',   value: results.skipped, light: ['#fffbeb','#fde68a','#d97706'], dark: '#fbbf24' },
+                  { icon: XCircle,      label: 'Errors',    value: results.errors.length, light: ['#fef2f2','#fecaca','#dc2626'], dark: '#f87171' },
+                ].map(({ icon: Icon, label, value, light, dark }) => (
+                  <div key={label} className="rounded-xl p-4 text-center border"
+                    style={{
+                      background: isDark ? dark + '22' : light[0],
+                      borderColor: isDark ? dark + '55' : light[1],
+                    }}
+                  >
+                    <Icon className="h-6 w-6 mx-auto mb-1" style={{ color: isDark ? dark : light[2] }} />
+                    <p className="text-2xl font-bold" style={{ color: isDark ? dark : light[2] }}>{value}</p>
+                    <p className="text-[10px] mt-0.5" style={{ color: textMuted }}>{label}</p>
                   </div>
                 ))}
               </div>
 
-              {totalIncome > 0 && (
-                <div className="rounded-xl p-3 border" style={{ background: isDark ? '#1e293b' : '#f8fafc', borderColor: isDark ? '#334155' : '#e2e8f0' }}>
-                  <div className="space-y-1">
-                    {INCOME_HEADS.map(({ key, label }) =>
-                      form[`income_${key}`] ? (
-                        <div key={key} className="flex justify-between text-xs">
-                          <span style={{ color: isDark ? '#64748b' : '#94a3b8' }}>{label}</span>
-                          <span className="font-semibold" style={{ color: isDark ? '#e2e8f0' : '#0f172a' }}>
-                            ₹{parseFloat(form[`income_${key}`]).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </span>
+              {results.errors.length > 0 && (
+                <div className="rounded-xl border overflow-hidden"
+                  style={{ borderColor: isDark ? '#991b1b' : '#fecaca' }}>
+                  <button
+                    className="w-full flex items-center justify-between px-4 py-3 text-xs font-semibold"
+                    style={{ background: isDark ? '#7f1d1d33' : '#fef2f2', color: isDark ? '#f87171' : '#dc2626' }}
+                    onClick={() => setShowErrors(v => !v)}
+                  >
+                    <span>{results.errors.length} error{results.errors.length !== 1 ? 's' : ''} — click to view</span>
+                    {showErrors ? <ChevronUp className="h-3.5 w-3.5"/> : <ChevronDown className="h-3.5 w-3.5"/>}
+                  </button>
+                  {showErrors && (
+                    <div className="max-h-40 overflow-y-auto" style={{ background: cardBg }}>
+                      {results.errors.map((e, i) => (
+                        <div key={i} className="px-4 py-2 border-t text-xs"
+                          style={{ borderColor: border }}>
+                          <span className="font-medium" style={{ color: textPrimary }}>
+                            #{e.row} {e.name}:
+                          </span>{' '}
+                          <span style={{ color: isDark ? '#f87171' : '#dc2626' }}>{e.error}</span>
                         </div>
-                      ) : null
-                    )}
-                    <div className="flex justify-between text-xs font-bold pt-2 border-t" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
-                      <span style={{ color: isDark ? '#94a3b8' : '#475569' }}>Gross Total</span>
-                      <span className="text-emerald-600">₹{totalIncome.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                      ))}
                     </div>
-                  </div>
+                  )}
                 </div>
               )}
-            </div>
-          )}
-
-          {/* ════ IT PORTAL ════ */}
-          {activeSection === 'portal' && (
-            <div className="space-y-4">
-              <div className="rounded-2xl p-4 border" style={{ background: '#fffbeb', borderColor: '#fde68a' }}>
-                <p className="text-xs font-bold text-amber-700 flex items-center gap-1.5">
-                  <Shield className="h-3.5 w-3.5" /> Credentials are stored securely in PassVault
-                </p>
-                <p className="text-xs text-amber-600 mt-1">
-                  These are auto-synced with PassVault on save. Access via the Passwords module.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className={labelCls}>IT Portal User ID (PAN / Email)</label>
-                  <Input
-                    className={`${fieldCls} font-mono`}
-                    placeholder="PAN or registered email"
-                    value={form.it_portal_user}
-                    onChange={e => set('it_portal_user', e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>IT Portal Password</label>
-                  <Input
-                    className={`${fieldCls} font-mono`}
-                    type="password"
-                    placeholder="••••••••"
-                    value={form.it_portal_password}
-                    onChange={e => set('it_portal_password', e.target.value)}
-                  />
-                </div>
-              </div>
-
-              {/* Quick info card */}
-              <div className="rounded-xl border p-4 space-y-2"
-                style={{ background: isDark ? '#1e293b' : '#f0f9ff', borderColor: isDark ? '#1e3a5f' : '#bae6fd' }}>
-                <p className="text-xs font-bold" style={{ color: isDark ? '#93c5fd' : '#0369a1' }}>
-                  Income Tax Portal — incometax.gov.in
-                </p>
-                <p className="text-xs" style={{ color: isDark ? '#60a5fa' : '#0284c7' }}>
-                  Login with PAN as User ID. New portal requires Aadhaar-linked mobile OTP for first login.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* ════ COMPANY LINKS ════ */}
-          {activeSection === 'companies' && (
-            <div className="space-y-5">
-
-              {/* Info banner */}
-              <div className="rounded-2xl p-4 border flex items-start gap-3"
-                style={{ background: isDark ? '#1e2d1e' : '#f0fdf4', borderColor: isDark ? '#166534' : '#bbf7d0' }}>
-                <Building2 className="h-4 w-4 mt-0.5 flex-shrink-0 text-emerald-600" />
-                <div>
-                  <p className="text-xs font-bold text-emerald-700">Link Individual to Companies</p>
-                  <p className="text-xs text-emerald-600 mt-0.5">
-                    Associate this individual with companies where they hold a role — Director, Partner, or Proprietor.
-                    This helps track compliance obligations across all linked entities.
-                  </p>
-                </div>
-              </div>
-
-              {/* Search + Role selector */}
-              <div className="space-y-3">
-                <label className={labelCls}>Search & Add Company</label>
-
-                {/* Row 1: Role selector + Search input */}
-                <div className="flex gap-2">
-                  {/* Role selector */}
-                  <select
-                    value={pendingRole}
-                    onChange={e => setPendingRole(e.target.value)}
-                    className="h-11 px-3 rounded-xl border text-xs font-semibold outline-none flex-shrink-0"
-                    style={{
-                      background: isDark ? '#1e293b' : '#f8fafc',
-                      borderColor: isDark ? '#334155' : '#e2e8f0',
-                      color: isDark ? '#94a3b8' : '#475569',
-                      minWidth: 130,
-                    }}
-                  >
-                    <option value="director">Director</option>
-                    <option value="partner">Partner</option>
-                    <option value="proprietor">Proprietor</option>
-                    <option value="shareholder">Shareholder</option>
-                    <option value="trustee">Trustee</option>
-                    <option value="karta">Karta (HUF)</option>
-                    <option value="member">Member</option>
-                  </select>
-
-                  {/* Search input */}
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                    <Input
-                      className={`${fieldCls} pl-9`}
-                      placeholder="Search by name, PAN or city…"
-                      value={companySearch}
-                      onChange={e => handleCompanySearchInput(e.target.value)}
-                    />
-                    {companySearching && (
-                      <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-slate-400" />
-                    )}
-                  </div>
-                </div>
-
-                {/* Row 2: Type filter chips */}
-                <div className="flex flex-wrap gap-1.5">
-                  {[
-                    { value: 'all',         label: 'All Types' },
-                    { value: 'pvt_ltd',     label: 'Pvt Ltd' },
-                    { value: 'llp',         label: 'LLP' },
-                    { value: 'partnership', label: 'Partnership' },
-                    { value: 'huf',         label: 'HUF' },
-                    { value: 'trust',       label: 'Trust' },
-                    { value: 'public_ltd',  label: 'Public Ltd' },
-                    { value: 'section_8',   label: 'Section 8' },
-                    { value: 'other',       label: 'Other' },
-                  ].map(opt => {
-                    const active = typeFilter === opt.value;
-                    return (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        onClick={() => handleTypeFilterChange(opt.value)}
-                        className="px-3 py-1 rounded-full text-[11px] font-semibold border transition-all"
-                        style={{
-                          background: active ? '#1e40af' : (isDark ? '#1e293b' : '#f1f5f9'),
-                          borderColor: active ? '#1e40af' : (isDark ? '#334155' : '#e2e8f0'),
-                          color: active ? '#fff' : (isDark ? '#94a3b8' : '#64748b'),
-                        }}
-                      >
-                        {opt.label}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Results count hint */}
-                {!companySearching && allCompaniesCache.current.length > 0 && (
-                  <p className="text-[11px] px-1" style={{ color: isDark ? '#64748b' : '#94a3b8' }}>
-                    {companyResults.length} compan{companyResults.length === 1 ? 'y' : 'ies'} found
-                    {typeFilter !== 'all' ? ` · filtered by ${typeFilter.replace(/_/g, ' ')}` : ''}
-                  </p>
-                )}
-
-                {/* Search results dropdown */}
-                {companyResults.length > 0 && (
-                  <div className="rounded-xl border overflow-hidden shadow-lg max-h-64 overflow-y-auto"
-                    style={{ borderColor: isDark ? '#334155' : '#e2e8f0', background: isDark ? '#1e293b' : '#fff' }}>
-                    {companyResults.map(company => {
-                      const typeLabel = (company.client_type || 'company').replace(/_/g, ' ');
-                      const typeColors = {
-                        pvt_ltd:     { bg: '#fef3c7', color: '#92400e' },
-                        llp:         { bg: '#ede9fe', color: '#4c1d95' },
-                        partnership: { bg: '#fce7f3', color: '#831843' },
-                        huf:         { bg: '#d1fae5', color: '#065f46' },
-                        trust:       { bg: '#fee2e2', color: '#991b1b' },
-                        public_ltd:  { bg: '#dbeafe', color: '#1e3a8a' },
-                        section_8:   { bg: '#e0f2fe', color: '#075985' },
-                        other:       { bg: '#f1f5f9', color: '#475569' },
-                      };
-                      const tc = typeColors[company.client_type] || typeColors.other;
-                      const alreadyLinked = form.company_links.some(l => l.client_id === company.id);
-                      return (
-                        <button
-                          key={company.id}
-                          type="button"
-                          onClick={() => !alreadyLinked && addCompanyLink(company)}
-                          disabled={alreadyLinked}
-                          className="w-full flex items-center gap-3 px-4 py-3 text-left transition-all border-b last:border-b-0"
-                          style={{
-                            borderColor: isDark ? '#2d3748' : '#f1f5f9',
-                            background: alreadyLinked ? (isDark ? '#172033' : '#f8fafc') : 'transparent',
-                            cursor: alreadyLinked ? 'default' : 'pointer',
-                            opacity: alreadyLinked ? 0.6 : 1,
-                          }}
-                          onMouseEnter={e => { if (!alreadyLinked) e.currentTarget.style.background = isDark ? '#1e3a5f' : '#eff6ff'; }}
-                          onMouseLeave={e => { if (!alreadyLinked) e.currentTarget.style.background = 'transparent'; }}
-                        >
-                          <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-sm font-bold text-white"
-                            style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
-                            {(company.company_name || '?')[0].toUpperCase()}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
-                              {company.company_name}
-                            </p>
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded capitalize"
-                                style={{ background: tc.bg, color: tc.color }}>
-                                {typeLabel}
-                              </span>
-                              {company.city && (
-                                <span className="text-[10px] text-slate-400">· {company.city}</span>
-                              )}
-                              {company.pan && (
-                                <span className="text-[10px] text-slate-400 font-mono">· {company.pan}</span>
-                              )}
-                            </div>
-                          </div>
-                          {alreadyLinked ? (
-                            <span className="text-[10px] font-bold px-2 py-1 rounded-lg flex-shrink-0"
-                              style={{ background: '#d1fae5', color: '#065f46' }}>
-                              ✓ Linked
-                            </span>
-                          ) : (
-                            <span className="text-[10px] font-bold px-2 py-1 rounded-lg flex-shrink-0"
-                              style={{ background: '#eff6ff', color: '#1e40af' }}>
-                              + {pendingRole}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {!companySearching && allCompaniesCache.current.length > 0 && companyResults.length === 0 && (
-                  <p className="text-xs text-slate-400 px-1">
-                    No companies found
-                    {companySearch ? ` matching "${companySearch}"` : ''}
-                    {typeFilter !== 'all' ? ` with type "${typeFilter.replace(/_/g, ' ')}"` : ''}
-                  </p>
-                )}
-              </div>
-
-              {/* Linked companies list */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className={labelCls}>
-                    Linked Companies
-                    {form.company_links.length > 0 && (
-                      <span className="ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-bold"
-                        style={{ background: '#eff6ff', color: '#1e40af' }}>
-                        {form.company_links.length}
-                      </span>
-                    )}
-                  </label>
-                </div>
-
-                {form.company_links.length === 0 ? (
-                  <div className="rounded-2xl border-2 border-dashed flex flex-col items-center justify-center py-10 gap-2"
-                    style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
-                    <Building2 className="h-8 w-8 text-slate-300" />
-                    <p className="text-sm text-slate-400">No companies linked yet</p>
-                    <p className="text-xs text-slate-400">Search above to link this individual to a company</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {form.company_links.map(link => {
-                      const roleColors = {
-                        director: { bg: '#eff6ff', text: '#1e40af', border: '#bfdbfe' },
-                        partner: { bg: '#f0fdf4', text: '#166534', border: '#bbf7d0' },
-                        proprietor: { bg: '#fff7ed', text: '#9a3412', border: '#fed7aa' },
-                        shareholder: { bg: '#fdf4ff', text: '#6b21a8', border: '#e9d5ff' },
-                        trustee: { bg: '#fefce8', text: '#713f12', border: '#fef08a' },
-                        karta: { bg: '#fff1f2', text: '#9f1239', border: '#fecdd3' },
-                        member: { bg: '#f0f9ff', text: '#075985', border: '#bae6fd' },
-                      };
-                      const rc = roleColors[link.role] || roleColors.member;
-                      return (
-                        <div key={link.client_id}
-                          className="flex items-center gap-3 p-3 rounded-xl border"
-                          style={{ background: isDark ? '#1e293b' : '#fafafa', borderColor: isDark ? '#334155' : '#e2e8f0' }}>
-                          <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 text-sm font-bold text-white"
-                            style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
-                            {(link.company_name || '?')[0].toUpperCase()}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{link.company_name}</p>
-                            <p className="text-[10px] text-slate-500 capitalize">{(link.client_type || 'Company').replace(/_/g, ' ')}</p>
-                          </div>
-                          {/* Role selector for this link */}
-                          <select
-                            value={link.role}
-                            onChange={e => updateLinkRole(link.client_id, e.target.value)}
-                            className="h-8 px-2 rounded-lg border text-xs font-bold outline-none"
-                            style={{ background: rc.bg, borderColor: rc.border, color: rc.text, minWidth: 110 }}
-                          >
-                            <option value="director">Director</option>
-                            <option value="partner">Partner</option>
-                            <option value="proprietor">Proprietor</option>
-                            <option value="shareholder">Shareholder</option>
-                            <option value="trustee">Trustee</option>
-                            <option value="karta">Karta (HUF)</option>
-                            <option value="member">Member</option>
-                          </select>
-                          <button
-                            type="button"
-                            onClick={() => removeCompanyLink(link.client_id)}
-                            className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
             </div>
           )}
         </div>
 
         {/* ── Footer ── */}
-        <div
-          className="flex-shrink-0 flex items-center justify-between gap-3 px-7 py-4 border-t"
-          style={{ borderColor: isDark ? '#1e2d3d' : '#f1f5f9', background: isDark ? '#0a1220' : '#fff' }}
-        >
-          <Button type="button" variant="ghost" onClick={onClose}
-            className="h-10 px-4 text-sm rounded-xl"
-            style={{ color: isDark ? '#64748b' : '#94a3b8' }}>
-            Cancel
-          </Button>
+        <div className="flex items-center justify-between px-5 py-4 border-t"
+          style={{ borderColor: border, background: cardBg }}>
 
-          {/* Section nav shortcuts */}
-          <div className="flex gap-1">
-            {SECTIONS.map(sec => (
-              <button key={sec.key} onClick={() => setActiveSection(sec.key)}
-                className="w-2 h-2 rounded-full transition-all"
-                style={{ background: activeSection === sec.key ? '#3b82f6' : (isDark ? '#334155' : '#e2e8f0') }} />
-            ))}
-          </div>
-
-          <div className="flex items-center gap-2">
-            {activeSection !== 'companies' && (
-              <Button type="button"
-                onClick={() => {
-                  const idx = SECTIONS.findIndex(s => s.key === activeSection);
-                  if (idx < SECTIONS.length - 1) setActiveSection(SECTIONS[idx + 1].key);
-                }}
-                variant="outline"
-                className="h-10 px-4 text-sm rounded-xl border-slate-200">
-                Next →
+          {step === 'upload' && (
+            <>
+              <Button variant="ghost" size="sm" onClick={handleClose} style={{ color: textMuted }}>
+                Cancel
               </Button>
-            )}
-            <button
-              disabled={loading}
-              onClick={handleSubmit}
-              className="flex items-center gap-2 h-10 px-6 rounded-xl text-white text-sm font-bold transition-all disabled:opacity-50"
-              style={{ background: loading ? '#94a3b8' : 'linear-gradient(135deg, #0f3460, #0d7377)' }}
-            >
-              {loading
-                ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
-                : <><CheckCircle2 className="h-4 w-4" /> {isEdit ? 'Update ITR Client' : 'Save ITR Client'}</>
-              }
-            </button>
-          </div>
+              <p className="text-[10px]" style={{ color: textMuted }}>Both sheets imported automatically</p>
+            </>
+          )}
+
+          {step === 'preview' && (
+            <>
+              <Button variant="ghost" size="sm" onClick={reset} style={{ color: textMuted }}>
+                ← Change File
+              </Button>
+              <Button size="sm" onClick={runImport} className="gap-2"
+                style={{ background: 'linear-gradient(135deg, #0f766e, #0369a1)', color: '#fff', border: 'none' }}>
+                <Upload className="h-3.5 w-3.5" />
+                Import {parsedRows.length} Client{parsedRows.length !== 1 ? 's' : ''}
+              </Button>
+            </>
+          )}
+
+          {step === 'importing' && (
+            <div className="w-full text-center text-xs" style={{ color: textMuted }}>
+              Importing {parsedRows.length} clients…
+            </div>
+          )}
+
+          {step === 'done' && (
+            <>
+              <Button variant="ghost" size="sm" onClick={reset} style={{ color: textMuted }}>
+                Import Another File
+              </Button>
+              <Button size="sm" onClick={handleClose}
+                style={{ background: 'linear-gradient(135deg, #0f766e, #0369a1)', color: '#fff', border: 'none' }}>
+                Done
+              </Button>
+            </>
+          )}
         </div>
       </DialogContent>
     </Dialog>
-  );
-}
-
-// ── Small helper badge for auto-filled fields ──────────────────────────────
-function AutoFilledBadge({ inline = false }) {
-  return (
-    <span
-      className={`inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${inline ? 'ml-1.5' : 'ml-2'}`}
-      style={{ background: '#d1fae5', color: '#065f46' }}
-    >
-      <Sparkles className="h-2.5 w-2.5" /> AUTO
-    </span>
   );
 }
