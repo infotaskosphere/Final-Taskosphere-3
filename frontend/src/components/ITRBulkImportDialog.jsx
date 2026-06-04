@@ -157,83 +157,138 @@ export default function ITRBulkImportDialog({ open, onClose, onImported, isDark 
     const ws = wb.Sheets[sheetName];
     if (!ws) return;
 
-    // Convert to array of arrays
+    // Convert to array of arrays — keep raw=false so dates are strings
     const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
     if (aoa.length < 2) { toast.error('Sheet has no data rows'); return; }
 
-    // Find the header row: look for a row containing "PAN" or "Name"
-    let headerRowIdx = 0;
-    for (let i = 0; i < Math.min(10, aoa.length); i++) {
-      const row = aoa[i].map(c => String(c || '').toLowerCase());
-      if (row.some(c => c.includes('pan') || c === 'name' || c.includes('assessee'))) {
-        headerRowIdx = i;
-        break;
+    // ── Step 1: Find the TRUE header row ──────────────────────────────────
+    // Score each row: more recognised field names = better header row candidate.
+    // Scan up to row 15 to handle title/subtitle/blank rows at the top.
+    const allAliases = COLUMN_MAP_RULES.flatMap(([, aliases]) => aliases);
+
+    let bestHeaderIdx = 0;
+    let bestScore = -1;
+
+    for (let i = 0; i < Math.min(15, aoa.length); i++) {
+      const row = aoa[i];
+      if (!row.some(c => String(c || '').trim())) continue; // skip blank rows
+
+      let score = 0;
+      row.forEach(cell => {
+        const norm = String(cell || '').toLowerCase().replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+        if (allAliases.some(a => norm === a || norm.includes(a) || a.includes(norm))) score++;
+        // Bonus: explicit "PAN" exact match is a very strong signal
+        if (norm === 'pan') score += 5;
+        if (norm === 'name' || norm.includes('assessee')) score += 3;
+      });
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestHeaderIdx = i;
       }
     }
 
-    const headerRow = aoa[headerRowIdx].map(h => String(h || '').replace(/[\r\n]+/g, ' ').trim());
-    const dataRows = aoa.slice(headerRowIdx + 1).filter(row => row.some(c => String(c || '').trim()));
+    const headerRow = aoa[bestHeaderIdx].map(h =>
+      String(h || '').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()
+    );
 
+    // ── Step 2: Build column mapping ──────────────────────────────────────
     const mapping = detectColumns(headerRow);
+
+    // ── Step 3: Collect data rows (everything after the header) ──────────
+    const allDataRows = aoa.slice(bestHeaderIdx + 1);
+
+    // ── Step 4: Determine which rows are junk ─────────────────────────────
+    // A row is junk / meta if:
+    //   a) It is entirely empty
+    //   b) The PAN cell or Name cell is a filter placeholder like (All), (All), empty
+    //   c) Every non-empty cell value is the same placeholder string (e.g. all "(All)")
+    //   d) The name column looks like a column header repeated (e.g. "Name", "PAN")
+    const panIdx  = mapping['pan'];
+    const nameIdx = mapping['company_name'];
+
+    const isJunkRow = (row) => {
+      // Blank row
+      if (!row.some(c => String(c || '').trim())) return true;
+
+      const panVal  = panIdx  !== undefined ? String(row[panIdx]  || '').trim() : '';
+      const nameVal = nameIdx !== undefined ? String(row[nameIdx] || '').trim() : '';
+
+      // Filter / placeholder rows: cells wrapped in parens like (All), (All)
+      if (nameVal.startsWith('(') && nameVal.endsWith(')')) return true;
+      if (panVal.startsWith('(')  && panVal.endsWith(')'))  return true;
+
+      // Row where all non-empty values are the same placeholder
+      const nonEmpty = row.filter(c => String(c || '').trim());
+      if (nonEmpty.length > 0 && nonEmpty.every(c => String(c).trim() === nonEmpty[0])) {
+        if (String(nonEmpty[0]).startsWith('(')) return true;
+      }
+
+      // Repeated header row (PAN cell = "PAN", name cell = "Name" etc.)
+      if (panVal.toLowerCase() === 'pan' && nameVal.toLowerCase() === 'name') return true;
+
+      // Row where Name is numeric only (pure serial number row)
+      if (nameVal && /^\d+$/.test(nameVal) && !panVal) return true;
+
+      return false;
+    };
+
+    const dataRows = allDataRows.filter(row => !isJunkRow(row));
+
     setHeaders(headerRow);
     setColMapping(mapping);
     setRawRows(dataRows);
 
-    // Map + validate rows
+    // ── Step 5: Map + validate rows ───────────────────────────────────────
     const mapped = dataRows.map((row, i) => {
       const get = (field) => {
         const idx = mapping[field];
         return idx !== undefined ? String(row[idx] || '').trim() : '';
       };
 
-      const pan = cleanPAN(get('pan'));
+      const pan  = cleanPAN(get('pan'));
       const name = get('company_name');
       const statusRaw = get('status_raw');
-      const clientTypeRaw = get('status_raw'); // same column often has Individual/Firm/HUF
 
       const errors = [];
       if (!name) errors.push('Name missing');
-      if (!pan) errors.push('PAN missing');
+      if (!pan)  errors.push('PAN missing');
       else if (!VALID_PAN.test(pan)) errors.push(`Invalid PAN: ${pan}`);
 
-      // Skip filter / totals rows
-      const isMetaRow = name === '(All)' || name === '' || (name.startsWith('(') && name.endsWith(')'));
-
       return {
-        _rowNum: headerRowIdx + 2 + i,
-        _valid: errors.length === 0 && !isMetaRow,
+        _rowNum: bestHeaderIdx + 2 + i,
+        _valid:  errors.length === 0,
         _errors: errors,
-        _skip: isMetaRow,
         company_name: name,
         pan,
-        email: get('email'),
-        phone: (get('phone') || '').replace(/\D/g, '').slice(-10) || '',
-        address: get('address'),
-        city: get('city'),
-        state: get('state'),
+        email:    get('email'),
+        phone:    (get('phone') || '').replace(/\D/g, '').slice(-10) || '',
+        address:  get('address'),
+        city:     get('city'),
+        state:    get('state'),
         date_of_birth: parseDate(get('date_of_birth')),
-        aadhaar: (get('aadhaar') || '').replace(/\s/g, ''),
-        bank_name: get('bank_name'),
-        ifsc_code: (get('ifsc_code') || '').toUpperCase(),
-        account_no: get('account_no'),
-        it_portal_user: get('it_portal_user') || pan,
+        aadhaar:  (get('aadhaar') || '').replace(/\s/g, ''),
+        bank_name:   get('bank_name'),
+        ifsc_code:   (get('ifsc_code') || '').toUpperCase(),
+        account_no:  get('account_no'),
+        it_portal_user:     get('it_portal_user') || pan,
         it_portal_password: get('it_portal_password'),
         gender: get('gender'),
-        ward: get('ward'),
+        ward:   get('ward'),
         remarks: [
-          get('group') ? `Group: ${get('group')}` : '',
-          get('ward') ? `Ward: ${get('ward')}` : '',
-          get('remarks') || '',
-          get('father_name') ? `Father/Husband: ${get('father_name')}` : '',
+          get('group')              ? `Group: ${get('group')}` : '',
+          get('ward')               ? `Ward: ${get('ward')}` : '',
+          get('remarks')            || '',
+          get('father_name')        ? `Father/Husband: ${get('father_name')}` : '',
           get('residential_status') ? `Residential Status: ${get('residential_status')}` : '',
         ].filter(Boolean).join(' | '),
-        status: mapStatusValue(statusRaw),
-        client_type: mapClientType(clientTypeRaw),
-        gstin: get('gstin'),
-        tan: get('tan'),
-        din: get('din'),
+        status:      mapStatusValue(statusRaw),
+        client_type: mapClientType(statusRaw),
+        gstin:   get('gstin'),
+        tan:     get('tan'),
+        din:     get('din'),
       };
-    }).filter(r => !r._skip);
+    });
 
     setMappedRows(mapped);
     setStep('preview');
