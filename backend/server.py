@@ -7550,9 +7550,13 @@ async def create_client(payload: dict, current_user: User = Depends(check_module
         await db.clients.insert_one(doc)
         return client
     except ValidationError as ve:
+        logger.error(
+            f"create_client ValidationError for '{payload.get('company_name')}': {ve.errors()}",
+            exc_info=True,
+        )
         raise HTTPException(status_code=422, detail=ve.errors())
     except Exception as e:
-        logger.error(f"create_client error: {e}", exc_info=True)
+        logger.error(f"create_client error for '{payload.get('company_name')}': {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
 
 _DEPT_SERVICE_MAP: Dict[str, List[str]] = {
