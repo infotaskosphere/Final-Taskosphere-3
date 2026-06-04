@@ -29,10 +29,13 @@ import {
   Shield, Download, UserCheck, AlertCircle, Sparkles, Loader2,
   ArrowLeftRight, RefreshCw, FileSpreadsheet, ExternalLink as ExternalLinkIcon,
   IndianRupee, Save as SaveIcon, Globe, Settings, Clock, Send, Repeat, Link,
+  Merge, Layers,
 } from 'lucide-react';
 import { detectClientDuplicates } from '@/lib/aiDuplicateEngine';
 import StandaloneGovtFeeDialog from '@/components/StandaloneGovtFeeDialog';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
+import MergeClientsDialog from '@/components/ui/MergeClientsDialog';
+import ClientGroupsPanel from '@/components/ClientGroupsPanel';
 import ClientPortalManager from '@/components/ClientPortalManager';
 import ITRClientDialog from '@/components/ITRClientDialog';
 import ITRBulkImportDialog from '@/components/ITRBulkImportDialog';
@@ -3456,6 +3459,13 @@ export default function Clients() {
   const [showDupDialog,    setShowDupDialog]    = useState(false);
   const [dupGroups,        setDupGroups]        = useState([]);
   const [detectingDups,    setDetectingDups]    = useState(false);
+  // ── Merge Clients state ──────────────────────────────────────────────────
+  const [showMergeDialog,  setShowMergeDialog]  = useState(false);
+  const [mergeDupGroups,   setMergeDupGroups]   = useState([]);
+  // ── Client Groups state ──────────────────────────────────────────────────
+  const [showGroupsPanel,  setShowGroupsPanel]  = useState(false);
+  const [activeGroupId,    setActiveGroupId]    = useState(null);
+  const [clientGroupsData, setClientGroupsData] = useState([]);
   // ── ITR Client state ─────────────────────────────────────────────────────
   const [itrDialogOpen,    setItrDialogOpen]    = useState(false);
   const [editingItrClient, setEditingItrClient] = useState(null);
@@ -3643,6 +3653,12 @@ export default function Clients() {
     // ITR tab: show only ITR clients
     if (itrTabActive && !c?.is_itr_client) return false;
 
+    // Group filter
+    if (activeGroupId) {
+      const grp = clientGroupsData.find(g => g.id === activeGroupId);
+      if (!grp || !(grp.client_ids || []).includes(c.id)) return false;
+    }
+
     const q = searchTerm.toLowerCase();
     if (q) {
       const nameMatch = (c?.company_name || '').toLowerCase().includes(q);
@@ -3665,7 +3681,7 @@ export default function Clients() {
       if (!matched) return false;
     }
     return true;
-  }), [clients, searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter, referredByFilter, itrTabActive]);
+  }), [clients, searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter, referredByFilter, itrTabActive, activeGroupId, clientGroupsData]);
 
   const sortedClients = useMemo(() => {
     const arr = [...filteredClients];
@@ -3678,7 +3694,7 @@ export default function Clients() {
     });
   }, [filteredClients, sortOrder]);
 
-  useEffect(() => { setBoardPage(1); setListPage(1); }, [searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter, referredByFilter, sortOrder, clients, itrTabActive]);
+  useEffect(() => { setBoardPage(1); setListPage(1); }, [searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter, referredByFilter, sortOrder, clients, itrTabActive, activeGroupId]);
 
   // ── Stats ────────────────────────────────────────────────────────────────
   const stats = useMemo(() => {
@@ -3752,6 +3768,44 @@ export default function Clients() {
       }
     }, 60);
   }, [clients, detectingDups]);
+
+  // ── Merge Duplicates ──────────────────────────────────────────────────────
+  const handleOpenMerge = useCallback(() => {
+    if (detectingDups) return;
+    setDetectingDups(true);
+    setTimeout(() => {
+      try {
+        const groups = detectClientDuplicates(clients);
+        if (!groups.length) {
+          toast.success(`Scanned ${clients.length} clients — no duplicates found ✓`);
+        } else {
+          setMergeDupGroups(groups);
+          setShowMergeDialog(true);
+        }
+      } catch (e) {
+        toast.error('Duplicate scan failed.');
+      } finally {
+        setDetectingDups(false);
+      }
+    }, 60);
+  }, [clients, detectingDups]);
+
+  const handleMergeClients = useCallback(async (primaryId, secondaryIds, fieldOverrides) => {
+    await api.post('/clients/merge', { primary_id: primaryId, secondary_ids: secondaryIds, field_overrides: fieldOverrides });
+    await fetchClients();
+  }, [fetchClients]);
+
+  // ── Client Groups ─────────────────────────────────────────────────────────
+  const fetchClientGroups = useCallback(async () => {
+    try {
+      const r = await api.get('/client-groups');
+      setClientGroupsData(r.data || []);
+    } catch (e) {
+      // silent — groups are optional
+    }
+  }, []);
+
+  useEffect(() => { fetchClientGroups(); }, [fetchClientGroups]);
 
   // ── Export filtered list ──────────────────────────────────────────────────
   const handleExportList = useCallback(() => {
@@ -5353,6 +5407,44 @@ export default function Clients() {
               {clients.filter(c => c.is_itr_client).length}
             </span>
           </button>
+          {/* Groups tab */}
+          <div className={`w-px h-6 flex-shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
+          <button
+            onClick={() => { setShowGroupsPanel(true); fetchClientGroups(); }}
+            className={`flex items-center gap-1.5 h-9 px-3 rounded-xl border text-xs font-semibold whitespace-nowrap flex-shrink-0 transition-all ${
+              activeGroupId
+                ? 'text-white border-transparent shadow-sm'
+                : isDark ? 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600' : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700'
+            }`}
+            style={activeGroupId ? { background: 'linear-gradient(135deg, #4338CA, #7C3AED)' } : {}}
+          >
+            <Layers className="h-3.5 w-3.5 flex-shrink-0" />
+            <span>Groups</span>
+            {clientGroupsData.length > 0 && (
+              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                activeGroupId ? 'bg-white/20 text-white' : isDark ? 'bg-slate-600 text-slate-300' : 'bg-indigo-100 text-indigo-700'
+              }`}>
+                {clientGroupsData.length}
+              </span>
+            )}
+          </button>
+          {/* Merge duplicates button */}
+          {canEditClients && (
+            <>
+              <div className={`w-px h-6 flex-shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
+              <button
+                onClick={handleOpenMerge}
+                disabled={detectingDups}
+                className={`flex items-center gap-1.5 h-9 px-3 rounded-xl border text-xs font-semibold whitespace-nowrap flex-shrink-0 transition-all ${
+                  isDark ? 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600' : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-rose-50 hover:border-rose-300 hover:text-rose-700'
+                }`}
+                title="Detect & merge duplicate clients"
+              >
+                {detectingDups ? <Loader2 className="h-3.5 w-3.5 animate-spin flex-shrink-0" /> : <Merge className="h-3.5 w-3.5 flex-shrink-0" />}
+                <span>Merge Dupes</span>
+              </button>
+            </>
+          )}
           <div className={`w-px h-6 flex-shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
           {/* Sort */}
           <div className={`flex items-center border rounded-xl overflow-hidden flex-shrink-0 ${isDark ? 'border-slate-600 bg-slate-700' : 'border-slate-200 bg-slate-50'}`}>
@@ -5415,6 +5507,21 @@ export default function Clients() {
           <button onClick={() => setItrTabActive(false)} className="ml-auto text-xs font-semibold text-teal-600 hover:text-teal-800 hover:underline flex-shrink-0">✕ Clear</button>
         </div>
       )}
+      {/* Active group filter banner */}
+      {activeGroupId && (() => {
+        const grp = clientGroupsData.find(g => g.id === activeGroupId);
+        if (!grp) return null;
+        return (
+          <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl border"
+            style={{ background: `${grp.color}12`, borderColor: `${grp.color}40` }}>
+            <Layers className="h-4 w-4 flex-shrink-0" style={{ color: grp.color }} />
+            <p className="text-xs font-semibold" style={{ color: grp.color }}>
+              Group filter: <strong>{grp.name}</strong> — showing {sortedClients.length} client{sortedClients.length !== 1 ? 's' : ''}
+            </p>
+            <button onClick={() => setActiveGroupId(null)} className="ml-auto text-xs font-semibold hover:underline flex-shrink-0" style={{ color: grp.color }}>✕ Clear</button>
+          </div>
+        );
+      })()}
 
       {clientsLoading ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(255px, 1fr))', gap: 10 }}>
@@ -5848,6 +5955,34 @@ export default function Clients() {
           } catch { toast.error('Failed to delete client'); }
         }}
         onView={(c) => { setSelectedClient(c); setClientDetailOpen(true); setShowDupDialog(false); }}
+      />
+
+      {/* ── Merge Clients Dialog ───────────────────────────────────────── */}
+      <MergeClientsDialog
+        open={showMergeDialog}
+        onClose={() => setShowMergeDialog(false)}
+        clients={clients}
+        groups={mergeDupGroups}
+        onMerge={handleMergeClients}
+        isDark={isDark}
+      />
+
+      {/* ── Client Groups Panel ────────────────────────────────────────── */}
+      <ClientGroupsPanel
+        open={showGroupsPanel}
+        onClose={() => setShowGroupsPanel(false)}
+        clients={clients}
+        onGroupFilter={(groupId) => {
+          setActiveGroupId(groupId);
+          setShowGroupsPanel(false);
+          if (groupId) {
+            const grp = clientGroupsData.find(g => g.id === groupId);
+            if (grp) toast.info(`Filtering by group: ${grp.name}`);
+          }
+          fetchClientGroups();
+        }}
+        activeGroupId={activeGroupId}
+        isDark={isDark}
       />
 
       {/* ── ITR Client Dialog ──────────────────────────────────────────── */}
