@@ -49,58 +49,193 @@ const CLIENT_TYPES = [
 ];
 
 const INDIAN_CITIES = [
-  'SURAT','AHMEDABAD','MUMBAI','DELHI','PUNE','VADODARA','BARODA','RAJKOT',
-  'NAVSARI','BHARUCH','ANAND','GANDHINAGAR','NADIAD','VALSAD','BILIMORA',
-  'KOLKATA','CHENNAI','HYDERABAD','BENGALURU','BANGALORE','JAIPUR','LUCKNOW',
-  'INDORE','BHOPAL','NAGPUR','COIMBATORE','PATNA','CHANDIGARH','THANE',
+  'SURAT','AHMEDABAD','MUMBAI','NEW DELHI','DELHI','PUNE','VADODARA','BARODA','RAJKOT',
+  'NAVSARI','BHARUCH','ANKLESHWAR','ANAND','GANDHINAGAR','NADIAD','VALSAD','BILIMORA',
+  'BHAVNAGAR','JAMNAGAR','JUNAGADH','PORBANDAR','MEHSANA','PALANPUR','MORBI',
+  'KOLKATA','CHENNAI','HYDERABAD','SECUNDERABAD','BENGALURU','BANGALORE','MYSORE',
+  'JAIPUR','JODHPUR','UDAIPUR','LUCKNOW','KANPUR','VARANASI','NOIDA','GHAZIABAD','GURUGRAM','GURGAON','FARIDABAD',
+  'INDORE','BHOPAL','NAGPUR','NASHIK','AURANGABAD','COIMBATORE','MADURAI',
+  'PATNA','CHANDIGARH','THANE','NAVI MUMBAI','KOCHI','TRIVANDRUM','VISAKHAPATNAM','VIJAYWADA',
+  // Surat sub-area names that often appear at end of address
+  'KAMREJ','OLPAD','MANDVI','BARDOLI','VYARA','SONGADH','PALSANA',
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Parsing helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+const STATE_BY_PIN_PREFIX = [
+  // first 2 digits → state. Covers India PIN ranges.
+  { rx: /^(11)/, state: 'Delhi' },
+  { rx: /^(12|13)/, state: 'Haryana' },
+  { rx: /^(14|15|16)/, state: 'Punjab' },
+  { rx: /^(17)/, state: 'Himachal Pradesh' },
+  { rx: /^(18|19)/, state: 'Jammu and Kashmir' },
+  { rx: /^(20|21|22|23|24|25|26|27|28)/, state: 'Uttar Pradesh' },
+  { rx: /^(30|31|32|33|34|35|36|37)/, state: 'Rajasthan' },
+  { rx: /^(38|39)/, state: 'Gujarat' },
+  { rx: /^(4)/,  state: 'Maharashtra' }, // 40-44 MH, 45-48 MP/CG, refined below
+  { rx: /^(45|46|47|48|49)/, state: 'Madhya Pradesh' },
+  { rx: /^(5)/,  state: 'Andhra Pradesh' }, // refined
+  { rx: /^(56|57|58|59)/, state: 'Karnataka' },
+  { rx: /^(6)/,  state: 'Tamil Nadu' },
+  { rx: /^(67|68|69)/, state: 'Kerala' },
+  { rx: /^(7)/,  state: 'West Bengal' },
+  { rx: /^(75|76|77)/, state: 'Odisha' },
+  { rx: /^(78)/, state: 'Assam' },
+  { rx: /^(8)/,  state: 'Bihar' },
+  { rx: /^(82|83|84|85)/, state: 'Jharkhand' },
+  { rx: /^(9)/,  state: 'Tamil Nadu' },
+];
+
+function stateFromPincode(pin) {
+  if (!pin || pin.length !== 6) return 'Gujarat';
+  for (let i = STATE_BY_PIN_PREFIX.length - 1; i >= 0; i--) {
+    if (STATE_BY_PIN_PREFIX[i].rx.test(pin)) return STATE_BY_PIN_PREFIX[i].state;
+  }
+  return 'Gujarat';
+}
+
+function titleCaseCity(c) {
+  return c.toLowerCase().split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
 function parseDOB(raw) {
-  if (!raw) return null;
+  if (raw === null || raw === undefined || raw === '') return null;
+  // Already an ISO date or Date object
+  if (raw instanceof Date && !isNaN(raw)) {
+    const yyyy = raw.getFullYear();
+    const mm = String(raw.getMonth() + 1).padStart(2,'0');
+    const dd = String(raw.getDate()).padStart(2,'0');
+    return `${yyyy}-${mm}-${dd}`;
+  }
   const s = String(raw).trim();
-  const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-  if (!m) return null;
-  const [, dd, mm, yyyy] = m;
-  return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+  // dd/mm/yyyy or dd-mm-yyyy
+  let m = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+  if (m) {
+    const [, dd, mm, yyyy] = m;
+    return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+  }
+  // yyyy-mm-dd
+  m = s.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
+  if (m) {
+    const [, yyyy, mm, dd] = m;
+    return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+  }
+  // Excel serial number
+  if (/^\d{4,6}$/.test(s)) {
+    const n = parseInt(s, 10);
+    if (n > 20000 && n < 80000) {
+      const d = new Date(Date.UTC(1899, 11, 30) + n * 86400000);
+      if (!isNaN(d)) {
+        return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+      }
+    }
+  }
+  return null;
 }
 
 function cleanPhone(raw) {
-  if (!raw) return null;
-  const d = String(raw).replace(/\D/g,'');
-  if (d.length === 12 && d.startsWith('91')) return d.slice(2);
-  return d.length >= 10 ? d.slice(-10) : (d || null);
+  if (raw === null || raw === undefined || raw === '') return null;
+  // Many cells contain multiple numbers separated by , / ; or whitespace — take the first valid 10-digit mobile.
+  const parts = String(raw).split(/[,;\/\n\r]+/).map(p => p.trim()).filter(Boolean);
+  for (const p of parts.length ? parts : [String(raw)]) {
+    let d = p.replace(/\D/g,'');
+    if (d.length === 12 && d.startsWith('91')) d = d.slice(2);
+    if (d.length === 11 && d.startsWith('0'))  d = d.slice(1);
+    if (d.length === 13 && d.startsWith('091')) d = d.slice(3);
+    if (d.length === 10 && /^[6-9]/.test(d))   return d;
+  }
+  // Fallback: last 10 digits of the whole field
+  const all = String(raw).replace(/\D/g,'');
+  if (all.length >= 10) {
+    const tail = all.slice(-10);
+    if (/^[6-9]/.test(tail)) return tail;
+  }
+  return null;
 }
 
 function formatAadhaar(raw) {
-  if (!raw) return null;
+  if (raw === null || raw === undefined || raw === '') return null;
   const d = String(raw).replace(/\D/g,'');
-  if (d.length !== 12) return d || null;
+  if (d.length !== 12) return null; // don't surface partial junk as a warning
   return `${d.slice(0,4)} ${d.slice(4,8)} ${d.slice(8,12)}`;
 }
 
+function cleanText(raw) {
+  if (raw === null || raw === undefined) return '';
+  // Strip carriage-return entities ("_x000D_") and normalize whitespace.
+  return String(raw).replace(/_x000D_/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 function parseAddress(raw) {
-  if (!raw) return { address: '', city: 'Surat', state: 'Gujarat', pincode: '' };
-  const s = String(raw).trim();
-  const pinMatch = s.match(/[- ](\d{6})\s*$/);
-  const pincode = pinMatch ? pinMatch[1] : '';
-  let clean = s.replace(/,?\s*[\w\s\.\(\)\/\\-]+[- ]\d{6}\s*$/, '').trim().replace(/,\s*$/, '').trim();
+  const fallback = { address: '', city: '', state: '', pincode: '' };
+  if (!raw) return fallback;
+  const s = cleanText(raw);
+
+  // 1) Pincode — anywhere in the string, but prefer one at/near the end.
+  let pincode = '';
+  const pinAll = s.match(/\b(\d{6})\b/g);
+  if (pinAll && pinAll.length) pincode = pinAll[pinAll.length - 1];
+
+  // 2) City — segment immediately before the pincode (or the last meaningful segment).
+  //    Standard ITR-software format: "..., <Post Office>, <Locality>-<PIN>"
   let city = '';
-  const upper = s.toUpperCase();
-  for (const c of INDIAN_CITIES) {
-    if (upper.includes(c)) { city = c.charAt(0) + c.slice(1).toLowerCase(); break; }
+  let body = s;
+  if (pincode) {
+    // Cut off "<separator><pin>" tail
+    const cutIdx = s.lastIndexOf(pincode);
+    body = s.slice(0, cutIdx).replace(/[\s,\-]+$/, '');
+  }
+  const segments = body.split(',').map(x => x.trim()).filter(Boolean);
+
+  // Try a known-city match in the LAST 3 segments (most reliable).
+  if (segments.length) {
+    const tail = segments.slice(-3).join(',').toUpperCase();
+    for (const c of INDIAN_CITIES) {
+      const rx = new RegExp(`\\b${c.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}\\b`);
+      if (rx.test(tail)) { city = titleCaseCity(c); break; }
+    }
+  }
+  // Fallback: use second-last segment (Post Office is usually last, City second-last)
+  if (!city && segments.length >= 2) {
+    let candidate = segments[segments.length - 2]
+      .replace(/\b(S\.O|B\.O|H\.O|R\.S)\b\.?/gi, '')
+      .replace(/[-\s]+\d+\s*$/, '')
+      .trim();
+    if (candidate && candidate.length <= 40) city = titleCaseCity(candidate);
+  }
+  // Fallback: last segment cleaned
+  if (!city && segments.length) {
+    let candidate = segments[segments.length - 1]
+      .replace(/\b(S\.O|B\.O|H\.O|R\.S)\b\.?/gi, '')
+      .replace(/[-\s]+\d+\s*$/, '')
+      .trim();
+    if (candidate && candidate.length <= 40) city = titleCaseCity(candidate);
   }
   if (!city) city = 'Surat';
-  return { address: clean, city, state: 'Gujarat', pincode };
+
+  // 3) Address — everything except the city-segment + PO + pincode tail.
+  let address = s
+    .replace(new RegExp(`[\\s,\\-]*\\b${pincode}\\b\\s*$`), '')
+    .replace(/[\s,]+$/, '')
+    .trim();
+  if (!address) address = s;
+
+  // 4) State — derive from pincode (defaults to Gujarat).
+  const state = stateFromPincode(pincode);
+
+  return { address, city, state, pincode };
 }
 
 function extractAY(title) {
   if (!title) return null;
-  const m = String(title).match(/A\.?Y\.?\s*['\u2018\u2019]?(\d{4}-\d{2,4})/i);
-  return m ? m[1] : null;
+  const m = String(title).match(/A\.?Y\.?\s*['\u2018\u2019]?\s*(\d{4})\s*[-\/]\s*(\d{2,4})/i);
+  if (!m) return null;
+  const start = m[1];
+  let end = m[2];
+  if (end.length === 4) end = end.slice(-2);
+  return `${start}-${end}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -152,141 +287,185 @@ function validateRow(row) {
 // Core parser
 // ─────────────────────────────────────────────────────────────────────────────
 
+function buildColMap(headerRow) {
+  // Map normalized header → column index. Normalization strips
+  // _x000D_, line breaks, dots, spaces, slashes, hyphens.
+  const map = {};
+  headerRow.forEach((h, i) => {
+    if (h === null || h === undefined) return;
+    const key = String(h)
+      .replace(/_x000D_/g, ' ')
+      .replace(/[\r\n]+/g, ' ')
+      .toLowerCase()
+      .replace(/[^\w]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    if (key && !(key in map)) map[key] = i;
+    // Also store a "compact" key with no underscores so look-ups like "pan" find "p_a_n"
+    const compact = key.replace(/_/g, '');
+    if (compact && !(compact in map)) map[compact] = i;
+  });
+  return map;
+}
+
+function getByCol(row, colMap, ...candidates) {
+  for (const c of candidates) {
+    const key = c.toLowerCase().replace(/[^\w]+/g, '_').replace(/^_+|_+$/g, '');
+    const compact = key.replace(/_/g, '');
+    const idx = colMap[key] !== undefined ? colMap[key]
+              : colMap[compact] !== undefined ? colMap[compact]
+              : undefined;
+    if (idx !== undefined) {
+      const v = row[idx];
+      if (v !== null && v !== undefined && String(v).trim() !== '') {
+        return cleanText(v);
+      }
+    }
+  }
+  return '';
+}
+
+function isFilterOrEmptyRow(r) {
+  if (!Array.isArray(r) || r.length === 0) return true;
+  const nonEmpty = r.filter(c => c !== null && c !== undefined && String(c).trim() !== '');
+  if (nonEmpty.length === 0) return true;
+  // ITR exports include a "(All)" filter row — every non-empty cell equals "(All)".
+  const allFilter = nonEmpty.every(c => String(c).trim().toLowerCase() === '(all)');
+  return allFilter;
+}
+
 function parseITRExcel(workbook) {
   const results = [];
   let detectedAY = null;
 
   for (const sheetName of workbook.SheetNames) {
     const ws = workbook.Sheets[sheetName];
-    const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: false, raw: true });
     if (rawRows.length < 3) continue;
 
-    const titleCell = String(rawRows[0]?.[0] || '');
-    if (!detectedAY) detectedAY = extractAY(titleCell);
-
-    const headerRow = rawRows[2] || [];
-    const isStandardFormat = headerRow.some(h =>
-      String(h).replace(/\s+/g,'').toLowerCase().includes('pan')
-    );
-
-    if (isStandardFormat) {
-      for (let ri = 4; ri < rawRows.length; ri++) {
-        const r = rawRows[ri];
-        const name = String(r[2] || '').trim();
-        const pan  = String(r[3] || '').trim().toUpperCase();
-        if (!name && !pan) continue;
-        if (pan === '(ALL)' || name === '(ALL)') continue;
-
-        const rawStatus = String(r[5] || '').trim().toLowerCase();
-        const clientType = STATUS_TO_CLIENT_TYPE[rawStatus] || 'proprietor';
-        const mobile = cleanPhone(r[17]) || cleanPhone(r[16]);
-        const { address, city, state, pincode } = parseAddress(r[15]);
-        const aadhaar = formatAadhaar(r[9]);
-        const dob = parseDOB(r[13]);
-
-        results.push({
-          company_name: name,
-          pan,
-          client_type: clientType,
-          email: String(r[18] || '').trim().toLowerCase() || null,
-          phone: mobile,
-          address, city, state,
-          birthday: dob,
-          gstin: String(r[11] || '').trim() || null,
-          notes: String(r[27] || '').trim() || null,
-          status: 'active',
-          services: ['Income Tax'],
-          is_itr_client: true,
-          itr_data: {
-            assessment_year: detectedAY || '2025-26',
-            itr_type: 'ITR-1',
-            filing_status: 'pending',
-            aadhaar,
-            code: String(r[1] || '').trim() || null,
-            group: String(r[4] || '').trim() || null,
-            residential_status: String(r[6] || '').trim() || null,
-            ward: String(r[7] || '').trim() || null,
-            tan: String(r[8] || '').trim() || null,
-            pan_aadhaar_linked: String(r[10] || '').trim() || null,
-            father_husband: String(r[12] || '').trim() || null,
-            gender: String(r[14] || '').trim() || null,
-            passport: String(r[23] || '').trim() || null,
-            it_portal_user: String(r[24] || '').trim() || null,
-            it_portal_password: String(r[25] || '').trim() || null,
-            category: String(r[26] || '').trim() || null,
-            remarks: String(r[27] || '').trim() || null,
-            din: String(r[29] || '').trim() || null,
-            bank_account_no: String(r[19] || '').trim() || null,
-            bank_name: String(r[20] || '').trim() || null,
-            ifsc_code: String(r[21] || '').trim() || null,
-            pincode,
-            company_links: [],
-          },
-        });
-      }
-    } else {
-      const colMap = {};
-      headerRow.forEach((h, i) => {
-        const key = String(h).toLowerCase().replace(/[\s\-_\/\r\n]+/g, '_').trim();
-        colMap[key] = i;
-      });
-      const g = (row, ...keys) => {
-        for (const k of keys) {
-          if (colMap[k] !== undefined) {
-            const v = String(row[colMap[k]] || '').trim();
-            if (v) return v;
-          }
+    // Detect AY from any cell in the first 3 rows (title row may not always be row 0).
+    if (!detectedAY) {
+      for (let i = 0; i < Math.min(3, rawRows.length); i++) {
+        for (const cell of rawRows[i]) {
+          const ay = extractAY(cell);
+          if (ay) { detectedAY = ay; break; }
         }
-        return '';
-      };
-
-      for (let ri = 1; ri < rawRows.length; ri++) {
-        const r = rawRows[ri];
-        const name = g(r,'name','full_name','assessee_name');
-        const pan  = g(r,'pan','pan_number','pan_no').toUpperCase();
-        if (!name && !pan) continue;
-
-        const rawStatus = g(r,'status','client_type').toLowerCase();
-        const clientType = STATUS_TO_CLIENT_TYPE[rawStatus] || 'proprietor';
-        const mobile = cleanPhone(g(r,'mobile','phone','mobile_number','phone_number'));
-        const { address, city, state, pincode } = parseAddress(g(r,'address'));
-
-        results.push({
-          company_name: name || pan,
-          pan: pan || null,
-          client_type: clientType,
-          email: g(r,'email','email_address').toLowerCase() || null,
-          phone: mobile,
-          address, city, state,
-          birthday: parseDOB(g(r,'dob','date_of_birth','dob_doi')),
-          gstin: g(r,'gstin') || null,
-          notes: g(r,'remark','remarks','notes') || null,
-          status: 'active',
-          services: ['Income Tax'],
-          is_itr_client: true,
-          itr_data: {
-            assessment_year: detectedAY || '2025-26',
-            itr_type: g(r,'itr_type','return_type') || 'ITR-1',
-            filing_status: g(r,'filing_status') || 'pending',
-            aadhaar: formatAadhaar(g(r,'aadhaar','aadhaar_number','aadhar')),
-            it_portal_user: g(r,'userid','user_id','portal_user') || null,
-            it_portal_password: g(r,'password','portal_password') || null,
-            bank_name: g(r,'bank_name','bank') || null,
-            bank_account_no: g(r,'a_c_no','account_no','ac_no') || null,
-            ifsc_code: g(r,'ifsc','ifsc_code') || null,
-            group: g(r,'group') || null,
-            ward: g(r,'ward') || null,
-            tan: g(r,'tan') || null,
-            remarks: g(r,'remark','remarks','notes') || null,
-            pincode,
-            company_links: [],
-          },
-        });
+        if (detectedAY) break;
       }
+    }
+
+    // Locate the header row dynamically — it's the row that contains a "PAN" header.
+    let headerRowIdx = -1;
+    for (let i = 0; i < Math.min(6, rawRows.length); i++) {
+      const row = rawRows[i] || [];
+      const hasName = row.some(h => /\bname\b/i.test(String(h || '')));
+      const hasPan  = row.some(h => /\bpan\b/i.test(String(h || '')));
+      if (hasName && hasPan) { headerRowIdx = i; break; }
+    }
+    if (headerRowIdx < 0) headerRowIdx = 2; // fallback to standard layout
+
+    const headerRow = rawRows[headerRowIdx] || [];
+    const colMap = buildColMap(headerRow);
+
+    for (let ri = headerRowIdx + 1; ri < rawRows.length; ri++) {
+      const r = rawRows[ri];
+      if (isFilterOrEmptyRow(r)) continue;
+
+      const name = getByCol(r, colMap, 'name', 'full_name', 'assessee_name', 'client_name');
+      const pan  = getByCol(r, colMap, 'pan', 'pan_number', 'pan_no').toUpperCase();
+      if (!name && !pan) continue;
+      if (pan === '(ALL)' || name === '(ALL)') continue;
+
+      const rawStatus = getByCol(r, colMap, 'status', 'client_type', 'type').toLowerCase();
+      const clientType = STATUS_TO_CLIENT_TYPE[rawStatus] || 'proprietor';
+
+      const mobile = cleanPhone(
+        getByCol(r, colMap, 'mobile', 'mobile_no', 'mobile_number', 'cell', 'cell_no')
+      ) || cleanPhone(
+        getByCol(r, colMap, 'phone', 'phone_no', 'phone_number', 'contact')
+      ) || cleanPhone(
+        getByCol(r, colMap, 'aadhaar_linked_mobile')
+      );
+
+      const addrRaw = getByCol(r, colMap, 'address', 'full_address', 'addr');
+      const { address, city, state, pincode } = parseAddress(addrRaw);
+
+      const aadhaar = formatAadhaar(getByCol(r, colMap, 'aadhaar', 'aadhar', 'aadhaar_number', 'aadhar_number'));
+      const dob = parseDOB(getByCol(r, colMap, 'dob_doi', 'dob', 'date_of_birth', 'doi', 'date_of_incorporation'));
+
+      const email = (getByCol(r, colMap, 'email', 'email_id', 'e_mail', 'mail') || '').toLowerCase() || null;
+      const gstin = (getByCol(r, colMap, 'gstin', 'gst_no', 'gst_number') || '').toUpperCase() || null;
+      const remarks = getByCol(r, colMap, 'remark', 'remarks', 'notes') || null;
+
+      results.push({
+        company_name: name || pan,
+        pan: pan || null,
+        client_type: clientType,
+        email,
+        phone: mobile,
+        address: address || addrRaw || '',
+        city: city || 'Surat',
+        state: state || 'Gujarat',
+        birthday: dob,
+        gstin,
+        notes: remarks,
+        status: 'active',
+        services: ['Income Tax'],
+        is_itr_client: true,
+        itr_data: {
+          assessment_year: detectedAY || '2025-26',
+          itr_type: getByCol(r, colMap, 'itr_type', 'return_type') || 'ITR-1',
+          filing_status: getByCol(r, colMap, 'filing_status') || 'pending',
+          aadhaar,
+          code: getByCol(r, colMap, 'code', 'client_code') || null,
+          group: getByCol(r, colMap, 'group') || null,
+          residential_status: getByCol(r, colMap, 'residential_status', 'residentialstatus') || null,
+          ward: getByCol(r, colMap, 'ward') || null,
+          tan: getByCol(r, colMap, 'tan') || null,
+          pan_aadhaar_linked: getByCol(r, colMap, 'pan_aadhaar_linked', 'panaadhaarlinked') || null,
+          father_husband: getByCol(r, colMap, 'father_husband', 'father', 'husband') || null,
+          gender: getByCol(r, colMap, 'gender') || null,
+          passport: getByCol(r, colMap, 'passport', 'passport_no') || null,
+          it_portal_user: getByCol(r, colMap, 'userid', 'user_id', 'portal_user', 'it_portal_user') || null,
+          it_portal_password: getByCol(r, colMap, 'password', 'portal_password', 'it_portal_password') || null,
+          category: getByCol(r, colMap, 'category') || null,
+          remarks,
+          din: getByCol(r, colMap, 'din') || null,
+          bank_account_no: getByCol(r, colMap, 'a_c_no', 'account_no', 'ac_no', 'bank_account_no') || null,
+          bank_name: getByCol(r, colMap, 'bank_name', 'bank') || null,
+          ifsc_code: getByCol(r, colMap, 'ifsc', 'ifsc_code') || null,
+          no_of_bank: getByCol(r, colMap, 'no_of_bank', 'number_of_bank') || null,
+          aadhaar_linked_mobile: cleanPhone(getByCol(r, colMap, 'aadhaar_linked_mobile')) || null,
+          sn: getByCol(r, colMap, 'sn', 's_n', 'sr_no', 'srno') || null,
+          pincode,
+          company_links: [],
+        },
+      });
     }
   }
 
-  return { rows: results, detectedAY };
+  // De-duplicate on PAN (keep the first, merge non-empty fields from later occurrences).
+  const byPan = new Map();
+  for (const row of results) {
+    const key = (row.pan || row.company_name || '').toUpperCase();
+    if (!key) continue;
+    if (!byPan.has(key)) {
+      byPan.set(key, row);
+    } else {
+      const existing = byPan.get(key);
+      // Merge top-level scalar fields
+      for (const k of Object.keys(row)) {
+        if (k === 'itr_data') continue;
+        if (!existing[k] && row[k]) existing[k] = row[k];
+      }
+      // Merge itr_data
+      for (const k of Object.keys(row.itr_data || {})) {
+        if (!existing.itr_data[k] && row.itr_data[k]) existing.itr_data[k] = row.itr_data[k];
+      }
+    }
+  }
+  const deduped = Array.from(byPan.values());
+
+  return { rows: deduped, detectedAY, totalParsed: results.length, duplicatesMerged: results.length - deduped.length };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
