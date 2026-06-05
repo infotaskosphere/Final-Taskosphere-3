@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useDark } from "@/hooks/useDark";
-import { api } from "@/lib/api";
+import api from "@/lib/api";
 
 // ─── design tokens ───────────────────────────────────────────────────────────
 const COLORS = {
