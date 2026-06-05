@@ -8,7 +8,7 @@ import {
   PanelLeftClose, PanelLeftOpen, Target, Sun, Moon, MapPin,
   Settings, Mail, Receipt, X, KeyRound, BrainCircuit,
   CreditCard, Fingerprint, Bell, Shield, ShieldCheck, ArrowLeftRight, MessageCircle,
-  Building2,
+  Building2, Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -42,6 +42,7 @@ const NAV_GROUPS = [
       { path: '/todos',      icon: CheckSquare,     label: 'To Do' },
       { path: '/attendance', icon: Clock,           label: 'Attendance' },
       { path: '/reminders',  icon: Bell,            label: 'Reminders' },
+      { path: '/action-center', icon: Zap, label: 'Action Center' },
       { path: '/visits',     icon: MapPin,          label: 'Client Visits' },
       { path: '/ai-reader',      icon: BrainCircuit,  label: 'AI Document Reader' },  // ← ADD THIS
     ],
