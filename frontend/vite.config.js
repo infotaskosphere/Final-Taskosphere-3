@@ -42,21 +42,31 @@ export default defineConfig({
           }
           return 'assets/[name]-[hash][extname]';
         },
-        manualChunks: {
-          'react-core': ['react', 'react-dom', 'react-router-dom'],
-          'framer':     ['framer-motion'],
-          'charts':     ['recharts', 'chart.js'],
-          'dnd':        ['@hello-pangea/dnd'],
-          'icons':      ['lucide-react'],
-          'radix':      [
-            '@radix-ui/react-dialog',
-            '@radix-ui/react-dropdown-menu',
-            '@radix-ui/react-select',
-            '@radix-ui/react-popover',
-            '@radix-ui/react-tooltip',
-            '@radix-ui/react-tabs',
-          ],
-        },
+        // ✅ FIX: manualChunks removed.
+        // The previous manualChunks config placed react/react-dom into a
+        // separate 'react-core' chunk. Rollup could not guarantee that
+        // 'react-core' was fully initialised before the 'Tasks' chunk ran,
+        // producing a Temporal Dead Zone (TDZ) ReferenceError:
+        //   "Cannot access 'ds' before initialization"
+        // ('ds' is the minified name for a React export like useState/useEffect.)
+        //
+        // Removing manualChunks lets Rollup manage chunk boundaries itself
+        // and resolve circular/ordering issues automatically.
+        //
+        // If you later want code-splitting, use a function form of manualChunks
+        // (shown below) which is safer than the object form because Rollup
+        // handles internal dependencies between chunks correctly:
+        //
+        // manualChunks(id) {
+        //   if (id.includes('node_modules')) {
+        //     if (id.includes('framer-motion'))   return 'vendor-framer';
+        //     if (id.includes('lucide-react'))     return 'vendor-icons';
+        //     if (id.includes('@radix-ui'))        return 'vendor-radix';
+        //     if (id.includes('recharts') || id.includes('chart.js')) return 'vendor-charts';
+        //     if (id.includes('@hello-pangea'))    return 'vendor-dnd';
+        //     return 'vendor';   // everything else in one vendor chunk
+        //   }
+        // },
       },
     },
   },
