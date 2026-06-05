@@ -1260,50 +1260,234 @@ async def create_individual_folder(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Bulk Upload from local disk → Google Drive (then auto-visible in portal)
+# Smart Bulk Upload  –  AI classifies each document → correct Drive subfolder
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _upload_file_to_drive_sync(service, folder_id: str, filename: str, file_bytes: bytes, mime_type: str) -> dict:
-    """Upload a single file to a Drive folder. Returns file metadata dict."""
+# Keyword→subfolder mapping used as fallback when AI is not available
+KEYWORD_FOLDER_MAP = [
+    # GST / Tax
+    (["gstr", "gst", "tax invoice", "eway bill", "e-way", "gst return", "gstin", "gst report", "gst certificate"], "GST Returns"),
+    (["income tax", "itr", "form 16", "tds", "tcs", "advance tax", "tax computation", "26as", "ais", "tax audit"], "Income Tax"),
+    # Incorporation / Company
+    (["pan card", "pan ", "permanent account", "aadhaar", "aadhar", "identity proof", "address proof", "kyc"], "Documents"),
+    (["incorporation", "moa", "aoa", "cin ", "certificate of incorporation", "memorandum", "articles of association", "llp agreement", "partnership deed"], "Documents"),
+    (["roc filing", "mgt", "dir ", "aoc", "annual return", "annual report", "board minutes", "board resolution", "eboard"], "ROC Filings"),
+    # Finance
+    (["invoice", "bill ", "proforma", "debit note", "credit note", "receipt", "payment voucher"], "Invoices"),
+    (["bank statement", "bank passbook", "account statement", "cancelled cheque", "bank certificate"], "Bank Statements"),
+    (["audit report", "audit", "statutory audit", "tax audit report", "3cd", "3ca"], "Audit Reports"),
+    (["balance sheet", "p&l", "profit and loss", "financial statement", "trial balance", "cash flow", "ledger"], "Reports"),
+    # Compliance
+    (["compliance", "deadline", "due date", "mca filing", "pf", "esic", "provident fund", "labour"], "Compliance"),
+    (["agreement", "contract", "mou", "letter of intent", "nda", "deed", "power of attorney", "legal notice"], "Agreements"),
+    (["correspondence", "letter", "notice", "communication", "email"], "Correspondence"),
+    (["trademark", "ip ", "copyright", "patent", "brand", "logo"], "Documents"),
+]
+
+def _keyword_classify(filename: str, text_snippet: str = "") -> str:
+    """Fast keyword-based fallback classifier. Returns subfolder name or 'Documents'."""
+    combined = (filename + " " + text_snippet).lower()
+    for keywords, folder in KEYWORD_FOLDER_MAP:
+        if any(kw in combined for kw in keywords):
+            return folder
+    return "Documents"
+
+
+async def _ai_classify_document(filename: str, file_bytes: bytes, mime: str, available_subfolders: list) -> dict:
+    """
+    Use Gemini (text PDF / Excel) or Groq vision (image / scanned PDF) to classify
+    a document and identify which client it belongs to.
+
+    Returns:
+        {
+            "suggested_folder": str,      # one of available_subfolders
+            "document_type":   str,       # human label e.g. "GST Return GSTR-3B"
+            "company_name":    str | None, # company name found in the document
+            "confidence":      "high"|"medium"|"low",
+            "notes":           str,
+        }
+    """
     import io as _io
-    from googleapiclient.http import MediaIoBaseUpload
+    folder_list = ", ".join(f'"{f}"' for f in available_subfolders)
+    base_prompt = f"""You are an expert Indian CA firm document classifier.
 
-    media = MediaIoBaseUpload(_io.BytesIO(file_bytes), mimetype=mime_type or "application/octet-stream", resumable=True)
-    metadata = {"name": filename, "parents": [folder_id]}
-    created = service.files().create(
-        body=metadata,
-        media_body=media,
-        fields="id,name,mimeType,size,modifiedTime,webViewLink",
-    ).execute()
-    return created
+Available destination folders: [{folder_list}]
+
+Analyse this document and return ONLY a JSON object (no markdown, no explanation) with these exact keys:
+{{
+  "suggested_folder": "<one of the folder names above>",
+  "document_type": "<concise type e.g. GST Return GSTR-3B, PAN Card, Income Tax ITR-3, Bank Statement, Audit Report>",
+  "company_name": "<company or individual name found in the document, or null>",
+  "confidence": "<high|medium|low>",
+  "notes": "<one short sentence about what this document is>"
+}}
+
+Rules:
+- suggested_folder MUST be exactly one of the listed folder names
+- If unsure, use "Documents"
+- company_name: extract the exact name of the company/individual the document is for
+"""
+
+    try:
+        gemini_key = __import__("os").environ.get("GEMINI_API_KEY", "")
+        groq_key   = __import__("os").environ.get("GROQ_API_KEY", "")
+        import json as _json
+
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+        # ── Text PDFs → Gemini ──────────────────────────────────────────────
+        if ext == "pdf" and gemini_key:
+            try:
+                import pdfplumber, google.generativeai as genai
+                genai.configure(api_key=gemini_key)
+                model = genai.GenerativeModel("gemini-2.0-flash")
+                text_pages = []
+                with pdfplumber.open(_io.BytesIO(file_bytes)) as pdf:
+                    for page in pdf.pages[:5]:
+                        t = page.extract_text()
+                        if t: text_pages.append(t.strip())
+                text = "\n".join(text_pages)[:8000]
+                if text.strip():
+                    resp = await model.generate_content_async(base_prompt + f"\n\nDOCUMENT TEXT:\n{text}")
+                    raw = resp.text.strip().strip("```json").strip("```").strip()
+                    result = _json.loads(raw)
+                    # Validate folder
+                    if result.get("suggested_folder") not in available_subfolders:
+                        result["suggested_folder"] = _keyword_classify(filename, text[:500])
+                    return result
+            except Exception:
+                pass  # fall through to Groq
+
+        # ── Images + scanned PDFs → Groq vision ────────────────────────────
+        if ext in ("pdf", "jpg", "jpeg", "png", "webp") and groq_key:
+            import base64 as _b64, httpx
+            images_b64 = []
+            if ext == "pdf":
+                try:
+                    import pdfplumber
+                    with pdfplumber.open(_io.BytesIO(file_bytes)) as pdf:
+                        for page in pdf.pages[:3]:
+                            pil = page.to_image(resolution=120).original
+                            buf = _io.BytesIO()
+                            pil.convert("RGB").save(buf, "JPEG", quality=80)
+                            images_b64.append(("image/jpeg", _b64.b64encode(buf.getvalue()).decode()))
+                except Exception:
+                    pass
+            else:
+                from PIL import Image as PILImage
+                img = PILImage.open(_io.BytesIO(file_bytes)).convert("RGB")
+                buf = _io.BytesIO()
+                img.save(buf, "JPEG", quality=80)
+                images_b64.append(("image/jpeg", _b64.b64encode(buf.getvalue()).decode()))
+
+            if images_b64:
+                content_parts = []
+                for mime_t, b64 in images_b64:
+                    content_parts.append({"type": "image_url", "image_url": {"url": f"data:{mime_t};base64,{b64}"}})
+                content_parts.append({"type": "text", "text": base_prompt})
+                payload = {
+                    "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+                    "messages": [{"role": "user", "content": content_parts}],
+                    "max_tokens": 512,
+                }
+                async with httpx.AsyncClient(timeout=30) as client:
+                    resp = await client.post(
+                        "https://api.groq.com/openai/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                        json=payload,
+                    )
+                if resp.status_code == 200:
+                    raw = resp.json()["choices"][0]["message"]["content"].strip().strip("```json").strip("```").strip()
+                    try:
+                        result = _json.loads(raw)
+                        if result.get("suggested_folder") not in available_subfolders:
+                            result["suggested_folder"] = _keyword_classify(filename)
+                        return result
+                    except Exception:
+                        pass
+
+        # ── Excel / CSV → Gemini text ───────────────────────────────────────
+        if ext in ("xlsx", "xls", "csv") and gemini_key:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=gemini_key)
+                model = genai.GenerativeModel("gemini-2.0-flash")
+                if ext == "csv":
+                    text = file_bytes.decode("utf-8", errors="replace")[:6000]
+                else:
+                    import openpyxl
+                    wb = openpyxl.load_workbook(_io.BytesIO(file_bytes), read_only=True, data_only=True)
+                    rows = []
+                    for ws in wb.worksheets:
+                        for row in ws.iter_rows(values_only=True, max_row=30):
+                            rows.append("\t".join("" if v is None else str(v) for v in row))
+                    text = "\n".join(rows)[:6000]
+                resp = await model.generate_content_async(base_prompt + f"\n\nSPREADSHEET DATA:\n{text}")
+                raw = resp.text.strip().strip("```json").strip("```").strip()
+                result = _json.loads(raw)
+                if result.get("suggested_folder") not in available_subfolders:
+                    result["suggested_folder"] = _keyword_classify(filename, text[:500])
+                return result
+            except Exception:
+                pass
+
+    except Exception:
+        pass
+
+    # ── Final fallback: keyword match on filename ───────────────────────────
+    folder = _keyword_classify(filename)
+    return {
+        "suggested_folder": folder,
+        "document_type": "Unknown — classified by filename",
+        "company_name": None,
+        "confidence": "low",
+        "notes": f"AI unavailable; classified by filename keyword matching.",
+    }
 
 
-def _get_or_create_subfolder_sync(service, parent_id: str, subfolder_name: str) -> str:
-    """Return existing subfolder ID or create it. Returns folder ID."""
-    existing = service.files().list(
-        q=f"'{parent_id}' in parents and name='{subfolder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false",
-        fields="files(id,name)",
-    ).execute().get("files", [])
-    if existing:
-        return existing[0]["id"]
-    created = service.files().create(
-        body={"name": subfolder_name, "mimeType": "application/vnd.google-apps.folder", "parents": [parent_id]},
-        fields="id",
-    ).execute()
-    return created["id"]
+class ClassifyRequest(BaseModel):
+    filename: str
+    available_subfolders: List[str] = Field(default_factory=list)
 
 
-@router.post("/drive/bulk-upload")
-async def bulk_upload_to_drive(
-    portal_user_id: str = Form(..., description="Portal user whose Drive folder receives the files"),
-    subfolder: str = Form("", description="Subfolder name inside the client root (leave blank for root)"),
-    files: List[UploadFile] = File(..., description="One or more files to upload"),
+@router.post("/drive/classify-document")
+async def classify_document_endpoint(
+    filename: str = Form(...),
+    available_subfolders: str = Form("[]"),   # JSON-encoded list
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_user),
+):
+    """Classify a single document and suggest which Drive subfolder it belongs in."""
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Insufficient permissions")
+    import json as _json
+    try:
+        subfolders = _json.loads(available_subfolders)
+    except Exception:
+        subfolders = []
+    if not subfolders:
+        subfolders = list(DEFAULT_SUBFOLDERS)
+
+    file_bytes = await file.read()
+    mime = file.content_type or "application/octet-stream"
+    result = await _ai_classify_document(filename, file_bytes, mime, subfolders)
+    return {"filename": filename, **result}
+
+
+@router.post("/drive/smart-bulk-upload")
+async def smart_bulk_upload(
+    portal_user_id: str = Form(...),
+    classifications: str = Form(...),   # JSON: [{filename, suggested_folder, override_folder?}, ...]
+    files: List[UploadFile] = File(...),
     current_user=Depends(get_current_user),
 ):
     """
-    Upload multiple files from the admin's machine directly into the client's
-    Google Drive folder (or a named subfolder).  Files appear in the client portal
-    immediately after upload.
+    Final upload step of the Smart Bulk Upload flow.
+
+    Receives files + the admin-confirmed classification map, then:
+    1. Resolves (or creates) the target subfolder in the client's Drive root
+    2. Uploads each file to its assigned subfolder
+    3. Returns per-file results with Drive links
     """
     if current_user.role not in ("admin", "manager"):
         raise HTTPException(403, "Insufficient permissions")
@@ -1318,50 +1502,66 @@ async def bulk_upload_to_drive(
 
     root_folder_id = portal_user.get("google_drive_folder_id")
     if not root_folder_id:
-        raise HTTPException(400, "This portal user has no Google Drive folder linked. Create one first.")
+        raise HTTPException(400, "This client has no Drive folder linked. Create one in Folder Architect first.")
 
-    import asyncio, mimetypes
+    import json as _json, asyncio
+    try:
+        class_map = {item["filename"]: item for item in _json.loads(classifications)}
+    except Exception:
+        raise HTTPException(400, "Invalid classifications JSON")
+
     service = _get_drive_service()
 
-    # Determine target folder (subfolder or root)
-    subfolder_name = subfolder.strip()
-    if subfolder_name:
+    # Cache subfolder IDs to avoid repeated Drive API calls
+    subfolder_id_cache: dict = {}
+
+    async def _get_subfolder_id(name: str) -> str:
+        if name in subfolder_id_cache:
+            return subfolder_id_cache[name]
         loop = asyncio.get_event_loop()
-        target_folder_id = await loop.run_in_executor(
-            None, _get_or_create_subfolder_sync, service, root_folder_id, subfolder_name
-        )
-    else:
-        target_folder_id = root_folder_id
+        fid = await loop.run_in_executor(None, _get_or_create_subfolder_sync, service, root_folder_id, name)
+        subfolder_id_cache[name] = fid
+        return fid
 
     results = []
+    import mimetypes
     for uf in files:
         file_bytes = await uf.read()
+        info = class_map.get(uf.filename, {})
+        # Admin override takes priority; fall back to AI suggestion; then root
+        dest_folder_name = (info.get("override_folder") or info.get("suggested_folder") or "").strip()
+
+        if dest_folder_name:
+            try:
+                target_id = await _get_subfolder_id(dest_folder_name)
+            except Exception as e:
+                results.append({"filename": uf.filename, "status": "error", "error": f"Could not resolve subfolder: {e}", "folder": dest_folder_name})
+                continue
+        else:
+            target_id = root_folder_id
+            dest_folder_name = "(root)"
+
         mime = uf.content_type or mimetypes.guess_type(uf.filename)[0] or "application/octet-stream"
         try:
             loop = asyncio.get_event_loop()
-            uploaded = await loop.run_in_executor(
-                None, _upload_file_to_drive_sync, service, target_folder_id, uf.filename, file_bytes, mime
-            )
+            uploaded = await loop.run_in_executor(None, _upload_file_to_drive_sync, service, target_id, uf.filename, file_bytes, mime)
             results.append({
                 "filename": uf.filename,
                 "status": "uploaded",
+                "folder": dest_folder_name,
                 "drive_id": uploaded.get("id"),
                 "web_link": uploaded.get("webViewLink"),
-                "size": uploaded.get("size"),
+                "document_type": info.get("document_type", ""),
             })
         except Exception as e:
-            logger.error(f"Failed to upload {uf.filename}: {e}", exc_info=True)
-            results.append({"filename": uf.filename, "status": "failed", "error": str(e)})
+            results.append({"filename": uf.filename, "status": "error", "error": str(e), "folder": dest_folder_name})
 
     uploaded_count = sum(1 for r in results if r["status"] == "uploaded")
-    failed_count = len(results) - uploaded_count
-
     return {
         "success": True,
-        "target_folder_id": target_folder_id,
-        "subfolder": subfolder_name or "(root)",
+        "portal_user_id": portal_user_id,
         "uploaded": uploaded_count,
-        "failed": failed_count,
+        "failed": len(results) - uploaded_count,
         "results": results,
     }
 
@@ -1371,27 +1571,19 @@ async def list_client_subfolders(
     portal_user_id: str,
     current_user=Depends(get_current_user),
 ):
-    """List the top-level subfolders inside a client's Drive root folder (for the upload subfolder picker)."""
+    """List top-level subfolders inside a client's Drive root folder."""
     if current_user.role not in ("admin", "manager"):
         raise HTTPException(403, "Insufficient permissions")
-
     portal_user = await db.client_portal_users.find_one({"id": portal_user_id}, {"_id": 0})
     if not portal_user:
         raise HTTPException(404, "Portal user not found")
-
     root_folder_id = portal_user.get("google_drive_folder_id")
     if not root_folder_id:
         return {"subfolders": [], "root_folder_id": None}
-
     from backend.invoicing import _get_drive_service, _drive_configured
     if not _drive_configured():
         return {"subfolders": [], "root_folder_id": root_folder_id}
-
     service = _get_drive_service()
     all_items = _fetch_drive_files_raw(root_folder_id, include_subfolders=False)
-    subfolders = [
-        {"id": f["id"], "name": f["name"]}
-        for f in all_items
-        if f.get("mimeType") == "application/vnd.google-apps.folder"
-    ]
+    subfolders = [{"id": f["id"], "name": f["name"]} for f in all_items if f.get("mimeType") == "application/vnd.google-apps.folder"]
     return {"subfolders": subfolders, "root_folder_id": root_folder_id}
