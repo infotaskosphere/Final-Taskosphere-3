@@ -634,7 +634,7 @@ export function WhatsAppButton({
         title={hasPhone ? (btnTitle || 'Send via WhatsApp') : 'No phone — click to enter one'}
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 5,
-          padding: s.p, fontSize: s.fs, fontWeight: 700, borderRadius: 8, border: 'none',
+          padding: s.p, fontSize: s.fs, fontWeight: 700, borderRadius: 8,
           background: hasPhone
             ? (isDark ? 'rgba(37,211,102,0.15)' : 'rgba(37,211,102,0.12)')
             : (isDark ? 'rgba(148,163,184,0.1)' : 'rgba(148,163,184,0.1)'),
