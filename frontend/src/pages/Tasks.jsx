@@ -30,7 +30,7 @@ import {
   X, ChevronDown, Filter, Clock, AlertCircle, CheckCircle2,
   TrendingUp, MoreHorizontal, Copy, SlidersHorizontal,
   Briefcase, Target, Activity, ChevronRight, Sun,
-  Loader2, Mail, Send,
+  Loader2, Mail, Send, Trophy, Medal, Star, Zap, Crown,
 } from 'lucide-react';
 import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
 
@@ -804,6 +804,10 @@ export default function Tasks() {
   const fileInputRef = useRef(null);
   const [csvAiFile, setCsvAiFile] = useState(null);
 
+  // ── Ranking state ──────────────────────────────────────────────────────────
+  const [myRanking, setMyRanking] = useState(null);
+  const [rankingsLoaded, setRankingsLoaded] = useState(false);
+
   const hasCrossVisibility = React.useMemo(() => {
     if (isAdmin) return true;
     // Cross-visibility is purely explicit (admin-curated view_other_tasks list).
@@ -869,6 +873,17 @@ export default function Tasks() {
       } catch (e) {
         console.error('Tasks wave-2 fetch error:', e);
         setUsersLoading(false);
+      }
+      // ── Fetch ranking data for the current user ──
+      try {
+        const rankData = await apiFetch('/reports/performance-rankings?period=monthly');
+        if (Array.isArray(rankData) && rankData.length > 0) {
+          const mine = rankData.find(r => r.user_id === user?.id) || rankData[0];
+          setMyRanking({ ...mine, totalUsers: rankData.length, rankings: rankData });
+          setRankingsLoaded(true);
+        }
+      } catch (e) {
+        console.error('Tasks ranking fetch error:', e);
       }
     };
     loadAll();
@@ -2217,6 +2232,147 @@ export default function Tasks() {
                   </motion.div>
                 );
               })}
+            </div>
+          </motion.div>
+        );
+      })()}
+
+      {/* ── RANKING BOOSTER WIDGET ─────────────────────────────────────────── */}
+      {rankingsLoaded && myRanking && (() => {
+        const { rank, totalUsers, overall_score, badge, task_completion_percent, rankings } = myRanking;
+        const prevRank = rank > 1 ? rankings[rank - 2] : null;
+        const pointsToNext = prevRank ? Math.ceil(prevRank.overall_score - overall_score + 0.1) : 0;
+
+        // How many tasks to complete to gain ~5 points (task weight = 0.25)
+        const pendingCount = stats.todo + stats.inProgress;
+        const tasksNeededForNextRank = prevRank
+          ? Math.max(1, Math.ceil((prevRank.overall_score - overall_score) / 2.5))
+          : 0;
+
+        const rankColor = rank === 1 ? '#F59E0B' : rank <= 3 ? '#60A5FA' : COLORS.mediumBlue;
+        const badgeColor = badge === 'Star Performer' ? '#F59E0B' : badge === 'Top Performer' ? '#60A5FA' : COLORS.emeraldGreen;
+        const scoreColor = overall_score >= 85 ? COLORS.emeraldGreen : overall_score >= 65 ? COLORS.amber : COLORS.coral;
+
+        return (
+          <motion.div variants={itemVariants}>
+            <div className={`rounded-2xl border overflow-hidden ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-200'}`}
+              style={{ boxShadow: `0 2px 16px ${rankColor}18` }}>
+              <div className="p-4 flex flex-col lg:flex-row gap-5">
+
+                {/* ── Left: Rank + badge ── */}
+                <div className="flex items-center gap-4 lg:w-56 flex-shrink-0">
+                  <div className="relative flex-shrink-0">
+                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
+                      style={{ background: `${rankColor}18`, border: `2px solid ${rankColor}44` }}>
+                      {rank === 1 ? <Crown className="h-7 w-7" style={{ color: rankColor }} />
+                        : rank <= 3 ? <Medal className="h-7 w-7" style={{ color: rankColor }} />
+                        : <Trophy className="h-7 w-7" style={{ color: rankColor }} />}
+                    </div>
+                    <span className="absolute -top-1.5 -right-1.5 text-[10px] font-black px-1.5 py-0.5 rounded-full"
+                      style={{ background: rankColor, color: '#fff' }}>
+                      #{rank}
+                    </span>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Your Ranking</p>
+                    <p className="text-xl font-black leading-tight" style={{ color: rankColor }}>
+                      {rank} <span className="text-sm font-semibold text-slate-400">/ {totalUsers}</span>
+                    </p>
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full mt-0.5"
+                      style={{ background: `${badgeColor}18`, color: badgeColor }}>
+                      <Star className="h-2.5 w-2.5" /> {badge}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Divider */}
+                <div className={`hidden lg:block w-px flex-shrink-0 ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`} />
+
+                {/* ── Middle: Score breakdown ── */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2.5">Performance Score</p>
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="relative w-10 h-10 flex-shrink-0">
+                      <svg viewBox="0 0 44 44" className="w-10 h-10 -rotate-90">
+                        <circle cx="22" cy="22" r="17" strokeWidth="4" fill="none"
+                          stroke={isDark ? '#334155' : '#e2e8f0'} />
+                        <circle cx="22" cy="22" r="17" strokeWidth="4" fill="none"
+                          strokeDasharray={`${(overall_score / 100) * 106.8} 106.8`}
+                          strokeLinecap="round" stroke={scoreColor} />
+                      </svg>
+                      <span className="absolute inset-0 flex items-center justify-center text-[9px] font-black"
+                        style={{ color: scoreColor }}>{Math.round(overall_score)}</span>
+                    </div>
+                    <div className="flex-1 space-y-1.5">
+                      {[
+                        { label: 'Task Completion', val: myRanking.task_completion_percent, color: COLORS.mediumBlue },
+                        { label: 'Attendance', val: myRanking.attendance_percent, color: COLORS.emeraldGreen },
+                        { label: 'On-Time Todos', val: myRanking.todo_ontime_percent, color: COLORS.amber },
+                      ].map(({ label, val, color }) => (
+                        <div key={label} className="flex items-center gap-2">
+                          <span className="text-[9px] w-24 flex-shrink-0 font-medium text-slate-400">{label}</span>
+                          <div className={`flex-1 h-1 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                            <motion.div className="h-full rounded-full"
+                              style={{ background: color }}
+                              initial={{ width: 0 }}
+                              animate={{ width: `${Math.min(val, 100)}%` }}
+                              transition={{ duration: 0.6, ease: 'easeOut' }} />
+                          </div>
+                          <span className="text-[9px] font-bold w-7 text-right" style={{ color }}>{Math.round(val)}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Divider */}
+                <div className={`hidden lg:block w-px flex-shrink-0 ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`} />
+
+                {/* ── Right: Suggestions to climb rank ── */}
+                <div className="lg:w-60 flex-shrink-0 flex flex-col gap-2.5">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                    {rank === 1 ? '🏆 You\'re #1!' : `🚀 Climb to Rank #${rank - 1}`}
+                  </p>
+
+                  {rank === 1 ? (
+                    <div className={`rounded-xl p-3 border ${isDark ? 'bg-amber-900/20 border-amber-800/40' : 'bg-amber-50 border-amber-100'}`}>
+                      <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-300 leading-relaxed">
+                        🎉 You're the top performer! Keep completing tasks on time to maintain your crown.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className={`rounded-xl p-3 border ${isDark ? 'bg-blue-900/20 border-blue-800/40' : 'bg-blue-50 border-blue-100'}`}>
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <Zap className="h-3 w-3 text-blue-500 flex-shrink-0" />
+                          <p className="text-[10px] font-bold text-blue-600 dark:text-blue-300 uppercase tracking-wide">
+                            {pointsToNext} pts needed
+                          </p>
+                        </div>
+                        <p className="text-[11px] font-medium leading-relaxed" style={{ color: isDark ? '#93c5fd' : '#1e40af' }}>
+                          Complete <strong>{tasksNeededForNextRank}</strong> more task{tasksNeededForNextRank !== 1 ? 's' : ''} to overtake{' '}
+                          <strong>{prevRank?.user_name?.split(' ')[0] || 'next rank'}</strong> and reach{' '}
+                          <strong>Rank #{rank - 1}</strong>.
+                        </p>
+                      </div>
+                      {pendingCount > 0 && (
+                        <div className={`rounded-xl p-3 border ${isDark ? 'bg-emerald-900/20 border-emerald-800/40' : 'bg-emerald-50 border-emerald-100'}`}>
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <CheckCircle2 className="h-3 w-3 text-emerald-500 flex-shrink-0" />
+                            <p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">
+                              {pendingCount} task{pendingCount !== 1 ? 's' : ''} pending
+                            </p>
+                          </div>
+                          <p className="text-[11px] font-medium leading-relaxed" style={{ color: isDark ? '#6ee7b7' : '#065f46' }}>
+                            Finish your <strong>{Math.min(tasksNeededForNextRank, pendingCount)}</strong> priority task{Math.min(tasksNeededForNextRank, pendingCount) !== 1 ? 's' : ''} today to jump up the leaderboard.
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+
+              </div>
             </div>
           </motion.div>
         );
