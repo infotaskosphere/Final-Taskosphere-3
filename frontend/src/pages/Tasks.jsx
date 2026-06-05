@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import useDark from '../hooks/useDark';
 import { useAuth } from '../contexts/AuthContext';
@@ -202,7 +202,7 @@ const getStripeColor = (task, overdue) => {
 // ─── Animation variants ───────────────────────────────────────────────────────
 const containerVariants = {
   hidden:  { opacity: 0 },
-  visible: { opacity: 1, transition: { staggerChildren: 0.055, delayChildren: 0.04 } },
+  visible: { opacity: 1, transition: { staggerChildren: 0, delayChildren: 0 } },
 };
 const itemVariants = {
   hidden:  { opacity: 0, y: 18, scale: 0.98 },
@@ -368,9 +368,8 @@ const TaskRow = ({
   openTaskDetail, openCommentTaskId, setOpenCommentTaskId,
   fetchComments, comments, newComment, setNewComment,
   selectedTask, setSelectedTask, handleAddComment,
-  user,
+  user, isDark,
 }) => {
-  const isDark = useDark();
   const [expanded, setExpanded] = useState(false);
   const checklistItems = parseChecklist(task.description);
   const checkedItems   = taskChecklists[task.id] || [];
@@ -590,8 +589,8 @@ const BoardCard = ({
   openTaskDetail, openCommentTaskId, setOpenCommentTaskId,
   fetchComments, comments, newComment, setNewComment,
   selectedTask, setSelectedTask, handleAddComment,
+  isDark,
 }) => {
-  const isDark = useDark();
   const checklistItems = parseChecklist(task.description);
   const checkedItems   = taskChecklists[task.id] || [];
   const progress       = getChecklistProgress(task);
@@ -794,7 +793,6 @@ export default function Tasks() {
   const [sortBy,                  setSortBy]                  = useState('due_date');
   const [sortDirection,           setSortDirection]           = useState('asc');
   const [showMyTasksOnly,         setShowMyTasksOnly]         = useState(false);
-  const [activeFilters,           setActiveFilters]           = useState([]);
   const [taskChecklists,          setTaskChecklists]          = useState({});
   const [showWorkflowLibrary,     setShowWorkflowLibrary]     = useState(false);
   const [workflowSearch,          setWorkflowSearch]          = useState('');
@@ -857,33 +855,47 @@ export default function Tasks() {
   useEffect(() => {
     const loadAll = async () => {
       setDataLoading(true);
-      try {
-        const tasksData = await apiFetch('/tasks');
+      // ── All 4 API calls fire simultaneously — no sequential waterfalls ──
+      const [tasksResult, usersResult, clientsResult, rankResult] = await Promise.allSettled([
+        apiFetch('/tasks'),
+        apiFetch('/users'),
+        apiFetch('/clients'),
+        apiFetch('/reports/performance-rankings?period=monthly'),
+      ]);
+
+      // tasks
+      if (tasksResult.status === 'fulfilled') {
+        const tasksData = tasksResult.value;
         if (Array.isArray(tasksData)) setTasks(tasksData);
         else if (tasksData === null) toast.error("You don't have permission to view tasks.");
-      } catch (e) {
-        if (e?.response?.status === 403) toast.error("You don't have permission to view tasks.");
-        else console.error('Tasks wave-1 fetch error:', e);
+      } else {
+        if (tasksResult.reason?.response?.status === 403)
+          toast.error("You don't have permission to view tasks.");
+        else console.error('Tasks fetch error:', tasksResult.reason);
       }
       setDataLoading(false);
-      try {
-        const [usersData, clientsData] = await Promise.all([apiFetch('/users'), apiFetch('/clients')]);
-        if (Array.isArray(usersData))   { setUsers(usersData);   setUsersLoading(false); }
-        if (Array.isArray(clientsData))   setClients(clientsData);
-      } catch (e) {
-        console.error('Tasks wave-2 fetch error:', e);
-        setUsersLoading(false);
+
+      // users
+      if (usersResult.status === 'fulfilled' && Array.isArray(usersResult.value)) {
+        setUsers(usersResult.value);
       }
-      // ── Fetch ranking data for the current user ──
-      try {
-        const rankData = await apiFetch('/reports/performance-rankings?period=monthly');
+      setUsersLoading(false);
+
+      // clients
+      if (clientsResult.status === 'fulfilled' && Array.isArray(clientsResult.value)) {
+        setClients(clientsResult.value);
+      }
+
+      // rankings
+      if (rankResult.status === 'fulfilled') {
+        const rankData = rankResult.value;
         if (Array.isArray(rankData) && rankData.length > 0) {
           const mine = rankData.find(r => r.user_id === user?.id) || rankData[0];
           setMyRanking({ ...mine, totalUsers: rankData.length, rankings: rankData });
           setRankingsLoaded(true);
         }
-      } catch (e) {
-        console.error('Tasks ranking fetch error:', e);
+      } else {
+        console.error('Tasks ranking fetch error:', rankResult.reason);
       }
     };
     loadAll();
@@ -923,28 +935,34 @@ export default function Tasks() {
   }, [searchParams, setSearchParams]);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
-  const parseChecklist = (description) => {
+  // O(1) lookup maps — built once when users/clients array changes
+  const userMap   = useMemo(() => new Map(users.map(u => [u.id, u])),     [users]);
+  const clientMap = useMemo(() => new Map(clients.map(c => [c.id, c])),   [clients]);
+
+  const parseChecklist = useCallback((description) => {
     if (!description) return [];
     return description.split('\n').map(l => l.trim()).filter(l => l.startsWith('-') || l.startsWith('•')).map(l => l.replace(/^[-•]\s*/, '').trim());
-  };
-  const toggleChecklistItem = (taskId, index) => {
+  }, []);
+  const toggleChecklistItem = useCallback((taskId, index) => {
     setTaskChecklists(prev => {
       const current = prev[taskId] || [];
       const next = current.includes(index) ? current.filter(i => i !== index) : [...current, index];
       return { ...prev, [taskId]: next };
     });
-  };
-  const getChecklistProgress = (task) => {
-    const items = parseChecklist(task.description);
+  }, []);
+  const getChecklistProgress = useCallback((task) => {
+    const items = task.description
+      ? task.description.split('\n').map(l => l.trim()).filter(l => l.startsWith('-') || l.startsWith('•'))
+      : [];
     if (!items.length) return 0;
     return Math.round(((taskChecklists[task.id] || []).length / items.length) * 100);
-  };
-  const getUserName      = (id) => users.find(u => u.id === id)?.full_name || 'Unassigned';
-  const getClientName    = (id) => clients.find(c => c.id === id)?.company_name || 'No Client';
-  const getCategoryLabel = (v)  => TASK_CATEGORIES.find(c => c.value === v)?.label || v || 'Other';
-  const isOverdue = (task) => { if (task.status === 'completed' || !task.due_date) return false; return new Date(task.due_date) < new Date(); };
-  const getDisplayStatus = (task) => isOverdue(task) ? 'overdue' : task.status || 'pending';
-  const getRelativeDueDate = (dueDate) => {
+  }, [taskChecklists]);
+  const getUserName      = useCallback((id) => userMap.get(id)?.full_name || 'Unassigned', [userMap]);
+  const getClientName    = useCallback((id) => clientMap.get(id)?.company_name || 'No Client', [clientMap]);
+  const getCategoryLabel = useCallback((v)  => TASK_CATEGORIES.find(c => c.value === v)?.label || v || 'Other', []);
+  const isOverdue = useCallback((task) => { if (task.status === 'completed' || !task.due_date) return false; return new Date(task.due_date) < new Date(); }, []);
+  const getDisplayStatus = useCallback((task) => isOverdue(task) ? 'overdue' : task.status || 'pending', [isOverdue]);
+  const getRelativeDueDate = useCallback((dueDate) => {
     if (!dueDate) return '';
     const due = new Date(dueDate); const now = new Date(); const diffDays = Math.ceil((due - now) / 86400000);
     if (diffDays < 0)   return `${Math.abs(diffDays)}d overdue`;
@@ -952,13 +970,13 @@ export default function Tasks() {
     if (diffDays === 1) return 'Tomorrow';
     if (diffDays <= 7)  return `In ${diffDays}d`;
     return format(due, 'MMM dd');
-  };
-  const openTaskDetail = (task) => { setSelectedDetailTask(task); setTaskDetailOpen(true); };
-  const resetForm = () => { setFormData({ ...EMPTY_FORM }); setEditingTask(null); };
-  const toggleSubAssignee = (userId) => {
+  }, []);
+  const openTaskDetail = useCallback((task) => { setSelectedDetailTask(task); setTaskDetailOpen(true); }, []);
+  const resetForm = useCallback(() => { setFormData({ ...EMPTY_FORM }); setEditingTask(null); }, []);
+  const toggleSubAssignee = useCallback((userId) => {
     setFormData(prev => ({ ...prev, sub_assignees: prev.sub_assignees.includes(userId) ? prev.sub_assignees.filter(id => id !== userId) : [...prev.sub_assignees, userId] }));
-  };
-  const markAllAsRead = () => { setNotifications(p => p.map(n => ({ ...n, is_read: true }))); toast.success('Marked all as read'); };
+  }, []);
+  const markAllAsRead = useCallback(() => { setNotifications(p => p.map(n => ({ ...n, is_read: true }))); toast.success('Marked all as read'); }, []);
 
   // ── CRUD ──────────────────────────────────────────────────────────────────
   const handleSubmit = async (e) => {
@@ -1436,7 +1454,7 @@ export default function Tasks() {
 
   const myTasks = React.useMemo(() => tasks.filter(t => t.assigned_to === user?.id || t.sub_assignees?.includes(user?.id)), [tasks, user]);
 
-  const stats = {
+  const stats = useMemo(() => ({
     myTask:     myTasks.length,
     assignedByMe: scopedTasks.filter(t => t.created_by === user?.id).length,
     total:      scopedTasks.length,
@@ -1445,7 +1463,7 @@ export default function Tasks() {
     completed:  scopedTasks.filter(t => t.status === 'completed').length,
     overdue:    scopedTasks.filter(t => isOverdue(t)).length,
     teamTask:   hasCrossVisibility ? tasks.filter(t => { const isIncomplete = t.status !== 'completed'; const isMyTask = t.assigned_to === user?.id || (t.sub_assignees || []).includes(user?.id); const isCrossTask = crossVisibilityUserIds.includes(t.assigned_to) || (t.sub_assignees || []).some(id => crossVisibilityUserIds.includes(id)); return isIncomplete && (isMyTask || isCrossTask); }).length : 0,
-  };
+  }), [myTasks, scopedTasks, tasks, hasCrossVisibility, crossVisibilityUserIds, user?.id, isOverdue]);
 
   const completionRate = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
 
@@ -1464,7 +1482,7 @@ export default function Tasks() {
   }, [hasCrossVisibility, crossVisibilityUserIds, tasks, users, user?.id]);
 
   // ── Filtering ─────────────────────────────────────────────────────────────
-  const filteredTasks = scopedTasks.filter(task => {
+  const filteredTasks = useMemo(() => scopedTasks.filter(task => {
     const matchesSearch   = task.title.toLowerCase().includes(searchQuery.toLowerCase()) || task.description?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesPriority = filterPriority === 'all' || task.priority   === filterPriority;
     const matchesCategory = filterCategory === 'all' || task.category   === filterCategory;
@@ -1496,7 +1514,9 @@ export default function Tasks() {
       }
     }
     return matchesSearch && matchesStatus && matchesPriority && matchesCategory && matchesAssignee && matchesTeam && matchesTodayNew && matchesPending;
-  });
+  }), [scopedTasks, searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee,
+       filterTeamOnly, filterTodayNew, filterPending, showMyTasksOnly,
+       user?.id, crossVisibilityUserIds, isOverdue, isAdmin]);
 
   // ── displayTasks must be defined BEFORE filteredStats ────────────────────
   const displayTasks = React.useMemo(() => {
@@ -1569,21 +1589,22 @@ export default function Tasks() {
     return parts.filter(Boolean).join(' · ');
   }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly, filterTeamOnly, filterAssignedByMe, filterCreatedBy, filterTodayNew, filterPending, users]);
 
-  useEffect(() => {
+  // useMemo instead of useEffect+setState — eliminates the extra render cycle
+  const activeFilters = useMemo(() => {
     const pills = [];
     if (searchQuery)              pills.push({ key: 'search',   label: `"${searchQuery}"` });
     if (filterStatus !== 'all')   pills.push({ key: 'status',   label: STATUS_STYLES[filterStatus]?.label || filterStatus });
     if (filterPriority !== 'all') pills.push({ key: 'priority', label: filterPriority.toUpperCase() });
     if (filterCategory !== 'all') pills.push({ key: 'category', label: getCategoryLabel(filterCategory) });
-    if (filterAssignee !== 'all') pills.push({ key: 'assignee', label: users.find(u => u.id === filterAssignee)?.full_name || filterAssignee });
+    if (filterAssignee !== 'all') pills.push({ key: 'assignee', label: userMap.get(filterAssignee)?.full_name || filterAssignee });
     if (showMyTasksOnly)          pills.push({ key: 'mytasks',     label: 'Assigned To Me' });
     if (filterTeamOnly)           pills.push({ key: 'teamonly',    label: 'Team Tasks' });
     if (filterAssignedByMe)       pills.push({ key: 'assignedby',  label: 'Assigned by Me' });
-    if (filterCreatedBy !== 'all') pills.push({ key: 'createdby', label: `By: ${users.find(u => u.id === filterCreatedBy)?.full_name || filterCreatedBy}` });
+    if (filterCreatedBy !== 'all') pills.push({ key: 'createdby', label: `By: ${userMap.get(filterCreatedBy)?.full_name || filterCreatedBy}` });
     if (filterTodayNew)           pills.push({ key: 'todaynew',   label: "Today's New Tasks" });
     if (filterPending)            pills.push({ key: 'pending',    label: 'Pending Tasks' });
-    setActiveFilters(pills);
-  }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly, filterTeamOnly, filterAssignedByMe, filterCreatedBy, filterTodayNew, filterPending, users]);
+    return pills;
+  }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly, filterTeamOnly, filterAssignedByMe, filterCreatedBy, filterTodayNew, filterPending, userMap, getCategoryLabel]);
 
   const removeFilter = (key) => {
     if (key === 'search')   setSearchQuery('');
@@ -1607,12 +1628,12 @@ export default function Tasks() {
     toast.success('Filters cleared');
   };
 
-  const filteredWorkflows = COMPLIANCE_WORKFLOWS.filter(wf => {
+  const filteredWorkflows = useMemo(() => COMPLIANCE_WORKFLOWS.filter(wf => {
     const matchSearch = wf.name.toLowerCase().includes(workflowSearch.toLowerCase()) || wf.title.toLowerCase().includes(workflowSearch.toLowerCase());
     const matchDept   = workflowDeptFilter      === 'all' || wf.category  === workflowDeptFilter;
     const matchFreq   = workflowFrequencyFilter === 'all' || wf.frequency.toLowerCase().includes(workflowFrequencyFilter.toLowerCase());
     return matchSearch && matchDept && matchFreq;
-  });
+  }), [workflowSearch, workflowDeptFilter, workflowFrequencyFilter]);
 
   const applyComplianceWorkflow = (wf) => {
     const due = new Date(); due.setDate(due.getDate() + wf.estimatedDays);
@@ -2825,6 +2846,7 @@ export default function Tasks() {
                           fetchComments={fetchComments} comments={comments} newComment={newComment}
                           setNewComment={setNewComment} selectedTask={selectedTask} setSelectedTask={setSelectedTask}
                           handleAddComment={handleAddComment}
+                          isDark={isDark}
                         />
                       );
                     })}
