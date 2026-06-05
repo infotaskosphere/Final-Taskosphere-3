@@ -33,6 +33,7 @@ const CompliancePage    = lazy(() => import("@/pages/CompliancePage.jsx"));
 const GSTReconciliation = lazy(() => import("@/pages/GSTReconciliation.jsx")); // ← NEW
 const AIDocumentReader = lazy(() => import("@/pages/AIDocumentReader.jsx"));
 const StaffActivity         = lazy(() => import("@/pages/StaffActivity.jsx"));
+const ActionCenter          = lazy(() => import("@/pages/ActionCenter.jsx"));
 const ClientPortalLogin     = lazy(() => import("@/pages/ClientPortalLogin.jsx"));
 const ClientPortalDashboard = lazy(() => import("@/pages/ClientPortalDashboard.jsx"));
 const ClientPortalManagerPage = lazy(() => import("@/pages/ClientPortalManagerPage.jsx"));
@@ -141,6 +142,7 @@ function AppRoutes() {
       <Route path="/todos"      element={<Protected><PageLoader><TodoDashboard /></PageLoader></Protected>} />
       <Route path="/attendance" element={<Protected><PageLoader><Attendance /></PageLoader></Protected>} />
       <Route path="/reminders"  element={<Protected><PageLoader><Reminders /></PageLoader></Protected>} />
+      <Route path="/action-center" element={<Protected><PageLoader><ActionCenter /></PageLoader></Protected>} />
       <Route path="/visits"     element={<Protected><PageLoader><VisitsPage /></PageLoader></Protected>} />
       <Route path="/reports"    element={<Protected><PageLoader><Reports /></PageLoader></Protected>} />
       <Route path="/ai-reader" element={<Protected><PageLoader><AIDocumentReader /></PageLoader></Protected>} />
