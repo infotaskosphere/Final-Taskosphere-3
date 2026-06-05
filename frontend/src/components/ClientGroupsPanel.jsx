@@ -24,9 +24,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
-} from '@/components/ui/dialog';
+// Inline panel — no Dialog wrapper, renders directly in the page flow.
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -349,40 +347,59 @@ export default function ClientGroupsPanel({
     }
   };
 
-  return (
-    <Dialog open={open} onOpenChange={v => !v && onClose()}>
-      <DialogContent
-        className={`max-w-2xl max-h-[90vh] flex flex-col overflow-hidden p-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white'}`}
-        style={{ borderRadius: 20 }}
-      >
-        {/* Header */}
-        <DialogHeader className={`flex-shrink-0 px-6 pt-5 pb-4 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg, #4338CA, #7C3AED)' }}>
-              <Layers className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <DialogTitle className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>Client Groups</DialogTitle>
-              <DialogDescription className="text-xs text-slate-400 mt-0.5">
-                Organize clients into groups · click a group to view members · WhatsApp the whole group with one click
-              </DialogDescription>
-            </div>
-            <div className="ml-auto flex items-center gap-2">
-              {activeGroupId && (
-                <Button size="sm" variant="outline" onClick={() => onGroupFilter?.(null)}
-                  className="text-xs h-8 border-amber-300 text-amber-700 hover:bg-amber-50">
-                  <X className="w-3 h-3 mr-1" /> Clear Filter
-                </Button>
-              )}
-              <Button size="sm" onClick={() => setCreateMode(v => !v)}
-                className="text-xs h-8 bg-gradient-to-r from-indigo-600 to-violet-600 text-white border-0">
-                <Plus className="w-3 h-3 mr-1" /> New Group
-              </Button>
-            </div>
-          </div>
-        </DialogHeader>
+  if (!open) return null;
 
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+  return (
+    <div
+      className={`w-full rounded-2xl border shadow-sm overflow-hidden mb-4 ${
+        isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
+      }`}
+    >
+      {/* Header */}
+      <div className={`px-4 sm:px-6 pt-5 pb-4 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+        <div className="flex items-start gap-3 flex-wrap">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg, #4338CA, #7C3AED)' }}>
+            <Layers className="w-5 h-5 text-white" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>Client Groups</h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Click a group to view all members · WhatsApp the whole group with one click
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap flex-shrink-0">
+            {activeGroupId && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onGroupFilter?.(null)}
+                className="text-xs h-8 px-3 whitespace-nowrap border-amber-300 text-amber-700 hover:bg-amber-50"
+              >
+                <X className="w-3 h-3 mr-1" /> Clear Filter
+              </Button>
+            )}
+            <Button
+              size="sm"
+              onClick={() => setCreateMode(v => !v)}
+              className="text-xs h-8 px-3 whitespace-nowrap bg-gradient-to-r from-indigo-600 to-violet-600 text-white border-0"
+            >
+              <Plus className="w-3 h-3 mr-1" /> New Group
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => onClose?.()}
+              className="text-xs h-8 w-8 p-0"
+              title="Close groups panel"
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="px-4 py-4 space-y-3 max-h-[70vh] overflow-y-auto">
+
           {/* Create form */}
           <AnimatePresence>
             {createMode && (
@@ -500,11 +517,11 @@ export default function ClientGroupsPanel({
                   </button>
 
                   {!isEditing && (
-                    <div className="flex items-center gap-1 flex-shrink-0">
+                    <div className="flex items-center gap-1 flex-shrink-0 flex-wrap justify-end">
                       <button
                         onClick={() => handleWhatsAppGroup(group)}
                         disabled={memberCount === 0}
-                        className={`h-7 px-2 rounded-lg text-[10px] font-semibold transition-all flex items-center gap-1 ${
+                        className={`h-7 px-2.5 rounded-lg text-[11px] font-semibold whitespace-nowrap transition-all flex items-center gap-1 ${
                           memberCount === 0
                             ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
                             : 'bg-emerald-500 text-white hover:bg-emerald-600'
@@ -515,7 +532,7 @@ export default function ClientGroupsPanel({
                       </button>
                       <button
                         onClick={() => onGroupFilter?.(isActiveFilter ? null : group.id)}
-                        className={`h-7 px-2 rounded-lg text-[10px] font-semibold transition-all ${
+                        className={`h-7 px-2.5 rounded-lg text-[11px] font-semibold whitespace-nowrap transition-all ${
                           isActiveFilter
                             ? 'bg-blue-500 text-white'
                             : isDark ? 'bg-slate-700 text-slate-300 hover:bg-blue-900 hover:text-blue-300' : 'bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-600'
@@ -540,6 +557,7 @@ export default function ClientGroupsPanel({
                       </button>
                     </div>
                   )}
+
                 </div>
 
                 {/* Members view / editor */}
@@ -629,7 +647,7 @@ export default function ClientGroupsPanel({
             );
           })}
         </div>
-      </DialogContent>
-    </Dialog>
+    </div>
   );
 }
+
