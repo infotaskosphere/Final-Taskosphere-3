@@ -24,6 +24,7 @@ from bson import ObjectId
 # from app.database import db                     # your motor database instance
 # Example placeholders (replace with your actual imports):
 from backend.dependencies import get_current_user, db
+from backend.models import User
 
 router = APIRouter()
 
@@ -73,7 +74,7 @@ def serialize_reminder(doc: dict) -> dict:
 @router.get("/email/reminders")
 async def get_reminders(
     user_id: Optional[str] = Query(None),
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Fetch reminders for the current user.
@@ -104,7 +105,7 @@ async def get_reminders(
 @router.post("/email/save-as-reminder")
 async def create_reminder(
     body: ReminderCreate,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Create a new reminder."""
     now = datetime.now(timezone.utc).isoformat()
@@ -137,7 +138,7 @@ async def create_reminder(
 async def update_reminder(
     reminder_id: str,
     body: ReminderUpdate,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Update a reminder (title, description, remind_at, is_dismissed, etc.)."""
     try:
@@ -181,7 +182,7 @@ async def update_reminder(
 @router.delete("/email/reminders/{reminder_id}")
 async def delete_reminder(
     reminder_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Delete a reminder permanently."""
     try:
