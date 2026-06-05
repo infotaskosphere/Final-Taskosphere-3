@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Building2, Users, FileText, MessageSquare, Settings, ExternalLink, ChevronRight } from 'lucide-react';
+import { Building2, Users, FileText, MessageSquare, Settings, ExternalLink, ChevronRight, Zap } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useDark } from '@/hooks/useDark.jsx';
 
@@ -14,11 +14,12 @@ const COLORS = {
 const GRADIENT = `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`;
 
 const NAV_ITEMS = [
-  { path: '/client-portal-manager',           icon: Building2,     label: 'Overview'    },
-  { path: '/client-portal-manager/clients',   icon: Users,         label: 'Clients'     },
-  { path: '/client-portal-manager/documents', icon: FileText,      label: 'Documents'   },
-  { path: '/client-portal-manager/messages',  icon: MessageSquare, label: 'Messages'    },
-  { path: '/client-portal-manager/settings',  icon: Settings,      label: 'Settings'    },
+  { path: '/client-portal-manager',                icon: Building2,     label: 'Overview'      },
+  { path: '/client-portal-manager/clients',        icon: Users,         label: 'Clients'       },
+  { path: '/client-portal-manager/documents',      icon: FileText,      label: 'Documents'     },
+  { path: '/client-portal-manager/smart-upload',   icon: Zap,           label: 'Smart Upload'  },
+  { path: '/client-portal-manager/messages',       icon: MessageSquare, label: 'Messages'      },
+  { path: '/client-portal-manager/settings',       icon: Settings,      label: 'Settings'      },
 ];
 
 const springSnap = { type: 'spring', stiffness: 500, damping: 28 };
