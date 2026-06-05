@@ -15,7 +15,7 @@ import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 import io
 from pydantic import BaseModel, EmailStr, Field
@@ -1257,3 +1257,141 @@ async def create_individual_folder(
         "folder_name": folder_name,
         "subfolders_created": subfolders,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Bulk Upload from local disk → Google Drive (then auto-visible in portal)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _upload_file_to_drive_sync(service, folder_id: str, filename: str, file_bytes: bytes, mime_type: str) -> dict:
+    """Upload a single file to a Drive folder. Returns file metadata dict."""
+    import io as _io
+    from googleapiclient.http import MediaIoBaseUpload
+
+    media = MediaIoBaseUpload(_io.BytesIO(file_bytes), mimetype=mime_type or "application/octet-stream", resumable=True)
+    metadata = {"name": filename, "parents": [folder_id]}
+    created = service.files().create(
+        body=metadata,
+        media_body=media,
+        fields="id,name,mimeType,size,modifiedTime,webViewLink",
+    ).execute()
+    return created
+
+
+def _get_or_create_subfolder_sync(service, parent_id: str, subfolder_name: str) -> str:
+    """Return existing subfolder ID or create it. Returns folder ID."""
+    existing = service.files().list(
+        q=f"'{parent_id}' in parents and name='{subfolder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false",
+        fields="files(id,name)",
+    ).execute().get("files", [])
+    if existing:
+        return existing[0]["id"]
+    created = service.files().create(
+        body={"name": subfolder_name, "mimeType": "application/vnd.google-apps.folder", "parents": [parent_id]},
+        fields="id",
+    ).execute()
+    return created["id"]
+
+
+@router.post("/drive/bulk-upload")
+async def bulk_upload_to_drive(
+    portal_user_id: str = Form(..., description="Portal user whose Drive folder receives the files"),
+    subfolder: str = Form("", description="Subfolder name inside the client root (leave blank for root)"),
+    files: List[UploadFile] = File(..., description="One or more files to upload"),
+    current_user=Depends(get_current_user),
+):
+    """
+    Upload multiple files from the admin's machine directly into the client's
+    Google Drive folder (or a named subfolder).  Files appear in the client portal
+    immediately after upload.
+    """
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Insufficient permissions")
+
+    from backend.invoicing import _get_drive_service, _drive_configured
+    if not _drive_configured():
+        raise HTTPException(503, "Google Drive not configured.")
+
+    portal_user = await db.client_portal_users.find_one({"id": portal_user_id}, {"_id": 0})
+    if not portal_user:
+        raise HTTPException(404, "Portal user not found")
+
+    root_folder_id = portal_user.get("google_drive_folder_id")
+    if not root_folder_id:
+        raise HTTPException(400, "This portal user has no Google Drive folder linked. Create one first.")
+
+    import asyncio, mimetypes
+    service = _get_drive_service()
+
+    # Determine target folder (subfolder or root)
+    subfolder_name = subfolder.strip()
+    if subfolder_name:
+        loop = asyncio.get_event_loop()
+        target_folder_id = await loop.run_in_executor(
+            None, _get_or_create_subfolder_sync, service, root_folder_id, subfolder_name
+        )
+    else:
+        target_folder_id = root_folder_id
+
+    results = []
+    for uf in files:
+        file_bytes = await uf.read()
+        mime = uf.content_type or mimetypes.guess_type(uf.filename)[0] or "application/octet-stream"
+        try:
+            loop = asyncio.get_event_loop()
+            uploaded = await loop.run_in_executor(
+                None, _upload_file_to_drive_sync, service, target_folder_id, uf.filename, file_bytes, mime
+            )
+            results.append({
+                "filename": uf.filename,
+                "status": "uploaded",
+                "drive_id": uploaded.get("id"),
+                "web_link": uploaded.get("webViewLink"),
+                "size": uploaded.get("size"),
+            })
+        except Exception as e:
+            logger.error(f"Failed to upload {uf.filename}: {e}", exc_info=True)
+            results.append({"filename": uf.filename, "status": "failed", "error": str(e)})
+
+    uploaded_count = sum(1 for r in results if r["status"] == "uploaded")
+    failed_count = len(results) - uploaded_count
+
+    return {
+        "success": True,
+        "target_folder_id": target_folder_id,
+        "subfolder": subfolder_name or "(root)",
+        "uploaded": uploaded_count,
+        "failed": failed_count,
+        "results": results,
+    }
+
+
+@router.get("/drive/subfolders/{portal_user_id}")
+async def list_client_subfolders(
+    portal_user_id: str,
+    current_user=Depends(get_current_user),
+):
+    """List the top-level subfolders inside a client's Drive root folder (for the upload subfolder picker)."""
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Insufficient permissions")
+
+    portal_user = await db.client_portal_users.find_one({"id": portal_user_id}, {"_id": 0})
+    if not portal_user:
+        raise HTTPException(404, "Portal user not found")
+
+    root_folder_id = portal_user.get("google_drive_folder_id")
+    if not root_folder_id:
+        return {"subfolders": [], "root_folder_id": None}
+
+    from backend.invoicing import _get_drive_service, _drive_configured
+    if not _drive_configured():
+        return {"subfolders": [], "root_folder_id": root_folder_id}
+
+    service = _get_drive_service()
+    all_items = _fetch_drive_files_raw(root_folder_id, include_subfolders=False)
+    subfolders = [
+        {"id": f["id"], "name": f["name"]}
+        for f in all_items
+        if f.get("mimeType") == "application/vnd.google-apps.folder"
+    ]
+    return {"subfolders": subfolders, "root_folder_id": root_folder_id}
