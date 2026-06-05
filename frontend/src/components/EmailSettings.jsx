@@ -24,8 +24,8 @@ import {
   Mail, Plus, Trash2, CheckCircle2, AlertCircle,
   Loader2, Eye, EyeOff, ExternalLink, ChevronDown, ChevronUp,
   Wifi, WifiOff, Edit2, Check, X, Info, Shield,
-  RefreshCw, Calendar, Bell, Eraser, Clock, Sparkles,
-  Settings2, ToggleLeft, ToggleRight, Zap, AlertTriangle,
+  RefreshCw, Calendar, Bell, Eraser, Clock,
+  Settings2, AlertTriangle,
   CheckSquare, Filter, Tag, BookOpen, Activity, ChevronRight,
   Square, Save, CalendarOff,
 } from "lucide-react";
@@ -247,26 +247,6 @@ function StatCard({ icon: Icon, label, value, unit, color, trend }) {
   );
 }
 
-function AutoSaveStatusBadge({ prefs, onEdit, isDark }) {
-  if (!prefs) return null;
-  const isActive = prefs.auto_save_reminders || prefs.auto_save_visits || prefs.auto_save_todos;
-  const activeParts = [];
-  if (prefs.auto_save_todos)     activeParts.push("Todos");
-  if (prefs.auto_save_reminders) activeParts.push("Reminders");
-  if (prefs.auto_save_visits)    activeParts.push("Visits");
-  return (
-    <button onClick={onEdit}
-      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all hover:opacity-80 active:scale-95"
-      style={isActive
-        ? { backgroundColor: isDark ? "rgba(31,175,90,0.15)" : "#dcfce7", borderColor: isDark ? "#14532d" : "#bbf7d0", color: COLORS.emeraldGreen }
-        : { backgroundColor: isDark ? D.raised : "#f8fafc", borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.muted : "#64748b" }
-      }>
-      <Zap className="w-3 h-3" />
-      {isActive ? `Auto-Save ON · ${activeParts.join(", ")}` : "Auto-Save OFF"}
-      <Settings2 className="w-3 h-3 ml-0.5 opacity-60" />
-    </button>
-  );
-}
 
 function GmailChecklistBanner({ onDismiss, isDark }) {
   return (
@@ -362,102 +342,97 @@ function CategoryRulesPanel({ isDark }) {
   );
 }
 
-function AutoSaveDialog({ onSave, onSkip, isDark }) {
-  const [autoReminders, setAutoReminders] = useState(true);
-  const [autoVisits,    setAutoVisits]    = useState(true);
-  const [autoTodos,     setAutoTodos]     = useState(true);
-  const [scanHour,      setScanHour]      = useState(12);
-  const [saving,        setSaving]        = useState(false);
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await api.post("/email/auto-save-prefs", {
-        auto_save_reminders: autoReminders,
-        auto_save_visits:    autoVisits,
-        auto_save_todos:     autoTodos,
-        scan_time_hour:      scanHour,
-        scan_time_minute:    0,
-      });
-      toast.success("✓ Auto-save enabled! Daily scan scheduled.");
-      onSave({ auto_save_reminders: autoReminders, auto_save_visits: autoVisits, auto_save_todos: autoTodos, scan_time_hour: scanHour });
-    } catch { toast.error("Failed to save preferences"); }
-    finally { setSaving(false); }
-  };
-
+function GmailChecklistBanner({ onDismiss, isDark }) {
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4">
-      <motion.div initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }}
-        transition={{ type: "spring", stiffness: 220, damping: 22 }}
-        className="w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
-        style={{ backgroundColor: isDark ? D.card : "#ffffff", border: isDark ? `1px solid ${D.border}` : "1px solid #e2e8f0" }}>
-        <div className="px-6 py-5 text-white" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-              <Zap className="w-5 h-5 text-white" />
+    <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+      className="rounded-2xl overflow-hidden border"
+      style={{ borderColor: isDark ? "#7f1d1d" : "#fecaca", backgroundColor: isDark ? "rgba(239,68,68,0.08)" : "#fef2f2" }}>
+      <div className="flex items-center gap-3 px-4 py-3 border-b"
+        style={{ borderColor: isDark ? "#7f1d1d" : "#fecaca", backgroundColor: isDark ? "rgba(239,68,68,0.12)" : "#fee2e2" }}>
+        <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
+        <p className="text-sm font-bold text-red-500 flex-1">Authentication Failed — Complete these 3 steps for Gmail</p>
+        <button onClick={onDismiss} className="text-red-400 hover:text-red-300"><X className="w-4 h-4" /></button>
+      </div>
+      <div className="p-4 space-y-3">
+        {[
+          { num: 1, title: "Enable IMAP in Gmail", link: "https://mail.google.com/mail/u/0/#settings/fwdandpop", linkText: "Open Gmail IMAP Settings →", detail: "Settings → See all settings → Forwarding and POP/IMAP → Enable IMAP → Save Changes" },
+          { num: 2, title: "Turn on 2-Step Verification", link: "https://myaccount.google.com/security", linkText: "Open Google Security →", detail: "Security → 2-Step Verification → Turn On" },
+          { num: 3, title: "Generate a fresh App Password", link: "https://myaccount.google.com/apppasswords", linkText: "Create App Password →", detail: "App: Mail · Device: Other (Taskosphere) → Generate → Copy 16 chars" },
+        ].map(step => (
+          <div key={step.num} className="flex items-start gap-3">
+            <div className="w-6 h-6 rounded-full bg-red-500 flex items-center justify-center flex-shrink-0 mt-0.5">
+              <span className="text-[10px] font-black text-white">{step.num}</span>
             </div>
-            <div>
-              <h2 className="text-lg font-bold">Smart Auto-Save</h2>
-              <p className="text-blue-200 text-xs mt-0.5">Set it once — never miss a hearing or deadline</p>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-red-500">{step.title}</p>
+              <p className="text-xs mt-0.5" style={{ color: isDark ? "#fca5a5" : "#dc2626" }}>{step.detail}</p>
+              <a href={step.link} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1 text-xs font-bold text-red-500 underline hover:text-red-400">
+                {step.linkText}<ExternalLink className="w-3 h-3" />
+              </a>
             </div>
           </div>
-          <p className="text-sm text-blue-100 leading-relaxed mt-3 opacity-90">
-            Taskosphere will <strong>automatically</strong> scan your inbox every day and save events to the right place.
-          </p>
-        </div>
-        <div className="p-6 space-y-3">
-          {[
-            { label: "Save Notices as Todos",      desc: "Examination reports, objections → Todo",   icon: CheckSquare, color: COLORS.purple,       val: autoTodos,     set: setAutoTodos },
-            { label: "Save Hearings as Reminders", desc: "Trademark hearings, GST dates → Reminder", icon: Bell,        color: COLORS.deepBlue,     val: autoReminders, set: setAutoReminders },
-            { label: "Save Meetings as Visits",    desc: "Zoom, Google Meet, client visits → Visit", icon: Calendar,    color: COLORS.emeraldGreen, val: autoVisits,    set: setAutoVisits },
-          ].map(item => (
-            <div key={item.label} className="flex items-center justify-between p-4 rounded-2xl border"
-              style={{ backgroundColor: isDark ? `${item.color}15` : `${item.color}08`, borderColor: isDark ? `${item.color}30` : `${item.color}20` }}>
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${item.color}15` }}>
-                  <item.icon className="w-4 h-4" style={{ color: item.color }} />
-                </div>
-                <div>
-                  <p className="text-sm font-bold" style={{ color: isDark ? D.text : "#1e293b" }}>{item.label}</p>
-                  <p className="text-xs" style={{ color: isDark ? D.muted : "#64748b" }}>{item.desc}</p>
-                </div>
-              </div>
-              <button onClick={() => item.set(s => !s)} className="transition-transform active:scale-95">
-                {item.val
-                  ? <ToggleRight className="w-8 h-8" style={{ color: item.color }} />
-                  : <ToggleLeft className="w-8 h-8 text-slate-300 dark:text-slate-600" />}
-              </button>
-            </div>
-          ))}
-          <div className="flex items-center gap-3 p-4 rounded-2xl border"
-            style={{ backgroundColor: isDark ? D.raised : "#f8fafc", borderColor: isDark ? D.border : "#e2e8f0" }}>
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ backgroundColor: isDark ? "#ffffff10" : "#f1f5f9" }}>
-              <Clock className="w-4 h-4 text-slate-500" />
-            </div>
-            <div className="flex-1">
-              <p className="text-sm font-bold" style={{ color: isDark ? D.text : "#1e293b" }}>Daily Scan Time (IST)</p>
-              <p className="text-xs" style={{ color: isDark ? D.muted : "#64748b" }}>Inbox scanned automatically every day</p>
-            </div>
-            <select value={scanHour} onChange={e => setScanHour(Number(e.target.value))}
-              className="px-3 py-1.5 text-sm font-semibold rounded-xl border focus:outline-none focus:ring-2 focus:ring-blue-400"
-              style={{ backgroundColor: isDark ? D.raised : "#ffffff", borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.text : "#1e293b" }}>
-              {[6,7,8,9,10,11,12,13,14,15,16,17,18,19,20].map(h => (
-                <option key={h} value={h}>{h === 12 ? "12:00 PM (Noon)" : h < 12 ? `${h}:00 AM` : `${h-12}:00 PM`}</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex gap-3 pt-1">
-            <Button variant="ghost" onClick={onSkip} className="flex-1 rounded-xl h-11 text-sm font-semibold"
-              style={{ color: isDark ? D.muted : undefined }}>Not now</Button>
-            <Button onClick={handleSave} disabled={saving} className="flex-1 rounded-xl h-11 text-sm font-bold text-white"
-              style={{ background: saving ? "#9CA3AF" : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-              {saving ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Saving…</> : <><Sparkles className="w-4 h-4 mr-2" />Enable Auto-Save</>}
-            </Button>
-          </div>
-        </div>
-      </motion.div>
+        ))}
+      </div>
     </motion.div>
+  );
+}
+
+function CategoryRulesPanel({ isDark }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <SectionCard>
+      <button onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-4 py-3.5 text-left transition-colors"
+        style={{ backgroundColor: open ? (isDark ? D.raised : "#f8fafc") : "transparent" }}>
+        <div className="flex items-center gap-2.5">
+          <div className="p-1.5 rounded-lg bg-purple-50 dark:bg-purple-900/40">
+            <BookOpen className="w-4 h-4 text-purple-500" />
+          </div>
+          <div>
+            <p className="font-semibold text-sm text-slate-800 dark:text-slate-100">Smart Categorization Rules</p>
+            <p className="text-xs text-slate-400 dark:text-slate-500">How emails are automatically classified</p>
+          </div>
+        </div>
+        {open ? <ChevronUp className="w-4 h-4 text-slate-400 flex-shrink-0" /> : <ChevronDown className="w-4 h-4 text-slate-400 flex-shrink-0" />}
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div initial={{ height: 0 }} animate={{ height: "auto" }} exit={{ height: 0 }} className="overflow-hidden">
+            <div className="px-4 pb-4 pt-1 space-y-3 border-t border-slate-100 dark:border-slate-700">
+              {[
+                { cat: "todo",     label: "→ Saved as Todo",     desc: "Action required notices",      examples: ["Examination Report","Office Action","Objection Raised","Reply Required","Show Cause Notice","Reply within X days"] },
+                { cat: "reminder", label: "→ Saved as Reminder", desc: "Scheduled dates and hearings", examples: ["Trademark Hearing","Court Hearing (NCLT, HC)","GST Filing Dates","Income Tax / Advance Tax","Due Dates","ROC Filing Deadlines"] },
+                { cat: "visit",    label: "→ Saved as Visit",    desc: "Meetings and consultations",   examples: ["Zoom Meeting Invite","Google Meet Link","Microsoft Teams","Client Visit Scheduled","Office Visit","Conference / Webinar"] },
+              ].map(({ cat, label, desc, examples }) => {
+                const cfg = CATEGORY_CONFIG[cat];
+                return (
+                  <div key={cat} className="rounded-xl border p-3.5"
+                    style={{ borderColor: isDark ? `${cfg.color}30` : cfg.border, backgroundColor: isDark ? cfg.darkBg : cfg.bg }}>
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <span className="text-xs font-black px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: cfg.color }}>{cfg.label.toUpperCase()}</span>
+                      <span className="text-xs font-bold" style={{ color: cfg.color }}>{label}</span>
+                      <span className="text-[10px] ml-auto" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>{desc}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {examples.map(ex => (
+                        <span key={ex} className="text-[10px] font-medium px-2 py-0.5 rounded-md border"
+                          style={{ backgroundColor: isDark ? "rgba(255,255,255,0.05)" : "#ffffff", borderColor: isDark ? `${cfg.color}35` : cfg.border, color: cfg.color }}>
+                          {ex}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+              <p className="text-[10px] pt-1" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+                ℹ️ AI uses these rules + context to classify. You can override the category in the preview panel before saving.
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </SectionCard>
   );
 }
 
@@ -694,8 +669,6 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, on
   const [labelVal,     setLabelVal]     = useState(conn.label || conn.email_address);
   const [testing,      setTesting]      = useState(false);
   const [syncing,      setSyncing]      = useState(false);
-  const [autoSync,     setAutoSync]     = useState(conn.auto_sync ?? false);
-  const [syncingAuto,  setSyncingAuto]  = useState(false);
 
   const color    = PROVIDER_COLORS[conn.provider] || PROVIDER_COLORS.other;
   const icon     = PROVIDER_ICONS[conn.provider]  || PROVIDER_ICONS.other;
@@ -718,17 +691,6 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, on
   const handleTest  = async () => { setTesting(true); try { await onTest(conn.email_address); } finally { setTesting(false); } };
   const handleSync  = async () => { setSyncing(true); try { await onSync(conn.email_address, conn.last_synced); } finally { setSyncing(false); } };
 
-  const handleToggleAutoSync = async () => {
-    const newVal = !autoSync;
-    setSyncingAuto(true);
-    try {
-      await api.patch(`/email/connections/${encodeURIComponent(conn.email_address)}`, { auto_sync: newVal });
-      setAutoSync(newVal);
-      toast.success(newVal ? "Auto-sync enabled" : "Auto-sync disabled");
-      if (onUpdateSettings) onUpdateSettings(conn.email_address, { auto_sync: newVal });
-    } catch { toast.error("Failed to update auto-sync"); }
-    finally { setSyncingAuto(false); }
-  };
 
   return (
     <motion.div variants={itemVariants} whileHover={{ y: -2, transition: springPhysics.lift }}>
@@ -809,29 +771,6 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, on
           )}
         </div>
 
-        {/* ── Auto-sync toggle row ── */}
-        <div className="flex items-center justify-between px-4 py-2 border-t border-slate-100 dark:border-slate-700"
-          style={{ backgroundColor: isDark ? "rgba(255,255,255,0.02)" : "#fafafa" }}>
-          <div className="flex items-center gap-2">
-            <Zap className={`w-3.5 h-3.5 ${autoSync ? "text-emerald-500" : (isDark ? "text-slate-500" : "text-slate-400")}`} />
-            <span className="text-xs font-semibold" style={{ color: isDark ? D.muted : "#64748b" }}>
-              Auto-sync daily
-            </span>
-            {autoSync && (
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                style={{ backgroundColor: isDark ? "rgba(31,175,90,0.15)" : "#dcfce7", color: COLORS.emeraldGreen }}>
-                ON
-              </span>
-            )}
-          </div>
-          <button type="button" onClick={handleToggleAutoSync} disabled={syncingAuto}
-            className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${autoSync ? "bg-emerald-500" : (isDark ? "bg-slate-600" : "bg-slate-300")}`}>
-            {syncingAuto
-              ? <Loader2 className="w-3 h-3 animate-spin absolute top-1 left-1 text-white" />
-              : <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${autoSync ? "translate-x-5" : "translate-x-0"}`} />
-            }
-          </button>
-        </div>
 
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-3 border-t border-slate-100 dark:border-slate-700"
           style={{ backgroundColor: isDark ? D.raised : "#f8fafc" }}>
@@ -1329,9 +1268,6 @@ export default function EmailSettings() {
   const [extractedEvents, setExtractedEvents] = useState([]);
   const [scanning,        setScanning]        = useState(false);
   const [clearing,        setClearing]        = useState(false);
-  const [autoSavePrefs,   setAutoSavePrefs]   = useState(null);
-  const [showAutoDialog,  setShowAutoDialog]  = useState(false);
-  const [prefsChecked,    setPrefsChecked]    = useState(false);
   const [activeTab,       setActiveTab]       = useState("accounts");
   // Session-level set of saved event keys — prevents duplicates within the session
   const [savedKeys, setSavedKeys] = useState(() => new Set());
@@ -1343,24 +1279,8 @@ export default function EmailSettings() {
     } catch { } finally { setLoading(false); }
   }, []);
 
-  const loadAutoSavePrefs = useCallback(async () => {
-    try {
-      const [prefsRes, existsRes] = await Promise.all([
-        api.get("/email/auto-save-prefs"),
-        api.get("/email/auto-save-prefs/exists"),
-      ]);
-      setAutoSavePrefs(prefsRes.data);
-      setPrefsChecked(true);
-      return existsRes.data.has_set_prefs;
-    } catch { setPrefsChecked(true); return true; }
-  }, []);
 
   useEffect(() => { loadConnections(); }, [loadConnections]);
-  useEffect(() => {
-    loadAutoSavePrefs().then(alreadySet => {
-      if (!alreadySet) setTimeout(() => setShowAutoDialog(true), 1200);
-    });
-  }, [loadAutoSavePrefs]);
 
   const handleDisconnect = async (emailAddress) => {
     if (!window.confirm(`Disconnect ${emailAddress}? Events already imported will remain.`)) return;
@@ -1472,9 +1392,6 @@ export default function EmailSettings() {
 
   const handleConnectSuccess = () => {
     setActiveForm(null); setShowAddOptions(false); loadConnections();
-    if (prefsChecked && !autoSavePrefs?.auto_save_reminders && !autoSavePrefs?.auto_save_visits && !autoSavePrefs?.auto_save_todos) {
-      setTimeout(() => setShowAutoDialog(true), 600);
-    }
   };
 
   const handleUpdateSettings = useCallback((emailAddress, updates) => {
@@ -1491,7 +1408,6 @@ export default function EmailSettings() {
   }, []);
 
   const activeProvider   = QUICK_PROVIDERS.find(p => p.id === activeForm);
-  const autoSaveActive   = autoSavePrefs?.auto_save_reminders || autoSavePrefs?.auto_save_visits || autoSavePrefs?.auto_save_todos;
   const futureEventCount = extractedEvents.filter(e => !isEventPast(e) && !savedKeys.has(eventKey(e))).length;
 
   const TAB_CONFIG = [
@@ -1502,17 +1418,6 @@ export default function EmailSettings() {
 
   return (
     <TooltipProvider>
-      <AnimatePresence>
-        {showAutoDialog && (
-          <AutoSaveDialog isDark={isDark}
-            onSave={prefs => { setAutoSavePrefs(prev => ({ ...prev, ...prefs })); setShowAutoDialog(false); }}
-            onSkip={() => {
-              setShowAutoDialog(false);
-              api.post("/email/auto-save-prefs", { auto_save_reminders: false, auto_save_visits: false, auto_save_todos: false, scan_time_hour: 12, scan_time_minute: 0 }).catch(() => {});
-            }}
-          />
-        )}
-      </AnimatePresence>
 
       <motion.div className="min-h-screen p-5 md:p-6 lg:p-8 space-y-5"
         style={{ background: isDark ? D.bg : "#f8fafc" }}
@@ -1533,7 +1438,6 @@ export default function EmailSettings() {
                 </p>
               </div>
               <div className="flex gap-2 flex-wrap items-center">
-                <AutoSaveStatusBadge prefs={autoSavePrefs} onEdit={() => setShowAutoDialog(true)} isDark={isDark} />
                 {connections.length > 0 && (
                   <>
                     <button onClick={handleClearAll} disabled={clearing}
@@ -1558,7 +1462,6 @@ export default function EmailSettings() {
           <StatCard icon={Mail}     label="Connected"  value={connections.length}              unit="accounts"     color={COLORS.deepBlue}     trend={connections.length > 0 ? "IMAP active" : "Add an account"} />
           <StatCard icon={Eye}      label="In Preview" value={extractedEvents.length}          unit="events found" color={COLORS.purple}       trend={`${futureEventCount} future · ready to save`} />
           <StatCard icon={Filter}   label="Whitelist"  value={0}                               unit="senders"      color={COLORS.emeraldGreen} trend="Manage in Whitelist tab" />
-          <StatCard icon={Activity} label="Auto-Save"  value={autoSaveActive ? "ON" : "OFF"}   unit="daily scan"   color={autoSaveActive ? COLORS.emeraldGreen : COLORS.orange} trend={autoSaveActive ? `Daily at ${autoSavePrefs?.scan_time_hour || 12}:00` : "Click badge to enable"} />
         </motion.div>
 
         {/* ══ TAB BAR ══ */}
@@ -1590,9 +1493,7 @@ export default function EmailSettings() {
                   After scanning, events appear in a <strong>preview panel</strong> where you choose which to save.
                   Only <strong>future-dated</strong> events are selectable. Past-dated and already-saved items are automatically filtered.
                   Each account's Sync button only fetches emails received <strong>after its last sync date</strong>.
-                  {!autoSaveActive && (
-                    <> <button onClick={() => setShowAutoDialog(true)} className="font-bold underline ml-1">Enable Auto-Save</button> for hands-free daily sync.</>
-                  )}
+
                 </div>
               </div>
             </motion.div>
@@ -1728,49 +1629,7 @@ export default function EmailSettings() {
               </div>
             </div>
             <CategoryRulesPanel isDark={isDark} />
-            {autoSavePrefs && (
-              <SectionCard>
-                <CardHeaderRow
-                  iconBg={isDark ? "bg-blue-900/40" : "bg-blue-50"}
-                  icon={<Zap className="w-4 h-4 text-blue-500" />}
-                  title="Current Auto-Save Settings"
-                  subtitle="Emails saved automatically every day at the configured time"
-                  action={
-                    <button onClick={() => setShowAutoDialog(true)}
-                      className="flex items-center gap-1.5 text-xs font-semibold transition-all"
-                      style={{ color: isDark ? "#93c5fd" : COLORS.mediumBlue }}>
-                      <Settings2 className="w-3.5 h-3.5" /> Edit
-                    </button>
-                  }
-                />
-                <div className="p-4 space-y-2.5">
-                  {[
-                    { label: "Notices → Todo",      active: autoSavePrefs.auto_save_todos,     color: COLORS.purple       },
-                    { label: "Hearings → Reminder", active: autoSavePrefs.auto_save_reminders, color: COLORS.deepBlue     },
-                    { label: "Meetings → Visit",    active: autoSavePrefs.auto_save_visits,    color: COLORS.emeraldGreen },
-                  ].map(item => (
-                    <div key={item.label} className="flex items-center justify-between">
-                      <span className="text-sm font-medium" style={{ color: isDark ? D.text : "#374151" }}>{item.label}</span>
-                      <span className="text-xs font-bold px-2 py-0.5 rounded-full"
-                        style={item.active
-                          ? { backgroundColor: isDark ? `${item.color}20` : `${item.color}15`, color: item.color }
-                          : { backgroundColor: isDark ? D.raised : "#f1f5f9", color: isDark ? D.muted : "#94a3b8" }}>
-                        {item.active ? "ON" : "OFF"}
-                      </span>
-                    </div>
-                  ))}
-                  <div className="flex items-center justify-between pt-1 border-t" style={{ borderColor: isDark ? D.border : "#f1f5f9" }}>
-                    <span className="text-sm font-medium" style={{ color: isDark ? D.text : "#374151" }}>Daily scan time</span>
-                    <span className="text-xs font-bold" style={{ color: isDark ? D.muted : "#64748b" }}>
-                      {autoSavePrefs.scan_time_hour < 12
-                        ? `${autoSavePrefs.scan_time_hour}:00 AM`
-                        : autoSavePrefs.scan_time_hour === 12 ? "12:00 PM"
-                        : `${autoSavePrefs.scan_time_hour - 12}:00 PM`} IST
-                    </span>
-                  </div>
-                </div>
-              </SectionCard>
-            )}
+
           </motion.div>
         )}
 
@@ -1793,6 +1652,7 @@ export default function EmailSettings() {
                   "Within a session, already-saved events show an 'Already Saved' badge and cannot be re-saved; duplicates are blocked",
                   "Add @ipindia.gov.in to whitelist to auto-import all trademark hearings and notices without filtering",
                   "Use 'Reset Cache' if you see wrong or stale results, then 'Scan All' for a completely fresh extraction",
+                  "Visit the Action Center page to see all linked email due dates and events in one place",
                 ].map((tip, i) => (
                   <li key={i} className="flex items-start gap-2.5 text-xs" style={{ color: isDark ? D.muted : "#64748b" }}>
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
