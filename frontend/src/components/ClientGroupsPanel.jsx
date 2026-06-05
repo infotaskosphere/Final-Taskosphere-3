@@ -4,13 +4,22 @@
  * Sidebar/modal panel to manage client groups.
  * Users can create groups, add/remove clients, rename groups, delete groups.
  *
+ * Behaviour:
+ *  • Lists every group (full list view).
+ *  • Clicking a group expands it and shows the full list of its members.
+ *  • From the member view the user can:
+ *      – Edit members (multi-select),
+ *      – Bulk WhatsApp every member of that group (uses the
+ *        existing bulk WhatsApp modal in the parent Clients page).
+ *
  * Props:
- *   open         — boolean
- *   onClose      — () => void
- *   clients      — full clients array
- *   onGroupFilter — (groupId | null) => void  — filter clients page by group
- *   activeGroupId — string | null
- *   isDark       — boolean
+ *   open            — boolean
+ *   onClose         — () => void
+ *   clients         — full clients array
+ *   onGroupFilter   — (groupId | null) => void  — filter clients page by group
+ *   onWhatsAppGroup — (groupId) => void         — open bulk WhatsApp for that group
+ *   activeGroupId   — string | null
+ *   isDark          — boolean
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
@@ -23,6 +32,7 @@ import { Input } from '@/components/ui/input';
 import {
   Layers, Plus, Trash2, Edit2, Check, X, Users, Search,
   ChevronDown, ChevronRight, Loader2, FolderOpen, Folder,
+  MessageCircle, Pencil,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '@/lib/api';
@@ -66,7 +76,7 @@ function ClientMultiSelect({ clients, selectedIds, onChange, isDark }) {
           />
         </div>
       </div>
-      <div className="max-h-44 overflow-y-auto">
+      <div className="max-h-60 overflow-y-auto">
         {filtered.length === 0 && (
           <p className="text-xs text-slate-400 text-center py-4">No clients found</p>
         )}
@@ -104,8 +114,97 @@ function ClientMultiSelect({ clients, selectedIds, onChange, isDark }) {
   );
 }
 
+// Read-only members list rendered when a group is expanded.
+// Lists every member (not just the first 3) with phone/type and a quick
+// "remove from group" affordance.
+function GroupMembersList({ memberIds, clients, isDark, onRemoveMember }) {
+  const [search, setSearch] = useState('');
+  const members = useMemo(() => {
+    const byId = new Map(clients.map(c => [c.id, c]));
+    return memberIds
+      .map(id => byId.get(id))
+      .filter(Boolean);
+  }, [memberIds, clients]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return members;
+    return members.filter(c =>
+      (c.company_name || '').toLowerCase().includes(q) ||
+      (c.phone || '').toLowerCase().includes(q) ||
+      (c.email || '').toLowerCase().includes(q),
+    );
+  }, [members, search]);
+
+  if (memberIds.length === 0) {
+    return (
+      <p className="text-xs text-slate-400 text-center py-4">
+        No members yet — use “Edit members” to add clients.
+      </p>
+    );
+  }
+
+  return (
+    <div className={`border rounded-xl overflow-hidden ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
+      <div className={`p-2 border-b ${isDark ? 'border-slate-600 bg-slate-700' : 'border-slate-100 bg-slate-50'}`}>
+        <div className="relative">
+          <Search className="absolute left-2.5 top-2 w-3.5 h-3.5 text-slate-400" />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder={`Search ${members.length} member${members.length !== 1 ? 's' : ''}…`}
+            className={`w-full pl-7 pr-3 py-1.5 text-xs rounded-lg outline-none border ${
+              isDark ? 'bg-slate-600 border-slate-500 text-slate-100 placeholder-slate-400' : 'bg-white border-slate-200 text-slate-700 placeholder-slate-400'
+            }`}
+          />
+        </div>
+      </div>
+      <div className="max-h-72 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700">
+        {filtered.length === 0 && (
+          <p className="text-xs text-slate-400 text-center py-4">No matches</p>
+        )}
+        {filtered.map(c => (
+          <div
+            key={c.id}
+            className={`flex items-center gap-2.5 px-3 py-2 text-xs ${
+              isDark ? 'text-slate-200 hover:bg-slate-700/60' : 'text-slate-700 hover:bg-slate-50'
+            }`}
+          >
+            <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-[10px] font-bold ${isDark ? 'bg-slate-600 text-slate-200' : 'bg-slate-100 text-slate-600'}`}>
+              {(c.company_name || '?').slice(0, 1).toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="truncate font-semibold">{c.company_name}</p>
+              <p className="text-[10px] text-slate-400 truncate">
+                {c.phone || '— no phone'}{c.client_type ? ` · ${c.client_type}` : ''}
+              </p>
+            </div>
+            {onRemoveMember && (
+              <button
+                onClick={() => onRemoveMember(c.id)}
+                className={`w-6 h-6 rounded-md flex items-center justify-center transition-colors flex-shrink-0 ${
+                  isDark ? 'hover:bg-red-900/40 text-slate-400 hover:text-red-400' : 'hover:bg-red-50 text-slate-400 hover:text-red-500'
+                }`}
+                title="Remove from group"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className={`px-3 py-1.5 border-t text-[10px] font-semibold ${
+        isDark ? 'border-slate-600 text-slate-400 bg-slate-700/50' : 'border-slate-100 text-slate-500 bg-slate-50'
+      }`}>
+        {members.length} member{members.length !== 1 ? 's' : ''} total
+        {search.trim() && ` · ${filtered.length} shown`}
+      </div>
+    </div>
+  );
+}
+
 export default function ClientGroupsPanel({
-  open, onClose, clients = [], onGroupFilter, activeGroupId, isDark = false,
+  open, onClose, clients = [], onGroupFilter, onWhatsAppGroup, activeGroupId, isDark = false,
 }) {
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -117,15 +216,16 @@ export default function ClientGroupsPanel({
   const [newDesc, setNewDesc] = useState('');
   const [newColor, setNewColor] = useState('#0D3B66');
 
-  // Edit mode
+  // Edit metadata mode
   const [editingGroupId, setEditingGroupId] = useState(null);
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
   const [editColor, setEditColor] = useState('#0D3B66');
 
-  // Expanded group (for adding/removing members)
+  // Expanded group — shows the full members list
   const [expandedGroupId, setExpandedGroupId] = useState(null);
-  const [memberSearch, setMemberSearch] = useState('');
+  // Within an expanded group: toggle between viewing members and editing them.
+  const [memberEditMode, setMemberEditMode] = useState(false);
   const [pendingMemberIds, setPendingMemberIds] = useState([]);
   const [savingMembers, setSavingMembers] = useState(false);
 
@@ -187,9 +287,20 @@ export default function ClientGroupsPanel({
     }
   };
 
-  const openMemberEditor = (group) => {
-    if (expandedGroupId === group.id) { setExpandedGroupId(null); return; }
+  const toggleExpand = (group) => {
+    if (expandedGroupId === group.id) {
+      setExpandedGroupId(null);
+      setMemberEditMode(false);
+      return;
+    }
     setExpandedGroupId(group.id);
+    setMemberEditMode(false);
+    setPendingMemberIds(group.client_ids || []);
+  };
+
+  const enterMemberEdit = (group) => {
+    setExpandedGroupId(group.id);
+    setMemberEditMode(true);
     setPendingMemberIds(group.client_ids || []);
   };
 
@@ -198,7 +309,7 @@ export default function ClientGroupsPanel({
     try {
       const r = await api.put(`/client-groups/${groupId}`, { client_ids: pendingMemberIds });
       setGroups(prev => prev.map(g => g.id === groupId ? r.data : g));
-      setExpandedGroupId(null);
+      setMemberEditMode(false);
       toast.success('Group members updated');
     } catch (e) {
       toast.error('Failed to update group members');
@@ -207,20 +318,41 @@ export default function ClientGroupsPanel({
     }
   };
 
-  // Get client names for a group
-  const getMemberNames = (client_ids = []) => {
-    const names = client_ids.slice(0, 3).map(id => {
-      const c = clients.find(cl => cl.id === id);
-      return c?.company_name;
-    }).filter(Boolean);
-    const extra = client_ids.length - 3;
-    return names.join(', ') + (extra > 0 ? ` +${extra} more` : '');
+  // Quick remove a single member from a group (used from the read-only list)
+  const handleRemoveSingleMember = async (group, clientId) => {
+    const nextIds = (group.client_ids || []).filter(id => id !== clientId);
+    try {
+      const r = await api.put(`/client-groups/${group.id}`, { client_ids: nextIds });
+      setGroups(prev => prev.map(g => g.id === group.id ? r.data : g));
+      setPendingMemberIds(nextIds);
+      toast.success('Member removed from group');
+    } catch (e) {
+      toast.error('Failed to remove member');
+    }
+  };
+
+  // Fire bulk WhatsApp for a specific group's members.
+  // Falls back to filtering by the group if no dedicated callback was wired.
+  const handleWhatsAppGroup = (group) => {
+    const count = (group.client_ids || []).length;
+    if (count === 0) {
+      toast.error(`"${group.name}" has no members to message`);
+      return;
+    }
+    if (typeof onWhatsAppGroup === 'function') {
+      onWhatsAppGroup(group.id);
+    } else {
+      // Fallback: at least apply the group filter so the user can hit
+      // the WhatsApp bulk button on the Clients page themselves.
+      onGroupFilter?.(group.id);
+      toast.info(`Filtered by "${group.name}" — click WhatsApp to send`);
+    }
   };
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
       <DialogContent
-        className={`max-w-lg max-h-[88vh] flex flex-col overflow-hidden p-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white'}`}
+        className={`max-w-2xl max-h-[90vh] flex flex-col overflow-hidden p-0 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white'}`}
         style={{ borderRadius: 20 }}
       >
         {/* Header */}
@@ -232,7 +364,7 @@ export default function ClientGroupsPanel({
             <div>
               <DialogTitle className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>Client Groups</DialogTitle>
               <DialogDescription className="text-xs text-slate-400 mt-0.5">
-                Organize clients into logical groups for easy filtering
+                Organize clients into groups · click a group to view members · WhatsApp the whole group with one click
               </DialogDescription>
             </div>
             <div className="ml-auto flex items-center gap-2">
@@ -320,47 +452,67 @@ export default function ClientGroupsPanel({
                     : isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-200 bg-white'
                 }`}
               >
-                {/* Group header */}
+                {/* Group header — clicking the body toggles the members view */}
                 <div className="flex items-center gap-3 p-3">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-                    style={{ background: `${group.color}20`, border: `1.5px solid ${group.color}40` }}>
-                    <Folder className="w-4 h-4" style={{ color: group.color }} />
-                  </div>
-
-                  {isEditing ? (
-                    <div className="flex-1 space-y-2">
-                      <Input value={editName} onChange={e => setEditName(e.target.value)}
-                        className={`h-8 text-xs ${isDark ? 'bg-slate-600 border-slate-500 text-white' : ''}`} />
-                      <Input value={editDesc} onChange={e => setEditDesc(e.target.value)}
-                        placeholder="Description" className={`h-8 text-xs ${isDark ? 'bg-slate-600 border-slate-500 text-white' : ''}`} />
-                      <ColorPicker value={editColor} onChange={setEditColor} />
-                      <div className="flex gap-2">
-                        <Button size="sm" onClick={() => handleUpdate(group.id)} disabled={saving} className="flex-1 h-7 text-xs bg-blue-600 text-white border-0">
-                          {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Save'}
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => setEditingGroupId(null)} className="h-7 text-xs">Cancel</Button>
-                      </div>
+                  <button
+                    type="button"
+                    onClick={() => !isEditing && toggleExpand(group)}
+                    className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                  >
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                      style={{ background: `${group.color}20`, border: `1.5px solid ${group.color}40` }}>
+                      {isExpanded
+                        ? <ChevronDown className="w-4 h-4" style={{ color: group.color }} />
+                        : <ChevronRight className="w-4 h-4" style={{ color: group.color }} />}
                     </div>
-                  ) : (
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className={`text-sm font-bold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{group.name}</p>
-                        {isActiveFilter && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500 text-white flex-shrink-0">ACTIVE FILTER</span>
+
+                    {isEditing ? (
+                      <div className="flex-1 space-y-2" onClick={e => e.stopPropagation()}>
+                        <Input value={editName} onChange={e => setEditName(e.target.value)}
+                          className={`h-8 text-xs ${isDark ? 'bg-slate-600 border-slate-500 text-white' : ''}`} />
+                        <Input value={editDesc} onChange={e => setEditDesc(e.target.value)}
+                          placeholder="Description" className={`h-8 text-xs ${isDark ? 'bg-slate-600 border-slate-500 text-white' : ''}`} />
+                        <ColorPicker value={editColor} onChange={setEditColor} />
+                        <div className="flex gap-2">
+                          <Button size="sm" onClick={() => handleUpdate(group.id)} disabled={saving} className="flex-1 h-7 text-xs bg-blue-600 text-white border-0">
+                            {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Save'}
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => setEditingGroupId(null)} className="h-7 text-xs">Cancel</Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <Folder className="w-3.5 h-3.5 flex-shrink-0" style={{ color: group.color }} />
+                          <p className={`text-sm font-bold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{group.name}</p>
+                          {isActiveFilter && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500 text-white flex-shrink-0">ACTIVE FILTER</span>
+                          )}
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+                            {memberCount} {memberCount === 1 ? 'member' : 'members'}
+                          </span>
+                        </div>
+                        {group.description && (
+                          <p className="text-[10px] text-slate-400 truncate mt-0.5">{group.description}</p>
                         )}
                       </div>
-                      {group.description && (
-                        <p className="text-[10px] text-slate-400 truncate mt-0.5">{group.description}</p>
-                      )}
-                      <p className="text-[10px] text-slate-400 mt-0.5">
-                        {memberCount === 0 ? 'No clients' : getMemberNames(group.client_ids)}
-                        {memberCount > 0 && ` · ${memberCount} client${memberCount !== 1 ? 's' : ''}`}
-                      </p>
-                    </div>
-                  )}
+                    )}
+                  </button>
 
                   {!isEditing && (
                     <div className="flex items-center gap-1 flex-shrink-0">
+                      <button
+                        onClick={() => handleWhatsAppGroup(group)}
+                        disabled={memberCount === 0}
+                        className={`h-7 px-2 rounded-lg text-[10px] font-semibold transition-all flex items-center gap-1 ${
+                          memberCount === 0
+                            ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                            : 'bg-emerald-500 text-white hover:bg-emerald-600'
+                        }`}
+                        title={memberCount === 0 ? 'No members in this group' : `Send WhatsApp to all ${memberCount} members`}
+                      >
+                        <MessageCircle className="w-3 h-3" /> WhatsApp
+                      </button>
                       <button
                         onClick={() => onGroupFilter?.(isActiveFilter ? null : group.id)}
                         className={`h-7 px-2 rounded-lg text-[10px] font-semibold transition-all ${
@@ -368,20 +520,9 @@ export default function ClientGroupsPanel({
                             ? 'bg-blue-500 text-white'
                             : isDark ? 'bg-slate-700 text-slate-300 hover:bg-blue-900 hover:text-blue-300' : 'bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-600'
                         }`}
-                        title={isActiveFilter ? 'Clear filter' : 'Filter by this group'}
+                        title={isActiveFilter ? 'Clear filter' : 'Filter clients page by this group'}
                       >
                         {isActiveFilter ? 'Filtering' : 'Filter'}
-                      </button>
-                      <button
-                        onClick={() => openMemberEditor(group)}
-                        className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
-                          isExpanded
-                            ? isDark ? 'bg-violet-700 text-white' : 'bg-violet-100 text-violet-700'
-                            : isDark ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-500'
-                        }`}
-                        title="Edit members"
-                      >
-                        <Users className="w-3.5 h-3.5" />
                       </button>
                       <button
                         onClick={() => { setEditingGroupId(group.id); setEditName(group.name); setEditDesc(group.description || ''); setEditColor(group.color || '#0D3B66'); }}
@@ -401,31 +542,86 @@ export default function ClientGroupsPanel({
                   )}
                 </div>
 
-                {/* Member editor */}
+                {/* Members view / editor */}
                 <AnimatePresence>
                   {isExpanded && (
                     <motion.div
                       initial={{ height: 0, opacity: 0 }}
                       animate={{ height: 'auto', opacity: 1 }}
                       exit={{ height: 0, opacity: 0 }}
-                      className={`border-t px-3 pb-3 pt-2 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}
+                      className={`border-t px-3 pb-3 pt-3 ${isDark ? 'border-slate-700 bg-slate-800/40' : 'border-slate-100 bg-slate-50/60'}`}
                     >
-                      <p className={`text-[10px] font-bold uppercase tracking-wide mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                        Select clients to include in this group
-                      </p>
-                      <ClientMultiSelect
-                        clients={clients}
-                        selectedIds={pendingMemberIds}
-                        onChange={setPendingMemberIds}
-                        isDark={isDark}
-                      />
-                      <div className="flex gap-2 mt-2">
-                        <Button size="sm" onClick={() => handleSaveMembers(group.id)} disabled={savingMembers}
-                          className="flex-1 h-8 text-xs bg-violet-600 text-white border-0">
-                          {savingMembers ? <Loader2 className="w-3 h-3 animate-spin" /> : `Save ${pendingMemberIds.length} member${pendingMemberIds.length !== 1 ? 's' : ''}`}
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => setExpandedGroupId(null)} className="h-8 text-xs">Cancel</Button>
+                      <div className="flex items-center justify-between mb-2">
+                        <p className={`text-[10px] font-bold uppercase tracking-wide ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                          {memberEditMode ? 'Edit members' : `All members (${memberCount})`}
+                        </p>
+                        <div className="flex items-center gap-1.5">
+                          {!memberEditMode && (
+                            <button
+                              onClick={() => enterMemberEdit(group)}
+                              className={`h-6 px-2 rounded-md text-[10px] font-semibold flex items-center gap-1 transition-all ${isDark ? 'bg-slate-700 text-slate-200 hover:bg-slate-600' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'}`}
+                            >
+                              <Pencil className="w-3 h-3" /> Edit members
+                            </button>
+                          )}
+                          {memberEditMode && (
+                            <button
+                              onClick={() => { setMemberEditMode(false); setPendingMemberIds(group.client_ids || []); }}
+                              className={`h-6 px-2 rounded-md text-[10px] font-semibold ${isDark ? 'bg-slate-700 text-slate-200 hover:bg-slate-600' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'}`}
+                            >
+                              Back to list
+                            </button>
+                          )}
+                        </div>
                       </div>
+
+                      {memberEditMode ? (
+                        <>
+                          <ClientMultiSelect
+                            clients={clients}
+                            selectedIds={pendingMemberIds}
+                            onChange={setPendingMemberIds}
+                            isDark={isDark}
+                          />
+                          <div className="flex gap-2 mt-2">
+                            <Button size="sm" onClick={() => handleSaveMembers(group.id)} disabled={savingMembers}
+                              className="flex-1 h-8 text-xs bg-violet-600 text-white border-0">
+                              {savingMembers ? <Loader2 className="w-3 h-3 animate-spin" /> : `Save ${pendingMemberIds.length} member${pendingMemberIds.length !== 1 ? 's' : ''}`}
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => setMemberEditMode(false)} className="h-8 text-xs">Cancel</Button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <GroupMembersList
+                            memberIds={group.client_ids || []}
+                            clients={clients}
+                            isDark={isDark}
+                            onRemoveMember={(clientId) => handleRemoveSingleMember(group, clientId)}
+                          />
+                          {memberCount > 0 && (
+                            <div className="flex gap-2 mt-3">
+                              <Button
+                                size="sm"
+                                onClick={() => handleWhatsAppGroup(group)}
+                                className="flex-1 h-9 text-xs text-white border-0"
+                                style={{ background: 'linear-gradient(135deg, #128C7E, #25D366)' }}
+                              >
+                                <MessageCircle className="w-3.5 h-3.5 mr-1.5" />
+                                WhatsApp all {memberCount} member{memberCount !== 1 ? 's' : ''}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => onGroupFilter?.(isActiveFilter ? null : group.id)}
+                                className="h-9 text-xs"
+                              >
+                                {isActiveFilter ? 'Clear filter' : 'Filter clients page'}
+                              </Button>
+                            </div>
+                          )}
+                        </>
+                      )}
                     </motion.div>
                   )}
                 </AnimatePresence>
