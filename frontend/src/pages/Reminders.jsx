@@ -920,6 +920,31 @@ export default function Reminders() {
     setActivePopupReminder(rem);
   };
 
+  // ── Open reschedule modal ─────────────────────────────────────────────────
+  const startReschedule = (rem) => {
+    setRescheduleTarget(rem);
+  };
+
+  // ── Confirm reschedule: PATCH new remind_at ───────────────────────────────
+  const handleRescheduleConfirm = async (newDatetime) => {
+    if (!rescheduleTarget) return;
+    const remId = resolveId(rescheduleTarget);
+    if (!remId) return;
+    try {
+      const { data: saved } = await api.patch(`/email/reminders/${remId}`, {
+        remind_at: new Date(newDatetime).toISOString(),
+        is_dismissed: false,
+      });
+      toast.success("Reminder rescheduled");
+      const normalized = normalizeReminder(saved);
+      setRescheduleTarget(null);
+      setActivePopupReminder(normalized);
+      fetchReminders();
+    } catch {
+      toast.error("Failed to reschedule reminder");
+    }
+  };
+
   // Filtered reminders — used by list view
   const filteredReminders = useMemo(() => {
     let list = Array.isArray(reminders) ? reminders : [];
@@ -1535,6 +1560,18 @@ export default function Reminders() {
             onDelete={handleDelete}
             onDismiss={handleDismiss}
             onReschedule={startReschedule}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── RESCHEDULE MODAL ─────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {rescheduleTarget && (
+          <RescheduleModal
+            rem={rescheduleTarget}
+            isDark={isDark}
+            onConfirm={handleRescheduleConfirm}
+            onCancel={() => setRescheduleTarget(null)}
           />
         )}
       </AnimatePresence>
