@@ -5824,7 +5824,32 @@ export default function Clients() {
         />
       </div>
 
+      {/* ── Inline Client Groups Panel (renders in-page, not as a popup) ── */}
+      <ClientGroupsPanel
+        open={showGroupsPanel}
+        onClose={() => setShowGroupsPanel(false)}
+        clients={clients}
+        onGroupFilter={(groupId) => {
+          setActiveGroupId(groupId);
+          if (groupId) {
+            const grp = clientGroupsData.find(g => g.id === groupId);
+            if (grp) toast.info(`Filtering by group: ${grp.name}`);
+          }
+          fetchClientGroups();
+        }}
+        onWhatsAppGroup={(groupId) => {
+          setActiveGroupId(groupId);
+          const grp = clientGroupsData.find(g => g.id === groupId);
+          if (grp) toast.info(`WhatsApp: ${grp.name} (${(grp.client_ids || []).length} members)`);
+          setBulkMsgMode('whatsapp');
+          setTimeout(() => setBulkMsgOpen(true), 50);
+        }}
+        activeGroupId={activeGroupId}
+        isDark={isDark}
+      />
+
       {/* BOARD / LIST */}
+
       {/* ITR mode banner */}
       {itrTabActive && (
         <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl border"
@@ -6296,35 +6321,8 @@ export default function Clients() {
         isDark={isDark}
       />
 
-      {/* ── Client Groups Panel ────────────────────────────────────────── */}
-      <ClientGroupsPanel
-        open={showGroupsPanel}
-        onClose={() => setShowGroupsPanel(false)}
-        clients={clients}
-        onGroupFilter={(groupId) => {
-          setActiveGroupId(groupId);
-          setShowGroupsPanel(false);
-          if (groupId) {
-            const grp = clientGroupsData.find(g => g.id === groupId);
-            if (grp) toast.info(`Filtering by group: ${grp.name}`);
-          }
-          fetchClientGroups();
-        }}
-        onWhatsAppGroup={(groupId) => {
-          // Filter the clients list by this group then immediately open the
-          // bulk WhatsApp modal — it reads from filteredClients, so it will
-          // be pre-populated with just the group's members.
-          setActiveGroupId(groupId);
-          setShowGroupsPanel(false);
-          const grp = clientGroupsData.find(g => g.id === groupId);
-          if (grp) toast.info(`WhatsApp: ${grp.name} (${(grp.client_ids || []).length} members)`);
-          setBulkMsgMode('whatsapp');
-          // Small delay so the group filter has applied before the modal mounts.
-          setTimeout(() => setBulkMsgOpen(true), 50);
-        }}
-        activeGroupId={activeGroupId}
-        isDark={isDark}
-      />
+
+
 
 
       {/* ── ITR Client Dialog ──────────────────────────────────────────── */}
