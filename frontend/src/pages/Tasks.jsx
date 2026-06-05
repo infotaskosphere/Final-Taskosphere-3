@@ -1467,7 +1467,6 @@ export default function Tasks() {
 
   const completionRate = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
 
-  const hasActiveFilters = activeFilters.length > 0;
 
   const teamTaskBreakdown = React.useMemo(() => {
     if (!hasCrossVisibility) return [];
@@ -1605,6 +1604,8 @@ export default function Tasks() {
     if (filterPending)            pills.push({ key: 'pending',    label: 'Pending Tasks' });
     return pills;
   }, [searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee, showMyTasksOnly, filterTeamOnly, filterAssignedByMe, filterCreatedBy, filterTodayNew, filterPending, userMap, getCategoryLabel]);
+
+  const hasActiveFilters = activeFilters.length > 0;
 
   const removeFilter = (key) => {
     if (key === 'search')   setSearchQuery('');
