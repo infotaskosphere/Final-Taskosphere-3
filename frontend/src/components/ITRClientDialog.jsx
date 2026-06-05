@@ -303,10 +303,30 @@ export default function ITRClientDialog({
     if (allCompaniesCache.current.length > 0) return; // already loaded
     setCompanySearching(true);
     try {
-      const r = await api.get('/clients');
-      const all = r.data?.clients || r.data?.items || r.data || [];
-      allCompaniesCache.current = all;
-      setCompanyResults(applyCompanyFilter('', 'all', all));
+      // Backend /clients endpoint is paginated (default page_size=100, max 500).
+      // Loop through every page so the company picker sees the full directory,
+      // not just the first 100 clients.
+      const PAGE_SIZE = 500;
+      const all = [];
+      let page = 1;
+      // Safety cap to avoid runaway loops if the API ever misbehaves.
+      while (page <= 200) {
+        const r = await api.get('/clients', { params: { page, page_size: PAGE_SIZE } });
+        const batch = r.data?.clients || r.data?.items || r.data || [];
+        if (!Array.isArray(batch) || batch.length === 0) break;
+        all.push(...batch);
+        if (batch.length < PAGE_SIZE) break;
+        page += 1;
+      }
+      // De-duplicate by id just in case of overlap between pages.
+      const seen = new Set();
+      const deduped = all.filter(c => {
+        if (!c?.id || seen.has(c.id)) return false;
+        seen.add(c.id);
+        return true;
+      });
+      allCompaniesCache.current = deduped;
+      setCompanyResults(applyCompanyFilter('', 'all', deduped));
     } catch { setCompanyResults([]); }
     finally { setCompanySearching(false); }
   }, [applyCompanyFilter]);
