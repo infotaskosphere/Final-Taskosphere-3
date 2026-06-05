@@ -14,7 +14,7 @@ import {
   Settings, MessageSquare, Mail, FolderOpen, FolderTree,
   Plus, Trash2, GripVertical, FolderPlus, CheckCircle2,
   XCircle, Play, RotateCcw, Check, X, ChevronDown, ChevronUp,
-  Folder, FolderCheck,
+  Folder, FolderCheck, UploadCloud, Upload, CheckCircle, XCircle as XCircleIcon, File as FileIcon, ChevronDown as ChevronDownIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -1080,17 +1080,31 @@ function FolderArchitectTab({ isDark, isAdmin }) {
 
 /* ── Documents Tab ──────────────────────────────────────────────────────────── */
 function DocumentsTab({ portalUsers, loading, isDark }) {
+  /* ── Browse panel state ── */
   const [selectedUser, setSelectedUser] = useState('');
   const [docs, setDocs] = useState([]);
   const [docsLoading, setDocsLoading] = useState(false);
+
+  /* ── Upload panel state ── */
+  const [uploadUser, setUploadUser] = useState('');
+  const [subfolders, setSubfolders] = useState([]);
+  const [subfoldersLoading, setSubfoldersLoading] = useState(false);
+  const [selectedSubfolder, setSelectedSubfolder] = useState('');
+  const [newSubfolder, setNewSubfolder] = useState('');
+  const [dragOver, setDragOver] = useState(false);
+  const [uploadQueue, setUploadQueue] = useState([]); // [{file, status:'pending'|'uploading'|'done'|'error', link}]
+  const [uploading, setUploading] = useState(false);
+  const [uploadResults, setUploadResults] = useState(null);
+  const fileInputRef = useRef(null);
+
   const usersWithDrive = portalUsers.filter((u) => u.google_drive_folder_id);
 
+  /* ── Browse helpers ── */
   const loadDocs = useCallback(async (userId) => {
     if (!userId) return;
     setDocsLoading(true);
     try {
       const res = await api.get(`/client-portal/drive/admin/files/${userId}`);
-      // Backend returns { files: [...], hidden_ids: [...] } — extract the files array
       const raw = res.data;
       setDocs(Array.isArray(raw) ? raw : (raw?.files ?? []));
     } catch { setDocs([]); toast.error('Failed to load documents'); }
@@ -1099,68 +1113,335 @@ function DocumentsTab({ portalUsers, loading, isDark }) {
 
   useEffect(() => { if (selectedUser) loadDocs(selectedUser); else setDocs([]); }, [selectedUser, loadDocs]);
 
-  const fmtSize = (b) => { if (!b) return ''; const n = Number(b); if (n < 1024) return `${n} B`; if (n < 1048576) return `${(n/1024).toFixed(1)} KB`; return `${(n/1048576).toFixed(1)} MB`; };
+  /* ── Upload helpers ── */
+  const loadSubfolders = useCallback(async (userId) => {
+    if (!userId) { setSubfolders([]); return; }
+    setSubfoldersLoading(true);
+    try {
+      const res = await api.get(`/client-portal/drive/subfolders/${userId}`);
+      setSubfolders(res.data?.subfolders || []);
+    } catch { setSubfolders([]); }
+    finally { setSubfoldersLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    setUploadQueue([]);
+    setUploadResults(null);
+    setSelectedSubfolder('');
+    setNewSubfolder('');
+    loadSubfolders(uploadUser);
+  }, [uploadUser, loadSubfolders]);
+
+  const addFiles = (fileList) => {
+    const newFiles = Array.from(fileList).map(f => ({ file: f, status: 'pending', link: null, error: null }));
+    setUploadQueue(prev => [...prev, ...newFiles]);
+    setUploadResults(null);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault(); setDragOver(false);
+    addFiles(e.dataTransfer.files);
+  };
+
+  const removeFile = (idx) => setUploadQueue(prev => prev.filter((_, i) => i !== idx));
+
+  const targetSubfolder = newSubfolder.trim() || selectedSubfolder;
+
+  const handleUpload = async () => {
+    if (!uploadUser) { toast.error('Select a client first'); return; }
+    const pending = uploadQueue.filter(q => q.status === 'pending');
+    if (pending.length === 0) { toast.error('No files queued'); return; }
+
+    setUploading(true);
+    const formData = new FormData();
+    formData.append('portal_user_id', uploadUser);
+    formData.append('subfolder', targetSubfolder);
+    pending.forEach(q => formData.append('files', q.file));
+
+    // Mark all as uploading
+    setUploadQueue(prev => prev.map(q => q.status === 'pending' ? { ...q, status: 'uploading' } : q));
+
+    try {
+      const res = await api.post('/client-portal/drive/bulk-upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const results = res.data?.results || [];
+      setUploadQueue(prev => {
+        let resultIdx = 0;
+        return prev.map(q => {
+          if (q.status !== 'uploading') return q;
+          const r = results[resultIdx++];
+          if (!r) return { ...q, status: 'error', error: 'No result' };
+          return { ...q, status: r.status === 'uploaded' ? 'done' : 'error', link: r.web_link, error: r.error };
+        });
+      });
+      setUploadResults(res.data);
+      if (res.data.uploaded > 0) {
+        toast.success(`✅ ${res.data.uploaded} file${res.data.uploaded > 1 ? 's' : ''} uploaded to client portal!`);
+        // Auto-refresh the browse panel if same client selected
+        if (selectedUser === uploadUser) loadDocs(selectedUser);
+      }
+      if (res.data.failed > 0) toast.error(`${res.data.failed} file(s) failed to upload`);
+    } catch (err) {
+      const msg = err?.response?.data?.detail || 'Upload failed';
+      toast.error(msg);
+      setUploadQueue(prev => prev.map(q => q.status === 'uploading' ? { ...q, status: 'error', error: msg } : q));
+    } finally { setUploading(false); }
+  };
+
+  const fmtSize = (b) => {
+    const n = Number(b); if (!n) return '';
+    if (n < 1024) return `${n} B`; if (n < 1048576) return `${(n/1024).toFixed(1)} KB`; return `${(n/1048576).toFixed(1)} MB`;
+  };
   const ICONS = { 'application/vnd.google-apps.folder':'📁','application/vnd.google-apps.document':'📄','application/vnd.google-apps.spreadsheet':'📊','application/vnd.google-apps.presentation':'📽️','application/pdf':'📑','image/jpeg':'🖼️','image/png':'🖼️' };
+  const extIcon = (name) => {
+    const ext = (name || '').split('.').pop().toLowerCase();
+    if (['pdf'].includes(ext)) return '📑';
+    if (['xls','xlsx','csv'].includes(ext)) return '📊';
+    if (['doc','docx'].includes(ext)) return '📄';
+    if (['jpg','jpeg','png','gif','webp'].includes(ext)) return '🖼️';
+    if (['zip','rar','7z'].includes(ext)) return '🗜️';
+    return '📎';
+  };
+
+  const cardCls = `rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`;
+  const headerCls = `flex items-center px-5 py-4 border-b gap-2.5 ${isDark ? 'border-slate-700' : 'border-slate-100'}`;
+  const selectCls = `w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-white border-slate-200 text-slate-800'}`;
 
   return (
-    <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-      <div className={`flex items-center px-5 py-4 border-b gap-2.5 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-        <div className="p-1.5 rounded-lg" style={{ background: `${COLORS.deepBlue}12` }}>
-          <FileText className="h-4 w-4" style={{ color: COLORS.deepBlue }} />
-        </div>
-        <div>
-          <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Client Documents</h3>
-          <p className="text-xs text-slate-400">Browse Drive files linked to each client</p>
-        </div>
-      </div>
-      <div className="p-5 space-y-4">
-        {loading ? (
-          <div className="flex items-center justify-center py-16 gap-2 text-slate-400"><Loader2 className="h-5 w-5 animate-spin" /><span className="text-sm">Loading…</span></div>
-        ) : usersWithDrive.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4" style={{ background: `${COLORS.deepBlue}10` }}>
-              <FolderOpen className="h-6 w-6" style={{ color: COLORS.deepBlue }} />
-            </div>
-            <h3 className="font-semibold text-slate-700 dark:text-slate-300 text-sm mb-1">No Drive folders linked</h3>
-            <p className="text-xs text-slate-400 max-w-xs">Link a Google Drive folder to a portal user from the Clients page to manage their documents here.</p>
+    <div className="space-y-6">
+
+      {/* ══ BULK UPLOAD PANEL ══════════════════════════════════════════════ */}
+      <div className={cardCls}>
+        <div className={headerCls}>
+          <div className="p-1.5 rounded-lg" style={{ background: '#1F6FB212' }}>
+            <UploadCloud className="h-4 w-4" style={{ color: '#1F6FB2' }} />
           </div>
-        ) : (
-          <>
-            <div>
-              <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block mb-1.5">Select Client</label>
-              <select value={selectedUser} onChange={(e) => setSelectedUser(e.target.value)}
-                className={`w-full max-w-sm border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-white border-slate-200 text-slate-800'}`}
-              >
-                <option value="">— Choose a client —</option>
-                {usersWithDrive.map((u) => (
-                  <option key={u.id} value={u.id}>{u.display_name || u.portal_username} ({u.google_drive_folder_name || 'Drive'})</option>
-                ))}
-              </select>
-            </div>
-            {selectedUser && (docsLoading ? (
-              <div className="flex items-center justify-center py-10 gap-2 text-slate-400"><Loader2 className="h-5 w-5 animate-spin" /><span className="text-sm">Loading documents…</span></div>
-            ) : docs.length === 0 ? (
-              <p className="text-center py-10 text-slate-400 text-sm">No documents found in this folder.</p>
-            ) : (
-              <div className="space-y-1">
-                {docs.map((f) => (
-                  <div key={f.id} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-                    <span className="text-lg flex-shrink-0">{ICONS[f.mimeType] || '📎'}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-slate-800 dark:text-slate-200 truncate">{f.name}</p>
-                      {f.size && <p className="text-[10px] text-slate-400">{fmtSize(f.size)}</p>}
+          <div>
+            <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Bulk Upload to Client Folder</h3>
+            <p className="text-xs text-slate-400">Upload files from your device directly into a client's Google Drive folder — visible in their portal instantly</p>
+          </div>
+        </div>
+        <div className="p-5 space-y-4">
+          {loading ? (
+            <div className="flex items-center gap-2 text-slate-400 py-8 justify-center"><Loader2 className="h-5 w-5 animate-spin" /><span className="text-sm">Loading clients…</span></div>
+          ) : usersWithDrive.length === 0 ? (
+            <div className="py-10 text-center text-sm text-slate-400">No clients with Drive folders yet. Create folders in the <strong>Folder Architect</strong> tab first.</div>
+          ) : (
+            <>
+              {/* Step 1 — Select client */}
+              <div>
+                <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 block mb-1.5">
+                  <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-white text-[10px] mr-1.5" style={{background:'#1F6FB2'}}>1</span>
+                  Select Client
+                </label>
+                <select value={uploadUser} onChange={(e) => setUploadUser(e.target.value)} className={selectCls + ' max-w-sm'}>
+                  <option value="">— Choose a client —</option>
+                  {usersWithDrive.map(u => (
+                    <option key={u.id} value={u.id}>{u.display_name || u.portal_username} ({u.google_drive_folder_name || 'Drive'})</option>
+                  ))}
+                </select>
+              </div>
+
+              {uploadUser && (
+                <>
+                  {/* Step 2 — Choose subfolder */}
+                  <div>
+                    <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 block mb-1.5">
+                      <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-white text-[10px] mr-1.5" style={{background:'#1F6FB2'}}>2</span>
+                      Destination Subfolder <span className="font-normal text-slate-400">(optional — leave blank to upload to root)</span>
+                    </label>
+                    <div className="flex gap-2 flex-wrap">
+                      <select
+                        value={selectedSubfolder}
+                        onChange={e => { setSelectedSubfolder(e.target.value); setNewSubfolder(''); }}
+                        className={selectCls + ' max-w-xs'}
+                        disabled={subfoldersLoading}
+                      >
+                        <option value="">— Root folder —</option>
+                        {subfolders.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                      </select>
+                      <span className="self-center text-xs text-slate-400">or create new:</span>
+                      <input
+                        type="text"
+                        placeholder="New subfolder name…"
+                        value={newSubfolder}
+                        onChange={e => { setNewSubfolder(e.target.value); setSelectedSubfolder(''); }}
+                        className={`border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-200 placeholder:text-slate-500' : 'bg-white border-slate-200 text-slate-800 placeholder:text-slate-400'}`}
+                      />
                     </div>
-                    {f.webViewLink && (
-                      <a href={f.webViewLink} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-0.5 flex-shrink-0">
-                        <ExternalLink className="h-3 w-3" /> Open
-                      </a>
+                    {targetSubfolder && (
+                      <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-1">
+                        📁 Files will go into: <strong>{targetSubfolder}</strong>
+                      </p>
                     )}
                   </div>
-                ))}
+
+                  {/* Step 3 — Drop zone */}
+                  <div>
+                    <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 block mb-1.5">
+                      <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-white text-[10px] mr-1.5" style={{background:'#1F6FB2'}}>3</span>
+                      Add Files
+                    </label>
+                    <div
+                      onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+                      onDragLeave={() => setDragOver(false)}
+                      onDrop={handleDrop}
+                      onClick={() => fileInputRef.current?.click()}
+                      className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all select-none ${
+                        dragOver
+                          ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20'
+                          : isDark ? 'border-slate-600 hover:border-slate-500 hover:bg-slate-700/30' : 'border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/40'
+                      }`}
+                    >
+                      <UploadCloud className={`h-8 w-8 mx-auto mb-2 ${dragOver ? 'text-indigo-500' : 'text-slate-400'}`} />
+                      <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                        {dragOver ? 'Drop files here!' : 'Drag & drop files here, or click to browse'}
+                      </p>
+                      <p className="text-xs text-slate-400 mt-1">PDFs, images, Excel, Word, ZIP — any file type</p>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        multiple
+                        className="hidden"
+                        onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* File queue */}
+                  {uploadQueue.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-medium text-slate-600 dark:text-slate-400">{uploadQueue.length} file{uploadQueue.length > 1 ? 's' : ''} queued</p>
+                        <button
+                          onClick={() => { setUploadQueue([]); setUploadResults(null); }}
+                          className="text-xs text-slate-400 hover:text-red-500 transition-colors"
+                        >Clear all</button>
+                      </div>
+                      <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
+                        {uploadQueue.map((q, i) => (
+                          <div key={i} className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border text-xs ${
+                            isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'
+                          }`}>
+                            <span className="text-base flex-shrink-0">{extIcon(q.file.name)}</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="truncate font-medium text-slate-700 dark:text-slate-200">{q.file.name}</p>
+                              <p className="text-slate-400">{fmtSize(q.file.size)}</p>
+                            </div>
+                            {q.status === 'pending' && (
+                              <button onClick={() => removeFile(i)} className="text-slate-400 hover:text-red-500 flex-shrink-0"><X className="h-3.5 w-3.5" /></button>
+                            )}
+                            {q.status === 'uploading' && <Loader2 className="h-4 w-4 animate-spin text-indigo-500 flex-shrink-0" />}
+                            {q.status === 'done' && (
+                              <div className="flex items-center gap-1 flex-shrink-0">
+                                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                                {q.link && <a href={q.link} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">View</a>}
+                              </div>
+                            )}
+                            {q.status === 'error' && (
+                              <span className="flex items-center gap-1 text-red-500 flex-shrink-0" title={q.error}>
+                                <XCircle className="h-4 w-4" /> Failed
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Upload button */}
+                  {uploadQueue.filter(q => q.status === 'pending').length > 0 && (
+                    <button
+                      onClick={handleUpload}
+                      disabled={uploading}
+                      className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all disabled:opacity-60"
+                      style={{ background: '#1F6FB2' }}
+                    >
+                      {uploading ? <><Loader2 className="h-4 w-4 animate-spin" /> Uploading…</> : <><Upload className="h-4 w-4" /> Upload {uploadQueue.filter(q => q.status === 'pending').length} File{uploadQueue.filter(q => q.status === 'pending').length > 1 ? 's' : ''} to Drive</>}
+                    </button>
+                  )}
+
+                  {/* Results summary */}
+                  {uploadResults && (
+                    <div className={`flex items-start gap-3 p-3 rounded-xl border text-xs ${
+                      uploadResults.failed === 0
+                        ? isDark ? 'bg-green-900/20 border-green-800 text-green-300' : 'bg-green-50 border-green-200 text-green-700'
+                        : isDark ? 'bg-amber-900/20 border-amber-800 text-amber-300' : 'bg-amber-50 border-amber-200 text-amber-700'
+                    }`}>
+                      <CheckCircle2 className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-semibold">{uploadResults.uploaded} uploaded successfully{uploadResults.failed > 0 ? `, ${uploadResults.failed} failed` : ''}</p>
+                        <p className="opacity-80 mt-0.5">Destination: <strong>{uploadResults.subfolder}</strong> · Files are now visible in the client portal</p>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ══ BROWSE PANEL (existing) ══════════════════════════════════════ */}
+      <div className={cardCls}>
+        <div className={headerCls}>
+          <div className="p-1.5 rounded-lg" style={{ background: `${COLORS.deepBlue}12` }}>
+            <FileText className="h-4 w-4" style={{ color: COLORS.deepBlue }} />
+          </div>
+          <div>
+            <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Browse Client Documents</h3>
+            <p className="text-xs text-slate-400">View Drive files linked to each client</p>
+          </div>
+        </div>
+        <div className="p-5 space-y-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-16 gap-2 text-slate-400"><Loader2 className="h-5 w-5 animate-spin" /><span className="text-sm">Loading…</span></div>
+          ) : usersWithDrive.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4" style={{ background: `${COLORS.deepBlue}10` }}>
+                <FolderOpen className="h-6 w-6" style={{ color: COLORS.deepBlue }} />
               </div>
-            ))}
-          </>
-        )}
+              <h3 className="font-semibold text-slate-700 dark:text-slate-300 text-sm mb-1">No Drive folders linked</h3>
+              <p className="text-xs text-slate-400 max-w-xs">Link a Google Drive folder to a portal user from the Clients page to manage their documents here.</p>
+            </div>
+          ) : (
+            <>
+              <div>
+                <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block mb-1.5">Select Client</label>
+                <select value={selectedUser} onChange={(e) => setSelectedUser(e.target.value)}
+                  className={selectCls + ' max-w-sm'}>
+                  <option value="">— Choose a client —</option>
+                  {usersWithDrive.map((u) => (
+                    <option key={u.id} value={u.id}>{u.display_name || u.portal_username} ({u.google_drive_folder_name || 'Drive'})</option>
+                  ))}
+                </select>
+              </div>
+              {selectedUser && (docsLoading ? (
+                <div className="flex items-center justify-center py-10 gap-2 text-slate-400"><Loader2 className="h-5 w-5 animate-spin" /><span className="text-sm">Loading documents…</span></div>
+              ) : docs.length === 0 ? (
+                <p className="text-center py-10 text-slate-400 text-sm">No documents found in this folder.</p>
+              ) : (
+                <div className="space-y-1">
+                  {docs.map((f) => (
+                    <div key={f.id} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                      <span className="text-lg flex-shrink-0">{ICONS[f.mimeType] || '📎'}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-slate-800 dark:text-slate-200 truncate">{f.name}</p>
+                        {f.size && <p className="text-[10px] text-slate-400">{fmtSize(f.size)}</p>}
+                      </div>
+                      {f.webViewLink && (
+                        <a href={f.webViewLink} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-0.5 flex-shrink-0">
+                          <ExternalLink className="h-3 w-3" /> Open
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
