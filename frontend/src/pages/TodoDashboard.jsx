@@ -27,6 +27,7 @@ import {
   User as UserIcon, Activity, Layers, CheckSquare, Circle,
   ChevronRight, Briefcase, Clock, FileText, Tag, ArrowUpRight,
   ArrowRight, Building2, List, LayoutGrid, Loader2,
+  Trophy, Medal, Crown, Star,
 } from 'lucide-react';
 import { detectTodoDuplicates } from '@/lib/aiDuplicateEngine';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
@@ -1140,6 +1141,10 @@ export default function TodoDashboard() {
   const [dupGroups,     setDupGroups]     = useState([]);
   const [detectingDups, setDetectingDups] = useState(false);
 
+  // ── Ranking state ──────────────────────────────────────────────────────────
+  const [myRanking,      setMyRanking]      = useState(null);
+  const [rankingsLoaded, setRankingsLoaded] = useState(false);
+
   // ── Fetch all users ────────────────────────────────────────────────────────
   const { data: allUsers = [] } = useQuery({
     queryKey: ['users'],
@@ -1268,6 +1273,24 @@ export default function TodoDashboard() {
         .slice(0, 200);
     });
   }, [todos]);
+
+  // ── Fetch rankings for current user ───────────────────────────────────────
+  useEffect(() => {
+    const fetchRanking = async () => {
+      try {
+        const res = await api.get('/reports/performance-rankings?period=monthly');
+        const rankData = res.data;
+        if (Array.isArray(rankData) && rankData.length > 0) {
+          const mine = rankData.find(r => r.user_id === user?.id) || rankData[0];
+          setMyRanking({ ...mine, totalUsers: rankData.length, rankings: rankData });
+          setRankingsLoaded(true);
+        }
+      } catch (e) {
+        console.error('TodoDashboard ranking fetch error:', e);
+      }
+    };
+    if (user?.id) fetchRanking();
+  }, [user?.id]);
 
   // ── Stats ──────────────────────────────────────────────────────────────────
   const stats = useMemo(() => {
@@ -2081,6 +2104,134 @@ export default function TodoDashboard() {
                     </div>
                   </div>
 
+                  {/* ── Ranking Booster — Full-width card above Focus Board ── */}
+                  {rankingsLoaded && myRanking && (() => {
+                    const { rank, totalUsers, overall_score, badge, task_completion_percent, todo_ontime_percent, attendance_percent, rankings } = myRanking;
+                    const prevRank = rank > 1 ? rankings[rank - 2] : null;
+                    const pointsToNext = prevRank ? Math.ceil(prevRank.overall_score - overall_score + 0.1) : 0;
+                    const todosNeeded = prevRank ? Math.max(1, Math.ceil((prevRank.overall_score - overall_score) / 1.5)) : 0;
+                    const pendingCount = todos.filter(t => !(t.is_completed === true || t.status === 'completed')).length;
+                    const rankColor = rank === 1 ? '#F59E0B' : rank <= 3 ? '#60A5FA' : '#1F6FB2';
+                    const badgeColor = badge === 'Star Performer' ? '#F59E0B' : badge === 'Top Performer' ? '#60A5FA' : '#1FAF5A';
+                    const scoreColor = overall_score >= 85 ? '#1FAF5A' : overall_score >= 65 ? '#F59E0B' : '#FF6B6B';
+                    const RankIcon = rank === 1 ? Crown : rank <= 3 ? Medal : Trophy;
+                    return (
+                      <motion.div variants={itemVariants}>
+                        <SectionCard>
+                          <div className="p-4">
+                            <div className="flex flex-col lg:flex-row gap-5">
+
+                              {/* Left: Rank + badge */}
+                              <div className="flex items-center gap-4 lg:w-52 flex-shrink-0">
+                                <div className="relative flex-shrink-0">
+                                  <div className="w-12 h-12 rounded-2xl flex items-center justify-center"
+                                    style={{ background: `${rankColor}18`, border: `2px solid ${rankColor}44` }}>
+                                    <RankIcon className="h-6 w-6" style={{ color: rankColor }} />
+                                  </div>
+                                  <span className="absolute -top-1.5 -right-1.5 text-[9px] font-black px-1.5 py-0.5 rounded-full text-white"
+                                    style={{ background: rankColor }}>#{rank}</span>
+                                </div>
+                                <div>
+                                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Your Ranking</p>
+                                  <p className="text-xl font-black leading-tight" style={{ color: rankColor }}>
+                                    {rank} <span className="text-sm font-semibold text-slate-400">/ {totalUsers}</span>
+                                  </p>
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full mt-0.5"
+                                    style={{ background: `${badgeColor}18`, color: badgeColor }}>
+                                    <Star className="h-2.5 w-2.5" /> {badge}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Divider */}
+                              <div className="hidden lg:block w-px bg-slate-100 dark:bg-slate-700 flex-shrink-0" />
+
+                              {/* Middle: Score breakdown */}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Performance Score</p>
+                                <div className="flex items-center gap-3">
+                                  <div className="relative w-10 h-10 flex-shrink-0">
+                                    <svg viewBox="0 0 44 44" className="w-10 h-10 -rotate-90">
+                                      <circle cx="22" cy="22" r="17" strokeWidth="4" fill="none" stroke={isDark ? '#334155' : '#e2e8f0'} />
+                                      <circle cx="22" cy="22" r="17" strokeWidth="4" fill="none"
+                                        strokeDasharray={`${(overall_score / 100) * 106.8} 106.8`}
+                                        strokeLinecap="round" stroke={scoreColor} />
+                                    </svg>
+                                    <span className="absolute inset-0 flex items-center justify-center text-[9px] font-black"
+                                      style={{ color: scoreColor }}>{Math.round(overall_score)}</span>
+                                  </div>
+                                  <div className="flex-1 space-y-1.5">
+                                    {[
+                                      { label: 'Task Completion', val: task_completion_percent, color: '#1F6FB2' },
+                                      { label: 'Todo On-Time',    val: todo_ontime_percent,     color: '#F59E0B' },
+                                      { label: 'Attendance',      val: attendance_percent,       color: '#1FAF5A' },
+                                    ].map(({ label, val, color }) => (
+                                      <div key={label} className="flex items-center gap-2">
+                                        <span className="text-[9px] w-24 flex-shrink-0 font-medium text-slate-400">{label}</span>
+                                        <div className={`flex-1 h-1 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                                          <motion.div className="h-full rounded-full" style={{ background: color }}
+                                            initial={{ width: 0 }} animate={{ width: `${Math.min(val, 100)}%` }}
+                                            transition={{ duration: 0.6, ease: 'easeOut' }} />
+                                        </div>
+                                        <span className="text-[9px] font-bold w-7 text-right" style={{ color }}>{Math.round(val)}%</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Divider */}
+                              <div className="hidden lg:block w-px bg-slate-100 dark:bg-slate-700 flex-shrink-0" />
+
+                              {/* Right: Climb suggestions */}
+                              <div className="lg:w-60 flex-shrink-0 flex flex-col gap-2.5">
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                                  {rank === 1 ? '🏆 Defending #1' : `🚀 Climb to Rank #${rank - 1}`}
+                                </p>
+                                {rank === 1 ? (
+                                  <div className="rounded-xl p-3 border bg-amber-50 dark:bg-amber-900/20 border-amber-100 dark:border-amber-800/40">
+                                    <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-300 leading-relaxed">
+                                      🎉 You're the top performer! Keep completing todos on time to hold your position.
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <div className="rounded-xl p-3 border bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-800/40">
+                                      <div className="flex items-center gap-1.5 mb-1">
+                                        <Zap className="h-3 w-3 text-blue-500 flex-shrink-0" />
+                                        <p className="text-[10px] font-bold text-blue-600 dark:text-blue-300 uppercase tracking-wide">
+                                          {pointsToNext} pts needed
+                                        </p>
+                                      </div>
+                                      <p className="text-[11px] font-medium text-blue-700 dark:text-blue-400 leading-relaxed">
+                                        Complete <strong>{todosNeeded}</strong> more todo{todosNeeded !== 1 ? 's' : ''} on time to overtake{' '}
+                                        <strong>{prevRank?.user_name?.split(' ')[0] || 'next rank'}</strong>.
+                                      </p>
+                                    </div>
+                                    {pendingCount > 0 && (
+                                      <div className="rounded-xl p-3 border bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-800/40">
+                                        <div className="flex items-center gap-1.5 mb-1">
+                                          <CheckCircle2 className="h-3 w-3 text-emerald-500 flex-shrink-0" />
+                                          <p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">
+                                            {pendingCount} pending
+                                          </p>
+                                        </div>
+                                        <p className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400 leading-relaxed">
+                                          Finish your top <strong>{Math.min(todosNeeded, pendingCount)}</strong> today to jump up the leaderboard.
+                                        </p>
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+
+                            </div>
+                          </div>
+                        </SectionCard>
+                      </motion.div>
+                    );
+                  })()}
+
                   {/* ── Focus Board — Full-width horizontal card below both columns ── */}
                   <motion.div variants={itemVariants}>
                     <SectionCard>
@@ -2194,7 +2345,7 @@ export default function TodoDashboard() {
                           {/* Vertical divider */}
                           <div className="hidden lg:block w-px bg-slate-100 dark:bg-slate-700 flex-shrink-0" />
 
-                          {/* Right section: tip + overdue alert */}
+                          {/* Right section: tip + ranking suggestion */}
                           <div className="lg:w-52 flex-shrink-0 flex flex-col justify-between gap-3">
                             <div>
                               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Quick Tip</p>
@@ -2214,13 +2365,67 @@ export default function TodoDashboard() {
                                 </p>
                               </div>
                             </div>
-                            {stats.overdue > 0 && (
-                              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800/40">
-                                <AlertCircle size={12} className="text-red-500 flex-shrink-0" />
-                                <p className="text-[11px] font-semibold text-red-600 dark:text-red-400">
-                                  {stats.overdue} overdue · health at {stats.healthScore}%
-                                </p>
-                              </div>
+
+                            {/* ── Ranking nudge (replaces overdue alert when ranking loaded) ── */}
+                            {rankingsLoaded && myRanking ? (() => {
+                              const { rank, totalUsers, overall_score, rankings } = myRanking;
+                              const prevRank = rank > 1 ? rankings[rank - 2] : null;
+                              const pointsToNext = prevRank ? Math.ceil(prevRank.overall_score - overall_score + 0.1) : 0;
+                              const todosToComplete = prevRank ? Math.max(1, Math.ceil((prevRank.overall_score - overall_score) / 1.5)) : 0;
+                              const rankColor = rank === 1 ? '#F59E0B' : rank <= 3 ? '#60A5FA' : '#1F6FB2';
+                              const RankIcon = rank === 1 ? Crown : rank <= 3 ? Medal : Trophy;
+                              return (
+                                <div className="flex flex-col gap-2">
+                                  {/* Rank badge */}
+                                  <div className="flex items-center gap-2 px-3 py-2 rounded-xl border"
+                                    style={{ background: `${rankColor}10`, borderColor: `${rankColor}30` }}>
+                                    <RankIcon size={12} style={{ color: rankColor }} className="flex-shrink-0" />
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-[10px] font-black" style={{ color: rankColor }}>
+                                        Rank #{rank} of {totalUsers}
+                                      </p>
+                                      <p className="text-[9px] text-slate-400">Score: {Math.round(overall_score)}/100</p>
+                                    </div>
+                                  </div>
+
+                                  {/* Rank climb nudge */}
+                                  {rank === 1 ? (
+                                    <div className="px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800/40">
+                                      <p className="text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+                                        🏆 You're #1! Complete todos on time to stay at the top.
+                                      </p>
+                                    </div>
+                                  ) : (
+                                    <div className="px-3 py-2 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/40">
+                                      <p className="text-[10px] font-bold text-blue-600 dark:text-blue-300 mb-0.5">
+                                        🚀 {pointsToNext}pts to Rank #{rank - 1}
+                                      </p>
+                                      <p className="text-[10px] text-blue-700 dark:text-blue-400 leading-relaxed">
+                                        Complete <strong>{todosToComplete}</strong> todo{todosToComplete !== 1 ? 's' : ''} on time to overtake{' '}
+                                        <strong>{prevRank?.user_name?.split(' ')[0] || 'next rank'}</strong>.
+                                      </p>
+                                    </div>
+                                  )}
+
+                                  {stats.overdue > 0 && (
+                                    <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800/40">
+                                      <AlertCircle size={12} className="text-red-500 flex-shrink-0" />
+                                      <p className="text-[10px] font-semibold text-red-600 dark:text-red-400">
+                                        {stats.overdue} overdue · health at {stats.healthScore}%
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })() : (
+                              stats.overdue > 0 && (
+                                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800/40">
+                                  <AlertCircle size={12} className="text-red-500 flex-shrink-0" />
+                                  <p className="text-[11px] font-semibold text-red-600 dark:text-red-400">
+                                    {stats.overdue} overdue · health at {stats.healthScore}%
+                                  </p>
+                                </div>
+                              )
                             )}
                           </div>
 
