@@ -6310,9 +6310,22 @@ export default function Clients() {
           }
           fetchClientGroups();
         }}
+        onWhatsAppGroup={(groupId) => {
+          // Filter the clients list by this group then immediately open the
+          // bulk WhatsApp modal — it reads from filteredClients, so it will
+          // be pre-populated with just the group's members.
+          setActiveGroupId(groupId);
+          setShowGroupsPanel(false);
+          const grp = clientGroupsData.find(g => g.id === groupId);
+          if (grp) toast.info(`WhatsApp: ${grp.name} (${(grp.client_ids || []).length} members)`);
+          setBulkMsgMode('whatsapp');
+          // Small delay so the group filter has applied before the modal mounts.
+          setTimeout(() => setBulkMsgOpen(true), 50);
+        }}
         activeGroupId={activeGroupId}
         isDark={isDark}
       />
+
 
       {/* ── ITR Client Dialog ──────────────────────────────────────────── */}
       <ITRClientDialog
