@@ -58,6 +58,9 @@ import {
   Search,
   List,
   LayoutGrid,
+  BellOff,
+  CalendarDays,
+  RefreshCw,
 } from "lucide-react";
 import LayoutCustomizer from "../components/layout/LayoutCustomizer";
 import { usePageLayout } from "../hooks/usePageLayout";
@@ -210,7 +213,7 @@ function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
 }
 
 // ── Shared Reminder Detail Popup ─────────────────────────────────────────────
-function ReminderDetailPopup({ rem, isDark, isViewingOther, onClose, onEdit, onDelete, COLORS }) {
+function ReminderDetailPopup({ rem, isDark, isViewingOther, onClose, onEdit, onDelete, onDismiss, onReschedule, COLORS }) {
   if (!rem) return null;
   const remId = resolveId(rem);
   const isDue = rem.remind_at && isPast(new Date(rem.remind_at));
@@ -280,6 +283,37 @@ function ReminderDetailPopup({ rem, isDark, isViewingOther, onClose, onEdit, onD
 
         {/* Popup Body */}
         <div className="px-8 py-6 space-y-5 max-h-[65vh] overflow-y-auto">
+
+          {/* ── Overdue Quick-Action Banner ── */}
+          {isDue && !isViewingOther && (
+            <div className={`rounded-2xl p-4 border ${isDark ? "bg-red-950/40 border-red-800" : "bg-red-50 border-red-200"}`}>
+              <div className="flex items-center gap-2 mb-3">
+                <AlertTriangle className="h-4 w-4 text-red-500 flex-shrink-0" />
+                <p className={`text-xs font-bold uppercase tracking-wide ${isDark ? "text-red-400" : "text-red-600"}`}>
+                  This reminder is overdue — take action
+                </p>
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={() => { onDismiss(remId); onClose(); }}
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
+                    isDark
+                      ? "bg-slate-700 hover:bg-slate-600 text-slate-200 border border-slate-600"
+                      : "bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 shadow-sm"
+                  }`}
+                >
+                  <BellOff className="h-3.5 w-3.5" /> Dismiss
+                </button>
+                <button
+                  onClick={() => { onReschedule(rem); onClose(); }}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all bg-purple-600 hover:bg-purple-700 text-white shadow-sm"
+                >
+                  <CalendarDays className="h-3.5 w-3.5" /> Reschedule
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Date & Time */}
           <div className={`flex items-start gap-3 p-4 rounded-2xl ${isDark ? "bg-slate-700/50" : "bg-slate-50"}`}>
             <Clock className={`h-5 w-5 flex-shrink-0 mt-0.5 ${isDue ? "text-red-500" : isDark ? "text-purple-400" : "text-purple-500"}`} />
@@ -458,6 +492,133 @@ function ReminderDetailPopup({ rem, isDark, isViewingOther, onClose, onEdit, onD
   );
 }
 
+// ── Quick Reschedule Modal ────────────────────────────────────────────────────
+function RescheduleModal({ rem, isDark, onConfirm, onCancel }) {
+  const [newDatetime, setNewDatetime] = useState(() => {
+    // Default to tomorrow same time
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().slice(0, 16);
+  });
+
+  if (!rem) return null;
+
+  return (
+    <motion.div
+      key="reschedule-modal"
+      className="fixed inset-0 z-[10000] flex items-center justify-center p-4"
+      style={{ background: "rgba(7,15,30,0.75)", backdropFilter: "blur(10px)" }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={onCancel}
+    >
+      <motion.div
+        initial={{ scale: 0.88, y: 30, opacity: 0 }}
+        animate={{ scale: 1, y: 0, opacity: 1 }}
+        exit={{ scale: 0.88, y: 30, opacity: 0 }}
+        transition={{ type: "spring", stiffness: 240, damping: 22 }}
+        className={`w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl ${isDark ? "bg-slate-800 border border-slate-700" : "bg-white border border-slate-200"}`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-6 py-5" style={{ background: "linear-gradient(135deg, #8B5CF6, #1F6FB2)" }}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0">
+                <RefreshCw className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <p className="text-white/60 text-[10px] font-bold uppercase tracking-widest">Reschedule</p>
+                <h3 className="text-base font-bold text-white leading-tight truncate max-w-[180px]">{rem.title}</h3>
+              </div>
+            </div>
+            <button
+              onClick={onCancel}
+              className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-all"
+            >
+              <X className="w-4 h-4 text-white" />
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="px-6 py-5 space-y-4">
+          <div className={`p-3 rounded-xl ${isDark ? "bg-amber-900/20 border border-amber-800" : "bg-amber-50 border border-amber-200"}`}>
+            <p className={`text-xs font-semibold flex items-center gap-1.5 ${isDark ? "text-amber-400" : "text-amber-700"}`}>
+              <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+              Original: {rem.remind_at ? new Date(rem.remind_at).toLocaleString() : "—"}
+            </p>
+          </div>
+          <div>
+            <label className={`block text-xs font-semibold mb-1.5 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+              New Date &amp; Time *
+            </label>
+            <input
+              type="datetime-local"
+              value={newDatetime}
+              onChange={(e) => setNewDatetime(e.target.value)}
+              className={`w-full px-3 py-2.5 text-sm border rounded-xl focus:outline-none focus:ring-2 transition-all ${
+                isDark
+                  ? "bg-slate-700 border-slate-600 text-slate-100 focus:ring-purple-900/40 focus:border-purple-500"
+                  : "bg-slate-50 border-slate-200 text-slate-800 focus:ring-purple-100 focus:border-purple-400"
+              }`}
+            />
+          </div>
+          {/* Quick presets */}
+          <div>
+            <p className={`text-[10px] font-bold uppercase tracking-widest mb-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Quick Presets</p>
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                { label: "Tomorrow", hours: 24 },
+                { label: "+3 Days", hours: 72 },
+                { label: "+1 Week", hours: 168 },
+                { label: "+1 Month", days: 30 },
+              ].map(({ label, hours, days }) => (
+                <button
+                  key={label}
+                  onClick={() => {
+                    const d = new Date();
+                    if (days) d.setDate(d.getDate() + days);
+                    else d.setHours(d.getHours() + hours);
+                    setNewDatetime(d.toISOString().slice(0, 16));
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-all ${
+                    isDark
+                      ? "bg-slate-700 hover:bg-purple-800 text-slate-300 hover:text-white border border-slate-600"
+                      : "bg-slate-100 hover:bg-purple-100 text-slate-600 hover:text-purple-700 border border-slate-200"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className={`px-6 py-4 flex gap-2 border-t ${isDark ? "border-slate-700" : "border-slate-100"}`}>
+          <button
+            onClick={onCancel}
+            className={`flex-1 py-2.5 rounded-xl text-xs font-semibold border transition-all ${
+              isDark ? "border-slate-600 text-slate-300 hover:bg-slate-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => newDatetime && onConfirm(newDatetime)}
+            disabled={!newDatetime}
+            className="flex-1 py-2.5 rounded-xl text-xs font-semibold bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white transition-all flex items-center justify-center gap-1.5"
+          >
+            <CalendarDays className="h-3.5 w-3.5" /> Save New Date
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ── Main Component ───────────────────────────────────────────────────────────
 export default function Reminders() {
   const isDark = useDark();
@@ -477,6 +638,9 @@ export default function Reminders() {
 
   // ── UNIFIED popup state — shared by BOTH calendar and list views ──────────
   const [activePopupReminder, setActivePopupReminder] = useState(null);
+
+  // Reschedule modal state
+  const [rescheduleTarget, setRescheduleTarget] = useState(null);
 
   // Calendar state
   const [calendarMonth, setCalendarMonth] = useState(new Date());
@@ -1369,6 +1533,8 @@ export default function Reminders() {
             onClose={() => setActivePopupReminder(null)}
             onEdit={startEdit}
             onDelete={handleDelete}
+            onDismiss={handleDismiss}
+            onReschedule={startReschedule}
           />
         )}
       </AnimatePresence>
