@@ -677,13 +677,13 @@ const ClientSearchCombobox = ({ clients = [], value, onSelect, onAddNew, isDark 
   const selected = useMemo(() => clients.find(c => c.id === value) || null, [clients, value]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return clients.slice(0, 50);
+    if (!q) return clients; // show all clients when no query
     return clients.filter(c =>
       (c.company_name || '').toLowerCase().includes(q) ||
       (c.email || '').toLowerCase().includes(q) ||
       (c.phone || '').includes(q) ||
-      (c.client_gstin || '').toLowerCase().includes(q)
-    ).slice(0, 40);
+      (c.gstin || c.client_gstin || '').toLowerCase().includes(q)
+    ); // no artificial cap — show all matches
   }, [clients, query]);
 
   // ── useEffect ──
@@ -5743,7 +5743,7 @@ const fetchAll = useCallback(async () => {
       const [invR, compR, clientR, leadR, statR] = await Promise.allSettled([
         api.get('/invoices', { params: { page: 1, page_size: 5000 } }),
         api.get('/companies'),
-        api.get('/clients'),
+        api.get('/clients', { params: { page: 1, page_size: 100 } }),
         api.get('/leads'),
         api.get('/invoices/stats'),
       ]);
@@ -5760,8 +5760,32 @@ const fetchAll = useCallback(async () => {
       if (compR.status === 'fulfilled') setCompanies(compR.value.data || []);
       else { console.error('Failed to load companies:', compR.reason); setCompanies([]); }
 
-      if (clientR.status === 'fulfilled') setClients(clientR.value.data || []);
-      else { console.error('Failed to load clients:', clientR.reason); setClients([]); }
+      if (clientR.status === 'fulfilled') {
+        // Load first page immediately, then fetch remaining pages in background
+        const firstPage = clientR.value.data || [];
+        setClients(firstPage);
+        const PAGE_SIZE = 100;
+        if (firstPage.length >= PAGE_SIZE) {
+          (async () => {
+            let page = 2;
+            while (true) {
+              try {
+                const r = await api.get('/clients', { params: { page, page_size: PAGE_SIZE } });
+                const batch = r.data || [];
+                if (batch.length > 0) {
+                  setClients(prev => {
+                    const ids = new Set(prev.map(c => c.id));
+                    const fresh = batch.filter(c => !ids.has(c.id));
+                    return fresh.length ? [...prev, ...fresh] : prev;
+                  });
+                }
+                if (batch.length < PAGE_SIZE) break;
+                page++;
+              } catch { break; }
+            }
+          })();
+        }
+      } else { console.error('Failed to load clients:', clientR.reason); setClients([]); }
 
       if (leadR.status === 'fulfilled') setLeads(leadR.value.data || []);
       else { console.error('Failed to load leads:', leadR.reason); setLeads([]); }
