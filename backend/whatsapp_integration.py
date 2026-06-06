@@ -7,6 +7,22 @@ Architecture:
   - Taskosphere backend proxies session management to the bridge
   - All authenticated users with WA access can send from any connected number
   - Full audit trail in MongoDB (whatsapp_messages collection)
+
+FIX SUMMARY (429 Too Many Requests / 502 Bad Gateway on Render free tier)
+─────────────────────────────────────────────────────────────────────────────
+Root cause: the frontend polled /whatsapp/sessions frequently (every 8 s) and
+every single request was forwarded straight to the wa-bridge with no caching.
+On Render free tier the wa-bridge has tight rate limits, so it quickly started
+returning 429 → backend raised a 502 "WA bridge error" toast to the user.
+
+Changes in this file:
+  1. In-memory cache for GET /sessions and GET /status (15-second TTL).
+     Multiple simultaneous frontend polls within a 15 s window hit the cache
+     instead of the bridge.
+  2. _bridge_get() now raises HTTP 429 (not 502) when the bridge itself
+     rate-limits, so the frontend can distinguish "slow down" from "broken".
+  3. Retry logic in _bridge_get / _bridge_post unchanged (3 attempts with
+     exponential back-off) — still works correctly.
 """
 
 from __future__ import annotations
@@ -33,6 +49,29 @@ WA_BRIDGE_URL = os.getenv("WA_BRIDGE_URL", "http://localhost:3002")
 def _db():
     from backend.server import db
     return db
+
+# ── Simple in-memory cache ───────────────────────────────────────────────────
+# Keyed by bridge path → (timestamp, response_dict)
+# Only used for read-only GET endpoints that are polled by the frontend.
+_CACHE: Dict[str, tuple] = {}
+_CACHE_TTL = 15  # seconds — enough to absorb a burst of browser polls
+
+
+def _cache_get(path: str) -> Optional[Dict]:
+    """Return cached value if still fresh, else None."""
+    entry = _CACHE.get(path)
+    if entry and (_time.monotonic() - entry[0]) < _CACHE_TTL:
+        return entry[1]
+    return None
+
+
+def _cache_set(path: str, value: Dict) -> None:
+    _CACHE[path] = (_time.monotonic(), value)
+
+
+def _cache_invalidate(path: str) -> None:
+    _CACHE.pop(path, None)
+
 
 # ── Pydantic models ──────────────────────────────────────────────────────────
 
@@ -73,18 +112,36 @@ class WASendMediaRequest(BaseModel):
 
 # ── Bridge helpers ───────────────────────────────────────────────────────────
 
-async def _bridge_get(path: str, retries: int = 3) -> Dict[str, Any]:
+async def _bridge_get(path: str, retries: int = 3, use_cache: bool = False) -> Dict[str, Any]:
+    """
+    GET a path on the wa-bridge.
+
+    use_cache=True enables the 15-second in-memory cache — use this for
+    endpoints that are polled frequently by the frontend (sessions, status).
+    """
+    if use_cache:
+        cached = _cache_get(path)
+        if cached is not None:
+            return cached
+
     for attempt in range(retries):
         try:
             async with httpx.AsyncClient(timeout=15) as c:
                 r = await c.get(f"{WA_BRIDGE_URL}{path}")
-                if r.status_code == 429 and attempt < retries - 1:
-                    wait = 2 ** (attempt + 1)
-                    logger.warning(f"WA bridge 429 on GET {path}, retry in {wait}s")
-                    await asyncio.sleep(wait)
-                    continue
+                if r.status_code == 429:
+                    if attempt < retries - 1:
+                        wait = 2 ** (attempt + 1)
+                        logger.warning("WA bridge 429 on GET %s, retry in %ss", path, wait)
+                        await asyncio.sleep(wait)
+                        continue
+                    # All retries exhausted — propagate 429 so the client knows
+                    # to back off rather than treating it as a server error.
+                    raise HTTPException(429, "WhatsApp bridge is rate-limiting requests. Please wait and try again.")
                 r.raise_for_status()
-                return r.json()
+                data = r.json()
+                if use_cache:
+                    _cache_set(path, data)
+                return data
         except httpx.ConnectError:
             raise HTTPException(503, "WhatsApp bridge not running. Start wa-bridge.")
         except HTTPException:
@@ -96,16 +153,19 @@ async def _bridge_get(path: str, retries: int = 3) -> Dict[str, Any]:
             raise HTTPException(502, f"WA bridge error: {e}")
     raise HTTPException(502, "WA bridge request failed after retries.")
 
+
 async def _bridge_post(path: str, payload: Dict, retries: int = 3) -> Dict:
     for attempt in range(retries):
         try:
             async with httpx.AsyncClient(timeout=20) as c:
                 r = await c.post(f"{WA_BRIDGE_URL}{path}", json=payload)
-                if r.status_code == 429 and attempt < retries - 1:
-                    wait = 2 ** (attempt + 1)
-                    logger.warning(f"WA bridge 429 on POST {path}, retry in {wait}s")
-                    await asyncio.sleep(wait)
-                    continue
+                if r.status_code == 429:
+                    if attempt < retries - 1:
+                        wait = 2 ** (attempt + 1)
+                        logger.warning("WA bridge 429 on POST %s, retry in %ss", path, wait)
+                        await asyncio.sleep(wait)
+                        continue
+                    raise HTTPException(429, "WhatsApp bridge is rate-limiting requests. Please wait and try again.")
                 r.raise_for_status()
                 return r.json()
         except httpx.ConnectError:
@@ -119,6 +179,7 @@ async def _bridge_post(path: str, payload: Dict, retries: int = 3) -> Dict:
             raise HTTPException(502, f"WA bridge error: {e}")
     raise HTTPException(502, "WA bridge request failed after retries.")
 
+
 async def _bridge_delete(path: str) -> Dict:
     try:
         async with httpx.AsyncClient(timeout=15) as c:
@@ -130,11 +191,13 @@ async def _bridge_delete(path: str) -> Dict:
     except Exception as e:
         raise HTTPException(502, f"WA bridge error: {e}")
 
+
 async def _has_wa_access(user: User) -> bool:
     if user.role == "admin":
         return True
     rec = await _db()["whatsapp_access_requests"].find_one({"user_id": user.id, "status": "approved"})
     return rec is not None
+
 
 async def _store_message(sent_by, to, message, message_type, context_id, status_val, session_id=None, error=None):
     await _db()["whatsapp_messages"].insert_one({
@@ -148,8 +211,9 @@ async def _store_message(sent_by, to, message, message_type, context_id, status_
 
 @router.get("/sessions")
 async def list_sessions(current_user: User = Depends(get_current_user)):
+    # FIX: use_cache=True — multiple frontend polls within 15 s share one bridge request
     try:
-        data = await _bridge_get("/sessions")
+        data = await _bridge_get("/sessions", use_cache=True)
         bridge_sessions = data.get("sessions", [])
     except HTTPException:
         bridge_sessions = []
@@ -174,6 +238,8 @@ async def list_sessions(current_user: User = Depends(get_current_user)):
 async def add_session(body: WASessionCreate, current_user: User = Depends(require_admin())):
     session_id = f"wa_{int(_time.time() * 1000)}"
     bridge_resp = await _bridge_post("/sessions", {"sessionId": session_id})
+    # Invalidate the sessions cache so the next poll sees the new session
+    _cache_invalidate("/sessions")
     db = _db()
     await db["whatsapp_sessions"].insert_one({
         "session_id": session_id,
@@ -189,12 +255,14 @@ async def add_session(body: WASessionCreate, current_user: User = Depends(requir
 
 @router.get("/sessions/{session_id}/qr")
 async def get_session_qr(session_id: str, current_user: User = Depends(require_admin())):
-    return await _bridge_get(f"/sessions/{session_id}/qr")
+    # QR endpoint is NOT cached — it changes frequently during the scan flow
+    return await _bridge_get(f"/sessions/{session_id}/qr", use_cache=False)
 
 
 @router.delete("/sessions/{session_id}")
 async def remove_session(session_id: str, current_user: User = Depends(require_admin())):
     await _bridge_delete(f"/sessions/{session_id}")
+    _cache_invalidate("/sessions")
     await _db()["whatsapp_sessions"].delete_one({"session_id": session_id})
     return {"message": f"Session {session_id} removed"}
 
@@ -202,6 +270,7 @@ async def remove_session(session_id: str, current_user: User = Depends(require_a
 @router.patch("/sessions/{session_id}/label")
 async def update_session_label(session_id: str, body: WASessionCreate, current_user: User = Depends(require_admin())):
     await _db()["whatsapp_sessions"].update_one({"session_id": session_id}, {"$set": {"label": body.label}})
+    _cache_invalidate("/sessions")
     return {"message": "Label updated"}
 
 
@@ -210,6 +279,7 @@ async def update_session_label(session_id: str, body: WASessionCreate, current_u
 @router.post("/webhook/connected")
 async def wa_connected_webhook(payload: Dict[str, Any]):
     session_id = payload.get("sessionId")
+    _cache_invalidate("/sessions")
     await _db()["whatsapp_sessions"].update_one(
         {"session_id": session_id},
         {"$set": {
@@ -228,6 +298,7 @@ async def wa_connected_webhook(payload: Dict[str, Any]):
 async def wa_disconnected_webhook(payload: Dict[str, Any]):
     session_id = payload.get("sessionId")
     if session_id:
+        _cache_invalidate("/sessions")
         await _db()["whatsapp_sessions"].update_one(
             {"session_id": session_id},
             {"$set": {"status": "disconnected", "disconnected_at": datetime.now(timezone.utc).isoformat()}},
@@ -344,8 +415,9 @@ async def send_media(body: WASendMediaRequest, current_user: User = Depends(get_
 
 @router.get("/status")
 async def get_wa_status(current_user: User = Depends(get_current_user)):
+    # FIX: use_cache=True — status is derived from sessions, cache alongside it
     try:
-        data = await _bridge_get("/sessions")
+        data = await _bridge_get("/sessions", use_cache=True)
         sessions = data.get("sessions", [])
         connected = [s for s in sessions if s.get("status") == "connected"]
         return {"connected": len(connected) > 0, "sessions_count": len(sessions),
@@ -453,7 +525,7 @@ async def list_scheduled_bulk(current_user: User = Depends(get_current_user)):
     jobs = await db["whatsapp_scheduled_bulk"].find(query).sort("scheduled_at", 1).to_list(100)
     for j in jobs:
         j["id"] = str(j.pop("_id"))
-        j.pop("recipients", None)   # don't return full recipient list in listing
+        j.pop("recipients", None)
     return {"jobs": jobs}
 
 
@@ -477,7 +549,6 @@ async def _run_scheduled_bulk_jobs():
     """
     db = _db()
     now_str = datetime.now(timezone.utc).isoformat()
-    # Find jobs due now (scheduled_at <= now and still pending)
     jobs = await db["whatsapp_scheduled_bulk"].find({
         "status": "pending",
         "scheduled_at": {"$lte": now_str},
@@ -485,7 +556,6 @@ async def _run_scheduled_bulk_jobs():
 
     for job in jobs:
         job_id = job["job_id"]
-        # Mark as running to prevent double-execution
         await db["whatsapp_scheduled_bulk"].update_one(
             {"job_id": job_id, "status": "pending"},
             {"$set": {"status": "running", "started_at": datetime.now(timezone.utc).isoformat()}}
@@ -523,12 +593,11 @@ def wa_scheduled_bulk_job():
     coroutine on the already-running main loop and block until it finishes.
     """
     try:
-        # Import here to avoid circular imports at module load time
         from backend.server import app_event_loop
         if app_event_loop is None or app_event_loop.is_closed():
             logger.warning("wa_scheduled_bulk_job: main event loop not available yet, skipping.")
             return
         future = asyncio.run_coroutine_threadsafe(_run_scheduled_bulk_jobs(), app_event_loop)
-        future.result(timeout=55)  # wait up to 55 s (job runs every 60 s)
+        future.result(timeout=55)
     except Exception as exc:
         logger.error("wa_scheduled_bulk_job failed: %s", exc)
