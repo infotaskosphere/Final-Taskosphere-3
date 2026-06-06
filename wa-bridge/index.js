@@ -25,6 +25,20 @@ const multer     = require("multer");
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, downloadMediaMessage } = require("@whiskeysockets/baileys");
 const pino       = require("pino");
 
+// Known stable WA Web version — used as fallback if fetchLatestBaileysVersion() fails
+const FALLBACK_WA_VERSION = [2, 3000, 1023125093];
+
+async function getWAVersion() {
+  try {
+    const { version } = await fetchLatestBaileysVersion();
+    console.log("WA version fetched:", version);
+    return version;
+  } catch (e) {
+    console.warn("fetchLatestBaileysVersion failed, using fallback:", FALLBACK_WA_VERSION, e.message);
+    return FALLBACK_WA_VERSION;
+  }
+}
+
 // ─── Config ──────────────────────────────────────────────────────────────────
 const PORT           = parseInt(process.env.PORT || process.env.WA_BRIDGE_PORT || "3002");
 const BACKEND_URL    = process.env.BACKEND_URL || "http://localhost:8000";
@@ -131,7 +145,7 @@ async function startSession(sessionId, webhookOnConnect = true) {
   sessions[sessionId].retryCount = (sessions[sessionId].retryCount || 0);
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-  const { version } = await fetchLatestBaileysVersion();
+  const version = await getWAVersion();
 
   const sock = makeWASocket({
     version,
@@ -249,8 +263,13 @@ app.post("/sessions", async (req, res) => {
   if (sessions[sessionId]?.status === "connected") {
     return res.status(409).json({ error: "Session already connected" });
   }
-  await startSession(sessionId);
-  res.json({ sessionId, status: "connecting", message: "Poll /sessions/:id/qr for QR code" });
+  try {
+    await startSession(sessionId);
+    res.json({ sessionId, status: "connecting", message: "Poll /sessions/:id/qr for QR code" });
+  } catch (e) {
+    console.error(`Failed to start session ${sessionId}:`, e.message);
+    res.status(500).json({ error: `Failed to start session: ${e.message}` });
+  }
 });
 
 app.get("/sessions/:id", (req, res) => {
