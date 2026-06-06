@@ -3,7 +3,8 @@
  *  1. Auto-send to saved phone number (no extra click when phone is on record)
  *  2. Multi-account picker: when ≥2 WA sessions are connected, prompt which account to use
  *  3. Direct send via WA Bridge API when connected; WA Web fallback otherwise
- *  4. Used across: Clients, PassVault, DSC, Invoicing pages.
+ *  4. History tab — shows all WA messages sent to this client with stats report
+ *  5. Used across: Clients, PassVault, DSC, Invoicing pages.
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -12,6 +13,7 @@ import {
   MessageCircle, Phone, Send, X, ExternalLink, Loader2,
   CheckCircle2, AlertCircle, Image, Edit2, Link, ChevronRight,
   Smartphone, Wifi, WifiOff, RefreshCw, Copy, Check,
+  Clock, History, BarChart2, User, ChevronDown,
 } from 'lucide-react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -89,7 +91,6 @@ function AccountCard({ session, selected, onSelect, isDark }) {
         display: 'flex', alignItems: 'center', gap: 12,
         transition: 'all 0.15s', position: 'relative', overflow: 'hidden',
       }}>
-      {/* Avatar */}
       <div style={{
         width: 40, height: 40, borderRadius: 12, flexShrink: 0,
         background: `linear-gradient(135deg, ${accent}, ${dark})`,
@@ -110,7 +111,6 @@ function AccountCard({ session, selected, onSelect, isDark }) {
         }}>+{session.phoneNumber || '—'}</p>
       </div>
 
-      {/* Connected badge */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0,
         fontSize: 10, fontWeight: 700, color: WA_GREEN,
@@ -156,6 +156,223 @@ function MsgBubble({ text, isDark }) {
   );
 }
 
+/* ── History Tab ─────────────────────────────────────────────────────────────── */
+function HistoryTab({ phone, entityName, isDark }) {
+  const [messages,  setMessages]  = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [expanded,  setExpanded]  = useState(null);
+
+  const bg     = isDark ? '#0f172a' : '#fff';
+  const card   = isDark ? '#1a2236' : '#f8fafc';
+  const border = isDark ? 'rgba(255,255,255,0.08)' : '#e2e8f0';
+  const text   = isDark ? '#f0f4f8' : '#0f172a';
+  const muted  = isDark ? '#64748b' : '#94a3b8';
+
+  const normalizedPhone = formatPhoneE164(phone);
+
+  const fetchHistory = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await api.get('/whatsapp/messages', { params: { limit: 200 } });
+      const all = Array.isArray(data) ? data : [];
+      // Filter to messages sent to this client's number
+      const filtered = normalizedPhone
+        ? all.filter(m => {
+            const to = (m.to || '').replace(/\D/g, '');
+            return to === normalizedPhone || to.endsWith(normalizedPhone.slice(-10));
+          })
+        : all;
+      // Sort newest first
+      filtered.sort((a, b) => new Date(b.sent_at) - new Date(a.sent_at));
+      setMessages(filtered);
+    } catch {
+      setMessages([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [normalizedPhone]);
+
+  useEffect(() => { fetchHistory(); }, [fetchHistory]);
+
+  const sentCount   = messages.filter(m => m.status === 'sent').length;
+  const failedCount = messages.filter(m => m.status === 'failed').length;
+
+  const fmtDate = (iso) => {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
+    } catch { return iso; }
+  };
+
+  if (loading) {
+    return (
+      <div style={{ padding: '32px 22px', textAlign: 'center' }}>
+        <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }} style={{ display: 'inline-block' }}>
+          <RefreshCw size={24} color={WA_GREEN}/>
+        </motion.div>
+        <p style={{ color: muted, fontSize: 13, marginTop: 10 }}>Loading history…</p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: '14px 22px 18px' }}>
+
+      {/* ── Report summary row ── */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16,
+      }}>
+        {[
+          { label: 'Total Sent',  value: messages.length, color: WA_GREEN,   bg: `${WA_GREEN}12`  },
+          { label: 'Delivered',   value: sentCount,        color: '#22c55e',  bg: '#dcfce7'         },
+          { label: 'Failed',      value: failedCount,      color: '#ef4444',  bg: '#fee2e2'         },
+        ].map(stat => (
+          <div key={stat.label} style={{
+            background: stat.bg, borderRadius: 12, padding: '10px 12px', textAlign: 'center',
+          }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: stat.color, lineHeight: 1 }}>{stat.value}</div>
+            <div style={{ fontSize: 10, color: stat.color, fontWeight: 600, marginTop: 3, opacity: 0.8 }}>{stat.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Message list ── */}
+      {messages.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '24px 0' }}>
+          <div style={{
+            width: 48, height: 48, borderRadius: '50%', background: card,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 10px',
+          }}>
+            <History size={22} color={muted}/>
+          </div>
+          <p style={{ color: muted, fontSize: 13, margin: 0 }}>
+            No messages sent to {entityName || phone || 'this contact'} yet
+          </p>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 320, overflowY: 'auto' }}>
+          {messages.map((msg, idx) => {
+            const isExpanded = expanded === idx;
+            const isSent = msg.status === 'sent';
+            return (
+              <motion.div
+                key={msg.id || idx}
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: idx * 0.03 }}
+                style={{
+                  background: isDark ? 'rgba(255,255,255,0.04)' : '#f8fafc',
+                  border: `1px solid ${border}`,
+                  borderRadius: 12,
+                  overflow: 'hidden',
+                  cursor: 'pointer',
+                }}
+                onClick={() => setExpanded(isExpanded ? null : idx)}
+              >
+                {/* Header row */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px' }}>
+                  {/* Status dot */}
+                  <div style={{
+                    width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                    background: isSent ? WA_GREEN : '#ef4444',
+                  }}/>
+
+                  {/* Time */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{
+                      margin: 0, fontSize: 11, color: muted, fontFamily: 'monospace',
+                    }}>{fmtDate(msg.sent_at)}</p>
+                    {msg.sent_by && msg.sent_by !== 'system' && (
+                      <p style={{ margin: '2px 0 0', fontSize: 10, color: muted, display: 'flex', alignItems: 'center', gap: 3 }}>
+                        <User size={9}/> {msg.sent_by_name || msg.sent_by}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Status badge */}
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
+                    background: isSent ? `${WA_GREEN}15` : '#fee2e2',
+                    color: isSent ? WA_GREEN : '#ef4444',
+                    flexShrink: 0,
+                  }}>
+                    {isSent ? '✓ Sent' : '✗ Failed'}
+                  </span>
+
+                  {/* Expand toggle */}
+                  <motion.div
+                    animate={{ rotate: isExpanded ? 180 : 0 }}
+                    transition={{ duration: 0.2 }}
+                    style={{ flexShrink: 0 }}
+                  >
+                    <ChevronDown size={13} color={muted}/>
+                  </motion.div>
+                </div>
+
+                {/* Message preview (collapsed: 1 line; expanded: full) */}
+                <AnimatePresence initial={false}>
+                  {isExpanded ? (
+                    <motion.div
+                      key="expanded"
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.2 }}
+                      style={{ overflow: 'hidden' }}
+                    >
+                      <div style={{
+                        borderTop: `1px solid ${border}`,
+                        padding: '10px 12px',
+                        background: isDark ? '#1e3a2f' : WA_LIGHT,
+                        fontSize: 12, lineHeight: 1.6, color: isDark ? '#d4edda' : '#1a3a2a',
+                        whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                      }}>
+                        {msg.message || <span style={{ opacity: 0.5, fontStyle: 'italic' }}>No content</span>}
+                      </div>
+                      {msg.error && (
+                        <div style={{
+                          borderTop: `1px solid ${border}`,
+                          padding: '6px 12px',
+                          background: '#fee2e2',
+                          fontSize: 11, color: '#ef4444',
+                        }}>
+                          Error: {msg.error}
+                        </div>
+                      )}
+                    </motion.div>
+                  ) : (
+                    <div style={{
+                      padding: '0 12px 10px 30px',
+                      fontSize: 12, color: muted,
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>
+                      {msg.message || '—'}
+                    </div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Refresh */}
+      <button
+        onClick={fetchHistory}
+        style={{
+          marginTop: 12, width: '100%', padding: '9px', borderRadius: 10,
+          border: `1px solid ${border}`, background: 'transparent',
+          color: muted, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+        }}
+      >
+        <RefreshCw size={12}/> Refresh History
+      </button>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════════
    Main Dialog
 ═══════════════════════════════════════════════════════════════════════════════ */
@@ -180,6 +397,9 @@ export default function WhatsAppSendDialog({
   const [sent, setSent]               = useState(false);
   const [copied, setCopied]           = useState(false);
 
+  // Tab: 'send' | 'history'
+  const [activeTab, setActiveTab]     = useState('send');
+
   // Multi-account
   const [sessions, setSessions]           = useState([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
@@ -201,6 +421,7 @@ export default function WhatsAppSendDialog({
     setShowMsgEdit(false);
     setStep('compose');
     setSelectedSession(null);
+    setActiveTab('send');
 
     setSessionsLoading(true);
     fetchConnectedSessions().then(list => {
@@ -214,7 +435,6 @@ export default function WhatsAppSendDialog({
     const digits = phone.replace(/\D/g,'');
     if (digits.length < 10) { toast.error('Enter a valid 10-digit phone number'); return; }
 
-    // If multiple sessions and none selected yet → go to pick step
     if (sessions.length > 1 && !selectedSession && step === 'compose') {
       setStep('pick_account');
       return;
@@ -222,7 +442,6 @@ export default function WhatsAppSendDialog({
 
     setSending(true);
     try {
-      // Try API send if connected
       if (sessions.length > 0) {
         const result = await sendViaApi(phone, finalMsg, selectedSession);
         if (result.success) {
@@ -232,10 +451,8 @@ export default function WhatsAppSendDialog({
           setTimeout(() => { onClose?.(); setSent(false); }, 2200);
           return;
         }
-        // API failed — fall through to web
         console.warn('WA API failed, falling back to web:', result.error);
       }
-      // Fallback: WA Web
       openWhatsApp(phone, finalMsg);
       setSent(true);
       toast.success('WhatsApp Web opened — message ready to send');
@@ -272,57 +489,83 @@ export default function WhatsAppSendDialog({
         {/* ── Header ── */}
         <div style={{
           background: `linear-gradient(135deg, ${WA_DARK} 0%, ${WA_GREEN} 100%)`,
-          padding: '14px 22px 12px',
-          display: 'flex', alignItems: 'center', gap: 12,
+          padding: '14px 22px 0',
         }}>
-          <div style={{
-            width: 42, height: 42, borderRadius: 12,
-            background: 'rgba(255,255,255,0.2)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backdropFilter: 'blur(8px)',
-          }}>
-            <WAIcon size={22} color="#fff"/>
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <h2 style={{ margin: 0, color: '#fff', fontSize: 16, fontWeight: 800, letterSpacing: -0.3 }}>
-              {step === 'pick_account' ? 'Choose Account' : title}
-            </h2>
-            {subtitle && (
-              <p style={{ margin: '2px 0 0', color: 'rgba(255,255,255,0.75)', fontSize: 12 }}>{subtitle}</p>
-            )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+            <div style={{
+              width: 42, height: 42, borderRadius: 12,
+              background: 'rgba(255,255,255,0.2)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              backdropFilter: 'blur(8px)',
+            }}>
+              <WAIcon size={22} color="#fff"/>
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <h2 style={{ margin: 0, color: '#fff', fontSize: 16, fontWeight: 800, letterSpacing: -0.3 }}>
+                {step === 'pick_account' ? 'Choose Account' : title}
+              </h2>
+              {subtitle && (
+                <p style={{ margin: '2px 0 0', color: 'rgba(255,255,255,0.75)', fontSize: 12 }}>{subtitle}</p>
+              )}
+            </div>
+
+            {/* Session pills */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+              {sessionsLoading ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4,
+                  background: 'rgba(255,255,255,0.15)', borderRadius: 20, padding: '3px 10px',
+                  fontSize: 11, color: '#fff' }}>
+                  <Loader2 size={10} style={{ animation: 'spin 1s linear infinite' }}/>
+                </div>
+              ) : sessions.length > 0 ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4,
+                  background: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: '3px 10px',
+                  fontSize: 11, color: '#fff', fontWeight: 700 }}>
+                  <Wifi size={10}/>
+                  {sessions.length} connected
+                </div>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4,
+                  background: 'rgba(255,255,255,0.15)', borderRadius: 20, padding: '3px 10px',
+                  fontSize: 11, color: 'rgba(255,255,255,0.7)' }}>
+                  <WifiOff size={10}/> Web mode
+                </div>
+              )}
+            </div>
+
+            <button onClick={onClose} style={{
+              background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 8,
+              width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', color: '#fff', flexShrink: 0, backdropFilter: 'blur(4px)',
+            }}>
+              <X size={14}/>
+            </button>
           </div>
 
-          {/* Session pills */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-            {sessionsLoading ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4,
-                background: 'rgba(255,255,255,0.15)', borderRadius: 20, padding: '3px 10px',
-                fontSize: 11, color: '#fff' }}>
-                <Loader2 size={10} style={{ animation: 'spin 1s linear infinite' }}/>
-              </div>
-            ) : sessions.length > 0 ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4,
-                background: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: '3px 10px',
-                fontSize: 11, color: '#fff', fontWeight: 700 }}>
-                <Wifi size={10}/>
-                {sessions.length} connected
-              </div>
-            ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4,
-                background: 'rgba(255,255,255,0.15)', borderRadius: 20, padding: '3px 10px',
-                fontSize: 11, color: 'rgba(255,255,255,0.7)' }}>
-                <WifiOff size={10}/> Web mode
-              </div>
-            )}
-          </div>
-
-          <button onClick={onClose} style={{
-            background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 8,
-            width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', color: '#fff', flexShrink: 0, backdropFilter: 'blur(4px)',
-          }}>
-            <X size={14}/>
-          </button>
+          {/* ── Tab bar (only on compose step, not pick_account or sent) ── */}
+          {step === 'compose' && !sent && (
+            <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid rgba(255,255,255,0.15)' }}>
+              {[
+                { id: 'send',    label: 'Send',    icon: <Send size={12}/> },
+                { id: 'history', label: 'History', icon: <History size={12}/> },
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  style={{
+                    padding: '8px 18px', fontSize: 12, fontWeight: 700,
+                    background: 'transparent', border: 'none', cursor: 'pointer',
+                    color: activeTab === tab.id ? '#fff' : 'rgba(255,255,255,0.55)',
+                    display: 'flex', alignItems: 'center', gap: 5,
+                    borderBottom: activeTab === tab.id ? '2px solid #fff' : '2px solid transparent',
+                    marginBottom: -2, transition: 'all 0.15s',
+                  }}
+                >
+                  {tab.icon} {tab.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <AnimatePresence mode="wait">
@@ -396,8 +639,16 @@ export default function WhatsAppSendDialog({
               </p>
             </motion.div>
 
+          ) : activeTab === 'history' ? (
+            /* ══ HISTORY TAB ═══════════════════════════════════════════════════ */
+            <motion.div key="history"
+              initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.15 }}>
+              <HistoryTab phone={phone || initialPhone} entityName={entityName} isDark={isDark}/>
+            </motion.div>
+
           ) : (
-            /* ══ COMPOSE STEP ══════════════════════════════════════════════════ */
+            /* ══ COMPOSE / SEND TAB ════════════════════════════════════════════ */
             <motion.div key="compose"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }}
               exit={{ opacity: 0 }} transition={{ duration: 0.15 }}
@@ -539,7 +790,7 @@ export default function WhatsAppSendDialog({
                 </div>
               )}
 
-              {/* Account selector (single session — show which one) */}
+              {/* Account selector (single session) */}
               {sessions.length === 1 && (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14,
