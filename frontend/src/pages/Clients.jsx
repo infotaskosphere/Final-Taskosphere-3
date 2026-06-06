@@ -5280,6 +5280,12 @@ export default function Clients() {
   const clearAllFilters = useCallback(() => { setStatusFilter('all'); setClientTypeFilter('all'); setServiceFilter('all'); setAssignedToFilter('all'); setReferredByFilter('all'); setAuditorFilter('all'); setSearchInput(''); }, []);
 
   // ── List row — using itemData pattern so it doesn't recreate per-render ──
+  // ── Shared grid column definition ─────────────────────────────────────────
+  // Col:  chk  | avt  | company | type  | phone/linked | email | ref  | aud  | svc  | asgn | actions
+  // Px:   20px | 32px | 180px   | 76px  | 120px        | 148px | 88px | 88px | 116px| 112px| 96px
+  const LIST_GRID_NORMAL = '20px 32px 180px 76px 120px 148px 88px 88px 116px 112px 96px';
+  const LIST_GRID_ITR    = '20px 32px 180px 76px 140px 148px 88px 88px 116px 112px 96px';
+
   const ListRow = useCallback(({ index, style, data }) => {
     const { pageClients: pc, pageStart: ps, itrTabActive, bulkSelectedIds: bsi, toggleBulkSelect: tbs, canDeleteData: cdd } = data;
     const client = pc[index];
@@ -5291,44 +5297,57 @@ export default function Clients() {
     const clientAssignments = getClientAssignments(client);
     const companyLinks = client.itr_data?.company_links || [];
     const isSelected = bsi.has(client.id);
+    const gridTemplate = itrTabActive ? LIST_GRID_ITR : LIST_GRID_NORMAL;
 
     return (
       <div style={{ ...style, paddingTop: 2, paddingBottom: 2, paddingLeft: 4, paddingRight: 4 }}>
         <div
-          className={`relative rounded-xl border transition-all duration-200 overflow-hidden group cursor-pointer flex items-center h-full
+          className={`relative rounded-xl border transition-all duration-200 overflow-hidden group cursor-pointer h-full
             ${isArchived ? 'opacity-60' : ''}
             ${isSelected ? (isDark ? 'border-red-500 bg-red-900/10' : 'border-red-300 bg-red-50/60') : isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-500 hover:shadow-sm' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm'}`}
-          style={{ gap: 16, paddingLeft: 16, paddingRight: 12 }}
+          style={{ display: 'grid', gridTemplateColumns: gridTemplate, alignItems: 'center', columnGap: 8, paddingLeft: 12, paddingRight: 8 }}
           onClick={() => { if (bsi.size === 0) { setSelectedClient(client); setDetailDialogOpen(true); } }}>
+          {/* Colour strip */}
           <div className="absolute left-0 top-0 h-full w-1" style={{ background: isSelected ? '#ef4444' : (itrTabActive ? 'linear-gradient(180deg, #0f3460, #0d7377)' : cfg.strip) }} />
-          {/* Bulk select checkbox */}
-          {cdd && (
-            <div
-              onClick={e => tbs(client.id, e)}
-              className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer transition-all
-                ${isSelected ? 'bg-red-500 border-red-500' : isDark ? 'border-slate-500 hover:border-red-400' : 'border-slate-300 hover:border-red-400 opacity-0 group-hover:opacity-100'}`}
-              style={isSelected ? {} : {}}
-            >
-              {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
-            </div>
-          )}
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-sm font-bold flex-shrink-0" style={{ background: getAvatarGradient(client.company_name) }}>
-            {client.company_name?.charAt(0).toUpperCase() || '?'}
+
+          {/* 1 · Checkbox — always rendered, invisible when not needed */}
+          <div className="flex items-center justify-center">
+            {cdd ? (
+              <div
+                onClick={e => { e.stopPropagation(); tbs(client.id, e); }}
+                className={`w-4 h-4 rounded border-2 flex items-center justify-center cursor-pointer transition-all
+                  ${isSelected ? 'bg-red-500 border-red-500' : isDark ? 'border-slate-500 hover:border-red-400' : 'border-slate-300 hover:border-red-400 opacity-0 group-hover:opacity-100'}`}
+              >
+                {isSelected && <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+              </div>
+            ) : <span />}
           </div>
-          {/* Company — w-48 */}
-          <div className="w-48 flex-shrink-0 min-w-0">
-            <div className="flex items-center gap-1.5">
+
+          {/* 2 · Avatar */}
+          <div className="flex items-center justify-center">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold" style={{ background: getAvatarGradient(client.company_name) }}>
+              {client.company_name?.charAt(0).toUpperCase() || '?'}
+            </div>
+          </div>
+
+          {/* 3 · Company */}
+          <div className="min-w-0">
+            <div className="flex items-center gap-1">
               <span className="text-[10px] font-mono text-slate-300">#{getClientNumber(globalIndex)}</span>
-              {isArchived && <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">Archived</span>}
+              {isArchived && <span className="text-[9px] font-semibold text-amber-600 bg-amber-50 px-1 py-0.5 rounded">Arc</span>}
               {client.is_itr_client && !itrTabActive && <span className="text-[9px] font-bold px-1 py-0.5 rounded" style={{ background: '#ccfbf1', color: '#0f766e' }}>ITR</span>}
             </div>
-            <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{client.company_name}</p>
+            <p className={`text-xs font-semibold truncate leading-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{client.company_name}</p>
           </div>
-          {/* Type — w-20 */}
-          <div className="w-20 flex-shrink-0"><TypePill type={client.client_type} customLabel={client.client_type_label} /></div>
+
+          {/* 4 · Type */}
+          <div className="min-w-0 overflow-hidden">
+            <TypePill type={client.client_type} customLabel={client.client_type_label} />
+          </div>
+
+          {/* 5 · Phone OR Linked Company */}
           {itrTabActive ? (
-            /* ── Linked Company column ── */
-            <div className="w-44 flex-shrink-0 min-w-0">
+            <div className="min-w-0">
               {companyLinks.length === 0 ? (
                 <span className="text-[10px] text-slate-300 italic">No linked company</span>
               ) : (
@@ -5337,11 +5356,8 @@ export default function Clients() {
                     const roleColors = { director: '#1e40af', partner: '#166534', proprietor: '#9a3412', shareholder: '#6b21a8', trustee: '#713f12', karta: '#9f1239', member: '#075985' };
                     return (
                       <div key={i} className="flex items-center gap-1 min-w-0">
-                        <span className={`text-xs font-semibold truncate ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>{link.company_name}</span>
-                        <span className="text-[9px] font-bold px-1 py-0.5 rounded flex-shrink-0 capitalize"
-                          style={{ background: (roleColors[link.role] || '#475569') + '18', color: roleColors[link.role] || '#475569' }}>
-                          {link.role}
-                        </span>
+                        <span className={`text-[10px] font-semibold truncate ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>{link.company_name}</span>
+                        <span className="text-[9px] font-bold px-1 py-0.5 rounded flex-shrink-0 capitalize" style={{ background: (roleColors[link.role] || '#475569') + '18', color: roleColors[link.role] || '#475569' }}>{link.role}</span>
                       </div>
                     );
                   })}
@@ -5350,18 +5366,18 @@ export default function Clients() {
               )}
             </div>
           ) : (
-            /* Phone — w-28, no wrap */
-            <div className="w-28 flex-shrink-0">
+            <div className="min-w-0">
               <p
-                className={`text-xs font-medium whitespace-nowrap cursor-copy ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
+                className={`text-xs font-medium whitespace-nowrap truncate cursor-copy ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
                 onClick={client.phone ? e => { e.stopPropagation(); copyToClipboard(client.phone, 'Phone'); } : undefined}
-                title={client.phone ? 'Click to copy' : ''}>
+                title={client.phone || ''}>
                 {client.phone || '—'}
               </p>
             </div>
           )}
-          {/* Email — w-40, fixed (no wrap, truncate) */}
-          <div className="w-40 flex-shrink-0 min-w-0">
+
+          {/* 6 · Email */}
+          <div className="min-w-0">
             <p
               className={`text-xs truncate whitespace-nowrap cursor-copy ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
               onClick={client.email ? e => { e.stopPropagation(); copyToClipboard(client.email, 'Email'); } : undefined}
@@ -5369,54 +5385,70 @@ export default function Clients() {
               {client.email || '—'}
             </p>
           </div>
-          {/* Referred By — w-24 */}
-          <div className="w-24 flex-shrink-0 min-w-0">
+
+          {/* 7 · Referred By */}
+          <div className="min-w-0">
             {client.referred_by
               ? <span className="text-[10px] font-medium text-violet-600 truncate block">{client.referred_by}</span>
               : <span className="text-[10px] text-slate-300">—</span>}
           </div>
-          {/* Auditor — w-24 */}
-          <div className="w-24 flex-shrink-0 min-w-0">
+
+          {/* 8 · Auditor */}
+          <div className="min-w-0">
             {client.auditor
               ? <span className="text-[10px] font-medium truncate block" style={{ color: '#7c3aed' }}>{client.auditor}</span>
               : <span className="text-[10px] text-slate-300">—</span>}
           </div>
-          {/* Services — w-32, can wrap to 2 lines */}
-          <div className="w-32 flex-shrink-0 flex flex-wrap gap-1 content-center">
-            {client.services?.slice(0, 2).map((svc, i) => <span key={i} className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md border leading-tight" style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}>{svc.replace('Other: ', '').substring(0, 8)}</span>)}
-            {serviceCount > 2 && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200 leading-tight">+{serviceCount - 2}</span>}
+
+          {/* 9 · Services — can wrap to 2 lines */}
+          <div className="flex flex-wrap gap-1 content-center min-w-0">
+            {client.services?.slice(0, 2).map((svc, i) => (
+              <span key={i} className="text-[10px] font-semibold px-1.5 py-0.5 rounded border leading-tight whitespace-nowrap" style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}>
+                {svc.replace('Other: ', '').substring(0, 7)}
+              </span>
+            ))}
+            {serviceCount > 2 && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200 leading-tight">+{serviceCount - 2}</span>}
           </div>
-          {/* Assigned — w-28, can wrap to 2 lines */}
-          <div className="w-28 flex-shrink-0 flex flex-col gap-0.5">
-            {clientAssignments.slice(0, 2).map((a, i) => { const u = users.find(x => x.id === a.user_id); return u ? <span key={i} className="text-[10px] text-slate-500 truncate">{u.full_name || u.name}{a.services?.length > 0 && <span className="text-slate-400"> · {a.services[0]}{a.services.length > 1 ? `+${a.services.length - 1}` : ''}</span>}</span> : null; })}
+
+          {/* 10 · Assigned — can wrap to 2 lines */}
+          <div className="flex flex-col gap-0.5 min-w-0">
+            {clientAssignments.slice(0, 2).map((a, i) => {
+              const u = users.find(x => x.id === a.user_id);
+              return u ? (
+                <span key={i} className="text-[10px] text-slate-500 truncate">
+                  {u.full_name || u.name}
+                  {a.services?.length > 0 && <span className="text-slate-400"> · {a.services[0]}{a.services.length > 1 ? `+${a.services.length - 1}` : ''}</span>}
+                </span>
+              ) : null;
+            })}
             {clientAssignments.length > 2 && <span className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>+{clientAssignments.length - 2} more</span>}
           </div>
-          {/* Actions — w-20, always visible at low opacity, full on hover */}
-          <div className="w-20 flex-shrink-0 flex items-center justify-start gap-0.5">
+
+          {/* 11 · Actions — always reserved 96px, 4 buttons × 24px */}
+          <div className="flex items-center gap-0.5">
             <button
               onClick={e => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
-              className={`w-6 h-6 flex items-center justify-center rounded-lg transition-all ${isDark ? 'text-emerald-400 hover:bg-emerald-900/40' : 'text-emerald-500 opacity-40 group-hover:opacity-100 hover:bg-emerald-50'}`}
+              className={`w-6 h-6 flex items-center justify-center rounded-md transition-all flex-shrink-0 ${isDark ? 'text-emerald-400 hover:bg-emerald-900/40' : 'text-emerald-500 opacity-30 group-hover:opacity-100 hover:bg-emerald-50'}`}
               title="WhatsApp"
             ><MessageCircle className="h-3 w-3" /></button>
-            {itrTabActive && canEditClients && (
+            {itrTabActive && canEditClients ? (
               <button
                 onClick={e => { e.stopPropagation(); setEditingItrClient(client); setItrDialogOpen(true); }}
-                className={`w-6 h-6 flex items-center justify-center rounded-lg transition-all ${isDark ? 'opacity-50 hover:opacity-100' : 'opacity-40 group-hover:opacity-100'}`}
-                title="Link Company"
-                style={{ color: '#0d7377' }}
+                className={`w-6 h-6 flex items-center justify-center rounded-md transition-all flex-shrink-0 ${isDark ? 'opacity-50 hover:opacity-100' : 'opacity-30 group-hover:opacity-100'}`}
+                title="Link Company" style={{ color: '#0d7377' }}
               ><Link className="h-3 w-3" /></button>
-            )}
+            ) : <span className="w-6 flex-shrink-0" />}
             {canEditClients && (
               <button
                 onClick={e => { e.stopPropagation(); handleEdit(client); }}
-                className={`w-6 h-6 flex items-center justify-center rounded-lg transition-all ${isDark ? 'text-blue-400 hover:bg-blue-900/40' : 'text-blue-500 opacity-40 group-hover:opacity-100 hover:bg-blue-50'}`}
+                className={`w-6 h-6 flex items-center justify-center rounded-md transition-all flex-shrink-0 ${isDark ? 'text-blue-400 hover:bg-blue-900/40' : 'text-blue-500 opacity-30 group-hover:opacity-100 hover:bg-blue-50'}`}
                 title="Edit"
               ><Edit className="h-3 w-3" /></button>
             )}
             {canDeleteData && (
               <button
                 onClick={e => { e.stopPropagation(); handleDelete(client); }}
-                className={`w-6 h-6 flex items-center justify-center rounded-lg transition-all ${isDark ? 'text-red-400 hover:bg-red-900/40' : 'text-red-400 opacity-40 group-hover:opacity-100 hover:bg-red-50'}`}
+                className={`w-6 h-6 flex items-center justify-center rounded-md transition-all flex-shrink-0 ${isDark ? 'text-red-400 hover:bg-red-900/40' : 'text-red-400 opacity-30 group-hover:opacity-100 hover:bg-red-50'}`}
                 title="Delete"
               ><Trash2 className="h-3 w-3" /></button>
             )}
@@ -5424,7 +5456,7 @@ export default function Clients() {
         </div>
       </div>
     );
-  }, [isDark, users, getClientAssignments, getClientNumber, openWhatsApp, handleEdit, canEditClients, canDeleteData, handleDelete]);
+  }, [isDark, users, getClientAssignments, getClientNumber, openWhatsApp, handleEdit, canEditClients, canDeleteData, handleDelete, LIST_GRID_NORMAL, LIST_GRID_ITR]);
 
   // ── Pagination derived values ──────────────────────────────────────────────
   const boardTotalPages = Math.ceil(sortedClients.length / BOARD_PAGE_SIZE);
@@ -6641,42 +6673,47 @@ export default function Clients() {
           <div className="overflow-x-auto">
           <div style={{minWidth:920}}>
           <div
-            className={`flex items-center border-b flex-shrink-0 ${isDark ? 'bg-slate-700/60 border-slate-600' : 'bg-slate-50 border-slate-100'}`}
-            style={{ gap: 16, paddingLeft: 16, paddingRight: 12, paddingTop: 10, paddingBottom: 10 }}
+            className={`border-b flex-shrink-0 ${isDark ? 'bg-slate-700/60 border-slate-600' : 'bg-slate-50 border-slate-100'}`}
+            style={{ display: 'grid', gridTemplateColumns: itrTabActive ? LIST_GRID_ITR : LIST_GRID_NORMAL, alignItems: 'center', columnGap: 8, paddingLeft: 12, paddingRight: 8, paddingTop: 9, paddingBottom: 9 }}
           >
-            {/* Select-all checkbox — matches the w-5 checkbox in each row */}
+            {/* 1 · Checkbox */}
             {canDeleteData ? (
-              <div
-                onClick={() => selectAllVisible(listPageClients)}
-                className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer transition-all
-                  ${listPageClients.length > 0 && listPageClients.every(c => bulkSelectedIds.has(c.id))
-                    ? 'bg-red-500 border-red-500'
-                    : isDark ? 'border-slate-500 hover:border-red-400' : 'border-slate-300 hover:border-red-400'}`}
-              >
-                {listPageClients.length > 0 && listPageClients.every(c => bulkSelectedIds.has(c.id)) && (
-                  <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                )}
+              <div className="flex items-center justify-center">
+                <div
+                  onClick={() => selectAllVisible(listPageClients)}
+                  className={`w-4 h-4 rounded border-2 flex items-center justify-center cursor-pointer transition-all
+                    ${listPageClients.length > 0 && listPageClients.every(c => bulkSelectedIds.has(c.id))
+                      ? 'bg-red-500 border-red-500'
+                      : isDark ? 'border-slate-500 hover:border-red-400' : 'border-slate-300 hover:border-red-400'}`}
+                >
+                  {listPageClients.length > 0 && listPageClients.every(c => bulkSelectedIds.has(c.id)) && (
+                    <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                  )}
+                </div>
               </div>
-            ) : (
-              /* spacer matching the ml-1 + w-5 checkbox that appears in the row when canDeleteData */
-              <div className="w-5 flex-shrink-0" />
-            )}
-            {/* Avatar spacer — matches the w-8 avatar circle in each row */}
-            <div className="w-8 flex-shrink-0" />
-            <div className="w-48 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Company</div>
-            <div className="w-20 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Type</div>
-            {itrTabActive ? (
-              <div className="w-44 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest" style={{ color: '#0d7377' }}>Linked Company</div>
-            ) : (
-              <div className="w-28 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Phone</div>
-            )}
-            <div className="w-40 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Email</div>
-            <div className="w-24 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-violet-400">Referred By</div>
-            <div className="w-24 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest" style={{ color: '#7c3aed' }}>Auditor</div>
-            <div className="w-32 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Services</div>
-            <div className="w-28 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Assigned</div>
-            {/* Actions header */}
-            <div className="w-20 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Actions</div>
+            ) : <div />}
+            {/* 2 · Avatar spacer */}
+            <div />
+            {/* 3 · Company */}
+            <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Company</div>
+            {/* 4 · Type */}
+            <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Type</div>
+            {/* 5 · Phone / Linked Company */}
+            {itrTabActive
+              ? <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#0d7377' }}>Linked Company</div>
+              : <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Phone</div>}
+            {/* 6 · Email */}
+            <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Email</div>
+            {/* 7 · Referred By */}
+            <div className="text-[10px] font-bold uppercase tracking-widest text-violet-400">Referred By</div>
+            {/* 8 · Auditor */}
+            <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#7c3aed' }}>Auditor</div>
+            {/* 9 · Services */}
+            <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Services</div>
+            {/* 10 · Assigned */}
+            <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Assigned</div>
+            {/* 11 · Actions */}
+            <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Actions</div>
           </div>
           <div style={{ height: Math.max(listHeight, LIST_ROW_HEIGHT) }}>
             <FixedSizeList height={Math.max(listHeight, LIST_ROW_HEIGHT)} width="100%" itemCount={listPageClients.length} itemSize={LIST_ROW_HEIGHT} itemData={{ pageClients: listPageClients, pageStart: listPageStart, itrTabActive, bulkSelectedIds, toggleBulkSelect, canDeleteData }}>
