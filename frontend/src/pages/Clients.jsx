@@ -240,13 +240,14 @@ const TypePill = ({ type, customLabel }) => {
 };
 
 // ─── ActiveFilterChips ────────────────────────────────────────────────────────
-const ActiveFilterChips = ({ statusFilter, clientTypeFilter, serviceFilter, assignedToFilter, referredByFilter, users, onClear, onClearAll }) => {
+const ActiveFilterChips = ({ statusFilter, clientTypeFilter, serviceFilter, assignedToFilter, referredByFilter, auditorFilter, users, onClear, onClearAll }) => {
   const chips = [];
   if (statusFilter !== 'all') chips.push({ key: 'status', label: statusFilter === 'active' ? 'Active' : 'Archived', onRemove: () => onClear('status') });
   if (clientTypeFilter !== 'all') { const t = CLIENT_TYPES.find(x => x.value === clientTypeFilter); chips.push({ key: 'type', label: t?.label || clientTypeFilter, onRemove: () => onClear('clientType') }); }
   if (serviceFilter !== 'all') chips.push({ key: 'service', label: serviceFilter, onRemove: () => onClear('service') });
   if (assignedToFilter !== 'all') { const u = users.find(x => x.id === assignedToFilter); chips.push({ key: 'assigned', label: u?.full_name || u?.name || 'User', onRemove: () => onClear('assigned') }); }
   if (referredByFilter !== 'all') chips.push({ key: 'referredBy', label: `Referred: ${referredByFilter}`, onRemove: () => onClear('referredBy') });
+  if (auditorFilter !== 'all') chips.push({ key: 'auditor', label: `Auditor: ${auditorFilter}`, onRemove: () => onClear('auditor') });
   if (chips.length === 0) return null;
   return (
     <div className="flex items-center gap-2 px-3.5 py-2 flex-wrap">
@@ -1490,8 +1491,144 @@ const BulkAssignModal = React.memo(({ open, onClose, filteredClients, users, isD
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// CLIENT CARD — lifted outside Clients() so it never re-creates on render
+// BULK AUDITOR DIALOG
 // ═══════════════════════════════════════════════════════════════════════════
+const BulkAuditorDialog = React.memo(({ open, onClose, filteredClients, savedAuditors, saveAuditor, onBulkSave, isDark }) => {
+  const [selectedIds,    setSelectedIds]    = React.useState(new Set());
+  const [auditorValue,   setAuditorValue]   = React.useState('');
+  const [auditorInput,   setAuditorInput]   = React.useState('');
+  const [clientSearch,   setClientSearch]   = React.useState('');
+  const [saving,         setSaving]         = React.useState(false);
+  const accentGrad = 'linear-gradient(135deg, #4c1d95, #7c3aed)';
+
+  React.useEffect(() => {
+    if (open) { setSelectedIds(new Set()); setAuditorValue(''); setAuditorInput(''); setClientSearch(''); }
+  }, [open]);
+
+  const displayedClients = React.useMemo(() => {
+    const q = clientSearch.toLowerCase();
+    return q ? filteredClients.filter(c => (c.company_name || '').toLowerCase().includes(q)) : filteredClients;
+  }, [filteredClients, clientSearch]);
+
+  const toggleClient = (id) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleAll = () => {
+    if (displayedClients.every(c => selectedIds.has(c.id))) setSelectedIds(new Set());
+    else setSelectedIds(new Set(displayedClients.map(c => c.id)));
+  };
+
+  const finalAuditor = auditorValue === '__other__' ? auditorInput.trim() : auditorValue;
+
+  const handleSave = async () => {
+    if (!finalAuditor || selectedIds.size === 0) return;
+    setSaving(true);
+    try {
+      if (!savedAuditors.includes(finalAuditor)) await saveAuditor(finalAuditor);
+      await onBulkSave([...selectedIds], finalAuditor);
+      onClose();
+    } finally { setSaving(false); }
+  };
+
+  const selectedCount = selectedIds.size;
+  const allSelected = displayedClients.length > 0 && displayedClients.every(c => selectedIds.has(c.id));
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl max-h-[88vh] overflow-hidden flex flex-col rounded-2xl border border-slate-200 shadow-2xl p-0 bg-white">
+        <DialogTitle className="sr-only">Bulk Set Auditor</DialogTitle>
+        <div className="flex-shrink-0 px-7 py-5 border-b border-slate-100" style={{ background: 'linear-gradient(135deg, #f5f3ff, #ede9fe)' }}>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-sm flex-shrink-0" style={{ background: accentGrad }}>
+              <FileCheck className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-slate-900">Bulk Set Auditor</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Select clients and assign or update their auditor in one shot</p>
+            </div>
+            <div className="ml-auto flex-shrink-0">
+              <span className="text-xs font-bold px-3 py-1.5 rounded-full border" style={{ background: '#ede9fe', color: '#6d28d9', borderColor: '#ddd6fe' }}>
+                {selectedCount} selected
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-1 overflow-hidden">
+          {/* LEFT: Client list */}
+          <div className={`w-64 flex-shrink-0 border-r flex flex-col ${isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-100 bg-slate-50/40'}`}>
+            <div className={`flex items-center gap-1.5 px-3 py-2.5 border-b flex-shrink-0 ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-white'}`}>
+              <Search className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+              <input className={`flex-1 text-xs bg-transparent outline-none placeholder:text-slate-400 ${isDark ? 'text-slate-200' : 'text-slate-700'}`} placeholder="Search clients…" value={clientSearch} onChange={e => setClientSearch(e.target.value)} />
+              {clientSearch && <button onClick={() => setClientSearch('')} className="text-slate-300 hover:text-slate-500"><X className="h-3 w-3" /></button>}
+            </div>
+            <div className={`flex items-center gap-2 px-3 py-2 border-b text-[10px] font-bold uppercase tracking-widest flex-shrink-0 ${isDark ? 'border-slate-700 text-slate-400' : 'border-slate-100 text-slate-400'}`}>
+              <button onClick={toggleAll} className="flex items-center gap-1.5 hover:text-purple-600 transition-colors">
+                {allSelected ? <CheckSquare className="h-3.5 w-3.5 text-purple-600" /> : <Square className="h-3.5 w-3.5" />}
+                {allSelected ? 'Deselect All' : 'Select All'}
+              </button>
+              <span className="ml-auto">{displayedClients.length} shown</span>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {displayedClients.map(c => {
+                const checked = selectedIds.has(c.id);
+                return (
+                  <div key={c.id} onClick={() => toggleClient(c.id)}
+                    className={`flex items-center gap-2.5 px-3 py-2 cursor-pointer transition-colors border-b last:border-0 ${isDark ? 'border-slate-700/60' : 'border-slate-50'} ${checked ? (isDark ? 'bg-purple-900/20' : 'bg-purple-50/60') : (isDark ? 'hover:bg-slate-700/50' : 'hover:bg-slate-50')}`}>
+                    {checked ? <CheckSquare className="h-3.5 w-3.5 text-purple-600 flex-shrink-0" /> : <Square className="h-3.5 w-3.5 text-slate-300 flex-shrink-0" />}
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-xs font-semibold truncate leading-tight ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{c.company_name}</p>
+                      {c.auditor && <p className="text-[9px] text-purple-500 truncate">Current: {c.auditor}</p>}
+                    </div>
+                  </div>
+                );
+              })}
+              {displayedClients.length === 0 && <div className="flex items-center justify-center h-20 text-xs text-slate-400">No clients found</div>}
+            </div>
+          </div>
+
+          {/* RIGHT: Auditor picker */}
+          <div className="flex-1 flex flex-col overflow-y-auto p-6 space-y-5">
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2 block">Select Auditor <span className="text-red-400">*</span></label>
+              <div className="relative">
+                <FileCheck className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none z-10" />
+                <select className={`h-11 border focus:border-purple-400 rounded-xl text-sm pl-10 pr-4 w-full appearance-none outline-none transition-colors cursor-pointer ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} value={auditorValue} onChange={e => { setAuditorValue(e.target.value); if (e.target.value !== '__other__') setAuditorInput(''); }}>
+                  <option value="">— Choose auditor —</option>
+                  {savedAuditors.map(a => <option key={a} value={a}>{a}</option>)}
+                  <option value="__other__">+ Add New Auditor</option>
+                </select>
+              </div>
+              {auditorValue === '__other__' && (
+                <div className="flex gap-2 mt-2">
+                  <input className={`flex-1 h-10 px-3 border focus:border-purple-400 rounded-xl text-sm outline-none transition-colors ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} placeholder="Type new auditor name…" value={auditorInput} onChange={e => setAuditorInput(e.target.value)} autoFocus />
+                </div>
+              )}
+            </div>
+            {finalAuditor && selectedCount > 0 && (
+              <div className="rounded-xl border p-4" style={{ background: 'linear-gradient(135deg, #f5f3ff, #ede9fe)', borderColor: '#ddd6fe' }}>
+                <p className="text-xs font-semibold text-purple-800">
+                  ✓ Ready to set <strong>{finalAuditor}</strong> as auditor for <strong>{selectedCount}</strong> client{selectedCount !== 1 ? 's' : ''}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className={`flex-shrink-0 flex items-center justify-between gap-3 px-6 py-4 border-t ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-white'}`}>
+          <button type="button" onClick={onClose} className="h-10 px-4 text-sm rounded-xl text-slate-500 hover:bg-slate-100 transition-colors">Cancel</button>
+          <div className="flex items-center gap-2">
+            {!finalAuditor && <span className="text-xs text-amber-600 font-medium">← Choose an auditor first</span>}
+            {finalAuditor && selectedCount === 0 && <span className="text-xs text-amber-600 font-medium">← Select at least one client</span>}
+            <button type="button" disabled={!finalAuditor || selectedCount === 0 || saving} onClick={handleSave}
+              className="h-10 px-6 text-sm rounded-xl text-white font-semibold gap-2 shadow-sm disabled:opacity-50 flex items-center"
+              style={{ background: (!finalAuditor || selectedCount === 0 || saving) ? '#94a3b8' : accentGrad }}>
+              {saving ? <><span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-1" /> Saving…</> : <><FileCheck className="h-4 w-4 mr-1" /> Set Auditor {selectedCount > 0 ? `(${selectedCount})` : ''}</>}
+            </button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+});
 const ModernClientCard = React.memo(({
   onSendBirthdayWish, client, index, isDark, users,
   getClientAssignments, openWhatsApp, handleEdit,
@@ -1756,6 +1893,19 @@ const ModernClientCard = React.memo(({
                 </div>
                 <span style={{ fontSize: 10, color: isDark ? '#64748b' : '#64748b', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
                   {client.referred_by}
+                </span>
+              </div>
+            </>
+          )}
+          {client.auditor && (
+            <>
+              <div style={{ width: 1, height: 12, background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)', flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <div style={{ width: 18, height: 18, borderRadius: 5, background: isDark ? 'rgba(124,58,237,0.18)' : '#f5f3ff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <FileCheck style={{ width: 10, height: 10, color: '#7c3aed' }} />
+                </div>
+                <span style={{ fontSize: 10, color: isDark ? '#a78bfa' : '#6d28d9', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                  {client.auditor}
                 </span>
               </div>
             </>
@@ -3185,6 +3335,17 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                     </div>
                   </div>
                 )}
+                {selectedClient.auditor && (
+                  <div className={`col-span-2 sm:col-span-2 rounded-2xl p-4 border flex items-center gap-3 ${isDark ? 'bg-purple-900/20 border-purple-700/40' : 'bg-purple-50 border-purple-200'}`}>
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${isDark ? 'bg-purple-800/60' : 'bg-purple-100'}`}>
+                      <FileCheck className="h-4 w-4 text-purple-600" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-purple-500 mb-0.5">Auditor</p>
+                      <p className={`text-sm font-semibold truncate ${isDark ? 'text-purple-200' : 'text-purple-800'}`}>{selectedClient.auditor}</p>
+                    </div>
+                  </div>
+                )}
                 {selectedClient.cin && (
                   <div className={`rounded-2xl p-4 border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">CIN</p>
@@ -4012,6 +4173,7 @@ export default function Clients() {
   const [clientsLoading, setClientsLoading] = useState(true);
   const [users, setUsers]     = useState([]);
   const [savedReferrers, setSavedReferrers] = useState([]);
+  const [savedAuditors,  setSavedAuditors]  = useState([]);
 
   // ── UI state ────────────────────────────────────────────────────────────
   const [loading, setLoading]           = useState(false);
@@ -4045,6 +4207,9 @@ export default function Clients() {
   const [bulkAssignOpen, setBulkAssignOpen] = useState(false);
   const [referrerInput, setReferrerInput]       = useState('');
   const [referrerSelectValue, setReferrerSelectValue] = useState('');
+  const [auditorInput, setAuditorInput]         = useState('');
+  const [auditorSelectValue, setAuditorSelectValue] = useState('');
+  const [bulkAuditorOpen, setBulkAuditorOpen]   = useState(false);
   const [mdsPreviewOpen, setMdsPreviewOpen]     = useState(false);
   const [mdsPreviewLoading, setMdsPreviewLoading] = useState(false);
   const [mdsData, setMdsData]       = useState(null);
@@ -4089,6 +4254,7 @@ export default function Clients() {
   const [assignedToFilter, setAssignedToFilter] = useState('all');
   const [clientTypeFilter, setClientTypeFilter] = useState('all');
   const [referredByFilter, setReferredByFilter] = useState('all');
+  const [auditorFilter, setAuditorFilter]       = useState('all');
   const [itrTabActive, setItrTabActive] = useState(false);
 
   // Debounced search — inlined to avoid custom hook bundler issues
@@ -4107,7 +4273,7 @@ export default function Clients() {
     company_name: '', client_type: 'proprietor', client_type_other: '',
     contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }],
     email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [],
-    dsc_details: [], assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '',
+    dsc_details: [], assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '', auditor: '',
     // Tax & Billing
     gstin: '', pan: '', gst_treatment: 'regular', place_of_supply: '',
     default_payment_terms: 'Due on receipt', credit_limit: '', opening_balance: '',
@@ -4224,8 +4390,18 @@ export default function Clients() {
     }
   }, []);
 
+  const fetchAuditors = useCallback(async () => {
+    try {
+      const r = await api.get('/auditors');
+      setSavedAuditors((r.data || []).map(x => (typeof x === 'string' ? x : x.name)).filter(Boolean));
+    } catch {
+      try { setSavedAuditors(JSON.parse(localStorage.getItem('taskosphere_auditors') || '[]').map(x => (typeof x === 'string' ? x : x.name)).filter(Boolean)); }
+      catch { setSavedAuditors([]); }
+    }
+  }, []);
+
   useEffect(() => {
-    fetchClients(); fetchUsers(); fetchReferrers();
+    fetchClients(); fetchUsers(); fetchReferrers(); fetchAuditors();
     const params = new URLSearchParams(location.search);
     if (params.get("openAddClient") === "true") setDialogOpen(true);
   }, [location]);
@@ -4239,6 +4415,14 @@ export default function Clients() {
     else { setReferrerSelectValue('__other__'); setReferrerInput(val); }
   }, [formData.referred_by, savedReferrers]);
 
+  // ── Auditor sync ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    const val = formData.auditor;
+    if (!val) { setAuditorSelectValue(''); setAuditorInput(''); }
+    else if (savedAuditors.includes(val)) { setAuditorSelectValue(val); setAuditorInput(''); }
+    else { setAuditorSelectValue('__other__'); setAuditorInput(val); }
+  }, [formData.auditor, savedAuditors]);
+
   const saveReferrer = useCallback(async (name) => {
     const t = name?.trim();
     if (!t) return t;
@@ -4250,6 +4434,18 @@ export default function Clients() {
     catch { localStorage.setItem('taskosphere_referrers', JSON.stringify(updated)); }
     return t;
   }, [savedReferrers]);
+
+  const saveAuditor = useCallback(async (name) => {
+    const t = name?.trim();
+    if (!t) return t;
+    const existing = savedAuditors.find(a => a.toLowerCase() === t.toLowerCase());
+    if (existing) return existing;
+    const updated = [...savedAuditors, t];
+    setSavedAuditors(updated);
+    try { await api.post('/auditors', { name: t }); }
+    catch { localStorage.setItem('taskosphere_auditors', JSON.stringify(updated)); }
+    return t;
+  }, [savedAuditors]);
 
   // ── Filter & sort ────────────────────────────────────────────────────────
   const filteredClients = useMemo(() => clients.filter(c => {
@@ -4277,6 +4473,7 @@ export default function Clients() {
     if (statusFilter !== 'all' && (c?.status || 'active') !== statusFilter) return false;
     if (!itrTabActive && clientTypeFilter !== 'all' && (c?.client_type || 'proprietor') !== clientTypeFilter) return false;
     if (referredByFilter !== 'all' && (c?.referred_by || '') !== referredByFilter) return false;
+    if (auditorFilter !== 'all' && (c?.auditor || '') !== auditorFilter) return false;
     if (assignedToFilter !== 'all') {
       const assignments = c?.assignments || [];
       const legacy = c?.assigned_to;
@@ -4284,7 +4481,7 @@ export default function Clients() {
       if (!matched) return false;
     }
     return true;
-  }), [clients, searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter, referredByFilter, itrTabActive, activeGroupId, clientGroupsData]);
+  }), [clients, searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter, referredByFilter, auditorFilter, itrTabActive, activeGroupId, clientGroupsData]);
 
   const sortedClients = useMemo(() => {
     const arr = [...filteredClients];
@@ -4297,7 +4494,7 @@ export default function Clients() {
     });
   }, [filteredClients, sortOrder]);
 
-  useEffect(() => { setBoardPage(1); setListPage(1); }, [searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter, referredByFilter, sortOrder, clients, itrTabActive, activeGroupId]);
+  useEffect(() => { setBoardPage(1); setListPage(1); }, [searchTerm, serviceFilter, statusFilter, assignedToFilter, clientTypeFilter, referredByFilter, auditorFilter, sortOrder, clients, itrTabActive, activeGroupId]);
 
   // ── Stats ────────────────────────────────────────────────────────────────
   const stats = useMemo(() => {
@@ -4556,6 +4753,8 @@ export default function Clients() {
       const cleanedAssignments = (formData.assignments || []).filter(a => a.user_id && a.user_id !== 'unassigned').map(a => ({ user_id: a.user_id, services: a.services || [] }));
       const finalReferredBy = formData.referred_by?.trim() || null;
       if (finalReferredBy && finalReferredBy !== 'Our Client' && !savedReferrers.includes(finalReferredBy)) await saveReferrer(finalReferredBy);
+      const finalAuditor = formData.auditor?.trim() || null;
+      if (finalAuditor && !savedAuditors.includes(finalAuditor)) await saveAuditor(finalAuditor);
       
       const payload = {
         company_name: formData.company_name.trim(), client_type: formData.client_type,
@@ -4567,6 +4766,7 @@ export default function Clients() {
         assigned_to: cleanedAssignments[0]?.user_id || null, assignments: cleanedAssignments,
         status: formData.status, contact_persons: cleanedContacts, dsc_details: cleanedDSC,
         referred_by: finalReferredBy || null,
+        auditor: finalAuditor || null,
         // Tax & Billing
         gstin: formData.gstin?.trim().toUpperCase() || null,
         pan: formData.pan?.trim().toUpperCase() || null,
@@ -4666,7 +4866,7 @@ export default function Clients() {
         : [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }],
       birthday: client?.birthday ? format(new Date(client.birthday), 'yyyy-MM-dd') : '',
       dsc_details: (client?.dsc_details || []).map(d => ({ ...d, issue_date: d?.issue_date ? format(new Date(d.issue_date), 'yyyy-MM-dd') : '', expiry_date: d?.expiry_date ? format(new Date(d.expiry_date), 'yyyy-MM-dd') : '' })),
-      status: client?.status || 'active', assignments, referred_by: client?.referred_by || '',
+      status: client?.status || 'active', assignments, referred_by: client?.referred_by || '', auditor: client?.auditor || '',
     });
     const other = client?.services?.find(s => s.startsWith('Other: '));
     setOtherService(other ? other.replace('Other: ', '') : '');
@@ -4702,8 +4902,8 @@ export default function Clients() {
 
   const resetForm = useCallback(() => {
     setAddressTab('primary');
-    setFormData({ company_name: '', client_type: 'proprietor', client_type_other: '', contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }], email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [], dsc_details: [], assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '', gstin: '', pan: '', gst_treatment: 'regular', place_of_supply: '', default_payment_terms: 'Due on receipt', credit_limit: '', opening_balance: '', opening_balance_type: 'Dr', tally_ledger_name: '', tally_group: 'Sundry Debtors', website: '', msme_number: '', gst_address: '', gst_city: '', gst_state: '', gst_pin: '', cin: '', llpin: '', mca_fetch_date: '' });
-    setOtherService(''); setEditingClient(null); setFormErrors({}); setContactErrors([]); setReferrerInput(''); setReferrerSelectValue('');
+    setFormData({ company_name: '', client_type: 'proprietor', client_type_other: '', contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }], email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [], dsc_details: [], assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '', auditor: '', gstin: '', pan: '', gst_treatment: 'regular', place_of_supply: '', default_payment_terms: 'Due on receipt', credit_limit: '', opening_balance: '', opening_balance_type: 'Dr', tally_ledger_name: '', tally_group: 'Sundry Debtors', website: '', msme_number: '', gst_address: '', gst_city: '', gst_state: '', gst_pin: '', cin: '', llpin: '', mca_fetch_date: '' });
+    setOtherService(''); setEditingClient(null); setFormErrors({}); setContactErrors([]); setReferrerInput(''); setReferrerSelectValue(''); setAuditorInput(''); setAuditorSelectValue('');
     setSmartImportFiles({ gst: null, udyam: null, mca: null });
     setSmartImportError('');
   }, []);
@@ -4778,6 +4978,23 @@ export default function Clients() {
     setReferrerSelectValue(saved); setReferrerInput(''); setFormData(prev => ({ ...prev, referred_by: saved }));
     toast.success(`"${saved}" added to referrer list`);
   }, [referrerInput, savedReferrers, saveReferrer]);
+
+  // ── Auditor handlers ──────────────────────────────────────────────────────
+  const handleAuditorSelectChange = useCallback((val) => {
+    setAuditorSelectValue(val);
+    if (val === '__other__') { setAuditorInput(''); setFormData(prev => ({ ...prev, auditor: '' })); }
+    else { setAuditorInput(''); setFormData(prev => ({ ...prev, auditor: val === '' ? '' : val })); }
+  }, []);
+  const handleAuditorInputChange = useCallback((val) => { setAuditorInput(val); setFormData(prev => ({ ...prev, auditor: val })); }, []);
+  const handleSaveAuditor = useCallback(async () => {
+    const name = auditorInput.trim();
+    if (!name) { toast.error('Please enter an auditor name'); return; }
+    const dup = savedAuditors.find(a => a.toLowerCase() === name.toLowerCase());
+    if (dup) { toast.info(`"${dup}" already exists — selected!`); setAuditorSelectValue(dup); setAuditorInput(''); setFormData(prev => ({ ...prev, auditor: dup })); return; }
+    const saved = await saveAuditor(name);
+    setAuditorSelectValue(saved); setAuditorInput(''); setFormData(prev => ({ ...prev, auditor: saved }));
+    toast.success(`"${saved}" added to auditor list`);
+  }, [auditorInput, savedAuditors, saveAuditor]);
 
   // ── CSV / Excel imports ───────────────────────────────────────────────────
   const downloadTemplate = useCallback(() => {
@@ -5058,8 +5275,9 @@ export default function Clients() {
     if (which === 'service')    setServiceFilter('all');
     if (which === 'assigned')   setAssignedToFilter('all');
     if (which === 'referredBy') setReferredByFilter('all');
+    if (which === 'auditor')    setAuditorFilter('all');
   }, []);
-  const clearAllFilters = useCallback(() => { setStatusFilter('all'); setClientTypeFilter('all'); setServiceFilter('all'); setAssignedToFilter('all'); setReferredByFilter('all'); setSearchInput(''); }, []);
+  const clearAllFilters = useCallback(() => { setStatusFilter('all'); setClientTypeFilter('all'); setServiceFilter('all'); setAssignedToFilter('all'); setReferredByFilter('all'); setAuditorFilter('all'); setSearchInput(''); }, []);
 
   // ── List row — using itemData pattern so it doesn't recreate per-render ──
   const ListRow = useCallback(({ index, style, data }) => {
@@ -5145,6 +5363,16 @@ export default function Clients() {
               title={client.email ? 'Click to copy' : ''}>
               {client.email || '—'}
             </p>
+          </div>
+          <div className="w-28 flex-shrink-0 min-w-0">
+            {client.referred_by
+              ? <span className="text-[10px] font-medium text-violet-600 truncate block">{client.referred_by}</span>
+              : <span className="text-[10px] text-slate-300">—</span>}
+          </div>
+          <div className="w-28 flex-shrink-0 min-w-0">
+            {client.auditor
+              ? <span className="text-[10px] font-medium truncate block" style={{ color: '#7c3aed' }}>{client.auditor}</span>
+              : <span className="text-[10px] text-slate-300">—</span>}
           </div>
           <div className="flex items-center gap-1 w-44 flex-shrink-0">
             {client.services?.slice(0, 2).map((svc, i) => <span key={i} className="text-[10px] font-semibold px-2 py-0.5 rounded-md border" style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}>{svc.replace('Other: ', '').substring(0, 10)}</span>)}
@@ -5610,6 +5838,28 @@ export default function Clients() {
                           return isDup
                             ? <p className="text-[10px] text-amber-600 mt-1.5">⚠ "{referrerInput.trim()}" already exists — click Save to select it</p>
                             : <p className="text-[10px] text-slate-400 mt-1.5">Press Enter or click Save — name will appear in dropdown next time</p>;
+                        })()}
+                      </div>
+                      <div>
+                        <label className={labelCls}>Auditor <span className="text-slate-400 font-normal">(optional)</span></label>
+                        <div className="relative"><FileCheck className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none z-10" />
+                          <select className={`h-11 border focus:border-purple-400 rounded-xl text-sm pl-10 pr-4 w-full appearance-none outline-none transition-colors cursor-pointer ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} value={auditorSelectValue} onChange={e => handleAuditorSelectChange(e.target.value)}>
+                            <option value="">— Select auditor —</option>
+                            {savedAuditors.map(a => <option key={a} value={a}>{a}</option>)}
+                            <option value="__other__">+ Add New Auditor</option>
+                          </select>
+                        </div>
+                        {auditorSelectValue === '__other__' && (
+                          <div className="flex gap-2 mt-2">
+                            <Input className={`flex-1 h-11 focus:border-purple-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} placeholder="Type auditor's name…" value={auditorInput} onChange={e => handleAuditorInputChange(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSaveAuditor(); } }} autoFocus />
+                            <Button type="button" onClick={handleSaveAuditor} className="h-11 px-4 rounded-xl text-white text-sm font-semibold gap-1.5" style={{ background: 'linear-gradient(135deg, #4c1d95, #7c3aed)' }}><Plus className="h-4 w-4" /> Save</Button>
+                          </div>
+                        )}
+                        {auditorSelectValue === '__other__' && (() => {
+                          const isDup = auditorInput.trim() && savedAuditors.some(a => a.toLowerCase() === auditorInput.trim().toLowerCase());
+                          return isDup
+                            ? <p className="text-[10px] text-amber-600 mt-1.5">⚠ "{auditorInput.trim()}" already exists — click Save to select it</p>
+                            : <p className="text-[10px] text-slate-400 mt-1.5">Press Enter or click Save — auditor will appear in dropdown next time</p>;
                         })()}
                       </div>
                       {/* ── Address Section: tabs when GST address differs from primary ─ */}
@@ -6154,12 +6404,19 @@ export default function Clients() {
                 <SelectContent><SelectItem value="all">All Referrers</SelectItem>{savedReferrers.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
               </Select>
             )}
+            {savedAuditors.length > 0 && (
+              <Select value={auditorFilter} onValueChange={setAuditorFilter}>
+                <SelectTrigger className={`h-9 w-[140px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue placeholder="All Auditors" /></SelectTrigger>
+                <SelectContent><SelectItem value="all">All Auditors</SelectItem>{savedAuditors.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}</SelectContent>
+              </Select>
+            )}
           </div>
         </div>
         {/* Row 4: active filter chips */}
         <ActiveFilterChips
           statusFilter={statusFilter} clientTypeFilter={clientTypeFilter}
           serviceFilter={serviceFilter} assignedToFilter={assignedToFilter} referredByFilter={referredByFilter}
+          auditorFilter={auditorFilter}
           users={users} onClear={clearFilter} onClearAll={clearAllFilters}
         />
       </div>
@@ -6387,6 +6644,7 @@ export default function Clients() {
             )}
             <div className="flex-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Email</div>
             <div className="w-28 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-violet-400">Referred By</div>
+            <div className="w-28 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest" style={{ color: '#7c3aed' }}>Auditor</div>
             <div className="w-44 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Services</div>
             <div className="w-32 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Assigned</div>
             <div className="w-24 flex-shrink-0" />
