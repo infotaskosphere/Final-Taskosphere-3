@@ -298,6 +298,12 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
   const mediaInputRef = React.useRef(null);
   const [showVariables, setShowVariables] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState('');
+  // WhatsApp history state
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyLogs, setHistoryLogs] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyFilter, setHistoryFilter] = useState('all'); // all | sent | failed
 
   const activeClients = useMemo(() => filteredClients.filter(c => (c?.status || 'active') !== 'inactive'), [filteredClients]);
   const archivedCount = filteredClients.length - activeClients.length;
@@ -338,6 +344,35 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
     } catch { setScheduledJobs([]); }
     finally { setLoadingJobs(false); }
   }, []);
+
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const r = await api.get('/whatsapp/history', { params: { limit: 200, message_type: 'bulk_client' } });
+      setHistoryLogs(r.data?.messages || r.data || []);
+    } catch {
+      // fallback: try generic messages endpoint
+      try {
+        const r2 = await api.get('/whatsapp/messages', { params: { limit: 200 } });
+        setHistoryLogs(r2.data?.messages || r2.data || []);
+      } catch { setHistoryLogs([]); }
+    } finally { setHistoryLoading(false); }
+  }, []);
+
+  const filteredHistory = useMemo(() => {
+    let logs = historyLogs;
+    if (historyFilter === 'sent') logs = logs.filter(l => l.status === 'sent' || l.status === 'delivered' || l.status === 'read');
+    if (historyFilter === 'failed') logs = logs.filter(l => l.status === 'failed' || l.status === 'error');
+    if (historySearch.trim()) {
+      const q = historySearch.toLowerCase();
+      logs = logs.filter(l =>
+        (l.to || l.phone || '').includes(q) ||
+        (l.client_name || l.name || '').toLowerCase().includes(q) ||
+        (l.message || l.body || '').toLowerCase().includes(q)
+      );
+    }
+    return logs;
+  }, [historyLogs, historyFilter, historySearch]);
 
   // Always show ALL clients — archived ones appear dimmed/unchecked in Active mode
   const displayedClients = useMemo(() => {
@@ -588,10 +623,136 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
               <span className="text-xs font-bold px-2.5 py-1 rounded-full" style={{ background: 'rgba(255,255,255,0.15)', color: '#fff' }}>
                 {relevantCount} {isWhatsApp ? 'with phone' : 'with email'}
               </span>
+              {isWhatsApp && (
+                <button
+                  onClick={() => { setShowHistory(v => !v); if (!showHistory) loadHistory(); }}
+                  className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full transition-all"
+                  style={{
+                    background: showHistory ? 'rgba(251,191,36,0.3)' : 'rgba(255,255,255,0.12)',
+                    color: showHistory ? '#fbbf24' : 'rgba(255,255,255,0.85)',
+                    border: `1px solid ${showHistory ? 'rgba(251,191,36,0.5)' : 'rgba(255,255,255,0.2)'}`,
+                  }}
+                  title="View WhatsApp send history"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  History
+                </button>
+              )}
             </div>
           </div>
         </div>
 
+        {/* WhatsApp History Panel */}
+        {showHistory && isWhatsApp && (
+          <div className="flex flex-col flex-1 overflow-hidden" style={{ background: isDark ? '#0f172a' : '#fff' }}>
+            {/* History header */}
+            <div className="flex items-center gap-3 px-5 py-3 border-b flex-shrink-0" style={{ borderColor: isDark ? '#1e3a5f' : '#f1f5f9', background: isDark ? '#0d1b2a' : '#f8fafc' }}>
+              <div className="flex items-center gap-2 flex-1">
+                <svg className="h-4 w-4 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                <span className="text-sm font-bold" style={{ color: isDark ? '#e2e8f0' : '#0f172a' }}>WhatsApp Send History</span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: isDark ? '#1e293b' : '#fef9c3', color: isDark ? '#fbbf24' : '#92400e' }}>{historyLogs.length} records</span>
+              </div>
+              {/* Filter tabs */}
+              <div className="flex items-center gap-1">
+                {[['all','All'],['sent','Delivered'],['failed','Failed']].map(([v,l]) => (
+                  <button key={v} onClick={() => setHistoryFilter(v)}
+                    className="text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all"
+                    style={historyFilter === v
+                      ? { background: v === 'failed' ? '#ef4444' : v === 'sent' ? '#22c55e' : '#3b82f6', color: '#fff' }
+                      : { background: isDark ? '#1e293b' : '#f1f5f9', color: isDark ? '#94a3b8' : '#64748b' }}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+              {/* Search */}
+              <div className="relative">
+                <svg className="absolute left-2.5 top-2 h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" /></svg>
+                <input
+                  value={historySearch} onChange={e => setHistorySearch(e.target.value)}
+                  placeholder="Search name, phone…"
+                  className="pl-7 pr-3 py-1.5 text-xs rounded-lg border outline-none w-44"
+                  style={{ background: isDark ? '#1e293b' : '#fff', borderColor: isDark ? '#334155' : '#e2e8f0', color: isDark ? '#e2e8f0' : '#0f172a' }}
+                />
+              </div>
+              <button onClick={() => loadHistory()} title="Refresh" className="w-7 h-7 flex items-center justify-center rounded-lg transition-all hover:opacity-70" style={{ color: isDark ? '#94a3b8' : '#64748b' }}>
+                <svg className={`h-4 w-4 ${historyLoading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+              </button>
+            </div>
+
+            {/* History list */}
+            <div className="flex-1 overflow-y-auto">
+              {historyLoading ? (
+                <div className="flex items-center justify-center py-16">
+                  <svg className="h-6 w-6 animate-spin text-amber-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                  <span className="ml-3 text-sm text-slate-400">Loading history…</span>
+                </div>
+              ) : filteredHistory.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16">
+                  <svg className="h-10 w-10 text-slate-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                  <p className="text-sm font-semibold text-slate-400">No history found</p>
+                  <p className="text-xs text-slate-400 mt-1">WhatsApp messages sent from Taskosphere will appear here</p>
+                </div>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 z-10">
+                    <tr style={{ background: isDark ? '#0d1b2a' : '#f8fafc', borderBottom: `1px solid ${isDark ? '#1e3a5f' : '#f1f5f9'}` }}>
+                      <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-widest text-slate-400 w-48">Client / Phone</th>
+                      <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-widest text-slate-400">Message Preview</th>
+                      <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-widest text-slate-400 w-32">Sent At</th>
+                      <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-widest text-slate-400 w-28">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredHistory.map((log, i) => {
+                      const status = log.status || 'unknown';
+                      const isDelivered = ['sent','delivered','read'].includes(status);
+                      const isFailed = ['failed','error'].includes(status);
+                      const statusColor = isDelivered ? '#22c55e' : isFailed ? '#ef4444' : '#f59e0b';
+                      const statusBg = isDelivered ? (isDark ? 'rgba(34,197,94,0.12)' : '#f0fdf4') : isFailed ? (isDark ? 'rgba(239,68,68,0.12)' : '#fef2f2') : (isDark ? 'rgba(245,158,11,0.12)' : '#fffbeb');
+                      const statusLabel = status === 'read' ? '✓✓ Read' : status === 'delivered' ? '✓✓ Delivered' : status === 'sent' ? '✓ Sent' : status === 'failed' || status === 'error' ? '✗ Failed' : '⏳ Pending';
+                      const sentAt = log.created_at || log.sent_at || log.timestamp;
+                      const phone = log.to || log.phone || '';
+                      const name = log.client_name || log.name || log.context_name || '';
+                      const msgBody = log.message || log.body || log.text || '';
+                      return (
+                        <tr key={log.id || i} style={{ borderBottom: `1px solid ${isDark ? '#1e2d3d' : '#f8fafc'}`, background: i % 2 === 0 ? 'transparent' : (isDark ? 'rgba(255,255,255,0.015)' : 'rgba(0,0,0,0.015)') }}>
+                          <td className="px-4 py-3">
+                            <p className="font-semibold truncate max-w-[160px]" style={{ color: isDark ? '#e2e8f0' : '#0f172a' }}>{name || '—'}</p>
+                            <p className="text-[10px] font-mono mt-0.5" style={{ color: isDark ? '#475569' : '#94a3b8' }}>{phone}</p>
+                          </td>
+                          <td className="px-4 py-3 max-w-xs">
+                            <p className="truncate" style={{ color: isDark ? '#94a3b8' : '#475569' }}>{msgBody.slice(0, 100) || '—'}</p>
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap" style={{ color: isDark ? '#475569' : '#94a3b8' }}>
+                            {sentAt ? new Date(sentAt).toLocaleString('en-IN', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : '—'}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: statusBg, color: statusColor, border: `1px solid ${statusColor}40` }}>
+                              {statusLabel}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* History footer summary */}
+            {filteredHistory.length > 0 && (
+              <div className="flex-shrink-0 flex items-center gap-4 px-5 py-2.5 border-t text-[11px]" style={{ borderColor: isDark ? '#1e3a5f' : '#f1f5f9', background: isDark ? '#0d1b2a' : '#f8fafc' }}>
+                <span style={{ color: '#22c55e', fontWeight: 700 }}>✓ {filteredHistory.filter(l => ['sent','delivered','read'].includes(l.status)).length} delivered</span>
+                <span style={{ color: '#ef4444', fontWeight: 700 }}>✗ {filteredHistory.filter(l => ['failed','error'].includes(l.status)).length} failed</span>
+                <span style={{ color: isDark ? '#64748b' : '#94a3b8' }}>⏳ {filteredHistory.filter(l => !['sent','delivered','read','failed','error'].includes(l.status)).length} pending</span>
+                <span className="ml-auto" style={{ color: isDark ? '#475569' : '#94a3b8' }}>Showing {filteredHistory.length} of {historyLogs.length} records</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Main compose body — hidden when history is open */}
+        {!showHistory && (
         <div className="flex flex-1 overflow-hidden">
           {/* Left: client list */}
           <div className="w-64 flex-shrink-0 flex flex-col border-r" style={{ borderColor: isDark ? '#1e3a5f' : '#f1f5f9', background: isDark ? '#0f172a' : '#fafafa' }}>
@@ -797,6 +958,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
                   )}
                 </div>
               )}
+              {isWhatsApp && (
                 <>
                   {/* Send mode tabs */}
                   <div>
@@ -940,7 +1102,12 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
             </div>
 
             {/* Footer action bar */}
-            <div className="flex-shrink-0 flex items-center justify-between gap-3 px-5 py-3.5 border-t" style={{ borderColor: isDark ? '#1e2d3d' : '#f1f5f9', background: isDark ? '#0a1220' : '#fff' }}>
+            <div className="flex-shrink-0 border-t" style={{ borderColor: isDark ? '#1e2d3d' : '#f1f5f9', background: isDark ? '#0a1220' : '#fff' }}>
+              {/* Actions heading */}
+              <div className="px-5 pt-3 pb-1">
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: isDark ? '#475569' : '#94a3b8' }}>Actions</p>
+              </div>
+              <div className="flex items-center justify-between gap-3 px-5 pb-3.5">
               <Button type="button" variant="ghost" onClick={onClose} className="h-10 px-4 text-sm rounded-xl" style={{ color: isDark ? '#64748b' : '#94a3b8' }}>Cancel</Button>
               {selectedClients.length === 0 && <span className="text-xs text-amber-500 font-medium">← Select at least one client</span>}
               <div className="flex items-center gap-2 ml-auto">
@@ -985,9 +1152,11 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
                   </Button>
                 )}
               </div>
+              </div>
             </div>
           </div>
         </div>
+        )} {/* end !showHistory */}
       </DialogContent>
     </Dialog>
   );
@@ -1327,6 +1496,7 @@ const ModernClientCard = React.memo(({
   onSendBirthdayWish, client, index, isDark, users,
   getClientAssignments, openWhatsApp, handleEdit,
   canDeleteData, canEditClients, onDelete, setSelectedClient, setDetailDialogOpen, getClientNumber,
+  isSelected, onToggleSelect,
 }) => {
   const cfg            = TYPE_CONFIG[client.client_type] || TYPE_CONFIG.proprietor;
   const avatarGrad     = getAvatarGradient(client.company_name);
@@ -1407,14 +1577,33 @@ const ModernClientCard = React.memo(({
       style={{
         borderRadius: 16,
         background: isDark ? '#1e293b' : '#ffffff',
-        border: `1px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)'}`,
-        boxShadow: isDark ? '0 2px 8px rgba(0,0,0,0.35)' : '0 1px 4px rgba(0,0,0,0.06)',
+        border: isSelected
+          ? '2px solid #ef4444'
+          : `1px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)'}`,
+        boxShadow: isSelected
+          ? '0 0 0 3px rgba(239,68,68,0.15)'
+          : isDark ? '0 2px 8px rgba(0,0,0,0.35)' : '0 1px 4px rgba(0,0,0,0.06)',
       }}
-      onClick={() => { setSelectedClient(client); setDetailDialogOpen(true); }}
+      onClick={() => { if (!isSelected && !onToggleSelect) { setSelectedClient(client); setDetailDialogOpen(true); } else if (!onToggleSelect) { setSelectedClient(client); setDetailDialogOpen(true); } else { setSelectedClient(client); setDetailDialogOpen(true); } }}
     >
       {/* ── VERTICAL LEFT STRIP ── */}
-      <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, borderRadius: '16px 0 0 16px', background: stripeColor }} />
+      <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, borderRadius: '16px 0 0 16px', background: isSelected ? '#ef4444' : stripeColor }} />
  
+      {/* ── BULK SELECT CHECKBOX ── */}
+      {canDeleteData && (
+        <div
+          onClick={e => { e.stopPropagation(); onToggleSelect && onToggleSelect(client.id, e); }}
+          className={`absolute top-2 right-2 z-10 w-5 h-5 rounded border-2 flex items-center justify-center cursor-pointer transition-all
+            ${isSelected ? 'bg-red-500 border-red-500 opacity-100' : 'opacity-0 group-hover:opacity-100 border-slate-300 hover:border-red-400 bg-white/80'}`}
+        >
+          {isSelected && (
+            <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          )}
+        </div>
+      )}
+
       {/* ── HEADER ── */}
       <div style={{
         padding: '12px 14px 10px 18px',
@@ -3838,6 +4027,10 @@ export default function Clients() {
   const [showGroupsPanel,  setShowGroupsPanel]  = useState(false);
   const [activeGroupId,    setActiveGroupId]    = useState(null);
   const [clientGroupsData, setClientGroupsData] = useState([]);
+  // ── Bulk select / delete state ────────────────────────────────────────────
+  const [bulkSelectedIds,     setBulkSelectedIds]     = useState(new Set());
+  const [bulkDeleteConfirm,   setBulkDeleteConfirm]   = useState(false);
+  const [bulkDeleting,        setBulkDeleting]        = useState(false);
   // ── ITR Client state ─────────────────────────────────────────────────────
   const [itrDialogOpen,    setItrDialogOpen]    = useState(false);
   const [editingItrClient, setEditingItrClient] = useState(null);
@@ -4256,6 +4449,58 @@ export default function Clients() {
       action: { label: 'Undo', onClick: () => { pendingDeleteRef.current?.cancel(); toast.success('Delete cancelled'); } },
     });
   }, []);
+
+  // ── Bulk select helpers ──────────────────────────────────────────────────
+  const toggleBulkSelect = useCallback((clientId, e) => {
+    e.stopPropagation();
+    setBulkSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(clientId) ? next.delete(clientId) : next.add(clientId);
+      return next;
+    });
+  }, []);
+
+  const selectAllVisible = useCallback((pageClients) => {
+    const allSelected = pageClients.every(c => bulkSelectedIds.has(c.id));
+    if (allSelected) {
+      setBulkSelectedIds(prev => {
+        const next = new Set(prev);
+        pageClients.forEach(c => next.delete(c.id));
+        return next;
+      });
+    } else {
+      setBulkSelectedIds(prev => {
+        const next = new Set(prev);
+        pageClients.forEach(c => next.add(c.id));
+        return next;
+      });
+    }
+  }, [bulkSelectedIds]);
+
+  const clearBulkSelection = useCallback(() => setBulkSelectedIds(new Set()), []);
+
+  // ── Bulk delete handler ──────────────────────────────────────────────────
+  const handleBulkDelete = useCallback(async () => {
+    if (bulkSelectedIds.size === 0) return;
+    setBulkDeleting(true);
+    const ids = [...bulkSelectedIds];
+    // Optimistically remove from UI
+    setClients(prev => prev.filter(c => !ids.includes(c.id)));
+    setBulkSelectedIds(new Set());
+    setBulkDeleteConfirm(false);
+    let failed = 0;
+    for (const id of ids) {
+      try { await api.delete(`/clients/${id}`); }
+      catch { failed++; }
+    }
+    setBulkDeleting(false);
+    if (failed > 0) {
+      toast.error(`${failed} client(s) could not be deleted — refresh to check`);
+      fetchClients();
+    } else {
+      toast.success(`${ids.length} client${ids.length !== 1 ? 's' : ''} deleted`);
+    }
+  }, [bulkSelectedIds, fetchClients]);
 
   // ── Validate form ────────────────────────────────────────────────────────
   const validateForm = useCallback(() => {
@@ -4818,7 +5063,7 @@ export default function Clients() {
 
   // ── List row — using itemData pattern so it doesn't recreate per-render ──
   const ListRow = useCallback(({ index, style, data }) => {
-    const { pageClients: pc, pageStart: ps, itrTabActive } = data;
+    const { pageClients: pc, pageStart: ps, itrTabActive, bulkSelectedIds: bsi, toggleBulkSelect: tbs, canDeleteData: cdd } = data;
     const client = pc[index];
     if (!client) return null;
     const globalIndex = ps + index;
@@ -4827,15 +5072,27 @@ export default function Clients() {
     const serviceCount = client.services?.length || 0;
     const clientAssignments = getClientAssignments(client);
     const companyLinks = client.itr_data?.company_links || [];
+    const isSelected = bsi.has(client.id);
 
     return (
       <div style={{ ...style, paddingTop: 2, paddingBottom: 2, paddingLeft: 4, paddingRight: 4 }}>
         <div
-          className={`relative rounded-xl border transition-all duration-200 overflow-hidden group cursor-pointer flex items-center gap-4 pl-5 pr-3 h-full
+          className={`relative rounded-xl border transition-all duration-200 overflow-hidden group cursor-pointer flex items-center gap-4 pl-3 pr-3 h-full
             ${isArchived ? 'opacity-60' : ''}
-            ${isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-500 hover:shadow-sm' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm'}`}
-          onClick={() => { setSelectedClient(client); setDetailDialogOpen(true); }}>
-          <div className="absolute left-0 top-0 h-full w-1" style={{ background: itrTabActive ? 'linear-gradient(180deg, #0f3460, #0d7377)' : cfg.strip }} />
+            ${isSelected ? (isDark ? 'border-red-500 bg-red-900/10' : 'border-red-300 bg-red-50/60') : isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-500 hover:shadow-sm' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm'}`}
+          onClick={() => { if (bsi.size === 0) { setSelectedClient(client); setDetailDialogOpen(true); } }}>
+          <div className="absolute left-0 top-0 h-full w-1" style={{ background: isSelected ? '#ef4444' : (itrTabActive ? 'linear-gradient(180deg, #0f3460, #0d7377)' : cfg.strip) }} />
+          {/* Bulk select checkbox */}
+          {cdd && (
+            <div
+              onClick={e => tbs(client.id, e)}
+              className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer transition-all ml-1
+                ${isSelected ? 'bg-red-500 border-red-500' : isDark ? 'border-slate-500 hover:border-red-400' : 'border-slate-300 hover:border-red-400 opacity-0 group-hover:opacity-100'}`}
+              style={isSelected ? {} : {}}
+            >
+              {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+            </div>
+          )}
           <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-sm font-bold flex-shrink-0" style={{ background: getAvatarGradient(client.company_name) }}>
             {client.company_name?.charAt(0).toUpperCase() || '?'}
           </div>
@@ -5801,7 +6058,7 @@ export default function Clients() {
           {/* ITR Clients tab */}
           <div className={`w-px h-6 flex-shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
           <button
-            onClick={() => setItrTabActive(v => !v)}
+            onClick={() => { setItrTabActive(v => !v); clearBulkSelection(); }}
             className={`flex items-center gap-1.5 h-9 px-3 rounded-xl border text-xs font-semibold whitespace-nowrap flex-shrink-0 transition-all ${
               itrTabActive
                 ? 'text-white border-transparent shadow-sm'
@@ -5820,19 +6077,19 @@ export default function Clients() {
           {/* Groups tab */}
           <div className={`w-px h-6 flex-shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
           <button
-            onClick={() => { setShowGroupsPanel(true); fetchClientGroups(); }}
+            onClick={() => { setShowGroupsPanel(v => !v); fetchClientGroups(); }}
             className={`flex items-center gap-1.5 h-9 px-3 rounded-xl border text-xs font-semibold whitespace-nowrap flex-shrink-0 transition-all ${
-              activeGroupId
+              showGroupsPanel
                 ? 'text-white border-transparent shadow-sm'
                 : isDark ? 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600' : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700'
             }`}
-            style={activeGroupId ? { background: 'linear-gradient(135deg, #4338CA, #7C3AED)' } : {}}
+            style={showGroupsPanel ? { background: 'linear-gradient(135deg, #4338CA, #7C3AED)' } : {}}
           >
             <Layers className="h-3.5 w-3.5 flex-shrink-0" />
             <span>Groups</span>
             {clientGroupsData.length > 0 && (
               <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
-                activeGroupId ? 'bg-white/20 text-white' : isDark ? 'bg-slate-600 text-slate-300' : 'bg-indigo-100 text-indigo-700'
+                showGroupsPanel ? 'bg-white/20 text-white' : isDark ? 'bg-slate-600 text-slate-300' : 'bg-indigo-100 text-indigo-700'
               }`}>
                 {clientGroupsData.length}
               </span>
@@ -5905,31 +6162,46 @@ export default function Clients() {
         />
       </div>
 
-      {/* ── Inline Client Groups Panel (renders in-page, not as a popup) ── */}
-      <ClientGroupsPanel
-        open={showGroupsPanel}
-        onClose={() => setShowGroupsPanel(false)}
-        clients={clients}
-        onGroupFilter={(groupId) => {
-          setActiveGroupId(groupId);
-          if (groupId) {
-            const grp = clientGroupsData.find(g => g.id === groupId);
-            if (grp) toast.info(`Filtering by group: ${grp.name}`);
-          }
-          fetchClientGroups();
-        }}
-        onWhatsAppGroup={(groupId) => {
-          setActiveGroupId(groupId);
-          const grp = clientGroupsData.find(g => g.id === groupId);
-          if (grp) toast.info(`WhatsApp: ${grp.name} (${(grp.client_ids || []).length} members)`);
-          setBulkMsgMode('whatsapp');
-          setTimeout(() => setBulkMsgOpen(true), 50);
-        }}
-        activeGroupId={activeGroupId}
-        isDark={isDark}
-      />
+      {/* ── Client Groups Panel — standalone view (replaces board/list when active) ── */}
+      {showGroupsPanel && (
+        <>
+          <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl border"
+            style={{ background: 'linear-gradient(135deg, rgba(67,56,202,0.08), rgba(124,58,237,0.08))', borderColor: '#c4b5fd' }}>
+            <Layers className="h-4 w-4 flex-shrink-0" style={{ color: '#4338CA' }} />
+            <p className="text-xs font-semibold" style={{ color: '#4338CA' }}>
+              Groups view — {clientGroupsData.length} group{clientGroupsData.length !== 1 ? 's' : ''} · <span className="font-normal">Click a group to see members · Use Filter to show group members in client list</span>
+            </p>
+            <button onClick={() => setShowGroupsPanel(false)} className="ml-auto text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline flex-shrink-0">✕ Close</button>
+          </div>
+          <ClientGroupsPanel
+            open={showGroupsPanel}
+            onClose={() => setShowGroupsPanel(false)}
+            clients={clients}
+            onGroupFilter={(groupId) => {
+              setActiveGroupId(groupId);
+              setShowGroupsPanel(false);
+              if (groupId) {
+                const grp = clientGroupsData.find(g => g.id === groupId);
+                if (grp) toast.info(`Filtering by group: ${grp.name}`);
+              }
+              fetchClientGroups();
+            }}
+            onWhatsAppGroup={(groupId) => {
+              setActiveGroupId(groupId);
+              const grp = clientGroupsData.find(g => g.id === groupId);
+              if (grp) toast.info(`WhatsApp: ${grp.name} (${(grp.client_ids || []).length} members)`);
+              setBulkMsgMode('whatsapp');
+              setShowGroupsPanel(false);
+              setTimeout(() => setBulkMsgOpen(true), 50);
+            }}
+            activeGroupId={activeGroupId}
+            isDark={isDark}
+          />
+        </>
+      )}
 
-      {/* BOARD / LIST */}
+      {/* BOARD / LIST — hidden when Groups view is active */}
+      {!showGroupsPanel && (<>
 
       {/* ITR mode banner */}
       {itrTabActive && (
@@ -5957,6 +6229,62 @@ export default function Clients() {
           </div>
         );
       })()}
+
+      {/* Bulk selection action bar */}
+      {canDeleteData && bulkSelectedIds.size > 0 && (
+        <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl border shadow-sm"
+          style={{ background: isDark ? 'rgba(239,68,68,0.12)' : '#fef2f2', borderColor: '#fca5a5' }}>
+          <Trash2 className="h-4 w-4 flex-shrink-0 text-red-500" />
+          <p className="text-xs font-semibold text-red-700 flex-1">
+            <strong>{bulkSelectedIds.size}</strong> client{bulkSelectedIds.size !== 1 ? 's' : ''} selected
+          </p>
+          <button
+            onClick={() => setBulkDeleteConfirm(true)}
+            className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold text-white transition-all hover:opacity-90"
+            style={{ background: 'linear-gradient(135deg, #dc2626, #ef4444)' }}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Delete {bulkSelectedIds.size} selected
+          </button>
+          <button
+            onClick={clearBulkSelection}
+            className="h-8 px-3 rounded-lg text-xs font-semibold text-red-600 hover:bg-red-100 transition-all"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
+      {/* Bulk delete confirmation dialog */}
+      <Dialog open={bulkDeleteConfirm} onOpenChange={setBulkDeleteConfirm}>
+        <DialogContent className="max-w-sm rounded-2xl border border-red-200 shadow-2xl">
+          <DialogTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
+            <div className="w-9 h-9 rounded-xl bg-red-100 flex items-center justify-center flex-shrink-0">
+              <Trash2 className="h-5 w-5 text-red-600" />
+            </div>
+            Delete {bulkSelectedIds.size} client{bulkSelectedIds.size !== 1 ? 's' : ''}?
+          </DialogTitle>
+          <DialogDescription className="text-sm text-slate-500 mt-1">
+            This will permanently delete <strong>{bulkSelectedIds.size}</strong> selected client{bulkSelectedIds.size !== 1 ? 's' : ''} and all their associated data. This action <strong>cannot be undone</strong>.
+          </DialogDescription>
+          <div className="flex gap-2 mt-4">
+            <button
+              onClick={handleBulkDelete}
+              disabled={bulkDeleting}
+              className="flex-1 h-10 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 disabled:opacity-60 flex items-center justify-center gap-2"
+              style={{ background: 'linear-gradient(135deg, #dc2626, #ef4444)' }}
+            >
+              {bulkDeleting ? <><Loader2 className="h-4 w-4 animate-spin" /> Deleting…</> : <><Trash2 className="h-4 w-4" /> Yes, delete all</>}
+            </button>
+            <button
+              onClick={() => setBulkDeleteConfirm(false)}
+              className={`flex-1 h-10 rounded-xl text-sm font-semibold border transition-all ${isDark ? 'border-slate-600 text-slate-200 hover:bg-slate-700' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+            >
+              Cancel
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {clientsLoading ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(255px, 1fr))', gap: 10 }}>
@@ -6012,6 +6340,8 @@ export default function Clients() {
                   setSelectedClient={setSelectedClient}
                   setDetailDialogOpen={setDetailDialogOpen}
                   getClientNumber={getClientNumber}
+                  isSelected={bulkSelectedIds.has(client.id)}
+                  onToggleSelect={toggleBulkSelect}
                 />
               ))}
             </div>
@@ -6031,7 +6361,21 @@ export default function Clients() {
           <div className="overflow-x-auto">
           <div style={{minWidth:780}}>
           <div className={`flex items-center gap-4 px-5 py-3 border-b flex-shrink-0 ${isDark ? 'bg-slate-700/60 border-slate-600' : 'bg-slate-50 border-slate-100'}`}>
-            <div className="w-8 flex-shrink-0" />
+            {/* Select-all checkbox */}
+            {canDeleteData && (
+              <div
+                onClick={() => selectAllVisible(listPageClients)}
+                className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer transition-all
+                  ${listPageClients.length > 0 && listPageClients.every(c => bulkSelectedIds.has(c.id))
+                    ? 'bg-red-500 border-red-500'
+                    : isDark ? 'border-slate-500 hover:border-red-400' : 'border-slate-300 hover:border-red-400'}`}
+              >
+                {listPageClients.length > 0 && listPageClients.every(c => bulkSelectedIds.has(c.id)) && (
+                  <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                )}
+              </div>
+            )}
+            {!canDeleteData && <div className="w-8 flex-shrink-0" />}
             <div className="w-56 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Company</div>
             <div className="w-28 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Type</div>
             {itrTabActive ? (
@@ -6046,7 +6390,7 @@ export default function Clients() {
             <div className="w-24 flex-shrink-0" />
           </div>
           <div style={{ height: Math.max(listHeight, LIST_ROW_HEIGHT) }}>
-            <FixedSizeList height={Math.max(listHeight, LIST_ROW_HEIGHT)} width="100%" itemCount={listPageClients.length} itemSize={LIST_ROW_HEIGHT} itemData={{ pageClients: listPageClients, pageStart: listPageStart, itrTabActive }}>
+            <FixedSizeList height={Math.max(listHeight, LIST_ROW_HEIGHT)} width="100%" itemCount={listPageClients.length} itemSize={LIST_ROW_HEIGHT} itemData={{ pageClients: listPageClients, pageStart: listPageStart, itrTabActive, bulkSelectedIds, toggleBulkSelect, canDeleteData }}>
               {ListRow}
             </FixedSizeList>
           </div>
@@ -6055,6 +6399,8 @@ export default function Clients() {
           <PaginationBar safePg={listSafePage} totalPgs={listTotalPages} pageStart={listPageStart} pageSize={LIST_PAGE_SIZE} totalCount={sortedClients.length} onPageChange={setListPage} isDark={isDark} />
         </div>
       )}
+
+      </>)}  {/* end !showGroupsPanel */}
 
       {/* DETAIL POPUP */}
       <ClientDetailPopup
