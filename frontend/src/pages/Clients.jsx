@@ -29,7 +29,7 @@ import {
   Shield, Download, UserCheck, AlertCircle, Sparkles, Loader2,
   ArrowLeftRight, RefreshCw, FileSpreadsheet, ExternalLink as ExternalLinkIcon,
   IndianRupee, Save as SaveIcon, Globe, Settings, Clock, Send, Repeat, Link,
-  Merge, Layers,
+  Merge, Layers, Paperclip,
 } from 'lucide-react';
 import { detectClientDuplicates } from '@/lib/aiDuplicateEngine';
 import StandaloneGovtFeeDialog from '@/components/StandaloneGovtFeeDialog';
@@ -293,6 +293,9 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
   const [scheduleTime, setScheduleTime] = useState('09:00');
   const [scheduledJobs, setScheduledJobs] = useState([]);
   const [loadingJobs, setLoadingJobs] = useState(false);
+  // Media attachment state
+  const [mediaFile, setMediaFile] = useState(null);      // { file, name, mimeType, base64, previewUrl }
+  const mediaInputRef = React.useRef(null);
   const [showVariables, setShowVariables] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState('');
 
@@ -306,6 +309,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
       setSelectedIds(new Set(activeClients.map(c => c.id)));
       setMessage(''); setClientSearch(''); setCopied(false); setExportDone(false); setSelectedTemplate('');
       setSendProgress(null); setSendingBulk(false);
+      setMediaFile(null);
       // Set default schedule to tomorrow 09:00
       const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
       setScheduleDate(tomorrow.toISOString().split('T')[0]);
@@ -397,9 +401,26 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
       .replace(/\{services\}/gi, (client.services || []).join(', ') || '');
   }, []);
 
+  // Handle media file selection
+  const handleMediaSelect = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const maxSize = 16 * 1024 * 1024;
+    if (file.size > maxSize) { toast.error('File too large — max 16 MB'); return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const base64 = ev.target.result.split(',')[1];
+      const previewUrl = file.type.startsWith('image/') ? ev.target.result : null;
+      setMediaFile({ file, name: file.name, mimeType: file.type, base64, previewUrl, size: file.size });
+    };
+    reader.readAsDataURL(file);
+    // Reset input so same file can be re-selected
+    e.target.value = '';
+  }, []);
+
   // Direct send via WA bridge
   const handleDirectSend = useCallback(async () => {
-    if (!message.trim()) { toast.error('Please write a message first'); return; }
+    if (!message.trim() && !mediaFile) { toast.error('Please write a message or attach a file'); return; }
     const toSend = selectedClients.filter(c => c.phone);
     if (toSend.length === 0) { toast.error('No selected clients have a phone number'); return; }
     setSendingBulk(true);
@@ -411,7 +432,23 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
       const digits = client.phone.replace(/\D/g, '');
       const waPhone = digits.length === 10 ? `91${digits}` : digits;
       try {
-        await api.post('/whatsapp/send', { to: waPhone, message: personalMsg, message_type: 'bulk_client', context_id: client.id, session_id: waSelectedSession || undefined });
+        // Send text message if present
+        if (personalMsg.trim()) {
+          await api.post('/whatsapp/send', { to: waPhone, message: personalMsg, message_type: 'bulk_client', context_id: client.id, session_id: waSelectedSession || undefined });
+        }
+        // Send media if attached
+        if (mediaFile) {
+          await api.post('/whatsapp/send-media', {
+            to: waPhone,
+            caption: !personalMsg.trim() ? `Dear ${client.company_name || 'Client'},` : undefined,
+            base64: mediaFile.base64,
+            mime_type: mediaFile.mimeType,
+            filename: mediaFile.name,
+            message_type: 'bulk_client',
+            context_id: client.id,
+            session_id: waSelectedSession || undefined,
+          });
+        }
         results.push({ id: client.id, name: client.company_name, status: 'sent' });
       } catch (err) {
         results.push({ id: client.id, name: client.company_name, status: 'failed', error: err?.response?.data?.detail || 'Failed' });
@@ -422,7 +459,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
     const sentCount = results.filter(r => r.status === 'sent').length;
     const failCount = results.filter(r => r.status === 'failed').length;
     toast.success(`Sent ${sentCount} messages${failCount > 0 ? `, ${failCount} failed` : ''}`);
-  }, [message, selectedClients, personalizeMessage]);
+  }, [message, mediaFile, selectedClients, personalizeMessage, waSelectedSession]);
 
   // Schedule bulk send
   const handleScheduleSend = useCallback(async () => {
@@ -503,7 +540,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
 
   const WA_GREEN = '#25D366';
   const WA_DARK  = '#128C7E';
-  const sendBtnEnabled = message.trim() && selectedClients.length > 0 && phoneCount > 0;
+  const sendBtnEnabled = (message.trim() || mediaFile) && selectedClients.length > 0 && phoneCount > 0;
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -715,7 +752,51 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
                 <p className="text-[10px] mt-1" style={{ color: isDark ? '#475569' : '#94a3b8' }}>{message.length} chars · Use variables above for personalization per client</p>
               </div>
 
+              {/* ── Media Attachment ── */}
               {isWhatsApp && (
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-widest mb-1.5 block" style={{ color: isDark ? '#64748b' : '#94a3b8' }}>
+                    Attach Media <span style={{ color: isDark ? '#334155' : '#cbd5e1', fontWeight: 400 }}>(image, PDF, Excel, Word — max 16 MB)</span>
+                  </label>
+                  <input
+                    type="file"
+                    ref={mediaInputRef}
+                    style={{ display: 'none' }}
+                    accept="image/*,.pdf,.xlsx,.xls,.docx,.doc,.mp4,.mp3"
+                    onChange={handleMediaSelect}
+                  />
+                  {!mediaFile ? (
+                    <button
+                      onClick={() => mediaInputRef.current?.click()}
+                      className="flex items-center gap-2 w-full border-2 border-dashed rounded-xl px-4 py-3 text-sm font-semibold transition-all hover:opacity-80"
+                      style={{ borderColor: isDark ? '#334155' : '#e2e8f0', color: isDark ? '#64748b' : '#94a3b8', background: isDark ? '#1e293b' : '#f8fafc' }}>
+                      <Paperclip className="h-4 w-4 flex-shrink-0" />
+                      Click to attach file
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-3 rounded-xl border px-3 py-2.5"
+                      style={{ background: isDark ? '#0a1628' : '#f0fdf4', borderColor: isDark ? '#166534' : '#86efac' }}>
+                      {mediaFile.previewUrl ? (
+                        <img src={mediaFile.previewUrl} alt="preview" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} />
+                      ) : (
+                        <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 text-white text-xs font-bold"
+                          style={{ background: mediaFile.mimeType.includes('pdf') ? '#ef4444' : mediaFile.mimeType.includes('sheet') || mediaFile.mimeType.includes('excel') ? '#22c55e' : '#3b82f6' }}>
+                          {mediaFile.mimeType.includes('pdf') ? 'PDF' : mediaFile.mimeType.includes('sheet') || mediaFile.mimeType.includes('excel') ? 'XLS' : 'DOC'}
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold truncate" style={{ color: isDark ? '#e2e8f0' : '#0f172a' }}>{mediaFile.name}</p>
+                        <p className="text-[10px]" style={{ color: isDark ? '#4ade80' : '#166534' }}>{(mediaFile.size / 1024).toFixed(0)} KB · Will be sent to all selected clients</p>
+                      </div>
+                      <button onClick={() => setMediaFile(null)}
+                        className="flex-shrink-0 rounded-lg p-1 hover:opacity-70 transition"
+                        style={{ color: isDark ? '#94a3b8' : '#64748b' }}>
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
                 <>
                   {/* Send mode tabs */}
                   <div>
