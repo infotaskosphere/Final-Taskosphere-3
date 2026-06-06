@@ -179,7 +179,7 @@ async def add_session(body: WASessionCreate, current_user: User = Depends(requir
         "session_id": session_id,
         "label": body.label or f"Number {session_id[-6:]}",
         "added_by": current_user.id,
-        "added_by_name": current_user.name,
+        "added_by_name": current_user.full_name,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "status": "connecting",
     })
@@ -247,7 +247,7 @@ async def request_wa_access(body: WAAccessRequest, current_user: User = Depends(
     if existing:
         return {"message": "Request already exists", "status": existing["status"]}
     await _db()["whatsapp_access_requests"].insert_one({
-        "user_id": current_user.id, "user_name": current_user.name,
+        "user_id": current_user.id, "user_name": current_user.full_name,
         "user_email": current_user.email, "reason": body.reason,
         "status": "pending", "requested_at": datetime.now(timezone.utc).isoformat(),
     })
@@ -280,7 +280,7 @@ async def decide_access_request(body: WAAccessDecision, current_user: User = Dep
     new_status = "approved" if body.approved else "rejected"
     result = await _db()["whatsapp_access_requests"].update_one(
         {"user_id": body.user_id, "status": "pending"},
-        {"$set": {"status": new_status, "decided_by": current_user.name,
+        {"$set": {"status": new_status, "decided_by": current_user.full_name,
                   "decided_at": datetime.now(timezone.utc).isoformat(), "admin_note": body.admin_note}},
     )
     if result.matched_count == 0:
@@ -428,7 +428,7 @@ async def schedule_bulk_send(body: WAScheduleBulkRequest, current_user: User = D
     job_doc = {
         "job_id": job_id,
         "created_by": current_user.id,
-        "created_by_name": current_user.name,
+        "created_by_name": current_user.full_name,
         "scheduled_at": body.scheduled_at,
         "message_template": body.message_template,
         "message_type": body.message_type,
