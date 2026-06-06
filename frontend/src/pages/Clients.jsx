@@ -6457,14 +6457,12 @@ export default function Clients() {
                 <SelectContent><SelectItem value="all">All Referrers</SelectItem>{savedReferrers.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
               </Select>
             )}
-            {savedAuditors.length > 0 && (
               <Select value={auditorFilter} onValueChange={setAuditorFilter}>
                 <SelectTrigger className={`h-9 w-[140px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue placeholder="All Auditors" /></SelectTrigger>
                 <SelectContent><SelectItem value="all">All Auditors</SelectItem>{savedAuditors.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}</SelectContent>
               </Select>
-            )}
+            </div>
           </div>
-        </div>
         {/* Row 4: active filter chips */}
         <ActiveFilterChips
           statusFilter={statusFilter} clientTypeFilter={clientTypeFilter}
