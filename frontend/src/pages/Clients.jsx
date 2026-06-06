@@ -5315,7 +5315,8 @@ export default function Clients() {
           <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-sm font-bold flex-shrink-0" style={{ background: getAvatarGradient(client.company_name) }}>
             {client.company_name?.charAt(0).toUpperCase() || '?'}
           </div>
-          <div className="w-56 flex-shrink-0 min-w-0">
+          {/* Company — w-48 */}
+          <div className="w-48 flex-shrink-0 min-w-0">
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] font-mono text-slate-300">#{getClientNumber(globalIndex)}</span>
               {isArchived && <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">Archived</span>}
@@ -5323,10 +5324,11 @@ export default function Clients() {
             </div>
             <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{client.company_name}</p>
           </div>
-          <div className="w-28 flex-shrink-0"><TypePill type={client.client_type} customLabel={client.client_type_label} /></div>
+          {/* Type — w-20 */}
+          <div className="w-20 flex-shrink-0"><TypePill type={client.client_type} customLabel={client.client_type_label} /></div>
           {itrTabActive ? (
             /* ── Linked Company column ── */
-            <div className="w-52 flex-shrink-0 min-w-0">
+            <div className="w-44 flex-shrink-0 min-w-0">
               {companyLinks.length === 0 ? (
                 <span className="text-[10px] text-slate-300 italic">No linked company</span>
               ) : (
@@ -5348,58 +5350,76 @@ export default function Clients() {
               )}
             </div>
           ) : (
-            <div className="w-36 flex-shrink-0">
+            /* Phone — w-28, no wrap */
+            <div className="w-28 flex-shrink-0">
               <p
-                className={`text-xs font-medium cursor-copy ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
+                className={`text-xs font-medium whitespace-nowrap cursor-copy ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
                 onClick={client.phone ? e => { e.stopPropagation(); copyToClipboard(client.phone, 'Phone'); } : undefined}
                 title={client.phone ? 'Click to copy' : ''}>
                 {client.phone || '—'}
               </p>
             </div>
           )}
-          <div className="flex-1 min-w-0">
+          {/* Email — w-40, fixed (no wrap, truncate) */}
+          <div className="w-40 flex-shrink-0 min-w-0">
             <p
-              className={`text-xs truncate cursor-copy ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+              className={`text-xs truncate whitespace-nowrap cursor-copy ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
               onClick={client.email ? e => { e.stopPropagation(); copyToClipboard(client.email, 'Email'); } : undefined}
-              title={client.email ? 'Click to copy' : ''}>
+              title={client.email || ''}>
               {client.email || '—'}
             </p>
           </div>
-          <div className="w-28 flex-shrink-0 min-w-0">
+          {/* Referred By — w-24 */}
+          <div className="w-24 flex-shrink-0 min-w-0">
             {client.referred_by
               ? <span className="text-[10px] font-medium text-violet-600 truncate block">{client.referred_by}</span>
               : <span className="text-[10px] text-slate-300">—</span>}
           </div>
-          <div className="w-28 flex-shrink-0 min-w-0">
+          {/* Auditor — w-24 */}
+          <div className="w-24 flex-shrink-0 min-w-0">
             {client.auditor
               ? <span className="text-[10px] font-medium truncate block" style={{ color: '#7c3aed' }}>{client.auditor}</span>
               : <span className="text-[10px] text-slate-300">—</span>}
           </div>
-          <div className="flex items-center gap-1 w-44 flex-shrink-0">
-            {client.services?.slice(0, 2).map((svc, i) => <span key={i} className="text-[10px] font-semibold px-2 py-0.5 rounded-md border" style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}>{svc.replace('Other: ', '').substring(0, 10)}</span>)}
-            {serviceCount > 2 && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">+{serviceCount - 2}</span>}
+          {/* Services — w-32, can wrap to 2 lines */}
+          <div className="w-32 flex-shrink-0 flex flex-wrap gap-1 content-center">
+            {client.services?.slice(0, 2).map((svc, i) => <span key={i} className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md border leading-tight" style={{ background: cfg.bg, color: cfg.text, borderColor: cfg.border }}>{svc.replace('Other: ', '').substring(0, 8)}</span>)}
+            {serviceCount > 2 && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200 leading-tight">+{serviceCount - 2}</span>}
           </div>
-          <div className="w-32 flex-shrink-0 flex flex-col gap-0.5">
+          {/* Assigned — w-28, can wrap to 2 lines */}
+          <div className="w-28 flex-shrink-0 flex flex-col gap-0.5">
             {clientAssignments.slice(0, 2).map((a, i) => { const u = users.find(x => x.id === a.user_id); return u ? <span key={i} className="text-[10px] text-slate-500 truncate">{u.full_name || u.name}{a.services?.length > 0 && <span className="text-slate-400"> · {a.services[0]}{a.services.length > 1 ? `+${a.services.length - 1}` : ''}</span>}</span> : null; })}
             {clientAssignments.length > 2 && <span className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>+{clientAssignments.length - 2} more</span>}
           </div>
-          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-            <button onClick={e => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors"><MessageCircle className="h-3.5 w-3.5" /></button>
-            {/* Link Company — only shown in ITR tab */}
+          {/* Actions — w-20, always visible at low opacity, full on hover */}
+          <div className="w-20 flex-shrink-0 flex items-center justify-start gap-0.5">
+            <button
+              onClick={e => { e.stopPropagation(); openWhatsApp(client.phone, client.company_name); }}
+              className={`w-6 h-6 flex items-center justify-center rounded-lg transition-all ${isDark ? 'text-emerald-400 hover:bg-emerald-900/40' : 'text-emerald-500 opacity-40 group-hover:opacity-100 hover:bg-emerald-50'}`}
+              title="WhatsApp"
+            ><MessageCircle className="h-3 w-3" /></button>
             {itrTabActive && canEditClients && (
               <button
-                onClick={e => { e.stopPropagation(); setEditingItrClient(client); setItrDialogOpen(true); setTimeout(() => {}, 50); }}
-                className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors"
+                onClick={e => { e.stopPropagation(); setEditingItrClient(client); setItrDialogOpen(true); }}
+                className={`w-6 h-6 flex items-center justify-center rounded-lg transition-all ${isDark ? 'opacity-50 hover:opacity-100' : 'opacity-40 group-hover:opacity-100'}`}
                 title="Link Company"
                 style={{ color: '#0d7377' }}
-                onMouseEnter={e => e.currentTarget.style.background = 'rgba(13,115,119,0.12)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-              >
-                <Link className="h-3.5 w-3.5" />
-              </button>
+              ><Link className="h-3 w-3" /></button>
             )}
-            {canEditClients && <button onClick={e => { e.stopPropagation(); handleEdit(client); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-blue-600 hover:bg-blue-50 transition-colors"><Edit className="h-3.5 w-3.5" /></button>}
-            {canDeleteData && <button onClick={e => { e.stopPropagation(); handleDelete(client); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-50 transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>}
+            {canEditClients && (
+              <button
+                onClick={e => { e.stopPropagation(); handleEdit(client); }}
+                className={`w-6 h-6 flex items-center justify-center rounded-lg transition-all ${isDark ? 'text-blue-400 hover:bg-blue-900/40' : 'text-blue-500 opacity-40 group-hover:opacity-100 hover:bg-blue-50'}`}
+                title="Edit"
+              ><Edit className="h-3 w-3" /></button>
+            )}
+            {canDeleteData && (
+              <button
+                onClick={e => { e.stopPropagation(); handleDelete(client); }}
+                className={`w-6 h-6 flex items-center justify-center rounded-lg transition-all ${isDark ? 'text-red-400 hover:bg-red-900/40' : 'text-red-400 opacity-40 group-hover:opacity-100 hover:bg-red-50'}`}
+                title="Delete"
+              ><Trash2 className="h-3 w-3" /></button>
+            )}
           </div>
         </div>
       </div>
@@ -6619,7 +6639,7 @@ export default function Clients() {
       ) : (
         <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col" style={{ background: isDark ? '#1e293b' : '#ffffff', borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' }}>
           <div className="overflow-x-auto">
-          <div style={{minWidth:780}}>
+          <div style={{minWidth:920}}>
           <div
             className={`flex items-center border-b flex-shrink-0 ${isDark ? 'bg-slate-700/60 border-slate-600' : 'bg-slate-50 border-slate-100'}`}
             style={{ gap: 16, paddingLeft: 16, paddingRight: 12, paddingTop: 10, paddingBottom: 10 }}
@@ -6643,20 +6663,20 @@ export default function Clients() {
             )}
             {/* Avatar spacer — matches the w-8 avatar circle in each row */}
             <div className="w-8 flex-shrink-0" />
-            <div className="w-56 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Company</div>
-            <div className="w-28 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Type</div>
+            <div className="w-48 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Company</div>
+            <div className="w-20 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Type</div>
             {itrTabActive ? (
-              <div className="w-52 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest" style={{ color: '#0d7377' }}>Linked Company</div>
+              <div className="w-44 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest" style={{ color: '#0d7377' }}>Linked Company</div>
             ) : (
-              <div className="w-36 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Phone</div>
+              <div className="w-28 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Phone</div>
             )}
-            <div className="flex-1 min-w-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Email</div>
-            <div className="w-28 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-violet-400">Referred By</div>
-            <div className="w-28 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest" style={{ color: '#7c3aed' }}>Auditor</div>
-            <div className="w-44 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Services</div>
-            <div className="w-32 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Assigned</div>
-            {/* Actions spacer */}
-            <div className="w-24 flex-shrink-0" />
+            <div className="w-40 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Email</div>
+            <div className="w-24 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-violet-400">Referred By</div>
+            <div className="w-24 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest" style={{ color: '#7c3aed' }}>Auditor</div>
+            <div className="w-32 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Services</div>
+            <div className="w-28 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Assigned</div>
+            {/* Actions header */}
+            <div className="w-20 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Actions</div>
           </div>
           <div style={{ height: Math.max(listHeight, LIST_ROW_HEIGHT) }}>
             <FixedSizeList height={Math.max(listHeight, LIST_ROW_HEIGHT)} width="100%" itemCount={listPageClients.length} itemSize={LIST_ROW_HEIGHT} itemData={{ pageClients: listPageClients, pageStart: listPageStart, itrTabActive, bulkSelectedIds, toggleBulkSelect, canDeleteData }}>
