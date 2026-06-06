@@ -4,6 +4,10 @@
  * All pages that need WhatsApp sending read settings from here.
  * Settings are stored in localStorage under 'wa_global_settings'
  * and are editable only via /settings/whatsapp.
+ *
+ * FIX: removed auto-refresh of sessions on mount — the WhatsApp Settings
+ * page manages its own polling interval. Calling refreshSessions() on every
+ * page mount caused excessive hits to the wa-bridge and triggered 429s.
  */
 import { useState, useEffect, useCallback } from 'react';
 import api from '@/lib/api';
@@ -156,7 +160,11 @@ export function useWhatsApp() {
     }
   }, []);
 
-  useEffect(() => { refreshStatus(); refreshSessions(); }, [refreshStatus, refreshSessions]);
+  // FIX: only fetch status on mount — NOT sessions.
+  // Sessions are polled by ConnectedNumbersTab with a controlled 30-second
+  // interval. Calling refreshSessions() here meant every page that imports
+  // useWhatsApp would hit the wa-bridge on load, quickly causing 429s.
+  useEffect(() => { refreshStatus(); }, [refreshStatus]);
 
   const updateSettings = useCallback((newSettings) => {
     saveWASettings(newSettings);
