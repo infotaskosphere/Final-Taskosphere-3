@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel, Field
 
 from backend.dependencies import get_current_user, require_admin
@@ -61,29 +61,63 @@ class WABulkSendRequest(BaseModel):
     context_id: Optional[str] = None
     session_id: Optional[str] = None
 
+class WASendMediaRequest(BaseModel):
+    to: str
+    caption: Optional[str] = None
+    base64: str                        # base64-encoded file content
+    mime_type: str
+    filename: str
+    message_type: str = "general"
+    context_id: Optional[str] = None
+    session_id: Optional[str] = None
+
 # ── Bridge helpers ───────────────────────────────────────────────────────────
 
-async def _bridge_get(path: str) -> Dict[str, Any]:
-    try:
-        async with httpx.AsyncClient(timeout=15) as c:
-            r = await c.get(f"{WA_BRIDGE_URL}{path}")
-            r.raise_for_status()
-            return r.json()
-    except httpx.ConnectError:
-        raise HTTPException(503, "WhatsApp bridge not running. Start wa-bridge.")
-    except Exception as e:
-        raise HTTPException(502, f"WA bridge error: {e}")
+async def _bridge_get(path: str, retries: int = 3) -> Dict[str, Any]:
+    for attempt in range(retries):
+        try:
+            async with httpx.AsyncClient(timeout=15) as c:
+                r = await c.get(f"{WA_BRIDGE_URL}{path}")
+                if r.status_code == 429 and attempt < retries - 1:
+                    wait = 2 ** (attempt + 1)
+                    logger.warning(f"WA bridge 429 on GET {path}, retry in {wait}s")
+                    await asyncio.sleep(wait)
+                    continue
+                r.raise_for_status()
+                return r.json()
+        except httpx.ConnectError:
+            raise HTTPException(503, "WhatsApp bridge not running. Start wa-bridge.")
+        except HTTPException:
+            raise
+        except Exception as e:
+            if attempt < retries - 1:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            raise HTTPException(502, f"WA bridge error: {e}")
+    raise HTTPException(502, "WA bridge request failed after retries.")
 
-async def _bridge_post(path: str, payload: Dict) -> Dict:
-    try:
-        async with httpx.AsyncClient(timeout=20) as c:
-            r = await c.post(f"{WA_BRIDGE_URL}{path}", json=payload)
-            r.raise_for_status()
-            return r.json()
-    except httpx.ConnectError:
-        raise HTTPException(503, "WhatsApp bridge not running.")
-    except Exception as e:
-        raise HTTPException(502, f"WA bridge error: {e}")
+async def _bridge_post(path: str, payload: Dict, retries: int = 3) -> Dict:
+    for attempt in range(retries):
+        try:
+            async with httpx.AsyncClient(timeout=20) as c:
+                r = await c.post(f"{WA_BRIDGE_URL}{path}", json=payload)
+                if r.status_code == 429 and attempt < retries - 1:
+                    wait = 2 ** (attempt + 1)
+                    logger.warning(f"WA bridge 429 on POST {path}, retry in {wait}s")
+                    await asyncio.sleep(wait)
+                    continue
+                r.raise_for_status()
+                return r.json()
+        except httpx.ConnectError:
+            raise HTTPException(503, "WhatsApp bridge not running.")
+        except HTTPException:
+            raise
+        except Exception as e:
+            if attempt < retries - 1:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            raise HTTPException(502, f"WA bridge error: {e}")
+    raise HTTPException(502, "WA bridge request failed after retries.")
 
 async def _bridge_delete(path: str) -> Dict:
     try:
@@ -284,6 +318,28 @@ async def send_bulk(body: WABulkSendRequest, current_user: User = Depends(get_cu
             results.append({"to": recipient, "status": "failed", "error": str(exc)})
         await asyncio.sleep(0.8)
     return {"results": results}
+
+
+@router.post("/send-media")
+async def send_media(body: WASendMediaRequest, current_user: User = Depends(get_current_user)):
+    """Send an image, PDF, Excel, or other document via WhatsApp."""
+    if not await _has_wa_access(current_user):
+        raise HTTPException(403, "You do not have permission to send WhatsApp messages.")
+    try:
+        result = await _bridge_post("/send-media", {
+            "to":        body.to,
+            "sessionId": body.session_id,
+            "caption":   body.caption,
+            "base64":    body.base64,
+            "mimeType":  body.mime_type,
+            "filename":  body.filename,
+        })
+        caption_log = f"[{body.filename}] {body.caption or ''}"
+        await _store_message(current_user.id, body.to, caption_log, body.message_type, body.context_id, "sent", body.session_id)
+        return {"success": True, "messageId": result.get("messageId"), "filename": body.filename}
+    except Exception as exc:
+        await _store_message(current_user.id, body.to, f"[media:{body.filename}]", body.message_type, body.context_id, "failed", body.session_id, str(exc))
+        raise
 
 
 @router.get("/status")
