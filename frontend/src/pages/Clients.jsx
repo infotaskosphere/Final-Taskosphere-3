@@ -6028,133 +6028,135 @@ export default function Clients() {
             <button onClick={() => setViewMode('list')}  className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${viewMode === 'list'  ? (isDark ? 'bg-slate-500 shadow-sm text-white' : 'bg-white shadow-sm text-slate-700') : 'text-slate-400 hover:text-slate-600'}`} title="List view"><List className="h-4 w-4" /></button>
           </div>
         </div>
-        {/* Row 2: controls */}
-        <div className="flex items-center gap-2 px-3.5 py-2.5 overflow-x-auto scrollbar-none">
-          {/* Bulk message */}
-          <div className={`flex items-center gap-0.5 border rounded-xl p-0.5 flex-shrink-0 ${isDark ? 'border-slate-600 bg-slate-700' : 'border-slate-200 bg-slate-50'}`}>
-            <button onClick={() => { setBulkMsgMode('whatsapp'); setBulkMsgOpen(true); }} className={`flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-emerald-700 transition-all text-xs font-semibold whitespace-nowrap ${isDark ? 'hover:bg-slate-600' : 'hover:bg-emerald-50'}`}>
-              <MessageCircle className="h-3.5 w-3.5 flex-shrink-0" /><span>WhatsApp</span>
-              <span className="bg-emerald-100 text-emerald-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full">{filteredClients.length}</span>
-            </button>
-            <div className={`w-px h-5 flex-shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
-            <button onClick={() => { setBulkMsgMode('email'); setBulkMsgOpen(true); }} className={`flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-blue-700 transition-all text-xs font-semibold whitespace-nowrap ${isDark ? 'hover:bg-slate-600' : 'hover:bg-blue-50'}`}>
-              <Mail className="h-3.5 w-3.5 flex-shrink-0" /><span>Email</span>
-              <span className="bg-blue-100 text-blue-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full">{filteredClients.length}</span>
-            </button>
-          </div>
-          {canAssignClients && (
-            <>
-              <div className={`w-px h-6 flex-shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
+        {/* Row 2: action tabs — equal-width, wrap-safe, no horizontal scroll */}
+        <div className={`px-3.5 py-2.5 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+          <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(110px, 1fr))` }}>
+            {/* WhatsApp */}
+            <div className={`flex items-center gap-0.5 border rounded-xl p-0.5 ${isDark ? 'border-slate-600 bg-slate-700' : 'border-slate-200 bg-slate-50'}`}>
+              <button onClick={() => { setBulkMsgMode('whatsapp'); setBulkMsgOpen(true); }} className={`flex-1 flex items-center justify-center gap-1.5 h-8 px-2 rounded-lg text-emerald-700 transition-all text-xs font-semibold min-w-0 ${isDark ? 'hover:bg-slate-600' : 'hover:bg-emerald-50'}`}>
+                <MessageCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                <span className="truncate">WhatsApp</span>
+                <span className="bg-emerald-100 text-emerald-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0">{filteredClients.length}</span>
+              </button>
+            </div>
+            {/* Email */}
+            <div className={`flex items-center border rounded-xl p-0.5 ${isDark ? 'border-slate-600 bg-slate-700' : 'border-slate-200 bg-slate-50'}`}>
+              <button onClick={() => { setBulkMsgMode('email'); setBulkMsgOpen(true); }} className={`flex-1 flex items-center justify-center gap-1.5 h-8 px-2 rounded-lg text-blue-700 transition-all text-xs font-semibold min-w-0 ${isDark ? 'hover:bg-slate-600' : 'hover:bg-blue-50'}`}>
+                <Mail className="h-3.5 w-3.5 flex-shrink-0" />
+                <span className="truncate">Email</span>
+                <span className="bg-blue-100 text-blue-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0">{filteredClients.length}</span>
+              </button>
+            </div>
+            {/* Bulk Assign */}
+            {canAssignClients && (
               <button
                 onClick={() => setBulkAssignOpen(true)}
-                className={`flex items-center gap-1.5 h-9 px-3 rounded-xl border text-xs font-semibold whitespace-nowrap flex-shrink-0 transition-all ${isDark ? 'border-slate-600 bg-slate-700 text-slate-200 hover:bg-slate-600 hover:border-slate-500' : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700'}`}
+                className={`flex items-center justify-center gap-1.5 h-9 px-2 rounded-xl border text-xs font-semibold transition-all min-w-0 ${isDark ? 'border-slate-600 bg-slate-700 text-slate-200 hover:bg-slate-600 hover:border-slate-500' : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700'}`}
               >
                 <UserCheck className="h-3.5 w-3.5 flex-shrink-0" />
-                <span>Bulk Assign</span>
-                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${isDark ? 'bg-slate-600 text-slate-300' : 'bg-blue-100 text-blue-700'}`}>{filteredClients.length}</span>
+                <span className="truncate">Bulk Assign</span>
+                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${isDark ? 'bg-slate-600 text-slate-300' : 'bg-blue-100 text-blue-700'}`}>{filteredClients.length}</span>
               </button>
-            </>
-          )}
-          {/* ITR Clients tab */}
-          <div className={`w-px h-6 flex-shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
-          <button
-            onClick={() => { setItrTabActive(v => !v); clearBulkSelection(); }}
-            className={`flex items-center gap-1.5 h-9 px-3 rounded-xl border text-xs font-semibold whitespace-nowrap flex-shrink-0 transition-all ${
-              itrTabActive
-                ? 'text-white border-transparent shadow-sm'
-                : isDark ? 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600' : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-teal-50 hover:border-teal-300 hover:text-teal-700'
-            }`}
-            style={itrTabActive ? { background: 'linear-gradient(135deg, #0f3460, #0d7377)' } : {}}
-          >
-            <FileText className="h-3.5 w-3.5 flex-shrink-0" />
-            <span>ITR Clients</span>
-            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
-              itrTabActive ? 'bg-white/20 text-white' : isDark ? 'bg-slate-600 text-slate-300' : 'bg-teal-100 text-teal-700'
-            }`}>
-              {clients.filter(c => c.is_itr_client).length}
-            </span>
-          </button>
-          {/* Groups tab */}
-          <div className={`w-px h-6 flex-shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
-          <button
-            onClick={() => { setShowGroupsPanel(v => !v); fetchClientGroups(); }}
-            className={`flex items-center gap-1.5 h-9 px-3 rounded-xl border text-xs font-semibold whitespace-nowrap flex-shrink-0 transition-all ${
-              showGroupsPanel
-                ? 'text-white border-transparent shadow-sm'
-                : isDark ? 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600' : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700'
-            }`}
-            style={showGroupsPanel ? { background: 'linear-gradient(135deg, #4338CA, #7C3AED)' } : {}}
-          >
-            <Layers className="h-3.5 w-3.5 flex-shrink-0" />
-            <span>Groups</span>
-            {clientGroupsData.length > 0 && (
-              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
-                showGroupsPanel ? 'bg-white/20 text-white' : isDark ? 'bg-slate-600 text-slate-300' : 'bg-indigo-100 text-indigo-700'
-              }`}>
-                {clientGroupsData.length}
-              </span>
             )}
-          </button>
-          {/* Merge duplicates button */}
-          {canEditClients && (
-            <>
-              <div className={`w-px h-6 flex-shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
+            {/* ITR Clients */}
+            <button
+              onClick={() => { setItrTabActive(v => !v); clearBulkSelection(); }}
+              className={`flex items-center justify-center gap-1.5 h-9 px-2 rounded-xl border text-xs font-semibold transition-all min-w-0 ${
+                itrTabActive
+                  ? 'text-white border-transparent shadow-sm'
+                  : isDark ? 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600' : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-teal-50 hover:border-teal-300 hover:text-teal-700'
+              }`}
+              style={itrTabActive ? { background: 'linear-gradient(135deg, #0f3460, #0d7377)' } : {}}
+            >
+              <FileText className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="truncate">ITR Clients</span>
+              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+                itrTabActive ? 'bg-white/20 text-white' : isDark ? 'bg-slate-600 text-slate-300' : 'bg-teal-100 text-teal-700'
+              }`}>
+                {clients.filter(c => c.is_itr_client).length}
+              </span>
+            </button>
+            {/* Groups */}
+            <button
+              onClick={() => { setShowGroupsPanel(v => !v); fetchClientGroups(); }}
+              className={`flex items-center justify-center gap-1.5 h-9 px-2 rounded-xl border text-xs font-semibold transition-all min-w-0 ${
+                showGroupsPanel
+                  ? 'text-white border-transparent shadow-sm'
+                  : isDark ? 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600' : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700'
+              }`}
+              style={showGroupsPanel ? { background: 'linear-gradient(135deg, #4338CA, #7C3AED)' } : {}}
+            >
+              <Layers className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="truncate">Groups</span>
+              {clientGroupsData.length > 0 && (
+                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+                  showGroupsPanel ? 'bg-white/20 text-white' : isDark ? 'bg-slate-600 text-slate-300' : 'bg-indigo-100 text-indigo-700'
+                }`}>
+                  {clientGroupsData.length}
+                </span>
+              )}
+            </button>
+            {/* Merge Dupes */}
+            {canEditClients && (
               <button
                 onClick={handleOpenMerge}
                 disabled={detectingDups}
-                className={`flex items-center gap-1.5 h-9 px-3 rounded-xl border text-xs font-semibold whitespace-nowrap flex-shrink-0 transition-all ${
+                className={`flex items-center justify-center gap-1.5 h-9 px-2 rounded-xl border text-xs font-semibold transition-all min-w-0 ${
                   isDark ? 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600' : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-rose-50 hover:border-rose-300 hover:text-rose-700'
                 }`}
                 title="Detect & merge duplicate clients"
               >
                 {detectingDups ? <Loader2 className="h-3.5 w-3.5 animate-spin flex-shrink-0" /> : <Merge className="h-3.5 w-3.5 flex-shrink-0" />}
-                <span>Merge Dupes</span>
+                <span className="truncate">Merge Dupes</span>
               </button>
-            </>
-          )}
-          <div className={`w-px h-6 flex-shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
-          {/* Sort */}
-          <div className={`flex items-center border rounded-xl overflow-hidden flex-shrink-0 ${isDark ? 'border-slate-600 bg-slate-700' : 'border-slate-200 bg-slate-50'}`}>
-            {SORT_OPTIONS.map((opt, i) => {
-              const isActive = sortOrder === opt.value;
-              return (
-                <button key={opt.value} onClick={() => setSortOrder(opt.value)} title={opt.label}
-                  className="h-9 px-2.5 flex items-center gap-1 text-xs font-semibold transition-all whitespace-nowrap flex-shrink-0"
-                  style={{ background: isActive ? 'linear-gradient(135deg, #0D3B66, #1F6FB2)' : 'transparent', color: isActive ? '#ffffff' : isDark ? '#94a3b8' : '#64748b', borderRight: i < SORT_OPTIONS.length - 1 ? `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)'}` : 'none' }}>
-                  <span style={{ fontSize: 11, fontWeight: 900 }}>{opt.icon}</span>
-                  <span style={{ fontSize: 10 }}>{opt.hint}</span>
-                </button>
-              );
-            })}
+            )}
           </div>
-          <div className={`w-px h-6 flex-shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
-          {/* Filters */}
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className={`h-9 w-[110px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="active">Active</SelectItem><SelectItem value="inactive">Archived</SelectItem><SelectItem value="all">All Status</SelectItem></SelectContent>
-          </Select>
-          <Select value={clientTypeFilter} onValueChange={setClientTypeFilter}>
-            <SelectTrigger className={`h-9 w-[110px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue placeholder="All Types" /></SelectTrigger>
-            <SelectContent><SelectItem value="all">All Types</SelectItem>{CLIENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
-          </Select>
-          <Select value={serviceFilter} onValueChange={setServiceFilter}>
-            <SelectTrigger className={`h-9 w-[120px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="all">All Services</SelectItem>{SERVICES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
-          </Select>
-          {canAssignClients && users.length > 0 && (
-            <Select value={assignedToFilter} onValueChange={setAssignedToFilter}>
-              <SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue placeholder="All Users" /></SelectTrigger>
-              <SelectContent><SelectItem value="all">All Users</SelectItem>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name || u.name || u.email}</SelectItem>)}</SelectContent>
-            </Select>
-          )}
-          {savedReferrers.length > 0 && (
-            <Select value={referredByFilter} onValueChange={setReferredByFilter}>
-              <SelectTrigger className={`h-9 w-[140px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue placeholder="All Referrers" /></SelectTrigger>
-              <SelectContent><SelectItem value="all">All Referrers</SelectItem>{savedReferrers.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
-            </Select>
-          )}
         </div>
-        {/* Row 3: active filter chips */}
+        {/* Row 3: sort + filters — wrap-safe, no horizontal scroll */}
+        <div className={`px-3.5 py-2.5 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Sort buttons */}
+            <div className={`flex items-center border rounded-xl overflow-hidden flex-shrink-0 ${isDark ? 'border-slate-600 bg-slate-700' : 'border-slate-200 bg-slate-50'}`}>
+              {SORT_OPTIONS.map((opt, i) => {
+                const isActive = sortOrder === opt.value;
+                return (
+                  <button key={opt.value} onClick={() => setSortOrder(opt.value)} title={opt.label}
+                    className="h-9 px-2.5 flex items-center gap-1 text-xs font-semibold transition-all whitespace-nowrap"
+                    style={{ background: isActive ? 'linear-gradient(135deg, #0D3B66, #1F6FB2)' : 'transparent', color: isActive ? '#ffffff' : isDark ? '#94a3b8' : '#64748b', borderRight: i < SORT_OPTIONS.length - 1 ? `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)'}` : 'none' }}>
+                    <span style={{ fontSize: 11, fontWeight: 900 }}>{opt.icon}</span>
+                    <span style={{ fontSize: 10 }}>{opt.hint}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {/* Filters */}
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className={`h-9 w-[110px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="active">Active</SelectItem><SelectItem value="inactive">Archived</SelectItem><SelectItem value="all">All Status</SelectItem></SelectContent>
+            </Select>
+            <Select value={clientTypeFilter} onValueChange={setClientTypeFilter}>
+              <SelectTrigger className={`h-9 w-[110px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue placeholder="All Types" /></SelectTrigger>
+              <SelectContent><SelectItem value="all">All Types</SelectItem>{CLIENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
+            </Select>
+            <Select value={serviceFilter} onValueChange={setServiceFilter}>
+              <SelectTrigger className={`h-9 w-[120px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="all">All Services</SelectItem>{SERVICES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+            </Select>
+            {canAssignClients && users.length > 0 && (
+              <Select value={assignedToFilter} onValueChange={setAssignedToFilter}>
+                <SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue placeholder="All Users" /></SelectTrigger>
+                <SelectContent><SelectItem value="all">All Users</SelectItem>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name || u.name || u.email}</SelectItem>)}</SelectContent>
+              </Select>
+            )}
+            {savedReferrers.length > 0 && (
+              <Select value={referredByFilter} onValueChange={setReferredByFilter}>
+                <SelectTrigger className={`h-9 w-[140px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue placeholder="All Referrers" /></SelectTrigger>
+                <SelectContent><SelectItem value="all">All Referrers</SelectItem>{savedReferrers.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
+              </Select>
+            )}
+          </div>
+        </div>
+        {/* Row 4: active filter chips */}
         <ActiveFilterChips
           statusFilter={statusFilter} clientTypeFilter={clientTypeFilter}
           serviceFilter={serviceFilter} assignedToFilter={assignedToFilter} referredByFilter={referredByFilter}
