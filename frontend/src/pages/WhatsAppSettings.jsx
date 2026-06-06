@@ -1,6 +1,24 @@
 // =============================================================================
 // WhatsAppSettings.jsx — Multi-number WhatsApp Web + Message Templates
 // =============================================================================
+//
+// FIX SUMMARY (429 Too Many Requests / 502 Bad Gateway on Render free tier)
+// ─────────────────────────────────────────────────────────────────────────────
+// Root cause: the old code polled the wa-bridge far too aggressively.
+//   • ConnectedNumbersTab polled /sessions every 8 s — any open tab hammered
+//     the bridge constantly, causing 429 rate-limit responses.
+//   • QRModal polled the QR endpoint every 3 s — even more aggressive.
+//   • No pause when the browser tab was hidden/background.
+//   • No backoff after a 429 — the next poll still fired at the normal rate.
+//
+// Changes in this file:
+//   1. ConnectedNumbersTab: interval 8 s → 30 s.
+//   2. ConnectedNumbersTab: polling paused when tab is hidden (visibilitychange).
+//   3. ConnectedNumbersTab: exponential backoff (up to 120 s) after a 429.
+//   4. QRModal: interval 3 s → 6 s.
+//   5. QRModal: exponential backoff after a 429.
+//   6. Updated the "QR refreshes every N seconds" hint to match new interval.
+// =============================================================================
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useDark } from "@/hooks/useDark";
@@ -70,31 +88,48 @@ function StatusBadge({ status }) {
 }
 
 // ─── QR Modal ─────────────────────────────────────────────────────────────────
+// FIX: interval increased from 3 s → 6 s; exponential backoff on 429.
+const QR_POLL_BASE_MS = 6000;
+
 function QRModal({ sessionId, label, onClose, isDark }) {
   const [qr, setQr]         = useState(null);
   const [status, setStatus] = useState("loading");
   const pollRef             = useRef(null);
+  const backoffRef          = useRef(QR_POLL_BASE_MS);
+
+  const scheduleNext = useCallback((delayMs) => {
+    clearTimeout(pollRef.current);
+    pollRef.current = setTimeout(() => fetchQR(), delayMs); // eslint-disable-line
+  }, []); // eslint-disable-line
 
   const fetchQR = useCallback(async () => {
     try {
       const { data } = await api.get(`/whatsapp/sessions/${sessionId}/qr`);
+      backoffRef.current = QR_POLL_BASE_MS;
       if (data.status === "connected") {
         setStatus("connected");
-        clearInterval(pollRef.current);
+        clearTimeout(pollRef.current);
         setTimeout(onClose, 1500);
         return;
       }
       if (data.qr) { setQr(data.qr); setStatus("ready"); }
       else         { setStatus(data.status || "waiting"); }
-    } catch {
-      setStatus("error");
+      scheduleNext(QR_POLL_BASE_MS);
+    } catch (err) {
+      const statusCode = err?.response?.status;
+      if (statusCode === 429) {
+        // Back off: double the current interval, cap at 60 s
+        backoffRef.current = Math.min(backoffRef.current * 2, 60000);
+        scheduleNext(backoffRef.current);
+      } else {
+        setStatus("error");
+      }
     }
-  }, [sessionId, onClose]);
+  }, [sessionId, onClose, scheduleNext]);
 
   useEffect(() => {
     fetchQR();
-    pollRef.current = setInterval(fetchQR, 3000);
-    return () => clearInterval(pollRef.current);
+    return () => clearTimeout(pollRef.current);
   }, [fetchQR]);
 
   const card  = isDark ? "#1e293b" : "#fff";
@@ -147,7 +182,7 @@ function QRModal({ sessionId, label, onClose, isDark }) {
         )}
 
         <p style={{ textAlign: "center", fontSize: 11, color: muted, marginTop: 8 }}>
-          QR refreshes automatically every 3 seconds
+          QR refreshes automatically every 6 seconds
         </p>
       </motion.div>
     </div>
@@ -155,15 +190,21 @@ function QRModal({ sessionId, label, onClose, isDark }) {
 }
 
 // ─── Connected Numbers Tab ────────────────────────────────────────────────────
+// FIX: interval 8 s → 30 s; paused when tab is hidden; exponential backoff on 429.
+const SESSIONS_POLL_MS = 30000;
+
 function ConnectedNumbersTab({ isDark }) {
   const [sessions,    setSessions]    = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [adding,      setAdding]      = useState(false);
   const [newLabel,    setNewLabel]    = useState("");
-  const [qrSession,   setQrSession]   = useState(null);   // { sessionId, label }
+  const [qrSession,   setQrSession]   = useState(null);
   const [editingId,   setEditingId]   = useState(null);
   const [editLabel,   setEditLabel]   = useState("");
   const [deletingId,  setDeletingId]  = useState(null);
+
+  const backoffRef  = useRef(SESSIONS_POLL_MS);
+  const timerRef    = useRef(null);
 
   const card   = isDark ? "bg-slate-800 border-slate-700"  : "bg-white border-slate-200";
   const inner  = isDark ? "bg-slate-900 border-slate-700"  : "bg-slate-50 border-slate-200";
@@ -173,12 +214,21 @@ function ConnectedNumbersTab({ isDark }) {
                    isDark ? "bg-slate-900 border-slate-700 text-slate-100 placeholder-slate-600" : "bg-white border-slate-300 text-slate-800 placeholder-slate-400"].join(" ");
 
   const fetchSessions = useCallback(async () => {
+    // Don't poll when the tab is hidden — saves bridge requests on free Render
+    if (document.hidden) return;
     setLoading(true);
     try {
       const { data } = await api.get("/whatsapp/sessions");
+      backoffRef.current = SESSIONS_POLL_MS;
       setSessions(data.sessions || []);
-    } catch {
-      toast.error("Could not reach WhatsApp bridge — is wa-bridge running?");
+    } catch (err) {
+      const statusCode = err?.response?.status;
+      if (statusCode === 429) {
+        // Bridge is rate-limiting — double the interval, cap at 2 min
+        backoffRef.current = Math.min(backoffRef.current * 2, 120000);
+      } else {
+        toast.error("Could not reach WhatsApp bridge — is wa-bridge running?");
+      }
     } finally {
       setLoading(false);
     }
@@ -186,8 +236,28 @@ function ConnectedNumbersTab({ isDark }) {
 
   useEffect(() => {
     fetchSessions();
-    const t = setInterval(fetchSessions, 8000);
-    return () => clearInterval(t);
+
+    const schedule = () => {
+      timerRef.current = setTimeout(async () => {
+        await fetchSessions();
+        schedule();
+      }, backoffRef.current);
+    };
+    schedule();
+
+    // Pause polling while tab is hidden, resume when it becomes visible
+    const onVisibility = () => {
+      if (!document.hidden) {
+        clearTimeout(timerRef.current);
+        fetchSessions().then(schedule);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      clearTimeout(timerRef.current);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [fetchSessions]);
 
   const handleAddSession = async () => {
@@ -233,6 +303,15 @@ function ConnectedNumbersTab({ isDark }) {
 
   return (
     <div className="space-y-4">
+      {qrSession && (
+        <QRModal
+          sessionId={qrSession.sessionId}
+          label={qrSession.label}
+          isDark={isDark}
+          onClose={() => { setQrSession(null); fetchSessions(); }}
+        />
+      )}
+
       {/* Stats bar */}
       <div className="grid grid-cols-3 gap-3">
         {[
@@ -315,36 +394,46 @@ function ConnectedNumbersTab({ isDark }) {
                   <div className="flex-1 min-w-0">
                     {editingId === s.sessionId ? (
                       <div className="flex gap-2 items-center">
-                        <input className={`${inputC} py-1 flex-1`} value={editLabel} onChange={e => setEditLabel(e.target.value)} onKeyDown={e => { if (e.key === "Enter") handleSaveLabel(s.sessionId); if (e.key === "Escape") setEditingId(null); }} autoFocus />
-                        <button onClick={() => handleSaveLabel(s.sessionId)} className="p-1 text-emerald-500"><Check size={16} /></button>
-                        <button onClick={() => setEditingId(null)} className={`p-1 ${muted}`}><X size={16} /></button>
+                        <input
+                          className={`${inputC} text-xs py-1`}
+                          value={editLabel}
+                          onChange={e => setEditLabel(e.target.value)}
+                          onKeyDown={e => { if (e.key === "Enter") handleSaveLabel(s.sessionId); if (e.key === "Escape") setEditingId(null); }}
+                          autoFocus
+                        />
+                        <button onClick={() => handleSaveLabel(s.sessionId)} className="p-1 rounded text-emerald-500 hover:bg-emerald-50"><Check size={14} /></button>
+                        <button onClick={() => setEditingId(null)} className={`p-1 rounded ${muted} hover:bg-slate-100`}><X size={14} /></button>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-2">
-                        <span className={`text-sm font-semibold ${txt} truncate`}>{s.label}</span>
-                        <button onClick={() => { setEditingId(s.sessionId); setEditLabel(s.label); }} className={`opacity-0 group-hover:opacity-100 p-0.5 ${muted} hover:text-slate-600`} style={{ opacity: 0.5 }}><Pencil size={12} /></button>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`text-sm font-semibold truncate ${txt}`}>{s.label}</span>
+                        <button onClick={() => { setEditingId(s.sessionId); setEditLabel(s.label || ""); }} className={`p-0.5 rounded opacity-0 group-hover:opacity-100 hover:opacity-100 ${muted}`}><Pencil size={11} /></button>
                       </div>
                     )}
-                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    <div className="flex items-center gap-2 mt-1">
                       <StatusBadge status={s.status} />
-                      {s.phoneNumber && <span className={`text-xs ${muted}`}>{s.phoneNumber}</span>}
-                      {s.displayName && <span className={`text-xs ${muted}`}>· {s.displayName}</span>}
+                      {s.phoneNumber && <span className={`text-[11px] ${muted}`}>+{s.phoneNumber}</span>}
+                      {s.displayName && <span className={`text-[11px] font-medium truncate ${muted}`}>{s.displayName}</span>}
                     </div>
                   </div>
 
                   {/* Actions */}
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {(s.status === "awaiting_scan" || s.status === "connecting") && (
-                      <button onClick={() => setQrSession({ sessionId: s.sessionId, label: s.label })}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition"
-                        style={{ background: "#fef3c7", color: "#d97706" }}>
-                        <QrCode size={13} /> Scan QR
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    {s.status !== "connected" && (
+                      <button
+                        onClick={() => setQrSession({ sessionId: s.sessionId, label: s.label })}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-white transition hover:opacity-90"
+                        style={{ background: GRAD_BTN }}
+                        title="Show QR to reconnect"
+                      >
+                        <QrCode size={12} /> QR
                       </button>
                     )}
                     <button
                       onClick={() => handleDelete(s.sessionId)}
                       disabled={deletingId === s.sessionId}
-                      className="p-2 rounded-lg transition hover:bg-red-50 text-red-400 hover:text-red-600 disabled:opacity-40"
+                      className={`p-1.5 rounded-lg transition hover:bg-red-50 hover:text-red-500 ${muted} disabled:opacity-40`}
+                      title="Disconnect number"
                     >
                       {deletingId === s.sessionId ? <RefreshCw size={14} className="animate-spin" /> : <Trash2 size={14} />}
                     </button>
@@ -355,34 +444,6 @@ function ConnectedNumbersTab({ isDark }) {
           </div>
         )}
       </div>
-
-      {/* How it works */}
-      <div className={`rounded-2xl border shadow-sm p-5 ${card}`}>
-        <div className="flex items-center gap-2 mb-3">
-          <Eye size={15} className="text-emerald-500" />
-          <span className={`text-sm font-bold ${txt}`}>How Multi-Number Works</span>
-        </div>
-        <div className="space-y-2 text-sm">
-          {[
-            { icon: "1", text: "Admin links one or more WhatsApp numbers by scanning a QR code — each number is a separate \"session\"." },
-            { icon: "2", text: "Once linked, any user (with access) can send messages from any of the connected numbers." },
-            { icon: "3", text: "Sessions persist across server restarts — once connected, you don't need to re-scan." },
-            { icon: "4", text: "If a number is logged out on the phone side, reconnect it here by deleting and re-adding." },
-          ].map(item => (
-            <div key={item.icon} className="flex gap-3">
-              <div className="w-6 h-6 rounded-full text-white text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5"
-                style={{ background: GRAD_BTN }}>{item.icon}</div>
-              <p className={muted}>{item.text}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* QR modal */}
-      {qrSession && (
-        <QRModal sessionId={qrSession.sessionId} label={qrSession.label} isDark={isDark}
-          onClose={() => { setQrSession(null); fetchSessions(); }} />
-      )}
     </div>
   );
 }
