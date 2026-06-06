@@ -5295,16 +5295,17 @@ export default function Clients() {
     return (
       <div style={{ ...style, paddingTop: 2, paddingBottom: 2, paddingLeft: 4, paddingRight: 4 }}>
         <div
-          className={`relative rounded-xl border transition-all duration-200 overflow-hidden group cursor-pointer flex items-center gap-4 pl-3 pr-3 h-full
+          className={`relative rounded-xl border transition-all duration-200 overflow-hidden group cursor-pointer flex items-center h-full
             ${isArchived ? 'opacity-60' : ''}
             ${isSelected ? (isDark ? 'border-red-500 bg-red-900/10' : 'border-red-300 bg-red-50/60') : isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-500 hover:shadow-sm' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm'}`}
+          style={{ gap: 16, paddingLeft: 16, paddingRight: 12 }}
           onClick={() => { if (bsi.size === 0) { setSelectedClient(client); setDetailDialogOpen(true); } }}>
           <div className="absolute left-0 top-0 h-full w-1" style={{ background: isSelected ? '#ef4444' : (itrTabActive ? 'linear-gradient(180deg, #0f3460, #0d7377)' : cfg.strip) }} />
           {/* Bulk select checkbox */}
           {cdd && (
             <div
               onClick={e => tbs(client.id, e)}
-              className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer transition-all ml-1
+              className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer transition-all
                 ${isSelected ? 'bg-red-500 border-red-500' : isDark ? 'border-slate-500 hover:border-red-400' : 'border-slate-300 hover:border-red-400 opacity-0 group-hover:opacity-100'}`}
               style={isSelected ? {} : {}}
             >
@@ -6619,9 +6620,12 @@ export default function Clients() {
         <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col" style={{ background: isDark ? '#1e293b' : '#ffffff', borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' }}>
           <div className="overflow-x-auto">
           <div style={{minWidth:780}}>
-          <div className={`flex items-center gap-4 px-5 py-3 border-b flex-shrink-0 ${isDark ? 'bg-slate-700/60 border-slate-600' : 'bg-slate-50 border-slate-100'}`}>
-            {/* Select-all checkbox */}
-            {canDeleteData && (
+          <div
+            className={`flex items-center border-b flex-shrink-0 ${isDark ? 'bg-slate-700/60 border-slate-600' : 'bg-slate-50 border-slate-100'}`}
+            style={{ gap: 16, paddingLeft: 16, paddingRight: 12, paddingTop: 10, paddingBottom: 10 }}
+          >
+            {/* Select-all checkbox — matches the w-5 checkbox in each row */}
+            {canDeleteData ? (
               <div
                 onClick={() => selectAllVisible(listPageClients)}
                 className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 cursor-pointer transition-all
@@ -6633,8 +6637,12 @@ export default function Clients() {
                   <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
                 )}
               </div>
+            ) : (
+              /* spacer matching the ml-1 + w-5 checkbox that appears in the row when canDeleteData */
+              <div className="w-5 flex-shrink-0" />
             )}
-            {!canDeleteData && <div className="w-8 flex-shrink-0" />}
+            {/* Avatar spacer — matches the w-8 avatar circle in each row */}
+            <div className="w-8 flex-shrink-0" />
             <div className="w-56 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Company</div>
             <div className="w-28 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Type</div>
             {itrTabActive ? (
@@ -6642,11 +6650,12 @@ export default function Clients() {
             ) : (
               <div className="w-36 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Phone</div>
             )}
-            <div className="flex-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Email</div>
+            <div className="flex-1 min-w-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Email</div>
             <div className="w-28 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-violet-400">Referred By</div>
             <div className="w-28 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest" style={{ color: '#7c3aed' }}>Auditor</div>
             <div className="w-44 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Services</div>
             <div className="w-32 flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-slate-400">Assigned</div>
+            {/* Actions spacer */}
             <div className="w-24 flex-shrink-0" />
           </div>
           <div style={{ height: Math.max(listHeight, LIST_ROW_HEIGHT) }}>
