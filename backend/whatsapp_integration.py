@@ -83,6 +83,7 @@ def _invalidate_sessions_cache():
 
 class WASessionCreate(BaseModel):
     label: Optional[str] = None
+    pairing_phone: Optional[str] = None  # E.164 digits, e.g. "919876543210"
 
 class WAAccessRequest(BaseModel):
     reason: str = Field(..., min_length=5, max_length=500)
@@ -227,7 +228,11 @@ async def list_sessions(current_user: User = Depends(get_current_user)):
 @router.post("/sessions")
 async def add_session(body: WASessionCreate, current_user: User = Depends(require_admin())):
     session_id = f"wa_{int(_time.time() * 1000)}"
-    bridge_resp = await _bridge_post("/sessions", {"sessionId": session_id})
+    bridge_payload: Dict[str, Any] = {"sessionId": session_id}
+    if body.pairing_phone:
+        # Strip non-digits, pass to bridge for code-based pairing
+        bridge_payload["pairingPhone"] = "".join(c for c in body.pairing_phone if c.isdigit())
+    bridge_resp = await _bridge_post("/sessions", bridge_payload)
     db = _db()
     await db["whatsapp_sessions"].insert_one({
         "session_id": session_id,
@@ -236,15 +241,22 @@ async def add_session(body: WASessionCreate, current_user: User = Depends(requir
         "added_by_name": current_user.full_name,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "status": "connecting",
+        "auth_method": "pairing_code" if body.pairing_phone else "qr",
     })
-    _invalidate_sessions_cache()  # force fresh data on next poll
+    _invalidate_sessions_cache()
     return {"sessionId": session_id, "label": body.label,
-            "message": "Poll /whatsapp/sessions/{id}/qr for QR code."}
+            "message": bridge_resp.get("message", "Session started")}
 
 
 @router.get("/sessions/{session_id}/qr")
 async def get_session_qr(session_id: str, current_user: User = Depends(require_admin())):
     return await _bridge_get(f"/sessions/{session_id}/qr")
+
+
+@router.get("/sessions/{session_id}/pair-code")
+async def get_session_pair_code(session_id: str, current_user: User = Depends(require_admin())):
+    """Get the 8-digit pairing code for phone-number based linking (no QR needed)."""
+    return await _bridge_get(f"/sessions/{session_id}/pair-code")
 
 
 @router.delete("/sessions/{session_id}")
