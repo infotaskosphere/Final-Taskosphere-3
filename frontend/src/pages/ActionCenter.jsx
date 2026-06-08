@@ -644,14 +644,23 @@ export default function ActionCenter() {
     setSavedKeys(prev => { const s = new Set(prev); s.add(key); return s; });
   }, []);
 
-  const handleDismiss = useCallback((key) => {
+  const handleDismiss = useCallback(async (key, event) => {
+    // Optimistically remove from UI
     setDismissedKeys(prev => { const s = new Set(prev); s.add(key); return s; });
-    toast.info("Event dismissed from Action Center");
+    // Remove from backend so it won't reappear after next load
+    if (event?.id) {
+      try { await api.delete(`/email/events/${event.id}`); }
+      catch (_) { /* best-effort — UI already dismissed */ }
+    }
+    toast.info("Event removed from Action Center");
   }, []);
 
   // Filtered + sorted events
   const processed = useMemo(() => {
     let arr = [...events];
+
+    // Dismissed filter — remove events the user has closed
+    arr = arr.filter(e => !dismissedKeys.has(e.id || `${e.title}::${e.date}`));
 
     // Search
     if (searchQ.trim()) {
@@ -691,7 +700,7 @@ export default function ActionCenter() {
     });
 
     return arr;
-  }, [events, searchQ, filterCat, filterUrgency, showPast, sortBy, savedKeys]);
+  }, [events, searchQ, filterCat, filterUrgency, showPast, sortBy, savedKeys, dismissedKeys]);
 
   // Group by date bucket
   const grouped = useMemo(() => {
@@ -921,7 +930,9 @@ export default function ActionCenter() {
                       <EventCard key={ev.id || `${ev.title}::${ev.date}`}
                         event={ev} isDark={isDark}
                         savedKeys={savedKeys}
-                        onSaved={handleEventSaved} />
+                        onSaved={handleEventSaved}
+                        onDismiss={handleDismiss}
+                        viewMode={viewMode} />
                     ))}
                   </motion.div>
                 )}
