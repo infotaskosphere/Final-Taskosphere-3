@@ -135,18 +135,24 @@ app.use(express.json({ limit: "2mb" }));
 // SESSION MANAGEMENT
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function startSession(sessionId, webhookOnConnect = true) {
+// ─── Persistent keep-alive: max retries removed — reconnect forever until logout ─
+const MAX_RECONNECT_DELAY_MS = 120000; // 2 min cap between retries
+
+async function startSession(sessionId, webhookOnConnect = true, usePairingCode = false, phoneNumber = null) {
   const sessionDir = path.join(SESSIONS_DIR, sessionId);
   if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
 
   sessions[sessionId] = sessions[sessionId] || {};
-  sessions[sessionId].status    = "connecting";
-  sessions[sessionId].qrBase64  = null;
-  sessions[sessionId].retryCount = (sessions[sessionId].retryCount || 0);
+  sessions[sessionId].status         = "connecting";
+  sessions[sessionId].qrBase64       = null;
+  sessions[sessionId].pairingCode    = null;
+  sessions[sessionId].retryCount     = (sessions[sessionId].retryCount || 0);
+  sessions[sessionId].manuallyRemoved = false; // flag set on explicit DELETE
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
   const version = await getWAVersion();
 
+  // Use mobile pairing code mode when requested (no QR generated in this mode)
   const sock = makeWASocket({
     version,
     auth: state,
@@ -154,16 +160,34 @@ async function startSession(sessionId, webhookOnConnect = true) {
     printQRInTerminal: false,
     browser: ["Taskosphere", "Chrome", "1.0"],
     generateHighQualityLinkPreview: false,
-    // Reduce 429s: increase retry delays
     retryRequestDelayMs: 2000,
+    // mobile pairing: skip QR if we want code-based auth
+    ...(usePairingCode ? { mobile: false } : {}),
   });
 
   sessions[sessionId].socket = sock;
 
+  // Request pairing code immediately after socket opens (before creds registered)
+  if (usePairingCode && phoneNumber && !state.creds.registered) {
+    // Baileys needs a moment to set up before requesting the code
+    setTimeout(async () => {
+      try {
+        const digits = phoneNumber.replace(/\D/g, "");
+        const code = await sock.requestPairingCode(digits);
+        sessions[sessionId].pairingCode = code;
+        sessions[sessionId].status      = "awaiting_pair";
+        console.log(`[${sessionId}] Pairing code: ${code}`);
+      } catch (e) {
+        console.error(`[${sessionId}] Pairing code request failed:`, e.message);
+        sessions[sessionId].pairingCodeError = e.message;
+      }
+    }, 3000);
+  }
+
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
-    if (qr) {
+    if (qr && !usePairingCode) {
       try {
         sessions[sessionId].qrBase64 = await QRCode.toDataURL(qr);
         sessions[sessionId].status   = "awaiting_scan";
@@ -177,6 +201,7 @@ async function startSession(sessionId, webhookOnConnect = true) {
       const info = sock.user;
       sessions[sessionId].status      = "connected";
       sessions[sessionId].qrBase64    = null;
+      sessions[sessionId].pairingCode = null;
       sessions[sessionId].phoneNumber = info?.id?.split(":")[0] || "";
       sessions[sessionId].displayName = info?.name || info?.verifiedName || "";
       sessions[sessionId].connectedAt = new Date().toISOString();
@@ -200,7 +225,9 @@ async function startSession(sessionId, webhookOnConnect = true) {
     if (connection === "close") {
       const code   = lastDisconnect?.error?.output?.statusCode;
       const reason = DisconnectReason[code] || code;
-      const shouldReconnect = code !== DisconnectReason.loggedOut;
+      // Only stop reconnecting on explicit logout OR if admin manually removed the session
+      const loggedOut = code === DisconnectReason.loggedOut;
+      const shouldReconnect = !loggedOut && !sessions[sessionId]?.manuallyRemoved;
 
       console.log(`[${sessionId}] Disconnected (${reason}). Reconnect: ${shouldReconnect}`);
       sessions[sessionId].status  = shouldReconnect ? "reconnecting" : "disconnected";
@@ -210,14 +237,24 @@ async function startSession(sessionId, webhookOnConnect = true) {
         await axios.post(`${BACKEND_URL}/whatsapp/webhook/disconnected`, { sessionId, reason });
       } catch (_) {}
 
-      if (shouldReconnect && sessions[sessionId].retryCount < 5) {
+      if (shouldReconnect) {
+        // Persistent reconnect: exponential backoff, no hard retry limit
         sessions[sessionId].retryCount++;
-        const delay = Math.min(8000 * sessions[sessionId].retryCount, 60000);
-        console.log(`[${sessionId}] Reconnecting in ${delay}ms (attempt ${sessions[sessionId].retryCount})`);
-        setTimeout(() => startSession(sessionId, false), delay);
-      } else if (!shouldReconnect) {
+        const delay = Math.min(5000 * Math.pow(1.5, sessions[sessionId].retryCount - 1), MAX_RECONNECT_DELAY_MS);
+        console.log(`[${sessionId}] Reconnecting in ${Math.round(delay/1000)}s (attempt ${sessions[sessionId].retryCount})`);
+        setTimeout(() => {
+          if (!sessions[sessionId]?.manuallyRemoved) startSession(sessionId, true, false, null);
+        }, delay);
+      } else if (loggedOut) {
+        // Phone logged out — clear stored creds so next connect starts fresh
         try { fs.rmSync(path.join(SESSIONS_DIR, sessionId), { recursive: true, force: true }); } catch (_) {}
-        delete sessions[sessionId];
+        if (!sessions[sessionId]?.manuallyRemoved) {
+          // Keep the session record but reset status — admin will need to re-scan
+          sessions[sessionId].status = "disconnected";
+          sessions[sessionId].retryCount = 0;
+        } else {
+          delete sessions[sessionId];
+        }
       }
     }
   });
@@ -259,13 +296,21 @@ app.get("/sessions", (req, res) => {
 });
 
 app.post("/sessions", async (req, res) => {
-  const sessionId = req.body.sessionId || `session_${Date.now()}`;
+  const { sessionId: reqSessionId, pairingPhone } = req.body;
+  const sessionId = reqSessionId || `session_${Date.now()}`;
   if (sessions[sessionId]?.status === "connected") {
     return res.status(409).json({ error: "Session already connected" });
   }
   try {
-    await startSession(sessionId);
-    res.json({ sessionId, status: "connecting", message: "Poll /sessions/:id/qr for QR code" });
+    const usePairingCode = !!pairingPhone;
+    await startSession(sessionId, true, usePairingCode, pairingPhone || null);
+    res.json({
+      sessionId,
+      status: "connecting",
+      message: usePairingCode
+        ? `Poll /sessions/${sessionId}/pair-code for your 8-digit pairing code`
+        : `Poll /sessions/${sessionId}/qr for QR code`,
+    });
   } catch (e) {
     console.error(`Failed to start session ${sessionId}:`, e.message);
     res.status(500).json({ error: `Failed to start session: ${e.message}` });
@@ -294,9 +339,22 @@ app.get("/sessions/:id/qr", (req, res) => {
   res.json({ qr: s.qrBase64, status: s.status });
 });
 
+// ── GET /sessions/:id/pair-code — phone-number based linking code ─────────────
+app.get("/sessions/:id/pair-code", (req, res) => {
+  const s = sessions[req.params.id];
+  if (!s) return res.status(404).json({ error: "Session not found" });
+  if (s.status === "connected") return res.json({ code: null, status: "connected" });
+  if (s.pairingCodeError) return res.status(500).json({ error: s.pairingCodeError });
+  if (!s.pairingCode) return res.json({ code: null, status: s.status || "waiting" });
+  res.json({ code: s.pairingCode, status: s.status });
+});
+
 app.delete("/sessions/:id", async (req, res) => {
   const s = sessions[req.params.id];
   if (!s) return res.status(404).json({ error: "Session not found" });
+
+  // Mark as manually removed BEFORE logout so reconnect loop knows to stop
+  s.manuallyRemoved = true;
 
   try { if (s.socket) await s.socket.logout(); } catch (_) {}
   try { fs.rmSync(path.join(SESSIONS_DIR, req.params.id), { recursive: true, force: true }); } catch (_) {}
