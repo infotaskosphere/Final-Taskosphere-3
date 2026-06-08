@@ -782,11 +782,16 @@ export default function Reminders() {
     if (!id) return;
     try {
       await api.patch(`/email/reminders/${id}`, { is_dismissed: true });
+      const rem = reminders.find(r => resolveId(r) === String(id));
       setReminders((prev) =>
         prev.map((r) =>
           resolveId(r) === String(id) ? { ...r, is_dismissed: true } : r,
         ),
       );
+      // Also remove the linked email event from Action Center (best-effort)
+      if (rem?.event_id) {
+        api.delete(`/email/events/${rem.event_id}`).catch(() => {});
+      }
     } catch {}
   };
 
@@ -852,15 +857,23 @@ export default function Reminders() {
   // Delete reminder
   const handleDelete = async (id) => {
     if (!id) return;
+    const rem = reminders.find(r => resolveId(r) === String(id));
     try {
       await api.delete(`/email/reminders/${id}`);
       toast.success("Reminder deleted");
       setReminders((prev) => prev.filter((r) => resolveId(r) !== String(id)));
+      // Also remove the linked email event from Action Center (best-effort)
+      if (rem?.event_id) {
+        api.delete(`/email/events/${rem.event_id}`).catch(() => {});
+      }
     } catch {
       try {
         await api.patch(`/email/reminders/${id}`, { is_dismissed: true });
         toast.success("Reminder dismissed");
         setReminders((prev) => prev.filter((r) => resolveId(r) !== String(id)));
+        if (rem?.event_id) {
+          api.delete(`/email/events/${rem.event_id}`).catch(() => {});
+        }
       } catch {
         toast.error("Failed to delete reminder");
       }
