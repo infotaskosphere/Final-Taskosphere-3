@@ -135,24 +135,18 @@ app.use(express.json({ limit: "2mb" }));
 // SESSION MANAGEMENT
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ─── Persistent keep-alive: max retries removed — reconnect forever until logout ─
-const MAX_RECONNECT_DELAY_MS = 120000; // 2 min cap between retries
-
-async function startSession(sessionId, webhookOnConnect = true, usePairingCode = false, phoneNumber = null) {
+async function startSession(sessionId, webhookOnConnect = true) {
   const sessionDir = path.join(SESSIONS_DIR, sessionId);
   if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
 
   sessions[sessionId] = sessions[sessionId] || {};
-  sessions[sessionId].status         = "connecting";
-  sessions[sessionId].qrBase64       = null;
-  sessions[sessionId].pairingCode    = null;
-  sessions[sessionId].retryCount     = (sessions[sessionId].retryCount || 0);
-  sessions[sessionId].manuallyRemoved = false; // flag set on explicit DELETE
+  sessions[sessionId].status    = "connecting";
+  sessions[sessionId].qrBase64  = null;
+  sessions[sessionId].retryCount = (sessions[sessionId].retryCount || 0);
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
   const version = await getWAVersion();
 
-  // Use mobile pairing code mode when requested (no QR generated in this mode)
   const sock = makeWASocket({
     version,
     auth: state,
@@ -160,34 +154,16 @@ async function startSession(sessionId, webhookOnConnect = true, usePairingCode =
     printQRInTerminal: false,
     browser: ["Taskosphere", "Chrome", "1.0"],
     generateHighQualityLinkPreview: false,
+    // Reduce 429s: increase retry delays
     retryRequestDelayMs: 2000,
-    // mobile pairing: skip QR if we want code-based auth
-    ...(usePairingCode ? { mobile: false } : {}),
   });
 
   sessions[sessionId].socket = sock;
 
-  // Request pairing code immediately after socket opens (before creds registered)
-  if (usePairingCode && phoneNumber && !state.creds.registered) {
-    // Baileys needs a moment to set up before requesting the code
-    setTimeout(async () => {
-      try {
-        const digits = phoneNumber.replace(/\D/g, "");
-        const code = await sock.requestPairingCode(digits);
-        sessions[sessionId].pairingCode = code;
-        sessions[sessionId].status      = "awaiting_pair";
-        console.log(`[${sessionId}] Pairing code: ${code}`);
-      } catch (e) {
-        console.error(`[${sessionId}] Pairing code request failed:`, e.message);
-        sessions[sessionId].pairingCodeError = e.message;
-      }
-    }, 3000);
-  }
-
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
-    if (qr && !usePairingCode) {
+    if (qr) {
       try {
         sessions[sessionId].qrBase64 = await QRCode.toDataURL(qr);
         sessions[sessionId].status   = "awaiting_scan";
@@ -201,7 +177,6 @@ async function startSession(sessionId, webhookOnConnect = true, usePairingCode =
       const info = sock.user;
       sessions[sessionId].status      = "connected";
       sessions[sessionId].qrBase64    = null;
-      sessions[sessionId].pairingCode = null;
       sessions[sessionId].phoneNumber = info?.id?.split(":")[0] || "";
       sessions[sessionId].displayName = info?.name || info?.verifiedName || "";
       sessions[sessionId].connectedAt = new Date().toISOString();
@@ -225,9 +200,7 @@ async function startSession(sessionId, webhookOnConnect = true, usePairingCode =
     if (connection === "close") {
       const code   = lastDisconnect?.error?.output?.statusCode;
       const reason = DisconnectReason[code] || code;
-      // Only stop reconnecting on explicit logout OR if admin manually removed the session
-      const loggedOut = code === DisconnectReason.loggedOut;
-      const shouldReconnect = !loggedOut && !sessions[sessionId]?.manuallyRemoved;
+      const shouldReconnect = code !== DisconnectReason.loggedOut;
 
       console.log(`[${sessionId}] Disconnected (${reason}). Reconnect: ${shouldReconnect}`);
       sessions[sessionId].status  = shouldReconnect ? "reconnecting" : "disconnected";
@@ -237,24 +210,14 @@ async function startSession(sessionId, webhookOnConnect = true, usePairingCode =
         await axios.post(`${BACKEND_URL}/whatsapp/webhook/disconnected`, { sessionId, reason });
       } catch (_) {}
 
-      if (shouldReconnect) {
-        // Persistent reconnect: exponential backoff, no hard retry limit
+      if (shouldReconnect && sessions[sessionId].retryCount < 5) {
         sessions[sessionId].retryCount++;
-        const delay = Math.min(5000 * Math.pow(1.5, sessions[sessionId].retryCount - 1), MAX_RECONNECT_DELAY_MS);
-        console.log(`[${sessionId}] Reconnecting in ${Math.round(delay/1000)}s (attempt ${sessions[sessionId].retryCount})`);
-        setTimeout(() => {
-          if (!sessions[sessionId]?.manuallyRemoved) startSession(sessionId, true, false, null);
-        }, delay);
-      } else if (loggedOut) {
-        // Phone logged out — clear stored creds so next connect starts fresh
+        const delay = Math.min(8000 * sessions[sessionId].retryCount, 60000);
+        console.log(`[${sessionId}] Reconnecting in ${delay}ms (attempt ${sessions[sessionId].retryCount})`);
+        setTimeout(() => startSession(sessionId, false), delay);
+      } else if (!shouldReconnect) {
         try { fs.rmSync(path.join(SESSIONS_DIR, sessionId), { recursive: true, force: true }); } catch (_) {}
-        if (!sessions[sessionId]?.manuallyRemoved) {
-          // Keep the session record but reset status — admin will need to re-scan
-          sessions[sessionId].status = "disconnected";
-          sessions[sessionId].retryCount = 0;
-        } else {
-          delete sessions[sessionId];
-        }
+        delete sessions[sessionId];
       }
     }
   });
@@ -280,6 +243,30 @@ function pickSession(sessionId) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// MEDIA HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Build the correct Baileys message payload for a given MIME type. */
+function buildMediaPayload(buffer, mimeType, filename, caption) {
+  if (mimeType.startsWith("image/")) {
+    return { image: buffer, caption: caption || undefined };
+  }
+  if (mimeType.startsWith("video/")) {
+    return { video: buffer, caption: caption || undefined };
+  }
+  if (mimeType.startsWith("audio/")) {
+    return { audio: buffer, mimetype: mimeType, ptt: false };
+  }
+  // PDF, Excel, Word, etc — document type
+  return {
+    document: buffer,
+    mimetype: mimeType,
+    fileName: filename || "file",
+    caption: caption || undefined,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // REST API
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -296,21 +283,13 @@ app.get("/sessions", (req, res) => {
 });
 
 app.post("/sessions", async (req, res) => {
-  const { sessionId: reqSessionId, pairingPhone } = req.body;
-  const sessionId = reqSessionId || `session_${Date.now()}`;
+  const sessionId = req.body.sessionId || `session_${Date.now()}`;
   if (sessions[sessionId]?.status === "connected") {
     return res.status(409).json({ error: "Session already connected" });
   }
   try {
-    const usePairingCode = !!pairingPhone;
-    await startSession(sessionId, true, usePairingCode, pairingPhone || null);
-    res.json({
-      sessionId,
-      status: "connecting",
-      message: usePairingCode
-        ? `Poll /sessions/${sessionId}/pair-code for your 8-digit pairing code`
-        : `Poll /sessions/${sessionId}/qr for QR code`,
-    });
+    await startSession(sessionId);
+    res.json({ sessionId, status: "connecting", message: "Poll /sessions/:id/qr for QR code" });
   } catch (e) {
     console.error(`Failed to start session ${sessionId}:`, e.message);
     res.status(500).json({ error: `Failed to start session: ${e.message}` });
@@ -339,22 +318,9 @@ app.get("/sessions/:id/qr", (req, res) => {
   res.json({ qr: s.qrBase64, status: s.status });
 });
 
-// ── GET /sessions/:id/pair-code — phone-number based linking code ─────────────
-app.get("/sessions/:id/pair-code", (req, res) => {
-  const s = sessions[req.params.id];
-  if (!s) return res.status(404).json({ error: "Session not found" });
-  if (s.status === "connected") return res.json({ code: null, status: "connected" });
-  if (s.pairingCodeError) return res.status(500).json({ error: s.pairingCodeError });
-  if (!s.pairingCode) return res.json({ code: null, status: s.status || "waiting" });
-  res.json({ code: s.pairingCode, status: s.status });
-});
-
 app.delete("/sessions/:id", async (req, res) => {
   const s = sessions[req.params.id];
   if (!s) return res.status(404).json({ error: "Session not found" });
-
-  // Mark as manually removed BEFORE logout so reconnect loop knows to stop
-  s.manuallyRemoved = true;
 
   try { if (s.socket) await s.socket.logout(); } catch (_) {}
   try { fs.rmSync(path.join(SESSIONS_DIR, req.params.id), { recursive: true, force: true }); } catch (_) {}
@@ -386,14 +352,13 @@ app.post("/send", async (req, res) => {
   }
 });
 
-// ── POST /send-media — send image / PDF / Excel / doc ────────────────────────
-//    Accepts: multipart/form-data OR JSON with base64 data
+// ── POST /send-media — send image / PDF / Excel / doc (multipart upload) ──────
 //    Multipart fields: to, sessionId (opt), caption (opt), file (binary)
-//    JSON fields:      to, sessionId (opt), caption (opt), mimeType, base64, filename
 app.post("/send-media", upload.single("file"), async (req, res) => {
   try {
     const { to, sessionId, caption } = req.body;
     if (!to) return res.status(400).json({ error: "to is required" });
+    if (!req.file) return res.status(400).json({ error: "No file uploaded. Use /send-media-base64 for base64 JSON." });
 
     const jid = to.includes("@") ? to : `${to.replace(/\D/g, "")}@s.whatsapp.net`;
     const session = pickSession(sessionId);
@@ -401,41 +366,12 @@ app.post("/send-media", upload.single("file"), async (req, res) => {
       return res.status(503).json({ error: "No connected WhatsApp session available" });
     }
 
-    let mediaBuffer, mimeType, filename;
+    const mediaBuffer = fs.readFileSync(req.file.path);
+    const mimeType    = req.file.mimetype;
+    const filename    = req.file.originalname;
+    fs.unlink(req.file.path, () => {});
 
-    if (req.file) {
-      // Multipart upload
-      mediaBuffer = fs.readFileSync(req.file.path);
-      mimeType     = req.file.mimetype;
-      filename     = req.file.originalname;
-      // Clean up temp file
-      fs.unlink(req.file.path, () => {});
-    } else if (req.body.base64 && req.body.mimeType) {
-      // Base64 JSON
-      mediaBuffer = Buffer.from(req.body.base64, "base64");
-      mimeType     = req.body.mimeType;
-      filename     = req.body.filename || "file";
-    } else {
-      return res.status(400).json({ error: "Provide a file (multipart) or base64+mimeType (JSON)" });
-    }
-
-    // Determine message type from MIME
-    let msgPayload;
-    if (mimeType.startsWith("image/")) {
-      msgPayload = { image: mediaBuffer, caption: caption || undefined };
-    } else if (mimeType.startsWith("video/")) {
-      msgPayload = { video: mediaBuffer, caption: caption || undefined };
-    } else if (mimeType.startsWith("audio/")) {
-      msgPayload = { audio: mediaBuffer, mimetype: mimeType, ptt: false };
-    } else {
-      // PDF, Excel, Word, etc — send as document
-      msgPayload = {
-        document: mediaBuffer,
-        mimetype: mimeType,
-        fileName: filename,
-        caption: caption || undefined,
-      };
-    }
+    const msgPayload = buildMediaPayload(mediaBuffer, mimeType, filename, caption);
 
     const result = await enqueueSend(session.sessionId || sessionId || "default", () =>
       session.socket.sendMessage(jid, msgPayload)
@@ -445,6 +381,37 @@ app.post("/send-media", upload.single("file"), async (req, res) => {
   } catch (e) {
     const status = e?.output?.statusCode || e?.status || 500;
     console.error("Media send failed:", e.message);
+    res.status(status === 429 ? 429 : 500).json({ error: e.message, retryable: status === 429 });
+  }
+});
+
+// ── POST /send-media-base64 — send media via base64 JSON (no multer) ──────────
+//    JSON fields: to, sessionId (opt), caption (opt), mimeType, base64, filename
+app.post("/send-media-base64", express.json({ limit: "25mb" }), async (req, res) => {
+  try {
+    const { to, sessionId, caption, base64, mimeType, filename } = req.body;
+    if (!to)       return res.status(400).json({ error: "to is required" });
+    if (!base64)   return res.status(400).json({ error: "base64 is required" });
+    if (!mimeType) return res.status(400).json({ error: "mimeType is required" });
+
+    const jid = to.includes("@") ? to : `${to.replace(/\D/g, "")}@s.whatsapp.net`;
+    const session = pickSession(sessionId);
+    if (!session || !session.socket) {
+      return res.status(503).json({ error: "No connected WhatsApp session available" });
+    }
+
+    const mediaBuffer = Buffer.from(base64, "base64");
+    const fname       = filename || "file";
+    const msgPayload  = buildMediaPayload(mediaBuffer, mimeType, fname, caption);
+
+    const result = await enqueueSend(session.sessionId || sessionId || "default", () =>
+      session.socket.sendMessage(jid, msgPayload)
+    );
+
+    res.json({ success: true, messageId: result?.key?.id, filename: fname, mimeType });
+  } catch (e) {
+    const status = e?.output?.statusCode || e?.status || 500;
+    console.error("Media (base64) send failed:", e.message);
     res.status(status === 429 ? 429 : 500).json({ error: e.message, retryable: status === 429 });
   }
 });
