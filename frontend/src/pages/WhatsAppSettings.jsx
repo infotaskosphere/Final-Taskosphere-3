@@ -29,7 +29,7 @@ import {
   MessageCircle, Settings, Save, CheckCircle2, FileText, Users,
   Shield, Key, Eye, Building2, Plus, Trash2, Smartphone, QrCode,
   Wifi, WifiOff, RefreshCw, Link, Unlink, ChevronRight, AlertCircle,
-  Pencil, Check, X,
+  Pencil, Check, X, Phone, Hash, Copy, ShieldCheck,
 } from "lucide-react";
 import { getWASettings, saveWASettings } from "@/hooks/useWhatsApp";
 import api from "@/lib/api";
@@ -189,6 +189,112 @@ function QRModal({ sessionId, label, onClose, isDark }) {
   );
 }
 
+// ─── Pairing Code Modal ───────────────────────────────────────────────────────
+const PAIR_POLL_BASE_MS = 4000;
+
+function PairCodeModal({ sessionId, label, onClose, isDark }) {
+  const [code,   setCode]   = useState(null);
+  const [status, setStatus] = useState("loading");
+  const [copied, setCopied] = useState(false);
+  const pollRef             = useRef(null);
+  const backoffRef          = useRef(PAIR_POLL_BASE_MS);
+
+  const scheduleNext = useCallback((ms) => {
+    clearTimeout(pollRef.current);
+    pollRef.current = setTimeout(() => fetchCode(), ms); // eslint-disable-line
+  }, []); // eslint-disable-line
+
+  const fetchCode = useCallback(async () => {
+    try {
+      const { data } = await api.get(`/whatsapp/sessions/${sessionId}/pair-code`);
+      backoffRef.current = PAIR_POLL_BASE_MS;
+      if (data.status === "connected") { setStatus("connected"); clearTimeout(pollRef.current); setTimeout(onClose, 1500); return; }
+      if (data.code) { setCode(data.code); setStatus("ready"); }
+      else           { setStatus(data.status || "waiting"); }
+      scheduleNext(PAIR_POLL_BASE_MS);
+    } catch (err) {
+      if (err?.response?.status === 429) {
+        backoffRef.current = Math.min(backoffRef.current * 2, 30000);
+        scheduleNext(backoffRef.current);
+      } else { setStatus("error"); }
+    }
+  }, [sessionId, onClose, scheduleNext]);
+
+  useEffect(() => { fetchCode(); return () => clearTimeout(pollRef.current); }, [fetchCode]);
+
+  const handleCopy = () => { if (code) { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 2000); } };
+
+  const card  = isDark ? "#1e293b" : "#fff";
+  const muted = isDark ? "#94a3b8" : "#64748b";
+
+  // Format code as XXXX-XXXX
+  const formatted = code ? `${code.slice(0, 4)}-${code.slice(4)}` : null;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(4px)" }} onClick={onClose}>
+      <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} style={{ background: card, borderRadius: 20, padding: 32, maxWidth: 400, width: "90%", boxShadow: "0 24px 80px rgba(0,0,0,0.3)" }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: isDark ? "#f1f5f9" : "#0f172a" }}>Phone Pairing Code</h3>
+            <p style={{ margin: "4px 0 0", fontSize: 12, color: muted }}>{label}</p>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: muted, padding: 4 }}><X size={18} /></button>
+        </div>
+
+        <div style={{ background: isDark ? "#0f172a" : "#f8fafc", borderRadius: 16, padding: 24, minHeight: 200, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16 }}>
+          {status === "connected" && (
+            <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} style={{ textAlign: "center" }}>
+              <CheckCircle2 size={56} color="#22c55e" />
+              <p style={{ color: "#22c55e", fontWeight: 700, marginTop: 12 }}>Connected!</p>
+            </motion.div>
+          )}
+          {status === "ready" && formatted && (
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ textAlign: "center", width: "100%" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 8 }}>
+                <Hash size={20} color={GREEN} />
+                <span style={{ fontSize: 13, fontWeight: 600, color: muted }}>Your Pairing Code</span>
+              </div>
+              <div style={{ fontSize: 38, fontWeight: 900, letterSpacing: "0.12em", color: isDark ? "#f1f5f9" : "#0f172a", fontFamily: "monospace", marginBottom: 16 }}>
+                {formatted}
+              </div>
+              <button onClick={handleCopy} style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 auto", background: copied ? "#22c55e22" : GRAD_BTN, color: copied ? "#22c55e" : "#fff", border: copied ? "1.5px solid #22c55e" : "none", borderRadius: 10, padding: "10px 20px", cursor: "pointer", fontSize: 13, fontWeight: 700, transition: "all 0.2s" }}>
+                {copied ? <><Check size={14} /> Copied!</> : <><Copy size={14} /> Copy Code</>}
+              </button>
+            </motion.div>
+          )}
+          {(status === "loading" || status === "connecting" || status === "waiting") && (
+            <div style={{ textAlign: "center" }}>
+              <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }}>
+                <RefreshCw size={36} color={GREEN} />
+              </motion.div>
+              <p style={{ color: muted, fontSize: 13, marginTop: 12 }}>Generating pairing code…</p>
+            </div>
+          )}
+          {status === "error" && (
+            <div style={{ textAlign: "center" }}>
+              <AlertCircle size={36} color="#ef4444" />
+              <p style={{ color: "#ef4444", fontSize: 13, marginTop: 8 }}>Failed to get pairing code</p>
+              <button onClick={fetchCode} style={{ marginTop: 8, background: GRAD_BTN, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontSize: 13 }}>Retry</button>
+            </div>
+          )}
+        </div>
+
+        {status === "ready" && (
+          <div style={{ marginTop: 16 }}>
+            <p style={{ fontSize: 12, color: muted, lineHeight: 1.7, margin: 0 }}>
+              <strong style={{ color: isDark ? "#e2e8f0" : "#334155" }}>Steps:</strong><br />
+              1. Open WhatsApp on your phone<br />
+              2. Go to <strong>Linked Devices</strong> → <strong>Link a Device</strong><br />
+              3. Tap <strong>"Link with phone number instead"</strong><br />
+              4. Enter your phone number, then type the code above
+            </p>
+          </div>
+        )}
+      </motion.div>
+    </div>
+  );
+}
+
 // ─── Connected Numbers Tab ────────────────────────────────────────────────────
 // FIX: interval 8 s → 30 s; paused when tab is hidden; exponential backoff on 429.
 const SESSIONS_POLL_MS = 30000;
@@ -196,9 +302,12 @@ const SESSIONS_POLL_MS = 30000;
 function ConnectedNumbersTab({ isDark }) {
   const [sessions,    setSessions]    = useState([]);
   const [loading,     setLoading]     = useState(true);
-  const [adding,      setAdding]      = useState(false);
   const [newLabel,    setNewLabel]    = useState("");
+  const [newPhone,    setNewPhone]    = useState("");
+  const [authMode,    setAuthMode]    = useState("qr");   // "qr" | "phone"
+  const [adding,      setAdding]      = useState(false);
   const [qrSession,   setQrSession]   = useState(null);
+  const [pairSession, setPairSession] = useState(null);
   const [editingId,   setEditingId]   = useState(null);
   const [editLabel,   setEditLabel]   = useState("");
   const [deletingId,  setDeletingId]  = useState(null);
@@ -214,7 +323,6 @@ function ConnectedNumbersTab({ isDark }) {
                    isDark ? "bg-slate-900 border-slate-700 text-slate-100 placeholder-slate-600" : "bg-white border-slate-300 text-slate-800 placeholder-slate-400"].join(" ");
 
   const fetchSessions = useCallback(async () => {
-    // Don't poll when the tab is hidden — saves bridge requests on free Render
     if (document.hidden) return;
     setLoading(true);
     try {
@@ -224,7 +332,6 @@ function ConnectedNumbersTab({ isDark }) {
     } catch (err) {
       const statusCode = err?.response?.status;
       if (statusCode === 429) {
-        // Bridge is rate-limiting — double the interval, cap at 2 min
         backoffRef.current = Math.min(backoffRef.current * 2, 120000);
       } else {
         toast.error("Could not reach WhatsApp bridge — is wa-bridge running?");
@@ -236,39 +343,30 @@ function ConnectedNumbersTab({ isDark }) {
 
   useEffect(() => {
     fetchSessions();
-
     const schedule = () => {
-      timerRef.current = setTimeout(async () => {
-        await fetchSessions();
-        schedule();
-      }, backoffRef.current);
+      timerRef.current = setTimeout(async () => { await fetchSessions(); schedule(); }, backoffRef.current);
     };
     schedule();
-
-    // Pause polling while tab is hidden, resume when it becomes visible
     const onVisibility = () => {
-      if (!document.hidden) {
-        clearTimeout(timerRef.current);
-        fetchSessions().then(schedule);
-      }
+      if (!document.hidden) { clearTimeout(timerRef.current); fetchSessions().then(schedule); }
     };
     document.addEventListener("visibilitychange", onVisibility);
-
-    return () => {
-      clearTimeout(timerRef.current);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
+    return () => { clearTimeout(timerRef.current); document.removeEventListener("visibilitychange", onVisibility); };
   }, [fetchSessions]);
 
   const handleAddSession = async () => {
     if (!newLabel.trim()) { toast.error("Enter a label for this number"); return; }
+    if (authMode === "phone" && !newPhone.trim()) { toast.error("Enter the phone number with country code"); return; }
     setAdding(true);
     try {
-      const { data } = await api.post("/whatsapp/sessions", { label: newLabel.trim() });
-      toast.success("Session started — scan the QR code!");
-      setNewLabel("");
+      const payload = { label: newLabel.trim() };
+      if (authMode === "phone") payload.pairing_phone = newPhone.replace(/\D/g, "");
+      const { data } = await api.post("/whatsapp/sessions", payload);
+      toast.success(authMode === "phone" ? "Session started — get your pairing code!" : "Session started — scan the QR code!");
+      setNewLabel(""); setNewPhone("");
       await fetchSessions();
-      setQrSession({ sessionId: data.sessionId, label: data.label || newLabel });
+      if (authMode === "phone") setPairSession({ sessionId: data.sessionId, label: data.label || newLabel });
+      else                      setQrSession(  { sessionId: data.sessionId, label: data.label || newLabel });
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Failed to start session");
     } finally {
@@ -303,21 +401,15 @@ function ConnectedNumbersTab({ isDark }) {
 
   return (
     <div className="space-y-4">
-      {qrSession && (
-        <QRModal
-          sessionId={qrSession.sessionId}
-          label={qrSession.label}
-          isDark={isDark}
-          onClose={() => { setQrSession(null); fetchSessions(); }}
-        />
-      )}
+      {qrSession   && <QRModal       sessionId={qrSession.sessionId}   label={qrSession.label}   isDark={isDark} onClose={() => { setQrSession(null);   fetchSessions(); }} />}
+      {pairSession && <PairCodeModal sessionId={pairSession.sessionId} label={pairSession.label} isDark={isDark} onClose={() => { setPairSession(null); fetchSessions(); }} />}
 
       {/* Stats bar */}
       <div className="grid grid-cols-3 gap-3">
         {[
-          { label: "Connected",    value: connectedCount,                               color: "#22c55e" },
-          { label: "Total Linked", value: sessions.length,                              color: GREEN },
-          { label: "Pending Scan", value: sessions.filter(s => s.status === "awaiting_scan").length, color: "#f59e0b" },
+          { label: "Connected",    value: connectedCount,                                       color: "#22c55e" },
+          { label: "Total Linked", value: sessions.length,                                      color: GREEN },
+          { label: "Pending",      value: sessions.filter(s => s.status !== "connected").length, color: "#f59e0b" },
         ].map(s => (
           <div key={s.label} className={`rounded-xl border p-4 text-center ${card}`}>
             <div style={{ fontSize: 28, fontWeight: 800, color: s.color }}>{s.value}</div>
@@ -332,10 +424,39 @@ function ConnectedNumbersTab({ isDark }) {
           <Plus size={16} className="text-emerald-500" />
           <span className={`text-sm font-bold ${txt}`}>Add WhatsApp Number</span>
         </div>
+
+        {/* Auth mode toggle */}
+        <div className={`flex gap-1 p-1 rounded-xl mb-4 ${isDark ? "bg-slate-900" : "bg-slate-100"}`} style={{ width: "fit-content" }}>
+          {[
+            { id: "qr",    label: "QR Code",     icon: QrCode },
+            { id: "phone", label: "Phone Number", icon: Phone  },
+          ].map(({ id, label, icon: Icon }) => (
+            <button key={id} onClick={() => setAuthMode(id)}
+              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold transition ${authMode === id ? "bg-white text-slate-800 shadow" : (isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700")}`}
+              style={authMode === id ? { background: isDark ? "#1e293b" : "#fff" } : {}}>
+              <Icon size={12} />{label}
+            </button>
+          ))}
+        </div>
+
+        {/* Phone number input (only for phone mode) */}
+        {authMode === "phone" && (
+          <div className="mb-3">
+            <input
+              className={`${inputC} mb-1`}
+              placeholder="Phone with country code, e.g. 919876543210"
+              value={newPhone}
+              onChange={e => setNewPhone(e.target.value)}
+              type="tel"
+            />
+            <p className={`text-[11px] ${muted}`}>Include country code, no + or spaces — e.g. 91 for India</p>
+          </div>
+        )}
+
         <div className="flex gap-3">
           <input
             className={`${inputC} flex-1`}
-            placeholder='Label e.g. "Office", "Client Line"…'
+            placeholder='Label e.g. "MDA GST", "Office Line"…'
             value={newLabel}
             onChange={e => setNewLabel(e.target.value)}
             onKeyDown={e => e.key === "Enter" && handleAddSession()}
@@ -346,13 +467,17 @@ function ConnectedNumbersTab({ isDark }) {
             className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold text-white transition hover:opacity-90 active:scale-95 disabled:opacity-60"
             style={{ background: GRAD_BTN, whiteSpace: "nowrap" }}
           >
-            {adding ? <RefreshCw size={14} className="animate-spin" /> : <QrCode size={14} />}
-            {adding ? "Starting…" : "Get QR"}
+            {adding ? <RefreshCw size={14} className="animate-spin" /> : (authMode === "phone" ? <Hash size={14} /> : <QrCode size={14} />)}
+            {adding ? "Starting…" : (authMode === "phone" ? "Get Code" : "Get QR")}
           </button>
         </div>
-        <p className={`text-xs mt-2 ${muted}`}>
-          A QR code will appear — scan it with your WhatsApp to link the number. Multiple numbers can be added.
-        </p>
+
+        <div className={`mt-3 p-3 rounded-xl text-xs ${isDark ? "bg-slate-900/60 text-slate-400" : "bg-slate-50 text-slate-500"}`}>
+          {authMode === "phone"
+            ? <span><strong className={isDark ? "text-slate-300" : "text-slate-700"}>Phone Number method:</strong> No QR camera needed. An 8-digit code appears — enter it in WhatsApp → Linked Devices → Link with phone number.</span>
+            : <span><strong className={isDark ? "text-slate-300" : "text-slate-700"}>QR Code method:</strong> A QR code appears — scan it in WhatsApp → Linked Devices → Link a Device.</span>
+          }
+        </div>
       </div>
 
       {/* Session list */}
@@ -362,9 +487,16 @@ function ConnectedNumbersTab({ isDark }) {
             <Smartphone size={16} className="text-emerald-500" />
             <span className={`text-sm font-bold ${txt}`}>Linked Numbers</span>
           </div>
-          <button onClick={fetchSessions} className={`p-1.5 rounded-lg transition hover:bg-slate-100 ${muted}`}>
-            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-          </button>
+          <div className="flex items-center gap-2">
+            {connectedCount > 0 && (
+              <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-500">
+                <ShieldCheck size={12} /> Auto-reconnect ON
+              </span>
+            )}
+            <button onClick={fetchSessions} className={`p-1.5 rounded-lg transition hover:bg-slate-100 ${muted}`}>
+              <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+            </button>
+          </div>
         </div>
 
         {loading && sessions.length === 0 ? (
@@ -384,13 +516,11 @@ function ConnectedNumbersTab({ isDark }) {
               {sessions.map(s => (
                 <motion.div key={s.sessionId} initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, height: 0 }}
                   className="flex items-center gap-4 p-4">
-                  {/* Icon */}
                   <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
                     style={{ background: s.status === "connected" ? "#dcfce7" : (isDark ? "#1e293b" : "#f1f5f9") }}>
                     {s.status === "connected" ? <Wifi size={18} color="#22c55e" /> : <WifiOff size={18} color="#94a3b8" />}
                   </div>
 
-                  {/* Info */}
                   <div className="flex-1 min-w-0">
                     {editingId === s.sessionId ? (
                       <div className="flex gap-2 items-center">
@@ -414,20 +544,30 @@ function ConnectedNumbersTab({ isDark }) {
                       <StatusBadge status={s.status} />
                       {s.phoneNumber && <span className={`text-[11px] ${muted}`}>+{s.phoneNumber}</span>}
                       {s.displayName && <span className={`text-[11px] font-medium truncate ${muted}`}>{s.displayName}</span>}
+                      {s.status === "reconnecting" && <span className={`text-[10px] italic ${muted}`}>auto-retrying…</span>}
                     </div>
                   </div>
 
-                  {/* Actions */}
                   <div className="flex items-center gap-1 flex-shrink-0">
                     {s.status !== "connected" && (
-                      <button
-                        onClick={() => setQrSession({ sessionId: s.sessionId, label: s.label })}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-white transition hover:opacity-90"
-                        style={{ background: GRAD_BTN }}
-                        title="Show QR to reconnect"
-                      >
-                        <QrCode size={12} /> QR
-                      </button>
+                      <>
+                        <button
+                          onClick={() => setQrSession({ sessionId: s.sessionId, label: s.label })}
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-white transition hover:opacity-90"
+                          style={{ background: GRAD_BTN }}
+                          title="Show QR to reconnect"
+                        >
+                          <QrCode size={12} /> QR
+                        </button>
+                        <button
+                          onClick={() => setPairSession({ sessionId: s.sessionId, label: s.label })}
+                          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition hover:bg-emerald-50 ${muted}`}
+                          style={{ borderColor: isDark ? "#334155" : "#e2e8f0" }}
+                          title="Show phone pairing code"
+                        >
+                          <Hash size={12} /> Code
+                        </button>
+                      </>
                     )}
                     <button
                       onClick={() => handleDelete(s.sessionId)}
@@ -627,11 +767,11 @@ export default function WhatsAppSettings() {
             <div className="flex items-center gap-2 mb-4"><Eye className="h-4 w-4 text-emerald-500" /><span className={`text-base font-bold ${txt}`}>How WhatsApp Integration Works</span></div>
             <div className="space-y-4 text-sm">
               {[
-                { step: "1", title: "Admin links WhatsApp numbers via QR",   desc: "Go to 'Connected Numbers' and add a label, then scan the QR code with your WhatsApp — just like WhatsApp Web." },
-                { step: "2", title: "Multiple numbers can be connected",     desc: "You can link as many numbers as needed. Each session is stored and reconnects automatically on restart." },
-                { step: "3", title: "All users share the connected numbers", desc: "Once admin connects a number, every user with WhatsApp access can send messages through it." },
-                { step: "4", title: "Messages are sent directly via bridge", desc: "The wa-bridge service (Node.js) handles the WhatsApp Web protocol — no Meta API or third-party fees." },
-                { step: "5", title: "Full audit trail",                      desc: "Every message sent is logged with sender, recipient, content, and status for compliance." },
+                { step: "1", title: "Two ways to link your number",         desc: "QR Code: scan with your phone camera like WhatsApp Web. Phone Number: get an 8-digit pairing code, enter it in WhatsApp → Linked Devices → Link with phone number. The phone method avoids QR rate-limit errors on Render free tier." },
+                { step: "2", title: "Multiple numbers can be connected",    desc: "You can link as many numbers as needed. Each session is stored and reconnects automatically on restart — there's no hard retry limit, so connections persist until you manually disconnect." },
+                { step: "3", title: "Auto-reconnect until manually removed", desc: "If the bridge restarts or loses connection, it will keep retrying with exponential backoff (up to 2 min between attempts). Only an explicit Disconnect removes the number permanently." },
+                { step: "4", title: "All users share the connected numbers", desc: "Once admin connects a number, every user with WhatsApp access can send messages through it." },
+                { step: "5", title: "Messages are sent directly via bridge", desc: "The wa-bridge service (Node.js) handles the WhatsApp Web protocol — no Meta API or third-party fees." },
               ].map(item => (
                 <div key={item.step} className="flex gap-4">
                   <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0 mt-0.5" style={{ background: GRAD_BTN }}>{item.step}</div>
