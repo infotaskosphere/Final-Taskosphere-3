@@ -377,6 +377,10 @@ function VisitCard({ v, onClick, onEdit, currentUser, selected, onSelectToggle, 
       toast.success(`Status → ${s}`);
       qc.invalidateQueries({ queryKey: ["visits"] });
       setShowStatusMenu(false);
+      // Remove linked email event from Action Center when visit is completed (best-effort)
+      if (s === "completed" && v.event_id) {
+        api.delete(`/email/events/${v.event_id}`).catch(() => {});
+      }
     },
     onError: (err) => toast.error(err.response?.data?.detail || "Update failed"),
   });
@@ -387,6 +391,10 @@ function VisitCard({ v, onClick, onEdit, currentUser, selected, onSelectToggle, 
       toast.success("Visit deleted");
       qc.invalidateQueries({ queryKey: ["visits"] });
       qc.invalidateQueries({ queryKey: ["visits-upcoming-dashboard"] });
+      // Also remove the linked email event from Action Center (best-effort)
+      if (v.event_id) {
+        api.delete(`/email/events/${v.event_id}`).catch(() => {});
+      }
     },
     onError: (err) => {
       qc.invalidateQueries({ queryKey: ["visits"] });
@@ -965,7 +973,16 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
 
   const statusMut = useMutation({
     mutationFn: (status) => api.patch(`/visits/${visit.id}`, { status }),
-    onSuccess: () => { toast.success("Status updated"); qc.invalidateQueries({ queryKey: ["visits"] }); setShowStatusMenu(false); onDeleted?.(); },
+    onSuccess: (_, status) => {
+      toast.success("Status updated");
+      qc.invalidateQueries({ queryKey: ["visits"] });
+      setShowStatusMenu(false);
+      // Remove linked email event from Action Center when visit is completed (best-effort)
+      if (status === "completed" && visit.event_id) {
+        api.delete(`/email/events/${visit.event_id}`).catch(() => {});
+      }
+      onDeleted?.();
+    },
     onError: err => toast.error(err.response?.data?.detail || "Update failed"),
   });
 
@@ -989,7 +1006,16 @@ function VisitDetailPanel({ visit, currentUser, onClose, onEdit, onDeleted }) {
 
   const deleteMut = useMutation({
     mutationFn: () => api.delete(`/visits/${visit.id}`),
-    onSuccess: () => { toast.success("Visit deleted"); qc.invalidateQueries({ queryKey: ["visits"] }); onDeleted?.(); onClose(); },
+    onSuccess: () => {
+      toast.success("Visit deleted");
+      qc.invalidateQueries({ queryKey: ["visits"] });
+      // Also remove the linked email event from Action Center (best-effort)
+      if (visit.event_id) {
+        api.delete(`/email/events/${visit.event_id}`).catch(() => {});
+      }
+      onDeleted?.();
+      onClose();
+    },
     onError: (err) => {
       qc.invalidateQueries({ queryKey: ["visits"] });
       if (err.response?.status === 404) { toast.info("Visit was already removed."); onClose(); }
