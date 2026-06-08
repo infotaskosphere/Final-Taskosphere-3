@@ -1395,6 +1395,10 @@ export default function TodoDashboard() {
         }, ...prev].slice(0, 200));
         if (!wasCompleted) {
           sendNotification({ title: '✅ Todo Completed', message: `"${todo.title}" completed by ${user?.full_name || 'a user'}.` });
+          // Remove linked email event from Action Center when todo is completed (best-effort)
+          if (todo.event_id) {
+            api.delete(`/email/events/${todo.event_id}`).catch(() => {});
+          }
         }
       }
       invalidateTodos();
@@ -1417,6 +1421,10 @@ export default function TodoDashboard() {
           deleted_at:    new Date(),
           event:         'deleted',
         }, ...prev].slice(0, 200));
+        // Also remove the linked email event from Action Center (best-effort)
+        if (deleted.event_id) {
+          api.delete(`/email/events/${deleted.event_id}`).catch(() => {});
+        }
       }
       invalidateTodos();
       toast.success('Todo deleted');
