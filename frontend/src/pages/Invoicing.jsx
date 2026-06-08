@@ -80,6 +80,9 @@ const num = (v) => {
 const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 const calcPaid = (inv) => {
   if (!inv) return 0;
+  // If admin explicitly marked as fully paid, treat the entire grand_total as collected —
+  // even if amount_paid wasn't updated in the same request (e.g. inline status dropdown).
+  if (inv.status === 'paid') return num(inv.grand_total);
   // amount_paid is the canonical "received so far" field once the form has
   // run; fall back to advance_received for legacy / partially-migrated rows.
   const paid = num(inv.amount_paid);
@@ -88,6 +91,8 @@ const calcPaid = (inv) => {
 };
 const calcDue = (inv) => {
   if (!inv) return 0;
+  // Fully-paid invoices have zero outstanding regardless of amount_paid field
+  if (inv.status === 'paid' || inv.status === 'cancelled') return 0;
   const grand = num(inv.grand_total);
   return round2(Math.max(0, grand - calcPaid(inv)));
 };
@@ -2552,8 +2557,13 @@ const InlineStatusDropdown = ({ inv, onStatusChange, isDark }) => {
     if (newStatus === inv.status) { setOpen(false); return; }
     setLoading(true);
     try {
-      await api.patch(`/invoices/${inv.id}/status`, { status: newStatus });
-      onStatusChange(inv.id, newStatus);
+      const { data } = await api.patch(`/invoices/${inv.id}/status`, { status: newStatus });
+      // data now includes amount_paid and amount_due from the server — pass them
+      // so the parent can update the invoice row accurately without a refetch.
+      onStatusChange(inv.id, newStatus, {
+        amount_paid: data.amount_paid,
+        amount_due:  data.amount_due,
+      });
       toast.success(`Status updated → ${STATUS_META[newStatus]?.label || newStatus}`);
     } catch {
       toast.error('Failed to update status');
@@ -5971,8 +5981,23 @@ const fetchAll = useCallback(async () => {
   }, [fetchAll]);
 
   // Optimistic status update — avoids a full refetch on every dropdown change
-  const handleStatusChange = useCallback((invId, newStatus) => {
-    setInvoices(prev => prev.map(i => i.id === invId ? { ...i, status: newStatus } : i));
+  const handleStatusChange = useCallback((invId, newStatus, serverAmounts = {}) => {
+    setInvoices(prev => prev.map(i => {
+      if (i.id !== invId) return i;
+      const updated = { ...i, status: newStatus };
+      // Use server-returned amounts if available (backend is the source of truth)
+      if (serverAmounts.amount_paid !== undefined) updated.amount_paid = serverAmounts.amount_paid;
+      if (serverAmounts.amount_due  !== undefined) updated.amount_due  = serverAmounts.amount_due;
+      // Fallback optimistic sync when no server amounts returned
+      if (newStatus === 'paid' && serverAmounts.amount_paid === undefined) {
+        updated.amount_paid = num(i.grand_total);
+        updated.amount_due  = 0;
+      }
+      if (newStatus === 'cancelled' && serverAmounts.amount_due === undefined) {
+        updated.amount_due = 0;
+      }
+      return updated;
+    }));
   }, []);
 
   const [invoicePreviewOpen, setInvoicePreviewOpen] = useState(false);
@@ -6227,7 +6252,7 @@ const fetchAll = useCallback(async () => {
                 {fmtC(enrichedFiltered.reduce((s, i) => s + calcDue(i), 0))} due
               </span>
               <span className={`font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
-                {fmtC(enrichedFiltered.reduce((s, i) => s + (i.amount_paid || 0), 0))} collected
+                {fmtC(enrichedFiltered.reduce((s, i) => s + calcPaid(i), 0))} collected
               </span>
             </div>
           </div>
