@@ -83,7 +83,6 @@ def _invalidate_sessions_cache():
 
 class WASessionCreate(BaseModel):
     label: Optional[str] = None
-    pairing_phone: Optional[str] = None  # E.164 digits, e.g. "919876543210"
 
 class WAAccessRequest(BaseModel):
     reason: str = Field(..., min_length=5, max_length=500)
@@ -177,6 +176,38 @@ async def _bridge_post(path: str, payload: Dict, retries: int = 3) -> Dict:
             raise HTTPException(502, f"WA bridge error: {e}")
     raise HTTPException(502, "WA bridge request failed after retries.")
 
+
+async def _bridge_post_large(path: str, payload: Dict, retries: int = 2) -> Dict:
+    """Like _bridge_post but with a 90-second timeout for large base64 payloads (PDFs, images).
+    Only 2 retries — large files are slow; we don't want to triple the wait time on failure.
+    """
+    for attempt in range(retries):
+        try:
+            async with httpx.AsyncClient(timeout=90) as c:
+                r = await c.post(f"{WA_BRIDGE_URL}{path}", json=payload)
+                if r.status_code == 429:
+                    if attempt < retries - 1:
+                        wait = 2 ** (attempt + 1)
+                        logger.warning(f"WA bridge 429 on POST {path} (media), retry in {wait}s")
+                        await asyncio.sleep(wait)
+                        continue
+                    raise HTTPException(429, "WhatsApp bridge is rate-limiting requests. Please wait and try again.")
+                if r.status_code == 400:
+                    detail = r.json().get("error", "Bad request to bridge")
+                    raise HTTPException(400, f"Bridge rejected media: {detail}")
+                r.raise_for_status()
+                return r.json()
+        except httpx.ConnectError:
+            raise HTTPException(503, "WhatsApp bridge not running.")
+        except HTTPException:
+            raise
+        except Exception as e:
+            if attempt < retries - 1:
+                await asyncio.sleep(3)
+                continue
+            raise HTTPException(502, f"WA bridge media error: {e}")
+    raise HTTPException(502, "WA bridge media request failed after retries.")
+
 async def _bridge_delete(path: str) -> Dict:
     try:
         async with httpx.AsyncClient(timeout=15) as c:
@@ -228,11 +259,7 @@ async def list_sessions(current_user: User = Depends(get_current_user)):
 @router.post("/sessions")
 async def add_session(body: WASessionCreate, current_user: User = Depends(require_admin())):
     session_id = f"wa_{int(_time.time() * 1000)}"
-    bridge_payload: Dict[str, Any] = {"sessionId": session_id}
-    if body.pairing_phone:
-        # Strip non-digits, pass to bridge for code-based pairing
-        bridge_payload["pairingPhone"] = "".join(c for c in body.pairing_phone if c.isdigit())
-    bridge_resp = await _bridge_post("/sessions", bridge_payload)
+    bridge_resp = await _bridge_post("/sessions", {"sessionId": session_id})
     db = _db()
     await db["whatsapp_sessions"].insert_one({
         "session_id": session_id,
@@ -241,22 +268,15 @@ async def add_session(body: WASessionCreate, current_user: User = Depends(requir
         "added_by_name": current_user.full_name,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "status": "connecting",
-        "auth_method": "pairing_code" if body.pairing_phone else "qr",
     })
-    _invalidate_sessions_cache()
+    _invalidate_sessions_cache()  # force fresh data on next poll
     return {"sessionId": session_id, "label": body.label,
-            "message": bridge_resp.get("message", "Session started")}
+            "message": "Poll /whatsapp/sessions/{id}/qr for QR code."}
 
 
 @router.get("/sessions/{session_id}/qr")
 async def get_session_qr(session_id: str, current_user: User = Depends(require_admin())):
     return await _bridge_get(f"/sessions/{session_id}/qr")
-
-
-@router.get("/sessions/{session_id}/pair-code")
-async def get_session_pair_code(session_id: str, current_user: User = Depends(require_admin())):
-    """Get the 8-digit pairing code for phone-number based linking (no QR needed)."""
-    return await _bridge_get(f"/sessions/{session_id}/pair-code")
 
 
 @router.delete("/sessions/{session_id}")
@@ -393,11 +413,18 @@ async def send_bulk(body: WABulkSendRequest, current_user: User = Depends(get_cu
 
 @router.post("/send-media")
 async def send_media(body: WASendMediaRequest, current_user: User = Depends(get_current_user)):
-    """Send an image, PDF, Excel, or other document via WhatsApp."""
+    """Send an image, PDF, Excel, or other document via WhatsApp.
+
+    Calls /send-media-base64 on the bridge (a dedicated JSON endpoint that is
+    NOT wrapped in multer), so the base64 payload is parsed correctly.
+    Previously this called /send-media which applies multer middleware for
+    multipart uploads — that caused multer to skip express.json() parsing
+    and silently drop the base64 field, causing every media send to fail.
+    """
     if not await _has_wa_access(current_user):
         raise HTTPException(403, "You do not have permission to send WhatsApp messages.")
     try:
-        result = await _bridge_post("/send-media", {
+        result = await _bridge_post_large("/send-media-base64", {
             "to":        body.to,
             "sessionId": body.session_id,
             "caption":   body.caption,
