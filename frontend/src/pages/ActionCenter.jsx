@@ -319,9 +319,9 @@ function EventCard({ event, isDark, savedKeys, onSaved, onDismiss, viewMode }) {
           </div>
 
           {/* Content */}
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 overflow-hidden">
             <div className="flex items-start justify-between gap-2 mb-1">
-              <p className="text-sm font-bold leading-tight" style={{ color: isDark ? D_DARK.text : "#1e293b" }}>
+              <p className="text-sm font-bold leading-tight break-words" style={{ color: isDark ? D_DARK.text : "#1e293b" }}>
                 {event.title || "Untitled Event"}
               </p>
               <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -355,146 +355,6 @@ function EventCard({ event, isDark, savedKeys, onSaved, onDismiss, viewMode }) {
                   }}>
                   <X className="w-3.5 h-3.5" />
                 </button>
-              </div>
-            </div>
-
-            {/* Date & time row */}
-            <div className="flex items-center gap-3 mb-2 flex-wrap">
-              {event.date ? (
-                <div className="flex items-center gap-1.5">
-                  <Clock className="w-3 h-3 flex-shrink-0" style={{ color: isDark ? D_DARK.muted : "#94a3b8" }} />
-                  <span className="text-xs font-semibold" style={{ color: days !== null && days <= 3 && !past ? COLORS.red : (isDark ? D_DARK.muted : "#64748b") }}>
-                    {formatDate(event.date)}
-                    {days !== null && !past && days <= 7 && (
-                      <span className="ml-1 font-bold" style={{ color: days === 0 ? COLORS.red : days <= 3 ? COLORS.orange : COLORS.amber }}>
-                        {days === 0 ? "(Today!)" : days === 1 ? "(Tomorrow)" : `(${days}d)`}
-                      </span>
-                    )}
-                  </span>
-                </div>
-              ) : (
-                <span className="text-xs" style={{ color: isDark ? D_DARK.dimmer : "#94a3b8" }}>No date extracted</span>
-              )}
-              {event.time && (
-                <span className="text-xs font-medium" style={{ color: isDark ? D_DARK.muted : "#64748b" }}>@ {event.time}</span>
-              )}
-              {event.email_account && (
-                <span className="text-[10px] flex items-center gap-1" style={{ color: isDark ? D_DARK.dimmer : "#94a3b8" }}>
-                  <Mail className="w-3 h-3" /> {event.email_account}
-                </span>
-              )}
-            </div>
-
-            {/* Description */}
-            {event.description && (
-              <p className="text-xs leading-relaxed mb-3 line-clamp-2" style={{ color: isDark ? D_DARK.muted : "#64748b" }}>
-                {event.description}
-              </p>
-            )}
-
-            {/* Event type + TM app no */}
-            <div className="flex items-center gap-2 flex-wrap">
-              {event.event_type && (
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-lg border"
-                  style={{ backgroundColor: isDark ? D_DARK.raised : "#f8fafc", borderColor: isDark ? D_DARK.border : "#e2e8f0", color: isDark ? D_DARK.muted : "#64748b" }}>
-                  {event.event_type}
-                </span>
-              )}
-              {event.tm_app_no && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg"
-                  style={{ backgroundColor: isDark ? "rgba(124,58,237,0.12)" : "#F5F3FF", color: COLORS.purple }}>
-                  TM: {event.tm_app_no}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Action row */}
-        {!past && !saved && (
-          <div className="mt-3 pt-3 border-t flex items-center gap-2" style={{ borderColor: isDark ? D_DARK.border : "#f1f5f9" }}>
-            <span className="text-xs font-medium mr-1" style={{ color: isDark ? D_DARK.muted : "#64748b" }}>Save as:</span>
-            {Object.entries(CATEGORY_CONFIG).map(([k, cfg]) => {
-              const Ic = cfg.icon;
-              const active = override === k;
-              return (
-                <button key={k} onClick={() => setOverride(k)}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold border-2 transition-all"
-                  style={{
-                    borderColor: active ? cfg.color : "transparent",
-                    backgroundColor: active ? (isDark ? cfg.darkBg : cfg.bg) : (isDark ? D_DARK.raised : "#f8fafc"),
-                    color: active ? cfg.color : (isDark ? D_DARK.muted : "#64748b"),
-                  }}>
-                  <Ic className="w-3 h-3" /> {cfg.label}
-                </button>
-              );
-            })}
-            <button onClick={handleSave} disabled={!!saving}
-              className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-white transition-all active:scale-95"
-              style={{ background: saving ? "#9CA3AF" : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-              {saving
-                ? <><Loader2 className="w-3 h-3 animate-spin" /> Saving…</>
-                : <><Save className="w-3 h-3" /> Save</>}
-            </button>
-          </div>
-        )}
-        {saved && (
-          <div className="mt-3 pt-3 border-t flex items-center gap-2" style={{ borderColor: isDark ? D_DARK.border : "#f1f5f9" }}>
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-            <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-              Saved as {CATEGORY_CONFIG[cat]?.label || cat}
-            </span>
-          </div>
-        )}
-      </div>
-    </motion.div>
-  );
-
-  return (
-    <motion.div variants={itemV} layout
-      className="rounded-2xl border overflow-hidden transition-all"
-      style={{
-        backgroundColor: isDark ? D_DARK.card : "#ffffff",
-        borderColor: saved ? catCfg.color + "40" : past ? (isDark ? D_DARK.border : "#e2e8f0") : (isDark ? D_DARK.border : "#e2e8f0"),
-        opacity: past && !saved ? 0.7 : 1,
-      }}>
-      {/* Top accent bar */}
-      <div className="h-0.5 w-full" style={{ backgroundColor: saved ? catCfg.color : past ? "#e2e8f0" : catCfg.color + "80" }} />
-
-      <div className="p-4">
-        <div className="flex items-start gap-3">
-          {/* Category icon */}
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
-            style={{ backgroundColor: isDark ? catCfg.darkBg : catCfg.bg }}>
-            <CatIcon className="w-4 h-4" style={{ color: catCfg.color }} />
-          </div>
-
-          {/* Content */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-start justify-between gap-2 mb-1">
-              <p className="text-sm font-bold leading-tight" style={{ color: isDark ? D_DARK.text : "#1e293b" }}>
-                {event.title || "Untitled Event"}
-              </p>
-              <div className="flex items-center gap-1.5 flex-shrink-0">
-                {/* Urgency badge */}
-                {event.urgency && (
-                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full uppercase"
-                    style={{ backgroundColor: isDark ? urg.dark : urg.bg, color: urg.text, border: `1px solid ${urg.border}` }}>
-                    {event.urgency}
-                  </span>
-                )}
-                {saved && (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1"
-                    style={{ backgroundColor: isDark ? "rgba(31,175,90,0.15)" : "#dcfce7", color: COLORS.emeraldGreen }}>
-                    <CheckCircle2 className="w-3 h-3" /> Saved
-                  </span>
-                )}
-                {past && !saved && (
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                    style={{ backgroundColor: isDark ? D_DARK.raised : "#f1f5f9", color: isDark ? D_DARK.muted : "#94a3b8" }}>
-                    Past
-                  </span>
-                )}
               </div>
             </div>
 
@@ -837,6 +697,29 @@ export default function ActionCenter() {
             <Eye className="w-3.5 h-3.5" />
             {showPast ? "Hiding Past" : "Show Past"}
           </button>
+
+          {/* View mode toggle */}
+          <div className="flex items-center rounded-xl border overflow-hidden flex-shrink-0"
+            style={{ borderColor: isDark ? D_DARK.border : "#e2e8f0" }}>
+            <button onClick={() => setViewMode("list")}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold transition-all"
+              title="List view"
+              style={{
+                backgroundColor: viewMode === "list" ? COLORS.deepBlue : (isDark ? D_DARK.raised : "#f8fafc"),
+                color: viewMode === "list" ? "#fff" : (isDark ? D_DARK.muted : "#64748b"),
+              }}>
+              <LayoutList className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={() => setViewMode("board")}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold transition-all"
+              title="Board view"
+              style={{
+                backgroundColor: viewMode === "board" ? COLORS.deepBlue : (isDark ? D_DARK.raised : "#f8fafc"),
+                color: viewMode === "board" ? "#fff" : (isDark ? D_DARK.muted : "#64748b"),
+              }}>
+              <LayoutGrid className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </motion.div>
 
@@ -925,14 +808,18 @@ export default function ActionCenter() {
                 {!collapsed[group.label] && (
                   <motion.div
                     initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
-                    className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    className={viewMode === "board"
+                      ? "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3"
+                      : "grid grid-cols-1 gap-2"}>
                     {group.events.map(ev => (
-                      <EventCard key={ev.id || `${ev.title}::${ev.date}`}
-                        event={ev} isDark={isDark}
-                        savedKeys={savedKeys}
-                        onSaved={handleEventSaved}
-                        onDismiss={handleDismiss}
-                        viewMode={viewMode} />
+                      <div key={ev.id || `${ev.title}::${ev.date}`} className="min-w-0">
+                        <EventCard
+                          event={ev} isDark={isDark}
+                          savedKeys={savedKeys}
+                          onSaved={handleEventSaved}
+                          onDismiss={handleDismiss}
+                          viewMode={viewMode} />
+                      </div>
                     ))}
                   </motion.div>
                 )}
