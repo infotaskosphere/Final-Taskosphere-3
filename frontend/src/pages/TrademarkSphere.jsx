@@ -980,8 +980,9 @@ function MatchesTable({ rows, T }) {
 }
 
 // ─── History rail — with Re-brand PDF button + individual delete ───────────────
-function HistoryRail({ items, onSelect, activeId, branding, onDelete, T }) {
+function HistoryRail({ items, onSelect, activeId, branding, onDelete, onClearAll, T }) {
   const [deletingId, setDeletingId] = useState(null);
+  const [clearing, setClearing] = useState(false);
   const fmt = (iso) => { try { return new Date(iso).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return iso; } };
   const hasBranding = !!(branding?.footer || branding?.logo || branding?.tagline);
 
@@ -995,13 +996,39 @@ function HistoryRail({ items, onSelect, activeId, branding, onDelete, T }) {
   return (
     <Card style={{ overflow: "hidden" }}>
       <div style={{ padding: "16px 18px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ background: `${COLORS.mediumBlue}20`, borderRadius: 8, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ background: `${COLORS.mediumBlue}20`, borderRadius: 8, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           <Clock size={14} style={{ color: COLORS.mediumBlue }} />
         </div>
-        <div>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: T.dimmer, fontWeight: 700 }}>Docket</div>
           <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>Recent Reports</div>
         </div>
+        {onClearAll && items?.length > 0 && (
+          <button
+            onClick={async () => {
+              if (!window.confirm(`Clear all ${items.length} report${items.length !== 1 ? "s" : ""} from docket?`)) return;
+              setClearing(true);
+              try { await onClearAll(); } finally { setClearing(false); }
+            }}
+            disabled={clearing}
+            title="Clear all reports from docket"
+            style={{
+              background: "transparent", border: `1px solid ${T.border}`, borderRadius: 7,
+              cursor: clearing ? "not-allowed" : "pointer", padding: "4px 10px",
+              fontSize: 11, fontWeight: 600, color: T.dimmer, display: "flex",
+              alignItems: "center", gap: 5, transition: "all 0.15s", flexShrink: 0,
+              opacity: clearing ? 0.6 : 1,
+            }}
+            onMouseEnter={e => { if (!clearing) { e.currentTarget.style.background = "rgba(239,68,68,0.1)"; e.currentTarget.style.color = "#DC2626"; e.currentTarget.style.borderColor = "rgba(239,68,68,0.4)"; }}}
+            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = T.dimmer; e.currentTarget.style.borderColor = T.border; }}
+          >
+            {clearing
+              ? <span style={{ display: "block", width: 10, height: 10, border: `2px solid ${T.border}`, borderTopColor: T.muted, borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+              : <Trash2 size={11} />
+            }
+            {clearing ? "Clearing…" : "Clear all"}
+          </button>
+        )}
       </div>
 
       <div style={{ maxHeight: 520, overflowY: "auto", scrollbarWidth: "thin", scrollbarColor: `${T.border} transparent` }}>
@@ -1377,6 +1404,18 @@ export default function TrademarkSphere() {
     }
   };
 
+  const handleClearAll = async () => {
+    const ids = history.map(h => h.id);
+    let failed = 0;
+    for (const id of ids) {
+      try { await deleteReport(id); } catch { failed++; }
+    }
+    setReport(null); setActiveId(null);
+    await refreshHistory();
+    if (failed > 0) toast.error(`${failed} report(s) could not be removed`);
+    else toast.success(`Cleared ${ids.length} report${ids.length !== 1 ? "s" : ""} from docket`);
+  };
+
   const handleHistorySelect = async (item) => {
     setLoading(true); setError(null); setReport(null);
     setLastClassFilter(item.class_filter || null);
@@ -1543,7 +1582,7 @@ export default function TrademarkSphere() {
             </div>
 
             <div style={{ position: "sticky", top: 24, alignSelf: "start" }}>
-              <HistoryRail T={T} items={history} onSelect={handleHistorySelect} activeId={activeId} branding={branding} onDelete={handleDeleteReport} />
+              <HistoryRail T={T} items={history} onSelect={handleHistorySelect} activeId={activeId} branding={branding} onDelete={handleDeleteReport} onClearAll={handleClearAll} />
             </div>
           </div>
 
