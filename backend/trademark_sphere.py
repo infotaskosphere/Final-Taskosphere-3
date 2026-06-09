@@ -1488,6 +1488,8 @@ class CombinedPdfItem(BaseModel):
     headline: str = ""
     class_filter: Optional[int] = None
     error: Optional[str] = None
+    all_results: Optional[List[dict]] = []
+    class_breakdown: Optional[List[dict]] = []
 
 class CombinedPdfRequest(BaseModel):
     items: List[CombinedPdfItem]
