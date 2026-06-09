@@ -18,13 +18,30 @@ import api from "@/lib/api";
 // ─── Report generation ────────────────────────────────────────────────────────
 
 export async function generateReport(name, opts = {}) {
-  const { class_filter = null, device_only = false, logo_data_url = null } = opts;
+  const {
+    class_filter = null,
+    device_only = false,
+    logo_data_url = null,
+    footer = "",
+    tagline = "",
+    watermark = "",
+    custom_watermark = "",
+  } = opts;
   const { data } = await api.post("/trademark-qc/report", {
     name,
     class_filter,
     device_only,
     logo_data_url,
+    footer,
+    tagline,
+    watermark,
+    custom_watermark,
   }, { timeout: 60000 });
+  return data;
+}
+
+export async function deleteReport(reportId) {
+  const { data } = await api.delete(`/trademark-qc/searches/${reportId}`);
   return data;
 }
 
