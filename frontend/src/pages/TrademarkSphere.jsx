@@ -105,7 +105,7 @@ function brandedPdfUrl(reportId, branding) {
 }
 
 // POST-based PDF download — required when a logo needs to be sent (too large for query params)
-async function downloadBrandedPdfWithLogo(reportId, branding) {
+async function downloadBrandedPdfWithLogo(reportId, branding, clientInfo = {}) {
   const base = api.defaults.baseURL || "";
   const wm = branding?.watermark === "CUSTOM" ? branding.customWatermark : branding?.watermark;
   const body = {
@@ -114,6 +114,9 @@ async function downloadBrandedPdfWithLogo(reportId, branding) {
     tagline:          branding?.tagline || "Trademark Availability Report",
     watermark:        wm || "",
     custom_watermark: branding?.customWatermark || "",
+    client_name:      clientInfo.client_name   || "",
+    client_mobile:    clientInfo.client_mobile || "",
+    report_date:      clientInfo.report_date   || "",
   };
   const res = await fetch(`${base}/trademark-qc/searches/${reportId}/pdf`, {
     method: "POST",
@@ -480,10 +483,18 @@ function ClientSelector({ value, onChange, T }) {
   const [results, setResults] = useState([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState("search"); // "search" | "add-perm" | "add-temp"
+  const [addForm, setAddForm] = useState({ company_name: "", phone: "", gstin: "" });
+  const [addLoading, setAddLoading] = useState(false);
   const ref = useRef();
 
   useEffect(() => {
-    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) {
+        setOpen(false);
+        setMode("search");
+      }
+    };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
@@ -495,7 +506,88 @@ function ClientSelector({ value, onChange, T }) {
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { if (open) search(q); }, [q, open, search]);
+  useEffect(() => { if (open && mode === "search") search(q); }, [q, open, mode, search]);
+
+  const handleAddPermanent = async () => {
+    if (!addForm.company_name.trim()) return toast.error("Client name is required");
+    setAddLoading(true);
+    try {
+      const { data } = await api.post("/clients", {
+        company_name: addForm.company_name.trim(),
+        phone: addForm.phone.trim(),
+        gstin: addForm.gstin.trim(),
+      });
+      onChange(data);
+      setOpen(false);
+      setMode("search");
+      setAddForm({ company_name: "", phone: "", gstin: "" });
+      toast.success(`Client "${data.company_name}" added and selected`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to add client");
+    } finally { setAddLoading(false); }
+  };
+
+  const handleAddTemp = () => {
+    if (!addForm.company_name.trim()) return toast.error("Client name is required");
+    onChange({
+      id: `temp_${Date.now()}`,
+      company_name: addForm.company_name.trim(),
+      phone: addForm.phone.trim(),
+      is_temporary: true,
+    });
+    setOpen(false);
+    setMode("search");
+    setAddForm({ company_name: "", phone: "", gstin: "" });
+    toast.success("Temporary client set — won't be saved to client list");
+  };
+
+  const inlineForm = (isTmp) => (
+    <div style={{ padding: "14px 16px" }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: T.text, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+        {isTmp
+          ? <><Clock size={12} style={{ color: COLORS.amber }} /> Temporary Client</>
+          : <><Plus size={12} style={{ color: COLORS.emeraldGreen }} /> Add New Client</>}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <input
+          value={addForm.company_name}
+          onChange={e => setAddForm(f => ({ ...f, company_name: e.target.value }))}
+          placeholder="Client / company name *"
+          autoFocus
+          style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 8, padding: "8px 12px", fontSize: 13, color: T.text, outline: "none", fontFamily: "inherit", width: "100%" }}
+        />
+        <input
+          value={addForm.phone}
+          onChange={e => setAddForm(f => ({ ...f, phone: e.target.value }))}
+          placeholder="Mobile number"
+          style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 8, padding: "8px 12px", fontSize: 13, color: T.text, outline: "none", fontFamily: "inherit", width: "100%" }}
+        />
+        {!isTmp && (
+          <input
+            value={addForm.gstin}
+            onChange={e => setAddForm(f => ({ ...f, gstin: e.target.value }))}
+            placeholder="GSTIN (optional)"
+            style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 8, padding: "8px 12px", fontSize: 13, color: T.text, outline: "none", fontFamily: "inherit", width: "100%" }}
+          />
+        )}
+        {isTmp && (
+          <p style={{ fontSize: 11, color: T.dimmer, margin: 0, lineHeight: 1.5 }}>
+            Appears on this PDF only — not saved to your client list.
+          </p>
+        )}
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn T={T} variant={isTmp ? "ghost" : "primary"} onClick={isTmp ? handleAddTemp : handleAddPermanent} disabled={addLoading}
+            style={{ flex: 1, justifyContent: "center", padding: "7px 12px", fontSize: 12, border: isTmp ? `1px solid ${COLORS.amber}` : undefined, color: isTmp ? COLORS.amber : undefined, background: isTmp ? `${COLORS.amber}12` : undefined }}>
+            {addLoading ? "Saving…" : isTmp ? "Use for This Report" : "Save & Select"}
+          </Btn>
+          <Btn T={T} variant="ghost" onClick={() => { setMode("search"); setAddForm({ company_name: "", phone: "", gstin: "" }); }}
+            style={{ padding: "7px 12px", fontSize: 12 }}>
+            Cancel
+          </Btn>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div ref={ref} style={{ position: "relative" }}>
@@ -503,7 +595,14 @@ function ClientSelector({ value, onChange, T }) {
       <button onClick={() => setOpen(v => !v)} style={{ width: "100%", background: T.raised, border: `1px solid ${value ? COLORS.blueLight : T.border}`, borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", color: value ? T.text : T.dimmer, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <Building2 size={14} style={{ color: value ? COLORS.blueLight : T.dimmer }} />
-          {value ? value.company_name : "Select a client (optional)"}
+          {value
+            ? <>
+                <span>{value.company_name}</span>
+                {value.is_temporary && (
+                  <span style={{ fontSize: 10, color: COLORS.amber, fontWeight: 700, background: `${COLORS.amber}18`, border: `1px solid ${COLORS.amber}44`, borderRadius: 4, padding: "1px 6px" }}>TEMP</span>
+                )}
+              </>
+            : "Select a client (optional)"}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {value && <button onClick={e => { e.stopPropagation(); onChange(null); }} style={{ background: "none", border: "none", color: T.dimmer, cursor: "pointer", lineHeight: 1, padding: 0 }}><X size={12} /></button>}
@@ -515,36 +614,60 @@ function ClientSelector({ value, onChange, T }) {
         {open && (
           <motion.div initial={{ opacity: 0, y: -8, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -8, scale: 0.97 }} transition={{ duration: 0.15 }}
             style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, zIndex: 50, boxShadow: "0 16px 40px rgba(0,0,0,0.2)", overflow: "hidden" }}>
-            <div style={{ padding: "10px 12px", borderBottom: `1px solid ${T.border}` }}>
-              <div style={{ position: "relative" }}>
-                <Search size={13} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: T.dimmer }} />
-                <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search clients…" autoFocus
-                  style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 8, padding: "7px 10px 7px 30px", fontSize: 13, color: T.text, width: "100%", outline: "none", fontFamily: "inherit" }} />
-              </div>
-            </div>
-            <div style={{ maxHeight: 220, overflowY: "auto" }}>
-              {loading && <div style={{ padding: "14px 16px", color: T.dimmer, fontSize: 13 }}>Searching…</div>}
-              {!loading && results.length === 0 && <div style={{ padding: "14px 16px", color: T.dimmer, fontSize: 13 }}>No clients found</div>}
-              {results.map(c => (
-                <button key={c.id} onClick={() => { onChange(c); setOpen(false); setQ(""); }} style={{ width: "100%", background: "none", border: "none", padding: "10px 16px", display: "flex", alignItems: "center", gap: 10, cursor: "pointer", borderBottom: `1px solid ${T.border}`, color: T.text, fontFamily: "inherit", textAlign: "left" }}>
-                  <div style={{ width: 30, height: 30, borderRadius: 8, background: T.raised, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    <Building2 size={14} style={{ color: T.blueL }} />
+
+            {mode === "add-perm" ? inlineForm(false)
+            : mode === "add-temp" ? inlineForm(true)
+            : (
+              <>
+                <div style={{ padding: "10px 12px", borderBottom: `1px solid ${T.border}` }}>
+                  <div style={{ position: "relative" }}>
+                    <Search size={13} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: T.dimmer }} />
+                    <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search clients…" autoFocus
+                      style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 8, padding: "7px 10px 7px 30px", fontSize: 13, color: T.text, width: "100%", outline: "none", fontFamily: "inherit" }} />
                   </div>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{c.company_name}</div>
-                    {c.gstin && <div style={{ fontSize: 11, color: T.dimmer }}>GSTIN: {c.gstin}</div>}
-                  </div>
-                </button>
-              ))}
-            </div>
+                </div>
+                <div style={{ maxHeight: 180, overflowY: "auto" }}>
+                  {loading && <div style={{ padding: "14px 16px", color: T.dimmer, fontSize: 13 }}>Searching…</div>}
+                  {!loading && results.length === 0 && <div style={{ padding: "14px 16px", color: T.dimmer, fontSize: 13 }}>No clients found</div>}
+                  {results.map(c => (
+                    <button key={c.id} onClick={() => { onChange(c); setOpen(false); setQ(""); }} style={{ width: "100%", background: "none", border: "none", padding: "10px 16px", display: "flex", alignItems: "center", gap: 10, cursor: "pointer", borderBottom: `1px solid ${T.border}`, color: T.text, fontFamily: "inherit", textAlign: "left" }}>
+                      <div style={{ width: 30, height: 30, borderRadius: 8, background: T.raised, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        <Building2 size={14} style={{ color: T.blueL }} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{c.company_name}</div>
+                        {c.gstin && <div style={{ fontSize: 11, color: T.dimmer }}>GSTIN: {c.gstin}</div>}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+                {/* Footer — Add New Client / Temp Client actions */}
+                <div style={{ display: "flex", borderTop: `1px solid ${T.border}` }}>
+                  <button
+                    onClick={() => { setMode("add-perm"); setAddForm(f => ({ ...f, company_name: q })); }}
+                    style={{ flex: 1, background: "none", border: "none", borderRight: `1px solid ${T.border}`, padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: 12, fontWeight: 600, color: COLORS.emeraldGreen, cursor: "pointer", fontFamily: "inherit" }}>
+                    <Plus size={13} /> Add New Client
+                  </button>
+                  <button
+                    onClick={() => { setMode("add-temp"); setAddForm(f => ({ ...f, company_name: q })); }}
+                    style={{ flex: 1, background: "none", border: "none", padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: 12, fontWeight: 600, color: COLORS.amber, cursor: "pointer", fontFamily: "inherit" }}>
+                    <Clock size={13} /> Temp Client
+                  </button>
+                </div>
+              </>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
 
       {value && (
-        <div style={{ marginTop: 8, background: `${COLORS.mediumBlue}12`, border: `1px solid ${COLORS.mediumBlue}33`, borderRadius: 8, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8 }}>
-          <Info size={12} style={{ color: T.blueL, flexShrink: 0 }} />
-          <span style={{ fontSize: 12, color: T.muted }}>Report filed under <strong style={{ color: T.text }}>{value.company_name}</strong></span>
+        <div style={{ marginTop: 8, background: value.is_temporary ? `${COLORS.amber}12` : `${COLORS.mediumBlue}12`, border: `1px solid ${value.is_temporary ? COLORS.amber : COLORS.mediumBlue}33`, borderRadius: 8, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8 }}>
+          <Info size={12} style={{ color: value.is_temporary ? COLORS.amber : T.blueL, flexShrink: 0 }} />
+          <span style={{ fontSize: 12, color: T.muted }}>
+            {value.is_temporary ? "Temp client for this report:" : "Report filed under"}
+            {" "}<strong style={{ color: T.text }}>{value.company_name}</strong>
+            {value.is_temporary && value.phone && <span style={{ color: T.dimmer }}> · {value.phone}</span>}
+          </span>
         </div>
       )}
     </div>
@@ -683,7 +806,7 @@ function StatGrid({ report, T }) {
 }
 
 // ─── Report actions — with Re-brand PDF ──────────────────────────────────────
-function ReportActions({ reportId, branding, T }) {
+function ReportActions({ reportId, branding, clientInfo = {}, T }) {
   const [copied, setCopied] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   if (!reportId) return null;
@@ -691,12 +814,14 @@ function ReportActions({ reportId, branding, T }) {
     try { await navigator.clipboard.writeText(shareLinkFor(reportId)); setCopied(true); toast.success("Share link copied"); setTimeout(() => setCopied(false), 2000); }
     catch { toast.error("Could not copy link"); }
   };
-  // Use POST when logo is present (logo data too large for query params), GET otherwise
+  // Use POST when logo or client info is present (data too large / not suitable for query params)
   const handlePdfDownload = async () => {
-    if (branding?.logo) {
+    const hasLogo = branding?.logo;
+    const hasClientInfo = clientInfo?.client_name || clientInfo?.client_mobile;
+    if (hasLogo || hasClientInfo) {
       setPdfLoading(true);
       try {
-        await downloadBrandedPdfWithLogo(reportId, branding);
+        await downloadBrandedPdfWithLogo(reportId, branding, clientInfo);
       } catch (e) {
         toast.error("PDF generation failed. Please try again.");
       } finally {
@@ -715,7 +840,7 @@ function ReportActions({ reportId, branding, T }) {
         {copied ? <Check size={14} style={{ color: COLORS.emeraldGreen }} /> : <Link2 size={14} />}
         {copied ? "Copied!" : "Copy share link"}
       </Btn>
-      {(branding?.footer || branding?.logo || branding?.tagline) && (
+      {(branding?.footer || branding?.logo || branding?.tagline || clientInfo?.client_name) && (
         <Btn T={T} variant="success" style={{ fontSize: 12 }} onClick={handlePdfDownload} disabled={pdfLoading}>
           <Paintbrush size={13} /> {pdfLoading ? "Generating…" : "PDF with Current Branding"}
         </Btn>
@@ -942,10 +1067,11 @@ function HistoryRail({ items, onSelect, activeId, branding, onDelete, T }) {
 }
 
 // ─── Bulk search ──────────────────────────────────────────────────────────────
-function BulkPanel({ onPickReport, T }) {
+function BulkPanel({ onPickReport, branding, clientInfo, T }) {
   const [text, setText] = useState("");
   const [klass, setKlass] = useState("");
   const [loading, setLoading] = useState(false);
+  const [combinedLoading, setCombinedLoading] = useState(false);
   const [items, setItems] = useState([]);
 
   const run = async () => {
@@ -960,6 +1086,51 @@ function BulkPanel({ onPickReport, T }) {
     } catch (e) { toast.error(e?.response?.data?.detail || "Bulk search failed"); }
     finally { setLoading(false); }
   };
+
+  const handleCombinedPdf = async () => {
+    const successful = items.filter(it => !it.error);
+    if (!successful.length) return toast.error("No successful results to include in combined report");
+    setCombinedLoading(true);
+    try {
+      const wm = branding?.watermark === "CUSTOM" ? branding?.customWatermark : branding?.watermark;
+      const body = {
+        items: successful.map(it => ({
+          name:           it.name,
+          overall_status: it.overall_status,
+          risk_score:     it.risk_score,
+          headline:       it.headline || "",
+          class_filter:   klass ? Number(klass) : null,
+        })),
+        logo_data_url:    branding?.logo    || null,
+        footer:           branding?.footer  || "",
+        tagline:          branding?.tagline || "Bulk Trademark Availability Report",
+        watermark:        wm || "",
+        custom_watermark: branding?.customWatermark || "",
+        client_name:      clientInfo?.client_name   || "",
+        client_mobile:    clientInfo?.client_mobile || "",
+        report_date:      clientInfo?.report_date   || "",
+      };
+      const base = api.defaults.baseURL || "";
+      const res = await fetch(`${base}/trademark-sphere/combined-pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`PDF generation failed: ${res.status}`);
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href = url;
+      a.download = `bulk_trademark_report_${new Date().toISOString().slice(0, 10)}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Combined report downloaded");
+    } catch (e) {
+      toast.error(e?.message || "Failed to generate combined report");
+    } finally { setCombinedLoading(false); }
+  };
+
+  const successCount = items.filter(it => !it.error).length;
 
   return (
     <Collapsible T={T} title="Bulk Search" icon={Layers} iconColor={COLORS.emeraldGreen} badge="Check up to 20 names at once">
@@ -977,25 +1148,48 @@ function BulkPanel({ onPickReport, T }) {
           <p style={{ fontSize: 11, color: T.dimmer, margin: 0 }}>Each name creates a stored report.</p>
         </div>
       </div>
+
       {items.length > 0 && (
-        <div style={{ border: `1px solid ${T.border}`, borderRadius: 10, overflow: "hidden" }}>
-          {items.map((it, i) => (
-            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 120px 60px 1fr auto", padding: "10px 14px", borderBottom: i < items.length - 1 ? `1px solid ${T.border}` : "none", alignItems: "center", gap: 12 }}>
-              <span style={{ fontWeight: 600, color: T.text, fontSize: 13 }}>{it.name}</span>
-              {it.error ? <span style={{ color: T.red, fontSize: 12 }}>Failed</span> : <VerdictBadge status={it.overall_status} />}
-              <span style={{ fontFamily: "'JetBrains Mono', monospace", color: T.muted, fontSize: 13 }}>{it.error ? "—" : it.risk_score}</span>
-              <span style={{ fontSize: 12, color: T.dimmer, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.error || it.headline}</span>
-              {!it.error && it.id && (
-                <div style={{ display: "flex", gap: 6 }}>
-                  <Btn T={T} variant="ghost" onClick={() => onPickReport?.(it.id)} style={{ padding: "4px 10px", fontSize: 11 }}>View</Btn>
-                  <a href={pdfDownloadUrl(it.id)} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
-                    <Btn T={T} variant="ghost" style={{ padding: "4px 10px", fontSize: 11 }}><Download size={11} /> PDF</Btn>
-                  </a>
-                </div>
-              )}
+        <>
+          <div style={{ border: `1px solid ${T.border}`, borderRadius: 10, overflow: "hidden", marginBottom: 12 }}>
+            {items.map((it, i) => (
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 120px 60px 1fr auto", padding: "10px 14px", borderBottom: i < items.length - 1 ? `1px solid ${T.border}` : "none", alignItems: "center", gap: 12 }}>
+                <span style={{ fontWeight: 600, color: T.text, fontSize: 13 }}>{it.name}</span>
+                {it.error ? <span style={{ color: T.red, fontSize: 12 }}>Failed</span> : <VerdictBadge status={it.overall_status} />}
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", color: T.muted, fontSize: 13 }}>{it.error ? "—" : it.risk_score}</span>
+                <span style={{ fontSize: 12, color: T.dimmer, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.error || it.headline}</span>
+                {!it.error && it.id && (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <Btn T={T} variant="ghost" onClick={() => onPickReport?.(it.id)} style={{ padding: "4px 10px", fontSize: 11 }}>View</Btn>
+                    <a href={pdfDownloadUrl(it.id)} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+                      <Btn T={T} variant="ghost" style={{ padding: "4px 10px", fontSize: 11 }}><Download size={11} /> PDF</Btn>
+                    </a>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Combined report action bar */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: `${COLORS.mediumBlue}0e`, border: `1px solid ${COLORS.mediumBlue}33`, borderRadius: 10 }}>
+            <div style={{ background: `${COLORS.mediumBlue}22`, borderRadius: 8, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <FileText size={15} style={{ color: COLORS.mediumBlue }} />
             </div>
-          ))}
-        </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>Combined Report</div>
+              <div style={{ fontSize: 11, color: T.dimmer }}>
+                {successCount} mark{successCount !== 1 ? "s" : ""} · all verdicts in one PDF
+                {(clientInfo?.client_name) && <> · {clientInfo.client_name}</>}
+              </div>
+            </div>
+            <Btn T={T} variant="primary" onClick={handleCombinedPdf} disabled={combinedLoading || successCount === 0}
+              style={{ whiteSpace: "nowrap", padding: "8px 18px" }}>
+              {combinedLoading
+                ? <><RefreshCw size={13} style={{ animation: "spin 1s linear infinite" }} /> Generating…</>
+                : <><Download size={13} /> Download Combined PDF</>}
+            </Btn>
+          </div>
+        </>
       )}
     </Collapsible>
   );
@@ -1103,6 +1297,7 @@ export default function TrademarkSphere() {
   const [lastClassFilter, setLastClassFilter] = useState(null);
   const [pinnedClass, setPinnedClass]   = useState("");
   const [selectedClient, setSelectedClient] = useState(null);
+  const [reportDate, setReportDate]     = useState(() => new Date().toISOString().slice(0, 10));
   const [companies, setCompanies]       = useState([]);
 
   // Branding — load saved on mount
@@ -1162,6 +1357,9 @@ export default function TrademarkSphere() {
         tagline:          branding.tagline || "Trademark Availability Report",
         watermark:        effectiveWm || "",
         custom_watermark: branding.customWatermark || "",
+        client_name:      selectedClient?.company_name || "",
+        client_mobile:    selectedClient?.phone || "",
+        report_date:      reportDate || "",
       });
       setReport(data.report);
       setActiveId(data.id);
@@ -1247,6 +1445,18 @@ export default function TrademarkSphere() {
             {/* Client selector card */}
             <Card style={{ padding: "18px 20px" }}>
               <ClientSelector T={T} value={selectedClient} onChange={setSelectedClient} />
+              {/* Report Date */}
+              <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${T.border}` }}>
+                <div style={{ fontSize: 11, color: T.dimmer, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
+                  Report Date
+                </div>
+                <input
+                  type="date"
+                  value={reportDate}
+                  onChange={e => setReportDate(e.target.value)}
+                  style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 10, color: T.text, padding: "9px 14px", fontSize: 13, outline: "none", width: "100%", fontFamily: "inherit", cursor: "pointer" }}
+                />
+              </div>
             </Card>
 
             {/* Branding panel — always expanded, no collapsible */}
@@ -1272,7 +1482,11 @@ export default function TrademarkSphere() {
           {/* ── Tools row: class finder + bulk (collapsible, compact) ── */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 24 }}>
             <ClassFinderPanel T={T} onPickClass={(cls) => { setPinnedClass(String(cls)); toast.success(`Class ${cls} pinned`); scrollToSearch(); }} />
-            <BulkPanel T={T} onPickReport={async (id) => {
+            <BulkPanel T={T} branding={branding} clientInfo={{
+              client_name:   selectedClient?.company_name || "",
+              client_mobile: selectedClient?.phone || "",
+              report_date:   reportDate || "",
+            }} onPickReport={async (id) => {
               const item = history.find(h => h.id === id);
               if (item) handleHistorySelect(item);
               else { try { const d = await getReport(id); setReport(d.report); setActiveId(d.id); refreshHistory(); } catch {} }
@@ -1319,7 +1533,11 @@ export default function TrademarkSphere() {
                     </Card>
                   )}
 
-                  <ReportActions T={T} reportId={activeId} branding={branding} />
+                  <ReportActions T={T} reportId={activeId} branding={branding} clientInfo={{
+                    client_name:   selectedClient?.company_name || "",
+                    client_mobile: selectedClient?.phone || "",
+                    report_date:   reportDate || "",
+                  }} />
                   <Recommendations T={T} recommendations={report.recommendations} alternatives={report.alternative_name_suggestions} />
                   <ClassBreakdown T={T} rows={report.class_breakdown} />
                   <MatchesTable T={T} rows={report.all_results} />
