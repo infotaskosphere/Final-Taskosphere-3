@@ -340,6 +340,63 @@ async def download_report_pdf(
     )
 
 
+class PdfRenderRequest(BaseModel):
+    """Body for the POST PDF endpoint - lets caller supply full branding including logo."""
+    logo_data_url:    Optional[str] = Field(None, max_length=500_000)
+    footer:           Optional[str] = Field(None, max_length=500)
+    tagline:          Optional[str] = Field(None, max_length=200)
+    watermark:        Optional[str] = Field(None, max_length=100)
+    custom_watermark: Optional[str] = Field(None, max_length=100)
+
+
+@router.post("/searches/{report_id}/pdf")
+async def download_report_pdf_post(
+    report_id: str,
+    payload:   PdfRenderRequest,
+):
+    """
+    POST variant of the PDF download endpoint.
+
+    Accepts a JSON body with optional branding overrides including logo_data_url
+    (a data: URI string, e.g. data:image/png;base64,...).  This is the recommended
+    endpoint when the caller wants to inject a company logo into the PDF header,
+    because logo data is too large to fit in a query-string parameter.
+
+    The logo supplied here takes priority over any logo stored with the report.
+    """
+    doc = await db.qc_trademark_reports.find_one({"id": report_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    if "report" not in doc:
+        doc["report"] = {}
+
+    # Resolve effective watermark (CUSTOM -> custom_watermark text)
+    wm = payload.watermark or ""
+    if wm == "CUSTOM":
+        wm = payload.custom_watermark or ""
+
+    # Merge caller-supplied branding into the stored report dict
+    doc["report"] = {
+        **doc["report"],
+        # Logo: caller value wins; fall back to whatever was stored at creation time
+        "logo_data_url": payload.logo_data_url or doc["report"].get("logo_data_url"),
+        "footer_text":   payload.footer   or doc["report"].get("footer_text", ""),
+        "tagline":       payload.tagline  or doc["report"].get("tagline", "Trademark Availability Report"),
+        "watermark":     wm               or doc["report"].get("watermark", ""),
+        "custom_watermark": payload.custom_watermark or doc["report"].get("custom_watermark", ""),
+    }
+
+    pdf_bytes = build_report_pdf(doc)
+    safe_query = "".join(c if c.isalnum() else "_" for c in (doc.get("query") or "report"))[:48]
+    filename = f"trademark_report_{safe_query}_{report_id[:8]}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
 # ---------- Branding Preference (per-user, cross-device sync) ----------
 
 @router.post("/branding-preference")
