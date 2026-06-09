@@ -1,12 +1,19 @@
+
+# REMOVED broken import (backend.services not found): from backend.services.watchlist_service import watchlist_service
+# REMOVED broken import (backend.services not found): from backend.services.search_service import search_service
+
+
+# REMOVED broken import (backend.services not found): from backend.services.ipindia_scraper import scraper
+"""
 backend/trademark_sphere.py
 ---------------------------
 Dual-source trademark scraper:
 
-  Source 1 — QuickCompany  (https://www.quickcompany.in/trademarks/{app_no}-{slug})
+  Source 1 - QuickCompany  (https://www.quickcompany.in/trademarks/{app_no}-{slug})
              Full HTML page scrape via BeautifulSoup. No login, no OTP.
              Used for: single-mark lookup, auto-add, refresh.
 
-  Source 2 — IP India TMR Public Search
+  Source 2 - IP India TMR Public Search
              (https://tmrsearch.ipindia.gov.in/tmrpublicsearch/frmmain.aspx)
              ASP.NET __VIEWSTATE session scrape via requests + BS4.
              Used for: attorney portfolio bulk import.
