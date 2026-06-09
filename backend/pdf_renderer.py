@@ -214,18 +214,19 @@ def _make_page_cb(footer_left: str, footer_right: str, watermark: str = ""):
     def _cb(canvas, doc):
         canvas.saveState()
 
-        # ── Diagonal watermark stamp (behind content) ─────────────────────────
+        # ── Diagonal watermark stamp — single centred diagonal (MS Word style) ──
         if watermark:
             canvas.saveState()
-            canvas.setFont("Helvetica-Bold", 52)
-            canvas.setFillColor(colors.HexColor("#D0DCE8"))
-            canvas.setFillAlpha(0.18)
+            # Choose font size based on text length so it fits within the page
+            wm_text = watermark.upper()
+            font_size = max(28, min(68, int(180 / max(len(wm_text), 1))))
+            canvas.setFont("Helvetica-Bold", font_size)
+            canvas.setFillColor(colors.HexColor("#C8D4E0"))
+            canvas.setFillAlpha(0.15)
+            # Translate to exact page centre, rotate 45° — one stamp only
             canvas.translate(PAGE_W / 2, PAGE_H / 2)
             canvas.rotate(45)
-            canvas.drawCentredString(0, 0, watermark.upper())
-            # Second instance offset
-            canvas.drawCentredString(0, 110, watermark.upper())
-            canvas.drawCentredString(0, -110, watermark.upper())
+            canvas.drawCentredString(0, 0, wm_text)
             canvas.restoreState()
 
         # ── Footer rule + text ─────────────────────────────────────────────────
