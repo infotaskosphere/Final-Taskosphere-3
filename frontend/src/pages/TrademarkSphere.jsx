@@ -339,7 +339,7 @@ function BrandingPanel({ branding, onChange, companies, T }) {
   const isDefault = !!branding.defaultCompanyId && branding.defaultCompanyId === selectedCompanyId;
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
 
       {/* Company selector — full width */}
       <div style={{ gridColumn: "1 / -1" }}>
@@ -427,15 +427,15 @@ function BrandingPanel({ branding, onChange, companies, T }) {
       </div>
 
       {/* Footer text */}
-      <div style={{ gridColumn: "1 / -1" }}>
+      <div style={{ gridColumn: "1 / 3" }}>
         <div style={{ fontSize: 11, color: T.dimmer, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Footer Text</div>
         <Textarea T={T} rows={2} placeholder="e.g. Prepared by Shree Hanuma & Associates · Confidential · For client use only" value={branding.footer || ""} onChange={e => onChange({ ...branding, footer: e.target.value })} />
       </div>
 
       {/* Header tagline */}
-      <div style={{ gridColumn: "1 / -1" }}>
+      <div style={{ gridColumn: "3 / 4" }}>
         <div style={{ fontSize: 11, color: T.dimmer, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Header Tagline (below logo)</div>
-        <Input T={T} placeholder="e.g. Trademark Availability Report · IP Compliance Practice" value={branding.tagline || ""} onChange={e => onChange({ ...branding, tagline: e.target.value })} />
+        <Input T={T} placeholder="e.g. Trademark Availability Report" value={branding.tagline || ""} onChange={e => onChange({ ...branding, tagline: e.target.value })} />
       </div>
 
       {/* Save branding settings note */}
@@ -1180,35 +1180,59 @@ export default function TrademarkSphere() {
         <div style={{ maxWidth: 1400, margin: "0 auto" }}>
 
           {/* ── Page header — aligned with Dashboard layout ── */}
-          <div style={{ marginBottom: 24 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-              <div style={{ width: 44, height: 44, borderRadius: 14, background: "linear-gradient(135deg, #0D3B66, #1F6FB2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                <Shield size={22} style={{ color: "#fff" }} />
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                <div style={{ width: 44, height: 44, borderRadius: 14, background: "linear-gradient(135deg, #0D3B66, #1F6FB2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 4px 14px rgba(31,111,178,0.35)" }}>
+                  <Shield size={22} style={{ color: "#fff" }} />
+                </div>
+                <div>
+                  <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: T.text, letterSpacing: "-0.4px" }}>Trademark Sphere</h1>
+                  <p style={{ margin: 0, fontSize: 12, color: T.dimmer, marginTop: 2 }}>IP India registry · QuickCompany data source</p>
+                </div>
               </div>
-              <div>
-                <h1 className="text-xl font-bold tracking-tight" style={{ margin: 0, color: T.text }}>Trademark Sphere</h1>
-                <p style={{ margin: 0, fontSize: 12, color: T.dimmer }}>IP India registry · QuickCompany data source</p>
-              </div>
+              {/* Quick stats strip */}
+              {report && (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <VerdictBadge status={report.overall_status} large />
+                  <div style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 10, padding: "6px 14px", display: "flex", alignItems: "center", gap: 6 }}>
+                    <BarChart3 size={13} style={{ color: T.blueL }} />
+                    <span style={{ fontSize: 12, fontWeight: 700, color: T.text, fontFamily: "'JetBrains Mono', monospace" }}>Risk {report.risk_score}/100</span>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* ── Top row: client selector + branding ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
-            <Card style={{ padding: "20px 22px" }}>
+          {/* ── Configuration row: client + branding ── */}
+          <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 16, marginBottom: 16 }}>
+            {/* Client selector card */}
+            <Card style={{ padding: "18px 20px" }}>
               <ClientSelector T={T} value={selectedClient} onChange={setSelectedClient} />
             </Card>
-            <Collapsible T={T} title="Report Branding" icon={Stamp} iconColor={COLORS.amber} badge="Logo · watermark · footer" defaultOpen={!!branding.defaultCompanyId}>
+
+            {/* Branding panel — always expanded, no collapsible */}
+            <Card style={{ padding: "18px 22px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                <div style={{ background: `${COLORS.amber}20`, borderRadius: 8, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Stamp size={15} style={{ color: COLORS.amber }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>Report Branding</div>
+                  <div style={{ fontSize: 11, color: T.dimmer }}>Logo · watermark · footer — applied to every generated PDF</div>
+                </div>
+              </div>
               <BrandingPanel T={T} branding={branding} onChange={handleBrandingChange} companies={companies} />
-            </Collapsible>
+            </Card>
           </div>
 
           {/* ── Search bar ── */}
-          <div ref={searchRef} style={{ marginBottom: 16 }}>
+          <div ref={searchRef} style={{ marginBottom: 14 }}>
             <SearchBar T={T} onSubmit={handleSearch} loading={loading} defaultClass={pinnedClass} client={selectedClient} />
           </div>
 
-          {/* ── Tools row: class finder + bulk ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 28 }}>
+          {/* ── Tools row: class finder + bulk (collapsible, compact) ── */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 24 }}>
             <ClassFinderPanel T={T} onPickClass={(cls) => { setPinnedClass(String(cls)); toast.success(`Class ${cls} pinned`); scrollToSearch(); }} />
             <BulkPanel T={T} onPickReport={async (id) => {
               const item = history.find(h => h.id === id);
