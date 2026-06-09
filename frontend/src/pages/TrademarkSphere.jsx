@@ -1110,14 +1110,9 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
         client_mobile:    clientInfo?.client_mobile || "",
         report_date:      clientInfo?.report_date   || "",
       };
-      const base = api.defaults.baseURL || "";
-      const res = await fetch(`${base}/trademark-sphere/combined-pdf`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error(`PDF generation failed: ${res.status}`);
-      const blob = await res.blob();
+      // Use the api axios instance so auth credentials are sent automatically
+      const res = await api.post("/trademark-sphere/combined-pdf", body, { responseType: "blob" });
+      const blob = new Blob([res.data], { type: "application/pdf" });
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement("a");
       a.href = url;
@@ -1126,7 +1121,7 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
       URL.revokeObjectURL(url);
       toast.success("Combined report downloaded");
     } catch (e) {
-      toast.error(e?.message || "Failed to generate combined report");
+      toast.error(e?.response?.data?.detail || e?.message || "Failed to generate combined report");
     } finally { setCombinedLoading(false); }
   };
 
