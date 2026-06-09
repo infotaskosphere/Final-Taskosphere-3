@@ -69,6 +69,11 @@ class ReportRequest(BaseModel):
     class_filter: Optional[int] = Field(None, ge=1, le=45)
     device_only: bool = False
     logo_data_url: Optional[str] = Field(None, max_length=500_000)
+    # Branding fields saved with the report for consistent PDF re-generation
+    footer: Optional[str] = Field(None, max_length=500)
+    tagline: Optional[str] = Field(None, max_length=200)
+    watermark: Optional[str] = Field(None, max_length=100)
+    custom_watermark: Optional[str] = Field(None, max_length=100)
 
 
 class BulkReportRequest(BaseModel):
@@ -134,8 +139,17 @@ async def _scrape_and_report(
     return report
 
 
-async def _save_report(report: dict) -> str:
+async def _save_report(report: dict, branding: dict | None = None) -> str:
     report_id = str(uuid.uuid4())
+    # Embed branding into the report dict so it survives re-render without query params
+    if branding:
+        report = {
+            **report,
+            "footer_text":     branding.get("footer", ""),
+            "tagline":         branding.get("tagline", "Trademark Availability Report"),
+            "watermark":       branding.get("watermark", ""),
+            "custom_watermark":branding.get("custom_watermark", ""),
+        }
     doc = {
         "id": report_id,
         "query": report["query"],
@@ -188,7 +202,13 @@ async def create_report(payload: ReportRequest):
         device_only=payload.device_only,
         logo_data_url=payload.logo_data_url,
     )
-    report_id = await _save_report(report)
+    branding = {
+        "footer":          payload.footer or "",
+        "tagline":         payload.tagline or "Trademark Availability Report",
+        "watermark":       payload.watermark or "",
+        "custom_watermark":payload.custom_watermark or "",
+    }
+    report_id = await _save_report(report, branding=branding)
     return {"id": report_id, "report": report}
 
 
@@ -261,6 +281,15 @@ async def get_report(report_id: str):
     return doc
 
 
+@router.delete("/searches/{report_id}")
+async def delete_report(report_id: str):
+    """Delete a stored report from history."""
+    result = await db.qc_trademark_reports.delete_one({"id": report_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return {"status": "deleted", "id": report_id}
+
+
 @router.get("/searches/{report_id}/pdf")
 async def download_report_pdf(
     report_id: str,
@@ -292,21 +321,13 @@ async def download_report_pdf(
 
     # Merge branding overrides into the doc before rendering PDF
     if footer or tagline or watermark:
-        # We pass these as top-level fields; build_report_pdf should read them
-        # (if the PDF renderer doesn't support them yet, they're ignored gracefully)
-        doc = {
-            **doc,
-            "branding_footer":    footer    or doc.get("branding_footer", ""),
-            "branding_tagline":   tagline   or doc.get("branding_tagline", ""),
-            "branding_watermark": watermark or doc.get("branding_watermark", ""),
-        }
-        # Also propagate into the nested report dict so pdf_renderer can access
+        # Map to the field names pdf_renderer.py reads from the report dict
         if "report" in doc:
             doc["report"] = {
                 **doc["report"],
-                "branding_footer":    doc["branding_footer"],
-                "branding_tagline":   doc["branding_tagline"],
-                "branding_watermark": doc["branding_watermark"],
+                "footer_text": footer or doc["report"].get("footer_text", ""),
+                "tagline":     tagline or doc["report"].get("tagline", "Trademark Availability Report"),
+                "watermark":   watermark or doc["report"].get("watermark", ""),
             }
 
     pdf_bytes = build_report_pdf(doc)
