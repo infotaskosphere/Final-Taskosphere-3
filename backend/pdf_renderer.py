@@ -570,6 +570,7 @@ def build_report_pdf(doc_record: dict) -> bytes:
 
         # Table header
         ex_hdr = [
+            Paragraph("LOGO",       st["tbl_hdr"]),
             Paragraph("APP. ID",    st["tbl_hdr"]),
             Paragraph("MARK NAME",  st["tbl_hdr"]),
             Paragraph("APPLICANT",  st["tbl_hdr"]),
@@ -594,7 +595,19 @@ def build_report_pdf(doc_record: dict) -> bytes:
             else:
                 r_c = MUTED
 
+            # Mark logo image cell
+            logo_cell = Paragraph("—", st["tbl_cell"])
+            img_data_url = r.get("mark_image_data_url") or r.get("mark_image_url", "")
+            if img_data_url and img_data_url.startswith("data:image"):
+                try:
+                    img_stream = _decode_logo(img_data_url)
+                    if img_stream:
+                        logo_cell = RLImage(img_stream, width=12*mm, height=12*mm, kind="proportional")
+                except Exception:
+                    pass
+
             ex_rows.append([
+                logo_cell,
                 Paragraph(str(r.get("application_id") or "—"), st["tbl_cell_mono"]),
                 Paragraph((r.get("name") or "—")[:34], ParagraphStyle(
                     "nm", fontName="Helvetica-Bold", fontSize=8, textColor=TEXT, leading=11,
@@ -620,7 +633,7 @@ def build_report_pdf(doc_record: dict) -> bytes:
                 ),
             ])
 
-        ex_cws = [20*mm, 46*mm, 44*mm, 26*mm, 10*mm, 20*mm, 12*mm]
+        ex_cws = [14*mm, 20*mm, 44*mm, 40*mm, 26*mm, 10*mm, 20*mm, 12*mm]
         ex_tbl = Table(ex_rows, colWidths=ex_cws, repeatRows=1)
         ex_tbl.setStyle(TableStyle([
             ("BACKGROUND",    (0, 0), (-1, 0),  NAVY),
