@@ -209,16 +209,30 @@ def _status_color(status: str) -> colors.Color:
 
 
 # ── Page callbacks ────────────────────────────────────────────────────────────
-def _make_page_cb(footer_left: str, footer_right: str):
-    """Returns an onPage callback that draws page number + footer."""
+def _make_page_cb(footer_left: str, footer_right: str, watermark: str = ""):
+    """Returns an onPage callback that draws page number + footer + optional diagonal watermark."""
     def _cb(canvas, doc):
         canvas.saveState()
-        # thin rule above footer
+
+        # ── Diagonal watermark stamp (behind content) ─────────────────────────
+        if watermark:
+            canvas.saveState()
+            canvas.setFont("Helvetica-Bold", 52)
+            canvas.setFillColor(colors.HexColor("#D0DCE8"))
+            canvas.setFillAlpha(0.18)
+            canvas.translate(PAGE_W / 2, PAGE_H / 2)
+            canvas.rotate(45)
+            canvas.drawCentredString(0, 0, watermark.upper())
+            # Second instance offset
+            canvas.drawCentredString(0, 110, watermark.upper())
+            canvas.drawCentredString(0, -110, watermark.upper())
+            canvas.restoreState()
+
+        # ── Footer rule + text ─────────────────────────────────────────────────
         canvas.setStrokeColor(BORDER)
         canvas.setLineWidth(0.4)
         y_rule = 12 * mm
         canvas.line(L_MARGIN, y_rule, PAGE_W - R_MARGIN, y_rule)
-        # footer text
         canvas.setFont("Helvetica", 7)
         canvas.setFillColor(MUTED)
         canvas.drawString(L_MARGIN, 8 * mm, footer_left)
@@ -271,25 +285,44 @@ def build_report_pdf(doc_record: dict) -> bytes:
 
     # ── HEADER BAND ────────────────────────────────────────────────────────────
     logo_img = None
+    logo_img_height = 0
     if logo_url:
         logo_stream = _decode_logo(logo_url)
         if logo_stream:
             try:
-                logo_img = RLImage(logo_stream, width=CONTENT_W, height=22 * mm, kind="proportional")
+                # Load image to get natural dimensions, then scale to full content width
+                from PIL import Image as PILImage
+                import copy
+                logo_stream.seek(0)
+                pil = PILImage.open(logo_stream)
+                nat_w, nat_h = pil.size
+                logo_stream.seek(0)
+                # Scale so width = CONTENT_W, keep aspect ratio (no height cap)
+                scaled_h = (nat_h / nat_w) * CONTENT_W if nat_w > 0 else 20 * mm
+                # Cap height at 36mm for very tall logos; wide logos show naturally
+                scaled_h = min(scaled_h, 36 * mm)
+                logo_img = RLImage(logo_stream, width=CONTENT_W, height=scaled_h)
+                logo_img_height = scaled_h
             except Exception:
-                logo_img = None
+                # Fallback: use proportional scaling with generous height budget
+                try:
+                    logo_stream.seek(0)
+                    logo_img = RLImage(logo_stream, width=CONTENT_W, height=30 * mm, kind="proportional")
+                    logo_img_height = 30 * mm
+                except Exception:
+                    logo_img = None
 
     if logo_img:
-        # Full-width logo on white, contained proportionally
+        # Full-width logo on white background — no clipping
         logo_tbl = Table([[logo_img]], colWidths=[CONTENT_W])
         logo_tbl.setStyle(TableStyle([
             ("BACKGROUND",   (0, 0), (-1, -1), WHITE),
             ("BOX",          (0, 0), (-1, -1), 0.4, BORDER),
-            ("TOPPADDING",   (0, 0), (-1, -1), 6),
-            ("BOTTOMPADDING",(0, 0), (-1, -1), 6),
-            ("LEFTPADDING",  (0, 0), (-1, -1), 10),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 10),
-            ("ALIGN",        (0, 0), (-1, -1), "LEFT"),
+            ("TOPPADDING",   (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING",(0, 0), (-1, -1), 8),
+            ("LEFTPADDING",  (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("ALIGN",        (0, 0), (-1, -1), "CENTER"),
             ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
         ]))
         story.append(logo_tbl)
@@ -516,42 +549,34 @@ def build_report_pdf(doc_record: dict) -> bytes:
         ]))
         story.append(cls_tbl)
 
-    # ── WATERMARK (decorative text behind page if set) ─────────────────────────
-    # Handled via page callback if needed — for now embed as subtle footer note
-    if watermark:
-        story.append(Spacer(1, 6))
-        wm_tbl = Table(
-            [[Paragraph(watermark, ParagraphStyle(
-                "wm", fontName="Helvetica-Bold", fontSize=8,
-                textColor=MUTED, leading=11, alignment=TA_CENTER,
-                letterSpacing=2,
-            ))]],
-            colWidths=[CONTENT_W],
-        )
-        wm_tbl.setStyle(TableStyle([
-            ("BOX",          (0, 0), (-1, -1), 0.5, BORDER),
-            ("TOPPADDING",   (0, 0), (-1, -1),  5),
-            ("BOTTOMPADDING",(0, 0), (-1, -1),  5),
-        ]))
-        story.append(wm_tbl)
+    # ── WATERMARK — rendered as diagonal canvas stamp via page callback ─────────
+    # (handled in _make_page_cb below — no flowable needed)
 
     # ── EXHIBIT A — MATCHES ────────────────────────────────────────────────────
     if all_results:
         story.append(PageBreak())
 
-        # Repeat logo on page 2 if present (smaller)
+        # Repeat logo on page 2 if present (half-width, properly scaled)
         if logo_img:
             logo_stream2 = _decode_logo(logo_url)
             if logo_stream2:
                 try:
-                    logo_sm = RLImage(logo_stream2, width=CONTENT_W * 0.5, height=14 * mm, kind="proportional")
+                    from PIL import Image as PILImage
+                    logo_stream2.seek(0)
+                    pil2 = PILImage.open(logo_stream2)
+                    nat_w2, nat_h2 = pil2.size
+                    logo_stream2.seek(0)
+                    half_w = CONTENT_W * 0.55
+                    scaled_h2 = (nat_h2 / nat_w2) * half_w if nat_w2 > 0 else 18 * mm
+                    scaled_h2 = min(scaled_h2, 28 * mm)
+                    logo_sm = RLImage(logo_stream2, width=half_w, height=scaled_h2)
                     logo_sm_tbl = Table([[logo_sm]], colWidths=[CONTENT_W])
                     logo_sm_tbl.setStyle(TableStyle([
                         ("BACKGROUND",   (0,0),(-1,-1), WHITE),
                         ("BOX",          (0,0),(-1,-1), 0.4, BORDER),
-                        ("TOPPADDING",   (0,0),(-1,-1), 4),
-                        ("BOTTOMPADDING",(0,0),(-1,-1), 4),
-                        ("LEFTPADDING",  (0,0),(-1,-1), 8),
+                        ("TOPPADDING",   (0,0),(-1,-1), 5),
+                        ("BOTTOMPADDING",(0,0),(-1,-1), 5),
+                        ("LEFTPADDING",  (0,0),(-1,-1), 0),
                         ("ALIGN",        (0,0),(-1,-1), "LEFT"),
                         ("VALIGN",       (0,0),(-1,-1), "MIDDLE"),
                     ]))
@@ -658,6 +683,6 @@ def build_report_pdf(doc_record: dict) -> bytes:
         st["footer"],
     ))
 
-    page_cb = _make_page_cb(footer_l, footer_r)
+    page_cb = _make_page_cb(footer_l, footer_r, watermark)
     pdf.build(story, onFirstPage=page_cb, onLaterPages=page_cb)
     return buf.getvalue()
