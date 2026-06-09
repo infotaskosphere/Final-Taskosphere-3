@@ -568,13 +568,13 @@ def build_report_pdf(doc_record: dict) -> bytes:
         ))
         story.append(_section_rule())
 
-        # Table header
+        # Table header  — column order: APP.ID | MARK NAME | APPLICANT | STATUS | LOGO | CL. | MATCH | RISK
         ex_hdr = [
-            Paragraph("LOGO",       st["tbl_hdr"]),
             Paragraph("APP. ID",    st["tbl_hdr"]),
             Paragraph("MARK NAME",  st["tbl_hdr"]),
             Paragraph("APPLICANT",  st["tbl_hdr"]),
             Paragraph("STATUS",     st["tbl_hdr"]),
+            Paragraph("LOGO",       st["tbl_hdr"]),
             Paragraph("CL.",        st["tbl_hdr"]),
             Paragraph("MATCH",      st["tbl_hdr"]),
             Paragraph("RISK",       st["tbl_hdr"]),
@@ -587,7 +587,6 @@ def build_report_pdf(doc_record: dict) -> bytes:
             st_c  = _status_color(r.get("status", ""))
             risk_v = r.get("individual_risk_score", 0)
 
-            # Risk colour
             if risk_v >= 70:
                 r_c = colors.HexColor("#DC2626")
             elif risk_v >= 40:
@@ -607,7 +606,6 @@ def build_report_pdf(doc_record: dict) -> bytes:
                     pass
 
             ex_rows.append([
-                logo_cell,
                 Paragraph(str(r.get("application_id") or "—"), st["tbl_cell_mono"]),
                 Paragraph((r.get("name") or "—")[:34], ParagraphStyle(
                     "nm", fontName="Helvetica-Bold", fontSize=8, textColor=TEXT, leading=11,
@@ -617,6 +615,7 @@ def build_report_pdf(doc_record: dict) -> bytes:
                     f'<font color="{st_c.hexval()}">{(r.get("status") or "—")[:16]}</font>',
                     st["tbl_cell"],
                 ),
+                logo_cell,
                 Paragraph(str(r.get("class") or "—"), ParagraphStyle(
                     "cls2", fontName="Helvetica-Bold", fontSize=8,
                     textColor=BLUE, leading=11, alignment=TA_CENTER,
@@ -633,7 +632,8 @@ def build_report_pdf(doc_record: dict) -> bytes:
                 ),
             ])
 
-        ex_cws = [14*mm, 20*mm, 44*mm, 40*mm, 26*mm, 10*mm, 20*mm, 12*mm]
+        # APP.ID | MARK NAME | APPLICANT | STATUS | LOGO | CL. | MATCH | RISK
+        ex_cws = [20*mm, 46*mm, 38*mm, 26*mm, 14*mm, 10*mm, 20*mm, 12*mm]
         ex_tbl = Table(ex_rows, colWidths=ex_cws, repeatRows=1)
         ex_tbl.setStyle(TableStyle([
             ("BACKGROUND",    (0, 0), (-1, 0),  NAVY),
