@@ -1,10 +1,3 @@
-
-# REMOVED broken import (backend.services not found): from backend.services.watchlist_service import watchlist_service
-# REMOVED broken import (backend.services not found): from backend.services.search_service import search_service
-
-
-# REMOVED broken import (backend.services not found): from backend.services.ipindia_scraper import scraper
-"""
 backend/trademark_sphere.py
 ---------------------------
 Dual-source trademark scraper:
@@ -34,7 +27,7 @@ from zoneinfo import ZoneInfo
 
 import requests as _requests
 from bs4 import BeautifulSoup
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query, Response
 from pydantic import BaseModel, Field
 
 from backend.dependencies import db, get_current_user
@@ -1477,3 +1470,48 @@ async def search_trademark(query: str):
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(_pool, _qc_fetch_by_app_number, query)
     return result
+
+
+# ── Combined / Bulk PDF ────────────────────────────────────────────────────────
+class CombinedPdfItem(BaseModel):
+    name: str
+    overall_status: str = "UNKNOWN"
+    risk_score: int = 0
+    headline: str = ""
+    class_filter: Optional[int] = None
+    error: Optional[str] = None
+
+class CombinedPdfRequest(BaseModel):
+    items: List[CombinedPdfItem]
+    logo_data_url:    Optional[str] = None
+    footer:           Optional[str] = ""
+    tagline:          Optional[str] = "Bulk Trademark Availability Report"
+    watermark:        Optional[str] = ""
+    custom_watermark: Optional[str] = ""
+    client_name:      Optional[str] = ""
+    client_mobile:    Optional[str] = ""
+    report_date:      Optional[str] = ""
+
+@router.post("/combined-pdf")
+async def generate_combined_pdf(
+    body: CombinedPdfRequest,
+    user: User = Depends(get_current_user),
+):
+    from backend.pdf_renderer import build_combined_report_pdf
+    items_data = [it.dict() for it in body.items]
+    branding = {
+        "logo_data_url":    body.logo_data_url,
+        "footer_text":      body.footer or "",
+        "tagline":          body.tagline or "Bulk Trademark Availability Report",
+        "watermark":        body.watermark or "",
+        "custom_watermark": body.custom_watermark or "",
+        "client_name":      body.client_name or "",
+        "client_mobile":    body.client_mobile or "",
+        "report_date":      body.report_date or "",
+    }
+    pdf_bytes = build_combined_report_pdf(items_data, branding)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=bulk_trademark_report.pdf"},
+    )
