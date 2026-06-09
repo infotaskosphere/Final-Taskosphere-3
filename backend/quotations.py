@@ -1117,6 +1117,7 @@ async def create_company(data: dict, current_user: User = Depends(check_module_p
         "bank_account_no":   data.get("bank_account_no", ""),
         "bank_ifsc":         data.get("bank_ifsc", ""),
         "logo_base64":       data.get("logo_base64"),
+        "tm_logo_base64":    data.get("tm_logo_base64"),
         "signature_base64":  data.get("signature_base64"),
         "smtp_host":         data.get("smtp_host", ""),
         "smtp_port":         int(data.get("smtp_port", 587)),
@@ -1168,10 +1169,11 @@ async def update_company(
         "name", "address", "phone", "email", "website", "gstin", "pan",
         "has_gst",
         "bank_account_name", "bank_name", "bank_account_no", "bank_ifsc",
-        "logo_base64", "signature_base64",
+        "logo_base64", "tm_logo_base64", "signature_base64",
         "smtp_host", "smtp_port", "smtp_user", "smtp_password", "smtp_from_name",
     ]
-    update = {k: data[k] for k in allowed if k in data and data[k] is not None}
+    # Allow explicit null to clear tm_logo_base64
+    update = {k: data[k] for k in allowed if k in data and (data[k] is not None or k == "tm_logo_base64")}
     await db.companies.update_one({"id": company_id}, {"$set": update})
     updated = await db.companies.find_one({"id": company_id}, {"_id": 0})
     return updated
