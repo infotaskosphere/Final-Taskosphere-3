@@ -234,8 +234,8 @@ function BrandingPanel({ branding, onChange, companies = [] }) {
     if (!co) return;
     onChange({
       ...branding,
-      logo: co.logo_base64 || branding.logo,
-      logoName: co.logo_base64 ? co.name : branding.logoName,
+      logo: co.tm_logo_base64 || co.logo_base64 || branding.logo,
+      logoName: (co.tm_logo_base64 || co.logo_base64) ? co.name : branding.logoName,
       footer: branding.footer || `Prepared by ${co.name}${co.gstin ? ` · GSTIN: ${co.gstin}` : ""}`,
       tagline: branding.tagline || "Trademark Availability Report",
     });
@@ -268,13 +268,18 @@ function BrandingPanel({ branding, onChange, companies = [] }) {
           </div>
           {selectedCompanyId && (() => {
             const co = companies.find(c => String(c.id) === selectedCompanyId);
+            const logoSrc = co?.tm_logo_base64 || co?.logo_base64;
             return co ? (
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, padding: "8px 12px", background: `${T.blue}18`, border: `1px solid ${T.blue}33`, borderRadius: 8 }}>
-                {co.logo_base64
-                  ? <img src={co.logo_base64} alt="logo" style={{ width: 24, height: 24, objectFit: "contain", borderRadius: 4, background: "#fff", padding: 2 }} />
+                {logoSrc
+                  ? <img src={logoSrc} alt="logo" style={{ height: 22, maxWidth: 80, objectFit: "contain", borderRadius: 4, background: "#fff", padding: 2 }} />
                   : <Building2 size={14} style={{ color: T.blueL }} />}
                 <span style={{ fontSize: 12, color: T.blueL, fontWeight: 600 }}>{co.name}</span>
-                {co.logo_base64 && <span style={{ fontSize: 11, color: T.dimmer }}>· logo auto-filled</span>}
+                {co.tm_logo_base64
+                  ? <span style={{ fontSize: 11, color: T.dimmer }}>· TM logo auto-filled</span>
+                  : co.logo_base64
+                    ? <span style={{ fontSize: 11, color: T.dimmer }}>· logo auto-filled</span>
+                    : null}
               </div>
             ) : null;
           })()}
