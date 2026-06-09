@@ -10,7 +10,7 @@ from io import BytesIO
 from datetime import datetime
 
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
+from reportlab.lib.units import
 from reportlab.lib import colors
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
@@ -267,6 +267,11 @@ def build_report_pdf(doc_record: dict) -> bytes:
     if watermark == "CUSTOM":
         watermark = report.get("custom_watermark", "") or ""
 
+    # Client information for report cover
+    client_name   = report.get("client_name",   "") or doc_record.get("client_name",   "") or ""
+    client_mobile = report.get("client_mobile", "") or doc_record.get("client_mobile", "") or ""
+    report_date   = report.get("report_date",   "") or doc_record.get("report_date",   "") or ""
+
     vp = VERDICT_PALETTE.get(overall, VERDICT_PALETTE["CAUTION"])
 
     buf = BytesIO()
@@ -373,6 +378,40 @@ def build_report_pdf(doc_record: dict) -> bytes:
         st["subtitle"],
     ))
     story.append(_section_rule())
+
+    # ── CLIENT INFORMATION ─────────────────────────────────────────────────────
+    if client_name or client_mobile or report_date:
+        ci_rows = []
+        if client_name:
+            ci_rows.append([
+                Paragraph("CLIENT", st["small_bold"]),
+                Paragraph(client_name, st["body_bold"]),
+            ])
+        if client_mobile:
+            ci_rows.append([
+                Paragraph("MOBILE", st["small_bold"]),
+                Paragraph(client_mobile, st["body"]),
+            ])
+        if report_date:
+            ci_rows.append([
+                Paragraph("REPORT DATE", st["small_bold"]),
+                Paragraph(report_date, st["body"]),
+            ])
+        if ci_rows:
+            ci_tbl = Table(ci_rows, colWidths=[28 * mm, CONTENT_W - 28 * mm])
+            ci_tbl.setStyle(TableStyle([
+                ("BACKGROUND",    (0, 0), (-1, -1), SUBTLE),
+                ("BACKGROUND",    (0, 0), (0, -1),  LIGHT_BLUE),
+                ("BOX",           (0, 0), (-1, -1), 0.5, BORDER),
+                ("INNERGRID",     (0, 0), (-1, -1), 0.3, BORDER),
+                ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING",    (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ("LEFTPADDING",   (0, 0), (-1, -1), 10),
+                ("RIGHTPADDING",  (0, 0), (-1, -1), 10),
+            ]))
+            story.append(ci_tbl)
+            story.append(Spacer(1, 10))
 
     # ── VERDICT BLOCK ──────────────────────────────────────────────────────────
     story.append(Spacer(1, 4))
@@ -674,6 +713,239 @@ def build_report_pdf(doc_record: dict) -> bytes:
             ("RIGHTPADDING",  (0, 0), (-1, -1),  5),
         ]))
         story.append(ex_tbl)
+
+    # ── FOOTER NOTE ────────────────────────────────────────────────────────────
+    story.append(Spacer(1, 14))
+    story.append(_section_rule())
+    story.append(Paragraph(
+        "Data source: quickcompany.in · IP India trademark index. "
+        "For informational purposes only — not legal advice.",
+        st["footer"],
+    ))
+
+    page_cb = _make_page_cb(footer_l, footer_r, watermark)
+    pdf.build(story, onFirstPage=page_cb, onLaterPages=page_cb)
+    return buf.getvalue()
+
+
+# ── Combined / Bulk report builder ────────────────────────────────────────────
+def build_combined_report_pdf(items: list, branding: dict) -> bytes:
+    """Generate a single combined PDF for multiple bulk trademark search results."""
+
+    logo_url    = branding.get("logo_data_url")
+    footer_text = branding.get("footer_text", "") or ""
+    tagline     = branding.get("tagline", "") or "Bulk Trademark Availability Report"
+    watermark   = branding.get("watermark", "") or ""
+    if watermark == "CUSTOM":
+        watermark = branding.get("custom_watermark", "") or ""
+
+    client_name   = branding.get("client_name",   "") or ""
+    client_mobile = branding.get("client_mobile", "") or ""
+    report_date   = branding.get("report_date",   "") or ""
+
+    created = datetime.utcnow().strftime("%Y-%m-%d %H:%M") + " UTC"
+
+    total     = len(items)
+    available = sum(1 for it in items if it.get("overall_status") == "AVAILABLE")
+    caution   = sum(1 for it in items if it.get("overall_status") == "CAUTION")
+    conflict  = sum(1 for it in items if it.get("overall_status") == "CONFLICT")
+
+    footer_l = footer_text or "Bureau of Trademark Intelligence — India"
+    footer_r = f"Bulk report · {total} marks · {created}"
+
+    buf = BytesIO()
+    st  = _S()
+
+    pdf = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=L_MARGIN, rightMargin=R_MARGIN,
+        topMargin=14 * mm, bottomMargin=20 * mm,
+        title="Bulk Trademark Availability Report",
+    )
+
+    story = []
+
+    # ── HEADER BAND ────────────────────────────────────────────────────────────
+    logo_img = None
+    if logo_url:
+        logo_stream = _decode_logo(logo_url)
+        if logo_stream:
+            try:
+                from PIL import Image as PILImage
+                logo_stream.seek(0)
+                pil = PILImage.open(logo_stream)
+                nat_w, nat_h = pil.size
+                logo_stream.seek(0)
+                scaled_h = min((nat_h / nat_w) * CONTENT_W if nat_w > 0 else 20 * mm, 36 * mm)
+                logo_img = RLImage(logo_stream, width=CONTENT_W, height=scaled_h)
+            except Exception:
+                try:
+                    logo_stream.seek(0)
+                    logo_img = RLImage(logo_stream, width=CONTENT_W, height=30 * mm, kind="proportional")
+                except Exception:
+                    logo_img = None
+
+    if logo_img:
+        logo_tbl = Table([[logo_img]], colWidths=[CONTENT_W])
+        logo_tbl.setStyle(TableStyle([
+            ("BACKGROUND",    (0, 0), (-1, -1), WHITE),
+            ("BOX",           (0, 0), (-1, -1), 0.4, BORDER),
+            ("TOPPADDING",    (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 0),
+            ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+        story.append(logo_tbl)
+        story.append(Spacer(1, 6))
+    else:
+        hdr_tbl = Table([[Paragraph("BUREAU OF TRADEMARK INTELLIGENCE — INDIA", ParagraphStyle(
+            "hdr_text_b", fontName="Helvetica-Bold", fontSize=11, textColor=WHITE, leading=15,
+        ))]], colWidths=[CONTENT_W])
+        hdr_tbl.setStyle(TableStyle([
+            ("BACKGROUND",    (0, 0), (-1, -1), NAVY),
+            ("TOPPADDING",    (0, 0), (-1, -1), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 14),
+        ]))
+        story.append(hdr_tbl)
+        story.append(Spacer(1, 6))
+
+    if tagline:
+        tag_tbl = Table([[Paragraph(tagline, ParagraphStyle(
+            "tagline_b", fontName="Helvetica", fontSize=8.5, textColor=BLUE, leading=12,
+        ))]], colWidths=[CONTENT_W])
+        tag_tbl.setStyle(TableStyle([
+            ("BACKGROUND",    (0, 0), (-1, -1), LIGHT_BLUE),
+            ("TOPPADDING",    (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 12),
+            ("BOX",           (0, 0), (-1, -1), 0.4, BORDER),
+        ]))
+        story.append(tag_tbl)
+        story.append(Spacer(1, 8))
+
+    # ── TITLE ──────────────────────────────────────────────────────────────────
+    story.append(Paragraph("Bulk Trademark Availability Report", st["h1"]))
+    story.append(Paragraph(
+        f"Total marks analysed: <b>{total}</b> &nbsp;·&nbsp; Generated: {created}",
+        st["subtitle"],
+    ))
+    story.append(_section_rule())
+
+    # ── CLIENT INFORMATION ─────────────────────────────────────────────────────
+    if client_name or client_mobile or report_date:
+        ci_rows = []
+        if client_name:
+            ci_rows.append([Paragraph("CLIENT", st["small_bold"]), Paragraph(client_name, st["body_bold"])])
+        if client_mobile:
+            ci_rows.append([Paragraph("MOBILE", st["small_bold"]), Paragraph(client_mobile, st["body"])])
+        if report_date:
+            ci_rows.append([Paragraph("REPORT DATE", st["small_bold"]), Paragraph(report_date, st["body"])])
+        if ci_rows:
+            ci_tbl = Table(ci_rows, colWidths=[28 * mm, CONTENT_W - 28 * mm])
+            ci_tbl.setStyle(TableStyle([
+                ("BACKGROUND",    (0, 0), (-1, -1), SUBTLE),
+                ("BACKGROUND",    (0, 0), (0, -1),  LIGHT_BLUE),
+                ("BOX",           (0, 0), (-1, -1), 0.5, BORDER),
+                ("INNERGRID",     (0, 0), (-1, -1), 0.3, BORDER),
+                ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING",    (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ("LEFTPADDING",   (0, 0), (-1, -1), 10),
+                ("RIGHTPADDING",  (0, 0), (-1, -1), 10),
+            ]))
+            story.append(ci_tbl)
+            story.append(Spacer(1, 10))
+
+    # ── SUMMARY STATS ──────────────────────────────────────────────────────────
+    story.append(Paragraph("SUMMARY", st["eyebrow"]))
+    story.append(_section_rule())
+
+    stat_data = [
+        [
+            Paragraph("TOTAL MARKS", st["small_bold"]),
+            Paragraph("AVAILABLE", st["small_bold"]),
+            Paragraph("CAUTION", st["small_bold"]),
+            Paragraph("CONFLICT", st["small_bold"]),
+        ],
+        [
+            Paragraph(f'<font color="{NAVY.hexval()}"><b>{total}</b></font>',
+                      ParagraphStyle("s1", fontName="Helvetica-Bold", fontSize=28, leading=34, alignment=TA_CENTER)),
+            Paragraph(f'<font color="{colors.HexColor("#166534").hexval()}"><b>{available}</b></font>',
+                      ParagraphStyle("s2", fontName="Helvetica-Bold", fontSize=28, leading=34, alignment=TA_CENTER)),
+            Paragraph(f'<font color="{colors.HexColor("#92400E").hexval()}"><b>{caution}</b></font>',
+                      ParagraphStyle("s3", fontName="Helvetica-Bold", fontSize=28, leading=34, alignment=TA_CENTER)),
+            Paragraph(f'<font color="{colors.HexColor("#7F1D1D").hexval()}"><b>{conflict}</b></font>',
+                      ParagraphStyle("s4", fontName="Helvetica-Bold", fontSize=28, leading=34, alignment=TA_CENTER)),
+        ],
+    ]
+    cw4 = CONTENT_W / 4
+    stat_tbl = Table(stat_data, colWidths=[cw4] * 4)
+    stat_tbl.setStyle(TableStyle([
+        ("BOX",           (0, 0), (-1, -1), 0.5, BORDER),
+        ("INNERGRID",     (0, 0), (-1, -1), 0.4, BORDER),
+        ("BACKGROUND",    (0, 0), (-1, 0),  SUBTLE),
+        ("BACKGROUND",    (0, 1), (-1, 1),  WHITE),
+        ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING",    (0, 0), (-1, 0),   7),
+        ("BOTTOMPADDING", (0, 0), (-1, 0),   7),
+        ("TOPPADDING",    (0, 1), (-1, 1),  10),
+        ("BOTTOMPADDING", (0, 1), (-1, 1),  10),
+    ]))
+    story.append(stat_tbl)
+    story.append(Spacer(1, 14))
+
+    # ── MARK-BY-MARK TABLE ─────────────────────────────────────────────────────
+    story.append(Paragraph("MARK-BY-MARK ANALYSIS", st["eyebrow"]))
+    story.append(_section_rule())
+
+    mark_rows = [[
+        Paragraph("MARK NAME", st["tbl_hdr"]),
+        Paragraph("VERDICT", st["tbl_hdr"]),
+        Paragraph("RISK", st["tbl_hdr"]),
+        Paragraph("CLASS", st["tbl_hdr"]),
+        Paragraph("ANALYSIS SUMMARY", st["tbl_hdr"]),
+    ]]
+
+    for it in items:
+        status   = it.get("overall_status", "UNKNOWN")
+        vp_it    = VERDICT_PALETTE.get(status, VERDICT_PALETTE["CAUTION"])
+        risk_v   = str(it.get("risk_score", "—")) if not it.get("error") else "—"
+        klass    = f'CL{str(it.get("class_filter","")).zfill(2)}' if it.get("class_filter") else "All"
+        headline = it.get("headline", "") or it.get("error", "—")
+        label    = vp_it["label"] if not it.get("error") else "ERROR"
+
+        mark_rows.append([
+            Paragraph(f'<b>{it.get("name", "")}</b>',
+                      ParagraphStyle("mn", fontName="Helvetica-Bold", fontSize=8.5, leading=11, textColor=NAVY)),
+            Paragraph(f'<font color="{vp_it["fg"].hexval()}"><b>{label}</b></font>',
+                      ParagraphStyle("vd", fontName="Helvetica-Bold", fontSize=8.5, leading=11)),
+            Paragraph(f'<font color="{vp_it["bar"].hexval()}"><b>{risk_v}</b></font>',
+                      ParagraphStyle("rs", fontName="Helvetica-Bold", fontSize=10, leading=13, alignment=TA_CENTER)),
+            Paragraph(klass,
+                      ParagraphStyle("kl", fontName="Helvetica", fontSize=8, leading=11, alignment=TA_CENTER, textColor=MUTED)),
+            Paragraph(headline, st["tbl_cell"]),
+        ])
+
+    mark_cws = [38 * mm, 24 * mm, 14 * mm, 14 * mm, CONTENT_W - 90 * mm]
+    mark_tbl = Table(mark_rows, colWidths=mark_cws, repeatRows=1)
+    mark_tbl.setStyle(TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, 0),  NAVY),
+        ("ROWBACKGROUNDS",(0, 1), (-1, -1), [WHITE, SUBTLE]),
+        ("BOX",           (0, 0), (-1, -1), 0.5, BORDER),
+        ("LINEBELOW",     (0, 0), (-1, 0),  0.8, NAVY),
+        ("INNERGRID",     (0, 1), (-1, -1), 0.3, BORDER),
+        ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+        ("ALIGN",         (2, 0), (3, -1),  "CENTER"),
+        ("TOPPADDING",    (0, 0), (-1, -1),  6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1),  6),
+        ("LEFTPADDING",   (0, 0), (-1, -1),  6),
+        ("RIGHTPADDING",  (0, 0), (-1, -1),  6),
+    ]))
+    story.append(mark_tbl)
 
     # ── FOOTER NOTE ────────────────────────────────────────────────────────────
     story.append(Spacer(1, 14))
