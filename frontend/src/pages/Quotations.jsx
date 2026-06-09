@@ -392,11 +392,14 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX = 400; let w = img.width, h = img.height;
+        // tm_logo_base64 is used as a full header in TM reports — allow larger size
+        const MAX = field === 'tm_logo_base64' ? 900 : 400;
+        const QUALITY = field === 'tm_logo_base64' ? 0.85 : 0.7;
+        let w = img.width, h = img.height;
         if (w > MAX || h > MAX) { if (w > h) { h = Math.round(h * MAX / w); w = MAX; } else { w = Math.round(w * MAX / h); h = MAX; } }
         canvas.width = w; canvas.height = h;
         canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-        setForm(prev => ({ ...prev, [field]: canvas.toDataURL('image/jpeg', 0.7) }));
+        setForm(prev => ({ ...prev, [field]: canvas.toDataURL('image/jpeg', QUALITY) }));
       };
       img.src = reader.result;
     };
