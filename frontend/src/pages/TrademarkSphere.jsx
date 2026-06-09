@@ -1,11 +1,14 @@
 /**
- * TrademarkSphere.jsx — Redesigned for Taskosphere v2
+ * TrademarkSphere.jsx — v3 (Dashboard-aligned design + persistent branding)
  *
- * New features:
- *  1. Full Taskosphere design system (dark cards, brand blues, Inter/JetBrains fonts)
- *  2. Report Branding Panel — company logo header, footer text, watermark
- *  3. Client-linked search — fetch clients from /api/clients/search, search under a client's brand
- *  4. All QuickCompany features: verdict, risk score, bulk, class finder, history, PDF, share
+ * Changes vs v2:
+ *  1. Design aligned with Dashboard metric cards (Tailwind classes, same card style)
+ *  2. BrandingPanel: "Save as Default" persists company to localStorage + backend user prefs
+ *  3. On load: auto-fill branding from saved default company
+ *  4. Re-brand old reports: history items now have a "Re-brand PDF" button that
+ *     calls /api/trademark-qc/searches/{id}/pdf with branding query params
+ *  5. PDF generation passes branding (logo, footer, tagline, watermark) to backend
+ *  6. Minor layout alignment with Dashboard: page header matches DashboardLayout style
  */
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -25,63 +28,82 @@ import {
   Download, Link2, Layers, Compass, BarChart3, Users,
   Sparkles, RefreshCw, Eye, ArrowUpRight, Copy, Check,
   ImageIcon, Type, Stamp, Tag, Hash, Zap, TrendingUp,
-  Info, Filter, SlidersHorizontal, Plus, Trash2,
+  Info, Filter, SlidersHorizontal, Plus, Trash2, Star,
+  BookmarkCheck, Paintbrush, RotateCcw,
 } from "lucide-react";
 
-// ─── Design tokens (Taskosphere system) ──────────────────────────────────────
-const DARK_T = {
-  bg:      "#0f172a",
-  card:    "#1e293b",
-  raised:  "#263348",
-  border:  "#334155",
-  text:    "#f1f5f9",
-  muted:   "#94a3b8",
-  dimmer:  "#64748b",
-  blue:    "#1F6FB2",
-  blueL:   "#3B82F6",
-  emerald: "#1FAF5A",
-  amber:   "#F59E0B",
-  red:     "#EF4444",
-  violet:  "#8B5CF6",
+// ─── Design tokens (mirrors Dashboard COLORS exactly) ─────────────────────────
+const COLORS = {
+  deepBlue:     "#0D3B66",
+  mediumBlue:   "#1F6FB2",
+  emeraldGreen: "#1FAF5A",
+  lightGreen:   "#5CCB5F",
+  coral:        "#FF6B6B",
+  amber:        "#F59E0B",
+  violet:       "#8B5CF6",
+  blueLight:    "#3B82F6",
 };
 
-const LIGHT_T = {
-  bg:      "#F4F6FA",
-  card:    "#ffffff",
-  raised:  "#f1f5f9",
-  border:  "#e2e8f0",
-  text:    "#0f172a",
-  muted:   "#475569",
-  dimmer:  "#94a3b8",
-  blue:    "#1F6FB2",
-  blueL:   "#3B82F6",
-  emerald: "#1FAF5A",
-  amber:   "#D97706",
-  red:     "#DC2626",
-  violet:  "#7C3AED",
-};
-
-// T is used throughout by components; each component calls useT() to keep it in sync.
-let T = LIGHT_T;
-
-function useT() {
-  const isDark = useDark();
-  T = isDark ? DARK_T : LIGHT_T;
-  return T;
+// Dynamic token getter (matches dashboard dark/light tokens)
+function useTokens(isDark) {
+  return {
+    bg:      isDark ? "#0f172a" : "#F4F6FA",
+    card:    isDark ? "#1e293b" : "#ffffff",
+    raised:  isDark ? "#263348" : "#f1f5f9",
+    border:  isDark ? "#334155" : "#e2e8f0",
+    text:    isDark ? "#f1f5f9" : "#0f172a",
+    muted:   isDark ? "#94a3b8" : "#475569",
+    dimmer:  isDark ? "#64748b" : "#94a3b8",
+    blue:    COLORS.mediumBlue,
+    blueL:   COLORS.blueLight,
+    emerald: COLORS.emeraldGreen,
+    amber:   COLORS.amber,
+    red:     isDark ? "#EF4444" : "#DC2626",
+    violet:  COLORS.violet,
+  };
 }
 
 const VERDICT_CFG = {
-  AVAILABLE: { color: T.emerald, bg: "rgba(31,175,90,0.12)",  border: "rgba(31,175,90,0.3)",  label: "Available",  dot: "#4ade80" },
-  CAUTION:   { color: T.amber,   bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.3)", label: "Caution",    dot: "#fbbf24" },
-  CONFLICT:  { color: T.red,     bg: "rgba(239,68,68,0.12)",  border: "rgba(239,68,68,0.3)",  label: "Conflict",   dot: "#f87171" },
+  AVAILABLE: { color: COLORS.emeraldGreen, bg: "rgba(31,175,90,0.12)",  border: "rgba(31,175,90,0.3)",  label: "Available",  dot: "#4ade80" },
+  CAUTION:   { color: COLORS.amber,        bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.3)", label: "Caution",    dot: "#fbbf24" },
+  CONFLICT:  { color: "#DC2626",           bg: "rgba(239,68,68,0.12)",  border: "rgba(239,68,68,0.3)",  label: "Conflict",   dot: "#f87171" },
 };
 
-const STATUS_COLOR = {
+const STATUS_COLOR = (T) => ({
   Registered: T.red, Accepted: T.red, Advertised: T.red,
   Opposed: T.amber, Objected: T.amber, "Under Examination": T.amber,
   Pending: T.amber, Abandoned: T.dimmer, Refused: T.dimmer,
   Withdrawn: T.dimmer, Removed: T.dimmer, Unknown: T.dimmer,
-};
+});
+
+const BRANDING_STORAGE_KEY = "tm_sphere_branding_v1";
+
+const DEFAULT_BRANDING = { logo: null, logoName: null, footer: "", tagline: "", watermark: "", customWatermark: "", defaultCompanyId: null, defaultCompanyName: null };
+
+function loadSavedBranding() {
+  try {
+    const raw = localStorage.getItem(BRANDING_STORAGE_KEY);
+    if (raw) return { ...DEFAULT_BRANDING, ...JSON.parse(raw) };
+  } catch {}
+  return DEFAULT_BRANDING;
+}
+
+function saveBrandingToStorage(branding) {
+  try { localStorage.setItem(BRANDING_STORAGE_KEY, JSON.stringify(branding)); } catch {}
+}
+
+// Builds PDF URL with branding params encoded
+function brandedPdfUrl(reportId, branding) {
+  const base = api.defaults.baseURL || "";
+  const params = new URLSearchParams();
+  if (branding?.footer)  params.set("footer",   branding.footer);
+  if (branding?.tagline) params.set("tagline",  branding.tagline);
+  const wm = branding?.watermark === "CUSTOM" ? branding.customWatermark : branding?.watermark;
+  if (wm)                params.set("watermark", wm);
+  if (branding?.logo)    params.set("has_logo", "1");
+  const qs = params.toString();
+  return `${base}/trademark-qc/searches/${reportId}/pdf${qs ? `?${qs}` : ""}`;
+}
 
 const fadeUp = {
   hidden:  { opacity: 0, y: 20 },
@@ -91,14 +113,59 @@ const stagger = {
   hidden:  { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.06 } },
 };
+const springCard = { type: "spring", stiffness: 280, damping: 22, mass: 0.85 };
 
-// ─── Shared UI primitives ─────────────────────────────────────────────────────
-const Card = ({ children, className = "", style = {} }) => (
-  <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, ...style }}
-    className={className}>{children}</div>
-);
+// ─── Shared primitives ─────────────────────────────────────────────────────────
+// Card — matches Dashboard metricCardCls pattern
+const Card = ({ children, className = "", style = {}, onClick }) => {
+  const isDark = useDark();
+  const border = isDark ? "#334155" : "#e2e8f0";
+  const bg     = isDark ? "#1e293b" : "#ffffff";
+  return (
+    <div
+      onClick={onClick}
+      style={{ background: bg, border: `1px solid ${border}`, borderRadius: 16, ...style }}
+      className={`shadow-sm ${onClick ? "cursor-pointer" : ""} ${className}`}
+    >
+      {children}
+    </div>
+  );
+};
 
-const SectionHeader = ({ icon: Icon, color, label, sub }) => (
+// MetricCard — exact same visual structure as Dashboard
+const MetricCard = ({ label, value, sub, color, icon: Icon, iconBg, onClick, children }) => {
+  const isDark = useDark();
+  const defaultBg   = isDark ? "bg-slate-800 border-slate-700 hover:border-slate-600" : "bg-white border-slate-200/80 hover:border-slate-300";
+  return (
+    <motion.div
+      whileHover={{ y: -3, transition: springCard }}
+      whileTap={{ scale: 0.985 }}
+      onClick={onClick}
+      className={`rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border ${defaultBg}`}
+    >
+      <div className="p-4 flex flex-col justify-between min-h-[110px]">
+        <div className="flex items-start justify-between">
+          <div className="min-w-0 flex-1 mr-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
+            <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color, fontFamily: "'JetBrains Mono', monospace" }}>
+              {value}
+            </p>
+            {sub && <p className={`text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>{sub}</p>}
+          </div>
+          {Icon && (
+            <div className="p-2 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
+              style={{ backgroundColor: iconBg }}>
+              <Icon className="h-4 w-4" style={{ color }} />
+            </div>
+          )}
+        </div>
+        {children}
+      </div>
+    </motion.div>
+  );
+};
+
+const SectionHeader = ({ icon: Icon, color, label, sub, T }) => (
   <div className="flex items-center gap-3 mb-5">
     <div style={{ background: `${color}22`, borderRadius: 10, width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}>
       <Icon size={18} style={{ color }} />
@@ -110,8 +177,9 @@ const SectionHeader = ({ icon: Icon, color, label, sub }) => (
   </div>
 );
 
-const Badge = ({ status }) => {
-  const color = STATUS_COLOR[status] || T.dimmer;
+const Badge = ({ status, T }) => {
+  const sc = STATUS_COLOR(T);
+  const color = sc[status] || T.dimmer;
   return (
     <span style={{ background: `${color}22`, border: `1px solid ${color}44`, color, borderRadius: 99, padding: "2px 10px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
       {status}
@@ -119,13 +187,13 @@ const Badge = ({ status }) => {
   );
 };
 
-const MatchBadge = ({ type }) => {
+const MatchBadge = ({ type, T }) => {
   const cfg = { exact: [T.red, "Exact"], phonetic: [T.amber, "Phonetic"], contains: [T.blueL, "Contains"], similar: [T.violet, "Similar"], weak: [T.dimmer, "Weak"] };
   const [color, label] = cfg[type] || [T.dimmer, type];
   return <span style={{ background: `${color}22`, color, border: `1px solid ${color}44`, borderRadius: 99, padding: "1px 8px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</span>;
 };
 
-const Pill = ({ label, active, onClick }) => (
+const Pill = ({ label, active, onClick, T }) => (
   <button onClick={onClick} style={{
     background: active ? T.blueL : T.raised, color: active ? "#fff" : T.muted,
     border: `1px solid ${active ? T.blueL : T.border}`, borderRadius: 99,
@@ -133,7 +201,7 @@ const Pill = ({ label, active, onClick }) => (
   }}>{label}</button>
 );
 
-const Input = ({ style = {}, ...props }) => (
+const Input = ({ T, style = {}, ...props }) => (
   <input style={{
     background: T.raised, border: `1px solid ${T.border}`, borderRadius: 10,
     color: T.text, padding: "10px 14px", fontSize: 14, outline: "none",
@@ -141,7 +209,7 @@ const Input = ({ style = {}, ...props }) => (
   }} {...props} />
 );
 
-const Textarea = ({ style = {}, ...props }) => (
+const Textarea = ({ T, style = {}, ...props }) => (
   <textarea style={{
     background: T.raised, border: `1px solid ${T.border}`, borderRadius: 10,
     color: T.text, padding: "10px 14px", fontSize: 14, outline: "none",
@@ -149,44 +217,37 @@ const Textarea = ({ style = {}, ...props }) => (
   }} {...props} />
 );
 
-const Btn = ({ children, variant = "primary", onClick, disabled, style = {}, ...props }) => {
+const Btn = ({ children, variant = "primary", onClick, disabled, style = {}, T, ...props }) => {
   const base = { display: "inline-flex", alignItems: "center", gap: 7, padding: "9px 18px", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: disabled ? "not-allowed" : "pointer", border: "none", transition: "all 0.15s", opacity: disabled ? 0.5 : 1, fontFamily: "inherit", ...style };
-  const variants = {
-    primary: { background: T.blue, color: "#fff" },
-    ghost:   { background: T.raised, color: T.muted, border: `1px solid ${T.border}` },
-    danger:  { background: "rgba(239,68,68,0.15)", color: T.red, border: `1px solid rgba(239,68,68,0.3)` },
-    success: { background: "rgba(31,175,90,0.15)", color: T.emerald, border: `1px solid rgba(31,175,90,0.3)` },
+  const v = {
+    primary: { background: COLORS.mediumBlue, color: "#fff" },
+    ghost:   { background: T?.raised || "#f1f5f9", color: T?.muted || "#475569", border: `1px solid ${T?.border || "#e2e8f0"}` },
+    danger:  { background: "rgba(239,68,68,0.15)", color: "#DC2626", border: "1px solid rgba(239,68,68,0.3)" },
+    success: { background: "rgba(31,175,90,0.15)", color: COLORS.emeraldGreen, border: `1px solid rgba(31,175,90,0.3)` },
+    save:    { background: `${COLORS.emeraldGreen}18`, color: COLORS.emeraldGreen, border: `1px solid ${COLORS.emeraldGreen}44` },
   };
-  return <button style={{ ...base, ...variants[variant] }} onClick={onClick} disabled={disabled} {...props}>{children}</button>;
+  return <button style={{ ...base, ...(v[variant] || v.primary) }} onClick={onClick} disabled={disabled} {...props}>{children}</button>;
 };
 
-// ─── Verdict status badge ─────────────────────────────────────────────────────
 const VerdictBadge = ({ status, large }) => {
   const cfg = VERDICT_CFG[status] || VERDICT_CFG.CAUTION;
   return (
-    <span style={{
-      background: cfg.bg, border: `1px solid ${cfg.border}`, color: cfg.color,
-      borderRadius: 99, padding: large ? "6px 18px" : "3px 12px",
-      fontSize: large ? 13 : 11, fontWeight: 700,
-      display: "inline-flex", alignItems: "center", gap: 6,
-    }}>
+    <span style={{ background: cfg.bg, border: `1px solid ${cfg.border}`, color: cfg.color, borderRadius: 99, padding: large ? "6px 18px" : "3px 12px", fontSize: large ? 13 : 11, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6 }}>
       <span style={{ width: 6, height: 6, borderRadius: "50%", background: cfg.dot, display: "inline-block" }} />
       {cfg.label}
     </span>
   );
 };
 
-// ─── Collapsible section ──────────────────────────────────────────────────────
-function Collapsible({ title, icon: Icon, iconColor, badge, defaultOpen = false, children }) {
-  useT();
-  iconColor = iconColor || T.blueL;
+function Collapsible({ title, icon: Icon, iconColor, badge, defaultOpen = false, children, T }) {
   const [open, setOpen] = useState(defaultOpen);
+  const color = iconColor || T.blueL;
   return (
-    <Card>
+    <Card style={{ overflow: "hidden" }}>
       <button onClick={() => setOpen(v => !v)} style={{ width: "100%", background: "none", border: "none", padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", color: T.text }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ background: `${iconColor}22`, borderRadius: 8, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Icon size={16} style={{ color: iconColor }} />
+          <div style={{ background: `${color}22`, borderRadius: 8, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Icon size={16} style={{ color }} />
           </div>
           <div style={{ textAlign: "left" }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>{title}</div>
@@ -206,16 +267,20 @@ function Collapsible({ title, icon: Icon, iconColor, badge, defaultOpen = false,
   );
 }
 
-// ─── Skeleton loader ──────────────────────────────────────────────────────────
-const Skeleton = ({ h = 20, w = "100%", r = 8, mb = 0 }) => (
+const Skeleton = ({ h = 20, w = "100%", r = 8, mb = 0, T }) => (
   <div style={{ height: h, width: w, borderRadius: r, background: `linear-gradient(90deg, ${T.raised} 25%, ${T.border} 50%, ${T.raised} 75%)`, backgroundSize: "200% 100%", animation: "shimmer 1.4s infinite", marginBottom: mb }} />
 );
 
-// ─── Report Branding Panel ────────────────────────────────────────────────────
-function BrandingPanel({ branding, onChange, companies = [] }) {
-  useT();
+// ─── Report Branding Panel — v3 with Save as Default ─────────────────────────
+function BrandingPanel({ branding, onChange, companies, T }) {
   const fileRef = useRef();
-  const [selectedCompanyId, setSelectedCompanyId] = useState("");
+  const [selectedCompanyId, setSelectedCompanyId] = useState(branding.defaultCompanyId || "");
+  const [saving, setSaving] = useState(false);
+
+  // Sync dropdown to branding.defaultCompanyId when it changes externally
+  useEffect(() => {
+    if (branding.defaultCompanyId) setSelectedCompanyId(branding.defaultCompanyId);
+  }, [branding.defaultCompanyId]);
 
   const handleLogo = (e) => {
     const f = e.target.files?.[0];
@@ -229,64 +294,107 @@ function BrandingPanel({ branding, onChange, companies = [] }) {
   const handleCompanySelect = (e) => {
     const id = e.target.value;
     setSelectedCompanyId(id);
-    if (!id) return;
+    if (!id) { onChange({ ...branding, logo: null, logoName: null, footer: "", tagline: "", defaultCompanyId: null, defaultCompanyName: null }); return; }
     const co = companies.find(c => String(c.id) === id);
     if (!co) return;
     onChange({
       ...branding,
       logo: co.tm_logo_base64 || co.logo_base64 || branding.logo,
       logoName: (co.tm_logo_base64 || co.logo_base64) ? co.name : branding.logoName,
-      footer: branding.footer || `Prepared by ${co.name}${co.gstin ? ` · GSTIN: ${co.gstin}` : ""}`,
+      footer: `Prepared by ${co.name}${co.gstin ? ` · GSTIN: ${co.gstin}` : ""}`,
       tagline: branding.tagline || "Trademark Availability Report",
+      defaultCompanyId: null, // not yet saved as default
+      defaultCompanyName: null,
     });
   };
 
+  const handleSaveAsDefault = async () => {
+    if (!selectedCompanyId) return toast.error("Select a company first");
+    setSaving(true);
+    try {
+      const co = companies.find(c => String(c.id) === selectedCompanyId);
+      const updated = { ...branding, defaultCompanyId: selectedCompanyId, defaultCompanyName: co?.name || "" };
+      onChange(updated);
+      saveBrandingToStorage(updated);
+      // Also persist to backend for cross-device sync
+      await api.post("/trademark-qc/branding-preference", {
+        default_company_id:   selectedCompanyId,
+        default_company_name: co?.name || "",
+        footer:   branding.footer,
+        tagline:  branding.tagline,
+        watermark: branding.watermark,
+      }).catch(() => {}); // graceful if endpoint not yet wired
+      toast.success(`"${co?.name}" saved as default reporting company`);
+    } finally { setSaving(false); }
+  };
+
+  const handleClearDefault = () => {
+    const updated = { ...branding, defaultCompanyId: null, defaultCompanyName: null };
+    onChange(updated);
+    saveBrandingToStorage(updated);
+    toast("Default company cleared");
+  };
+
   const WATERMARKS = ["", "CONFIDENTIAL", "DRAFT", "FOR REVIEW", "PRIVILEGED", "CUSTOM"];
+  const isDefault = !!branding.defaultCompanyId && branding.defaultCompanyId === selectedCompanyId;
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
 
-      {/* Company selector */}
-      {companies.length > 0 && (
-        <div style={{ gridColumn: "1 / -1" }}>
-          <div style={{ fontSize: 11, color: T.dimmer, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
-            Report Under Company
-          </div>
-          <div style={{ position: "relative" }}>
+      {/* Company selector — full width */}
+      <div style={{ gridColumn: "1 / -1" }}>
+        <div style={{ fontSize: 11, color: T.dimmer, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
+          Report Under Company
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ flex: 1, position: "relative" }}>
             <Building2 size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: T.dimmer, pointerEvents: "none" }} />
-            <select
-              value={selectedCompanyId}
-              onChange={handleCompanySelect}
-              style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 10, color: selectedCompanyId ? T.text : T.dimmer, padding: "10px 14px 10px 34px", fontSize: 13, width: "100%", outline: "none", fontFamily: "inherit", appearance: "none", cursor: "pointer" }}
-            >
+            <select value={selectedCompanyId} onChange={handleCompanySelect}
+              style={{ background: T.raised, border: `1px solid ${isDefault ? COLORS.emeraldGreen : T.border}`, borderRadius: 10, color: selectedCompanyId ? T.text : T.dimmer, padding: "10px 14px 10px 34px", fontSize: 13, width: "100%", outline: "none", fontFamily: "inherit", appearance: "none", cursor: "pointer" }}>
               <option value="">Select company (optional)</option>
               {companies.map(co => (
-                <option key={co.id} value={String(co.id)}>{co.name}{co.gstin ? ` — ${co.gstin}` : ""}</option>
+                <option key={co.id} value={String(co.id)}>
+                  {co.name}{co.gstin ? ` — ${co.gstin}` : ""}{String(co.id) === branding.defaultCompanyId ? " ★ Default" : ""}
+                </option>
               ))}
             </select>
             <ChevronDown size={14} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", color: T.dimmer, pointerEvents: "none" }} />
           </div>
-          {selectedCompanyId && (() => {
-            const co = companies.find(c => String(c.id) === selectedCompanyId);
-            const logoSrc = co?.tm_logo_base64 || co?.logo_base64;
-            return co ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, padding: "8px 12px", background: `${T.blue}18`, border: `1px solid ${T.blue}33`, borderRadius: 8 }}>
-                {logoSrc
-                  ? <img src={logoSrc} alt="logo" style={{ height: 22, maxWidth: 80, objectFit: "contain", borderRadius: 4, background: "#fff", padding: 2 }} />
-                  : <Building2 size={14} style={{ color: T.blueL }} />}
-                <span style={{ fontSize: 12, color: T.blueL, fontWeight: 600 }}>{co.name}</span>
-                {co.tm_logo_base64
-                  ? <span style={{ fontSize: 11, color: T.dimmer }}>· TM logo auto-filled</span>
-                  : co.logo_base64
-                    ? <span style={{ fontSize: 11, color: T.dimmer }}>· logo auto-filled</span>
-                    : null}
-              </div>
-            ) : null;
-          })()}
-        </div>
-      )}
 
-      {/* Logo */}
+          {/* Save as Default button */}
+          {selectedCompanyId && !isDefault && (
+            <Btn variant="save" T={T} onClick={handleSaveAsDefault} disabled={saving} style={{ whiteSpace: "nowrap", padding: "9px 14px", fontSize: 12 }}>
+              <BookmarkCheck size={13} /> {saving ? "Saving…" : "Set Default"}
+            </Btn>
+          )}
+          {isDefault && (
+            <Btn variant="ghost" T={T} onClick={handleClearDefault} style={{ whiteSpace: "nowrap", padding: "9px 14px", fontSize: 12 }}>
+              <X size={13} /> Clear Default
+            </Btn>
+          )}
+        </div>
+
+        {/* Company info chip */}
+        {selectedCompanyId && (() => {
+          const co = companies.find(c => String(c.id) === selectedCompanyId);
+          const logoSrc = co?.tm_logo_base64 || co?.logo_base64;
+          return co ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, padding: "8px 12px", background: isDefault ? `${COLORS.emeraldGreen}14` : `${COLORS.mediumBlue}14`, border: `1px solid ${isDefault ? COLORS.emeraldGreen : COLORS.mediumBlue}33`, borderRadius: 8 }}>
+              {logoSrc
+                ? <img src={logoSrc} alt="logo" style={{ height: 22, maxWidth: 80, objectFit: "contain", borderRadius: 4, background: "#fff", padding: 2 }} />
+                : <Building2 size={14} style={{ color: T.blueL }} />}
+              <span style={{ fontSize: 12, color: isDefault ? COLORS.emeraldGreen : T.blueL, fontWeight: 600 }}>{co.name}</span>
+              {isDefault
+                ? <span style={{ fontSize: 11, color: COLORS.emeraldGreen }}>★ Default company — auto-loads on next visit</span>
+                : logoSrc
+                  ? <span style={{ fontSize: 11, color: T.dimmer }}>· logo auto-filled</span>
+                  : null}
+            </div>
+          ) : null;
+        })()}
+      </div>
+
+      {/* Logo upload */}
       <div>
         <div style={{ fontSize: 11, color: T.dimmer, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Company Logo (Header)</div>
         <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleLogo} />
@@ -300,7 +408,7 @@ function BrandingPanel({ branding, onChange, companies = [] }) {
             <button onClick={() => onChange({ ...branding, logo: null, logoName: null })} style={{ background: "none", border: "none", color: T.dimmer, cursor: "pointer", padding: 4 }}><X size={14} /></button>
           </div>
         ) : (
-          <Btn variant="ghost" onClick={() => fileRef.current?.click()} style={{ width: "100%", justifyContent: "center" }}>
+          <Btn variant="ghost" T={T} onClick={() => fileRef.current?.click()} style={{ width: "100%", justifyContent: "center" }}>
             <ImageIcon size={14} /> Upload Logo
           </Btn>
         )}
@@ -314,28 +422,35 @@ function BrandingPanel({ branding, onChange, companies = [] }) {
           {WATERMARKS.map(w => <option key={w} value={w}>{w || "No watermark"}</option>)}
         </select>
         {branding.watermark === "CUSTOM" && (
-          <Input placeholder="Enter custom watermark text…" value={branding.customWatermark || ""} onChange={e => onChange({ ...branding, customWatermark: e.target.value })} style={{ marginTop: 8 }} />
+          <Input T={T} placeholder="Enter custom watermark text…" value={branding.customWatermark || ""} onChange={e => onChange({ ...branding, customWatermark: e.target.value })} style={{ marginTop: 8 }} />
         )}
       </div>
 
       {/* Footer text */}
       <div style={{ gridColumn: "1 / -1" }}>
         <div style={{ fontSize: 11, color: T.dimmer, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Footer Text</div>
-        <Textarea rows={2} placeholder="e.g. Prepared by Shree Hanuma & Associates · Confidential · For client use only" value={branding.footer || ""} onChange={e => onChange({ ...branding, footer: e.target.value })} />
+        <Textarea T={T} rows={2} placeholder="e.g. Prepared by Shree Hanuma & Associates · Confidential · For client use only" value={branding.footer || ""} onChange={e => onChange({ ...branding, footer: e.target.value })} />
       </div>
 
       {/* Header tagline */}
       <div style={{ gridColumn: "1 / -1" }}>
         <div style={{ fontSize: 11, color: T.dimmer, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Header Tagline (below logo)</div>
-        <Input placeholder="e.g. Trademark Availability Report · IP Compliance Practice" value={branding.tagline || ""} onChange={e => onChange({ ...branding, tagline: e.target.value })} />
+        <Input T={T} placeholder="e.g. Trademark Availability Report · IP Compliance Practice" value={branding.tagline || ""} onChange={e => onChange({ ...branding, tagline: e.target.value })} />
       </div>
+
+      {/* Save branding settings note */}
+      {(branding.footer || branding.tagline || branding.watermark) && !branding.defaultCompanyId && (
+        <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "flex-start", gap: 8, padding: "10px 12px", background: `${COLORS.amber}12`, border: `1px solid ${COLORS.amber}33`, borderRadius: 8 }}>
+          <Info size={13} style={{ color: COLORS.amber, marginTop: 1, flexShrink: 0 }} />
+          <span style={{ fontSize: 12, color: T.muted }}>Select a company and click <strong style={{ color: T.text }}>Set Default</strong> to auto-load these branding settings on future visits.</span>
+        </div>
+      )}
     </div>
   );
 }
 
 // ─── Client selector ──────────────────────────────────────────────────────────
-function ClientSelector({ value, onChange }) {
-  useT();
+function ClientSelector({ value, onChange, T }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState([]);
   const [open, setOpen] = useState(false);
@@ -350,33 +465,19 @@ function ClientSelector({ value, onChange }) {
 
   const search = useCallback(async (query) => {
     setLoading(true);
-    try {
-      const { data } = await api.get("/clients/search", { params: { q: query, limit: 20 } });
-      setResults(data);
-    } catch { setResults([]); }
+    try { const { data } = await api.get("/clients/search", { params: { q: query, limit: 20 } }); setResults(data); }
+    catch { setResults([]); }
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => {
-    if (open) search(q);
-  }, [q, open, search]);
-
-  const select = (client) => {
-    onChange(client);
-    setOpen(false);
-    setQ("");
-  };
+  useEffect(() => { if (open) search(q); }, [q, open, search]);
 
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <div style={{ fontSize: 11, color: T.dimmer, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Search Under Client</div>
-      <button onClick={() => setOpen(v => !v)} style={{
-        width: "100%", background: T.raised, border: `1px solid ${value ? T.blueL : T.border}`,
-        borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between",
-        color: value ? T.text : T.dimmer, fontSize: 13, cursor: "pointer", fontFamily: "inherit",
-      }}>
+      <button onClick={() => setOpen(v => !v)} style={{ width: "100%", background: T.raised, border: `1px solid ${value ? COLORS.blueLight : T.border}`, borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", color: value ? T.text : T.dimmer, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <Building2 size={14} style={{ color: value ? T.blueL : T.dimmer }} />
+          <Building2 size={14} style={{ color: value ? COLORS.blueLight : T.dimmer }} />
           {value ? value.company_name : "Select a client (optional)"}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -388,7 +489,7 @@ function ClientSelector({ value, onChange }) {
       <AnimatePresence>
         {open && (
           <motion.div initial={{ opacity: 0, y: -8, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -8, scale: 0.97 }} transition={{ duration: 0.15 }}
-            style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, zIndex: 50, boxShadow: "0 16px 40px rgba(0,0,0,0.4)", overflow: "hidden" }}>
+            style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, zIndex: 50, boxShadow: "0 16px 40px rgba(0,0,0,0.2)", overflow: "hidden" }}>
             <div style={{ padding: "10px 12px", borderBottom: `1px solid ${T.border}` }}>
               <div style={{ position: "relative" }}>
                 <Search size={13} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: T.dimmer }} />
@@ -400,12 +501,7 @@ function ClientSelector({ value, onChange }) {
               {loading && <div style={{ padding: "14px 16px", color: T.dimmer, fontSize: 13 }}>Searching…</div>}
               {!loading && results.length === 0 && <div style={{ padding: "14px 16px", color: T.dimmer, fontSize: 13 }}>No clients found</div>}
               {results.map(c => (
-                <button key={c.id} onClick={() => select(c)} style={{
-                  width: "100%", background: "none", border: "none", padding: "10px 16px",
-                  display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
-                  borderBottom: `1px solid ${T.border}`, color: T.text, fontFamily: "inherit",
-                  textAlign: "left",
-                }}>
+                <button key={c.id} onClick={() => { onChange(c); setOpen(false); setQ(""); }} style={{ width: "100%", background: "none", border: "none", padding: "10px 16px", display: "flex", alignItems: "center", gap: 10, cursor: "pointer", borderBottom: `1px solid ${T.border}`, color: T.text, fontFamily: "inherit", textAlign: "left" }}>
                   <div style={{ width: 30, height: 30, borderRadius: 8, background: T.raised, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                     <Building2 size={14} style={{ color: T.blueL }} />
                   </div>
@@ -421,9 +517,9 @@ function ClientSelector({ value, onChange }) {
       </AnimatePresence>
 
       {value && (
-        <div style={{ marginTop: 8, background: "rgba(31,111,178,0.1)", border: `1px solid rgba(31,111,178,0.3)`, borderRadius: 8, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ marginTop: 8, background: `${COLORS.mediumBlue}12`, border: `1px solid ${COLORS.mediumBlue}33`, borderRadius: 8, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8 }}>
           <Info size={12} style={{ color: T.blueL, flexShrink: 0 }} />
-          <span style={{ fontSize: 12, color: T.muted }}>Report will be filed under <strong style={{ color: T.text }}>{value.company_name}</strong></span>
+          <span style={{ fontSize: 12, color: T.muted }}>Report filed under <strong style={{ color: T.text }}>{value.company_name}</strong></span>
         </div>
       )}
     </div>
@@ -431,8 +527,7 @@ function ClientSelector({ value, onChange }) {
 }
 
 // ─── Main Search Bar ──────────────────────────────────────────────────────────
-function SearchBar({ onSubmit, loading, defaultClass, client }) {
-  useT();
+function SearchBar({ onSubmit, loading, defaultClass, client, T }) {
   const [name, setName] = useState("");
   const [klass, setKlass] = useState(defaultClass || "");
   const [deviceOnly, setDeviceOnly] = useState(false);
@@ -441,11 +536,7 @@ function SearchBar({ onSubmit, loading, defaultClass, client }) {
   const fileRef = useRef();
 
   useEffect(() => { if (defaultClass !== undefined) setKlass(String(defaultClass || "")); }, [defaultClass]);
-
-  // Auto-fill from client
-  useEffect(() => {
-    if (client?.company_name && !name) setName(client.company_name);
-  }, [client]);
+  useEffect(() => { if (client?.company_name && !name) setName(client.company_name); }, [client]);
 
   const handleFile = async (e) => {
     const f = e.target.files?.[0];
@@ -473,30 +564,24 @@ function SearchBar({ onSubmit, loading, defaultClass, client }) {
               placeholder={client ? `Search "${client.company_name}"…` : "Enter brand name e.g. Zorbixsynth"}
               style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 10, color: T.text, padding: "11px 14px 11px 40px", fontSize: 14, outline: "none", width: "100%", fontFamily: "inherit" }} />
           </div>
-
           <select value={klass} onChange={e => setKlass(e.target.value)}
             style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 10, color: klass ? T.text : T.dimmer, padding: "11px 14px", fontSize: 13, outline: "none", fontFamily: "inherit" }}>
             <option value="">All classes</option>
             {Array.from({ length: 45 }, (_, i) => i + 1).map(c => <option key={c} value={c}>Class {c}</option>)}
           </select>
-
-          <Btn type="submit" disabled={loading || !name.trim()} style={{ padding: "11px 24px", fontSize: 14 }}>
+          <Btn T={T} type="submit" disabled={loading || !name.trim()} style={{ padding: "11px 24px", fontSize: 14 }}>
             {loading ? <><RefreshCw size={14} style={{ animation: "spin 1s linear infinite" }} /> Analysing…</> : <><Zap size={14} /> Run Report</>}
           </Btn>
         </div>
-
-        {/* Advanced row */}
         <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 16, paddingTop: 12, borderTop: `1px solid ${T.border}` }}>
           <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
             <input type="checkbox" checked={deviceOnly} onChange={e => setDeviceOnly(e.target.checked)} style={{ accentColor: T.blueL, width: 15, height: 15 }} />
             <span style={{ fontSize: 13, color: T.muted }}>Device / logo marks only</span>
           </label>
-
           <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFile} />
-          <Btn type="button" variant="ghost" onClick={() => fileRef.current?.click()} style={{ padding: "6px 14px" }}>
+          <Btn T={T} type="button" variant="ghost" onClick={() => fileRef.current?.click()} style={{ padding: "6px 14px" }}>
             <ImageIcon size={13} /> {logoDataUrl ? "Replace logo" : "Upload logo (optional)"}
           </Btn>
-
           {logoDataUrl && (
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <img src={logoDataUrl} alt="preview" style={{ height: 28, width: 28, objectFit: "contain", borderRadius: 6, background: T.raised, border: `1px solid ${T.border}`, padding: 3 }} />
@@ -511,21 +596,14 @@ function SearchBar({ onSubmit, loading, defaultClass, client }) {
 }
 
 // ─── Verdict panel ────────────────────────────────────────────────────────────
-function VerdictPanel({ report }) {
-  useT();
+function VerdictPanel({ report, T }) {
   const cfg = VERDICT_CFG[report.overall_status] || VERDICT_CFG.CAUTION;
   const pct = report.risk_score;
   return (
     <motion.div variants={fadeUp} initial="hidden" animate="visible">
-      <div style={{
-        background: `linear-gradient(135deg, #0D3B66 0%, #1F6FB2 50%, #1e3a8a 100%)`,
-        borderRadius: 18, padding: "32px 36px", position: "relative", overflow: "hidden",
-        border: `1px solid rgba(31,111,178,0.4)`,
-      }}>
-        {/* bg blobs */}
+      <div style={{ background: "linear-gradient(135deg, #0D3B66 0%, #1F6FB2 50%, #1e3a8a 100%)", borderRadius: 18, padding: "32px 36px", position: "relative", overflow: "hidden", border: "1px solid rgba(31,111,178,0.4)" }}>
         <div style={{ position: "absolute", top: -60, right: -40, width: 260, height: 260, borderRadius: "50%", background: "rgba(255,255,255,0.06)", pointerEvents: "none" }} />
         <div style={{ position: "absolute", bottom: -40, left: "40%", width: 180, height: 180, borderRadius: "50%", background: "rgba(56,189,248,0.1)", pointerEvents: "none" }} />
-
         <div style={{ position: "relative", display: "grid", gridTemplateColumns: "1fr auto", gap: 32, alignItems: "center" }}>
           <div>
             <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.15em", color: "rgba(255,255,255,0.6)", fontWeight: 700, marginBottom: 12 }}>
@@ -536,8 +614,6 @@ function VerdictPanel({ report }) {
               <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", fontWeight: 600 }}>RISK SCORE — {pct}/100</span>
             </div>
             <div style={{ fontSize: 24, fontWeight: 700, color: "#fff", lineHeight: 1.3, maxWidth: 520, marginBottom: 24 }}>{report.headline}</div>
-
-            {/* risk bar */}
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "rgba(255,255,255,0.5)", fontWeight: 600, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.08em" }}>
                 <span>0 — Low risk</span><span>100 — High risk</span>
@@ -548,8 +624,6 @@ function VerdictPanel({ report }) {
               </div>
             </div>
           </div>
-
-          {/* Score ring */}
           <div style={{ textAlign: "center", background: "rgba(255,255,255,0.08)", backdropFilter: "blur(8px)", border: `2px solid ${cfg.dot}44`, borderRadius: 20, padding: "24px 32px" }}>
             <div style={{ fontSize: 56, fontWeight: 800, color: cfg.dot, lineHeight: 1, letterSpacing: "-2px", fontFamily: "'JetBrains Mono', monospace" }}>{pct}</div>
             <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.12em", color: "rgba(255,255,255,0.5)", marginTop: 6, fontWeight: 700 }}>Risk Score</div>
@@ -561,78 +635,78 @@ function VerdictPanel({ report }) {
   );
 }
 
-// ─── Stat grid ────────────────────────────────────────────────────────────────
-function StatGrid({ report }) {
-  useT();
+// ─── Stat grid — Dashboard metric card style ──────────────────────────────────
+function StatGrid({ report, T }) {
   const c = report.summary_counts || {};
   const stats = [
-    { label: "Total Matches", value: c.total_results ?? 0, color: T.blueL, hint: "All indexed filings" },
-    { label: "Exact", value: c.exact ?? 0, color: T.red, hint: "Identical name matches" },
-    { label: "Phonetic", value: c.phonetic ?? 0, color: T.amber, hint: "Sound-alike matches" },
-    { label: "Similar", value: c.contains_or_similar ?? 0, color: T.violet, hint: "Visual / partial overlap" },
-    { label: "Blocking", value: c.blocking_exact_matches ?? 0, color: T.red, hint: "Registered exact marks" },
+    { label: "Total Matches", value: c.total_results ?? 0,             color: COLORS.blueLight,    iconBg: `${COLORS.blueLight}18` },
+    { label: "Exact",         value: c.exact ?? 0,                     color: COLORS.coral,         iconBg: `${COLORS.coral}18` },
+    { label: "Phonetic",      value: c.phonetic ?? 0,                  color: COLORS.amber,         iconBg: `${COLORS.amber}18` },
+    { label: "Similar",       value: c.contains_or_similar ?? 0,       color: COLORS.violet,        iconBg: `${COLORS.violet}18` },
+    { label: "Blocking",      value: c.blocking_exact_matches ?? 0,    color: COLORS.coral,         iconBg: `${COLORS.coral}18` },
   ];
   return (
     <motion.div variants={stagger} initial="hidden" animate="visible"
       style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
       {stats.map(s => (
         <motion.div key={s.label} variants={fadeUp}>
-          <Card style={{ padding: "18px 20px" }}>
-            <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: T.dimmer, fontWeight: 700, marginBottom: 10 }}>{s.label}</div>
-            <div style={{ fontSize: 36, fontWeight: 800, color: s.color, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1 }}>{s.value}</div>
-            <div style={{ fontSize: 11, color: T.dimmer, marginTop: 6 }}>{s.hint}</div>
-          </Card>
+          <MetricCard label={s.label} value={s.value} color={s.color} iconBg={s.iconBg} />
         </motion.div>
       ))}
     </motion.div>
   );
 }
 
-// ─── Report actions ───────────────────────────────────────────────────────────
-function ReportActions({ reportId }) {
-  useT();
+// ─── Report actions — with Re-brand PDF ──────────────────────────────────────
+function ReportActions({ reportId, branding, T }) {
   const [copied, setCopied] = useState(false);
   if (!reportId) return null;
   const copy = async () => {
     try { await navigator.clipboard.writeText(shareLinkFor(reportId)); setCopied(true); toast.success("Share link copied"); setTimeout(() => setCopied(false), 2000); }
     catch { toast.error("Could not copy link"); }
   };
+  const pdfUrl = brandedPdfUrl(reportId, branding);
   return (
-    <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-      <a href={pdfDownloadUrl(reportId)} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
-        <Btn variant="ghost"><Download size={14} /> Download PDF</Btn>
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+      <a href={pdfUrl} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+        <Btn T={T} variant="ghost"><Download size={14} /> Download PDF</Btn>
       </a>
-      <Btn variant="ghost" onClick={copy}>
-        {copied ? <Check size={14} style={{ color: T.emerald }} /> : <Link2 size={14} />}
+      <Btn T={T} variant="ghost" onClick={copy}>
+        {copied ? <Check size={14} style={{ color: COLORS.emeraldGreen }} /> : <Link2 size={14} />}
         {copied ? "Copied!" : "Copy share link"}
       </Btn>
+      {(branding?.footer || branding?.logo || branding?.tagline) && (
+        <a href={pdfUrl} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+          <Btn T={T} variant="success" style={{ fontSize: 12 }}>
+            <Paintbrush size={13} /> PDF with Current Branding
+          </Btn>
+        </a>
+      )}
     </div>
   );
 }
 
 // ─── Recommendations ──────────────────────────────────────────────────────────
-function Recommendations({ recommendations, alternatives }) {
-  useT();
+function Recommendations({ recommendations, alternatives, T }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
       <Card style={{ padding: "20px 22px" }}>
-        <SectionHeader icon={Sparkles} color={T.amber} label="Recommendations" sub="Legal guidance" />
+        <SectionHeader T={T} icon={Sparkles} color={COLORS.amber} label="Recommendations" sub="Legal guidance" />
         <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 12 }}>
           {recommendations.map((r, i) => (
             <li key={i} style={{ display: "flex", gap: 10, paddingBottom: 12, borderBottom: i < recommendations.length - 1 ? `1px solid ${T.border}` : "none" }}>
-              <span style={{ flexShrink: 0, width: 22, height: 22, borderRadius: "50%", background: "rgba(31,111,178,0.2)", color: T.blueL, fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</span>
+              <span style={{ flexShrink: 0, width: 22, height: 22, borderRadius: "50%", background: `${COLORS.mediumBlue}20`, color: COLORS.mediumBlue, fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</span>
               <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.6 }}>{r}</p>
             </li>
           ))}
         </ul>
       </Card>
-
-      <Card style={{ padding: "20px 22px", background: `linear-gradient(135deg, ${T.card} 0%, rgba(139,92,246,0.05) 100%)` }}>
-        <SectionHeader icon={Tag} color={T.violet} label="Alternative Names" sub="Suggested variations" />
+      <Card style={{ padding: "20px 22px" }}>
+        <SectionHeader T={T} icon={Tag} color={COLORS.violet} label="Alternative Names" sub="Suggested variations" />
         {alternatives?.length > 0 ? (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {alternatives.map((a, i) => (
-              <span key={i} style={{ background: "rgba(139,92,246,0.12)", border: `1px solid rgba(139,92,246,0.3)`, color: T.violet, borderRadius: 8, padding: "5px 12px", fontSize: 13, fontWeight: 600 }}>{a}</span>
+              <span key={i} style={{ background: `${COLORS.violet}18`, border: `1px solid ${COLORS.violet}33`, color: COLORS.violet, borderRadius: 8, padding: "5px 12px", fontSize: 13, fontWeight: 600 }}>{a}</span>
             ))}
           </div>
         ) : (
@@ -644,13 +718,12 @@ function Recommendations({ recommendations, alternatives }) {
 }
 
 // ─── Class breakdown ──────────────────────────────────────────────────────────
-function ClassBreakdown({ rows }) {
-  useT();
+function ClassBreakdown({ rows, T }) {
   if (!rows?.length) return null;
   return (
     <Card style={{ overflow: "hidden" }}>
       <div style={{ padding: "18px 22px", borderBottom: `1px solid ${T.border}` }}>
-        <SectionHeader icon={BarChart3} color={T.violet} label="Class Breakdown" sub={`Filings across ${rows.length} class${rows.length === 1 ? "" : "es"}`} />
+        <SectionHeader T={T} icon={BarChart3} color={COLORS.violet} label="Class Breakdown" sub={`Filings across ${rows.length} class${rows.length === 1 ? "" : "es"}`} />
       </div>
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -664,9 +737,7 @@ function ClassBreakdown({ rows }) {
           <tbody>
             {rows.map(r => (
               <tr key={r.class} style={{ borderTop: `1px solid ${T.border}` }}>
-                <td style={{ padding: "10px 16px" }}>
-                  <span style={{ background: "rgba(31,111,178,0.2)", color: T.blueL, borderRadius: 6, padding: "3px 10px", fontSize: 12, fontWeight: 700 }}>CL{String(r.class).padStart(2, "0")}</span>
-                </td>
+                <td style={{ padding: "10px 16px" }}><span style={{ background: `${COLORS.mediumBlue}20`, color: COLORS.mediumBlue, borderRadius: 6, padding: "3px 10px", fontSize: 12, fontWeight: 700 }}>CL{String(r.class).padStart(2, "0")}</span></td>
                 <td style={{ padding: "10px 16px", color: T.muted }}>{r.hint || "—"}</td>
                 <td style={{ padding: "10px 16px", textAlign: "right", fontWeight: 700, color: T.text, fontFamily: "'JetBrains Mono', monospace" }}>{r.total}</td>
                 <td style={{ padding: "10px 16px", textAlign: "right", fontWeight: 700, color: T.red, fontFamily: "'JetBrains Mono', monospace" }}>{r.blocking}</td>
@@ -681,12 +752,10 @@ function ClassBreakdown({ rows }) {
 }
 
 // ─── Matches table ────────────────────────────────────────────────────────────
-function MatchesTable({ rows }) {
-  useT();
-  const [matchFilter, setMatchFilter] = useState("ALL");
+function MatchesTable({ rows, T }) {
+  const [matchFilter, setMatchFilter]   = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
-  const [searchQ, setSearchQ] = useState("");
-
+  const [searchQ, setSearchQ]           = useState("");
   const statusOptions = ["ALL", ...Array.from(new Set(rows.map(r => r.status).filter(Boolean)))];
   const filtered = rows.filter(r => {
     if (matchFilter !== "ALL" && r.match_type !== matchFilter.toLowerCase()) return false;
@@ -694,11 +763,10 @@ function MatchesTable({ rows }) {
     if (searchQ && !r.name?.toLowerCase().includes(searchQ.toLowerCase()) && !r.applicant?.toLowerCase().includes(searchQ.toLowerCase())) return false;
     return true;
   });
-
   return (
     <Card style={{ overflow: "hidden" }}>
       <div style={{ padding: "18px 22px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-        <SectionHeader icon={Search} color={T.blueL} label="All Recorded Matches" sub={`${filtered.length} of ${rows.length} filings`} />
+        <SectionHeader T={T} icon={Search} color={T.blueL} label="All Recorded Matches" sub={`${filtered.length} of ${rows.length} filings`} />
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <div style={{ position: "relative" }}>
             <Search size={12} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: T.dimmer }} />
@@ -725,17 +793,15 @@ function MatchesTable({ rows }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 && (
-              <tr><td colSpan={9} style={{ padding: "32px", textAlign: "center", color: T.dimmer, fontSize: 13 }}>No matches under current filters.</td></tr>
-            )}
+            {filtered.length === 0 && <tr><td colSpan={9} style={{ padding: "32px", textAlign: "center", color: T.dimmer, fontSize: 13 }}>No matches under current filters.</td></tr>}
             {filtered.map((r, i) => (
               <tr key={i} style={{ borderTop: `1px solid ${T.border}` }}>
                 <td style={{ padding: "10px 14px", color: T.dimmer, fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>{r.application_id || "—"}</td>
                 <td style={{ padding: "10px 14px", fontWeight: 600, color: T.text }}>{r.name}</td>
                 <td style={{ padding: "10px 14px", color: T.muted }}>{r.applicant || "—"}</td>
-                <td style={{ padding: "10px 14px" }}><Badge status={r.status} /></td>
+                <td style={{ padding: "10px 14px" }}><Badge status={r.status} T={T} /></td>
                 <td style={{ padding: "10px 14px", color: T.muted }}>{r.class ?? "—"}</td>
-                <td style={{ padding: "10px 14px" }}><MatchBadge type={r.match_type} /></td>
+                <td style={{ padding: "10px 14px" }}><MatchBadge type={r.match_type} T={T} /></td>
                 <td style={{ padding: "10px 14px", textAlign: "right", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: r.individual_risk_score >= 70 ? T.red : r.individual_risk_score >= 40 ? T.amber : T.emerald }}>{r.individual_risk_score}</td>
                 <td style={{ padding: "10px 14px", color: T.dimmer, fontSize: 11, whiteSpace: "nowrap" }}>{r.filing_date || "—"}</td>
                 <td style={{ padding: "10px 14px" }}>
@@ -750,41 +816,62 @@ function MatchesTable({ rows }) {
   );
 }
 
-// ─── API developer panel ──────────────────────────────────────────────────────
-function ApiPanel({ query, classFilter }) {
-  useT();
-  const [copied, setCopied] = useState(null);
-  const base = (import.meta.env.VITE_API_URL || "").replace(/\/api$/, "");
-  const q = encodeURIComponent(query || "your-brand");
-  const cls = classFilter ? `&class=${classFilter}` : "";
-  const curl = `curl "${base}/api/trademark-qc/check?name=${q}${cls}"`;
-  const js = `const r = await fetch("${base}/api/trademark-qc/check?name=${q}${cls}");\nconst report = await r.json();\nconsole.log(report.overall_status, report.risk_score);`;
-
-  const copy = async (text, key) => {
-    try { await navigator.clipboard.writeText(text); setCopied(key); setTimeout(() => setCopied(null), 1500); } catch {}
-  };
+// ─── History rail — with Re-brand PDF button ──────────────────────────────────
+function HistoryRail({ items, onSelect, activeId, branding, T }) {
+  const fmt = (iso) => { try { return new Date(iso).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return iso; } };
+  const hasBranding = !!(branding?.footer || branding?.logo || branding?.tagline);
 
   return (
-    <Collapsible title="API & Embed" icon={Hash} iconColor={T.emerald} badge="Integrate in any web app" id="docs">
-      <p style={{ fontSize: 13, color: T.muted, marginBottom: 16, lineHeight: 1.6 }}>This endpoint is CORS-open — embed in any application.</p>
-      {[["cURL", curl, "curl"], ["JavaScript", js, "js"]].map(([title, code, key]) => (
-        <div key={key} style={{ borderRadius: 10, overflow: "hidden", border: `1px solid ${T.border}`, marginBottom: 12 }}>
-          <div style={{ background: "#0d1117", padding: "8px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontSize: 11, color: T.dimmer, fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase" }}>{title}</span>
-            <button onClick={() => copy(code, key)} style={{ background: "none", border: "none", color: T.dimmer, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 4, fontFamily: "inherit" }}>
-              {copied === key ? <Check size={11} style={{ color: T.emerald }} /> : <Copy size={11} />} {copied === key ? "Copied" : "Copy"}
-            </button>
-          </div>
-          <pre style={{ background: "#010409", color: "#79c0ff", fontFamily: "'JetBrains Mono', monospace", fontSize: 12, padding: "14px", margin: 0, overflowX: "auto", lineHeight: 1.6 }}>{code}</pre>
+    <Card style={{ overflow: "hidden" }}>
+      <div style={{ padding: "16px 18px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ background: `${COLORS.mediumBlue}20`, borderRadius: 8, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <Clock size={14} style={{ color: COLORS.mediumBlue }} />
         </div>
-      ))}
-    </Collapsible>
+        <div>
+          <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: T.dimmer, fontWeight: 700 }}>Docket</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>Recent Reports</div>
+        </div>
+      </div>
+
+      <div style={{ maxHeight: 520, overflowY: "auto", scrollbarWidth: "thin", scrollbarColor: `${T.border} transparent` }}>
+        {(!items?.length) && <div style={{ padding: "20px 18px", color: T.dimmer, fontSize: 13 }}>No reports yet. Run your first search.</div>}
+        {items?.map(it => {
+          const active = it.id === activeId;
+          const cfg = VERDICT_CFG[it.overall_status] || VERDICT_CFG.CAUTION;
+          return (
+            <div key={it.id} style={{ borderBottom: `1px solid ${T.border}`, background: active ? `${COLORS.mediumBlue}12` : "none", borderLeft: active ? `3px solid ${COLORS.blueLight}` : "3px solid transparent", transition: "all 0.15s" }}>
+              <button onClick={() => onSelect(it)} style={{ width: "100%", background: "none", border: "none", padding: "12px 16px", textAlign: "left", cursor: "pointer" }}>
+                <div style={{ fontSize: 10, color: T.dimmer, marginBottom: 4 }}>{fmt(it.created_at)}</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.query}</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <VerdictBadge status={it.overall_status} />
+                  <span style={{ fontSize: 11, color: T.dimmer, fontFamily: "'JetBrains Mono', monospace" }}>Risk {it.risk_score}</span>
+                </div>
+              </button>
+
+              {/* Re-brand PDF row */}
+              <div style={{ display: "flex", gap: 6, padding: "0 12px 10px", flexWrap: "wrap" }}>
+                <a href={pdfDownloadUrl(it.id)} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+                  <Btn T={T} variant="ghost" style={{ padding: "3px 9px", fontSize: 11 }}><Download size={11} /> PDF</Btn>
+                </a>
+                {hasBranding && (
+                  <a href={brandedPdfUrl(it.id, branding)} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }} title="Re-generate this report PDF with your current branding">
+                    <Btn T={T} variant="save" style={{ padding: "3px 9px", fontSize: 11 }}>
+                      <Paintbrush size={11} /> Re-brand
+                    </Btn>
+                  </a>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
   );
 }
 
 // ─── Bulk search ──────────────────────────────────────────────────────────────
-function BulkPanel({ onPickReport }) {
-  useT();
+function BulkPanel({ onPickReport, T }) {
   const [text, setText] = useState("");
   const [klass, setKlass] = useState("");
   const [loading, setLoading] = useState(false);
@@ -804,22 +891,21 @@ function BulkPanel({ onPickReport }) {
   };
 
   return (
-    <Collapsible title="Bulk Search" icon={Layers} iconColor={T.emerald} badge="Check up to 20 names at once">
+    <Collapsible T={T} title="Bulk Search" icon={Layers} iconColor={COLORS.emeraldGreen} badge="Check up to 20 names at once">
       <div style={{ display: "grid", gridTemplateColumns: "1fr 200px", gap: 12, marginBottom: 12 }}>
-        <Textarea rows={5} value={text} onChange={e => setText(e.target.value)} placeholder={"One brand name per line:\nKunjveda\nFumera\nZorbixsynth"} />
+        <Textarea T={T} rows={5} value={text} onChange={e => setText(e.target.value)} placeholder={"One brand name per line:\nKunjveda\nFumera\nZorbixsynth"} />
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <select value={klass} onChange={e => setKlass(e.target.value)}
             style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 10, color: T.muted, padding: "10px 14px", fontSize: 13, outline: "none", fontFamily: "inherit" }}>
             <option value="">All classes</option>
             {Array.from({ length: 45 }, (_, i) => i + 1).map(c => <option key={c} value={c}>Class {c}</option>)}
           </select>
-          <Btn onClick={run} disabled={loading} style={{ justifyContent: "center" }}>
+          <Btn T={T} onClick={run} disabled={loading} style={{ justifyContent: "center" }}>
             {loading ? "Processing…" : "Run Batch"}
           </Btn>
           <p style={{ fontSize: 11, color: T.dimmer, margin: 0 }}>Each name creates a stored report.</p>
         </div>
       </div>
-
       {items.length > 0 && (
         <div style={{ border: `1px solid ${T.border}`, borderRadius: 10, overflow: "hidden" }}>
           {items.map((it, i) => (
@@ -830,9 +916,9 @@ function BulkPanel({ onPickReport }) {
               <span style={{ fontSize: 12, color: T.dimmer, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.error || it.headline}</span>
               {!it.error && it.id && (
                 <div style={{ display: "flex", gap: 6 }}>
-                  <Btn variant="ghost" onClick={() => onPickReport?.(it.id)} style={{ padding: "4px 10px", fontSize: 11 }}>View</Btn>
+                  <Btn T={T} variant="ghost" onClick={() => onPickReport?.(it.id)} style={{ padding: "4px 10px", fontSize: 11 }}>View</Btn>
                   <a href={pdfDownloadUrl(it.id)} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
-                    <Btn variant="ghost" style={{ padding: "4px 10px", fontSize: 11 }}><Download size={11} /> PDF</Btn>
+                    <Btn T={T} variant="ghost" style={{ padding: "4px 10px", fontSize: 11 }}><Download size={11} /> PDF</Btn>
                   </a>
                 </div>
               )}
@@ -845,8 +931,7 @@ function BulkPanel({ onPickReport }) {
 }
 
 // ─── Class finder ─────────────────────────────────────────────────────────────
-function ClassFinderPanel({ onPickClass }) {
-  useT();
+function ClassFinderPanel({ onPickClass, T }) {
   const [desc, setDesc] = useState("");
   const [loading, setLoading] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
@@ -862,17 +947,16 @@ function ClassFinderPanel({ onPickClass }) {
     finally { setLoading(false); }
   };
 
-  const CONF_COLOR = { high: T.emerald, medium: T.amber, low: T.dimmer };
+  const CONF_COLOR = { high: COLORS.emeraldGreen, medium: COLORS.amber, low: "#94a3b8" };
 
   return (
-    <Collapsible title="Class Finder" icon={Compass} iconColor={T.violet} badge="Describe your product → get Nice classification">
+    <Collapsible T={T} title="Class Finder" icon={Compass} iconColor={COLORS.violet} badge="Describe your product → get Nice classification">
       <div style={{ display: "grid", gridTemplateColumns: "1fr 180px", gap: 12, marginBottom: 16 }}>
-        <Textarea rows={3} value={desc} onChange={e => setDesc(e.target.value)} placeholder="e.g. AI-powered SaaS platform for online coaching, organic ayurvedic skincare" />
-        <Btn onClick={run} disabled={loading} style={{ alignSelf: "start", justifyContent: "center", height: 44 }}>
+        <Textarea T={T} rows={3} value={desc} onChange={e => setDesc(e.target.value)} placeholder="e.g. AI-powered SaaS platform for online coaching, organic ayurvedic skincare" />
+        <Btn T={T} onClick={run} disabled={loading} style={{ alignSelf: "start", justifyContent: "center", height: 44 }}>
           {loading ? "Analysing…" : "Find Classes"}
         </Btn>
       </div>
-
       {suggestions.length > 0 && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           {suggestions.map((s, i) => (
@@ -883,7 +967,7 @@ function ClassFinderPanel({ onPickClass }) {
                 <span style={{ fontSize: 10, color: CONF_COLOR[s.confidence] || T.dimmer, fontWeight: 700, textTransform: "uppercase" }}>{s.confidence}</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                <span style={{ background: "rgba(31,111,178,0.2)", color: T.blueL, borderRadius: 6, padding: "3px 8px", fontSize: 12, fontWeight: 700 }}>CL{String(s.class).padStart(2, "0")}</span>
+                <span style={{ background: `${COLORS.mediumBlue}20`, color: COLORS.mediumBlue, borderRadius: 6, padding: "3px 8px", fontSize: 12, fontWeight: 700 }}>CL{String(s.class).padStart(2, "0")}</span>
                 <span style={{ fontSize: 14, fontWeight: 700, color: T.text }}>{s.title}</span>
               </div>
               <p style={{ fontSize: 12, color: T.dimmer, margin: "0 0 8px", lineHeight: 1.5 }}>{s.summary}</p>
@@ -900,95 +984,33 @@ function ClassFinderPanel({ onPickClass }) {
   );
 }
 
-// ─── History rail ─────────────────────────────────────────────────────────────
-function HistoryRail({ items, onSelect, activeId }) {
-  useT();
-  const fmt = (iso) => { try { return new Date(iso).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return iso; } };
-  return (
-    <Card style={{ overflow: "hidden" }}>
-      <div style={{ padding: "16px 18px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ background: "rgba(31,111,178,0.2)", borderRadius: 8, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <Clock size={14} style={{ color: T.blueL }} />
-        </div>
-        <div>
-          <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: T.dimmer, fontWeight: 700 }}>Docket</div>
-          <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>Recent Reports</div>
-        </div>
-      </div>
-      <div style={{ maxHeight: 520, overflowY: "auto", scrollbarWidth: "thin", scrollbarColor: `${T.border} transparent` }}>
-        {(!items?.length) && <div style={{ padding: "20px 18px", color: T.dimmer, fontSize: 13 }}>No reports yet. Run your first search.</div>}
-        {items?.map(it => {
-          const active = it.id === activeId;
-          const cfg = VERDICT_CFG[it.overall_status] || VERDICT_CFG.CAUTION;
-          return (
-            <button key={it.id} onClick={() => onSelect(it)} style={{
-              width: "100%", background: active ? "rgba(31,111,178,0.1)" : "none",
-              border: "none", borderBottom: `1px solid ${T.border}`,
-              padding: "12px 16px", textAlign: "left", cursor: "pointer",
-              borderLeft: active ? `3px solid ${T.blueL}` : `3px solid transparent`, transition: "all 0.15s",
-            }}>
-              <div style={{ fontSize: 10, color: T.dimmer, marginBottom: 4 }}>{fmt(it.created_at)}</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.query}</div>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <VerdictBadge status={it.overall_status} />
-                <span style={{ fontSize: 11, color: T.dimmer, fontFamily: "'JetBrains Mono', monospace" }}>Risk {it.risk_score}</span>
-              </div>
-            </button>
-          );
-        })}
-      </div>
-    </Card>
-  );
-}
-
 // ─── Empty state ──────────────────────────────────────────────────────────────
-function EmptyState({ onScroll }) {
-  useT();
+function EmptyState({ onScroll, T }) {
   return (
     <motion.div variants={fadeUp} initial="hidden" animate="visible">
       <Card style={{ padding: "60px 40px", textAlign: "center" }}>
-        <div style={{ width: 72, height: 72, borderRadius: 20, background: "rgba(31,111,178,0.15)", border: `1px solid rgba(31,111,178,0.3)`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
-          <Shield size={32} style={{ color: T.blueL }} />
+        <div style={{ width: 72, height: 72, borderRadius: 20, background: `${COLORS.mediumBlue}18`, border: `1px solid ${COLORS.mediumBlue}33`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
+          <Shield size={32} style={{ color: COLORS.mediumBlue }} />
         </div>
         <h3 style={{ fontSize: 20, fontWeight: 700, color: T.text, margin: "0 0 10px" }}>Enter a brand name to generate your report</h3>
         <p style={{ fontSize: 14, color: T.muted, maxWidth: 440, margin: "0 auto 24px", lineHeight: 1.6 }}>
           Every search produces a verdict, risk score, conflicting filings, class breakdown, and alternative name suggestions — saved automatically to your docket.
         </p>
-        <Btn onClick={onScroll}><Search size={14} /> Start a Search</Btn>
+        <Btn T={T} onClick={onScroll}><Search size={14} /> Start a Search</Btn>
       </Card>
     </motion.div>
   );
 }
 
-// ─── Skeleton loader full ─────────────────────────────────────────────────────
-function ReportSkeleton() {
-  useT();
+// ─── Skeleton ─────────────────────────────────────────────────────────────────
+function ReportSkeleton({ T }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <style>{`@keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }`}</style>
-      <div style={{ background: `linear-gradient(135deg, #0D3B66, #1F6FB2)`, borderRadius: 18, padding: "32px 36px" }}>
-        <Skeleton h={12} w={200} r={6} mb={16} /><Skeleton h={32} w="70%" r={8} mb={12} /><Skeleton h={20} w="45%" r={6} mb={24} /><Skeleton h={8} r={99} />
+      <div style={{ background: "linear-gradient(135deg, #0D3B66, #1F6FB2)", borderRadius: 18, padding: "32px 36px" }}>
+        <Skeleton T={T} h={12} w={200} r={6} mb={16} /><Skeleton T={T} h={32} w="70%" r={8} mb={12} /><Skeleton T={T} h={20} w="45%" r={6} mb={24} /><Skeleton T={T} h={8} r={99} />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 12 }}>
-        {[1,2,3,4,5].map(i=><Card key={i} style={{padding:"18px 20px"}}><Skeleton h={10} w={80} r={4} mb={10}/><Skeleton h={36} w={50} r={6} mb={8}/><Skeleton h={10} w={90} r={4}/></Card>)}
-      </div>
-    </div>
-  );
-}
-
-// ─── Page header ──────────────────────────────────────────────────────────────
-function PageHeader() {
-  useT();
-  return (
-    <div style={{ marginBottom: 28 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 6 }}>
-        <div style={{ width: 44, height: 44, borderRadius: 14, background: "linear-gradient(135deg, #0D3B66, #1F6FB2)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <Shield size={22} style={{ color: "#fff" }} />
-        </div>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: T.text, letterSpacing: "-0.5px" }}>Trademark Sphere</h1>
-          <p style={{ margin: 0, fontSize: 13, color: T.dimmer }}>IP India registry · QuickCompany data source</p>
-        </div>
+        {[1,2,3,4,5].map(i => <Card key={i} style={{ padding: "18px 20px" }}><Skeleton T={T} h={10} w={80} r={4} mb={10}/><Skeleton T={T} h={36} w={50} r={6} mb={8}/><Skeleton T={T} h={10} w={90} r={4}/></Card>)}
       </div>
     </div>
   );
@@ -998,7 +1020,8 @@ function PageHeader() {
 // Main component
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function TrademarkSphere() {
-  useT();
+  const isDark = useDark();
+  const T = useTokens(isDark);
   const { user } = useAuth();
 
   const [report, setReport]             = useState(null);
@@ -1009,17 +1032,33 @@ export default function TrademarkSphere() {
   const [lastClassFilter, setLastClassFilter] = useState(null);
   const [pinnedClass, setPinnedClass]   = useState("");
   const [selectedClient, setSelectedClient] = useState(null);
+  const [companies, setCompanies]       = useState([]);
 
-  // Companies for report branding
-  const [companies, setCompanies] = useState([]);
-
-  // Branding state
-  const [branding, setBranding] = useState({ logo: null, logoName: null, footer: "", tagline: "", watermark: "", customWatermark: "" });
+  // Branding — load saved on mount
+  const [branding, setBranding] = useState(loadSavedBranding);
 
   const searchRef = useRef();
 
+  // Load companies and auto-apply default if saved
   useEffect(() => {
-    api.get('/companies').then(res => setCompanies(res.data)).catch(() => {});
+    api.get("/companies").then(res => {
+      const cos = res.data || [];
+      setCompanies(cos);
+      // Auto-apply default company branding
+      const saved = loadSavedBranding();
+      if (saved.defaultCompanyId) {
+        const co = cos.find(c => String(c.id) === String(saved.defaultCompanyId));
+        if (co) {
+          setBranding(prev => ({
+            ...prev,
+            logo:     co.tm_logo_base64 || co.logo_base64 || prev.logo,
+            logoName: (co.tm_logo_base64 || co.logo_base64) ? co.name : prev.logoName,
+            footer:   prev.footer || `Prepared by ${co.name}${co.gstin ? ` · GSTIN: ${co.gstin}` : ""}`,
+            tagline:  prev.tagline || "Trademark Availability Report",
+          }));
+        }
+      }
+    }).catch(() => {});
   }, []);
 
   const refreshHistory = useCallback(async () => {
@@ -1032,7 +1071,8 @@ export default function TrademarkSphere() {
     const sid = p.get("report");
     if (sid) {
       (async () => {
-        try { setLoading(true); const d = await getReport(sid); setReport(d.report); setActiveId(d.id); } catch { toast.error("Could not load shared report"); }
+        try { setLoading(true); const d = await getReport(sid); setReport(d.report); setActiveId(d.id); }
+        catch { toast.error("Could not load shared report"); }
         finally { setLoading(false); }
       })();
     }
@@ -1042,7 +1082,6 @@ export default function TrademarkSphere() {
     setLoading(true); setError(null); setReport(null); setActiveId(null);
     setLastClassFilter(opts.class_filter ?? null);
     try {
-      // Merge branding into logo_data_url if no logo uploaded in search bar
       const effectiveLogo = opts.logo_data_url || branding.logo || null;
       const data = await generateReport(name, { ...opts, logo_data_url: effectiveLogo });
       setReport(data.report);
@@ -1071,6 +1110,12 @@ export default function TrademarkSphere() {
     searchRef.current?.querySelector('input[data-testid="search-input"]')?.focus();
   };
 
+  const handleBrandingChange = (updated) => {
+    setBranding(updated);
+    // Auto-save footer/tagline/watermark to localStorage (not the full logo to avoid quota issues)
+    saveBrandingToStorage({ ...updated, logo: null }); // logo stays in memory only
+  };
+
   return (
     <>
       <style>{`
@@ -1082,27 +1127,38 @@ export default function TrademarkSphere() {
       <div style={{ minHeight: "100vh", background: T.bg, color: T.text, fontFamily: "'Inter', -apple-system, sans-serif", padding: "28px 28px 48px" }}>
         <div style={{ maxWidth: 1400, margin: "0 auto" }}>
 
-          <PageHeader />
+          {/* ── Page header — aligned with Dashboard layout ── */}
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 14, background: "linear-gradient(135deg, #0D3B66, #1F6FB2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <Shield size={22} style={{ color: "#fff" }} />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold tracking-tight" style={{ margin: 0, color: T.text }}>Trademark Sphere</h1>
+                <p style={{ margin: 0, fontSize: 12, color: T.dimmer }}>IP India registry · QuickCompany data source</p>
+              </div>
+            </div>
+          </div>
 
           {/* ── Top row: client selector + branding ── */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
             <Card style={{ padding: "20px 22px" }}>
-              <ClientSelector value={selectedClient} onChange={setSelectedClient} />
+              <ClientSelector T={T} value={selectedClient} onChange={setSelectedClient} />
             </Card>
-            <Collapsible title="Report Branding" icon={Stamp} iconColor={T.amber} badge="Logo · watermark · footer">
-              <BrandingPanel branding={branding} onChange={setBranding} companies={companies} />
+            <Collapsible T={T} title="Report Branding" icon={Stamp} iconColor={COLORS.amber} badge="Logo · watermark · footer" defaultOpen={!!branding.defaultCompanyId}>
+              <BrandingPanel T={T} branding={branding} onChange={handleBrandingChange} companies={companies} />
             </Collapsible>
           </div>
 
           {/* ── Search bar ── */}
           <div ref={searchRef} style={{ marginBottom: 16 }}>
-            <SearchBar onSubmit={handleSearch} loading={loading} defaultClass={pinnedClass} client={selectedClient} />
+            <SearchBar T={T} onSubmit={handleSearch} loading={loading} defaultClass={pinnedClass} client={selectedClient} />
           </div>
 
           {/* ── Tools row: class finder + bulk ── */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 28 }}>
-            <ClassFinderPanel onPickClass={(cls) => { setPinnedClass(String(cls)); toast.success(`Class ${cls} pinned`); scrollToSearch(); }} />
-            <BulkPanel onPickReport={async (id) => {
+            <ClassFinderPanel T={T} onPickClass={(cls) => { setPinnedClass(String(cls)); toast.success(`Class ${cls} pinned`); scrollToSearch(); }} />
+            <BulkPanel T={T} onPickReport={async (id) => {
               const item = history.find(h => h.id === id);
               if (item) handleHistorySelect(item);
               else { try { const d = await getReport(id); setReport(d.report); setActiveId(d.id); refreshHistory(); } catch {} }
@@ -1113,10 +1169,10 @@ export default function TrademarkSphere() {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 20 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
-              {loading && <ReportSkeleton />}
+              {loading && <ReportSkeleton T={T} />}
 
               {!loading && error && (
-                <Card style={{ padding: "28px 28px", borderColor: "rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.05)" }}>
+                <Card style={{ padding: "28px", borderColor: "rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.05)" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
                     <AlertTriangle size={18} style={{ color: T.red }} />
                     <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, color: T.red }}>Scraper Error</span>
@@ -1128,10 +1184,10 @@ export default function TrademarkSphere() {
 
               {!loading && !error && report && (
                 <motion.div variants={stagger} initial="hidden" animate="visible" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                  <VerdictPanel report={report} />
-                  <StatGrid report={report} />
+                  <VerdictPanel T={T} report={report} />
+                  <StatGrid T={T} report={report} />
 
-                  {/* Branding preview strip if configured */}
+                  {/* Branding preview strip */}
                   {(branding.logo || branding.watermark || branding.footer) && (
                     <Card style={{ padding: "14px 20px" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -1149,19 +1205,18 @@ export default function TrademarkSphere() {
                     </Card>
                   )}
 
-                  <ReportActions reportId={activeId} />
-                  <Recommendations recommendations={report.recommendations} alternatives={report.alternative_name_suggestions} />
-                  <ClassBreakdown rows={report.class_breakdown} />
-                  <MatchesTable rows={report.all_results} />
-                  <ApiPanel query={report.query} classFilter={lastClassFilter} />
+                  <ReportActions T={T} reportId={activeId} branding={branding} />
+                  <Recommendations T={T} recommendations={report.recommendations} alternatives={report.alternative_name_suggestions} />
+                  <ClassBreakdown T={T} rows={report.class_breakdown} />
+                  <MatchesTable T={T} rows={report.all_results} />
                 </motion.div>
               )}
 
-              {!loading && !error && !report && <EmptyState onScroll={scrollToSearch} />}
+              {!loading && !error && !report && <EmptyState T={T} onScroll={scrollToSearch} />}
             </div>
 
             <div style={{ position: "sticky", top: 24, alignSelf: "start" }}>
-              <HistoryRail items={history} onSelect={handleHistorySelect} activeId={activeId} />
+              <HistoryRail T={T} items={history} onSelect={handleHistorySelect} activeId={activeId} branding={branding} />
             </div>
           </div>
 
