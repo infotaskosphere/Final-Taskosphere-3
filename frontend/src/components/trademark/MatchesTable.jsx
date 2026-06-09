@@ -51,14 +51,14 @@ export const MatchesTable = ({ rows }) => {
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-slate-50/50">
-              <Th>ID</Th><Th>Name</Th><Th>Applicant</Th><Th>Status</Th>
+              <Th>ID</Th><Th>Name</Th><Th>Applicant</Th><Th>Status</Th><Th>Logo</Th>
               <Th>Class</Th><Th>Match</Th><Th align="right">Risk</Th>
               <Th>Filed</Th><Th></Th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={9} className="p-12 text-center text-slate-400 text-sm">
+              <tr><td colSpan={10} className="p-12 text-center text-slate-400 text-sm">
                 No matches under current filters.
               </td></tr>
             )}
@@ -69,6 +69,20 @@ export const MatchesTable = ({ rows }) => {
                 <Td className="font-medium text-slate-900">{r.name}</Td>
                 <Td className="text-slate-600">{r.applicant || "—"}</Td>
                 <Td><StatusBadge status={r.status} /></Td>
+                <Td>
+                  {r.mark_image_data_url || r.mark_image_url ? (
+                    <img
+                      src={r.mark_image_data_url || r.mark_image_url}
+                      alt={r.name}
+                      className="h-8 w-8 object-contain rounded border border-slate-200 bg-white p-0.5"
+                      onError={(e) => { e.target.style.display = "none"; }}
+                    />
+                  ) : (
+                    <div className="h-8 w-8 rounded border border-slate-200 bg-slate-50 flex items-center justify-center text-[9px] text-slate-400 font-bold uppercase">
+                      {(r.name || "?").slice(0, 2)}
+                    </div>
+                  )}
+                </Td>
                 <Td className="text-slate-700">{r.class ?? "—"}</Td>
                 <Td>
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-medium uppercase tracking-wider">
