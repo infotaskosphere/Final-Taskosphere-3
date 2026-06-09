@@ -39,6 +39,7 @@ from pydantic import BaseModel, Field
 
 from backend.dependencies import db, get_current_user
 from backend.models import User
+from backend.pdf_renderer import build_combined_report_pdf
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/trademark-sphere", tags=["trademark-sphere"])
@@ -1504,7 +1505,6 @@ async def generate_combined_pdf(
     body: CombinedPdfRequest,
     user: User = Depends(get_current_user),
 ):
-    from backend.pdf_renderer import build_combined_report_pdf
     items_data = [it.dict() for it in body.items]
     branding = {
         "logo_data_url":    body.logo_data_url,
