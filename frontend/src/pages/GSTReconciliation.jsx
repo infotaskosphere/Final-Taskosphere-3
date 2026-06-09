@@ -6150,6 +6150,11 @@ export default function GSTReconciliation() {
   const [aiInsights,     setAiInsights]     = useState('');
   const [aiInsightState, setAiInsightState] = useState('idle'); // idle | loading | done | error
 
+  // GST Verification state
+  const [gstStatusMap,   setGstStatusMap]   = useState({}); // GSTIN → { status, tradeName, legalName, state, ... }
+  const [verifyingGST,   setVerifyingGST]   = useState(false);
+  const [gstVerifyDone,  setGstVerifyDone]  = useState(false);
+
   const handleAiInsights = useCallback(async () => {
     if (!results) return;
     setAiInsightState('loading');
@@ -6216,6 +6221,51 @@ export default function GSTReconciliation() {
       setAiInsightState('error');
     }
   }, [results, company, period]);
+
+  // ── GST Verification ──────────────────────────────────────────────────────
+  const verifyAllGSTINs = useCallback(async () => {
+    if (!results) return;
+    const allRecs = [
+      ...(results.matched    || []),
+      ...(results.mismatch   || []),
+      ...(results.portalOnly || []),
+      ...(results.booksOnly  || []),
+      ...(results.crossGstin || []),
+    ];
+    const gstins = [...new Set(
+      allRecs
+        .map(r => r.portal?.gstin || r.books?.gstin || r.gstin)
+        .filter(Boolean)
+        .map(g => String(g).trim().toUpperCase())
+        .filter(g => /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(g))
+    )];
+    if (!gstins.length) {
+      toast.error('No valid GSTINs found in current results.');
+      return;
+    }
+    setVerifyingGST(true);
+    setGstVerifyDone(false);
+    try {
+      const res = await fetch('/api/gst-reconciliation/verify-gstins', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gstins }),
+      });
+      if (!res.ok) throw new Error(`Server responded ${res.status}`);
+      const data = await res.json();
+      const map = {};
+      (data.results || []).forEach(r => { map[r.gstin] = r; });
+      setGstStatusMap(map);
+      setGstVerifyDone(true);
+      const active    = (data.results || []).filter(r => (r.status || '').toLowerCase() === 'active').length;
+      const inactive  = (data.results || []).filter(r => (r.status || '').toLowerCase() !== 'active' && r.status !== 'Lookup failed' && r.status !== 'Invalid GSTIN').length;
+      toast.success(`GST status verified: ${active} active, ${inactive} inactive/cancelled out of ${gstins.length} GSTINs.`);
+    } catch (e) {
+      toast.error(`GST verification failed: ${e.message}`);
+    } finally {
+      setVerifyingGST(false);
+    }
+  }, [results]);
 
   const onSaveComment = useCallback((key, comment) => {
     setInvoiceComments(prev => {
@@ -7258,6 +7308,115 @@ export default function GSTReconciliation() {
                 </div>
               </div>
 
+              {/* ── GST Verification Panel ── */}
+              {gstVerifyDone && Object.keys(gstStatusMap).length > 0 && (() => {
+                const entries = Object.values(gstStatusMap);
+                const active    = entries.filter(e => (e.status || '').toLowerCase() === 'active');
+                const cancelled = entries.filter(e => /cancel|suspend|surrender|inactive/i.test(e.status || ''));
+                const unknown   = entries.filter(e => e.status === 'Lookup failed');
+                const invalid   = entries.filter(e => e.status === 'Invalid GSTIN');
+                const riskCount = cancelled.length + invalid.length;
+
+                return (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden"
+                  >
+                    {/* Header */}
+                    <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-r from-teal-50 to-emerald-50 dark:from-teal-900/20 dark:to-emerald-900/20">
+                      <ShieldCheck className="h-4 w-4 text-teal-600 dark:text-teal-400 flex-shrink-0"/>
+                      <span className="text-sm font-semibold text-teal-700 dark:text-teal-300">GST Registration Status</span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400">— {entries.length} unique GSTINs verified from government portal</span>
+                      {riskCount > 0 && (
+                        <span className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                          <AlertTriangle className="h-3 w-3"/>{riskCount} AT RISK
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Summary pills */}
+                    <div className="flex flex-wrap gap-2 px-4 pt-3 pb-2">
+                      {active.length > 0 && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                          <CheckCircle2 className="h-3.5 w-3.5"/>{active.length} Active
+                        </span>
+                      )}
+                      {cancelled.length > 0 && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                          <AlertTriangle className="h-3.5 w-3.5"/>{cancelled.length} Cancelled / Suspended
+                        </span>
+                      )}
+                      {unknown.length > 0 && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                          <Info className="h-3.5 w-3.5"/>{unknown.length} Lookup failed
+                        </span>
+                      )}
+                      {invalid.length > 0 && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                          <X className="h-3.5 w-3.5"/>{invalid.length} Invalid GSTIN
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Table */}
+                    <div className="overflow-x-auto px-4 pb-4">
+                      <table className="w-full text-xs border-separate border-spacing-0">
+                        <thead>
+                          <tr className="text-left">
+                            <th className="py-2 pr-3 font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700 whitespace-nowrap">GSTIN</th>
+                            <th className="py-2 pr-3 font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700 whitespace-nowrap">Business Name</th>
+                            <th className="py-2 pr-3 font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700 whitespace-nowrap">Status</th>
+                            <th className="py-2 pr-3 font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700 whitespace-nowrap">State</th>
+                            <th className="py-2 pr-3 font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700 whitespace-nowrap">Type</th>
+                            <th className="py-2 font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700 whitespace-nowrap">Reg. Date</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {entries.map((e, idx) => {
+                            const isActive    = (e.status || '').toLowerCase() === 'active';
+                            const isRisk      = /cancel|suspend|surrender|inactive/i.test(e.status || '');
+                            const isLookupFail = e.status === 'Lookup failed';
+                            const displayName = e.tradeName || e.legalName || manualTradeNames[e.gstin] || '—';
+                            const rowBg = isRisk
+                              ? 'bg-red-50/50 dark:bg-red-900/10'
+                              : idx % 2 === 0 ? '' : 'bg-slate-50/50 dark:bg-slate-800/30';
+                            return (
+                              <tr key={e.gstin} className={rowBg}>
+                                <td className="py-2 pr-3 font-mono text-slate-700 dark:text-slate-200 whitespace-nowrap">{e.gstin}</td>
+                                <td className="py-2 pr-3 text-slate-700 dark:text-slate-200 max-w-[180px] truncate" title={displayName}>{displayName}</td>
+                                <td className="py-2 pr-3 whitespace-nowrap">
+                                  {isActive ? (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 flex-shrink-0"/>Active
+                                    </span>
+                                  ) : isRisk ? (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                                      <span className="h-1.5 w-1.5 rounded-full bg-red-500 flex-shrink-0"/>{e.status}
+                                    </span>
+                                  ) : isLookupFail ? (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                                      <span className="h-1.5 w-1.5 rounded-full bg-amber-400 flex-shrink-0"/>Lookup failed
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400">
+                                      {e.status || '—'}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-2 pr-3 text-slate-600 dark:text-slate-300 whitespace-nowrap">{e.state || '—'}</td>
+                                <td className="py-2 pr-3 text-slate-500 dark:text-slate-400 whitespace-nowrap">{e.registrationType || e.entityType || '—'}</td>
+                                <td className="py-2 text-slate-500 dark:text-slate-400 whitespace-nowrap">{e.registrationDate || '—'}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </motion.div>
+                );
+              })()}
+
               {/* ── Detail Panel ── */}
               <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
                 {/* Slim header: active tab name + Search + Compare */}
@@ -7278,6 +7437,19 @@ export default function GSTReconciliation() {
                     <button onClick={()=>setActiveTab('search')}
                       className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${activeTab==='search' ? 'bg-purple-600 text-white border-purple-600' : 'text-slate-500 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>
                       <ScanSearch className="h-3.5 w-3.5"/> Search All
+                    </button>
+                    <button
+                      onClick={verifyAllGSTINs}
+                      disabled={verifyingGST}
+                      title="Check GST registration status for all vendors from the government portal"
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors shadow-sm ${gstVerifyDone ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-teal-600 hover:bg-teal-700'} text-white disabled:opacity-60`}
+                    >
+                      {verifyingGST
+                        ? <><div className="h-3 w-3 border-2 border-white/40 border-t-white rounded-full animate-spin flex-shrink-0"/>Verifying…</>
+                        : gstVerifyDone
+                        ? <><ShieldCheck className="h-3.5 w-3.5 flex-shrink-0"/>GST Verified</>
+                        : <><ShieldCheck className="h-3.5 w-3.5 flex-shrink-0"/>Verify GST Status</>
+                      }
                     </button>
                     <button onClick={() => setShowCompare(true)}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-violet-600 hover:bg-violet-700 text-white transition-colors shadow-sm">
