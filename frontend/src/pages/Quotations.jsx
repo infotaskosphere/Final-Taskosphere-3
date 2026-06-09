@@ -348,11 +348,12 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
     name: '', address: '', phone: '', email: '', website: '', gstin: '', pan: '',
     has_gst: true,
     bank_account_name: '', bank_name: '', bank_account_no: '', bank_ifsc: '',
-    logo_base64: null, signature_base64: null,
+    logo_base64: null, tm_logo_base64: null, signature_base64: null,
     smtp_host: '', smtp_port: 587, smtp_user: '', smtp_password: '', smtp_from_name: '',
   });
   const [saving, setSaving] = useState(false);
   const logoInputRef = useRef(null);
+  const tmLogoInputRef = useRef(null);
   const sigInputRef  = useRef(null);
 
   useEffect(() => {
@@ -371,6 +372,7 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
         bank_account_no: editingCompany.bank_account_no || '',
         bank_ifsc: editingCompany.bank_ifsc || '',
         logo_base64: editingCompany.logo_base64 || null,
+        tm_logo_base64: editingCompany.tm_logo_base64 || null,
         signature_base64: editingCompany.signature_base64 || null,
         smtp_host: editingCompany.smtp_host || '',
         smtp_port: editingCompany.smtp_port || 587,
@@ -483,12 +485,23 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
 
             <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2 mt-4"><Tag className="h-4 w-4" />Logo &amp; Signature</h4>
             <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">Company Logo</Label>
+              <Label className="text-xs font-semibold">Company Logo <span className="text-slate-400 font-normal">(Invoice / Quotation)</span></Label>
               <Input type="file" accept="image/*" onChange={e => handleFileChange(e, 'logo_base64')} className="h-9 rounded-xl text-sm" ref={logoInputRef} />
               {form.logo_base64 && (
                 <div className="flex items-center gap-2">
                   <img src={form.logo_base64} alt="Logo" className="h-12 object-contain rounded border" />
                   <Button variant="outline" size="sm" onClick={() => { setForm(p => ({ ...p, logo_base64: null })); if (logoInputRef.current) logoInputRef.current.value = ''; }}>Remove</Button>
+                </div>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Full Logo <span className="text-slate-400 font-normal">(TM Reports &amp; other documents)</span></Label>
+              <p className="text-[10px] text-slate-400 -mt-0.5">Upload the full horizontal logo with company name — used as the header in trademark reports.</p>
+              <Input type="file" accept="image/*" onChange={e => handleFileChange(e, 'tm_logo_base64')} className="h-9 rounded-xl text-sm" ref={tmLogoInputRef} />
+              {form.tm_logo_base64 && (
+                <div className="flex items-center gap-2">
+                  <img src={form.tm_logo_base64} alt="TM Logo" className="h-12 object-contain rounded border bg-slate-50 px-2" />
+                  <Button variant="outline" size="sm" onClick={() => { setForm(p => ({ ...p, tm_logo_base64: null })); if (tmLogoInputRef.current) tmLogoInputRef.current.value = ''; }}>Remove</Button>
                 </div>
               )}
             </div>
@@ -598,6 +611,7 @@ function CompanyListModal({ open, onClose, onRefresh }) {
                         <div className="flex items-center gap-1 mt-1">
                           {company.smtp_host ? <Badge className="text-[10px] px-2 py-0 bg-green-50 text-green-700 border-green-200">Email Ready</Badge> : <Badge className="text-[10px] px-2 py-0 bg-amber-50 text-amber-700 border-amber-200">SMTP Not Set</Badge>}
                           {company.logo_base64 && <Badge className="text-[10px] px-2 py-0 bg-blue-50 text-blue-700 border-blue-200">Has Logo</Badge>}
+                          {company.tm_logo_base64 && <Badge className="text-[10px] px-2 py-0 bg-violet-50 text-violet-700 border-violet-200">Has TM Logo</Badge>}
                         </div>
                       </div>
                       <div className="flex gap-2 flex-shrink-0">
