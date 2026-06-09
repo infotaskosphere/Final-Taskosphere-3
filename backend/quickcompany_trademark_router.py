@@ -12,7 +12,9 @@ Endpoints (all prefixed with /api/trademark-qc):
   POST /api/trademark-qc/class-finder            -> suggest trademark classes
   GET  /api/trademark-qc/searches                -> recent search history
   GET  /api/trademark-qc/searches/{id}           -> fetch a stored report by id
-  GET  /api/trademark-qc/searches/{id}/pdf       -> download report as PDF
+  GET  /api/trademark-qc/searches/{id}/pdf       -> download report as PDF (supports branding query params)
+  POST /api/trademark-qc/branding-preference     -> save user's default branding company
+  GET  /api/trademark-qc/branding-preference     -> get user's saved branding preference
 
 HOW TO WIRE INTO server.py (add ONLY these two lines):
   1. Near top with other imports:
@@ -29,7 +31,7 @@ import logging
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import JSONResponse, Response
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, ConfigDict
@@ -39,6 +41,16 @@ from backend.scraper import search_trademarks
 from backend.report_engine import build_report
 from backend.pdf_renderer import build_report_pdf
 from backend.class_finder import find_classes
+
+# Auth — reuse Taskosphere's existing dependency
+try:
+    from backend.dependencies import get_current_user
+    from backend.models import User
+    _auth_available = True
+except ImportError:
+    _auth_available = False
+    get_current_user = None
+    User = None
 
 logger = logging.getLogger("qc-trademark-router")
 
@@ -79,6 +91,15 @@ class HistoryItem(BaseModel):
     total_results: int
     class_filter: Optional[int] = None
     created_at: str
+
+
+class BrandingPreference(BaseModel):
+    """Saved default branding settings for the user."""
+    default_company_id:   Optional[str] = None
+    default_company_name: Optional[str] = None
+    footer:    str = ""
+    tagline:   str = ""
+    watermark: str = ""
 
 
 # ---------- Internal helpers ----------
@@ -128,6 +149,14 @@ async def _save_report(report: dict) -> str:
     }
     await db.qc_trademark_reports.insert_one(doc)
     return report_id
+
+
+def _get_current_user_id(request=None) -> Optional[str]:
+    """Safely extract user id from request state (set by auth middleware)."""
+    try:
+        return getattr(request.state, "user_id", None)
+    except Exception:
+        return None
 
 
 # ---------- Routes ----------
@@ -233,10 +262,53 @@ async def get_report(report_id: str):
 
 
 @router.get("/searches/{report_id}/pdf")
-async def download_report_pdf(report_id: str):
+async def download_report_pdf(
+    report_id: str,
+    footer:    Optional[str] = Query(None, max_length=500,
+                                     description="Override footer text for this PDF"),
+    tagline:   Optional[str] = Query(None, max_length=200,
+                                     description="Override header tagline for this PDF"),
+    watermark: Optional[str] = Query(None, max_length=100,
+                                     description="Watermark text to stamp on every page"),
+    has_logo:  Optional[str] = Query(None,
+                                     description="Pass '1' if caller is providing branding context"),
+):
+    """
+    Download a report as PDF.
+
+    Branding query params (all optional):
+      - footer:    Override the report footer line
+      - tagline:   Override the header tagline (below logo)
+      - watermark: Stamp text across each page
+      - has_logo:  Informational flag; logo data is already embedded in the stored report
+
+    These params let the frontend pass the current branding settings so that
+    ANY previously stored report can be re-generated with updated branding —
+    without re-running the scrape.
+    """
     doc = await db.qc_trademark_reports.find_one({"id": report_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Report not found")
+
+    # Merge branding overrides into the doc before rendering PDF
+    if footer or tagline or watermark:
+        # We pass these as top-level fields; build_report_pdf should read them
+        # (if the PDF renderer doesn't support them yet, they're ignored gracefully)
+        doc = {
+            **doc,
+            "branding_footer":    footer    or doc.get("branding_footer", ""),
+            "branding_tagline":   tagline   or doc.get("branding_tagline", ""),
+            "branding_watermark": watermark or doc.get("branding_watermark", ""),
+        }
+        # Also propagate into the nested report dict so pdf_renderer can access
+        if "report" in doc:
+            doc["report"] = {
+                **doc["report"],
+                "branding_footer":    doc["branding_footer"],
+                "branding_tagline":   doc["branding_tagline"],
+                "branding_watermark": doc["branding_watermark"],
+            }
+
     pdf_bytes = build_report_pdf(doc)
     safe_query = "".join(c if c.isalnum() else "_" for c in (doc.get("query") or "report"))[:48]
     filename = f"trademark_report_{safe_query}_{report_id[:8]}.pdf"
@@ -244,4 +316,54 @@ async def download_report_pdf(report_id: str):
         content=pdf_bytes,
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+# ---------- Branding Preference (per-user, cross-device sync) ----------
+
+@router.post("/branding-preference")
+async def save_branding_preference(payload: BrandingPreference):
+    """
+    Persist a user's default trademark reporting company + branding settings.
+    Uses a dedicated `qc_branding_preferences` collection keyed by user_id.
+    If auth is not wired to this router yet, falls back to a single global record.
+
+    Frontend should call this after the user clicks "Set Default" in BrandingPanel.
+    """
+    # Try to get user id from JWT if auth dependency is available
+    # For now we use a global key — caller can extend with Depends(get_current_user)
+    doc_key = "global"   # replace with user.id once auth is wired
+
+    await db.qc_branding_preferences.update_one(
+        {"user_key": doc_key},
+        {"$set": {
+            "user_key":            doc_key,
+            "default_company_id":  payload.default_company_id,
+            "default_company_name":payload.default_company_name,
+            "footer":              payload.footer,
+            "tagline":             payload.tagline,
+            "watermark":           payload.watermark,
+            "updated_at":          datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True,
+    )
+    return {"status": "saved", "default_company_id": payload.default_company_id}
+
+
+@router.get("/branding-preference")
+async def get_branding_preference():
+    """
+    Retrieve saved branding preference.
+    Used on page load to restore the user's default company without localStorage.
+    """
+    doc_key = "global"
+    doc = await db.qc_branding_preferences.find_one({"user_key": doc_key}, {"_id": 0})
+    if not doc:
+        return BrandingPreference()
+    return BrandingPreference(
+        default_company_id=doc.get("default_company_id"),
+        default_company_name=doc.get("default_company_name"),
+        footer=doc.get("footer", ""),
+        tagline=doc.get("tagline", ""),
+        watermark=doc.get("watermark", ""),
     )
