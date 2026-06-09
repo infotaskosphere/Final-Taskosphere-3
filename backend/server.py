@@ -17,6 +17,7 @@ from datetime import datetime, date, timezone, timedelta
 
 # --- FIXED ROUTER IMPORTS ---
 # Added 'backend.' to invoicing to match the others
+from backend.quickcompany_trademark_router import router as qc_trademark_router
 from backend.compliance import router as compliance_router, create_compliance_indexes
 from backend.ai_document_reader import router as ai_document_reader_router
 from backend.gst_reconciliation import router as gst_reconciliation_router
@@ -9580,6 +9581,7 @@ app.include_router(api_router)
 #
 # IMPORTANT: These routes must be at ROOT level — NOT under /api/identix/...
 # No auth middleware. No CORS required. Always return plain text "OK".
+app.include_router(qc_trademark_router)
 from backend.attendance_identix import iclock_getrequest, iclock_cdata, iclock_devicecmd
 
 app.add_api_route("/iclock/cdata",       iclock_cdata,       methods=["GET", "POST"])
