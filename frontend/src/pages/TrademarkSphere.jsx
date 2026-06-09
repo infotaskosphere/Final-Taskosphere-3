@@ -92,7 +92,7 @@ function saveBrandingToStorage(branding) {
   try { localStorage.setItem(BRANDING_STORAGE_KEY, JSON.stringify(branding)); } catch {}
 }
 
-// Builds PDF URL with branding params encoded
+// Builds PDF URL with branding params encoded (GET, no logo)
 function brandedPdfUrl(reportId, branding) {
   const base = api.defaults.baseURL || "";
   const params = new URLSearchParams();
@@ -100,9 +100,34 @@ function brandedPdfUrl(reportId, branding) {
   if (branding?.tagline) params.set("tagline",  branding.tagline);
   const wm = branding?.watermark === "CUSTOM" ? branding.customWatermark : branding?.watermark;
   if (wm)                params.set("watermark", wm);
-  if (branding?.logo)    params.set("has_logo", "1");
   const qs = params.toString();
   return `${base}/trademark-qc/searches/${reportId}/pdf${qs ? `?${qs}` : ""}`;
+}
+
+// POST-based PDF download — required when a logo needs to be sent (too large for query params)
+async function downloadBrandedPdfWithLogo(reportId, branding) {
+  const base = api.defaults.baseURL || "";
+  const wm = branding?.watermark === "CUSTOM" ? branding.customWatermark : branding?.watermark;
+  const body = {
+    logo_data_url:    branding?.logo || null,
+    footer:           branding?.footer || "",
+    tagline:          branding?.tagline || "Trademark Availability Report",
+    watermark:        wm || "",
+    custom_watermark: branding?.customWatermark || "",
+  };
+  const res = await fetch(`${base}/trademark-qc/searches/${reportId}/pdf`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`PDF generation failed: ${res.status}`);
+  const blob = await res.blob();
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url;
+  a.download = `trademark_report_${reportId.slice(0, 8)}.pdf`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 const fadeUp = {
@@ -660,27 +685,40 @@ function StatGrid({ report, T }) {
 // ─── Report actions — with Re-brand PDF ──────────────────────────────────────
 function ReportActions({ reportId, branding, T }) {
   const [copied, setCopied] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
   if (!reportId) return null;
   const copy = async () => {
     try { await navigator.clipboard.writeText(shareLinkFor(reportId)); setCopied(true); toast.success("Share link copied"); setTimeout(() => setCopied(false), 2000); }
     catch { toast.error("Could not copy link"); }
   };
-  const pdfUrl = brandedPdfUrl(reportId, branding);
+  // Use POST when logo is present (logo data too large for query params), GET otherwise
+  const handlePdfDownload = async () => {
+    if (branding?.logo) {
+      setPdfLoading(true);
+      try {
+        await downloadBrandedPdfWithLogo(reportId, branding);
+      } catch (e) {
+        toast.error("PDF generation failed. Please try again.");
+      } finally {
+        setPdfLoading(false);
+      }
+    } else {
+      window.open(brandedPdfUrl(reportId, branding), "_blank");
+    }
+  };
   return (
     <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-      <a href={pdfUrl} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
-        <Btn T={T} variant="ghost"><Download size={14} /> Download PDF</Btn>
-      </a>
+      <Btn T={T} variant="ghost" onClick={handlePdfDownload} disabled={pdfLoading}>
+        <Download size={14} /> {pdfLoading ? "Generating…" : "Download PDF"}
+      </Btn>
       <Btn T={T} variant="ghost" onClick={copy}>
         {copied ? <Check size={14} style={{ color: COLORS.emeraldGreen }} /> : <Link2 size={14} />}
         {copied ? "Copied!" : "Copy share link"}
       </Btn>
       {(branding?.footer || branding?.logo || branding?.tagline) && (
-        <a href={pdfUrl} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
-          <Btn T={T} variant="success" style={{ fontSize: 12 }}>
-            <Paintbrush size={13} /> PDF with Current Branding
-          </Btn>
-        </a>
+        <Btn T={T} variant="success" style={{ fontSize: 12 }} onClick={handlePdfDownload} disabled={pdfLoading}>
+          <Paintbrush size={13} /> {pdfLoading ? "Generating…" : "PDF with Current Branding"}
+        </Btn>
       )}
     </div>
   );
