@@ -148,3 +148,9 @@ cryptography>=42.0.0
 # =========================
 selenium==4.20.0
 # pyscard excluded — requires libpcsclite-dev not available on [Render.com](https://Render.com)
+
+# =========================
+# QuickCompany Trademark
+# =========================
+Metaphone==0.6
+reportlab==4.1.0
