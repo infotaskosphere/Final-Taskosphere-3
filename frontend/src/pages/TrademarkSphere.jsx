@@ -831,20 +831,22 @@ function ReportActions({ reportId, branding, clientInfo = {}, T }) {
       window.open(brandedPdfUrl(reportId, branding), "_blank");
     }
   };
+  const hasBrandingOrClient = !!(branding?.footer || branding?.logo || branding?.tagline || clientInfo?.client_name);
   return (
     <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-      <Btn T={T} variant="ghost" onClick={handlePdfDownload} disabled={pdfLoading}>
-        <Download size={14} /> {pdfLoading ? "Generating…" : "Download PDF"}
-      </Btn>
+      {hasBrandingOrClient ? (
+        <Btn T={T} variant="success" style={{ fontSize: 12 }} onClick={handlePdfDownload} disabled={pdfLoading}>
+          <Download size={13} /> {pdfLoading ? "Generating…" : "Download PDF"}
+        </Btn>
+      ) : (
+        <Btn T={T} variant="ghost" onClick={handlePdfDownload} disabled={pdfLoading}>
+          <Download size={14} /> {pdfLoading ? "Generating…" : "Download PDF"}
+        </Btn>
+      )}
       <Btn T={T} variant="ghost" onClick={copy}>
         {copied ? <Check size={14} style={{ color: COLORS.emeraldGreen }} /> : <Link2 size={14} />}
         {copied ? "Copied!" : "Copy share link"}
       </Btn>
-      {(branding?.footer || branding?.logo || branding?.tagline || clientInfo?.client_name) && (
-        <Btn T={T} variant="success" style={{ fontSize: 12 }} onClick={handlePdfDownload} disabled={pdfLoading}>
-          <Paintbrush size={13} /> {pdfLoading ? "Generating…" : "PDF with Current Branding"}
-        </Btn>
-      )}
     </div>
   );
 }
@@ -1119,14 +1121,28 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
     if (!successful.length) return toast.error("No successful results to include in combined report");
     setCombinedLoading(true);
     try {
+      // Fetch full report for each mark to get conflicting marks detail
+      const fullItems = await Promise.all(
+        successful.map(async (it) => {
+          if (it.id) {
+            try {
+              const d = await getReport(it.id);
+              return { ...it, all_results: d.report?.all_results || [], class_breakdown: d.report?.class_breakdown || [] };
+            } catch { return it; }
+          }
+          return it;
+        })
+      );
       const wm = branding?.watermark === "CUSTOM" ? branding?.customWatermark : branding?.watermark;
       const body = {
-        items: successful.map(it => ({
-          name:           it.name,
-          overall_status: it.overall_status,
-          risk_score:     it.risk_score,
-          headline:       it.headline || "",
-          class_filter:   klass ? Number(klass) : null,
+        items: fullItems.map(it => ({
+          name:            it.name,
+          overall_status:  it.overall_status,
+          risk_score:      it.risk_score,
+          headline:        it.headline || "",
+          class_filter:    klass ? Number(klass) : null,
+          all_results:     it.all_results || [],
+          class_breakdown: it.class_breakdown || [],
         })),
         logo_data_url:    branding?.logo    || null,
         footer:           branding?.footer  || "",
@@ -1137,7 +1153,6 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
         client_mobile:    clientInfo?.client_mobile || "",
         report_date:      clientInfo?.report_date   || "",
       };
-      // Use the api axios instance so auth credentials are sent automatically
       const res = await api.post("/trademark-sphere/combined-pdf", body, { responseType: "blob" });
       const blob = new Blob([res.data], { type: "application/pdf" });
       const url  = URL.createObjectURL(blob);
