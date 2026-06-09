@@ -898,7 +898,7 @@ def build_combined_report_pdf(items: list, branding: dict) -> bytes:
     story.append(stat_tbl)
     story.append(Spacer(1, 14))
 
-    # ── MARK-BY-MARK TABLE ─────────────────────────────────────────────────────
+    # ── MARK-BY-MARK SUMMARY TABLE ─────────────────────────────────────────────
     story.append(Paragraph("MARK-BY-MARK ANALYSIS", st["eyebrow"]))
     story.append(_section_rule())
 
@@ -947,14 +947,185 @@ def build_combined_report_pdf(items: list, branding: dict) -> bytes:
     ]))
     story.append(mark_tbl)
 
-    # ── FOOTER NOTE ────────────────────────────────────────────────────────────
-    story.append(Spacer(1, 14))
-    story.append(_section_rule())
-    story.append(Paragraph(
-        "Data source: quickcompany.in · IP India trademark index. "
-        "For informational purposes only — not legal advice.",
-        st["footer"],
-    ))
+    # ── DETAILED MARK SECTIONS ─────────────────────────────────────────────────
+    # Status color map for conflicting marks
+    STATUS_CLR = {
+        "Registered":           colors.HexColor("#166534"),
+        "Objected":             colors.HexColor("#92400E"),
+        "Abandoned":            colors.HexColor("#64748B"),
+        "Formalities Chk Pass": colors.HexColor("#1F6FB2"),
+        "Refused":              colors.HexColor("#7F1D1D"),
+        "Withdrawn":            colors.HexColor("#64748B"),
+    }
+    MATCH_CLR = {
+        "EXACT":     colors.HexColor("#7F1D1D"),
+        "PHONETIC":  colors.HexColor("#92400E"),
+        "CONTAINS":  colors.HexColor("#1E40AF"),
+        "SIMILAR":   colors.HexColor("#92400E"),
+        "WEAK":      colors.HexColor("#374151"),
+    }
+
+    for it in items:
+        if it.get("error"):
+            continue
+        all_results = it.get("all_results") or []
+        story.append(PageBreak())
+
+        # Mark section header bar
+        status  = it.get("overall_status", "UNKNOWN")
+        vp_it   = VERDICT_PALETTE.get(status, VERDICT_PALETTE["CAUTION"])
+        label   = vp_it["label"]
+        risk_v  = str(it.get("risk_score", "—"))
+        klass   = f'CL{str(it.get("class_filter","")).zfill(2)}' if it.get("class_filter") else "All Classes"
+
+        hdr_data = [[
+            Paragraph(f'<b>{it.get("name", "").upper()}</b>',
+                      ParagraphStyle("mhdr", fontName="Helvetica-Bold", fontSize=14, leading=18, textColor=WHITE)),
+            Paragraph(
+                f'<font color="{vp_it["fg"].hexval()}"><b>{label}</b></font>  '
+                f'<font color="{MUTED.hexval()}">Risk {risk_v}/100 &middot; {klass}</font>',
+                ParagraphStyle("mhdr2", fontName="Helvetica", fontSize=10, leading=14, textColor=WHITE),
+            ),
+        ]]
+        hdr_tbl = Table(hdr_data, colWidths=[CONTENT_W * 0.45, CONTENT_W * 0.55])
+        hdr_tbl.setStyle(TableStyle([
+            ("BACKGROUND",    (0, 0), (-1, -1), NAVY),
+            ("TOPPADDING",    (0, 0), (-1, -1), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 14),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 14),
+            ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+        story.append(hdr_tbl)
+        story.append(Spacer(1, 6))
+
+        # Headline / verdict explanation
+        headline = it.get("headline", "")
+        if headline:
+            story.append(Paragraph(headline, st["body"]))
+            story.append(Spacer(1, 8))
+
+        # Class breakdown mini-table
+        cb = it.get("class_breakdown") or []
+        if cb:
+            story.append(Paragraph("CLASS BREAKDOWN", st["eyebrow"]))
+            story.append(_section_rule())
+            cb_rows = [[
+                Paragraph("CLASS", st["tbl_hdr"]),
+                Paragraph("TOTAL FILINGS", st["tbl_hdr"]),
+                Paragraph("BLOCKING", st["tbl_hdr"]),
+                Paragraph("DEAD/ABANDONED", st["tbl_hdr"]),
+            ]]
+            for row in cb:
+                cl = str(row.get("class_number", row.get("class", "—")))
+                cb_rows.append([
+                    Paragraph(f'<b>CL{cl.zfill(2)}</b>',
+                              ParagraphStyle("cbc", fontName="Helvetica-Bold", fontSize=8.5, leading=11, textColor=NAVY)),
+                    Paragraph(str(row.get("total", "—")),
+                              ParagraphStyle("cbt", fontName="Helvetica", fontSize=8.5, leading=11, alignment=TA_CENTER)),
+                    Paragraph(str(row.get("blocking", row.get("blocking_count", "—"))),
+                              ParagraphStyle("cbb", fontName="Helvetica-Bold", fontSize=8.5, leading=11,
+                                             alignment=TA_CENTER, textColor=colors.HexColor("#7F1D1D"))),
+                    Paragraph(str(row.get("dead", row.get("dead_count", "—"))),
+                              ParagraphStyle("cbd", fontName="Helvetica", fontSize=8.5, leading=11,
+                                             alignment=TA_CENTER, textColor=MUTED)),
+                ])
+            cw_cb = [20 * mm, CONTENT_W / 3 - 7 * mm, CONTENT_W / 3 - 7 * mm, CONTENT_W / 3 - 6 * mm]
+            cb_tbl = Table(cb_rows, colWidths=cw_cb, repeatRows=1)
+            cb_tbl.setStyle(TableStyle([
+                ("BACKGROUND",    (0, 0), (-1, 0),  NAVY),
+                ("ROWBACKGROUNDS",(0, 1), (-1, -1), [WHITE, SUBTLE]),
+                ("BOX",           (0, 0), (-1, -1), 0.5, BORDER),
+                ("INNERGRID",     (0, 1), (-1, -1), 0.3, BORDER),
+                ("ALIGN",         (1, 0), (-1, -1), "CENTER"),
+                ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING",    (0, 0), (-1, -1),  5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1),  5),
+                ("LEFTPADDING",   (0, 0), (-1, -1),  6),
+                ("RIGHTPADDING",  (0, 0), (-1, -1),  6),
+            ]))
+            story.append(cb_tbl)
+            story.append(Spacer(1, 10))
+
+        # Conflicting marks table
+        story.append(Paragraph(
+            f'ALL RECORDED MATCHES — {len(all_results)} filing{"s" if len(all_results) != 1 else ""}',
+            st["eyebrow"],
+        ))
+        story.append(_section_rule())
+
+        if not all_results:
+            story.append(Paragraph("No conflicting trademarks were found in the QuickCompany index.", st["body"]))
+        else:
+            ex_rows = [[
+                Paragraph("APP. ID", st["tbl_hdr"]),
+                Paragraph("MARK NAME", st["tbl_hdr"]),
+                Paragraph("APPLICANT", st["tbl_hdr"]),
+                Paragraph("STATUS", st["tbl_hdr"]),
+                Paragraph("CL.", st["tbl_hdr"]),
+                Paragraph("MATCH", st["tbl_hdr"]),
+                Paragraph("RISK", st["tbl_hdr"]),
+                Paragraph("FILED", st["tbl_hdr"]),
+            ]]
+            for r in all_results:
+                app_id    = str(r.get("application_id") or "—")
+                mark_name = str(r.get("name") or r.get("mark_name") or "—")
+                applicant = str(r.get("applicant") or "—")
+                r_status  = str(r.get("status") or "—")
+                r_class   = str(r.get("class") or "—")
+                match_t   = str(r.get("match_type") or "—").upper()
+                ind_risk  = r.get("individual_risk_score") or r.get("risk_score") or 0
+                filed     = str(r.get("filing_date") or "—")
+
+                s_clr  = STATUS_CLR.get(r_status, MUTED)
+                m_clr  = MATCH_CLR.get(match_t, MUTED)
+                rk_clr = (colors.HexColor("#7F1D1D") if ind_risk >= 70
+                          else colors.HexColor("#92400E") if ind_risk >= 40
+                          else colors.HexColor("#166534"))
+
+                ex_rows.append([
+                    Paragraph(app_id,
+                              ParagraphStyle("xid", fontName="Helvetica", fontSize=7, leading=10, textColor=MUTED)),
+                    Paragraph(f'<b>{mark_name}</b>',
+                              ParagraphStyle("xmn", fontName="Helvetica-Bold", fontSize=8, leading=11, textColor=NAVY)),
+                    Paragraph(applicant,
+                              ParagraphStyle("xap", fontName="Helvetica", fontSize=7.5, leading=10, textColor=MUTED)),
+                    Paragraph(f'<font color="{s_clr.hexval()}"><b>{r_status}</b></font>',
+                              ParagraphStyle("xst", fontName="Helvetica-Bold", fontSize=7.5, leading=10)),
+                    Paragraph(r_class,
+                              ParagraphStyle("xcl", fontName="Helvetica", fontSize=8, leading=10, alignment=TA_CENTER, textColor=MUTED)),
+                    Paragraph(f'<font color="{m_clr.hexval()}"><b>{match_t}</b></font>',
+                              ParagraphStyle("xmt", fontName="Helvetica-Bold", fontSize=7.5, leading=10, alignment=TA_CENTER)),
+                    Paragraph(f'<font color="{rk_clr.hexval()}"><b>{ind_risk}</b></font>',
+                              ParagraphStyle("xrk", fontName="Helvetica-Bold", fontSize=9, leading=11, alignment=TA_CENTER)),
+                    Paragraph(filed,
+                              ParagraphStyle("xfd", fontName="Helvetica", fontSize=7, leading=10, textColor=MUTED)),
+                ])
+
+            ex_cws = [18 * mm, 38 * mm, 34 * mm, 26 * mm, 10 * mm, 18 * mm, 12 * mm, 24 * mm]
+            ex_tbl = Table(ex_rows, colWidths=ex_cws, repeatRows=1)
+            ex_tbl.setStyle(TableStyle([
+                ("BACKGROUND",    (0, 0), (-1, 0),  NAVY),
+                ("ROWBACKGROUNDS",(0, 1), (-1, -1), [WHITE, SUBTLE]),
+                ("BOX",           (0, 0), (-1, -1), 0.5, BORDER),
+                ("LINEBELOW",     (0, 0), (-1, 0),  0.8, NAVY),
+                ("INNERGRID",     (0, 1), (-1, -1), 0.3, BORDER),
+                ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+                ("ALIGN",         (4, 0), (6, -1),  "CENTER"),
+                ("TOPPADDING",    (0, 0), (-1, -1),  5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1),  5),
+                ("LEFTPADDING",   (0, 0), (-1, -1),  5),
+                ("RIGHTPADDING",  (0, 0), (-1, -1),  5),
+            ]))
+            story.append(ex_tbl)
+
+        story.append(Spacer(1, 14))
+        story.append(_section_rule())
+        story.append(Paragraph(
+            "Data source: quickcompany.in · IP India trademark index. "
+            "For informational purposes only — not legal advice.",
+            st["footer"],
+        ))
 
     page_cb = _make_page_cb(footer_l, footer_r, watermark)
     pdf.build(story, onFirstPage=page_cb, onLaterPages=page_cb)
