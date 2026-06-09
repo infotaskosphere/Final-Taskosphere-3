@@ -19,7 +19,7 @@ import { useDark } from "@/hooks/useDark";
 import api from "@/lib/api";
 import {
   generateReport, listHistory, getReport, bulkReports,
-  findClasses, pdfDownloadUrl, shareLinkFor,
+  findClasses, pdfDownloadUrl, shareLinkFor, deleteReport,
 } from "@/lib/trademark-qc-api";
 
 import {
@@ -816,10 +816,18 @@ function MatchesTable({ rows, T }) {
   );
 }
 
-// ─── History rail — with Re-brand PDF button ──────────────────────────────────
-function HistoryRail({ items, onSelect, activeId, branding, T }) {
+// ─── History rail — with Re-brand PDF button + individual delete ───────────────
+function HistoryRail({ items, onSelect, activeId, branding, onDelete, T }) {
+  const [deletingId, setDeletingId] = useState(null);
   const fmt = (iso) => { try { return new Date(iso).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return iso; } };
   const hasBranding = !!(branding?.footer || branding?.logo || branding?.tagline);
+
+  const handleDelete = async (e, id) => {
+    e.stopPropagation();
+    if (!onDelete) return;
+    setDeletingId(id);
+    try { await onDelete(id); } finally { setDeletingId(null); }
+  };
 
   return (
     <Card style={{ overflow: "hidden" }}>
@@ -837,10 +845,11 @@ function HistoryRail({ items, onSelect, activeId, branding, T }) {
         {(!items?.length) && <div style={{ padding: "20px 18px", color: T.dimmer, fontSize: 13 }}>No reports yet. Run your first search.</div>}
         {items?.map(it => {
           const active = it.id === activeId;
+          const isDeleting = deletingId === it.id;
           const cfg = VERDICT_CFG[it.overall_status] || VERDICT_CFG.CAUTION;
           return (
-            <div key={it.id} style={{ borderBottom: `1px solid ${T.border}`, background: active ? `${COLORS.mediumBlue}12` : "none", borderLeft: active ? `3px solid ${COLORS.blueLight}` : "3px solid transparent", transition: "all 0.15s" }}>
-              <button onClick={() => onSelect(it)} style={{ width: "100%", background: "none", border: "none", padding: "12px 16px", textAlign: "left", cursor: "pointer" }}>
+            <div key={it.id} style={{ borderBottom: `1px solid ${T.border}`, background: active ? `${COLORS.mediumBlue}12` : "none", borderLeft: active ? `3px solid ${COLORS.blueLight}` : "3px solid transparent", transition: "all 0.15s", position: "relative" }}>
+              <button onClick={() => onSelect(it)} disabled={isDeleting} style={{ width: "100%", background: "none", border: "none", padding: "12px 40px 6px 16px", textAlign: "left", cursor: isDeleting ? "not-allowed" : "pointer", opacity: isDeleting ? 0.5 : 1 }}>
                 <div style={{ fontSize: 10, color: T.dimmer, marginBottom: 4 }}>{fmt(it.created_at)}</div>
                 <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.query}</div>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -848,6 +857,30 @@ function HistoryRail({ items, onSelect, activeId, branding, T }) {
                   <span style={{ fontSize: 11, color: T.dimmer, fontFamily: "'JetBrains Mono', monospace" }}>Risk {it.risk_score}</span>
                 </div>
               </button>
+
+              {/* Delete button — appears on hover */}
+              {onDelete && (
+                <button
+                  onClick={(e) => handleDelete(e, it.id)}
+                  disabled={isDeleting}
+                  title="Remove from docket"
+                  style={{
+                    position: "absolute", top: 10, right: 10,
+                    background: "transparent", border: "none",
+                    cursor: isDeleting ? "not-allowed" : "pointer",
+                    padding: 5, borderRadius: 6, color: T.dimmer,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    transition: "all 0.15s",
+                  }}
+                  onMouseEnter={e => { if (!isDeleting) { e.currentTarget.style.background = "rgba(239,68,68,0.12)"; e.currentTarget.style.color = "#DC2626"; }}}
+                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = T.dimmer; }}
+                >
+                  {isDeleting
+                    ? <span style={{ display: "block", width: 12, height: 12, border: `2px solid ${T.border}`, borderTopColor: T.muted, borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+                    : <Trash2 size={13} />
+                  }
+                </button>
+              )}
 
               {/* Re-brand PDF row */}
               <div style={{ display: "flex", gap: 6, padding: "0 12px 10px", flexWrap: "wrap" }}>
@@ -1083,7 +1116,15 @@ export default function TrademarkSphere() {
     setLastClassFilter(opts.class_filter ?? null);
     try {
       const effectiveLogo = opts.logo_data_url || branding.logo || null;
-      const data = await generateReport(name, { ...opts, logo_data_url: effectiveLogo });
+      const effectiveWm = branding.watermark === "CUSTOM" ? branding.customWatermark : branding.watermark;
+      const data = await generateReport(name, {
+        ...opts,
+        logo_data_url:    effectiveLogo,
+        footer:           branding.footer || "",
+        tagline:          branding.tagline || "Trademark Availability Report",
+        watermark:        effectiveWm || "",
+        custom_watermark: branding.customWatermark || "",
+      });
       setReport(data.report);
       setActiveId(data.id);
       toast.success(`Report ready — ${data.report.overall_status}`);
@@ -1092,6 +1133,17 @@ export default function TrademarkSphere() {
       const msg = e?.response?.data?.detail || e.message || "Failed to generate report";
       setError(msg); toast.error(msg);
     } finally { setLoading(false); }
+  };
+
+  const handleDeleteReport = async (reportId) => {
+    try {
+      await deleteReport(reportId);
+      if (activeId === reportId) { setReport(null); setActiveId(null); }
+      await refreshHistory();
+      toast.success("Report removed from docket");
+    } catch (e) {
+      toast.error("Failed to delete report");
+    }
   };
 
   const handleHistorySelect = async (item) => {
@@ -1216,7 +1268,7 @@ export default function TrademarkSphere() {
             </div>
 
             <div style={{ position: "sticky", top: 24, alignSelf: "start" }}>
-              <HistoryRail T={T} items={history} onSelect={handleHistorySelect} activeId={activeId} branding={branding} />
+              <HistoryRail T={T} items={history} onSelect={handleHistorySelect} activeId={activeId} branding={branding} onDelete={handleDeleteReport} />
             </div>
           </div>
 
