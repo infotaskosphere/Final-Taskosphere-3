@@ -6,6 +6,7 @@ and returns a structured list of trademark records.
 from __future__ import annotations
 
 import re
+import base64
 import logging
 from typing import List, Dict, Optional
 import httpx
@@ -106,6 +107,16 @@ def _parse_card(card) -> Optional[Dict]:
         if application_id is None and not name:
             return None
 
+        # Mark image: <img> inside the card (QuickCompany renders a thumbnail)
+        mark_image_url = None
+        img_tag = card.find("img")
+        if img_tag:
+            src = img_tag.get("src") or img_tag.get("data-src") or ""
+            if src and not src.startswith("data:"):
+                if src.startswith("/"):
+                    src = f"{BASE_URL}{src}"
+                mark_image_url = src
+
         return {
             "application_id": application_id,
             "name": name,
@@ -116,6 +127,7 @@ def _parse_card(card) -> Optional[Dict]:
             "filing_date": filing_date,
             "description": description,
             "detail_url": f"{BASE_URL}{detail_path}" if detail_path else None,
+            "mark_image_url": mark_image_url,
         }
     except Exception as e:
         logger.warning("Failed to parse card: %s", e)
@@ -131,6 +143,23 @@ def _parse_total(soup: BeautifulSoup) -> Optional[int]:
     m = re.search(r"Search\s+all\s+([\d,]{1,12})", text, re.I)
     if m:
         return int(m.group(1).replace(",", ""))
+    return None
+
+
+async def _fetch_image_as_data_url(url: str, client: httpx.AsyncClient) -> Optional[str]:
+    """Fetch a remote image and return it as a base64 data URL."""
+    if not url:
+        return None
+    try:
+        resp = await client.get(url, timeout=8.0, follow_redirects=True)
+        if resp.status_code == 200:
+            ct = resp.headers.get("content-type", "image/jpeg").split(";")[0].strip()
+            if not ct.startswith("image/"):
+                ct = "image/jpeg"
+            b64 = base64.b64encode(resp.content).decode()
+            return f"data:{ct};base64,{b64}"
+    except Exception as e:
+        logger.debug("Failed to fetch mark image %s: %s", url, e)
     return None
 
 
@@ -157,30 +186,47 @@ async def search_trademarks(query: str, limit: int = 40, timeout: float = 20.0) 
         resp.raise_for_status()
         html = resp.text
 
-    soup = BeautifulSoup(html, "lxml")
+        soup = BeautifulSoup(html, "lxml")
 
-    # Each trademark result is rendered as a <turbo-frame id="trademark_<id>"> block
-    frames = soup.find_all("turbo-frame", id=re.compile(r"^trademark_"))
-    results: List[Dict] = []
-    for f in frames:
-        parsed = _parse_card(f)
-        if parsed:
-            results.append(parsed)
-        if len(results) >= limit:
-            break
-
-    # Fallback: parse list-group-items if turbo-frame structure changes
-    if not results:
-        for item in soup.find_all("div", class_=re.compile(r"list-group-item")):
-            parsed = _parse_card(item)
+        # Each trademark result is rendered as a <turbo-frame id="trademark_<id>"> block
+        frames = soup.find_all("turbo-frame", id=re.compile(r"^trademark_"))
+        results: List[Dict] = []
+        for f in frames:
+            parsed = _parse_card(f)
             if parsed:
                 results.append(parsed)
             if len(results) >= limit:
                 break
 
+        # Fallback: parse list-group-items if turbo-frame structure changes
+        if not results:
+            for item in soup.find_all("div", class_=re.compile(r"list-group-item")):
+                parsed = _parse_card(item)
+                if parsed:
+                    results.append(parsed)
+                if len(results) >= limit:
+                    break
+
+        total = _parse_total(soup)
+
+        # Fetch mark images as base64 data URLs (up to 20 to avoid timeout)
+        import asyncio
+        sem = asyncio.Semaphore(5)
+
+        async def _fetch_bounded(r: Dict) -> Dict:
+            url = r.get("mark_image_url")
+            if not url:
+                return r
+            async with sem:
+                data_url = await _fetch_image_as_data_url(url, client)
+            return {**r, "mark_image_data_url": data_url} if data_url else r
+
+        results = await asyncio.gather(*[_fetch_bounded(r) for r in results[:20]])
+        results = list(results)
+
     return {
         "query": query.strip(),
-        "total_estimated": _parse_total(soup),
+        "total_estimated": total,
         "results": results,
         "source": "quickcompany.in",
     }
