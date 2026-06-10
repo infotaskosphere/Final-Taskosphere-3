@@ -1647,7 +1647,7 @@ export default function TrademarkSphere() {
           </div>
 
           {/* ── Configuration row: client + branding ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 16, marginBottom: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 360px) 1fr", gap: 16, marginBottom: 16, alignItems: "start" }}>
             {/* Client selector card */}
             <Card style={{ padding: "18px 20px" }}>
               <ClientSelector T={T} value={selectedClient} onChange={setSelectedClient} />
@@ -1686,7 +1686,7 @@ export default function TrademarkSphere() {
           </div>
 
           {/* ── Tools row: class finder + bulk (collapsible, compact) ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 24 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 24, alignItems: "start" }}>
             <ClassFinderPanel T={T} onPickClass={(cls) => { setPinnedClass(String(cls)); toast.success(`Class ${cls} pinned`); scrollToSearch(); }} />
             <BulkPanel T={T} branding={branding} clientInfo={{
               client_name:   selectedClient?.company_name || "",
