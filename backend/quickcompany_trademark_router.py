@@ -26,7 +26,7 @@ All FastAPI routes are preserved. Frontend contract bugs fixed:
 
 import os, re, uuid, time, logging, asyncio
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import Optional, List, Any, Dict, Tuple
 from urllib.parse import quote, urljoin
 from zoneinfo import ZoneInfo
@@ -38,10 +38,16 @@ from pydantic import BaseModel, Field
 
 from backend.dependencies import db, get_current_user
 from backend.models import User
-from backend.pdf_renderer import build_combined_report_pdf
+from backend.pdf_renderer import build_combined_report_pdf, build_report_pdf
+from backend.scraper import search_trademarks as _qc_search_trademarks
+from backend.report_engine import build_report as _build_report
+from backend.class_finder import find_classes as _find_classes
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/trademark-sphere", tags=["trademark-sphere"])
+
+# ── QC Report Router (no internal prefix — mounted at /api/trademark-qc by server.py) ──
+qc_report_router = APIRouter(tags=["trademark-qc-reports"])
 IST   = ZoneInfo("Asia/Kolkata")
 _pool = ThreadPoolExecutor(max_workers=6)
 
@@ -1534,3 +1540,400 @@ async def generate_combined_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": "attachment; filename=bulk_trademark_report.pdf"},
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ── QC Report Endpoints  (mounted at /api/trademark-qc by server.py) ──────────
+# These mirror the standalone QuickCompany backend and are called by TrademarkSphere.jsx
+# via trademark-qc-api.js:
+#   POST /api/trademark-qc/report          → generate + save report
+#   GET  /api/trademark-qc/check           → quick check (no save)
+#   POST /api/trademark-qc/bulk            → bulk reports
+#   POST /api/trademark-qc/bulk/export     → bulk export (pdf/docx/xlsx)
+#   GET  /api/trademark-qc/searches        → list history
+#   GET  /api/trademark-qc/searches/{id}   → get stored report
+#   GET  /api/trademark-qc/searches/{id}/pdf → download PDF
+#   DELETE /api/trademark-qc/searches/{id} → delete report
+#   POST /api/trademark-qc/class-finder    → Nice class suggestions
+#   GET  /api/trademark-qc/branding-preference  → get saved branding
+#   POST /api/trademark-qc/branding-preference  → save branding
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── Pydantic models ────────────────────────────────────────────────────────────
+
+class QCReportRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    class_filter: Optional[int] = Field(None, ge=1, le=45)
+    device_only: bool = False
+    logo_data_url: Optional[str] = Field(None, max_length=500_000)
+    footer: Optional[str] = ""
+    tagline: Optional[str] = ""
+    watermark: Optional[str] = ""
+    custom_watermark: Optional[str] = ""
+
+
+class QCBulkReportRequest(BaseModel):
+    names: List[str] = Field(..., min_items=1, max_items=20)
+    class_filter: Optional[int] = Field(None, ge=1, le=45)
+    device_only: bool = False
+    logo_data_url: Optional[str] = Field(None, max_length=500_000)
+    footer: Optional[str] = ""
+    tagline: Optional[str] = ""
+    watermark: Optional[str] = ""
+    custom_watermark: Optional[str] = ""
+    prepared_by: Optional[str] = ""
+    disclaimer: Optional[str] = ""
+    company_name: Optional[str] = ""
+    client_name: Optional[str] = ""
+    client_mobile: Optional[str] = ""
+    report_date: Optional[str] = ""
+    enable_monitoring: bool = False
+
+
+class QCClassFinderRequest(BaseModel):
+    description: str = Field(..., min_length=3, max_length=2000)
+    top: int = Field(5, ge=1, le=10)
+
+
+class QCBrandingPreference(BaseModel):
+    default_company_id: Optional[str] = None
+    default_company_name: Optional[str] = None
+    footer: Optional[str] = ""
+    tagline: Optional[str] = ""
+    watermark: Optional[str] = ""
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+async def _scrape_and_build_report(
+    name: str,
+    class_filter: Optional[int],
+    device_only: bool = False,
+    branding: Optional[Dict[str, Any]] = None,
+) -> dict:
+    """Scrape QC and build availability report. Raises HTTPException on scraper failure."""
+    try:
+        scraped = await _qc_search_trademarks(name)
+    except Exception as e:
+        logger.exception("QC scrape failed for '%s': %s", name, e)
+        raise HTTPException(
+            status_code=502,
+            detail=f"QuickCompany source may be temporarily unreachable. Please retry. ({e.__class__.__name__})"
+        )
+
+    if device_only:
+        device_kw = ("device", "logo", "label", "composite")
+        scraped = {
+            **scraped,
+            "results": [
+                r for r in (scraped.get("results") or [])
+                if any(k in (r.get("mark_type") or "").lower() for k in device_kw)
+                or any(k in (r.get("name") or "").lower() for k in ("device", "label"))
+            ],
+        }
+
+    report = _build_report(name, scraped, class_filter=class_filter)
+    report["device_only"] = device_only
+    if branding:
+        report.update({k: v for k, v in branding.items() if v is not None})
+    return report
+
+
+async def _save_qc_report(report: dict, user_id: str) -> str:
+    report_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id": report_id,
+        "query": report["query"],
+        "overall_status": report["overall_status"],
+        "risk_score": report["risk_score"],
+        "class_filter": report.get("class_filter"),
+        "total_results": (report.get("summary_counts") or {}).get("total_results", 0),
+        "headline": report.get("headline", ""),
+        "report": report,
+        "created_at": now,
+        "created_by": user_id,
+    }
+    await db.trademark_qc_reports.insert_one(doc)
+    return report_id
+
+
+# ── Endpoints ──────────────────────────────────────────────────────────────────
+
+@qc_report_router.get("/")
+async def qc_health():
+    return {"service": "trademark-qc-api", "status": "ok"}
+
+
+@qc_report_router.post("/report")
+async def qc_create_report(
+    payload: QCReportRequest,
+    user: User = Depends(get_current_user),
+):
+    """Generate a full trademark availability report and save to history."""
+    branding = {
+        "logo_data_url":    payload.logo_data_url,
+        "footer":           payload.footer or "",
+        "tagline":          payload.tagline or "",
+        "watermark":        payload.watermark or "",
+        "custom_watermark": payload.custom_watermark or "",
+    }
+    report = await _scrape_and_build_report(
+        payload.name, payload.class_filter,
+        device_only=payload.device_only,
+        branding=branding,
+    )
+    report_id = await _save_qc_report(report, user.id)
+    return {"id": report_id, "report": report}
+
+
+@qc_report_router.get("/check")
+async def qc_quick_check(
+    name: str = Query(..., min_length=1, max_length=128),
+    class_filter: Optional[int] = Query(None, ge=1, le=45, alias="class"),
+    device_only: bool = Query(False),
+    save: bool = Query(False),
+    user: User = Depends(get_current_user),
+):
+    """Quick check — optionally save report to history."""
+    report = await _scrape_and_build_report(name, class_filter, device_only=device_only)
+    saved_id = None
+    if save:
+        saved_id = await _save_qc_report(report, user.id)
+    return {**report, "saved_id": saved_id}
+
+
+@qc_report_router.post("/bulk")
+async def qc_bulk_reports(
+    payload: QCBulkReportRequest,
+    user: User = Depends(get_current_user),
+):
+    """Generate reports for multiple names. Returns { items, count }."""
+    # De-dupe + sanitise
+    seen: set = set()
+    names: List[str] = []
+    for n in payload.names:
+        s = (n or "").strip()
+        if s and s.lower() not in seen and len(s) <= 128:
+            seen.add(s.lower())
+            names.append(s)
+
+    if not names:
+        raise HTTPException(400, "No valid names provided.")
+
+    branding = {
+        "logo_data_url":    payload.logo_data_url,
+        "footer":           payload.footer or "",
+        "tagline":          payload.tagline or "",
+        "watermark":        payload.watermark or "",
+        "custom_watermark": payload.custom_watermark or "",
+    }
+    sem = asyncio.Semaphore(5)
+
+    async def _one(n: str) -> dict:
+        async with sem:
+            try:
+                report = await _scrape_and_build_report(
+                    n, payload.class_filter,
+                    device_only=payload.device_only,
+                    branding=branding,
+                )
+                rid = await _save_qc_report(report, user.id)
+                return {
+                    "name": n,
+                    "id": rid,
+                    "overall_status": report["overall_status"],
+                    "risk_score": report["risk_score"],
+                    "total_results": (report.get("summary_counts") or {}).get("total_results", 0),
+                    "headline": report.get("headline", ""),
+                    "report": report,
+                    "error": None,
+                }
+            except HTTPException as e:
+                return {"name": n, "error": e.detail}
+            except Exception as e:
+                logger.exception("bulk item failed: %s", n)
+                return {"name": n, "error": str(e)}
+
+    items = list(await asyncio.gather(*[_one(n) for n in names]))
+    return {"items": items, "count": len(items)}
+
+
+@qc_report_router.post("/bulk/export")
+async def qc_bulk_export(
+    payload: QCBulkReportRequest,
+    format: str = Query("pdf", regex="^(pdf|docx|xlsx)$"),
+    user: User = Depends(get_current_user),
+):
+    """Generate + export bulk report as PDF / DOCX / XLSX."""
+    from backend.trademark_bulk import (
+        run_bulk_searches, build_bulk_pdf, build_bulk_docx, build_bulk_xlsx,
+        compute_analytics,
+    )
+
+    seen: set = set()
+    names: List[str] = []
+    for n in payload.names:
+        s = (n or "").strip()
+        if s and s.lower() not in seen and len(s) <= 128:
+            seen.add(s.lower())
+            names.append(s)
+
+    if not names:
+        raise HTTPException(400, "No valid names provided.")
+
+    branding = {
+        "logo_data_url":    payload.logo_data_url,
+        "footer":           payload.footer or "",
+        "tagline":          payload.tagline or "Bulk Trademark Availability Report",
+        "watermark":        payload.watermark or "",
+        "custom_watermark": payload.custom_watermark or "",
+        "prepared_by":      payload.prepared_by or "",
+        "company_name":     payload.company_name or "",
+        "client_name":      payload.client_name or "",
+        "client_mobile":    payload.client_mobile or "",
+        "report_date":      payload.report_date or "",
+    }
+
+    async def _scrape_fn(name, class_filter, *, device_only=False):
+        return await _scrape_and_build_report(name, class_filter, device_only=device_only, branding=branding)
+
+    items = await run_bulk_searches(
+        names,
+        class_filter=payload.class_filter,
+        device_only=payload.device_only,
+        scrape_fn=_scrape_fn,
+        enable_monitoring=payload.enable_monitoring,
+    )
+    analytics = compute_analytics(items)
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if format == "pdf":
+        content = build_bulk_pdf(items, branding, analytics)
+        media_type = "application/pdf"
+        filename = f"bulk_trademark_report_{today}.pdf"
+    elif format == "docx":
+        content = build_bulk_docx(items, branding, analytics)
+        media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        filename = f"bulk_trademark_report_{today}.docx"
+    else:
+        content = build_bulk_xlsx(items, branding, analytics)
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        filename = f"bulk_trademark_report_{today}.xlsx"
+
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@qc_report_router.get("/searches")
+async def qc_list_history(
+    limit: int = Query(25, ge=1, le=100),
+    user: User = Depends(get_current_user),
+):
+    """Return recent saved reports (newest first)."""
+    cursor = db.trademark_qc_reports.find(
+        {},
+        {
+            "_id": 0, "id": 1, "query": 1, "overall_status": 1, "risk_score": 1,
+            "total_results": 1, "class_filter": 1, "headline": 1, "created_at": 1,
+        },
+    ).sort("created_at", -1).limit(limit)
+    items = [doc async for doc in cursor]
+    return items
+
+
+@qc_report_router.get("/searches/{report_id}")
+async def qc_get_report(
+    report_id: str,
+    user: User = Depends(get_current_user),
+):
+    doc = await db.trademark_qc_reports.find_one({"id": report_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Report not found.")
+    return doc
+
+
+@qc_report_router.delete("/searches/{report_id}")
+async def qc_delete_report(
+    report_id: str,
+    user: User = Depends(get_current_user),
+):
+    res = await db.trademark_qc_reports.delete_one({"id": report_id})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Report not found.")
+    return {"deleted": report_id}
+
+
+@qc_report_router.get("/searches/{report_id}/pdf")
+async def qc_download_pdf(
+    report_id: str,
+    footer: Optional[str] = Query(None),
+    tagline: Optional[str] = Query(None),
+    watermark: Optional[str] = Query(None),
+    has_logo: Optional[str] = Query(None),
+    user: User = Depends(get_current_user),
+):
+    """Download a stored report as PDF. Supports on-the-fly branding override via query params."""
+    doc = await db.trademark_qc_reports.find_one({"id": report_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Report not found.")
+
+    # Allow branding override from query params (used by brandedPdfUrl())
+    report_data = dict(doc)
+    if footer  is not None: report_data.setdefault("report", {})["footer"]   = footer
+    if tagline is not None: report_data.setdefault("report", {})["tagline"]  = tagline
+    if watermark is not None: report_data.setdefault("report", {})["watermark"] = watermark
+
+    pdf_bytes = build_report_pdf(report_data)
+    safe = "".join(c if c.isalnum() else "_" for c in (doc.get("query") or "report"))[:48]
+    filename = f"trademark_report_{safe}_{report_id[:8]}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+@qc_report_router.post("/class-finder")
+async def qc_class_finder(
+    payload: QCClassFinderRequest,
+    user: User = Depends(get_current_user),
+):
+    """Suggest Nice classification classes from a free-text product/service description."""
+    suggestions = _find_classes(payload.description, top=payload.top)
+    return {"description": payload.description, "suggestions": suggestions}
+
+
+@qc_report_router.get("/branding-preference")
+async def qc_get_branding(user: User = Depends(get_current_user)):
+    """Retrieve saved branding preference for the current user."""
+    doc = await db.trademark_qc_branding.find_one({"user_id": user.id}, {"_id": 0})
+    if not doc:
+        return {"default_company_id": None, "default_company_name": None, "footer": "", "tagline": "", "watermark": ""}
+    return doc
+
+
+@qc_report_router.post("/branding-preference")
+async def qc_save_branding(
+    payload: QCBrandingPreference,
+    user: User = Depends(get_current_user),
+):
+    """Save or update branding preference for the current user."""
+    doc = {
+        "user_id":              user.id,
+        "default_company_id":   payload.default_company_id,
+        "default_company_name": payload.default_company_name,
+        "footer":               payload.footer or "",
+        "tagline":              payload.tagline or "",
+        "watermark":            payload.watermark or "",
+        "updated_at":           datetime.now(timezone.utc).isoformat(),
+    }
+    await db.trademark_qc_branding.update_one(
+        {"user_id": user.id},
+        {"$set": doc},
+        upsert=True,
+    )
+    return {"status": "saved", **doc}
