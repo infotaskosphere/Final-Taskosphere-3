@@ -866,13 +866,15 @@ function ReportActions({ reportId, branding, clientInfo = {}, T }) {
 
 // ─── Recommendations ──────────────────────────────────────────────────────────
 function Recommendations({ recommendations, alternatives, T }) {
+  const safeRecs = Array.isArray(recommendations) ? recommendations : [];
+  const safeAlts = Array.isArray(alternatives) ? alternatives : [];
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
       <Card style={{ padding: "20px 22px" }}>
         <SectionHeader T={T} icon={Sparkles} color={COLORS.amber} label="Recommendations" sub="Legal guidance" />
         <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 12 }}>
-          {recommendations.map((r, i) => (
-            <li key={i} style={{ display: "flex", gap: 10, paddingBottom: 12, borderBottom: i < recommendations.length - 1 ? `1px solid ${T.border}` : "none" }}>
+          {safeRecs.map((r, i) => (
+            <li key={i} style={{ display: "flex", gap: 10, paddingBottom: 12, borderBottom: i < safeRecs.length - 1 ? `1px solid ${T.border}` : "none" }}>
               <span style={{ flexShrink: 0, width: 22, height: 22, borderRadius: "50%", background: `${COLORS.mediumBlue}20`, color: COLORS.mediumBlue, fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</span>
               <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.6 }}>{r}</p>
             </li>
@@ -881,9 +883,9 @@ function Recommendations({ recommendations, alternatives, T }) {
       </Card>
       <Card style={{ padding: "20px 22px" }}>
         <SectionHeader T={T} icon={Tag} color={COLORS.violet} label="Alternative Names" sub="Suggested variations" />
-        {alternatives?.length > 0 ? (
+        {safeAlts.length > 0 ? (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {alternatives.map((a, i) => (
+            {safeAlts.map((a, i) => (
               <span key={i} style={{ background: `${COLORS.violet}18`, border: `1px solid ${COLORS.violet}33`, color: COLORS.violet, borderRadius: 8, padding: "5px 12px", fontSize: 13, fontWeight: 600 }}>{a}</span>
             ))}
           </div>
@@ -897,11 +899,12 @@ function Recommendations({ recommendations, alternatives, T }) {
 
 // ─── Class breakdown ──────────────────────────────────────────────────────────
 function ClassBreakdown({ rows, T }) {
-  if (!rows?.length) return null;
+  const safeRows = Array.isArray(rows) ? rows : [];
+  if (!safeRows.length) return null;
   return (
     <Card style={{ overflow: "hidden" }}>
       <div style={{ padding: "18px 22px", borderBottom: `1px solid ${T.border}` }}>
-        <SectionHeader T={T} icon={BarChart3} color={COLORS.violet} label="Class Breakdown" sub={`Filings across ${rows.length} class${rows.length === 1 ? "" : "es"}`} />
+        <SectionHeader T={T} icon={BarChart3} color={COLORS.violet} label="Class Breakdown" sub={`Filings across ${safeRows.length} class${safeRows.length === 1 ? "" : "es"}`} />
       </div>
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -913,7 +916,7 @@ function ClassBreakdown({ rows, T }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => (
+            {safeRows.map(r => (
               <tr key={r.class} style={{ borderTop: `1px solid ${T.border}` }}>
                 <td style={{ padding: "10px 16px" }}><span style={{ background: `${COLORS.mediumBlue}20`, color: COLORS.mediumBlue, borderRadius: 6, padding: "3px 10px", fontSize: 12, fontWeight: 700 }}>CL{String(r.class).padStart(2, "0")}</span></td>
                 <td style={{ padding: "10px 16px", color: T.muted }}>{r.hint || "—"}</td>
@@ -934,8 +937,9 @@ function MatchesTable({ rows, T }) {
   const [matchFilter, setMatchFilter]   = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [searchQ, setSearchQ]           = useState("");
-  const statusOptions = ["ALL", ...Array.from(new Set(rows.map(r => r.status).filter(Boolean)))];
-  const filtered = rows.filter(r => {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const statusOptions = ["ALL", ...Array.from(new Set(safeRows.map(r => r.status).filter(Boolean)))];
+  const filtered = safeRows.filter(r => {
     if (matchFilter !== "ALL" && r.match_type !== matchFilter.toLowerCase()) return false;
     if (statusFilter !== "ALL" && r.status !== statusFilter) return false;
     if (searchQ && !r.name?.toLowerCase().includes(searchQ.toLowerCase()) && !r.applicant?.toLowerCase().includes(searchQ.toLowerCase())) return false;
@@ -944,7 +948,7 @@ function MatchesTable({ rows, T }) {
   return (
     <Card style={{ overflow: "hidden" }}>
       <div style={{ padding: "18px 22px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-        <SectionHeader T={T} icon={Search} color={T.blueL} label="All Recorded Matches" sub={`${filtered.length} of ${rows.length} filings`} />
+        <SectionHeader T={T} icon={Search} color={T.blueL} label="All Recorded Matches" sub={`${filtered.length} of ${safeRows.length} filings`} />
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <div style={{ position: "relative" }}>
             <Search size={12} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: T.dimmer }} />
@@ -1627,9 +1631,9 @@ export default function TrademarkSphere() {
                     client_mobile: selectedClient?.phone || "",
                     report_date:   reportDate || "",
                   }} />
-                  <Recommendations T={T} recommendations={report.recommendations} alternatives={report.alternative_name_suggestions} />
-                  <ClassBreakdown T={T} rows={report.class_breakdown} />
-                  <MatchesTable T={T} rows={report.all_results} />
+                  <Recommendations T={T} recommendations={report.recommendations ?? []} alternatives={report.alternative_name_suggestions ?? []} />
+                  <ClassBreakdown T={T} rows={report.class_breakdown ?? []} />
+                  <MatchesTable T={T} rows={report.all_results ?? []} />
                 </motion.div>
               )}
 
