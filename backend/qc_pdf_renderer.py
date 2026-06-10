@@ -5,6 +5,7 @@ Produces a comprehensive legal-style dossier matching professional TM attorney r
 from __future__ import annotations
 
 import base64
+import os
 import re
 from io import BytesIO
 from datetime import datetime
@@ -17,11 +18,66 @@ from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak,
     HRFlowable, KeepTogether,
 )
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 try:
     from reportlab.platypus import Image as RLImage
 except ImportError:
     RLImage = None
+
+# ── Cambria font registration (falls back to Times if unavailable) ────────────
+def _register_cambria() -> bool:
+    """Try to register Microsoft Cambria TTF fonts; return True on success."""
+    search_dirs = [
+        "/usr/share/fonts/truetype/msttcorefonts",
+        "/usr/share/fonts/truetype/microsoft",
+        "/usr/share/fonts/truetype",
+        "/usr/share/fonts",
+        "/Library/Fonts",
+        os.path.expanduser("~/Library/Fonts"),
+        "C:/Windows/Fonts",
+        os.path.dirname(__file__),  # same dir as this script
+    ]
+    regular_names = ["Cambria.ttf", "cambria.ttf", "CAMBRIA.TTF"]
+    bold_names    = ["Cambriab.ttf", "cambriab.ttf", "CambriaBold.ttf", "cambria-bold.ttf"]
+
+    reg_path  = None
+    bold_path = None
+    for d in search_dirs:
+        if not os.path.isdir(d):
+            continue
+        for fname in regular_names:
+            p = os.path.join(d, fname)
+            if os.path.isfile(p):
+                reg_path = p
+                break
+        if reg_path:
+            for fname in bold_names:
+                p = os.path.join(d, fname)
+                if os.path.isfile(p):
+                    bold_path = p
+                    break
+            break
+
+    if not reg_path:
+        return False
+
+    try:
+        pdfmetrics.registerFont(TTFont("Cambria", reg_path))
+        if bold_path:
+            pdfmetrics.registerFont(TTFont("Cambria-Bold", bold_path))
+        else:
+            # alias Bold to regular if only one weight is available
+            pdfmetrics.registerFont(TTFont("Cambria-Bold", reg_path))
+        return True
+    except Exception:
+        return False
+
+
+_CAMBRIA_OK = _register_cambria()
+_SERIF      = "Cambria"      if _CAMBRIA_OK else "Times-Roman"
+_SERIF_BOLD = "Cambria-Bold" if _CAMBRIA_OK else "Times-Bold"
 
 # ── Colour palette ──────────────────────────────────────────────────────────
 DARK_BLUE  = colors.HexColor("#0D3B66")
@@ -61,72 +117,72 @@ def _styles():
     return {
         "report_title": ParagraphStyle(
             "report_title", parent=base["Normal"],
-            fontName="Times-Bold", fontSize=18, leading=22, textColor=DARK_BLUE,
+            fontName=_SERIF_BOLD, fontSize=18, leading=22, textColor=DARK_BLUE,
             alignment=TA_CENTER, spaceAfter=4,
         ),
         "firm_name": ParagraphStyle(
             "firm_name", parent=base["Normal"],
-            fontName="Times-Bold", fontSize=13, leading=16, textColor=DARK_BLUE,
+            fontName=_SERIF_BOLD, fontSize=13, leading=16, textColor=DARK_BLUE,
             alignment=TA_CENTER, spaceAfter=2,
         ),
         "firm_sub": ParagraphStyle(
             "firm_sub", parent=base["Normal"],
-            fontName="Helvetica", fontSize=9, leading=12, textColor=TEXT_MUTED,
+            fontName=_SERIF, fontSize=9, leading=12, textColor=TEXT_MUTED,
             alignment=TA_CENTER,
         ),
         "section_title": ParagraphStyle(
             "section_title", parent=base["Normal"],
-            fontName="Times-Bold", fontSize=11, leading=14, textColor=WHITE,
+            fontName=_SERIF_BOLD, fontSize=11, leading=14, textColor=WHITE,
             spaceBefore=0, spaceAfter=0, leftIndent=0,
         ),
         "h2": ParagraphStyle(
             "h2", parent=base["Heading2"],
-            fontName="Times-Bold", fontSize=11, leading=14, textColor=MED_BLUE,
+            fontName=_SERIF_BOLD, fontSize=11, leading=14, textColor=MED_BLUE,
             spaceBefore=10, spaceAfter=4,
         ),
         "h3": ParagraphStyle(
             "h3", parent=base["Heading3"],
-            fontName="Helvetica-Bold", fontSize=10, leading=13, textColor=DARK_BLUE,
+            fontName=_SERIF_BOLD, fontSize=10, leading=13, textColor=DARK_BLUE,
             spaceBefore=6, spaceAfter=3,
         ),
         "body": ParagraphStyle(
             "body", parent=base["BodyText"],
-            fontName="Helvetica", fontSize=9.5, leading=13, textColor=TEXT_DARK,
+            fontName=_SERIF, fontSize=9.5, leading=13, textColor=TEXT_DARK,
         ),
         "body_j": ParagraphStyle(
             "body_j", parent=base["BodyText"],
-            fontName="Helvetica", fontSize=9.5, leading=13, textColor=TEXT_DARK,
+            fontName=_SERIF, fontSize=9.5, leading=13, textColor=TEXT_DARK,
             alignment=TA_JUSTIFY,
         ),
         "small": ParagraphStyle(
             "small", parent=base["BodyText"],
-            fontName="Helvetica", fontSize=8, leading=11, textColor=TEXT_MUTED,
+            fontName=_SERIF, fontSize=8, leading=11, textColor=TEXT_MUTED,
         ),
         "label": ParagraphStyle(
             "label", parent=base["Normal"],
-            fontName="Helvetica-Bold", fontSize=8.5, leading=11, textColor=TEXT_MUTED,
+            fontName=_SERIF_BOLD, fontSize=8.5, leading=11, textColor=TEXT_MUTED,
         ),
         "cell": ParagraphStyle(
             "cell", parent=base["Normal"],
-            fontName="Helvetica", fontSize=9, leading=12, textColor=TEXT_DARK,
+            fontName=_SERIF, fontSize=9, leading=12, textColor=TEXT_DARK,
         ),
         "cell_bold": ParagraphStyle(
             "cell_bold", parent=base["Normal"],
-            fontName="Helvetica-Bold", fontSize=9, leading=12, textColor=TEXT_DARK,
+            fontName=_SERIF_BOLD, fontSize=9, leading=12, textColor=TEXT_DARK,
         ),
         "cell_center": ParagraphStyle(
             "cell_center", parent=base["Normal"],
-            fontName="Helvetica", fontSize=9, leading=12, textColor=TEXT_DARK,
+            fontName=_SERIF, fontSize=9, leading=12, textColor=TEXT_DARK,
             alignment=TA_CENTER,
         ),
         "disclaimer": ParagraphStyle(
             "disclaimer", parent=base["BodyText"],
-            fontName="Helvetica", fontSize=8, leading=11, textColor=TEXT_MUTED,
+            fontName=_SERIF, fontSize=8, leading=11, textColor=TEXT_MUTED,
             alignment=TA_JUSTIFY,
         ),
         "numbered": ParagraphStyle(
             "numbered", parent=base["Normal"],
-            fontName="Helvetica", fontSize=9.5, leading=14, textColor=TEXT_DARK,
+            fontName=_SERIF, fontSize=9.5, leading=14, textColor=TEXT_DARK,
             leftIndent=14, spaceAfter=3,
         ),
     }
@@ -255,14 +311,14 @@ class _PageTemplate:
         # Watermark
         if self.wm:
             canvas.saveState()
-            canvas.setFont("Helvetica-Bold", 52)
+            canvas.setFont(_SERIF_BOLD, 52)
             canvas.setFillColor(colors.HexColor("#D1D5DB"))
             canvas.translate(PAGE_W / 2, PAGE_H / 2)
             canvas.rotate(45)
             canvas.drawCentredString(0, 0, self.wm.upper())
             canvas.restoreState()
         # Footer
-        canvas.setFont("Helvetica", 7.5)
+        canvas.setFont(_SERIF, 7.5)
         canvas.setFillColor(colors.HexColor("#94A3B8"))
         fl = self.footer_line or "Trademark Search Report — Confidential"
         canvas.drawCentredString(PAGE_W / 2, 10, fl)
@@ -680,7 +736,7 @@ def build_report_pdf(doc_record: dict) -> bytes:
     story.append(Paragraph(
         op_text,
         ParagraphStyle("opinion", parent=st["body"], textColor=op_clr,
-                       fontName="Helvetica-Bold", fontSize=11),
+                       fontName=_SERIF_BOLD, fontSize=11),
     ))
     story.append(Spacer(1, 14))
 
