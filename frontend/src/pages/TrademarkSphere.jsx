@@ -109,7 +109,7 @@ function brandedPdfUrl(reportId, branding) {
 }
 
 // POST-based PDF download — required when a logo needs to be sent (too large for query params)
-async function downloadBrandedPdfWithLogo(reportId, branding, clientInfo = {}) {
+async function downloadBrandedPdfWithLogo(reportId, branding, clientInfo = {}, brandName = "") {
   const wm = branding?.watermark === "CUSTOM" ? branding.customWatermark : branding?.watermark;
   const body = {
     logo_data_url:    branding?.logo || null,
@@ -131,7 +131,9 @@ async function downloadBrandedPdfWithLogo(reportId, branding, clientInfo = {}) {
   const url  = URL.createObjectURL(new Blob([blob], { type: "application/pdf" }));
   const a    = document.createElement("a");
   a.href = url;
-  a.download = `trademark_report_${reportId.slice(0, 8)}.pdf`;
+  // Use the brand name for the filename — passed from report.query, fall back to reportId prefix
+  const safeFileName = (brandName || reportId || "report").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40);
+  a.download = `trademark_${safeFileName}.pdf`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -818,7 +820,7 @@ function StatGrid({ report, T }) {
 }
 
 // ─── Report actions — with Re-brand PDF ──────────────────────────────────────
-function ReportActions({ reportId, branding, clientInfo = {}, T }) {
+function ReportActions({ reportId, branding, clientInfo = {}, brandName = "", T }) {
   const [copied, setCopied] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   if (!reportId) return null;
@@ -830,7 +832,7 @@ function ReportActions({ reportId, branding, clientInfo = {}, T }) {
   const handlePdfDownload = async () => {
     setPdfLoading(true);
     try {
-      await downloadBrandedPdfWithLogo(reportId, branding, clientInfo);
+      await downloadBrandedPdfWithLogo(reportId, branding, clientInfo, brandName);
     } catch (e) {
       toast.error("PDF generation failed. Please try again.");
     } finally {
@@ -862,10 +864,10 @@ function Recommendations({ recommendations, alternatives, T }) {
   const safeRecs = Array.isArray(recommendations) ? recommendations : [];
   const safeAlts = Array.isArray(alternatives) ? alternatives : [];
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-      <Card style={{ padding: "20px 22px" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "stretch" }}>
+      <Card style={{ padding: "20px 22px", display: "flex", flexDirection: "column" }}>
         <SectionHeader T={T} icon={Sparkles} color={COLORS.amber} label="Recommendations" sub="Legal guidance" />
-        <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 12 }}>
+        <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
           {safeRecs.map((r, i) => (
             <li key={i} style={{ display: "flex", gap: 10, paddingBottom: 12, borderBottom: i < safeRecs.length - 1 ? `1px solid ${T.border}` : "none" }}>
               <span style={{ flexShrink: 0, width: 22, height: 22, borderRadius: "50%", background: `${COLORS.mediumBlue}20`, color: COLORS.mediumBlue, fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</span>
@@ -874,10 +876,10 @@ function Recommendations({ recommendations, alternatives, T }) {
           ))}
         </ul>
       </Card>
-      <Card style={{ padding: "20px 22px" }}>
+      <Card style={{ padding: "20px 22px", display: "flex", flexDirection: "column" }}>
         <SectionHeader T={T} icon={Tag} color={COLORS.violet} label="Alternative Names" sub="Suggested variations" />
         {safeAlts.length > 0 ? (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, flex: 1, alignContent: "flex-start" }}>
             {safeAlts.map((a, i) => (
               <span key={i} style={{ background: `${COLORS.violet}18`, border: `1px solid ${COLORS.violet}33`, color: COLORS.violet, borderRadius: 8, padding: "5px 12px", fontSize: 13, fontWeight: 600 }}>{a}</span>
             ))}
@@ -1654,9 +1656,9 @@ export default function TrademarkSphere() {
           </div>
 
           {/* ── Configuration row: client + branding ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 360px) 1fr", gap: 16, marginBottom: 16, alignItems: "start" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 360px) 1fr", gap: 16, marginBottom: 16, alignItems: "stretch" }}>
             {/* Client selector card */}
-            <Card style={{ padding: "18px 20px" }}>
+            <Card style={{ padding: "18px 20px", minHeight: 220, height: "100%" }}>
               <ClientSelector T={T} value={selectedClient} onChange={setSelectedClient} />
               {/* Report Date */}
               <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${T.border}` }}>
@@ -1673,7 +1675,7 @@ export default function TrademarkSphere() {
             </Card>
 
             {/* Branding panel — always expanded, no collapsible */}
-            <Card style={{ padding: "18px 22px" }}>
+            <Card style={{ padding: "18px 22px", minHeight: 220, height: "100%" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
                 <div style={{ background: `${COLORS.amber}20`, borderRadius: 8, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <Stamp size={15} style={{ color: COLORS.amber }} />
@@ -1692,8 +1694,8 @@ export default function TrademarkSphere() {
             <SearchBar T={T} onSubmit={handleSearch} loading={loading} defaultClass={pinnedClass} client={selectedClient} />
           </div>
 
-          {/* ── Tools row: class finder + bulk (collapsible, compact) ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 14, marginBottom: 24, alignItems: "start" }}>
+          {/* ── Tools row: class finder + bulk (stacked, full width) ── */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 24 }}>
             <ClassFinderPanel T={T} onPickClass={(cls) => { setPinnedClass(String(cls)); toast.success(`Class ${cls} pinned`); scrollToSearch(); }} />
             <BulkPanel T={T} branding={branding} clientInfo={{
               client_name:   selectedClient?.company_name || "",
@@ -1746,7 +1748,7 @@ export default function TrademarkSphere() {
                     </Card>
                   )}
 
-                  <ReportActions T={T} reportId={activeId} branding={branding} clientInfo={{
+                  <ReportActions T={T} reportId={activeId} branding={branding} brandName={report?.query || ""} clientInfo={{
                     client_name:   selectedClient?.company_name || "",
                     client_mobile: selectedClient?.phone || "",
                     report_date:   reportDate || "",
