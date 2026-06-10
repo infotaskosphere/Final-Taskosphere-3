@@ -29,6 +29,9 @@ export async function generateReport(name, opts = {}) {
     tagline = "",
     watermark = "",
     custom_watermark = "",
+    client_name = "",
+    client_mobile = "",
+    report_date = "",
   } = opts;
   const { data } = await api.post("/trademark-qc/report", {
     name,
@@ -39,6 +42,9 @@ export async function generateReport(name, opts = {}) {
     tagline,
     watermark,
     custom_watermark,
+    client_name,
+    client_mobile,
+    report_date,
   }, { timeout: 60000 });
   return data;
 }
