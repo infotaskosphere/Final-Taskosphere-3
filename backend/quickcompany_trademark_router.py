@@ -1,23 +1,16 @@
-"""
-PATCH to apply to backend/quickcompany_trademark_router.py
+import logging
+from datetime import datetime, timezone
+from typing import List, Optional
 
-Goal:
-  - Extend BulkReportRequest with branding fields.
-  - Wire `run_bulk_searches` + analytics enrichment into POST /bulk so each
-    item's `report` field is fully enriched (success%, badge, severity, etc.)
-    AND every report is stored with branding embedded — guaranteeing that
-    later calls to GET /searches/{id}/pdf render identical to the combined
-    bulk PDF.
-  - Add POST /bulk/export?format=pdf|docx|xlsx returning the combined file
-    with full per-mark dossiers + executive summary cover.
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response, StreamingResponse
+from pydantic import BaseModel, Field
 
-Apply by hand (only ~50 lines change). The diff below is annotated with the
-location markers from the existing file.
-"""
+router = APIRouter()
+logger = logging.getLogger(__name__)
 
-# ── 1) Imports — add near the top (after the existing imports) ───────────────
-from fastapi.responses import StreamingResponse
 from backend.trademark_bulk import (
+
     build_bulk_docx,
     build_bulk_dossier_pdf,
     build_bulk_xlsx,
@@ -26,7 +19,6 @@ from backend.trademark_bulk import (
     validate_branding,
 )
 
-# ── 2) Replace the BulkReportRequest model ───────────────────────────────────
 class BulkReportRequest(BaseModel):
     names: List[str] = Field(..., min_length=1, max_length=50)
     class_filter: Optional[int] = Field(None, ge=1, le=45)
@@ -62,7 +54,6 @@ def _branding_dict(p: "BulkReportRequest") -> dict:
     }
 
 
-# ── 3) Replace the POST /bulk endpoint body ──────────────────────────────────
 @router.post("/bulk")
 async def bulk_reports(payload: BulkReportRequest):
     """Generate reports for multiple names concurrently with analytics."""
@@ -105,7 +96,6 @@ async def bulk_reports(payload: BulkReportRequest):
     return {"items": items, "count": len(items), "analytics": analytics}
 
 
-# ── 4) NEW endpoint — combined bulk export (PDF / DOCX / XLSX) ───────────────
 @router.post("/bulk/export")
 async def bulk_export(
     payload: BulkReportRequest,
