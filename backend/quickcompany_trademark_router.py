@@ -852,6 +852,9 @@ class ReportRequest(BaseModel):
     tagline: str = ""
     watermark: str = ""
     custom_watermark: str = ""
+    client_name: str = ""
+    client_mobile: str = ""
+    report_date: str = ""
 
 class BulkReportRequest(BaseModel):
     names: List[str]
@@ -1040,11 +1043,16 @@ async def qc_generate_report(body: ReportRequest, user: User = Depends(get_curre
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"SCRAPER ERROR - {exc}")
     report = build_report(name, scraped, class_filter=body.class_filter)
-    report["logo_data_url"] = body.logo_data_url
-    report["footer"]        = body.footer
-    report["tagline"]       = body.tagline
-    report["watermark"]     = body.watermark
-    report["device_only"]   = body.device_only
+    report["logo_data_url"]   = body.logo_data_url
+    report["footer"]          = body.footer
+    report["tagline"]         = body.tagline
+    report["watermark"]       = body.watermark
+    report["custom_watermark"]= body.custom_watermark
+    report["device_only"]     = body.device_only
+    report["client_name"]     = body.client_name
+    report["client_mobile"]   = body.client_mobile
+    report["report_date"]     = body.report_date
+    report["class_filter"]    = body.class_filter
     user_id = str(getattr(user, "id", None) or user.get("_id", ""))
     doc = {
         "_id":        str(uuid.uuid4()),
@@ -1068,11 +1076,16 @@ async def qc_bulk_reports(body: BulkReportRequest, user: User = Depends(get_curr
         try:
             scraped = await _qc_availability_search(name)
             report  = build_report(name, scraped, class_filter=body.class_filter)
-            report["logo_data_url"] = body.logo_data_url
-            report["footer"]        = body.footer
-            report["tagline"]       = body.tagline
-            report["watermark"]     = body.watermark
-            report["device_only"]   = body.device_only
+            report["logo_data_url"]    = body.logo_data_url
+            report["footer"]           = body.footer
+            report["tagline"]          = body.tagline
+            report["watermark"]        = body.watermark
+            report["custom_watermark"] = body.custom_watermark
+            report["device_only"]      = body.device_only
+            report["client_name"]      = body.client_name
+            report["client_mobile"]    = body.client_mobile
+            report["report_date"]      = body.report_date
+            report["class_filter"]     = body.class_filter
             doc = {
                 "_id":        str(uuid.uuid4()),
                 "user_id":    user_id,
@@ -1143,8 +1156,11 @@ async def qc_download_pdf_post(
     if not doc:
         raise HTTPException(status_code=404, detail="Report not found")
     rep = dict(doc.get("report", {}))
-    for field in ("logo_data_url", "footer", "tagline", "watermark"):
-        if body.get(field):
+    for field in (
+        "logo_data_url", "footer", "tagline", "watermark", "custom_watermark",
+        "client_name", "client_mobile", "report_date",
+    ):
+        if body.get(field) is not None:
             rep[field] = body[field]
     doc = {**doc, "report": rep}
     pdf_bytes = build_report_pdf(doc)
