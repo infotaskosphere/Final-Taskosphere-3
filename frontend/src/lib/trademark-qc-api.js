@@ -139,7 +139,8 @@ export async function bulkExport(names, opts = {}, format = "pdf") {
   const cd       = res.headers?.["content-disposition"] || "";
   const m        = /filename="?([^"]+)"?/.exec(cd);
   const today    = new Date().toISOString().slice(0, 10);
-  const filename = (m && m[1]) || `bulk_trademark_report_${today}.${format}`;
+  const brandSlug = names.slice(0, 3).map(n => n.trim().replace(/[^a-zA-Z0-9]/g, "_")).join("-").toLowerCase();
+  const filename = (m && m[1]) || `${brandSlug}_trademark_report_${today}.${format}`;
   const url = window.URL.createObjectURL(new Blob([res.data]));
   const a   = document.createElement("a");
   a.href = url;
