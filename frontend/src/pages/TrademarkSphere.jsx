@@ -19,8 +19,12 @@ import { useDark } from "@/hooks/useDark";
 import api from "@/lib/api";
 import {
   generateReport, listHistory, getReport, bulkReports,
-  findClasses, pdfDownloadUrl, shareLinkFor, deleteReport,
+  findClasses, pdfDownloadUrl, deleteReport,
 } from "@/lib/trademark-qc-api";
+
+// Inlined helper — not exported by older versions of trademark-qc-api.js
+const shareLinkFor = (reportId) =>
+  `${window.location.origin}/trademark-sphere?report=${reportId}`;
 
 import {
   Shield, Search, Upload, X, ChevronDown, ChevronRight,
