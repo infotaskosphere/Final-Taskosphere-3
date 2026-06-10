@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { pdfDownloadUrl, shareLinkFor } from "@/lib/trademark-qc-api";
-import { bulkReportsBranded, bulkExport } from "@/lib/trademark-qc-api.bulk";
+import { bulkReportsBranded, bulkExport } from "@/lib/trademark-qc-api";
 import StatusBadge from "./StatusBadge";
 import { Stack, FilePdf, Link as LinkIcon, ArrowRight, X, CaretDown,
          FileDoc, FileXls, Download } from "@phosphor-icons/react";
