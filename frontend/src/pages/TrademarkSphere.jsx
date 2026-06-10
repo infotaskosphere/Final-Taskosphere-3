@@ -1409,7 +1409,7 @@ export default function TrademarkSphere() {
   }, []);
 
   const refreshHistory = useCallback(async () => {
-    try { setHistory(await listHistory(25)); } catch {}
+    try { const h = await listHistory(25); setHistory(Array.isArray(h) ? h : (h?.items ?? [])); } catch {}
   }, []);
 
   useEffect(() => {
