@@ -154,7 +154,8 @@ export async function findClasses(description, top = 5) {
 
 export async function listHistory(limit = 25) {
   const { data } = await api.get("/trademark-qc/searches", { params: { limit } });
-  return data;
+  // Backend returns { items: [...], count: N } — unwrap to array
+  return Array.isArray(data) ? data : (data?.items ?? []);
 }
 
 export async function getReport(id) {
