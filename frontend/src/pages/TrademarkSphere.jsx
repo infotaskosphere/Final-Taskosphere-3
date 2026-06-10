@@ -1513,7 +1513,7 @@ export default function TrademarkSphere() {
                 </div>
                 <div>
                   <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: T.text, letterSpacing: "-0.4px" }}>Trademark Sphere</h1>
-                  <p style={{ margin: 0, fontSize: 12, color: T.dimmer, marginTop: 2 }}>IP India registry · QuickCompany data source</p>
+                  <p style={{ margin: 0, fontSize: 12, color: T.dimmer, marginTop: 2 }}>Data source: quickcompany.in/trademarks</p>
                 </div>
               </div>
               {/* Quick stats strip */}
@@ -1642,7 +1642,7 @@ export default function TrademarkSphere() {
           </div>
 
           <div style={{ marginTop: 32, paddingTop: 20, borderTop: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", fontSize: 12, color: T.dimmer }}>
-            <span>Data source: quickcompany.in · IP India trademark index</span>
+            <span>Data source: quickcompany.in/trademarks</span>
             <span>For informational purposes only — not legal advice</span>
           </div>
         </div>
