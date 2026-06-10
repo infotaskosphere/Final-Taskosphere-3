@@ -9581,7 +9581,7 @@ app.include_router(api_router)
 #
 # IMPORTANT: These routes must be at ROOT level — NOT under /api/identix/...
 # No auth middleware. No CORS required. Always return plain text "OK".
-app.include_router(qc_trademark_router)
+app.include_router(qc_trademark_router, prefix="/api/trademark-qc", tags=["trademark-qc"])
 from backend.attendance_identix import iclock_getrequest, iclock_cdata, iclock_devicecmd
 
 app.add_api_route("/iclock/cdata",       iclock_cdata,       methods=["GET", "POST"])
