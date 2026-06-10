@@ -11,9 +11,6 @@ from __future__ import annotations
 import re
 from typing import List, Dict
 
-# Class title summary + curated keyword set per class.
-# Keywords are lowercase, can be multi-word; matched as substrings on a
-# normalised description string.
 CLASS_DEFS: Dict[int, Dict] = {
     1: {
         "title": "Chemicals",
@@ -350,14 +347,11 @@ def find_classes(description: str, top: int = 5) -> List[Dict]:
     Return ranked class candidates for a free-text goods/services description.
 
     Each candidate: {class, title, summary, score, matched_keywords}
-    Score is the count of distinct matched keywords, plus a small bump for
-    multi-word matches.
     """
     norm = _normalise(description)
     if not norm.strip():
         return []
 
-    # Token set (used as a secondary signal for short descriptions)
     tokens = {t for t in norm.split() if t and t not in _STOPWORDS and len(t) > 2}
 
     scored: List[Dict] = []
@@ -368,13 +362,10 @@ def find_classes(description: str, top: int = 5) -> List[Dict]:
             if not kw:
                 continue
             if " " in kw or "-" in kw:
-                # Multi-word phrase: substring match is appropriate
                 if kw in norm:
                     matched.append(kw)
                     score += 2.0
             else:
-                # Single word: require whole-word (token) match to avoid
-                # false positives like 'ar' matching inside 'foobar'.
                 if kw in tokens:
                     matched.append(kw)
                     score += 1.0
@@ -387,10 +378,8 @@ def find_classes(description: str, top: int = 5) -> List[Dict]:
                 "matched_keywords": matched,
             })
 
-    # Tie-break: prefer classes with more distinct matched keywords
     scored.sort(key=lambda x: (x["score"], len(x["matched_keywords"])), reverse=True)
 
-    # Confidence label: top match dominates if its score is at least 1.5x the next
     if scored:
         top_score = scored[0]["score"]
         for s in scored:
