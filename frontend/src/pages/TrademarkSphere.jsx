@@ -131,9 +131,9 @@ async function downloadBrandedPdfWithLogo(reportId, branding, clientInfo = {}, b
   const url  = URL.createObjectURL(new Blob([blob], { type: "application/pdf" }));
   const a    = document.createElement("a");
   a.href = url;
-  // Use the brand name for the filename — passed from report.query, fall back to reportId prefix
-  const safeFileName = (brandName || reportId || "report").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40);
-  a.download = `trademark_${safeFileName}.pdf`;
+  a.download = brandName
+    ? `${brandName.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase()}_trademark_report.pdf`
+    : `trademark_report_${reportId.slice(0, 8)}.pdf`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -860,14 +860,12 @@ function ReportActions({ reportId, branding, clientInfo = {}, brandName = "", T 
 }
 
 // ─── Recommendations ──────────────────────────────────────────────────────────
-function Recommendations({ recommendations, alternatives, T }) {
-  const safeRecs = Array.isArray(recommendations) ? recommendations : [];
-  const safeAlts = Array.isArray(alternatives) ? alternatives : [];
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "stretch" }}>
-      <Card style={{ padding: "20px 22px", display: "flex", flexDirection: "column" }}>
+function RecommendationsPanel({ recommendations, T }) {
+    const safeRecs = Array.isArray(recommendations) ? recommendations : [];
+    return (
+      <Card style={{ padding: "20px 22px", height: "100%" }}>
         <SectionHeader T={T} icon={Sparkles} color={COLORS.amber} label="Recommendations" sub="Legal guidance" />
-        <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
+        <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 12 }}>
           {safeRecs.map((r, i) => (
             <li key={i} style={{ display: "flex", gap: 10, paddingBottom: 12, borderBottom: i < safeRecs.length - 1 ? `1px solid ${T.border}` : "none" }}>
               <span style={{ flexShrink: 0, width: 22, height: 22, borderRadius: "50%", background: `${COLORS.mediumBlue}20`, color: COLORS.mediumBlue, fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</span>
@@ -876,10 +874,16 @@ function Recommendations({ recommendations, alternatives, T }) {
           ))}
         </ul>
       </Card>
-      <Card style={{ padding: "20px 22px", display: "flex", flexDirection: "column" }}>
+    );
+  }
+
+  function AlternativesPanel({ alternatives, T }) {
+    const safeAlts = Array.isArray(alternatives) ? alternatives : [];
+    return (
+      <Card style={{ padding: "20px 22px", height: "100%" }}>
         <SectionHeader T={T} icon={Tag} color={COLORS.violet} label="Alternative Names" sub="Suggested variations" />
         {safeAlts.length > 0 ? (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, flex: 1, alignContent: "flex-start" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {safeAlts.map((a, i) => (
               <span key={i} style={{ background: `${COLORS.violet}18`, border: `1px solid ${COLORS.violet}33`, color: COLORS.violet, borderRadius: 8, padding: "5px 12px", fontSize: 13, fontWeight: 600 }}>{a}</span>
             ))}
@@ -888,9 +892,8 @@ function Recommendations({ recommendations, alternatives, T }) {
           <p style={{ fontSize: 13, color: T.muted }}>Your mark looks largely clear — no alternatives required.</p>
         )}
       </Card>
-    </div>
-  );
-}
+    );
+  }
 
 // ─── Class breakdown ──────────────────────────────────────────────────────────
 function ClassBreakdown({ rows, T }) {
@@ -1499,6 +1502,7 @@ export default function TrademarkSphere() {
   const [error, setError]               = useState(null);
   const [lastClassFilter, setLastClassFilter] = useState(null);
   const [pinnedClass, setPinnedClass]   = useState("");
+  const [searchQuery, setSearchQuery]   = useState("");
   const [selectedClient, setSelectedClient] = useState(null);
   const [reportDate, setReportDate]     = useState(() => new Date().toISOString().slice(0, 10));
   const [companies, setCompanies]       = useState([]);
@@ -1550,6 +1554,7 @@ export default function TrademarkSphere() {
   const handleSearch = async (name, opts = {}) => {
     setLoading(true); setError(null); setReport(null); setActiveId(null);
     setLastClassFilter(opts.class_filter ?? null);
+    setSearchQuery(name);
     try {
       const effectiveLogo = opts.logo_data_url || branding.logo || null;
       const effectiveWm = branding.watermark === "CUSTOM" ? branding.customWatermark : branding.watermark;
@@ -1658,7 +1663,7 @@ export default function TrademarkSphere() {
           {/* ── Configuration row: client + branding ── */}
           <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 360px) 1fr", gap: 16, marginBottom: 16, alignItems: "stretch" }}>
             {/* Client selector card */}
-            <Card style={{ padding: "18px 20px", minHeight: 220, height: "100%" }}>
+            <Card style={{ padding: "18px 20px" }}>
               <ClientSelector T={T} value={selectedClient} onChange={setSelectedClient} />
               {/* Report Date */}
               <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${T.border}` }}>
@@ -1675,7 +1680,7 @@ export default function TrademarkSphere() {
             </Card>
 
             {/* Branding panel — always expanded, no collapsible */}
-            <Card style={{ padding: "18px 22px", minHeight: 220, height: "100%" }}>
+            <Card style={{ padding: "18px 22px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
                 <div style={{ background: `${COLORS.amber}20`, borderRadius: 8, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <Stamp size={15} style={{ color: COLORS.amber }} />
@@ -1694,7 +1699,7 @@ export default function TrademarkSphere() {
             <SearchBar T={T} onSubmit={handleSearch} loading={loading} defaultClass={pinnedClass} client={selectedClient} />
           </div>
 
-          {/* ── Tools row: class finder + bulk (stacked, full width) ── */}
+          {/* ── Tools row: class finder + bulk (full width, stacked) ── */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 24 }}>
             <ClassFinderPanel T={T} onPickClass={(cls) => { setPinnedClass(String(cls)); toast.success(`Class ${cls} pinned`); scrollToSearch(); }} />
             <BulkPanel T={T} branding={branding} clientInfo={{
@@ -1708,64 +1713,75 @@ export default function TrademarkSphere() {
             }} />
           </div>
 
-          {/* ── Report + history ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 300px", gap: 20 }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* ── Report section (full width) ── */}
+            <div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
-              {loading && <ReportSkeleton T={T} />}
+                {loading && <ReportSkeleton T={T} />}
 
-              {!loading && error && (
-                <Card style={{ padding: "28px", borderColor: "rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.05)" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                    <AlertTriangle size={18} style={{ color: T.red }} />
-                    <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, color: T.red }}>Scraper Error</span>
-                  </div>
-                  <p style={{ margin: 0, color: "#fca5a5", fontSize: 14 }}>{error}</p>
-                  <p style={{ margin: "8px 0 0", fontSize: 12, color: T.dimmer }}>QuickCompany source may be temporarily unreachable. Please retry.</p>
-                </Card>
-              )}
+                {!loading && error && (
+                  <Card style={{ padding: "28px", borderColor: "rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.05)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                      <AlertTriangle size={18} style={{ color: T.red }} />
+                      <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, color: T.red }}>Scraper Error</span>
+                    </div>
+                    <p style={{ margin: 0, color: "#fca5a5", fontSize: 14 }}>{error}</p>
+                    <p style={{ margin: "8px 0 0", fontSize: 12, color: T.dimmer }}>QuickCompany source may be temporarily unreachable. Please retry.</p>
+                  </Card>
+                )}
 
-              {!loading && !error && report && (
-                <motion.div variants={stagger} initial="hidden" animate="visible" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                  <VerdictPanel T={T} report={report} />
-                  <StatGrid T={T} report={report} />
+                {!loading && !error && report && (
+                  <motion.div variants={stagger} initial="hidden" animate="visible" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                    <VerdictPanel T={T} report={report} />
+                    <StatGrid T={T} report={report} />
 
-                  {/* Branding preview strip */}
-                  {(branding.logo || branding.watermark || branding.footer) && (
-                    <Card style={{ padding: "14px 20px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                        {branding.logo && <img src={branding.logo} alt="brand" style={{ height: 32, objectFit: "contain", borderRadius: 4, background: "#fff", padding: "2px 6px" }} />}
-                        <div>
-                          {branding.tagline && <div style={{ fontSize: 12, color: T.muted, fontWeight: 500 }}>{branding.tagline}</div>}
-                          {branding.footer && <div style={{ fontSize: 11, color: T.dimmer }}>{branding.footer}</div>}
-                        </div>
-                        {(branding.watermark === "CUSTOM" ? branding.customWatermark : branding.watermark) && (
-                          <div style={{ marginLeft: "auto", fontSize: 11, fontWeight: 800, color: T.dimmer, letterSpacing: "0.15em", textTransform: "uppercase", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 10px", opacity: 0.6 }}>
-                            {branding.watermark === "CUSTOM" ? branding.customWatermark : branding.watermark}
+                    {/* Branding preview strip */}
+                    {(branding.logo || branding.watermark || branding.footer) && (
+                      <Card style={{ padding: "14px 20px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                          {branding.logo && <img src={branding.logo} alt="brand" style={{ height: 32, objectFit: "contain", borderRadius: 4, background: "#fff", padding: "2px 6px" }} />}
+                          <div>
+                            {branding.tagline && <div style={{ fontSize: 12, color: T.muted, fontWeight: 500 }}>{branding.tagline}</div>}
+                            {branding.footer && <div style={{ fontSize: 11, color: T.dimmer }}>{branding.footer}</div>}
                           </div>
-                        )}
-                      </div>
-                    </Card>
-                  )}
+                          {(branding.watermark === "CUSTOM" ? branding.customWatermark : branding.watermark) && (
+                            <div style={{ marginLeft: "auto", fontSize: 11, fontWeight: 800, color: T.dimmer, letterSpacing: "0.15em", textTransform: "uppercase", border: `1px solid ${T.border}`, borderRadius: 6, padding: "4px 10px", opacity: 0.6 }}>
+                              {branding.watermark === "CUSTOM" ? branding.customWatermark : branding.watermark}
+                            </div>
+                          )}
+                        </div>
+                      </Card>
+                    )}
 
-                  <ReportActions T={T} reportId={activeId} branding={branding} brandName={report?.query || ""} clientInfo={{
-                    client_name:   selectedClient?.company_name || "",
-                    client_mobile: selectedClient?.phone || "",
-                    report_date:   reportDate || "",
-                  }} />
-                  <Recommendations T={T} recommendations={report.recommendations ?? []} alternatives={report.alternative_name_suggestions ?? []} />
-                  <ClassBreakdown T={T} rows={report.class_breakdown ?? []} />
-                  <MatchesTable T={T} rows={report.all_results ?? []} />
-                </motion.div>
-              )}
+                    <ReportActions T={T} reportId={activeId} branding={branding} brandName={searchQuery} clientInfo={{
+                        client_name:   selectedClient?.company_name || "",
+                        client_mobile: selectedClient?.phone || "",
+                        report_date:   reportDate || "",
+                      }} />
 
-              {!loading && !error && !report && <EmptyState T={T} onScroll={scrollToSearch} />}
+                    {/* ── 3-col row: Recommendations + Alternative Names + Recent Reports ── */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, alignItems: "stretch" }}>
+                      <RecommendationsPanel T={T} recommendations={report.recommendations ?? []} />
+                      <AlternativesPanel T={T} alternatives={report.alternative_name_suggestions ?? []} />
+                      <HistoryRail T={T} items={history} onSelect={handleHistorySelect} activeId={activeId} branding={branding} onDelete={handleDeleteReport} onClearAll={handleClearAll} />
+                    </div>
+
+                    {/* ── 2-col row: Class Breakdown + All Recorded Matches (full width, equal height) ── */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "stretch" }}>
+                      <ClassBreakdown T={T} rows={report.class_breakdown ?? []} />
+                      <MatchesTable T={T} rows={report.all_results ?? []} />
+                    </div>
+                  </motion.div>
+                )}
+
+                {!loading && !error && !report && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 20, alignItems: "start" }}>
+                    <EmptyState T={T} onScroll={scrollToSearch} />
+                    <HistoryRail T={T} items={history} onSelect={handleHistorySelect} activeId={activeId} branding={branding} onDelete={handleDeleteReport} onClearAll={handleClearAll} />
+                  </div>
+                )}
+              </div>
             </div>
-
-            <div style={{ position: "sticky", top: 24, alignSelf: "start" }}>
-              <HistoryRail T={T} items={history} onSelect={handleHistorySelect} activeId={activeId} branding={branding} onDelete={handleDeleteReport} onClearAll={handleClearAll} />
-            </div>
-          </div>
 
           <div style={{ marginTop: 32, paddingTop: 20, borderTop: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", fontSize: 12, color: T.dimmer }}>
             <span>Data source: quickcompany.in/trademarks</span>
