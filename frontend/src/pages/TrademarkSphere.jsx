@@ -18,7 +18,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useDark } from "@/hooks/useDark";
 import api from "@/lib/api";
 import {
-  generateReport, listHistory, getReport, bulkReports,
+  generateReport, listHistory, getReport, bulkReports, bulkExport,
   findClasses, pdfDownloadUrl, deleteReport,
 } from "@/lib/trademark-qc-api";
 
@@ -1246,37 +1246,43 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
       {items.length > 0 && (
         <>
           <div style={{ border: `1px solid ${T.border}`, borderRadius: 10, overflow: "hidden", marginBottom: 12 }}>
+            {/* Scrollable wrapper so columns never wrap */}
+            <div style={{ overflowX: "auto" }}>
             {items.map((it, i) => {
-              const regProb = it.error ? null : Math.max(0, Math.min(95, it.overall_status === "AVAILABLE" ? Math.min(95, 100 - it.risk_score + 10) : it.overall_status === "CONFLICT" ? Math.max(5, 100 - it.risk_score - 15) : 100 - it.risk_score));
-              const badgeCfg = { AVAILABLE: [COLORS.emeraldGreen, "Safe to File"], CAUTION: [COLORS.amber, "Review First"], CONFLICT: ["#DC2626", "High Risk"] };
-              const [badgeClr, badgeLabel] = badgeCfg[it.overall_status] || [COLORS.amber, "Unknown"];
-              const isExpanded = expandedId === i;
               const rpt = it.report || {};
+              const status    = rpt.overall_status || it.overall_status;
+              const riskScore = rpt.risk_score     ?? it.risk_score ?? 0;
+              const name      = rpt.query          || it.name || "—";
+              const headline  = rpt.headline       || it.headline || "";
+              const regProb = it.error ? null : Math.max(0, Math.min(95, status === "AVAILABLE" ? Math.min(95, 100 - riskScore + 10) : status === "CONFLICT" ? Math.max(5, 100 - riskScore - 15) : 100 - riskScore));
+              const badgeCfg = { AVAILABLE: [COLORS.emeraldGreen, "Safe to File"], CAUTION: [COLORS.amber, "Review First"], CONFLICT: ["#DC2626", "High Risk"] };
+              const [badgeClr, badgeLabel] = badgeCfg[status] || [COLORS.amber, "Unknown"];
+              const isExpanded = expandedId === i;
               const allResults = Array.isArray(rpt.all_results) ? rpt.all_results : (Array.isArray(it.all_results) ? it.all_results : []);
               const classBreakdown = Array.isArray(rpt.class_breakdown) ? rpt.class_breakdown : (Array.isArray(it.class_breakdown) ? it.class_breakdown : []);
               const recommendations = Array.isArray(rpt.recommendations) ? rpt.recommendations : (Array.isArray(it.recommendations) ? it.recommendations : []);
               return (
                 <div key={i} style={{ borderBottom: i < items.length - 1 ? `1px solid ${T.border}` : "none" }}>
-                  {/* Summary row */}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 110px 52px 80px 90px 1fr auto", padding: "10px 14px", alignItems: "center", gap: 10 }}>
-                    <span style={{ fontWeight: 600, color: T.text, fontSize: 13 }}>{it.name}</span>
-                    {it.error ? <span style={{ color: T.red, fontSize: 12 }}>Failed</span> : <VerdictBadge status={it.overall_status} />}
-                    <span style={{ fontFamily: "'JetBrains Mono', monospace", color: T.muted, fontSize: 13 }}>{it.error ? "—" : it.risk_score}</span>
+                  {/* Summary row — min-width prevents column wrapping */}
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(120px,1fr) 108px 48px 72px 96px minmax(140px,1fr) 148px", padding: "10px 14px", alignItems: "center", gap: 8, minWidth: 700 }}>
+                    <span style={{ fontWeight: 600, color: T.text, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
+                    {it.error ? <span style={{ color: T.red, fontSize: 12 }}>Failed</span> : <VerdictBadge status={status} />}
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", color: T.muted, fontSize: 12, whiteSpace: "nowrap" }}>{it.error ? "—" : riskScore}</span>
                     {!it.error && regProb !== null ? (
-                      <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.mediumBlue }}>{regProb}% prob.</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.mediumBlue, whiteSpace: "nowrap" }}>{regProb}%</span>
                     ) : <span />}
                     {!it.error ? (
-                      <span style={{ fontSize: 10, fontWeight: 700, color: badgeClr, background: `${badgeClr}18`, border: `1px solid ${badgeClr}44`, borderRadius: 99, padding: "2px 8px", whiteSpace: "nowrap" }}>{badgeLabel}</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: badgeClr, background: `${badgeClr}18`, border: `1px solid ${badgeClr}44`, borderRadius: 99, padding: "2px 7px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{badgeLabel}</span>
                     ) : <span />}
-                    <span style={{ fontSize: 12, color: T.dimmer, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.error || it.headline}</span>
+                    <span style={{ fontSize: 12, color: T.dimmer, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.error || headline}</span>
                     {!it.error && it.id && (
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <Btn T={T} variant="ghost" onClick={() => onPickReport?.(it.id)} style={{ padding: "4px 10px", fontSize: 11 }}>View</Btn>
-                        <Btn T={T} variant="ghost" style={{ padding: "4px 10px", fontSize: 11 }} disabled={dlId === it.id} onClick={e => downloadItemPdf(e, it.id)}>
+                      <div style={{ display: "flex", gap: 4, justifyContent: "flex-end", flexShrink: 0 }}>
+                        <Btn T={T} variant="ghost" onClick={() => onPickReport?.(it.id)} style={{ padding: "4px 8px", fontSize: 11, whiteSpace: "nowrap" }}>View</Btn>
+                        <Btn T={T} variant="ghost" style={{ padding: "4px 8px", fontSize: 11, whiteSpace: "nowrap" }} disabled={dlId === it.id} onClick={e => downloadItemPdf(e, it.id)}>
                           <Download size={11} /> {dlId === it.id ? "…" : "PDF"}
                         </Btn>
-                        <Btn T={T} variant="ghost" style={{ padding: "4px 10px", fontSize: 11 }} onClick={() => setExpandedId(isExpanded ? null : i)}>
-                          {isExpanded ? "▲ Less" : "▼ Details"}
+                        <Btn T={T} variant="ghost" style={{ padding: "4px 8px", fontSize: 11, whiteSpace: "nowrap" }} onClick={() => setExpandedId(isExpanded ? null : i)}>
+                          {isExpanded ? "▲" : "▼"} Details
                         </Btn>
                       </div>
                     )}
@@ -1362,6 +1368,7 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
                 </div>
               );
             })}
+            </div>{/* end scrollable wrapper */}
           </div>
 
           {/* Combined report action bar */}
@@ -1618,8 +1625,8 @@ export default function TrademarkSphere() {
         * { box-sizing: border-box; }
       `}</style>
 
-      <div style={{ minHeight: "100vh", background: T.bg, color: T.text, fontFamily: "'Inter', -apple-system, sans-serif", padding: "28px 28px 48px" }}>
-        <div style={{ maxWidth: 1400, margin: "0 auto" }}>
+      <div style={{ minHeight: "100vh", background: T.bg, color: T.text, fontFamily: "'Inter', -apple-system, sans-serif", padding: "24px 24px 48px", overflowX: "hidden" }}>
+        <div style={{ maxWidth: 1400, margin: "0 auto", width: "100%" }}>
 
           {/* ── Page header — aligned with Dashboard layout ── */}
           <div style={{ marginBottom: 20 }}>
@@ -1686,7 +1693,7 @@ export default function TrademarkSphere() {
           </div>
 
           {/* ── Tools row: class finder + bulk (collapsible, compact) ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 24, alignItems: "start" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 14, marginBottom: 24, alignItems: "start" }}>
             <ClassFinderPanel T={T} onPickClass={(cls) => { setPinnedClass(String(cls)); toast.success(`Class ${cls} pinned`); scrollToSearch(); }} />
             <BulkPanel T={T} branding={branding} clientInfo={{
               client_name:   selectedClient?.company_name || "",
@@ -1700,7 +1707,7 @@ export default function TrademarkSphere() {
           </div>
 
           {/* ── Report + history ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 300px", gap: 20 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
               {loading && <ReportSkeleton T={T} />}
