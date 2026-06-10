@@ -246,29 +246,106 @@ async def delete_search(
     return {"deleted": report_id}
 
 
+class RebrandPdfRequest(BaseModel):
+    logo_data_url:    Optional[str] = Field(None, max_length=500_000)
+    footer:           Optional[str] = Field(None, max_length=500)
+    tagline:          Optional[str] = Field(None, max_length=200)
+    watermark:        Optional[str] = Field(None, max_length=100)
+    custom_watermark: Optional[str] = Field(None, max_length=100)
+    client_name:      Optional[str] = Field(None, max_length=200)
+    client_mobile:    Optional[str] = Field(None, max_length=40)
+    report_date:      Optional[str] = Field(None, max_length=40)
+
+
+def _build_single_pdf(doc: dict, branding_overrides: dict) -> bytes:
+    """Merge stored branding with any overrides, then render a single-report PDF."""
+    from backend.pdf_renderer import build_report_pdf
+
+    stored_branding = dict(doc.get("branding") or {})
+    merged = {**stored_branding, **{k: v for k, v in branding_overrides.items() if v is not None}}
+
+    # Inject merged branding fields into the report dict so build_report_pdf can read them
+    report = dict(doc.get("report") or {})
+    report.setdefault("logo_data_url",    merged.get("logo_data_url"))
+    report.setdefault("footer_text",      merged.get("footer") or merged.get("footer_text") or "")
+    report.setdefault("tagline",          merged.get("tagline") or "Trademark Availability Report")
+    report.setdefault("watermark",        merged.get("watermark") or "")
+    report.setdefault("custom_watermark", merged.get("custom_watermark") or "")
+    report.setdefault("client_name",      merged.get("client_name") or "")
+    report.setdefault("client_mobile",    merged.get("client_mobile") or "")
+    report.setdefault("report_date",      merged.get("report_date") or "")
+
+    # Override — always use latest values
+    if merged.get("logo_data_url"):    report["logo_data_url"]    = merged["logo_data_url"]
+    if merged.get("footer"):           report["footer_text"]       = merged["footer"]
+    if merged.get("tagline"):          report["tagline"]           = merged["tagline"]
+    if merged.get("watermark"):        report["watermark"]         = merged["watermark"]
+    if merged.get("custom_watermark"): report["custom_watermark"]  = merged["custom_watermark"]
+    if merged.get("client_name"):      report["client_name"]       = merged["client_name"]
+    if merged.get("client_mobile"):    report["client_mobile"]     = merged["client_mobile"]
+    if merged.get("report_date"):      report["report_date"]       = merged["report_date"]
+
+    doc_record = {**doc, "report": report}
+    return build_report_pdf(doc_record)
+
+
 @router.get("/searches/{report_id}/pdf")
 async def get_report_pdf(
     report_id: str,
     footer:    Optional[str] = Query(None),
     tagline:   Optional[str] = Query(None),
     watermark: Optional[str] = Query(None),
-    has_logo:  Optional[str] = Query(None),
     user: User = Depends(get_current_user),
 ):
-    """Return a PDF for a previously generated trademark report."""
+    """Download a single-report PDF (GET — no logo override, branding from stored doc)."""
     doc = await db.trademark_qc_reports.find_one({"id": report_id}, {"_id": 0})
     if not doc:
         raise HTTPException(404, f"Report {report_id} not found.")
 
-    branding = dict(doc.get("branding") or {})
-    if footer:    branding["footer"]    = footer
-    if tagline:   branding["tagline"]   = tagline
-    if watermark: branding["watermark"] = watermark
-
+    overrides = {
+        "footer":    footer,
+        "tagline":   tagline,
+        "watermark": watermark,
+    }
     try:
-        from backend.pdf_renderer import build_combined_report_pdf
-        pdf_bytes = build_combined_report_pdf(doc.get("report", {}), branding)
+        pdf_bytes = _build_single_pdf(doc, overrides)
     except Exception as e:
+        logger.exception("PDF generation failed for %s", report_id)
+        raise HTTPException(500, f"PDF generation failed: {e}")
+
+    name = (doc.get("name") or "trademark").replace(" ", "_")[:40]
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{name}_report.pdf"'},
+    )
+
+
+@router.post("/searches/{report_id}/pdf")
+async def post_report_pdf(
+    report_id: str,
+    body: RebrandPdfRequest,
+    user: User = Depends(get_current_user),
+):
+    """Download a single-report PDF with full branding override (POST — supports logo data URL)."""
+    doc = await db.trademark_qc_reports.find_one({"id": report_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, f"Report {report_id} not found.")
+
+    overrides = {
+        "logo_data_url":    body.logo_data_url,
+        "footer":           body.footer,
+        "tagline":          body.tagline,
+        "watermark":        body.watermark,
+        "custom_watermark": body.custom_watermark,
+        "client_name":      body.client_name,
+        "client_mobile":    body.client_mobile,
+        "report_date":      body.report_date,
+    }
+    try:
+        pdf_bytes = _build_single_pdf(doc, overrides)
+    except Exception as e:
+        logger.exception("PDF generation failed for %s", report_id)
         raise HTTPException(500, f"PDF generation failed: {e}")
 
     name = (doc.get("name") or "trademark").replace(" ", "_")[:40]
