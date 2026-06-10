@@ -747,6 +747,13 @@ function SearchBar({ onSubmit, loading, defaultClass, client, T }) {
 function VerdictPanel({ report, T }) {
   const cfg = VERDICT_CFG[report.overall_status] || VERDICT_CFG.CAUTION;
   const pct = report.risk_score;
+  const regProb = report.overall_status === "AVAILABLE"
+    ? Math.min(95, 100 - pct + 10)
+    : report.overall_status === "CONFLICT"
+      ? Math.max(5, 100 - pct - 15)
+      : Math.max(0, 100 - pct);
+  const badgeCfg = { AVAILABLE: [COLORS.emeraldGreen, "Safe to File"], CAUTION: [COLORS.amber, "Review First"], CONFLICT: ["#DC2626", "High Risk"] };
+  const [badgeClr, badgeLabel] = badgeCfg[report.overall_status] || [COLORS.amber, "Caution"];
   return (
     <motion.div variants={fadeUp} initial="hidden" animate="visible">
       <div style={{ background: "linear-gradient(135deg, #0D3B66 0%, #1F6FB2 50%, #1e3a8a 100%)", borderRadius: 18, padding: "32px 36px", position: "relative", overflow: "hidden", border: "1px solid rgba(31,111,178,0.4)" }}>
@@ -760,6 +767,7 @@ function VerdictPanel({ report, T }) {
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
               <VerdictBadge status={report.overall_status} large />
               <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", fontWeight: 600 }}>RISK SCORE — {pct}/100</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: badgeClr, background: `${badgeClr}28`, border: `1px solid ${badgeClr}55`, borderRadius: 99, padding: "3px 10px" }}>● {badgeLabel}</span>
             </div>
             <div style={{ fontSize: 24, fontWeight: 700, color: "#fff", lineHeight: 1.3, maxWidth: 520, marginBottom: 24 }}>{report.headline}</div>
             <div>
@@ -776,6 +784,7 @@ function VerdictPanel({ report, T }) {
             <div style={{ fontSize: 56, fontWeight: 800, color: cfg.dot, lineHeight: 1, letterSpacing: "-2px", fontFamily: "'JetBrains Mono', monospace" }}>{pct}</div>
             <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.12em", color: "rgba(255,255,255,0.5)", marginTop: 6, fontWeight: 700 }}>Risk Score</div>
             <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>{report.summary_counts?.total_results ?? 0} filings</div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginTop: 8, fontWeight: 700 }}>{regProb}% success probability</div>
           </div>
         </div>
       </div>
@@ -1119,15 +1128,28 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
   const handleCombinedPdf = async () => {
     const successful = items.filter(it => !it.error);
     if (!successful.length) return toast.error("No successful results to include in combined report");
+    // Validate branding is loaded
+    if (!branding?.footer && !branding?.logo && !branding?.tagline) {
+      toast("Tip: set branding in the Report Branding panel to add your logo and company name to the PDF");
+    }
     setCombinedLoading(true);
     try {
-      // Fetch full report for each mark to get conflicting marks detail
+      // Fetch full report for each mark to get ALL dossier data (counts, recs, alts, results, classes)
       const fullItems = await Promise.all(
         successful.map(async (it) => {
           if (it.id) {
             try {
               const d = await getReport(it.id);
-              return { ...it, all_results: d.report?.all_results || [], class_breakdown: d.report?.class_breakdown || [] };
+              const r = d.report || {};
+              return {
+                ...it,
+                all_results:                  r.all_results || [],
+                class_breakdown:              r.class_breakdown || [],
+                summary_counts:               r.summary_counts || {},
+                recommendations:              r.recommendations || [],
+                alternative_name_suggestions: r.alternative_name_suggestions || [],
+                headline:                     r.headline || it.headline || "",
+              };
             } catch { return it; }
           }
           return it;
@@ -1136,13 +1158,16 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
       const wm = branding?.watermark === "CUSTOM" ? branding?.customWatermark : branding?.watermark;
       const body = {
         items: fullItems.map(it => ({
-          name:            it.name,
-          overall_status:  it.overall_status,
-          risk_score:      it.risk_score,
-          headline:        it.headline || "",
-          class_filter:    klass ? Number(klass) : null,
-          all_results:     it.all_results || [],
-          class_breakdown: it.class_breakdown || [],
+          name:                         it.name,
+          overall_status:               it.overall_status,
+          risk_score:                   it.risk_score,
+          headline:                     it.headline || "",
+          class_filter:                 klass ? Number(klass) : null,
+          all_results:                  it.all_results || [],
+          class_breakdown:              it.class_breakdown || [],
+          summary_counts:               it.summary_counts || {},
+          recommendations:              it.recommendations || [],
+          alternative_name_suggestions: it.alternative_name_suggestions || [],
         })),
         logo_data_url:    branding?.logo    || null,
         footer:           branding?.footer  || "",
@@ -1189,22 +1214,33 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
       {items.length > 0 && (
         <>
           <div style={{ border: `1px solid ${T.border}`, borderRadius: 10, overflow: "hidden", marginBottom: 12 }}>
-            {items.map((it, i) => (
-              <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 120px 60px 1fr auto", padding: "10px 14px", borderBottom: i < items.length - 1 ? `1px solid ${T.border}` : "none", alignItems: "center", gap: 12 }}>
-                <span style={{ fontWeight: 600, color: T.text, fontSize: 13 }}>{it.name}</span>
-                {it.error ? <span style={{ color: T.red, fontSize: 12 }}>Failed</span> : <VerdictBadge status={it.overall_status} />}
-                <span style={{ fontFamily: "'JetBrains Mono', monospace", color: T.muted, fontSize: 13 }}>{it.error ? "—" : it.risk_score}</span>
-                <span style={{ fontSize: 12, color: T.dimmer, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.error || it.headline}</span>
-                {!it.error && it.id && (
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <Btn T={T} variant="ghost" onClick={() => onPickReport?.(it.id)} style={{ padding: "4px 10px", fontSize: 11 }}>View</Btn>
-                    <a href={pdfDownloadUrl(it.id)} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
-                      <Btn T={T} variant="ghost" style={{ padding: "4px 10px", fontSize: 11 }}><Download size={11} /> PDF</Btn>
-                    </a>
-                  </div>
-                )}
-              </div>
-            ))}
+            {items.map((it, i) => {
+              const regProb = it.error ? null : Math.max(0, Math.min(95, it.overall_status === "AVAILABLE" ? Math.min(95, 100 - it.risk_score + 10) : it.overall_status === "CONFLICT" ? Math.max(5, 100 - it.risk_score - 15) : 100 - it.risk_score));
+              const badgeCfg = { AVAILABLE: [COLORS.emeraldGreen, "Safe to File"], CAUTION: [COLORS.amber, "Review First"], CONFLICT: ["#DC2626", "High Risk"] };
+              const [badgeClr, badgeLabel] = badgeCfg[it.overall_status] || [COLORS.amber, "Unknown"];
+              return (
+                <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 110px 52px 80px 90px 1fr auto", padding: "10px 14px", borderBottom: i < items.length - 1 ? `1px solid ${T.border}` : "none", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontWeight: 600, color: T.text, fontSize: 13 }}>{it.name}</span>
+                  {it.error ? <span style={{ color: T.red, fontSize: 12 }}>Failed</span> : <VerdictBadge status={it.overall_status} />}
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", color: T.muted, fontSize: 13 }}>{it.error ? "—" : it.risk_score}</span>
+                  {!it.error && regProb !== null ? (
+                    <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.mediumBlue }}>{regProb}% prob.</span>
+                  ) : <span />}
+                  {!it.error ? (
+                    <span style={{ fontSize: 10, fontWeight: 700, color: badgeClr, background: `${badgeClr}18`, border: `1px solid ${badgeClr}44`, borderRadius: 99, padding: "2px 8px", whiteSpace: "nowrap" }}>{badgeLabel}</span>
+                  ) : <span />}
+                  <span style={{ fontSize: 12, color: T.dimmer, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.error || it.headline}</span>
+                  {!it.error && it.id && (
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <Btn T={T} variant="ghost" onClick={() => onPickReport?.(it.id)} style={{ padding: "4px 10px", fontSize: 11 }}>View</Btn>
+                      <a href={pdfDownloadUrl(it.id)} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+                        <Btn T={T} variant="ghost" style={{ padding: "4px 10px", fontSize: 11 }}><Download size={11} /> PDF</Btn>
+                      </a>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           {/* Combined report action bar */}
