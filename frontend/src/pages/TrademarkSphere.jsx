@@ -110,7 +110,6 @@ function brandedPdfUrl(reportId, branding) {
 
 // POST-based PDF download — required when a logo needs to be sent (too large for query params)
 async function downloadBrandedPdfWithLogo(reportId, branding, clientInfo = {}) {
-  const base = api.defaults.baseURL || "";
   const wm = branding?.watermark === "CUSTOM" ? branding.customWatermark : branding?.watermark;
   const body = {
     logo_data_url:    branding?.logo || null,
@@ -122,14 +121,14 @@ async function downloadBrandedPdfWithLogo(reportId, branding, clientInfo = {}) {
     client_mobile:    clientInfo.client_mobile || "",
     report_date:      clientInfo.report_date   || "",
   };
-  const res = await fetch(`${base}/trademark-qc/searches/${reportId}/pdf`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`PDF generation failed: ${res.status}`);
-  const blob = await res.blob();
-  const url  = URL.createObjectURL(blob);
+  // Use the axios instance so the JWT Authorization header is sent automatically
+  const res = await api.post(
+    `/trademark-qc/searches/${reportId}/pdf`,
+    body,
+    { responseType: "blob", timeout: 60000 }
+  );
+  const blob = res.data;
+  const url  = URL.createObjectURL(new Blob([blob], { type: "application/pdf" }));
   const a    = document.createElement("a");
   a.href = url;
   a.download = `trademark_report_${reportId.slice(0, 8)}.pdf`;
@@ -827,21 +826,15 @@ function ReportActions({ reportId, branding, clientInfo = {}, T }) {
     try { await navigator.clipboard.writeText(shareLinkFor(reportId)); setCopied(true); toast.success("Share link copied"); setTimeout(() => setCopied(false), 2000); }
     catch { toast.error("Could not copy link"); }
   };
-  // Use POST when logo or client info is present (data too large / not suitable for query params)
+  // Always use authenticated api call — window.open / <a href> don't send JWT
   const handlePdfDownload = async () => {
-    const hasLogo = branding?.logo;
-    const hasClientInfo = clientInfo?.client_name || clientInfo?.client_mobile;
-    if (hasLogo || hasClientInfo) {
-      setPdfLoading(true);
-      try {
-        await downloadBrandedPdfWithLogo(reportId, branding, clientInfo);
-      } catch (e) {
-        toast.error("PDF generation failed. Please try again.");
-      } finally {
-        setPdfLoading(false);
-      }
-    } else {
-      window.open(brandedPdfUrl(reportId, branding), "_blank");
+    setPdfLoading(true);
+    try {
+      await downloadBrandedPdfWithLogo(reportId, branding, clientInfo);
+    } catch (e) {
+      toast.error("PDF generation failed. Please try again.");
+    } finally {
+      setPdfLoading(false);
     }
   };
   const hasBrandingOrClient = !!(branding?.footer || branding?.logo || branding?.tagline || clientInfo?.client_name);
@@ -1002,6 +995,7 @@ function MatchesTable({ rows, T }) {
 function HistoryRail({ items, onSelect, activeId, branding, onDelete, onClearAll, T }) {
   const [deletingId, setDeletingId] = useState(null);
   const [clearing, setClearing] = useState(false);
+  const [downloadingId, setDownloadingId] = useState(null);
   const fmt = (iso) => { try { return new Date(iso).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return iso; } };
   const hasBranding = !!(branding?.footer || branding?.logo || branding?.tagline);
 
@@ -1010,6 +1004,57 @@ function HistoryRail({ items, onSelect, activeId, branding, onDelete, onClearAll
     if (!onDelete) return;
     setDeletingId(id);
     try { await onDelete(id); } finally { setDeletingId(null); }
+  };
+
+  // Authenticated PDF download — uses axios so JWT header is included
+  const handlePdfDownload = async (e, id, withBranding = false) => {
+    e.stopPropagation();
+    if (downloadingId) return;
+    setDownloadingId(id + (withBranding ? ":brand" : ""));
+    try {
+      let blob;
+      if (withBranding && branding?.logo) {
+        // POST with logo body
+        const wm = branding?.watermark === "CUSTOM" ? branding.customWatermark : branding?.watermark;
+        const res = await api.post(
+          `/trademark-qc/searches/${id}/pdf`,
+          {
+            logo_data_url:    branding.logo || null,
+            footer:           branding.footer || "",
+            tagline:          branding.tagline || "Trademark Availability Report",
+            watermark:        wm || "",
+            custom_watermark: branding.customWatermark || "",
+          },
+          { responseType: "blob", timeout: 60000 }
+        );
+        blob = res.data;
+      } else {
+        // GET with optional branding query params
+        const params = new URLSearchParams();
+        if (withBranding) {
+          if (branding?.footer)  params.set("footer",    branding.footer);
+          if (branding?.tagline) params.set("tagline",   branding.tagline);
+          const wm = branding?.watermark === "CUSTOM" ? branding.customWatermark : branding?.watermark;
+          if (wm) params.set("watermark", wm);
+        }
+        const qs = params.toString();
+        const res = await api.get(
+          `/trademark-qc/searches/${id}/pdf${qs ? `?${qs}` : ""}`,
+          { responseType: "blob", timeout: 60000 }
+        );
+        blob = res.data;
+      }
+      const url = URL.createObjectURL(new Blob([blob], { type: "application/pdf" }));
+      const a   = document.createElement("a");
+      a.href     = url;
+      a.download = `trademark_report_${id.slice(0, 8)}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert("PDF download failed. Please try again.");
+    } finally {
+      setDownloadingId(null);
+    }
   };
 
   return (
@@ -1093,15 +1138,18 @@ function HistoryRail({ items, onSelect, activeId, branding, onDelete, onClearAll
 
               {/* Re-brand PDF row */}
               <div style={{ display: "flex", gap: 6, padding: "0 12px 10px", flexWrap: "wrap" }}>
-                <a href={pdfDownloadUrl(it.id)} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
-                  <Btn T={T} variant="ghost" style={{ padding: "3px 9px", fontSize: 11 }}><Download size={11} /> PDF</Btn>
-                </a>
+                <Btn T={T} variant="ghost" style={{ padding: "3px 9px", fontSize: 11 }}
+                  onClick={e => handlePdfDownload(e, it.id, false)}
+                  disabled={downloadingId === it.id}>
+                  <Download size={11} /> {downloadingId === it.id ? "…" : "PDF"}
+                </Btn>
                 {hasBranding && (
-                  <a href={brandedPdfUrl(it.id, branding)} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }} title="Re-generate this report PDF with your current branding">
-                    <Btn T={T} variant="save" style={{ padding: "3px 9px", fontSize: 11 }}>
-                      <Paintbrush size={11} /> Re-brand
-                    </Btn>
-                  </a>
+                  <Btn T={T} variant="save" style={{ padding: "3px 9px", fontSize: 11 }}
+                    title="Re-generate this report PDF with your current branding"
+                    onClick={e => handlePdfDownload(e, it.id, true)}
+                    disabled={downloadingId === it.id + ":brand"}>
+                    <Paintbrush size={11} /> {downloadingId === it.id + ":brand" ? "…" : "Re-brand"}
+                  </Btn>
                 )}
               </div>
             </div>
@@ -1119,6 +1167,8 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
   const [loading, setLoading] = useState(false);
   const [combinedLoading, setCombinedLoading] = useState(false);
   const [items, setItems] = useState([]);
+  const [expandedId, setExpandedId] = useState(null);
+  const [dlId, setDlId] = useState(null);
 
   const run = async () => {
     const names = text.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
@@ -1133,50 +1183,32 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
     finally { setLoading(false); }
   };
 
+  const downloadItemPdf = async (e, id) => {
+    e.stopPropagation();
+    if (dlId) return;
+    setDlId(id);
+    try {
+      const res = await api.get(`/trademark-qc/searches/${id}/pdf`, { responseType: "blob", timeout: 60000 });
+      const url = URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+      const a   = document.createElement("a");
+      a.href = url; a.download = `trademark_report_${id.slice(0, 8)}.pdf`; a.click();
+      URL.revokeObjectURL(url);
+    } catch { toast.error("PDF download failed"); } finally { setDlId(null); }
+  };
+
   const handleCombinedPdf = async () => {
     const successful = items.filter(it => !it.error);
     if (!successful.length) return toast.error("No successful results to include in combined report");
-    // Validate branding is loaded
     if (!branding?.footer && !branding?.logo && !branding?.tagline) {
       toast("Tip: set branding in the Report Branding panel to add your logo and company name to the PDF");
     }
     setCombinedLoading(true);
     try {
-      // Fetch full report for each mark to get ALL dossier data (counts, recs, alts, results, classes)
-      const fullItems = await Promise.all(
-        successful.map(async (it) => {
-          if (it.id) {
-            try {
-              const d = await getReport(it.id);
-              const r = d.report || {};
-              return {
-                ...it,
-                all_results:                  r.all_results || [],
-                class_breakdown:              r.class_breakdown || [],
-                summary_counts:               r.summary_counts || {},
-                recommendations:              r.recommendations || [],
-                alternative_name_suggestions: r.alternative_name_suggestions || [],
-                headline:                     r.headline || it.headline || "",
-              };
-            } catch { return it; }
-          }
-          return it;
-        })
-      );
+      // Use /bulk/export which runs searches + builds full combined PDF in one call
+      const names = successful.map(it => it.name);
       const wm = branding?.watermark === "CUSTOM" ? branding?.customWatermark : branding?.watermark;
-      const body = {
-        items: fullItems.map(it => ({
-          name:                         it.name,
-          overall_status:               it.overall_status,
-          risk_score:                   it.risk_score,
-          headline:                     it.headline || "",
-          class_filter:                 klass ? Number(klass) : null,
-          all_results:                  it.all_results || [],
-          class_breakdown:              it.class_breakdown || [],
-          summary_counts:               it.summary_counts || {},
-          recommendations:              it.recommendations || [],
-          alternative_name_suggestions: it.alternative_name_suggestions || [],
-        })),
+      await bulkExport(names, {
+        class_filter:     klass ? Number(klass) : null,
         logo_data_url:    branding?.logo    || null,
         footer:           branding?.footer  || "",
         tagline:          branding?.tagline || "Bulk Trademark Availability Report",
@@ -1185,15 +1217,7 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
         client_name:      clientInfo?.client_name   || "",
         client_mobile:    clientInfo?.client_mobile || "",
         report_date:      clientInfo?.report_date   || "",
-      };
-      const res = await api.post("/trademark-sphere/combined-pdf", body, { responseType: "blob" });
-      const blob = new Blob([res.data], { type: "application/pdf" });
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement("a");
-      a.href = url;
-      a.download = `bulk_trademark_report_${new Date().toISOString().slice(0, 10)}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
+      }, "pdf");
       toast.success("Combined report downloaded");
     } catch (e) {
       toast.error(e?.response?.data?.detail || e?.message || "Failed to generate combined report");
@@ -1226,29 +1250,119 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
               const regProb = it.error ? null : Math.max(0, Math.min(95, it.overall_status === "AVAILABLE" ? Math.min(95, 100 - it.risk_score + 10) : it.overall_status === "CONFLICT" ? Math.max(5, 100 - it.risk_score - 15) : 100 - it.risk_score));
               const badgeCfg = { AVAILABLE: [COLORS.emeraldGreen, "Safe to File"], CAUTION: [COLORS.amber, "Review First"], CONFLICT: ["#DC2626", "High Risk"] };
               const [badgeClr, badgeLabel] = badgeCfg[it.overall_status] || [COLORS.amber, "Unknown"];
+              const isExpanded = expandedId === i;
+              const rpt = it.report || {};
+              const allResults = Array.isArray(rpt.all_results) ? rpt.all_results : (Array.isArray(it.all_results) ? it.all_results : []);
+              const classBreakdown = Array.isArray(rpt.class_breakdown) ? rpt.class_breakdown : (Array.isArray(it.class_breakdown) ? it.class_breakdown : []);
+              const recommendations = Array.isArray(rpt.recommendations) ? rpt.recommendations : (Array.isArray(it.recommendations) ? it.recommendations : []);
               return (
-                <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 110px 52px 80px 90px 1fr auto", padding: "10px 14px", borderBottom: i < items.length - 1 ? `1px solid ${T.border}` : "none", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontWeight: 600, color: T.text, fontSize: 13 }}>{it.name}</span>
-                  {it.error ? <span style={{ color: T.red, fontSize: 12 }}>Failed</span> : <VerdictBadge status={it.overall_status} />}
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", color: T.muted, fontSize: 13 }}>{it.error ? "—" : it.risk_score}</span>
-                  {!it.error && regProb !== null ? (
-                    <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.mediumBlue }}>{regProb}% prob.</span>
-                  ) : <span />}
-                  {!it.error ? (
-                    <span style={{ fontSize: 10, fontWeight: 700, color: badgeClr, background: `${badgeClr}18`, border: `1px solid ${badgeClr}44`, borderRadius: 99, padding: "2px 8px", whiteSpace: "nowrap" }}>{badgeLabel}</span>
-                  ) : <span />}
-                  <span style={{ fontSize: 12, color: T.dimmer, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.error || it.headline}</span>
-                  {!it.error && it.id && (
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <Btn T={T} variant="ghost" onClick={() => onPickReport?.(it.id)} style={{ padding: "4px 10px", fontSize: 11 }}>View</Btn>
-                      <a href={pdfDownloadUrl(it.id)} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
-                        <Btn T={T} variant="ghost" style={{ padding: "4px 10px", fontSize: 11 }}><Download size={11} /> PDF</Btn>
-                      </a>
+                <div key={i} style={{ borderBottom: i < items.length - 1 ? `1px solid ${T.border}` : "none" }}>
+                  {/* Summary row */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 110px 52px 80px 90px 1fr auto", padding: "10px 14px", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontWeight: 600, color: T.text, fontSize: 13 }}>{it.name}</span>
+                    {it.error ? <span style={{ color: T.red, fontSize: 12 }}>Failed</span> : <VerdictBadge status={it.overall_status} />}
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", color: T.muted, fontSize: 13 }}>{it.error ? "—" : it.risk_score}</span>
+                    {!it.error && regProb !== null ? (
+                      <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.mediumBlue }}>{regProb}% prob.</span>
+                    ) : <span />}
+                    {!it.error ? (
+                      <span style={{ fontSize: 10, fontWeight: 700, color: badgeClr, background: `${badgeClr}18`, border: `1px solid ${badgeClr}44`, borderRadius: 99, padding: "2px 8px", whiteSpace: "nowrap" }}>{badgeLabel}</span>
+                    ) : <span />}
+                    <span style={{ fontSize: 12, color: T.dimmer, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.error || it.headline}</span>
+                    {!it.error && it.id && (
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <Btn T={T} variant="ghost" onClick={() => onPickReport?.(it.id)} style={{ padding: "4px 10px", fontSize: 11 }}>View</Btn>
+                        <Btn T={T} variant="ghost" style={{ padding: "4px 10px", fontSize: 11 }} disabled={dlId === it.id} onClick={e => downloadItemPdf(e, it.id)}>
+                          <Download size={11} /> {dlId === it.id ? "…" : "PDF"}
+                        </Btn>
+                        <Btn T={T} variant="ghost" style={{ padding: "4px 10px", fontSize: 11 }} onClick={() => setExpandedId(isExpanded ? null : i)}>
+                          {isExpanded ? "▲ Less" : "▼ Details"}
+                        </Btn>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Expanded full-data row */}
+                  {isExpanded && !it.error && (
+                    <div style={{ padding: "12px 16px 16px", background: T.raised, borderTop: `1px solid ${T.border}` }}>
+                      {/* Summary counts */}
+                      {it.summary_counts && (
+                        <div style={{ display: "flex", gap: 16, marginBottom: 12, flexWrap: "wrap" }}>
+                          {[["Total", it.summary_counts.total_results], ["Exact", it.summary_counts.exact], ["Phonetic", it.summary_counts.phonetic], ["Similar", it.summary_counts.contains_or_similar], ["Blocking", it.summary_counts.blocking_exact_matches]].map(([label, val]) => (
+                            <div key={label} style={{ textAlign: "center", minWidth: 56 }}>
+                              <div style={{ fontSize: 18, fontWeight: 700, color: T.text, fontFamily: "'JetBrains Mono', monospace" }}>{val ?? 0}</div>
+                              <div style={{ fontSize: 10, color: T.dimmer, textTransform: "uppercase" }}>{label}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Class breakdown */}
+                      {classBreakdown.length > 0 && (
+                        <div style={{ marginBottom: 12 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: T.dimmer, textTransform: "uppercase", marginBottom: 6 }}>Class Breakdown</div>
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                            {classBreakdown.map(cb => (
+                              <span key={cb.class} style={{ fontSize: 11, background: `${COLORS.mediumBlue}18`, color: COLORS.mediumBlue, borderRadius: 6, padding: "3px 8px", border: `1px solid ${COLORS.mediumBlue}33` }}>
+                                CL{String(cb.class).padStart(2,"0")}: {cb.total} ({cb.blocking} blocking)
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Recommendations */}
+                      {recommendations.length > 0 && (
+                        <div style={{ marginBottom: 12 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: T.dimmer, textTransform: "uppercase", marginBottom: 6 }}>Recommendations</div>
+                          <ol style={{ margin: 0, paddingLeft: 18 }}>
+                            {recommendations.map((r, ri) => (
+                              <li key={ri} style={{ fontSize: 12, color: T.muted, marginBottom: 4, lineHeight: 1.5 }}>{r}</li>
+                            ))}
+                          </ol>
+                        </div>
+                      )}
+
+                      {/* Conflict table */}
+                      {allResults.length > 0 ? (
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: T.dimmer, textTransform: "uppercase", marginBottom: 6 }}>Conflicting Filings ({allResults.length})</div>
+                          <div style={{ overflowX: "auto", maxHeight: 220, overflowY: "auto" }}>
+                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                              <thead>
+                                <tr style={{ background: T.bg }}>
+                                  {["App No.", "Name", "Applicant", "Status", "Class", "Match", "Risk"].map(h => (
+                                    <th key={h} style={{ padding: "6px 10px", textAlign: "left", fontSize: 10, textTransform: "uppercase", color: T.dimmer, fontWeight: 700, whiteSpace: "nowrap", position: "sticky", top: 0, background: T.bg }}>{h}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {allResults.map((r, ri) => (
+                                  <tr key={ri} style={{ borderTop: `1px solid ${T.border}` }}>
+                                    <td style={{ padding: "5px 10px", color: T.dimmer, fontFamily: "'JetBrains Mono', monospace" }}>{r.application_id || "—"}</td>
+                                    <td style={{ padding: "5px 10px", fontWeight: 600, color: T.text }}>
+                                      {r.detail_url ? <a href={r.detail_url} target="_blank" rel="noreferrer" style={{ color: COLORS.mediumBlue, textDecoration: "none" }}>{r.name}</a> : r.name}
+                                    </td>
+                                    <td style={{ padding: "5px 10px", color: T.muted }}>{r.applicant || "—"}</td>
+                                    <td style={{ padding: "5px 10px" }}><Badge status={r.status} T={T} /></td>
+                                    <td style={{ padding: "5px 10px", color: T.muted }}>{r.class ?? "—"}</td>
+                                    <td style={{ padding: "5px 10px" }}><MatchBadge type={r.match_type} T={T} /></td>
+                                    <td style={{ padding: "5px 10px", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: r.individual_risk_score >= 70 ? T.red : r.individual_risk_score >= 40 ? T.amber : T.emerald }}>{r.individual_risk_score}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ) : (
+                        <p style={{ fontSize: 12, color: T.dimmer, margin: 0 }}>No conflicting filings found in the QuickCompany index.</p>
+                      )}
                     </div>
                   )}
                 </div>
               );
             })}
+          </div>
           </div>
 
           {/* Combined report action bar */}
