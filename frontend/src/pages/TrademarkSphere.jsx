@@ -1363,7 +1363,6 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
               );
             })}
           </div>
-          </div>
 
           {/* Combined report action bar */}
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: `${COLORS.mediumBlue}0e`, border: `1px solid ${COLORS.mediumBlue}33`, borderRadius: 10 }}>
