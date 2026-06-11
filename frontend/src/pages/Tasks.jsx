@@ -870,13 +870,28 @@ export default function Tasks() {
   }, [isAdmin, users, tasks, user, crossVisibilityUserIds]);
 
   useEffect(() => {
+    // Fetch every page of clients until exhausted — identical to Clients.jsx strategy
+    const fetchAllClients = async () => {
+      const PAGE = 200;
+      let page = 1;
+      let all = [];
+      while (true) {
+        const res = await api.get('/clients', { params: { page, page_size: PAGE } });
+        const batch = Array.isArray(res.data) ? res.data : [];
+        all = [...all, ...batch];
+        if (batch.length < PAGE) break;
+        page++;
+      }
+      return all;
+    };
+
     const loadAll = async () => {
       setDataLoading(true);
       // ── All 4 API calls fire simultaneously — no sequential waterfalls ──
       const [tasksResult, usersResult, clientsResult, rankResult] = await Promise.allSettled([
         apiFetch('/tasks'),
         apiFetch('/users'),
-        apiFetch('/clients?page_size=9999'),
+        fetchAllClients(),
         apiFetch('/reports/performance-rankings?period=monthly'),
       ]);
 
@@ -898,7 +913,7 @@ export default function Tasks() {
       }
       setUsersLoading(false);
 
-      // clients
+      // clients — fetchAllClients always returns an array
       if (clientsResult.status === 'fulfilled' && Array.isArray(clientsResult.value)) {
         setClients(clientsResult.value);
       }
@@ -1821,286 +1836,309 @@ export default function Tasks() {
                     </div>
 
                     {/* Scrollable form body */}
-                    <div className="overflow-y-auto flex-1 min-h-0">
-                      <form onSubmit={handleSubmit} className="divide-y divide-slate-100">
+                    <div className="overflow-y-auto flex-1 min-h-0 bg-slate-50/40">
+                      <form onSubmit={handleSubmit}>
 
                         {/* ── Section 1: Task Details ── */}
-                        <div className="px-7 py-5 space-y-4">
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
-                            <FileText className="h-3 w-3" /> Task Details
-                          </p>
-                          <div className="space-y-1.5">
-                            <Label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                              Task Title <span className="text-red-500">*</span>
-                            </Label>
-                            <Input
-                              placeholder="e.g. File GST Return for March 2025"
-                              value={formData.title}
-                              onChange={(e) => setFormData(p => ({ ...p, title: e.target.value }))}
-                              required
-                              className="h-10 text-sm rounded-xl border-slate-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 bg-slate-50/60"
-                            />
+                        <div className="mx-6 mt-5 mb-1 rounded-2xl bg-white border border-slate-100 shadow-sm overflow-hidden">
+                          <div className="flex items-center gap-2.5 px-5 py-3 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
+                            <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}22, ${COLORS.mediumBlue}22)` }}>
+                              <FileText className="h-3.5 w-3.5" style={{ color: COLORS.mediumBlue }} />
+                            </div>
+                            <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Task Details</span>
                           </div>
-                          <div className="space-y-1.5">
-                            <Label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                              Description <span className="text-slate-300 font-normal normal-case tracking-normal text-xs">· use - for checklist items</span>
-                            </Label>
-                            <Textarea
-                              placeholder="Describe the task or add checklist items starting with -&#10;- Step 1&#10;- Step 2"
-                              value={formData.description}
-                              onChange={(e) => setFormData(p => ({ ...p, description: e.target.value }))}
-                              rows={3}
-                              className="text-sm rounded-xl border-slate-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 resize-none bg-slate-50/60"
-                            />
+                          <div className="p-5 space-y-4">
+                            <div className="space-y-1.5">
+                              <Label className="text-[11px] font-semibold text-slate-500 flex items-center gap-1">
+                                Task Title <span className="text-red-400 ml-0.5">*</span>
+                              </Label>
+                              <Input
+                                placeholder="e.g. File GST Return for March 2025"
+                                value={formData.title}
+                                onChange={(e) => setFormData(p => ({ ...p, title: e.target.value }))}
+                                required
+                                className="h-10 text-sm rounded-xl border-slate-200 bg-slate-50 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-colors"
+                              />
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label className="text-[11px] font-semibold text-slate-500">
+                                Description <span className="font-normal text-slate-400 text-[10px]">— use - bullet for checklist items</span>
+                              </Label>
+                              <Textarea
+                                placeholder={"Add notes or checklist items:\n- Step 1\n- Step 2\n- Step 3"}
+                                value={formData.description}
+                                onChange={(e) => setFormData(p => ({ ...p, description: e.target.value }))}
+                                rows={3}
+                                className="text-sm rounded-xl border-slate-200 bg-slate-50 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 resize-none transition-colors"
+                              />
+                            </div>
                           </div>
                         </div>
 
                         {/* ── Section 2: Assignment & Schedule ── */}
-                        <div className="px-7 py-5 space-y-4">
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
-                            <Calendar className="h-3 w-3" /> Assignment &amp; Schedule
-                          </p>
-                          <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-1.5">
-                              <Label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Client</Label>
-                              <Popover open={clientPopoverOpen} onOpenChange={setClientPopoverOpen}>
-                                <PopoverTrigger asChild>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    role="combobox"
-                                    aria-expanded={clientPopoverOpen}
-                                    className="h-10 w-full text-sm rounded-xl border-slate-200 font-normal justify-between bg-slate-50/60 hover:bg-white"
-                                  >
-                                    <span className="truncate text-left flex items-center gap-1.5">
-                                      {formData.client_id ? (
-                                        <>
-                                          <Building2 className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
-                                          <span className="truncate">{clients.find(c => c.id === formData.client_id)?.company_name || 'No Client'}</span>
-                                        </>
-                                      ) : (
-                                        <span className="text-slate-400">Select client…</span>
-                                      )}
-                                    </span>
-                                    <ChevronsUpDown className="ml-2 h-4 w-4 flex-shrink-0 opacity-40" />
-                                  </Button>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-[--radix-popover-trigger-width] p-0 rounded-xl shadow-xl border-slate-200" align="start" style={{ zIndex: 9999 }}>
-                                  <Command className="rounded-xl">
-                                    <CommandInput placeholder="Search clients…" className="h-9 text-sm" />
-                                    <CommandList
-                                      className="max-h-64 overflow-y-auto"
-                                      onWheel={(e) => e.stopPropagation()}
-                                    >
-                                      <CommandEmpty>No client found.</CommandEmpty>
-                                      <CommandGroup>
-                                        <CommandItem
-                                          value="No Client"
-                                          onSelect={() => {
-                                            setFormData(p => ({ ...p, client_id: '' }));
-                                            setClientPopoverOpen(false);
-                                          }}
-                                        >
-                                          <Check className={`mr-2 h-4 w-4 ${!formData.client_id ? 'opacity-100 text-blue-600' : 'opacity-0'}`} />
-                                          <span className="text-slate-500 italic">No Client</span>
-                                        </CommandItem>
-                                        {clients.map(c => (
-                                          <CommandItem
-                                            key={c.id}
-                                            value={c.company_name}
-                                            onSelect={() => {
-                                              const clientId = c.id;
-                                              if (!editingTask) {
-                                                const assignedUserId = c?.assignments?.length > 0
-                                                  ? c.assignments[0].user_id
-                                                  : c?.assigned_to || null;
-                                                setFormData(p => ({
-                                                  ...p,
-                                                  client_id: clientId,
-                                                  assigned_to: assignedUserId || p.assigned_to,
-                                                }));
-                                              } else {
-                                                setFormData(p => ({ ...p, client_id: clientId }));
-                                              }
-                                              setClientPopoverOpen(false);
-                                            }}
-                                          >
-                                            <Check className={`mr-2 h-4 w-4 flex-shrink-0 ${formData.client_id === c.id ? 'opacity-100 text-blue-600' : 'opacity-0'}`} />
-                                            <span className="truncate text-sm">{c.company_name}</span>
-                                          </CommandItem>
-                                        ))}
-                                      </CommandGroup>
-                                    </CommandList>
-                                  </Command>
-                                </PopoverContent>
-                              </Popover>
+                        <div className="mx-6 mt-3 mb-1 rounded-2xl bg-white border border-slate-100 shadow-sm overflow-hidden">
+                          <div className="flex items-center gap-2.5 px-5 py-3 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
+                            <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg, #10b98122, #059669aa22)' }}>
+                              <Calendar className="h-3.5 w-3.5 text-emerald-600" />
                             </div>
-                            <div className="space-y-1.5">
-                              <Label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Due Date</Label>
-                              <Input
-                                type="date"
-                                value={formData.due_date}
-                                onChange={(e) => setFormData(p => ({ ...p, due_date: e.target.value }))}
-                                className="h-10 text-sm rounded-xl border-slate-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 bg-slate-50/60"
-                              />
-                            </div>
+                            <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Assignment &amp; Schedule</span>
                           </div>
-                          {canAssignTasks && (
+                          <div className="p-5 space-y-4">
                             <div className="grid grid-cols-2 gap-4">
+                              {/* Client dropdown */}
                               <div className="space-y-1.5">
-                                <Label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 flex items-center gap-1.5">
-                                  Assignee
-                                  {formData.client_id && formData.assigned_to !== 'unassigned' && (
-                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: `${COLORS.emeraldGreen}18`, color: COLORS.emeraldGreen }}>
-                                      Auto
-                                    </span>
-                                  )}
-                                </Label>
-                                <Select value={formData.assigned_to} onValueChange={(v) => setFormData(p => ({ ...p, assigned_to: v }))}>
-                                  <SelectTrigger className="h-10 text-sm rounded-xl border-slate-200 bg-slate-50/60"><SelectValue /></SelectTrigger>
-                                  <SelectContent className="max-h-52 overflow-y-auto rounded-xl">
-                                    <SelectItem value="unassigned">— Unassigned</SelectItem>
-                                    {users.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <div className="space-y-1.5">
-                                <Label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Co-assignees</Label>
-                                <Popover>
+                                <Label className="text-[11px] font-semibold text-slate-500">Client</Label>
+                                <Popover open={clientPopoverOpen} onOpenChange={setClientPopoverOpen}>
                                   <PopoverTrigger asChild>
-                                    <Button variant="outline" className="w-full h-10 text-sm justify-between rounded-xl border-slate-200 bg-slate-50/60 hover:bg-white font-normal">
-                                      <span className="flex items-center gap-1.5">
-                                        <Users className="h-3.5 w-3.5 text-slate-400" />
-                                        {formData.sub_assignees.length > 0 ? `${formData.sub_assignees.length} co-assignee${formData.sub_assignees.length > 1 ? 's' : ''}` : 'Select…'}
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      role="combobox"
+                                      aria-expanded={clientPopoverOpen}
+                                      className="h-10 w-full text-sm rounded-xl border-slate-200 bg-slate-50 hover:bg-white font-normal justify-between transition-colors"
+                                    >
+                                      <span className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+                                        <Building2 className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                                        <span className="truncate text-left">
+                                          {formData.client_id
+                                            ? (clients.find(c => c.id === formData.client_id)?.company_name ?? 'Client')
+                                            : <span className="text-slate-400">Select client…</span>}
+                                        </span>
                                       </span>
-                                      <ChevronDown className="h-4 w-4 opacity-40" />
+                                      <ChevronsUpDown className="ml-1 h-3.5 w-3.5 flex-shrink-0 opacity-40" />
                                     </Button>
                                   </PopoverTrigger>
-                                  <PopoverContent className="w-72 max-h-56 overflow-y-auto rounded-xl shadow-xl">
-                                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-3">Select Co-assignees</p>
-                                    <div className="space-y-2">
-                                      {users.filter(u => u.id !== formData.assigned_to).map(u => (
-                                        <label key={u.id} className="flex items-center gap-2.5 cursor-pointer hover:bg-slate-50 rounded-lg px-1.5 py-1 transition-colors">
-                                          <Checkbox checked={formData.sub_assignees.includes(u.id)} onCheckedChange={() => toggleSubAssignee(u.id)} />
-                                          <span className="text-sm text-slate-700">{u.full_name}</span>
-                                        </label>
-                                      ))}
-                                    </div>
+                                  <PopoverContent
+                                    className="p-0 rounded-xl shadow-2xl border-slate-200"
+                                    align="start"
+                                    style={{ zIndex: 9999, width: 'var(--radix-popover-trigger-width)' }}
+                                  >
+                                    <Command className="rounded-xl">
+                                      <div className="flex items-center border-b border-slate-100 px-3">
+                                        <Search className="h-3.5 w-3.5 text-slate-400 mr-2 flex-shrink-0" />
+                                        <CommandInput placeholder="Search clients…" className="h-9 text-sm border-0 outline-none ring-0 focus:ring-0 pl-0" />
+                                      </div>
+                                      <CommandList
+                                        className="max-h-56 overflow-y-auto py-1"
+                                        onWheel={(e) => e.stopPropagation()}
+                                      >
+                                        <CommandEmpty className="py-6 text-center text-sm text-slate-400">No client found.</CommandEmpty>
+                                        <CommandGroup>
+                                          <CommandItem
+                                            value="__no_client__"
+                                            onSelect={() => { setFormData(p => ({ ...p, client_id: '' })); setClientPopoverOpen(false); }}
+                                            className="mx-1 rounded-lg text-slate-500 text-sm cursor-pointer"
+                                          >
+                                            <div className="w-4 h-4 mr-2 flex-shrink-0 flex items-center justify-center">
+                                              {!formData.client_id && <Check className="h-3.5 w-3.5 text-blue-600" />}
+                                            </div>
+                                            <span className="italic">No Client</span>
+                                          </CommandItem>
+                                          {clients.map(c => (
+                                            <CommandItem
+                                              key={c.id}
+                                              value={c.company_name}
+                                              onSelect={() => {
+                                                if (!editingTask) {
+                                                  const uid = c?.assignments?.length > 0 ? c.assignments[0].user_id : c?.assigned_to || null;
+                                                  setFormData(p => ({ ...p, client_id: c.id, assigned_to: uid || p.assigned_to }));
+                                                } else {
+                                                  setFormData(p => ({ ...p, client_id: c.id }));
+                                                }
+                                                setClientPopoverOpen(false);
+                                              }}
+                                              className="mx-1 rounded-lg text-sm cursor-pointer"
+                                            >
+                                              <div className="w-4 h-4 mr-2 flex-shrink-0 flex items-center justify-center">
+                                                {formData.client_id === c.id && <Check className="h-3.5 w-3.5 text-blue-600" />}
+                                              </div>
+                                              <span className="truncate">{c.company_name}</span>
+                                            </CommandItem>
+                                          ))}
+                                        </CommandGroup>
+                                      </CommandList>
+                                      {clients.length > 0 && (
+                                        <div className="px-3 py-2 border-t border-slate-100 text-center">
+                                          <span className="text-[10px] text-slate-400">{clients.length} clients loaded</span>
+                                        </div>
+                                      )}
+                                    </Command>
                                   </PopoverContent>
                                 </Popover>
                               </div>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* ── Section 3: Classification ── */}
-                        <div className="px-7 py-5 space-y-4">
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
-                            <SlidersHorizontal className="h-3 w-3" /> Classification
-                          </p>
-                          <div className="space-y-1.5">
-                            <Label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Department</Label>
-                            <div className="flex flex-wrap gap-1.5">
-                              {DEPARTMENTS.map(dept => (
-                                <button
-                                  key={dept.value}
-                                  type="button"
-                                  onClick={() => setFormData(p => ({ ...p, category: dept.value }))}
-                                  className={`h-7 px-3 rounded-lg text-[11px] font-bold uppercase tracking-wide transition-all border ${
-                                    formData.category === dept.value
-                                      ? 'shadow-md scale-105 border-transparent'
-                                      : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50'
-                                  }`}
-                                  style={formData.category === dept.value
-                                    ? { background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`, color: 'white' }
-                                    : {}}
-                                >
-                                  {dept.label}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-1.5">
-                              <Label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Priority</Label>
-                              <Select value={formData.priority} onValueChange={(v) => setFormData(p => ({ ...p, priority: v }))}>
-                                <SelectTrigger className="h-10 text-sm rounded-xl border-slate-200 bg-slate-50/60"><SelectValue /></SelectTrigger>
-                                <SelectContent className="rounded-xl">
-                                  <SelectItem value="low">🟢 Low</SelectItem>
-                                  <SelectItem value="medium">🟡 Medium</SelectItem>
-                                  <SelectItem value="high">🔴 High</SelectItem>
-                                  <SelectItem value="critical">🚨 Critical</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1.5">
-                              <Label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Status</Label>
-                              <Select value={formData.status} onValueChange={(v) => setFormData(p => ({ ...p, status: v }))}>
-                                <SelectTrigger className="h-10 text-sm rounded-xl border-slate-200 bg-slate-50/60"><SelectValue /></SelectTrigger>
-                                <SelectContent className="rounded-xl">
-                                  <SelectItem value="pending">📋 To Do</SelectItem>
-                                  <SelectItem value="in_progress">⚡ In Progress</SelectItem>
-                                  <SelectItem value="completed">✅ Completed</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* ── Section 4: Recurrence ── */}
-                        <div className="px-7 py-5">
-                          <div className={`rounded-xl border p-4 space-y-3 transition-colors ${
-                            formData.is_recurring
-                              ? 'border-blue-200 bg-blue-50/60'
-                              : isDark ? 'border-slate-600 bg-slate-700/30' : 'border-slate-200 bg-slate-50/60'
-                          }`}>
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${formData.is_recurring ? 'bg-blue-100' : 'bg-slate-100'}`}>
-                                  <Repeat className={`h-3.5 w-3.5 ${formData.is_recurring ? 'text-blue-600' : 'text-slate-400'}`} />
-                                </div>
-                                <div>
-                                  <Label className={`font-semibold text-sm ${formData.is_recurring ? 'text-blue-800' : 'text-slate-700'}`}>Recurring Task</Label>
-                                  {!formData.is_recurring && <p className="text-[10px] text-slate-400">Toggle to set up a repeating schedule</p>}
-                                </div>
+                              {/* Due date */}
+                              <div className="space-y-1.5">
+                                <Label className="text-[11px] font-semibold text-slate-500">Due Date</Label>
+                                <Input
+                                  type="date"
+                                  value={formData.due_date}
+                                  onChange={(e) => setFormData(p => ({ ...p, due_date: e.target.value }))}
+                                  className="h-10 text-sm rounded-xl border-slate-200 bg-slate-50 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-colors"
+                                />
                               </div>
-                              <Switch checked={formData.is_recurring} onCheckedChange={(c) => setFormData(p => ({ ...p, is_recurring: c }))} />
                             </div>
-                            {formData.is_recurring && (
-                              <div className="grid grid-cols-2 gap-3 pt-3 border-t border-blue-200">
+
+                            {canAssignTasks && (
+                              <div className="grid grid-cols-2 gap-4">
+                                {/* Assignee */}
                                 <div className="space-y-1.5">
-                                  <Label className="text-[11px] font-semibold uppercase tracking-wide text-blue-600">Repeat Pattern</Label>
-                                  <Select value={formData.recurrence_pattern} onValueChange={(v) => setFormData(p => ({ ...p, recurrence_pattern: v }))}>
-                                    <SelectTrigger className="h-9 text-sm rounded-xl border-blue-200 bg-white"><SelectValue /></SelectTrigger>
-                                    <SelectContent className="rounded-xl">
-                                      {RECURRENCE_PATTERNS.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
+                                  <Label className="text-[11px] font-semibold text-slate-500 flex items-center gap-1.5">
+                                    Assignee
+                                    {formData.client_id && formData.assigned_to !== 'unassigned' && (
+                                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200">Auto</span>
+                                    )}
+                                  </Label>
+                                  <Select value={formData.assigned_to} onValueChange={(v) => setFormData(p => ({ ...p, assigned_to: v }))}>
+                                    <SelectTrigger className="h-10 text-sm rounded-xl border-slate-200 bg-slate-50"><SelectValue /></SelectTrigger>
+                                    <SelectContent className="max-h-52 overflow-y-auto rounded-xl">
+                                      <SelectItem value="unassigned">— Unassigned</SelectItem>
+                                      {users.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}
                                     </SelectContent>
                                   </Select>
                                 </div>
+                                {/* Co-assignees */}
                                 <div className="space-y-1.5">
-                                  <Label className="text-[11px] font-semibold uppercase tracking-wide text-blue-600">Every</Label>
-                                  <div className="flex items-center gap-2">
-                                    <Input
-                                      type="number" min="1" max="365"
-                                      value={formData.recurrence_interval}
-                                      onChange={(e) => setFormData(p => ({ ...p, recurrence_interval: parseInt(e.target.value) || 1 }))}
-                                      className="w-20 h-9 text-sm rounded-xl border-blue-200 bg-white"
-                                    />
-                                    <span className="text-xs text-blue-600 font-medium">
-                                      {formData.recurrence_pattern === 'daily' && 'day(s)'}
-                                      {formData.recurrence_pattern === 'weekly' && 'week(s)'}
-                                      {formData.recurrence_pattern === 'monthly' && 'month(s)'}
-                                      {formData.recurrence_pattern === 'yearly' && 'year(s)'}
-                                    </span>
-                                  </div>
+                                  <Label className="text-[11px] font-semibold text-slate-500">Co-assignees</Label>
+                                  <Popover>
+                                    <PopoverTrigger asChild>
+                                      <Button variant="outline" className="w-full h-10 text-sm rounded-xl border-slate-200 bg-slate-50 hover:bg-white font-normal justify-between transition-colors">
+                                        <span className="flex items-center gap-1.5">
+                                          <Users className="h-3.5 w-3.5 text-slate-400" />
+                                          <span className="text-sm">
+                                            {formData.sub_assignees.length > 0
+                                              ? `${formData.sub_assignees.length} selected`
+                                              : <span className="text-slate-400">None selected</span>}
+                                          </span>
+                                        </span>
+                                        <ChevronDown className="h-3.5 w-3.5 opacity-40" />
+                                      </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-64 rounded-xl shadow-xl p-3" style={{ zIndex: 9999 }}>
+                                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2.5 px-1">Add Co-assignees</p>
+                                      <div className="space-y-1 max-h-48 overflow-y-auto">
+                                        {users.filter(u => u.id !== formData.assigned_to).map(u => (
+                                          <label key={u.id} className="flex items-center gap-2.5 cursor-pointer hover:bg-slate-50 rounded-lg px-2 py-1.5 transition-colors">
+                                            <Checkbox checked={formData.sub_assignees.includes(u.id)} onCheckedChange={() => toggleSubAssignee(u.id)} />
+                                            <span className="text-sm text-slate-700">{u.full_name}</span>
+                                          </label>
+                                        ))}
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
                                 </div>
                               </div>
                             )}
                           </div>
                         </div>
 
-                        {/* ── Footer ── */}
-                        <div className="px-7 py-4 bg-slate-50 flex items-center justify-between gap-3 flex-shrink-0">
+                        {/* ── Section 3: Classification ── */}
+                        <div className="mx-6 mt-3 mb-1 rounded-2xl bg-white border border-slate-100 shadow-sm overflow-hidden">
+                          <div className="flex items-center gap-2.5 px-5 py-3 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
+                            <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 bg-violet-50">
+                              <SlidersHorizontal className="h-3.5 w-3.5 text-violet-600" />
+                            </div>
+                            <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Classification</span>
+                          </div>
+                          <div className="p-5 space-y-4">
+                            {/* Department chips */}
+                            <div className="space-y-1.5">
+                              <Label className="text-[11px] font-semibold text-slate-500">Department</Label>
+                              <div className="flex flex-wrap gap-1.5">
+                                {DEPARTMENTS.map(dept => (
+                                  <button
+                                    key={dept.value}
+                                    type="button"
+                                    onClick={() => setFormData(p => ({ ...p, category: dept.value }))}
+                                    className={`h-7 px-3 rounded-lg text-[11px] font-bold uppercase tracking-wide transition-all duration-150 border ${
+                                      formData.category === dept.value
+                                        ? 'border-transparent shadow-md scale-105 text-white'
+                                        : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-700 hover:bg-slate-50'
+                                    }`}
+                                    style={formData.category === dept.value
+                                      ? { background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }
+                                      : {}}
+                                  >
+                                    {dept.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            {/* Priority + Status */}
+                            <div className="grid grid-cols-2 gap-4">
+                              <div className="space-y-1.5">
+                                <Label className="text-[11px] font-semibold text-slate-500">Priority</Label>
+                                <Select value={formData.priority} onValueChange={(v) => setFormData(p => ({ ...p, priority: v }))}>
+                                  <SelectTrigger className="h-10 text-sm rounded-xl border-slate-200 bg-slate-50"><SelectValue /></SelectTrigger>
+                                  <SelectContent className="rounded-xl">
+                                    <SelectItem value="low">🟢 Low</SelectItem>
+                                    <SelectItem value="medium">🟡 Medium</SelectItem>
+                                    <SelectItem value="high">🔴 High</SelectItem>
+                                    <SelectItem value="critical">🚨 Critical</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label className="text-[11px] font-semibold text-slate-500">Status</Label>
+                                <Select value={formData.status} onValueChange={(v) => setFormData(p => ({ ...p, status: v }))}>
+                                  <SelectTrigger className="h-10 text-sm rounded-xl border-slate-200 bg-slate-50"><SelectValue /></SelectTrigger>
+                                  <SelectContent className="rounded-xl">
+                                    <SelectItem value="pending">📋 To Do</SelectItem>
+                                    <SelectItem value="in_progress">⚡ In Progress</SelectItem>
+                                    <SelectItem value="completed">✅ Completed</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* ── Section 4: Recurrence ── */}
+                        <div className="mx-6 mt-3 mb-5 rounded-2xl bg-white border border-slate-100 shadow-sm overflow-hidden">
+                          <div className="flex items-center gap-2.5 px-5 py-3 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
+                            <div className={`w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 ${formData.is_recurring ? 'bg-blue-50' : 'bg-slate-100'}`}>
+                              <Repeat className={`h-3.5 w-3.5 ${formData.is_recurring ? 'text-blue-600' : 'text-slate-400'}`} />
+                            </div>
+                            <span className="text-xs font-bold uppercase tracking-widest text-slate-500 flex-1">Recurrence</span>
+                            <Switch checked={formData.is_recurring} onCheckedChange={(c) => setFormData(p => ({ ...p, is_recurring: c }))} />
+                          </div>
+                          {formData.is_recurring ? (
+                            <div className="p-5 grid grid-cols-2 gap-4 bg-blue-50/40">
+                              <div className="space-y-1.5">
+                                <Label className="text-[11px] font-semibold text-blue-600">Repeat Pattern</Label>
+                                <Select value={formData.recurrence_pattern} onValueChange={(v) => setFormData(p => ({ ...p, recurrence_pattern: v }))}>
+                                  <SelectTrigger className="h-10 text-sm rounded-xl border-blue-200 bg-white"><SelectValue /></SelectTrigger>
+                                  <SelectContent className="rounded-xl">
+                                    {RECURRENCE_PATTERNS.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label className="text-[11px] font-semibold text-blue-600">Every</Label>
+                                <div className="flex items-center gap-2">
+                                  <Input
+                                    type="number" min="1" max="365"
+                                    value={formData.recurrence_interval}
+                                    onChange={(e) => setFormData(p => ({ ...p, recurrence_interval: parseInt(e.target.value) || 1 }))}
+                                    className="w-20 h-10 text-sm rounded-xl border-blue-200 bg-white"
+                                  />
+                                  <span className="text-sm text-blue-600 font-semibold">
+                                    {formData.recurrence_pattern === 'daily' && 'days'}
+                                    {formData.recurrence_pattern === 'weekly' && 'weeks'}
+                                    {formData.recurrence_pattern === 'monthly' && 'months'}
+                                    {formData.recurrence_pattern === 'yearly' && 'years'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="px-5 py-3.5 text-[12px] text-slate-400">
+                              Toggle on to make this task repeat automatically on a schedule.
+                            </div>
+                          )}
+                        </div>
+
+                        {/* ── Sticky Footer ── */}
+                        <div className="sticky bottom-0 px-6 py-4 bg-white border-t border-slate-100 flex items-center justify-between gap-3 shadow-[0_-4px_12px_rgba(0,0,0,0.06)]">
                           <Button
                             type="button"
                             variant="ghost"
@@ -2109,15 +2147,15 @@ export default function Tasks() {
                           >
                             Cancel
                           </Button>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-3">
                             {editingTask && (
-                              <span className="text-[11px] text-slate-400 hidden sm:block">Editing existing task</span>
+                              <span className="text-[11px] text-slate-400 hidden sm:block italic">Editing task</span>
                             )}
                             <Button
                               type="submit"
                               disabled={loading}
-                              className="h-10 px-7 text-sm rounded-xl font-semibold gap-2 shadow-md"
-                              style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`, color: 'white' }}
+                              className="h-10 px-7 text-sm rounded-xl font-semibold gap-2 shadow-lg hover:shadow-xl hover:brightness-110 transition-all"
+                              style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`, color: 'white' }}
                             >
                               {loading ? (
                                 <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
