@@ -630,7 +630,7 @@ def build_report_pdf(doc_record: dict) -> bytes:
             Paragraph("Similarity %", hdr_style),
             Paragraph("Risk",         hdr_style),
         ]]
-        for i, r in enumerate(phonetic_results[:20], 1):
+        for i, r in enumerate(phonetic_results, 1):
             risk_cat = _categorize_risk(r.get("individual_risk_score", 0), r.get("status", ""), r.get("match_type", ""))
             risk_clr = RISK_COLOR.get(risk_cat, AMBER)
             phon_rows.append([
