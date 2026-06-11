@@ -304,9 +304,21 @@ def build_report(query: str, scraped: Dict, class_filter: Optional[int] = None) 
         "exact_matches":    exact,
         "phonetic_matches": phonetic,
         "contains_matches": contains,
-        "all_results":      all_enriched,     # ALL classes, not just filtered
-        "focused_results":  focused_results,  # filtered class only (or all if no filter)
-        "class_breakdown":  class_breakdown,  # ALL classes found in scrape
+        # ── When a class filter is active, reports show ONLY that class ────────
+        # This ensures Exhibit A, class-wise breakdown, and match tables in both
+        # the PDF and frontend only show filings relevant to the selected class.
+        "all_results":     focused_results,   # filtered to class if class_filter set
+        "focused_results": focused_results,
+        # Class breakdown: only the filtered class row when class_filter is set,
+        # so the PDF table and frontend don't show irrelevant classes.
+        "class_breakdown": (
+            [cb for cb in class_breakdown if cb["class"] == class_filter]
+            if class_filter is not None
+            else class_breakdown
+        ),
+        # Always keep the full cross-class breakdown under a separate key so
+        # the frontend "View in all classes" feature or future features can use it.
+        "class_breakdown_all": class_breakdown,
         "recommendations":  recommendations,
         "alternative_name_suggestions": alt_suggestions,
         "source":           scraped.get("source"),
