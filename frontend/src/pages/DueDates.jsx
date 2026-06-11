@@ -206,15 +206,26 @@ function DueDateRow({ dd, ds, dLeft, isOwnOrAdmin, onEdit, onDelete, onCalendar,
           {/* Days left */}
           <div className="flex items-center justify-center overflow-hidden">
             {dd.status === 'completed' ? (
-              <span className="flex items-center gap-1 text-[10px] text-emerald-500 font-bold whitespace-nowrap">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />Done
-              </span>
+              <div className="flex flex-col items-center leading-tight text-center">
+                <span className="flex items-center gap-1 text-[10px] text-emerald-500 font-bold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />Done
+                </span>
+              </div>
             ) : (
-              <span className={`text-xs font-bold tabular-nums whitespace-nowrap ${
-                dLeft < 0 ? 'text-red-500' : dLeft <= 7 ? 'text-amber-500' : isDark ? 'text-slate-300' : 'text-slate-600'
-              }`}>
-                {dLeft < 0 ? `${Math.abs(dLeft)}d over` : `${dLeft}d left`}
-              </span>
+              <div className="flex flex-col items-center leading-tight text-center">
+                <span className={`text-xs font-bold tabular-nums ${
+                  dLeft < 0 ? 'text-red-500' : dLeft <= 7 ? 'text-amber-500' : isDark ? 'text-slate-300' : 'text-slate-600'
+                }`}>
+                  {dLeft === 0 ? 'today' : `${Math.abs(dLeft)} days`}
+                </span>
+                {dLeft !== 0 && (
+                  <span className={`text-[9px] font-semibold ${
+                    dLeft < 0 ? 'text-red-400' : dLeft <= 7 ? 'text-amber-400' : isDark ? 'text-slate-500' : 'text-slate-400'
+                  }`}>
+                    {dLeft < 0 ? 'overdue' : 'left'}
+                  </span>
+                )}
+              </div>
             )}
           </div>
 
