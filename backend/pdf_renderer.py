@@ -627,7 +627,7 @@ def _render_trademark_dossier(story: List, report: dict, branding: dict, st: dic
         story.append(Paragraph("EXHIBIT A", st["eyebrow"]))
         story.append(Paragraph("Recorded Matches", st["h2"]))
         story.append(Paragraph(
-            f"Showing top {min(len(all_results), 30)} of {len(all_results)} indexed filings for <b>{query}</b>.",
+            f"Showing all {len(all_results)} indexed filings for <b>{query}</b>.",
             st["subtitle"],
         ))
         story.append(_section_rule())
@@ -644,7 +644,7 @@ def _render_trademark_dossier(story: List, report: dict, branding: dict, st: dic
         ]
         ex_rows = [ex_hdr]
 
-        for r in all_results[:30]:
+        for r in all_results:
             mt    = (r.get("match_type") or "").lower()
             mt_c  = _match_color(mt)
             st_c  = _status_color(r.get("status", ""))
