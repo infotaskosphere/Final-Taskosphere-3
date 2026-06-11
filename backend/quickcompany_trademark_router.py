@@ -1098,10 +1098,25 @@ async def qc_bulk_reports(body: BulkReportRequest, user: User = Depends(get_curr
                 "report":     report,
             }
             await db.trademark_qc_reports.insert_one(doc)
-            items.append({**doc, "id": doc["_id"]})
+            items.append({
+                **doc,
+                "id":             doc["_id"],
+                "name":           name,            # FIX: always surface the searched name
+                "overall_status": report.get("overall_status"),
+                "risk_score":     report.get("risk_score"),
+                "headline":       report.get("headline"),
+            })
         except Exception as exc:
             items.append({"name": name, "error": str(exc)})
-    return {"items": items, "count": len(items)}
+
+    # Compute portfolio analytics so the frontend can show the summary grid
+    from backend.trademark_bulk import enrich_report_with_analytics, compute_portfolio_analytics
+    for it in items:
+        if not it.get("error") and it.get("report"):
+            enrich_report_with_analytics(it["report"], enable_monitoring=body.enable_monitoring)
+    analytics = compute_portfolio_analytics(items)
+
+    return {"items": items, "count": len(items), "analytics": analytics}
 
 
 @router.post("/bulk/export")
