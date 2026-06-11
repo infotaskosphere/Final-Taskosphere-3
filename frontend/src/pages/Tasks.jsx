@@ -15,6 +15,7 @@ import { Checkbox } from '../components/ui/checkbox';
 import { Badge } from '../components/ui/badge';
 import { Switch } from '../components/ui/switch';
 import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
+import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from '../components/ui/command';
 
 // ✅ OTHER LIBS
 import { toast } from 'sonner';
@@ -30,7 +31,7 @@ import {
   X, ChevronDown, Filter, Clock, AlertCircle, CheckCircle2,
   TrendingUp, MoreHorizontal, Copy, SlidersHorizontal,
   Briefcase, Target, Activity, ChevronRight, Sun,
-  Loader2, Mail, Send, Trophy, Medal, Star, Zap, Crown,
+  Loader2, Mail, Send, Trophy, Medal, Star, Zap, Crown, ChevronsUpDown,
 } from 'lucide-react';
 import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
 
@@ -472,16 +473,25 @@ const TaskRow = ({
             </span>
           </div>
 
-          <div className={`flex items-center justify-center gap-1 overflow-hidden px-1 ${isOverdue ? 'text-red-600' : 'text-slate-500'}`}>
+          <div className={`flex items-center justify-center overflow-hidden px-1 ${isOverdue ? 'text-red-600' : 'text-slate-500'}`}>
             {task.due_date ? (
-              <>
-                <Clock className="h-3 w-3 flex-shrink-0" />
-                <span className="text-[10px] font-medium truncate">{getRelativeDueDate(task.due_date)}</span>
-              </>
+              isOverdue ? (
+                <div className="flex flex-col items-center leading-tight">
+                  <span className="text-[10px] font-semibold whitespace-nowrap">
+                    {Math.abs(Math.ceil((new Date(task.due_date) - new Date()) / 86400000))} days
+                  </span>
+                  <span className="text-[9px] font-bold uppercase tracking-wide">Overdue</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1">
+                  <Clock className="h-3 w-3 flex-shrink-0" />
+                  <span className="text-[10px] font-medium truncate">{getRelativeDueDate(task.due_date)}</span>
+                </div>
+              )
             ) : <span className="text-slate-300 text-[10px]">—</span>}
           </div>
 
-          <div className="flex items-center justify-end gap-0 opacity-0 group-hover:opacity-100 transition-opacity overflow-hidden">
+          <div className="flex items-center justify-end gap-0 opacity-100 transition-opacity overflow-hidden">
             {canModifyTask(task) && (
               <button onClick={() => setExpanded(v => !v)}
                 className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors" title="Expand">
@@ -761,6 +771,7 @@ export default function Tasks() {
   const [filterTodayNew,      setFilterTodayNew]      = useState(false);
   const [filterPending,       setFilterPending]       = useState(false);
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
+  const [clientPopoverOpen,   setClientPopoverOpen]   = useState(false);
   const [duplicateGroups,     setDuplicateGroups]     = useState([]);
   const [detectingDuplicates, setDetectingDuplicates] = useState(false);
   const [aiProvider, setAiProvider] = useState('auto'); // 'auto' | 'gemini' | 'grok' | 'local'
@@ -1814,29 +1825,70 @@ export default function Tasks() {
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1.5">
                           <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Client</Label>
-                          <Select value={formData.client_id || 'no_client'} onValueChange={(v) => {
-                            const clientId = v === 'no_client' ? '' : v;
-                            if (clientId && !editingTask) {
-                              const selectedClient = clients.find(c => c.id === clientId);
-                              // Determine assigned user from assignments array or legacy assigned_to
-                              const assignedUserId = selectedClient?.assignments?.length > 0
-                                ? selectedClient.assignments[0].user_id
-                                : selectedClient?.assigned_to || null;
-                              setFormData(p => ({
-                                ...p,
-                                client_id: clientId,
-                                assigned_to: assignedUserId || p.assigned_to,
-                              }));
-                            } else {
-                              setFormData(p => ({ ...p, client_id: clientId }));
-                            }
-                          }}>
-                            <SelectTrigger className="h-10 text-sm border-slate-300"><SelectValue placeholder="No Client" /></SelectTrigger>
-                            <SelectContent className="max-h-52 overflow-y-auto">
-                              <SelectItem value="no_client">No Client</SelectItem>
-                              {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.company_name}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
+                          <Popover open={clientPopoverOpen} onOpenChange={setClientPopoverOpen}>
+                            <PopoverTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                role="combobox"
+                                aria-expanded={clientPopoverOpen}
+                                className="h-10 w-full text-sm border-slate-300 font-normal justify-between"
+                              >
+                                <span className="truncate">
+                                  {formData.client_id
+                                    ? (clients.find(c => c.id === formData.client_id)?.company_name || 'No Client')
+                                    : 'No Client'}
+                                </span>
+                                <ChevronsUpDown className="ml-2 h-4 w-4 flex-shrink-0 opacity-50" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                              <Command>
+                                <CommandInput placeholder="Search clients…" className="h-9" />
+                                <CommandList className="max-h-64 overflow-y-auto">
+                                  <CommandEmpty>No client found.</CommandEmpty>
+                                  <CommandGroup>
+                                    <CommandItem
+                                      value="No Client"
+                                      onSelect={() => {
+                                        setFormData(p => ({ ...p, client_id: '' }));
+                                        setClientPopoverOpen(false);
+                                      }}
+                                    >
+                                      <Check className={`mr-2 h-4 w-4 ${!formData.client_id ? 'opacity-100' : 'opacity-0'}`} />
+                                      No Client
+                                    </CommandItem>
+                                    {clients.map(c => (
+                                      <CommandItem
+                                        key={c.id}
+                                        value={c.company_name}
+                                        onSelect={() => {
+                                          const clientId = c.id;
+                                          if (!editingTask) {
+                                            // Determine assigned user from assignments array or legacy assigned_to
+                                            const assignedUserId = c?.assignments?.length > 0
+                                              ? c.assignments[0].user_id
+                                              : c?.assigned_to || null;
+                                            setFormData(p => ({
+                                              ...p,
+                                              client_id: clientId,
+                                              assigned_to: assignedUserId || p.assigned_to,
+                                            }));
+                                          } else {
+                                            setFormData(p => ({ ...p, client_id: clientId }));
+                                          }
+                                          setClientPopoverOpen(false);
+                                        }}
+                                      >
+                                        <Check className={`mr-2 h-4 w-4 ${formData.client_id === c.id ? 'opacity-100' : 'opacity-0'}`} />
+                                        <span className="truncate">{c.company_name}</span>
+                                      </CommandItem>
+                                    ))}
+                                  </CommandGroup>
+                                </CommandList>
+                              </Command>
+                            </PopoverContent>
+                          </Popover>
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Due Date</Label>
