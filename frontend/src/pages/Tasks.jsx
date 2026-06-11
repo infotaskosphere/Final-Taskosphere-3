@@ -1848,10 +1848,11 @@ export default function Tasks() {
                                 <ChevronsUpDown className="ml-2 h-4 w-4 flex-shrink-0 opacity-50" />
                               </Button>
                             </PopoverTrigger>
-                            <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                            <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start" style={{ zIndex: 9999 }}>
                               <Command>
                                 <CommandInput placeholder="Search clients…" className="h-9" />
-                                <CommandList className="max-h-64 overflow-y-auto">
+                                <CommandList className="max-h-80 overflow-y-auto"
+                                  onWheel={(e) => e.stopPropagation()}>
                                   <CommandEmpty>No client found.</CommandEmpty>
                                   <CommandGroup>
                                     <CommandItem
@@ -2317,50 +2318,98 @@ export default function Tasks() {
         );
       })()}
 
-      {/* ── RANKING BOOSTER WIDGET ─────────────────────────────────────────── */}
-      {rankingsLoaded && myRanking && (() => {
-        const { rank, totalUsers, overall_score, badge, task_completion_percent, rankings } = myRanking;
-        const prevRank = rank > 1 ? rankings[rank - 2] : null;
-        const pointsToNext = prevRank ? Math.ceil(prevRank.overall_score - overall_score + 0.1) : 0;
+      {/* ── PERFORMANCE SCORE WIDGET ────────────────────────────────────────── */}
+      {(() => {
+        if (myTasks.length === 0) return null;
 
-        // How many tasks to complete to gain ~5 points (task weight = 0.25)
-        const pendingCount = stats.todo + stats.inProgress;
-        const tasksNeededForNextRank = prevRank
-          ? Math.max(1, Math.ceil((prevRank.overall_score - overall_score) / 2.5))
-          : 0;
+        // ── Working days remaining this month (Mon–Fri only) ──
+        const today = new Date();
+        const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+        let workingDaysLeft = 0;
+        const cursor = new Date(today);
+        cursor.setHours(0, 0, 0, 0);
+        while (cursor <= lastDay) {
+          const dow = cursor.getDay();
+          if (dow !== 0 && dow !== 6) workingDaysLeft++;
+          cursor.setDate(cursor.getDate() + 1);
+        }
 
-        const rankColor = rank === 1 ? '#F59E0B' : rank <= 3 ? '#60A5FA' : COLORS.mediumBlue;
-        const badgeColor = badge === 'Star Performer' ? '#F59E0B' : badge === 'Top Performer' ? '#60A5FA' : COLORS.emeraldGreen;
-        const scoreColor = overall_score >= 85 ? COLORS.emeraldGreen : overall_score >= 65 ? COLORS.amber : COLORS.coral;
+        // ── Local metrics from actual task data ──
+        const myCompleted = myTasks.filter(t => t.status === 'completed').length;
+        const myTotal     = myTasks.length;
+        const myPending   = myTasks.filter(t => t.status !== 'completed').length;
+        const myOverdue   = myTasks.filter(t => isOverdue(t)).length;
+
+        const completedWithDue = myTasks.filter(t => t.status === 'completed' && t.due_date);
+        const onTimeCompleted  = completedWithDue.filter(t => {
+          if (!t.completed_at) return false;
+          return new Date(t.completed_at) <= new Date(t.due_date);
+        }).length;
+        const onTimeRate    = completedWithDue.length > 0 ? Math.round((onTimeCompleted / completedWithDue.length) * 100) : 100;
+        const completionPct = myTotal > 0 ? Math.round((myCompleted / myTotal) * 100) : 0;
+        const healthPct     = myTotal > 0 ? Math.max(0, Math.round(((myTotal - myOverdue) / myTotal) * 100)) : 100;
+
+        // ── Composite local score (weighted) ──
+        const localScore = Math.round(completionPct * 0.5 + healthPct * 0.3 + onTimeRate * 0.2);
+
+        // ── Prefer API score/rank if loaded, fall back to local ──
+        const apiRank    = rankingsLoaded && myRanking ? myRanking.rank       : null;
+        const totalUsers = rankingsLoaded && myRanking ? myRanking.totalUsers  : null;
+        const apiBadge   = rankingsLoaded && myRanking ? myRanking.badge       : null;
+        const apiScore   = rankingsLoaded && myRanking ? myRanking.overall_score : null;
+        const apiAttendance  = rankingsLoaded && myRanking ? (myRanking.attendance_percent  ?? null) : null;
+        const displayScore   = apiScore !== null ? apiScore : localScore;
+        const displayBadge   = apiBadge  || (localScore >= 85 ? 'Star Performer' : localScore >= 65 ? 'Top Performer' : 'Rising Star');
+
+        // ── Improve-rank insight ──
+        const dailyTarget   = workingDaysLeft > 0 ? Math.ceil(myPending / workingDaysLeft) : myPending;
+        const nextTierScore = localScore < 65 ? 65 : localScore < 85 ? 85 : 100;
+        const nextTierName  = localScore < 65 ? 'Top Performer' : localScore < 85 ? 'Star Performer' : 'Perfect Score';
+        const tasksForTier  = Math.max(1, Math.ceil((nextTierScore - localScore) / 4));
+
+        // Rank-climb hint (when API rank available)
+        const prevRankUser        = apiRank && apiRank > 1 && myRanking?.rankings ? myRanking.rankings[apiRank - 2] : null;
+        const tasksForNextApiRank = prevRankUser
+          ? Math.max(1, Math.ceil((prevRankUser.overall_score - (apiScore || localScore)) / 2.5))
+          : null;
+
+        const rankColor  = apiRank === 1 ? '#F59E0B' : apiRank !== null && apiRank <= 3 ? '#60A5FA' : COLORS.mediumBlue;
+        const scoreColor = displayScore >= 85 ? COLORS.emeraldGreen : displayScore >= 65 ? COLORS.amber : COLORS.coral;
+        const badgeColor = displayBadge === 'Star Performer' ? '#F59E0B' : displayBadge === 'Top Performer' ? '#60A5FA' : COLORS.emeraldGreen;
 
         return (
           <motion.div variants={itemVariants}>
             <div className={`rounded-2xl border overflow-hidden ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-200'}`}
-              style={{ boxShadow: `0 2px 16px ${rankColor}18` }}>
+              style={{ boxShadow: `0 2px 16px ${scoreColor}18` }}>
               <div className="p-4 flex flex-col lg:flex-row gap-5">
 
-                {/* ── Left: Rank + badge ── */}
+                {/* ── Left: Score badge + rank ── */}
                 <div className="flex items-center gap-4 lg:w-56 flex-shrink-0">
                   <div className="relative flex-shrink-0">
                     <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
-                      style={{ background: `${rankColor}18`, border: `2px solid ${rankColor}44` }}>
-                      {rank === 1 ? <Crown className="h-7 w-7" style={{ color: rankColor }} />
-                        : rank <= 3 ? <Medal className="h-7 w-7" style={{ color: rankColor }} />
-                        : <Trophy className="h-7 w-7" style={{ color: rankColor }} />}
+                      style={{ background: `${scoreColor}18`, border: `2px solid ${scoreColor}44` }}>
+                      {apiRank === 1 ? <Crown className="h-7 w-7" style={{ color: scoreColor }} />
+                        : apiRank !== null && apiRank <= 3 ? <Medal className="h-7 w-7" style={{ color: scoreColor }} />
+                        : <Trophy className="h-7 w-7" style={{ color: scoreColor }} />}
                     </div>
-                    <span className="absolute -top-1.5 -right-1.5 text-[10px] font-black px-1.5 py-0.5 rounded-full"
-                      style={{ background: rankColor, color: '#fff' }}>
-                      #{rank}
-                    </span>
+                    {apiRank !== null && (
+                      <span className="absolute -top-1.5 -right-1.5 text-[10px] font-black px-1.5 py-0.5 rounded-full"
+                        style={{ background: rankColor, color: '#fff' }}>
+                        #{apiRank}
+                      </span>
+                    )}
                   </div>
                   <div>
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Your Ranking</p>
-                    <p className="text-xl font-black leading-tight" style={{ color: rankColor }}>
-                      {rank} <span className="text-sm font-semibold text-slate-400">/ {totalUsers}</span>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Performance</p>
+                    <p className="text-xl font-black leading-tight" style={{ color: scoreColor }}>
+                      {Math.round(displayScore)}<span className="text-sm font-semibold text-slate-400">/100</span>
                     </p>
-                    <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full mt-0.5"
+                    {apiRank !== null && totalUsers !== null && (
+                      <p className="text-[10px] font-semibold text-slate-400 mb-0.5">Rank {apiRank}/{totalUsers}</p>
+                    )}
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full"
                       style={{ background: `${badgeColor}18`, color: badgeColor }}>
-                      <Star className="h-2.5 w-2.5" /> {badge}
+                      <Star className="h-2.5 w-2.5" /> {displayBadge}
                     </span>
                   </div>
                 </div>
@@ -2368,26 +2417,26 @@ export default function Tasks() {
                 {/* Divider */}
                 <div className={`hidden lg:block w-px flex-shrink-0 ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`} />
 
-                {/* ── Middle: Score breakdown ── */}
+                {/* ── Middle: Score breakdown bars ── */}
                 <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2.5">Performance Score</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2.5">Score Breakdown</p>
                   <div className="flex items-center gap-3 mb-3">
                     <div className="relative w-10 h-10 flex-shrink-0">
                       <svg viewBox="0 0 44 44" className="w-10 h-10 -rotate-90">
                         <circle cx="22" cy="22" r="17" strokeWidth="4" fill="none"
                           stroke={isDark ? '#334155' : '#e2e8f0'} />
                         <circle cx="22" cy="22" r="17" strokeWidth="4" fill="none"
-                          strokeDasharray={`${(overall_score / 100) * 106.8} 106.8`}
+                          strokeDasharray={`${(displayScore / 100) * 106.8} 106.8`}
                           strokeLinecap="round" stroke={scoreColor} />
                       </svg>
                       <span className="absolute inset-0 flex items-center justify-center text-[9px] font-black"
-                        style={{ color: scoreColor }}>{Math.round(overall_score)}</span>
+                        style={{ color: scoreColor }}>{Math.round(displayScore)}</span>
                     </div>
                     <div className="flex-1 space-y-1.5">
                       {[
-                        { label: 'Task Completion', val: myRanking.task_completion_percent, color: COLORS.mediumBlue },
-                        { label: 'Attendance', val: myRanking.attendance_percent, color: COLORS.emeraldGreen },
-                        { label: 'On-Time Todos', val: myRanking.todo_ontime_percent, color: COLORS.amber },
+                        { label: 'Task Completion', val: apiScore !== null ? (myRanking.task_completion_percent ?? completionPct) : completionPct, color: COLORS.mediumBlue },
+                        { label: 'Task Health', val: apiAttendance !== null ? apiAttendance : healthPct, color: COLORS.emeraldGreen },
+                        { label: 'On-Time Rate', val: apiScore !== null ? (myRanking.todo_ontime_percent ?? onTimeRate) : onTimeRate, color: COLORS.amber },
                       ].map(({ label, val, color }) => (
                         <div key={label} className="flex items-center gap-2">
                           <span className="text-[9px] w-24 flex-shrink-0 font-medium text-slate-400">{label}</span>
@@ -2395,10 +2444,10 @@ export default function Tasks() {
                             <motion.div className="h-full rounded-full"
                               style={{ background: color }}
                               initial={{ width: 0 }}
-                              animate={{ width: `${Math.min(val, 100)}%` }}
+                              animate={{ width: `${Math.min(val ?? 0, 100)}%` }}
                               transition={{ duration: 0.6, ease: 'easeOut' }} />
                           </div>
-                          <span className="text-[9px] font-bold w-7 text-right" style={{ color }}>{Math.round(val)}%</span>
+                          <span className="text-[9px] font-bold w-7 text-right" style={{ color }}>{Math.round(val ?? 0)}%</span>
                         </div>
                       ))}
                     </div>
@@ -2408,47 +2457,64 @@ export default function Tasks() {
                 {/* Divider */}
                 <div className={`hidden lg:block w-px flex-shrink-0 ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`} />
 
-                {/* ── Right: Suggestions to climb rank ── */}
-                <div className="lg:w-60 flex-shrink-0 flex flex-col gap-2.5">
+                {/* ── Right: Working days + insights ── */}
+                <div className="lg:w-64 flex-shrink-0 flex flex-col gap-2.5">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                    {rank === 1 ? '🏆 You\'re #1!' : `🚀 Climb to Rank #${rank - 1}`}
+                    📅 This Month
                   </p>
 
-                  {rank === 1 ? (
+                  {/* Working days card */}
+                  <div className={`rounded-xl p-3 border ${isDark ? 'bg-blue-900/20 border-blue-800/40' : 'bg-blue-50 border-blue-100'}`}>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Calendar className="h-3 w-3 text-blue-500 flex-shrink-0" />
+                      <p className="text-[10px] font-bold text-blue-600 dark:text-blue-300 uppercase tracking-wide">
+                        {workingDaysLeft} working day{workingDaysLeft !== 1 ? 's' : ''} remaining
+                      </p>
+                    </div>
+                    <p className="text-[11px] font-medium leading-relaxed" style={{ color: isDark ? '#93c5fd' : '#1e40af' }}>
+                      {myPending > 0 ? (
+                        <>You have <strong>{myPending}</strong> pending task{myPending !== 1 ? 's' : ''}. Complete ~<strong>{dailyTarget}</strong>/day to finish this month.</>
+                      ) : (
+                        <>All tasks cleared! Great work this month. 🎉</>
+                      )}
+                    </p>
+                  </div>
+
+                  {/* Rank-climb hint when API data available */}
+                  {tasksForNextApiRank !== null && apiRank !== null && apiRank > 1 ? (
                     <div className={`rounded-xl p-3 border ${isDark ? 'bg-amber-900/20 border-amber-800/40' : 'bg-amber-50 border-amber-100'}`}>
-                      <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-300 leading-relaxed">
-                        🎉 You're the top performer! Keep completing tasks on time to maintain your crown.
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Zap className="h-3 w-3 text-amber-500 flex-shrink-0" />
+                        <p className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wide">
+                          🚀 Climb to Rank #{apiRank - 1}
+                        </p>
+                      </div>
+                      <p className="text-[11px] font-medium leading-relaxed" style={{ color: isDark ? '#fde68a' : '#92400e' }}>
+                        Complete <strong>{tasksForNextApiRank}</strong> more task{tasksForNextApiRank !== 1 ? 's' : ''} to overtake{' '}
+                        <strong>{prevRankUser?.user_name?.split(' ')[0] || 'the next person'}</strong> and reach Rank #{apiRank - 1}.
+                      </p>
+                    </div>
+                  ) : apiRank === 1 ? (
+                    <div className={`rounded-xl p-3 border ${isDark ? 'bg-amber-900/20 border-amber-800/40' : 'bg-amber-50 border-amber-100'}`}>
+                      <p className="text-[11px] font-semibold leading-relaxed" style={{ color: isDark ? '#fde68a' : '#92400e' }}>
+                        🏆 You're #1! Keep completing tasks on time to hold your crown.
                       </p>
                     </div>
                   ) : (
-                    <>
-                      <div className={`rounded-xl p-3 border ${isDark ? 'bg-blue-900/20 border-blue-800/40' : 'bg-blue-50 border-blue-100'}`}>
+                    /* Score-tier improvement hint (local) */
+                    myPending > 0 && localScore < 100 && (
+                      <div className={`rounded-xl p-3 border ${isDark ? 'bg-emerald-900/20 border-emerald-800/40' : 'bg-emerald-50 border-emerald-100'}`}>
                         <div className="flex items-center gap-1.5 mb-1">
-                          <Zap className="h-3 w-3 text-blue-500 flex-shrink-0" />
-                          <p className="text-[10px] font-bold text-blue-600 dark:text-blue-300 uppercase tracking-wide">
-                            {pointsToNext} pts needed
+                          <Zap className="h-3 w-3 text-emerald-500 flex-shrink-0" />
+                          <p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">
+                            Boost your score
                           </p>
                         </div>
-                        <p className="text-[11px] font-medium leading-relaxed" style={{ color: isDark ? '#93c5fd' : '#1e40af' }}>
-                          Complete <strong>{tasksNeededForNextRank}</strong> more task{tasksNeededForNextRank !== 1 ? 's' : ''} to overtake{' '}
-                          <strong>{prevRank?.user_name?.split(' ')[0] || 'next rank'}</strong> and reach{' '}
-                          <strong>Rank #{rank - 1}</strong>.
+                        <p className="text-[11px] font-medium leading-relaxed" style={{ color: isDark ? '#6ee7b7' : '#065f46' }}>
+                          Complete <strong>{Math.min(tasksForTier, myPending)}</strong> more task{Math.min(tasksForTier, myPending) !== 1 ? 's' : ''} to reach <strong>{nextTierName}</strong> status.
                         </p>
                       </div>
-                      {pendingCount > 0 && (
-                        <div className={`rounded-xl p-3 border ${isDark ? 'bg-emerald-900/20 border-emerald-800/40' : 'bg-emerald-50 border-emerald-100'}`}>
-                          <div className="flex items-center gap-1.5 mb-1">
-                            <CheckCircle2 className="h-3 w-3 text-emerald-500 flex-shrink-0" />
-                            <p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">
-                              {pendingCount} task{pendingCount !== 1 ? 's' : ''} pending
-                            </p>
-                          </div>
-                          <p className="text-[11px] font-medium leading-relaxed" style={{ color: isDark ? '#6ee7b7' : '#065f46' }}>
-                            Finish your <strong>{Math.min(tasksNeededForNextRank, pendingCount)}</strong> priority task{Math.min(tasksNeededForNextRank, pendingCount) !== 1 ? 's' : ''} today to jump up the leaderboard.
-                          </p>
-                        </div>
-                      )}
-                    </>
+                    )
                   )}
                 </div>
 
