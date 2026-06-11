@@ -720,11 +720,15 @@ function SearchBar({ onSubmit, loading, defaultClass, client, T }) {
     e.preventDefault();
     if (!name.trim() || loading) return;
     if (multiMode && multiClasses.length > 0) {
-      // Fire one search per selected class in sequence
-      multiClasses.forEach((cls, idx) => {
-        setTimeout(() => {
-          onSubmit(name.trim(), { class_filter: cls, device_only: deviceOnly, logo_data_url: logoDataUrl, _multiClass: true, _multiIdx: idx, _multiTotal: multiClasses.length });
-        }, idx * 200);
+      // Single call with ALL selected classes — backend scrapes each class-specific URL
+      // This is more efficient than N separate calls and guarantees consistent data
+      onSubmit(name.trim(), {
+        class_filter: multiClasses[0],       // primary class for verdict focus
+        class_filters: multiClasses,         // all classes for comprehensive scraping
+        device_only: deviceOnly,
+        logo_data_url: logoDataUrl,
+        _multiClass: true,
+        _multiTotal: multiClasses.length,
       });
       toast.info(`Running report for "${name.trim()}" across ${multiClasses.length} classes…`);
     } else {
@@ -1787,7 +1791,10 @@ export default function TrademarkSphere() {
       });
       setReport(data.report);
       setActiveId(data.id);
-      toast.success(`Report ready — ${data.report.overall_status}`);
+      const classInfo = opts.class_filters?.length > 1
+        ? ` (${opts.class_filters.length} classes, ${data.report.summary_counts?.total_all_classes ?? data.report.summary_counts?.total_results ?? "?"} total matches)`
+        : "";
+      toast.success(`Report ready — ${data.report.overall_status}${classInfo}`);
       refreshHistory();
     } catch (e) {
       const msg = e?.response?.data?.detail || e.message || "Failed to generate report";
