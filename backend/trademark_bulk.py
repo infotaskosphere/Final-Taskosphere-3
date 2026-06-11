@@ -785,7 +785,7 @@ def build_bulk_docx(items: List[dict], branding: Dict[str, Any], analytics: Dict
             for i, h in enumerate(["App. No.", "Mark", "Applicant", "Status", "Class", "Match", "Risk"]):
                 et.rows[0].cells[i].text = h
                 for r in et.rows[0].cells[i].paragraphs[0].runs: r.bold = True
-            for row in all_results[:200]:
+            for row in (rep.get("all_results") or []):
                 rr = et.add_row().cells
                 rr[0].text = str(row.get("application_no") or row.get("application_number") or "")
                 rr[1].text = str(row.get("name") or "")
