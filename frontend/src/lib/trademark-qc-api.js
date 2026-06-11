@@ -87,10 +87,10 @@ export async function deleteReport(reportId) {
  * Use bulkReportsBranded() when you need per-report PDFs to match bulk PDF branding.
  */
 export async function bulkReports(names, opts = {}) {
-  const { class_filter = null, device_only = false } = opts;
+  const { class_filter = null, class_filters = null, device_only = false } = opts;
   const { data } = await api.post(
     "/trademark-qc/bulk",
-    { names, class_filter, device_only },
+    { names, class_filter, class_filters, device_only },
     { timeout: 120000 }
   );
   return data;
@@ -144,6 +144,7 @@ export async function bulkExport(names, opts = {}, format = "pdf") {
   const body = {
     names,
     class_filter:      opts.class_filter      ?? null,
+    class_filters:     opts.class_filters      || null,
     device_only:       !!opts.device_only,
     logo_data_url:     opts.logo_data_url     || null,
     footer:            opts.footer            || "",
