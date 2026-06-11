@@ -433,6 +433,72 @@ def _render_trademark_dossier(story: List, report: dict, branding: dict, st: dic
     story.append(verdict_tbl)
     story.append(Spacer(1, 10))
 
+    # ── PLAIN-LANGUAGE VERDICT (Layman Summary) ───────────────────────────────
+    if overall == "AVAILABLE":
+        plain_icon  = "✔"
+        plain_color = colors.HexColor("#166534")
+        plain_bg    = colors.HexColor("#DCFCE7")
+        plain_border= colors.HexColor("#86EFAC")
+        plain_head  = "Good News — You Can Likely File This Trademark"
+        plain_body  = (
+            f"No identical or very similar trademark for <b>\"{query}\"</b> was found in the "
+            "registry. This means your chances of getting this name registered are high. "
+            "However, always do a final check with a trademark attorney before filing, because "
+            "the registry may still raise an objection based on details not visible in this search."
+        )
+        plain_action = "✅ Recommended Action: Proceed with filing — engage a trademark attorney to draft the application."
+    elif overall == "CONFLICT":
+        plain_icon  = "✘"
+        plain_color = colors.HexColor("#7F1D1D")
+        plain_bg    = colors.HexColor("#FEE2E2")
+        plain_border= colors.HexColor("#FCA5A5")
+        plain_head  = "Caution — Strong Conflicts Found, Filing is Risky"
+        plain_body  = (
+            f"One or more trademarks very similar to <b>\"{query}\"</b> already exist and are "
+            "active in the same category. If you file now, the registry will very likely reject "
+            "your application — or the existing owner can challenge and cancel it even after "
+            "registration. This does NOT mean you can never use the name — but filing as-is is risky."
+        )
+        plain_action = "⚠ Recommended Action: Consult a trademark attorney before filing. Consider modifying the name or filing in a different class."
+    else:
+        plain_icon  = "◐"
+        plain_color = colors.HexColor("#92400E")
+        plain_bg    = colors.HexColor("#FEF3C7")
+        plain_border= colors.HexColor("#FCD34D")
+        plain_head  = "Proceed with Care — Some Similar Marks Exist"
+        plain_body  = (
+            f"Some trademarks with names or sounds similar to <b>\"{query}\"</b> were found, but "
+            "none are an exact match. Registration may still be possible, but the registry "
+            "could raise an objection. The outcome depends on how different your goods/services "
+            "are from the existing marks and how distinctly your brand is presented."
+        )
+        plain_action = "🔍 Recommended Action: Get a legal opinion before filing. A small change to the name or logo may significantly improve your chances."
+
+    plain_tbl = Table([[
+        Paragraph(
+            f'<font color="{plain_color.hexval()}"><b>{plain_icon} {plain_head}</b></font><br/><br/>'
+            f'{plain_body}<br/><br/>'
+            f'<font color="{plain_color.hexval()}"><i>{plain_action}</i></font>',
+            ParagraphStyle(
+                "plain_body",
+                fontName="Helvetica", fontSize=9, textColor=TEXT,
+                leading=14, spaceAfter=0,
+            ),
+        )
+    ]], colWidths=[CONTENT_W])
+    plain_tbl.setStyle(TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, -1), plain_bg),
+        ("BOX",           (0, 0), (-1, -1), 1.0, plain_border),
+        ("TOPPADDING",    (0, 0), (-1, -1), 12),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 14),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 14),
+    ]))
+    story.append(Paragraph("WHAT THIS MEANS FOR YOU", st["eyebrow"]))
+    story.append(_section_rule())
+    story.append(plain_tbl)
+    story.append(Spacer(1, 10))
+
     # ── MATCH COUNTS ─────────────────────────────────────────────────────────
     story.append(Paragraph("MATCH COUNTS", st["eyebrow"]))
     story.append(_section_rule())
@@ -842,6 +908,61 @@ def build_combined_report_pdf(items: list, branding: dict) -> bytes:
             [[Paragraph(f"{i:02d}.", st["rec_num"]), Paragraph(rec, st["rec_text"])]],
             colWidths=[10 * mm, CONTENT_W - 10 * mm],
         )]))
+    story.append(Spacer(1, 12))
+
+    # ── PLAIN-LANGUAGE PORTFOLIO GUIDE ───────────────────────────────────────
+    if conflict == 0 and caution == 0:
+        pl_bg = EMERALD_BG; pl_bd = colors.HexColor("#86EFAC"); pl_c = EMERALD
+        pl_icon = "✔"; pl_head = "All Marks Look Clear — Good Position to File"
+        pl_body = (
+            f"All <b>{total}</b> brand name(s) searched appear to be available with no major "
+            "conflicts found. You are in a strong position to begin trademark registration. "
+            "Review individual dossiers below for mark-specific details."
+        )
+    elif conflict >= total // 2 + 1:
+        pl_bg = RED_BG; pl_bd = colors.HexColor("#FCA5A5"); pl_c = RED
+        pl_icon = "✘"; pl_head = "Most Marks Have Conflicts — Seek Legal Advice Before Filing"
+        pl_body = (
+            f"Out of <b>{total}</b> marks searched, <b>{conflict}</b> have significant "
+            "conflicts with already-registered trademarks. Filing these names as-is risks "
+            "rejection or legal challenge. Consider alternate names (see each dossier) or "
+            "consult a trademark attorney for a modified filing strategy."
+        )
+    else:
+        pl_bg = AMBER_BG; pl_bd = colors.HexColor("#FCD34D"); pl_c = AMBER
+        pl_icon = "◐"; pl_head = "Mixed Results — Some Marks Ready, Others Need Review"
+        pl_body = (
+            f"Of <b>{total}</b> marks: <b>{available}</b> appear available to file, "
+            f"<b>{caution}</b> need caution and deeper review, and <b>{conflict}</b> have "
+            "strong conflicts. Focus on marks labelled 'Available' and get a legal opinion "
+            "for those marked 'Caution' or 'Conflict' before spending on filing fees."
+        )
+    action_lines = []
+    if available:
+        action_lines.append(f"✅ <b>{available} mark(s)</b> — Safe to proceed with filing.")
+    if caution:
+        action_lines.append(f"🔍 <b>{caution} mark(s)</b> — Get a legal opinion first.")
+    if conflict:
+        action_lines.append(f"⚠ <b>{conflict} mark(s)</b> — Avoid filing without attorney review or name modification.")
+    action_lines.append("📋 Verify final results on the official IP India database (ipindia.gov.in) before filing.")
+
+    pl_tbl = Table([[Paragraph(
+        f'<font color="{pl_c.hexval()}"><b>{pl_icon}  {pl_head}</b></font><br/><br/>'
+        f'{pl_body}<br/><br/>'
+        + "<br/>".join(action_lines),
+        ParagraphStyle("pl_p", fontName="Helvetica", fontSize=9, textColor=TEXT, leading=14),
+    )]], colWidths=[CONTENT_W])
+    pl_tbl.setStyle(TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, -1), pl_bg),
+        ("BOX",           (0, 0), (-1, -1), 1.0, pl_bd),
+        ("TOPPADDING",    (0, 0), (-1, -1), 12),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 14),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 14),
+    ]))
+    story.append(Paragraph("WHAT THIS MEANS FOR YOU — PLAIN LANGUAGE GUIDE", st["eyebrow"]))
+    story.append(_section_rule())
+    story.append(pl_tbl)
     story.append(Spacer(1, 12))
 
     # Mark-by-mark summary table
