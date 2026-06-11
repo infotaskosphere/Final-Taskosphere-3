@@ -681,19 +681,30 @@ function ClientSelector({ value, onChange, T }) {
 
 // ─── Main Search Bar ──────────────────────────────────────────────────────────
 function SearchBar({ onSubmit, loading, defaultClass, client, T }) {
-  const [name, setName] = useState("");
-  const [klass, setKlass] = useState(defaultClass || "");
-  const [deviceOnly, setDeviceOnly] = useState(false);
+  const [name, setName]               = useState("");
+  const [klass, setKlass]             = useState(defaultClass || "");
+  const [multiClasses, setMultiClasses] = useState([]);    // array of class numbers for multi-class mode
+  const [multiMode, setMultiMode]     = useState(false);
+  const [deviceOnly, setDeviceOnly]   = useState(false);
   const [logoDataUrl, setLogoDataUrl] = useState(null);
-  const [logoName, setLogoName] = useState(null);
+  const [logoName, setLogoName]       = useState(null);
+  const [classDropOpen, setClassDropOpen] = useState(false);
   const fileRef = useRef();
+  const dropRef = useRef();
 
   useEffect(() => { if (defaultClass !== undefined) setKlass(String(defaultClass || "")); }, [defaultClass]);
   useEffect(() => { if (client?.company_name && !name) setName(client.company_name); }, [client]);
 
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e) => { if (dropRef.current && !dropRef.current.contains(e.target)) setClassDropOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
   const handleFile = async (e) => {
     const f = e.target.files?.[0];
-    if (!f) return;
+    if (!f) return toast.error("Please upload an image file");
     if (!/^image\//.test(f.type)) return toast.error("Please upload an image file");
     if (f.size > 350_000) return toast.error("Logo must be under 350 KB");
     const reader = new FileReader();
@@ -701,36 +712,108 @@ function SearchBar({ onSubmit, loading, defaultClass, client, T }) {
     reader.readAsDataURL(f);
   };
 
+  const toggleMultiClass = (num) => {
+    setMultiClasses(prev => prev.includes(num) ? prev.filter(c => c !== num) : [...prev, num].sort((a,b) => a-b));
+  };
+
   const submit = (e) => {
     e.preventDefault();
     if (!name.trim() || loading) return;
-    onSubmit(name.trim(), { class_filter: klass ? Number(klass) : null, device_only: deviceOnly, logo_data_url: logoDataUrl });
+    if (multiMode && multiClasses.length > 0) {
+      // Fire one search per selected class in sequence
+      multiClasses.forEach((cls, idx) => {
+        setTimeout(() => {
+          onSubmit(name.trim(), { class_filter: cls, device_only: deviceOnly, logo_data_url: logoDataUrl, _multiClass: true, _multiIdx: idx, _multiTotal: multiClasses.length });
+        }, idx * 200);
+      });
+      toast.info(`Running report for "${name.trim()}" across ${multiClasses.length} classes…`);
+    } else {
+      onSubmit(name.trim(), { class_filter: klass ? Number(klass) : null, device_only: deviceOnly, logo_data_url: logoDataUrl });
+    }
   };
+
+  const allClasses = Array.from({ length: 45 }, (_, i) => i + 1);
 
   return (
     <Card style={{ padding: 24 }}>
       <form onSubmit={submit}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 200px auto", gap: 10, marginBottom: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 10, marginBottom: 14 }}>
+          {/* Brand name input */}
           <div style={{ position: "relative" }}>
             <Search size={15} style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: T.dimmer }} />
             <input data-testid="search-input" type="text" value={name} onChange={e => setName(e.target.value)}
               placeholder={client ? `Search "${client.company_name}"…` : "Enter brand name e.g. Zorbixsynth"}
               style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 10, color: T.text, padding: "11px 14px 11px 40px", fontSize: 14, outline: "none", width: "100%", fontFamily: "inherit" }} />
           </div>
-          <select value={klass} onChange={e => setKlass(e.target.value)}
-            style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 10, color: klass ? T.text : T.dimmer, padding: "11px 14px", fontSize: 13, outline: "none", fontFamily: "inherit" }}>
-            <option value="">All classes</option>
-            {Array.from({ length: 45 }, (_, i) => i + 1).map(c => <option key={c} value={c}>Class {c}</option>)}
-          </select>
-          <Btn T={T} type="submit" disabled={loading || !name.trim()} style={{ padding: "11px 24px", fontSize: 14 }}>
-            {loading ? <><RefreshCw size={14} style={{ animation: "spin 1s linear infinite" }} /> Analysing…</> : <><Zap size={14} /> Run Report</>}
+
+          {/* Class selector — single or multi */}
+          {!multiMode ? (
+            <select value={klass} onChange={e => setKlass(e.target.value)}
+              style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 10, color: klass ? T.text : T.dimmer, padding: "11px 14px", fontSize: 13, outline: "none", fontFamily: "inherit", minWidth: 160 }}>
+              <option value="">All classes</option>
+              {allClasses.map(c => <option key={c} value={c}>Class {c}</option>)}
+            </select>
+          ) : (
+            /* Multi-class dropdown */
+            <div ref={dropRef} style={{ position: "relative", minWidth: 220 }}>
+              <button type="button" onClick={() => setClassDropOpen(o => !o)}
+                style={{ background: T.raised, border: `1px solid ${multiClasses.length ? T.blueL : T.border}`, borderRadius: 10, color: multiClasses.length ? T.text : T.dimmer, padding: "11px 14px", fontSize: 13, outline: "none", fontFamily: "inherit", width: "100%", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {multiClasses.length === 0 ? "Pick classes…" : multiClasses.map(c => `CL${c}`).join(", ")}
+                </span>
+                <span style={{ fontSize: 10, background: multiClasses.length ? T.blueL : T.border, color: multiClasses.length ? "#fff" : T.muted, borderRadius: 99, padding: "1px 7px", flexShrink: 0 }}>
+                  {multiClasses.length || "0"}
+                </span>
+              </button>
+              {classDropOpen && (
+                <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, boxShadow: "0 8px 32px rgba(0,0,0,0.18)", zIndex: 999, maxHeight: 320, overflowY: "auto", padding: 10 }}>
+                  <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                    <button type="button" onClick={() => setMultiClasses(allClasses)}
+                      style={{ fontSize: 11, background: `${T.blueL}18`, border: `1px solid ${T.blueL}44`, color: T.blueL, borderRadius: 7, padding: "4px 10px", cursor: "pointer", fontFamily: "inherit" }}>All</button>
+                    <button type="button" onClick={() => setMultiClasses([])}
+                      style={{ fontSize: 11, background: T.raised, border: `1px solid ${T.border}`, color: T.muted, borderRadius: 7, padding: "4px 10px", cursor: "pointer", fontFamily: "inherit" }}>Clear</button>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 4 }}>
+                    {allClasses.map(c => {
+                      const sel = multiClasses.includes(c);
+                      return (
+                        <button key={c} type="button" onClick={() => toggleMultiClass(c)}
+                          style={{ background: sel ? T.blueL : T.raised, border: `1px solid ${sel ? T.blueL : T.border}`, color: sel ? "#fff" : T.muted, borderRadius: 7, padding: "5px 4px", fontSize: 11, fontWeight: sel ? 700 : 400, cursor: "pointer", fontFamily: "'JetBrains Mono', monospace", transition: "all 0.12s" }}>
+                          {c}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <Btn T={T} type="submit" disabled={loading || !name.trim() || (multiMode && multiClasses.length === 0)} style={{ padding: "11px 24px", fontSize: 14, whiteSpace: "nowrap" }}>
+            {loading
+              ? <><RefreshCw size={14} style={{ animation: "spin 1s linear infinite" }} /> Analysing…</>
+              : multiMode && multiClasses.length > 0
+                ? <><Layers size={14} /> Run {multiClasses.length} Class{multiClasses.length > 1 ? "es" : ""}</>
+                : <><Zap size={14} /> Run Report</>
+            }
           </Btn>
         </div>
+
+        {/* Options row */}
         <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 16, paddingTop: 12, borderTop: `1px solid ${T.border}` }}>
+          {/* Multi-class toggle */}
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+            <input type="checkbox" checked={multiMode} onChange={e => { setMultiMode(e.target.checked); if (!e.target.checked) setMultiClasses([]); }}
+              style={{ accentColor: T.blueL, width: 15, height: 15 }} />
+            <span style={{ fontSize: 13, color: T.muted, fontWeight: multiMode ? 700 : 400 }}>Multi-class search</span>
+            {multiMode && <span style={{ fontSize: 11, color: T.dimmer }}>(generates one report per class)</span>}
+          </label>
+
           <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
             <input type="checkbox" checked={deviceOnly} onChange={e => setDeviceOnly(e.target.checked)} style={{ accentColor: T.blueL, width: 15, height: 15 }} />
             <span style={{ fontSize: 13, color: T.muted }}>Device / logo marks only</span>
           </label>
+
           <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFile} />
           <Btn T={T} type="button" variant="ghost" onClick={() => fileRef.current?.click()} style={{ padding: "6px 14px" }}>
             <ImageIcon size={13} /> {logoDataUrl ? "Replace logo" : "Upload logo (optional)"}
@@ -740,6 +823,17 @@ function SearchBar({ onSubmit, loading, defaultClass, client, T }) {
               <img src={logoDataUrl} alt="preview" style={{ height: 28, width: 28, objectFit: "contain", borderRadius: 6, background: T.raised, border: `1px solid ${T.border}`, padding: 3 }} />
               <span style={{ fontSize: 12, color: T.muted }}>{logoName}</span>
               <button type="button" onClick={() => { setLogoDataUrl(null); setLogoName(null); }} style={{ background: "none", border: "none", color: T.red, cursor: "pointer", fontSize: 11, display: "flex", alignItems: "center", gap: 3 }}><X size={12} /> Remove</button>
+            </div>
+          )}
+
+          {/* Multi-class pill summary */}
+          {multiMode && multiClasses.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginLeft: "auto" }}>
+              {multiClasses.map(c => (
+                <span key={c} onClick={() => toggleMultiClass(c)} style={{ background: `${T.blueL}18`, color: T.blueL, border: `1px solid ${T.blueL}44`, borderRadius: 99, padding: "2px 9px", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }} title="Click to remove">
+                  CL{c} ×
+                </span>
+              ))}
             </div>
           )}
         </div>
@@ -899,30 +993,71 @@ function RecommendationsPanel({ recommendations, T }) {
 function ClassBreakdown({ rows, T }) {
   const safeRows = Array.isArray(rows) ? rows : [];
   if (!safeRows.length) return null;
+  const maxTotal = Math.max(...safeRows.map(r => r.total || 0), 1);
   return (
-    <Card style={{ overflow: "hidden" }}>
-      <div style={{ padding: "18px 22px", borderBottom: `1px solid ${T.border}` }}>
-        <SectionHeader T={T} icon={BarChart3} color={COLORS.violet} label="Class Breakdown" sub={`Filings across ${safeRows.length} class${safeRows.length === 1 ? "" : "es"}`} />
-      </div>
+    <Card style={{ padding: "20px 22px" }}>
+      <SectionHeader T={T} icon={BarChart3} color={COLORS.violet} label="Class Breakdown" sub={`Filings across ${safeRows.length} class${safeRows.length === 1 ? "" : "es"}`} />
       <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed", minWidth: 700 }}>
+          <colgroup>
+            <col style={{ width: 80 }} />
+            <col style={{ width: "auto" }} />
+            <col style={{ width: 80 }} />
+            <col style={{ width: 90 }} />
+            <col style={{ width: 70 }} />
+            <col style={{ width: 220 }} />
+          </colgroup>
           <thead>
             <tr style={{ background: T.raised }}>
-              {["Class", "Sector", "Total", "Blocking", "Dead"].map(h => (
-                <th key={h} style={{ padding: "10px 16px", textAlign: h === "Total" || h === "Blocking" || h === "Dead" ? "right" : "left", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: T.dimmer, fontWeight: 700 }}>{h}</th>
+              {["Class", "Sector", "Total", "Blocking", "Dead", "Conflict bar"].map((h, i) => (
+                <th key={i} style={{ padding: "9px 14px", textAlign: i >= 2 ? "center" : "left", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: T.dimmer, fontWeight: 700, whiteSpace: "nowrap" }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {safeRows.map(r => (
-              <tr key={r.class} style={{ borderTop: `1px solid ${T.border}` }}>
-                <td style={{ padding: "10px 16px" }}><span style={{ background: `${COLORS.mediumBlue}20`, color: COLORS.mediumBlue, borderRadius: 6, padding: "3px 10px", fontSize: 12, fontWeight: 700 }}>CL{String(r.class).padStart(2, "0")}</span></td>
-                <td style={{ padding: "10px 16px", color: T.muted }}>{r.hint || "—"}</td>
-                <td style={{ padding: "10px 16px", textAlign: "right", fontWeight: 700, color: T.text, fontFamily: "'JetBrains Mono', monospace" }}>{r.total}</td>
-                <td style={{ padding: "10px 16px", textAlign: "right", fontWeight: 700, color: T.red, fontFamily: "'JetBrains Mono', monospace" }}>{r.blocking}</td>
-                <td style={{ padding: "10px 16px", textAlign: "right", color: T.dimmer, fontFamily: "'JetBrains Mono', monospace" }}>{r.dead}</td>
-              </tr>
-            ))}
+            {safeRows.map((r, i) => {
+              const cls = r.class ?? r.class_number ?? "?";
+              const blocking = r.blocking ?? r.blocking_count ?? 0;
+              const dead = r.dead ?? r.dead_count ?? 0;
+              const total = r.total ?? 0;
+              const hint = r.hint || CLASS_HINTS[cls] || "—";
+              const blockingPct = total > 0 ? (blocking / total) * 100 : 0;
+              const safePct = total > 0 ? (total / maxTotal) * 100 : 0;
+              return (
+                <tr key={i} style={{ borderTop: `1px solid ${T.border}`, background: i % 2 === 0 ? "transparent" : `${T.raised}88` }}>
+                  <td style={{ padding: "10px 14px" }}>
+                    <span style={{ background: `${COLORS.mediumBlue}18`, color: COLORS.mediumBlue, border: `1px solid ${COLORS.mediumBlue}33`, borderRadius: 7, padding: "3px 10px", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", fontFamily: "'JetBrains Mono', monospace" }}>
+                      CL{String(cls).padStart(2, "0")}
+                    </span>
+                  </td>
+                  <td style={{ padding: "10px 14px", color: T.muted, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={hint}>{hint}</td>
+                  <td style={{ padding: "10px 14px", textAlign: "center", fontWeight: 700, color: T.text, fontFamily: "'JetBrains Mono', monospace" }}>{total}</td>
+                  <td style={{ padding: "10px 14px", textAlign: "center" }}>
+                    {blocking > 0
+                      ? <span style={{ fontWeight: 800, color: T.red, fontFamily: "'JetBrains Mono', monospace", fontSize: 13 }}>{blocking}</span>
+                      : <span style={{ color: T.dimmer, fontSize: 13 }}>0</span>
+                    }
+                  </td>
+                  <td style={{ padding: "10px 14px", textAlign: "center", color: T.dimmer, fontFamily: "'JetBrains Mono', monospace", fontSize: 13 }}>{dead}</td>
+                  <td style={{ padding: "10px 20px 10px 14px" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                      {/* total bar */}
+                      <div style={{ height: 6, background: T.border, borderRadius: 99, overflow: "hidden" }}>
+                        <div style={{ width: `${safePct}%`, height: "100%", background: COLORS.mediumBlue, borderRadius: 99, transition: "width 0.6s ease" }} />
+                      </div>
+                      {/* blocking bar */}
+                      <div style={{ height: 4, background: T.border, borderRadius: 99, overflow: "hidden" }}>
+                        <div style={{ width: `${blockingPct}%`, height: "100%", background: blocking > 0 ? T.red : T.emerald, borderRadius: 99, transition: "width 0.6s ease" }} />
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ fontSize: 9, color: T.dimmer }}>total</span>
+                        <span style={{ fontSize: 9, color: blocking > 0 ? T.red : T.dimmer }}>{blocking > 0 ? `${Math.round(blockingPct)}% blocking` : "no blockers"}</span>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -930,11 +1065,34 @@ function ClassBreakdown({ rows, T }) {
   );
 }
 
+const CLASS_HINTS = {
+  1: "Chemicals", 2: "Paints", 3: "Cosmetics & cleaning", 4: "Oils & fuels",
+  5: "Pharmaceuticals", 6: "Metals", 7: "Machinery", 8: "Hand tools",
+  9: "Electronics, computers, software", 10: "Medical devices",
+  11: "Lighting & heating", 12: "Vehicles", 13: "Firearms", 14: "Jewellery",
+  15: "Musical instruments", 16: "Paper & stationery", 17: "Rubber & plastics",
+  18: "Leather goods", 19: "Building materials", 20: "Furniture",
+  21: "Household utensils", 22: "Ropes & fibres", 23: "Yarns & threads",
+  24: "Textiles & fabrics", 25: "Clothing, footwear, apparel",
+  26: "Lace & buttons", 27: "Carpets", 28: "Games & toys",
+  29: "Meat & preserved foods", 30: "Coffee, tea & spices",
+  31: "Agricultural products", 32: "Beverages", 33: "Alcoholic beverages",
+  34: "Tobacco", 35: "Advertising, business, retail services",
+  36: "Finance & insurance", 37: "Construction & repair",
+  38: "Telecommunications", 39: "Transport & travel",
+  40: "Treatment of materials", 41: "Education, training, entertainment",
+  42: "Scientific, technological, software services", 43: "Restaurants, hospitality",
+  44: "Medical, healthcare", 45: "Legal services",
+};
+
 // ─── Matches table ────────────────────────────────────────────────────────────
 function MatchesTable({ rows, T }) {
   const [matchFilter, setMatchFilter]   = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [searchQ, setSearchQ]           = useState("");
+  const [page, setPage]                 = useState(1);
+  const PAGE_SIZE = 50;
+
   const safeRows = Array.isArray(rows) ? rows : [];
   const statusOptions = ["ALL", ...Array.from(new Set(safeRows.map(r => r.status).filter(Boolean)))];
   const filtered = safeRows.filter(r => {
@@ -943,55 +1101,113 @@ function MatchesTable({ rows, T }) {
     if (searchQ && !r.name?.toLowerCase().includes(searchQ.toLowerCase()) && !r.applicant?.toLowerCase().includes(searchQ.toLowerCase())) return false;
     return true;
   });
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  // Reset to page 1 when filters change
+  const setFilter = (setter) => (val) => { setter(val); setPage(1); };
+
+  if (!safeRows.length) return null;
+
+  const COL_WIDTHS = { id: 110, name: 180, applicant: 180, status: 130, logo: 52, cls: 56, match: 90, risk: 60, filed: 100, view: 50 };
+
   return (
     <Card style={{ overflow: "hidden" }}>
+      {/* Header */}
       <div style={{ padding: "18px 22px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <SectionHeader T={T} icon={Search} color={T.blueL} label="All Recorded Matches" sub={`${filtered.length} of ${safeRows.length} filings`} />
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <div style={{ position: "relative" }}>
             <Search size={12} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: T.dimmer }} />
-            <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Filter…"
-              style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 8, padding: "6px 10px 6px 28px", fontSize: 12, color: T.text, outline: "none", width: 140, fontFamily: "inherit" }} />
+            <input value={searchQ} onChange={e => { setSearchQ(e.target.value); setPage(1); }}
+              placeholder="Filter by name / applicant…"
+              style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 8, padding: "6px 10px 6px 28px", fontSize: 12, color: T.text, outline: "none", width: 200, fontFamily: "inherit" }} />
           </div>
-          <select value={matchFilter} onChange={e => setMatchFilter(e.target.value)}
+          <select value={matchFilter} onChange={e => setFilter(setMatchFilter)(e.target.value)}
             style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 8, color: T.muted, padding: "6px 10px", fontSize: 12, outline: "none", fontFamily: "inherit" }}>
             {["ALL", "EXACT", "PHONETIC", "CONTAINS", "SIMILAR", "WEAK"].map(o => <option key={o} value={o}>{o}</option>)}
           </select>
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+          <select value={statusFilter} onChange={e => setFilter(setStatusFilter)(e.target.value)}
             style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 8, color: T.muted, padding: "6px 10px", fontSize: 12, outline: "none", fontFamily: "inherit" }}>
             {statusOptions.map(o => <option key={o} value={o}>{o}</option>)}
           </select>
         </div>
       </div>
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+
+      {/* Scrollable table */}
+      <div style={{ overflowX: "auto", width: "100%" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed", minWidth: 980 }}>
+          <colgroup>
+            <col style={{ width: COL_WIDTHS.id }} />
+            <col style={{ width: COL_WIDTHS.name }} />
+            <col style={{ width: COL_WIDTHS.applicant }} />
+            <col style={{ width: COL_WIDTHS.status }} />
+            <col style={{ width: COL_WIDTHS.logo }} />
+            <col style={{ width: COL_WIDTHS.cls }} />
+            <col style={{ width: COL_WIDTHS.match }} />
+            <col style={{ width: COL_WIDTHS.risk }} />
+            <col style={{ width: COL_WIDTHS.filed }} />
+            <col style={{ width: COL_WIDTHS.view }} />
+          </colgroup>
           <thead>
-            <tr style={{ background: T.raised }}>
-              {["ID", "Name", "Applicant", "Status", "Class", "Match", "Risk", "Filed", ""].map((h, i) => (
-                <th key={i} style={{ padding: "10px 14px", textAlign: h === "Risk" ? "right" : "left", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: T.dimmer, fontWeight: 700, whiteSpace: "nowrap" }}>{h}</th>
+            <tr style={{ background: T.raised, position: "sticky", top: 0, zIndex: 1 }}>
+              {["ID", "Name", "Applicant", "Status", "Logo", "CL", "Match", "Risk", "Filed", ""].map((h, i) => (
+                <th key={i} style={{ padding: "10px 12px", textAlign: h === "Risk" ? "right" : "left", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: T.dimmer, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden" }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 && <tr><td colSpan={9} style={{ padding: "32px", textAlign: "center", color: T.dimmer, fontSize: 13 }}>No matches under current filters.</td></tr>}
-            {filtered.map((r, i) => (
-              <tr key={i} style={{ borderTop: `1px solid ${T.border}` }}>
-                <td style={{ padding: "10px 14px", color: T.dimmer, fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>{r.application_id || "—"}</td>
-                <td style={{ padding: "10px 14px", fontWeight: 600, color: T.text }}>{r.name}</td>
-                <td style={{ padding: "10px 14px", color: T.muted }}>{r.applicant || "—"}</td>
-                <td style={{ padding: "10px 14px" }}><Badge status={r.status} T={T} /></td>
-                <td style={{ padding: "10px 14px", color: T.muted }}>{r.class ?? "—"}</td>
-                <td style={{ padding: "10px 14px" }}><MatchBadge type={r.match_type} T={T} /></td>
-                <td style={{ padding: "10px 14px", textAlign: "right", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: r.individual_risk_score >= 70 ? T.red : r.individual_risk_score >= 40 ? T.amber : T.emerald }}>{r.individual_risk_score}</td>
-                <td style={{ padding: "10px 14px", color: T.dimmer, fontSize: 11, whiteSpace: "nowrap" }}>{r.filing_date || "—"}</td>
-                <td style={{ padding: "10px 14px" }}>
-                  {r.detail_url && <a href={r.detail_url} target="_blank" rel="noreferrer" style={{ color: T.blueL, fontSize: 12, display: "flex", alignItems: "center", gap: 4, textDecoration: "none" }}>View <ArrowUpRight size={11} /></a>}
+            {pageRows.length === 0 && (
+              <tr><td colSpan={10} style={{ padding: "32px", textAlign: "center", color: T.dimmer, fontSize: 13 }}>No matches under current filters.</td></tr>
+            )}
+            {pageRows.map((r, i) => (
+              <tr key={i} style={{ borderTop: `1px solid ${T.border}`, background: i % 2 === 0 ? "transparent" : `${T.raised}88` }}>
+                <td style={{ padding: "9px 12px", color: T.dimmer, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.application_id || "—"}>{r.application_id || "—"}</td>
+                <td style={{ padding: "9px 12px", fontWeight: 600, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.name}>{r.name}</td>
+                <td style={{ padding: "9px 12px", color: T.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.applicant || "—"}>{r.applicant || "—"}</td>
+                <td style={{ padding: "9px 12px", overflow: "hidden" }}><Badge status={r.status} T={T} /></td>
+                <td style={{ padding: "6px 12px", textAlign: "center" }}>
+                  {r.mark_image_data_url
+                    ? <img src={r.mark_image_data_url} alt="mark" style={{ width: 30, height: 30, objectFit: "contain", borderRadius: 4, background: "#fff", border: `1px solid ${T.border}`, padding: 2 }} />
+                    : <span style={{ color: T.dimmer, fontSize: 11 }}>—</span>
+                  }
+                </td>
+                <td style={{ padding: "9px 12px", color: T.blueL, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", fontSize: 12, whiteSpace: "nowrap" }}>{r.class ?? "—"}</td>
+                <td style={{ padding: "9px 12px", overflow: "hidden" }}><MatchBadge type={r.match_type} T={T} /></td>
+                <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", whiteSpace: "nowrap", color: r.individual_risk_score >= 70 ? T.red : r.individual_risk_score >= 40 ? T.amber : T.emerald }}>{r.individual_risk_score}</td>
+                <td style={{ padding: "9px 12px", color: T.dimmer, fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.filing_date || "—"}</td>
+                <td style={{ padding: "9px 12px", textAlign: "center" }}>
+                  {r.detail_url && <a href={r.detail_url} target="_blank" rel="noreferrer" style={{ color: T.blueL, fontSize: 11, display: "inline-flex", alignItems: "center", gap: 3, textDecoration: "none", whiteSpace: "nowrap" }}>View <ArrowUpRight size={10} /></a>}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div style={{ padding: "12px 22px", borderTop: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <span style={{ fontSize: 12, color: T.dimmer }}>
+            Showing {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filtered.length)} of {filtered.length}
+          </span>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}
+              style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 7, padding: "5px 12px", fontSize: 12, color: currentPage === 1 ? T.dimmer : T.text, cursor: currentPage === 1 ? "default" : "pointer", fontFamily: "inherit" }}>← Prev</button>
+            {Array.from({ length: Math.min(7, totalPages) }, (_, idx) => {
+              const p = totalPages <= 7 ? idx + 1 : currentPage <= 4 ? idx + 1 : currentPage >= totalPages - 3 ? totalPages - 6 + idx : currentPage - 3 + idx;
+              return (
+                <button key={p} onClick={() => setPage(p)}
+                  style={{ background: p === currentPage ? T.blueL : T.raised, border: `1px solid ${p === currentPage ? T.blueL : T.border}`, borderRadius: 7, padding: "5px 10px", fontSize: 12, color: p === currentPage ? "#fff" : T.text, cursor: "pointer", fontFamily: "inherit", minWidth: 32 }}>{p}</button>
+              );
+            })}
+            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}
+              style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 7, padding: "5px 12px", fontSize: 12, color: currentPage === totalPages ? T.dimmer : T.text, cursor: currentPage === totalPages ? "default" : "pointer", fontFamily: "inherit" }}>Next →</button>
+          </div>
+        </div>
+      )}
     </Card>
   );
 }
@@ -1766,11 +1982,11 @@ export default function TrademarkSphere() {
                       <HistoryRail T={T} items={history} onSelect={handleHistorySelect} activeId={activeId} branding={branding} onDelete={handleDeleteReport} onClearAll={handleClearAll} />
                     </div>
 
-                    {/* ── 2-col row: Class Breakdown + All Recorded Matches (full width, equal height) ── */}
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "stretch" }}>
-                      <ClassBreakdown T={T} rows={report.class_breakdown ?? []} />
-                      <MatchesTable T={T} rows={report.all_results ?? []} />
-                    </div>
+                    {/* ── Full-width: All Recorded Matches ── */}
+                    <MatchesTable T={T} rows={report.all_results ?? []} />
+
+                    {/* ── Full-width: Class Breakdown ── */}
+                    <ClassBreakdown T={T} rows={report.class_breakdown ?? []} />
                   </motion.div>
                 )}
 
