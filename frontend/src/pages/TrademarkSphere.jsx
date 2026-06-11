@@ -1389,20 +1389,41 @@ function HistoryRail({ items, onSelect, activeId, branding, onDelete, onClearAll
 function BulkPanel({ onPickReport, branding, clientInfo, T }) {
   const [text, setText] = useState("");
   const [klass, setKlass] = useState("");
+  // Multi-class mode: array of selected class numbers
+  const [selectedClasses, setSelectedClasses] = useState([]);
+  const [multiClassMode, setMultiClassMode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [combinedLoading, setCombinedLoading] = useState(false);
   const [items, setItems] = useState([]);
+  const [analytics, setAnalytics] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
   const [dlId, setDlId] = useState(null);
+
+  // Derive class_filter and class_filters from current mode
+  const getClassParams = () => {
+    if (multiClassMode && selectedClasses.length > 0) {
+      return { class_filter: selectedClasses[0], class_filters: selectedClasses };
+    }
+    const cf = klass ? Number(klass) : null;
+    return { class_filter: cf, class_filters: cf ? [cf] : null };
+  };
+
+  const toggleClass = (num) => {
+    setSelectedClasses(prev =>
+      prev.includes(num) ? prev.filter(c => c !== num) : [...prev, num].sort((a, b) => a - b)
+    );
+  };
 
   const run = async () => {
     const names = text.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
     if (!names.length) return toast.error("Enter at least one name");
     if (names.length > 20) return toast.error("Max 20 names per batch");
-    setLoading(true); setItems([]);
+    setLoading(true); setItems([]); setAnalytics(null);
     try {
-      const data = await bulkReports(names, { class_filter: klass ? Number(klass) : null });
+      const { class_filter, class_filters } = getClassParams();
+      const data = await bulkReports(names, { class_filter, class_filters });
       setItems(data.items || []);
+      setAnalytics(data.analytics || null);
       toast.success(`Batch complete — ${data.count} names processed`);
     } catch (e) { toast.error(e?.response?.data?.detail || "Bulk search failed"); }
     finally { setLoading(false); }
@@ -1421,7 +1442,7 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
     } catch { toast.error("PDF download failed"); } finally { setDlId(null); }
   };
 
-  const handleCombinedPdf = async () => {
+  const handleCombinedPdf = async (fmt = "pdf") => {
     const successful = items.filter(it => !it.error);
     if (!successful.length) return toast.error("No successful results to include in combined report");
     if (!branding?.footer && !branding?.logo && !branding?.tagline) {
@@ -1429,11 +1450,14 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
     }
     setCombinedLoading(true);
     try {
-      // Use /bulk/export which runs searches + builds full combined PDF in one call
-      const names = successful.map(it => it.name);
+      // FIX: name is on it.name (now guaranteed by backend) or fallback to report.query
+      const names = successful.map(it => it.name || it.report?.query || it.report?.report?.query).filter(Boolean);
+      if (!names.length) return toast.error("Could not determine mark names for export");
+      const { class_filter, class_filters } = getClassParams();
       const wm = branding?.watermark === "CUSTOM" ? branding?.customWatermark : branding?.watermark;
       await bulkExport(names, {
-        class_filter:     klass ? Number(klass) : null,
+        class_filter,
+        class_filters,
         logo_data_url:    branding?.logo    || null,
         footer:           branding?.footer  || "",
         tagline:          branding?.tagline || "Bulk Trademark Availability Report",
@@ -1442,8 +1466,8 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
         client_name:      clientInfo?.client_name   || "",
         client_mobile:    clientInfo?.client_mobile || "",
         report_date:      clientInfo?.report_date   || "",
-      }, "pdf");
-      toast.success("Combined report downloaded");
+      }, fmt);
+      toast.success(`Combined ${fmt.toUpperCase()} report downloaded`);
     } catch (e) {
       toast.error(e?.response?.data?.detail || e?.message || "Failed to generate combined report");
     } finally { setCombinedLoading(false); }
@@ -1453,20 +1477,71 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
 
   return (
     <Collapsible T={T} title="Bulk Search" icon={Layers} iconColor={COLORS.emeraldGreen} badge="Check up to 20 names at once">
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 200px", gap: 12, marginBottom: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 220px", gap: 12, marginBottom: 12 }}>
         <Textarea T={T} rows={5} value={text} onChange={e => setText(e.target.value)} placeholder={"One brand name per line:\nKunjveda\nFumera\nZorbixsynth"} />
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <select value={klass} onChange={e => setKlass(e.target.value)}
-            style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 10, color: T.muted, padding: "10px 14px", fontSize: 13, outline: "none", fontFamily: "inherit" }}>
-            <option value="">All classes</option>
-            {Array.from({ length: 45 }, (_, i) => i + 1).map(c => <option key={c} value={c}>Class {c}</option>)}
-          </select>
+
+          {/* Toggle between single-class and multi-class */}
+          <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", fontSize: 12, color: T.muted }}>
+            <input type="checkbox" checked={multiClassMode} onChange={e => { setMultiClassMode(e.target.checked); setSelectedClasses([]); setKlass(""); }}
+              style={{ accentColor: COLORS.mediumBlue }} />
+            Multi-class search
+          </label>
+
+          {!multiClassMode ? (
+            <select value={klass} onChange={e => setKlass(e.target.value)}
+              style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 10, color: T.muted, padding: "10px 14px", fontSize: 13, outline: "none", fontFamily: "inherit" }}>
+              <option value="">All classes</option>
+              {Array.from({ length: 45 }, (_, i) => i + 1).map(c => <option key={c} value={c}>Class {c}</option>)}
+            </select>
+          ) : (
+            <div style={{ border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px", maxHeight: 130, overflowY: "auto", background: T.raised }}>
+              <div style={{ fontSize: 10, color: T.dimmer, marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.07em" }}>
+                Select classes ({selectedClasses.length} selected)
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {Array.from({ length: 45 }, (_, i) => i + 1).map(c => {
+                  const sel = selectedClasses.includes(c);
+                  return (
+                    <button key={c} onClick={() => toggleClass(c)}
+                      style={{ fontSize: 10, padding: "2px 6px", borderRadius: 6, cursor: "pointer", fontFamily: "inherit",
+                        border: `1px solid ${sel ? COLORS.mediumBlue : T.border}`,
+                        background: sel ? `${COLORS.mediumBlue}18` : T.raised,
+                        color: sel ? COLORS.mediumBlue : T.muted, fontWeight: sel ? 700 : 400 }}>
+                      {c}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <Btn T={T} onClick={run} disabled={loading} style={{ justifyContent: "center" }}>
             {loading ? "Processing…" : "Run Batch"}
           </Btn>
           <p style={{ fontSize: 11, color: T.dimmer, margin: 0 }}>Each name creates a stored report.</p>
         </div>
       </div>
+
+      {/* Portfolio analytics summary */}
+      {analytics && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6, marginBottom: 14 }}>
+          {[
+            ["Total",       analytics.total_marks,                          T.text],
+            ["Available",   analytics.available,                            "#166534"],
+            ["Caution",     analytics.caution,                              "#92400E"],
+            ["Conflict",    analytics.conflict,                             "#7F1D1D"],
+            ["Avg Risk",    `${analytics.average_risk}/100`,                COLORS.mediumBlue],
+            ["High Risk",   analytics.high_risk_marks,                      "#B45309"],
+            ["Avg Success", `${analytics.average_success_probability}%`,    "#1F6FB2"],
+          ].map(([label, value, color]) => (
+            <div key={label} style={{ textAlign: "center", border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 4px", background: T.raised }}>
+              <div style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: "0.08em", color: T.dimmer, fontWeight: 600, marginBottom: 2 }}>{label}</div>
+              <div style={{ fontSize: 17, fontWeight: 800, color }}>{value}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {items.length > 0 && (
         <>
@@ -1604,16 +1679,26 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>Combined Report</div>
               <div style={{ fontSize: 11, color: T.dimmer }}>
-                {successCount} mark{successCount !== 1 ? "s" : ""} · all verdicts in one PDF
+                {successCount} mark{successCount !== 1 ? "s" : ""} · all verdicts in one file
                 {(clientInfo?.client_name) && <> · {clientInfo.client_name}</>}
               </div>
             </div>
-            <Btn T={T} variant="primary" onClick={handleCombinedPdf} disabled={combinedLoading || successCount === 0}
-              style={{ whiteSpace: "nowrap", padding: "8px 18px" }}>
-              {combinedLoading
-                ? <><RefreshCw size={13} style={{ animation: "spin 1s linear infinite" }} /> Generating…</>
-                : <><Download size={13} /> Download Combined PDF</>}
-            </Btn>
+            <div style={{ display: "flex", gap: 6 }}>
+              <Btn T={T} variant="primary" onClick={() => handleCombinedPdf("pdf")} disabled={combinedLoading || successCount === 0}
+                style={{ whiteSpace: "nowrap", padding: "8px 14px", fontSize: 12 }}>
+                {combinedLoading
+                  ? <><RefreshCw size={13} style={{ animation: "spin 1s linear infinite" }} /> Generating…</>
+                  : <><Download size={13} /> PDF</>}
+              </Btn>
+              <Btn T={T} variant="ghost" onClick={() => handleCombinedPdf("docx")} disabled={combinedLoading || successCount === 0}
+                style={{ whiteSpace: "nowrap", padding: "8px 14px", fontSize: 12 }}>
+                <Download size={13} /> DOCX
+              </Btn>
+              <Btn T={T} variant="ghost" onClick={() => handleCombinedPdf("xlsx")} disabled={combinedLoading || successCount === 0}
+                style={{ whiteSpace: "nowrap", padding: "8px 14px", fontSize: 12 }}>
+                <Download size={13} /> Excel
+              </Btn>
+            </div>
           </div>
         </>
       )}
@@ -1922,9 +2007,8 @@ export default function TrademarkSphere() {
             <SearchBar T={T} onSubmit={handleSearch} loading={loading} defaultClass={pinnedClass} client={selectedClient} />
           </div>
 
-          {/* ── Tools row: class finder + bulk (full width, stacked) ── */}
+          {/* ── Tools row: bulk search first, then class finder ── */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 24 }}>
-            <ClassFinderPanel T={T} onPickClass={(cls) => { setPinnedClass(String(cls)); toast.success(`Class ${cls} pinned`); scrollToSearch(); }} />
             <BulkPanel T={T} branding={branding} clientInfo={{
               client_name:   selectedClient?.company_name || "",
               client_mobile: selectedClient?.phone || "",
@@ -1934,6 +2018,7 @@ export default function TrademarkSphere() {
               if (item) handleHistorySelect(item);
               else { try { const d = await getReport(id); setReport(d.report); setActiveId(d.id); refreshHistory(); } catch {} }
             }} />
+            <ClassFinderPanel T={T} onPickClass={(cls) => { setPinnedClass(String(cls)); toast.success(`Class ${cls} pinned`); scrollToSearch(); }} />
           </div>
 
           {/* ── Report section (full width) ── */}
