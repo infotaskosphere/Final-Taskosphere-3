@@ -1099,6 +1099,86 @@ async def qc_bulk_reports(body: BulkReportRequest, user: User = Depends(get_curr
     return {"items": items, "count": len(items)}
 
 
+@router.post("/bulk/export")
+async def qc_bulk_export(
+    body: BulkReportRequest,
+    format: str = "pdf",
+    user: User = Depends(get_current_user),
+):
+    """
+    Run availability searches for multiple marks and return a combined
+    downloadable report in the requested format (pdf / docx / xlsx).
+    This is the endpoint called by the frontend bulkExport() helper.
+    """
+    from backend.trademark_bulk import (
+        build_bulk_dossier_pdf,
+        build_bulk_docx,
+        build_bulk_xlsx,
+        enrich_report_with_analytics,
+        compute_portfolio_analytics,
+    )
+
+    names = [n.strip() for n in (body.names or []) if n.strip()]
+    if not names:
+        raise HTTPException(status_code=422, detail="names list is required")
+
+    branding = {
+        "logo_data_url":    body.logo_data_url,
+        "footer":           body.footer or "",
+        "tagline":          body.tagline or "Bulk Trademark Availability Report",
+        "watermark":        body.watermark or "",
+        "custom_watermark": body.custom_watermark or "",
+        "prepared_by":      body.prepared_by or "",
+        "disclaimer":       body.disclaimer or "",
+        "company_name":     body.company_name or "",
+        "client_name":      body.client_name or "",
+        "client_mobile":    body.client_mobile or "",
+        "report_date":      body.report_date or "",
+    }
+
+    items = []
+    for name in names[:20]:
+        try:
+            scraped = await _qc_availability_search(name)
+            report  = build_report(name, scraped, class_filter=body.class_filter)
+            enrich_report_with_analytics(report, enable_monitoring=body.enable_monitoring)
+            items.append({
+                "name":           name,
+                "report":         report,
+                "error":          None,
+                "overall_status": report.get("overall_status"),
+                "risk_score":     report.get("risk_score"),
+                "headline":       report.get("headline"),
+            })
+        except Exception as exc:
+            logger.warning("bulk/export scrape failed for %s: %s", name, exc)
+            items.append({"name": name, "error": str(exc)})
+
+    analytics = compute_portfolio_analytics(items)
+    fmt   = (format or "pdf").lower()
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    slug  = "-".join(n.replace(" ", "_")[:12] for n in names[:3])
+
+    if fmt == "docx":
+        content  = build_bulk_docx(items, branding, analytics)
+        media    = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        filename = f"{slug}_trademark_report_{today}.docx"
+    elif fmt == "xlsx":
+        content  = build_bulk_xlsx(items, branding, analytics)
+        media    = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        filename = f"{slug}_trademark_report_{today}.xlsx"
+    else:
+        content  = build_bulk_dossier_pdf(items, branding, analytics)
+        media    = "application/pdf"
+        filename = f"{slug}_trademark_report_{today}.pdf"
+
+    return Response(
+        content=content,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/searches")
 async def qc_list_searches(limit: int = 25, user: User = Depends(get_current_user)):
     """List the user's past trademark availability searches."""
