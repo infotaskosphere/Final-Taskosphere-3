@@ -1,5 +1,5 @@
 /**
- * trademark-qc-api.js — v4
+ * trademark-qc-api.js — v5
  *
  * API helpers for the QuickCompany Trademark integration inside Taskosphere.
  * Place in: frontend/src/lib/trademark-qc-api.js
@@ -8,21 +8,39 @@
  * We reuse the existing `api` axios instance from api.js so auth headers / interceptors
  * are automatically included.
  *
- * New in v4:
- *   - bulkReportsBranded()  branding-aware bulk run; embeds branding into each stored report
- *   - bulkExport()          combined bulk PDF / DOCX / XLSX download with full dossiers
+ * New in v5:
+ *   - generateReport() now accepts class_filters (array) for multi-class scraping.
+ *     The backend scraper will fetch class-specific QC pages in addition to generic
+ *     pages, guaranteeing no class is missed even if it has few results.
+ * v4:
+ *   - bulkReportsBranded()  branding-aware bulk run
+ *   - bulkExport()          combined bulk PDF / DOCX / XLSX download
  * v3:
- *   - getBrandingPreference / saveBrandingPreference  (default company persistence)
- *   - pdfDownloadUrl now supports branding query params via brandedPdfUrl()
+ *   - getBrandingPreference / saveBrandingPreference
  */
 
 import api from "@/lib/api";
 
 // ─── Report generation ────────────────────────────────────────────────────────
 
+/**
+ * Generate a single trademark availability report.
+ *
+ * @param {string} name         Brand name to search
+ * @param {object} opts
+ *   @param {number|null}   opts.class_filter    Primary class to focus verdict on (legacy)
+ *   @param {number[]|null} opts.class_filters   All classes to scrape (multi-class mode).
+ *                                               When provided, backend also fetches class-
+ *                                               specific QC pages for each class to ensure
+ *                                               complete coverage.
+ *   @param {boolean}       opts.device_only
+ *   @param {string|null}   opts.logo_data_url
+ *   ... other branding fields
+ */
 export async function generateReport(name, opts = {}) {
   const {
     class_filter = null,
+    class_filters = null,   // NEW: array of class ints for multi-class scraping
     device_only = false,
     logo_data_url = null,
     footer = "",
@@ -33,9 +51,19 @@ export async function generateReport(name, opts = {}) {
     client_mobile = "",
     report_date = "",
   } = opts;
+
+  // Derive class_filters from class_filter if not explicitly provided
+  const effectiveClassFilters =
+    class_filters && class_filters.length > 0
+      ? class_filters
+      : class_filter != null
+        ? [class_filter]
+        : null;
+
   const { data } = await api.post("/trademark-qc/report", {
     name,
     class_filter,
+    class_filters: effectiveClassFilters,  // sent to backend for class-specific scraping
     device_only,
     logo_data_url,
     footer,
@@ -45,7 +73,7 @@ export async function generateReport(name, opts = {}) {
     client_name,
     client_mobile,
     report_date,
-  }, { timeout: 60000 });
+  }, { timeout: 90000 });  // Increased timeout for multi-class scraping
   return data;
 }
 
