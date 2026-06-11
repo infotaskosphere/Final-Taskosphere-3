@@ -476,18 +476,24 @@ const TaskRow = ({
           <div className={`flex items-center justify-center overflow-hidden px-1 ${isOverdue ? 'text-red-600' : 'text-slate-500'}`}>
             {task.due_date ? (
               isOverdue ? (
-                <div className="flex flex-col items-center leading-tight">
-                  <span className="text-[10px] font-semibold whitespace-nowrap">
+                <div className="flex flex-col items-center leading-tight text-center">
+                  <span className="text-[10px] font-bold whitespace-nowrap text-red-600">
                     {Math.abs(Math.ceil((new Date(task.due_date) - new Date()) / 86400000))} days
                   </span>
-                  <span className="text-[9px] font-bold uppercase tracking-wide">Overdue</span>
+                  <span className="text-[9px] font-bold uppercase tracking-wide text-red-500">OVERDUE</span>
                 </div>
-              ) : (
-                <div className="flex items-center gap-1">
-                  <Clock className="h-3 w-3 flex-shrink-0" />
-                  <span className="text-[10px] font-medium truncate">{getRelativeDueDate(task.due_date)}</span>
-                </div>
-              )
+              ) : (() => {
+                const diffDays = Math.ceil((new Date(task.due_date) - new Date()) / 86400000);
+                const daysLabel = diffDays === 0 ? 'Today' : diffDays === 1 ? '1 day' : `${diffDays} days`;
+                const dirLabel  = diffDays === 0 ? '' : diffDays > 0 ? 'left' : '';
+                return (
+                  <div className="flex flex-col items-center leading-tight text-center">
+                    <span className="text-[10px] font-bold whitespace-nowrap text-slate-600">{daysLabel}</span>
+                    {dirLabel ? <span className="text-[9px] font-medium text-slate-400">{dirLabel}</span>
+                      : <span className="text-[9px] font-medium text-amber-500">due today</span>}
+                  </div>
+                );
+              })()
             ) : <span className="text-slate-300 text-[10px]">—</span>}
           </div>
 
@@ -799,8 +805,8 @@ export default function Tasks() {
   const [searchQuery,             setSearchQuery]             = useState('');
   const [filterStatus,            setFilterStatus]            = useState('all');
   const [filterPriority,          setFilterPriority]          = useState('all');
-  const [filterCategory,          setFilterCategory]          = useState('all');
-  const [filterAssignee,          setFilterAssignee]          = useState('all');
+  const [filterCategory,          setFilterCategory]          = useState([]);   // multi-select array
+  const [filterAssignee,          setFilterAssignee]          = useState([]);   // multi-select array
   const [sortBy,                  setSortBy]                  = useState('due_date');
   const [sortDirection,           setSortDirection]           = useState('asc');
   const [showMyTasksOnly,         setShowMyTasksOnly]         = useState(false);
@@ -1495,8 +1501,8 @@ export default function Tasks() {
   const filteredTasks = useMemo(() => scopedTasks.filter(task => {
     const matchesSearch   = task.title.toLowerCase().includes(searchQuery.toLowerCase()) || task.description?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesPriority = filterPriority === 'all' || task.priority   === filterPriority;
-    const matchesCategory = filterCategory === 'all' || task.category   === filterCategory;
-    const matchesAssignee = filterAssignee === 'all' || task.assigned_to === filterAssignee;
+    const matchesCategory = filterCategory.length === 0 || filterCategory.includes(task.category);
+    const matchesAssignee = filterAssignee.length === 0 || filterAssignee.includes(task.assigned_to) || filterAssignee.some(id => (task.sub_assignees || []).includes(id));
     const matchesTeam     = !filterTeamOnly || task.assigned_to === user?.id || (task.sub_assignees || []).includes(user?.id) || crossVisibilityUserIds.includes(task.assigned_to) || (task.sub_assignees || []).some(id => crossVisibilityUserIds.includes(id));
     let matchesStatus = true;
     if (filterStatus !== 'all') matchesStatus = filterStatus === 'overdue' ? isOverdue(task) : task.status === filterStatus;
@@ -1506,7 +1512,7 @@ export default function Tasks() {
       const createdDate = task.created_at ? format(new Date(task.created_at), 'yyyy-MM-dd') : '';
       if (isAdmin) {
         // Admin: if a specific assignee is selected, show that user's today-new tasks; else show all users' today-new tasks
-        matchesTodayNew = createdDate === todayStr && (filterAssignee === 'all' || task.assigned_to === filterAssignee || (task.sub_assignees || []).includes(filterAssignee));
+        matchesTodayNew = createdDate === todayStr && (filterAssignee.length === 0 || filterAssignee.includes(task.assigned_to) || filterAssignee.some(id => (task.sub_assignees || []).includes(id)));
       } else {
         const assignedToMe = task.assigned_to === user?.id || (task.sub_assignees || []).includes(user?.id);
         matchesTodayNew = createdDate === todayStr && assignedToMe;
@@ -1517,7 +1523,7 @@ export default function Tasks() {
       const isNotCompleted = task.status !== 'completed';
       if (isAdmin) {
         // Admin: if a specific assignee is selected show their pending; else all pending
-        matchesPending = isNotCompleted && (filterAssignee === 'all' || task.assigned_to === filterAssignee || (task.sub_assignees || []).includes(filterAssignee));
+        matchesPending = isNotCompleted && (filterAssignee.length === 0 || filterAssignee.includes(task.assigned_to) || filterAssignee.some(id => (task.sub_assignees || []).includes(id)));
       } else {
         const assignedToMe = task.assigned_to === user?.id || (task.sub_assignees || []).includes(user?.id);
         matchesPending = isNotCompleted && assignedToMe;
@@ -1588,8 +1594,8 @@ export default function Tasks() {
     if (searchQuery)              parts.push(`"${searchQuery}"`);
     if (filterStatus !== 'all')   parts.push(STATUS_STYLES[filterStatus]?.label || filterStatus);
     if (filterPriority !== 'all') parts.push(filterPriority.toUpperCase());
-    if (filterCategory !== 'all') parts.push(getCategoryLabel(filterCategory));
-    if (filterAssignee !== 'all') parts.push(users.find(u => u.id === filterAssignee)?.full_name || '');
+    if (filterCategory.length > 0) parts.push(filterCategory.map(getCategoryLabel).join(', '));
+    if (filterAssignee.length > 0) parts.push(filterAssignee.map(id => users.find(u => u.id === id)?.full_name || '').filter(Boolean).join(', '));
     if (showMyTasksOnly)          parts.push('Mine');
     if (filterTeamOnly)           parts.push('Team');
     if (filterAssignedByMe)       parts.push('By Me');
@@ -1605,8 +1611,8 @@ export default function Tasks() {
     if (searchQuery)              pills.push({ key: 'search',   label: `"${searchQuery}"` });
     if (filterStatus !== 'all')   pills.push({ key: 'status',   label: STATUS_STYLES[filterStatus]?.label || filterStatus });
     if (filterPriority !== 'all') pills.push({ key: 'priority', label: filterPriority.toUpperCase() });
-    if (filterCategory !== 'all') pills.push({ key: 'category', label: getCategoryLabel(filterCategory) });
-    if (filterAssignee !== 'all') pills.push({ key: 'assignee', label: userMap.get(filterAssignee)?.full_name || filterAssignee });
+    if (filterCategory.length > 0) pills.push({ key: 'category', label: filterCategory.map(getCategoryLabel).join(' + ') });
+    if (filterAssignee.length > 0) pills.push({ key: 'assignee', label: filterAssignee.map(id => userMap.get(id)?.full_name || id).join(' + ') });
     if (showMyTasksOnly)          pills.push({ key: 'mytasks',     label: 'Assigned To Me' });
     if (filterTeamOnly)           pills.push({ key: 'teamonly',    label: 'Team Tasks' });
     if (filterAssignedByMe)       pills.push({ key: 'assignedby',  label: 'Assigned by Me' });
@@ -1622,8 +1628,8 @@ export default function Tasks() {
     if (key === 'search')   setSearchQuery('');
     if (key === 'status')   setFilterStatus('all');
     if (key === 'priority') setFilterPriority('all');
-    if (key === 'category') setFilterCategory('all');
-    if (key === 'assignee') setFilterAssignee('all');
+    if (key === 'category') setFilterCategory([]);
+    if (key === 'assignee') setFilterAssignee([]);
     if (key === 'mytasks')     setShowMyTasksOnly(false);
     if (key === 'teamonly')    setFilterTeamOnly(false);
     if (key === 'assignedby') setFilterAssignedByMe(false);
@@ -1633,7 +1639,7 @@ export default function Tasks() {
   };
 
   const clearAllFilters = () => {
-    setSearchQuery(''); setFilterStatus('all'); setFilterPriority('all'); setFilterCategory('all'); setFilterAssignee('all');
+    setSearchQuery(''); setFilterStatus('all'); setFilterPriority('all'); setFilterCategory([]); setFilterAssignee([]);
     setShowMyTasksOnly(false); setFilterTeamOnly(false); setFilterAssignedByMe(false); setFilterCreatedBy('all'); setSortBy('due_date'); setSortDirection('asc');
     setFilterTodayNew(false);
     setFilterPending(false);
@@ -2111,8 +2117,8 @@ export default function Tasks() {
         if (searchQuery)               filterParts.push({ key: 'search',    icon: '🔍', text: `"${searchQuery}"` });
         if (filterStatus !== 'all')    filterParts.push({ key: 'status',    icon: '📌', text: STATUS_STYLES[filterStatus]?.label || filterStatus });
         if (filterPriority !== 'all')  filterParts.push({ key: 'priority',  icon: '⚡', text: filterPriority.toUpperCase() + ' Priority' });
-        if (filterCategory !== 'all')  filterParts.push({ key: 'dept',      icon: '🏢', text: getCategoryLabel(filterCategory) });
-        if (filterAssignee !== 'all')  filterParts.push({ key: 'assignee',  icon: '👤', text: users.find(u => u.id === filterAssignee)?.full_name || 'Assignee' });
+        if (filterCategory.length > 0)   filterParts.push({ key: 'dept',      icon: '🏢', text: filterCategory.map(getCategoryLabel).join(' + ') });
+        if (filterAssignee.length > 0)   filterParts.push({ key: 'assignee',  icon: '👤', text: filterAssignee.map(id => users.find(u => u.id === id)?.full_name || 'Assignee').join(' + ') });
         if (showMyTasksOnly)           filterParts.push({ key: 'mine',      icon: '🎯', text: 'Assigned To Me' });
         if (filterTeamOnly)            filterParts.push({ key: 'team',      icon: '👥', text: 'Team Tasks' });
         if (filterAssignedByMe)        filterParts.push({ key: 'byme',      icon: '✍️', text: 'Assigned by Me' });
@@ -2129,11 +2135,11 @@ export default function Tasks() {
           // Contextualise with the primary active filter if no direct match
           if (isFiltered) {
             const ctx = filterParts[0];
-            if (ctx.key === 'assignee') return `${base} · ${users.find(u => u.id === filterAssignee)?.full_name?.split(' ')[0] || ''}`;
+            if (ctx.key === 'assignee') return `${base} · ${filterAssignee.map(id => users.find(u => u.id === id)?.full_name?.split(' ')[0] || '').join('+')}`;
             if (ctx.key === 'mine')     return `${base} · Me`;
             if (ctx.key === 'team')     return `${base} · Team`;
             if (ctx.key === 'creator')  return `${base} · ${users.find(u => u.id === filterCreatedBy)?.full_name?.split(' ')[0] || 'Creator'}`;
-            if (ctx.key === 'dept')     return `${base} · ${getCategoryLabel(filterCategory)}`;
+            if (ctx.key === 'dept')     return `${base} · ${filterCategory.map(getCategoryLabel).join('+')}` ;
           }
           return base;
         };
@@ -2501,28 +2507,118 @@ export default function Tasks() {
             </Select>
           </div>
 
-          <div className="flex-1 min-w-0">
-            <Select value={filterCategory} onValueChange={setFilterCategory}>
-              <SelectTrigger className={`h-8 w-full text-[11px] rounded-lg ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}>
-                <SelectValue placeholder="Dept" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Depts</SelectItem>
-                {TASK_CATEGORIES.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
+          <div className="flex-1 min-w-0 relative">
+            {/* Multi-select Dept dropdown */}
+            {(() => {
+              const [open, setOpen] = React.useState(false);
+              const ref = React.useRef(null);
+              React.useEffect(() => {
+                const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+                document.addEventListener('mousedown', handler);
+                return () => document.removeEventListener('mousedown', handler);
+              }, []);
+              const toggleVal = (val) => {
+                setFilterCategory(prev => prev.includes(val) ? prev.filter(v => v !== val) : prev.length < 2 ? [...prev, val] : prev);
+              };
+              const label = filterCategory.length === 0 ? 'All Depts' : filterCategory.map(getCategoryLabel).join(' + ');
+              return (
+                <div ref={ref} className="relative w-full">
+                  <button type="button" onClick={() => setOpen(o => !o)}
+                    className={`h-8 w-full text-[11px] rounded-lg border px-2.5 flex items-center justify-between gap-1 transition-colors
+                      ${filterCategory.length > 0 ? 'border-blue-400 bg-blue-50 text-blue-700 font-semibold' : (isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200 text-slate-700')}`}>
+                    <span className="truncate">{label}</span>
+                    <svg className="h-3.5 w-3.5 flex-shrink-0 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+                  </button>
+                  {open && (
+                    <div className={`absolute z-50 top-full left-0 mt-1 w-48 rounded-xl border shadow-xl overflow-hidden ${isDark ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-200'}`}>
+                      <div className="p-1.5 border-b border-slate-100 dark:border-slate-700">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 px-1">Select up to 2</p>
+                      </div>
+                      <div className="py-1 max-h-52 overflow-y-auto">
+                        {TASK_CATEGORIES.map(c => {
+                          const sel = filterCategory.includes(c.value);
+                          const disabled = !sel && filterCategory.length >= 2;
+                          return (
+                            <button key={c.value} type="button"
+                              onClick={() => !disabled && toggleVal(c.value)}
+                              className={`w-full flex items-center gap-2 px-3 py-1.5 text-[11px] transition-colors text-left
+                                ${sel ? 'bg-blue-50 text-blue-700 font-semibold' : disabled ? 'opacity-40 cursor-not-allowed text-slate-400' : (isDark ? 'text-slate-200 hover:bg-slate-700' : 'text-slate-700 hover:bg-slate-50')}`}>
+                              <span className={`w-3.5 h-3.5 rounded flex-shrink-0 border flex items-center justify-center ${sel ? 'bg-blue-600 border-blue-600' : 'border-slate-300'}`}>
+                                {sel && <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>}
+                              </span>
+                              {c.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {filterCategory.length > 0 && (
+                        <div className="p-1.5 border-t border-slate-100 dark:border-slate-700">
+                          <button type="button" onClick={() => { setFilterCategory([]); setOpen(false); }}
+                            className="w-full text-[10px] text-red-500 hover:text-red-700 font-semibold py-1">Clear</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
-          <div className="flex-1 min-w-0">
-            <Select value={filterAssignee} onValueChange={setFilterAssignee}>
-              <SelectTrigger className={`h-8 w-full text-[11px] rounded-lg ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200'}`}>
-                <SelectValue placeholder="Assignee" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Assignees</SelectItem>
-                {visibleUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+          <div className="flex-1 min-w-0 relative">
+            {/* Multi-select Assignee dropdown */}
+            {(() => {
+              const [open, setOpen] = React.useState(false);
+              const ref = React.useRef(null);
+              React.useEffect(() => {
+                const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+                document.addEventListener('mousedown', handler);
+                return () => document.removeEventListener('mousedown', handler);
+              }, []);
+              const toggleVal = (val) => {
+                setFilterAssignee(prev => prev.includes(val) ? prev.filter(v => v !== val) : prev.length < 2 ? [...prev, val] : prev);
+              };
+              const label = filterAssignee.length === 0 ? 'All Assignees' : filterAssignee.map(id => userMap.get(id)?.full_name?.split(' ')[0] || id).join(' + ');
+              return (
+                <div ref={ref} className="relative w-full">
+                  <button type="button" onClick={() => setOpen(o => !o)}
+                    className={`h-8 w-full text-[11px] rounded-lg border px-2.5 flex items-center justify-between gap-1 transition-colors
+                      ${filterAssignee.length > 0 ? 'border-blue-400 bg-blue-50 text-blue-700 font-semibold' : (isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-slate-50 border-slate-200 text-slate-700')}`}>
+                    <span className="truncate">{label}</span>
+                    <svg className="h-3.5 w-3.5 flex-shrink-0 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+                  </button>
+                  {open && (
+                    <div className={`absolute z-50 top-full left-0 mt-1 w-52 rounded-xl border shadow-xl overflow-hidden ${isDark ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-200'}`}>
+                      <div className="p-1.5 border-b border-slate-100 dark:border-slate-700">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 px-1">Select up to 2</p>
+                      </div>
+                      <div className="py-1 max-h-52 overflow-y-auto">
+                        {visibleUsers.map(u => {
+                          const sel = filterAssignee.includes(u.id);
+                          const disabled = !sel && filterAssignee.length >= 2;
+                          return (
+                            <button key={u.id} type="button"
+                              onClick={() => !disabled && toggleVal(u.id)}
+                              className={`w-full flex items-center gap-2 px-3 py-1.5 text-[11px] transition-colors text-left
+                                ${sel ? 'bg-blue-50 text-blue-700 font-semibold' : disabled ? 'opacity-40 cursor-not-allowed text-slate-400' : (isDark ? 'text-slate-200 hover:bg-slate-700' : 'text-slate-700 hover:bg-slate-50')}`}>
+                              <span className={`w-3.5 h-3.5 rounded flex-shrink-0 border flex items-center justify-center ${sel ? 'bg-blue-600 border-blue-600' : 'border-slate-300'}`}>
+                                {sel && <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>}
+                              </span>
+                              {u.full_name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {filterAssignee.length > 0 && (
+                        <div className="p-1.5 border-t border-slate-100 dark:border-slate-700">
+                          <button type="button" onClick={() => { setFilterAssignee([]); setOpen(false); }}
+                            className="w-full text-[10px] text-red-500 hover:text-red-700 font-semibold py-1">Clear</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           <div className="flex-1 min-w-0">
@@ -2598,7 +2694,7 @@ export default function Tasks() {
           <button
             onClick={() => { setFilterTodayNew(p => !p); if (filterPending) setFilterPending(false); }}
             title={isAdmin
-              ? filterAssignee === 'all' ? 'Show tasks created today across all users' : 'Show tasks created today for selected user'
+              ? filterAssignee.length === 0 ? 'Show tasks created today across all users' : 'Show tasks created today for selected user'
               : 'Show your tasks created today'}
             className={`flex-1 h-8 text-[11px] font-semibold rounded-lg border transition-all flex items-center justify-center gap-1.5 min-w-0
               ${filterTodayNew
@@ -2619,7 +2715,7 @@ export default function Tasks() {
           <button
             onClick={() => { setFilterPending(p => !p); if (filterTodayNew) setFilterTodayNew(false); }}
             title={isAdmin
-              ? filterAssignee === 'all' ? 'Show all pending tasks across all users' : 'Show pending tasks for selected user'
+              ? filterAssignee.length === 0 ? 'Show all pending tasks across all users' : 'Show pending tasks for selected user'
               : 'Show your pending (incomplete) tasks'}
             className={`flex-1 h-8 text-[11px] font-semibold rounded-lg border transition-all flex items-center justify-center gap-1.5 min-w-0
               ${filterPending
