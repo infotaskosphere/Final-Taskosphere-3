@@ -454,6 +454,83 @@ def build_executive_summary_pdf(items: List[dict], branding: Dict[str, Any], ana
     ]))
     story.append(grid2); story.append(Spacer(1, 14))
 
+    # ── PLAIN-LANGUAGE PORTFOLIO SUMMARY (Layman Guide) ──────────────────────
+    story.append(Paragraph("WHAT THIS REPORT MEANS — PLAIN LANGUAGE GUIDE", st["eyebrow"]))
+    story.append(_section_rule())
+
+    total_m   = analytics["total_marks"]
+    avail_m   = analytics["available"]
+    caution_m = analytics["caution"]
+    conflict_m= analytics["conflict"]
+    avg_suc   = analytics["average_success_probability"]
+
+    if conflict_m == 0 and caution_m == 0:
+        guide_bg     = colors.HexColor("#DCFCE7")
+        guide_border = colors.HexColor("#86EFAC")
+        guide_color  = colors.HexColor("#166534")
+        guide_icon   = "✔"
+        guide_head   = "All Marks Look Clear — Good Position to File"
+        guide_body   = (
+            f"All <b>{total_m}</b> brand name(s) searched appear to be available with no major "
+            "conflicts found. This is a strong position to begin the trademark registration process. "
+            "Review individual mark reports below for specific details before filing."
+        )
+    elif conflict_m > 0 and conflict_m >= total_m // 2:
+        guide_bg     = colors.HexColor("#FEE2E2")
+        guide_border = colors.HexColor("#FCA5A5")
+        guide_color  = colors.HexColor("#7F1D1D")
+        guide_icon   = "✘"
+        guide_head   = "Most Marks Have Conflicts — Review Before Filing Anything"
+        guide_body   = (
+            f"Out of <b>{total_m}</b> marks searched, <b>{conflict_m}</b> have significant conflicts "
+            "with existing registered trademarks. Filing these without legal advice is risky — "
+            "applications are likely to be rejected or challenged. Consider modifying brand names "
+            "or choosing alternative names suggested in each individual report."
+        )
+    else:
+        guide_bg     = colors.HexColor("#FEF3C7")
+        guide_border = colors.HexColor("#FCD34D")
+        guide_color  = colors.HexColor("#92400E")
+        guide_icon   = "◐"
+        guide_head   = "Mixed Results — Some Marks Ready, Others Need Review"
+        guide_body   = (
+            f"Out of <b>{total_m}</b> marks: <b>{avail_m}</b> appear available to file, "
+            f"<b>{caution_m}</b> need caution and deeper review, and <b>{conflict_m}</b> have "
+            "strong conflicts. The average chance of successful registration across this portfolio "
+            f"is <b>{avg_suc}%</b>. Focus on marks marked 'Available' first, and consult a "
+            "trademark attorney for those marked 'Caution' or 'Conflict'."
+        )
+
+    guide_action_parts = []
+    if avail_m:
+        guide_action_parts.append(f"✅ <b>{avail_m} mark(s)</b> — Safe to proceed with filing.")
+    if caution_m:
+        guide_action_parts.append(f"🔍 <b>{caution_m} mark(s)</b> — Get legal opinion before filing.")
+    if conflict_m:
+        guide_action_parts.append(f"⚠ <b>{conflict_m} mark(s)</b> — Avoid filing without significant modification or attorney review.")
+    guide_action_parts.append("📋 Always verify final results on the official IP India database (ipindia.gov.in) before filing.")
+    guide_actions_text = "<br/>".join(guide_action_parts)
+
+    guide_tbl = Table([[
+        Paragraph(
+            f'<font color="{guide_color.hexval()}"><b>{guide_icon}  {guide_head}</b></font><br/><br/>'
+            f'{guide_body}<br/><br/>'
+            f'{guide_actions_text}',
+            ParagraphStyle("guide_p", fontName="Helvetica", fontSize=9, textColor=colors.HexColor("#1A1A2E"),
+                           leading=14),
+        )
+    ]], colWidths=[CONTENT_W])
+    guide_tbl.setStyle(TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, -1), guide_bg),
+        ("BOX",           (0, 0), (-1, -1), 1.0, guide_border),
+        ("TOPPADDING",    (0, 0), (-1, -1), 12),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 14),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 14),
+    ]))
+    story.append(guide_tbl)
+    story.append(Spacer(1, 14))
+
     # Filing recommendations table
     story.append(Paragraph("FILING RECOMMENDATIONS", st["eyebrow"]))
     story.append(_section_rule())
