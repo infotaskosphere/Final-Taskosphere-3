@@ -846,6 +846,7 @@ class IpIndiaSearchRequest(BaseModel):
 class ReportRequest(BaseModel):
     name: str
     class_filter: Optional[int] = None
+    class_filters: Optional[List[int]] = None   # multi-class: scrape all these classes
     device_only: bool = False
     logo_data_url: Optional[str] = None
     footer: str = ""
@@ -859,6 +860,7 @@ class ReportRequest(BaseModel):
 class BulkReportRequest(BaseModel):
     names: List[str]
     class_filter: Optional[int] = None
+    class_filters: Optional[List[int]] = None   # multi-class: scrape all these classes
     device_only: bool = False
     logo_data_url: Optional[str] = None
     footer: str = ""
@@ -1039,7 +1041,9 @@ async def qc_generate_report(body: ReportRequest, user: User = Depends(get_curre
     if not name:
         raise HTTPException(status_code=422, detail="name is required")
     try:
-        scraped = await _qc_availability_search(name)
+        # Use body.class_filters (multi-class array) if provided; otherwise derive from class_filter
+        class_filters = body.class_filters or ([body.class_filter] if body.class_filter is not None else None)
+        scraped = await _qc_availability_search(name, class_filters=class_filters)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"SCRAPER ERROR - {exc}")
     report = build_report(name, scraped, class_filter=body.class_filter)
@@ -1072,9 +1076,10 @@ async def qc_bulk_reports(body: BulkReportRequest, user: User = Depends(get_curr
         raise HTTPException(status_code=422, detail="names list is required")
     user_id = str(getattr(user, "id", None) or user.get("_id", ""))
     items = []
+    class_filters_bulk = body.class_filters or ([body.class_filter] if body.class_filter is not None else None)
     for name in names[:20]:
         try:
-            scraped = await _qc_availability_search(name)
+            scraped = await _qc_availability_search(name, class_filters=class_filters_bulk)
             report  = build_report(name, scraped, class_filter=body.class_filter)
             report["logo_data_url"]    = body.logo_data_url
             report["footer"]           = body.footer
@@ -1137,9 +1142,10 @@ async def qc_bulk_export(
     }
 
     items = []
+    class_filters_export = body.class_filters or ([body.class_filter] if body.class_filter is not None else None)
     for name in names[:20]:
         try:
-            scraped = await _qc_availability_search(name)
+            scraped = await _qc_availability_search(name, class_filters=class_filters_export)
             report  = build_report(name, scraped, class_filter=body.class_filter)
             enrich_report_with_analytics(report, enable_monitoring=body.enable_monitoring)
             items.append({
@@ -1285,7 +1291,8 @@ async def qc_quick_check(
     if not name:
         raise HTTPException(status_code=422, detail="name is required")
     try:
-        scraped = await _qc_availability_search(name)
+        class_filters_check = [cls] if cls is not None else None
+        scraped = await _qc_availability_search(name, class_filters=class_filters_check)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"SCRAPER ERROR - {exc}")
     report = build_report(name, scraped, class_filter=cls)
