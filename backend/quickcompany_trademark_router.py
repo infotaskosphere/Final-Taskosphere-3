@@ -1180,18 +1180,32 @@ async def qc_bulk_export(
     today = datetime.utcnow().strftime("%Y-%m-%d")
     slug  = "-".join(n.replace(" ", "_")[:12] for n in names[:3])
 
-    if fmt == "docx":
-        content  = build_bulk_docx(items, branding, analytics)
-        media    = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        filename = f"{slug}_trademark_report_{today}.docx"
-    elif fmt == "xlsx":
-        content  = build_bulk_xlsx(items, branding, analytics)
-        media    = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        filename = f"{slug}_trademark_report_{today}.xlsx"
-    else:
-        content  = build_bulk_dossier_pdf(items, branding, analytics)
-        media    = "application/pdf"
-        filename = f"{slug}_trademark_report_{today}.pdf"
+    try:
+        if fmt == "docx":
+            content  = build_bulk_docx(items, branding, analytics)
+            media    = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            filename = f"{slug}_trademark_report_{today}.docx"
+        elif fmt == "xlsx":
+            content  = build_bulk_xlsx(items, branding, analytics)
+            media    = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            filename = f"{slug}_trademark_report_{today}.xlsx"
+        else:
+            content  = build_bulk_dossier_pdf(items, branding, analytics)
+            media    = "application/pdf"
+            filename = f"{slug}_trademark_report_{today}.pdf"
+    except ImportError as exc:
+        logger.error("bulk/export missing library: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Server is missing a required library for {fmt.upper()} export: {exc}. "
+                   "Please contact support or try a different format."
+        )
+    except Exception as exc:
+        logger.exception("bulk/export file generation failed (fmt=%s)", fmt)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate {fmt.upper()} report: {exc}"
+        )
 
     return Response(
         content=content,
