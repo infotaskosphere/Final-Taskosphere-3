@@ -6204,7 +6204,7 @@ async def parse_itr_computation_pdf(
 
 
 def _map_mca_constitution(raw: str) -> str:
-    """Map MCA class/constitution string → client_type slug."""
+    """Map MCA class/constitution/category string → client_type slug."""
     r = (raw or "").lower().strip()
     if "private" in r:
         return "pvt_ltd"
@@ -6216,85 +6216,369 @@ def _map_mca_constitution(raw: str) -> str:
         return "section_8"
     if "one person" in r or "opc" in r:
         return "pvt_ltd"
+    if "partnership" in r:
+        return "partnership"
+    if "proprietor" in r or "sole" in r:
+        return "proprietor"
+    if "huf" in r or "hindu undivided" in r:
+        return "huf"
+    if "trust" in r:
+        return "trust"
     return "other"
+
+
+# ── Browser-like headers for web scraping ────────────────────────────────────
+_SCRAPE_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-IN,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+_CIN_RE   = re.compile(r'^[UL]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6}$')
+_LLPIN_RE = re.compile(r'^[A-Z]{2,3}-\d{4,}$')
+
+
+async def _scrape_quickcompany(query: str) -> dict:
+    """Scrape company details from quickcompany.in. Returns {} on failure."""
+    from bs4 import BeautifulSoup
+    from datetime import date as _date
+
+    q = query.strip()
+    is_cin = bool(_CIN_RE.match(q.upper()))
+
+    urls_to_try = []
+    if is_cin:
+        urls_to_try.append(f"https://www.quickcompany.in/company/{q.upper()}")
+    urls_to_try.append(f"https://www.quickcompany.in/company?q={q}")
+
+    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, headers=_SCRAPE_HEADERS) as client:
+        for url in urls_to_try:
+            try:
+                resp = await client.get(url)
+                if resp.status_code not in (200,):
+                    continue
+                soup = BeautifulSoup(resp.text, "html.parser")
+                page_text = soup.get_text(" ", strip=True)
+
+                cin_m     = re.search(r'\b([UL]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6})\b', page_text)
+                found_cin = cin_m.group(1) if cin_m else ""
+
+                company_name = ""
+                h1 = soup.find("h1")
+                if h1:
+                    company_name = h1.get_text(strip=True)
+                if not company_name:
+                    t = soup.find("title")
+                    if t:
+                        company_name = t.get_text(strip=True).split("|")[0].strip()
+
+                # Search results page: follow first company link
+                if "company?q" in url or not found_cin:
+                    links = soup.find_all("a", href=re.compile(r"/company/[UL]\d{5}"))
+                    if not links:
+                        links = soup.find_all("a", href=re.compile(r"/company/"))
+                    if links:
+                        href = links[0].get("href", "")
+                        cin_in_url = re.search(r"/company/([UL]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6})", href)
+                        if cin_in_url:
+                            found_cin = cin_in_url.group(1)
+                        parent = links[0].find_parent(["div", "li", "article"])
+                        if parent:
+                            ne = parent.find(["h2", "h3", "h4", "strong", "b"])
+                            if ne:
+                                company_name = ne.get_text(strip=True)
+                        if not company_name:
+                            company_name = links[0].get_text(strip=True)
+                        # Fetch detail page
+                        if found_cin:
+                            try:
+                                dr = await client.get(
+                                    f"https://www.quickcompany.in/company/{found_cin}",
+                                    headers=_SCRAPE_HEADERS
+                                )
+                                if dr.status_code == 200:
+                                    ds = BeautifulSoup(dr.text, "html.parser")
+                                    page_text = ds.get_text(" ", strip=True)
+                                    dh1 = ds.find("h1")
+                                    if dh1:
+                                        company_name = dh1.get_text(strip=True)
+                            except Exception:
+                                pass
+
+                if not found_cin and not company_name:
+                    continue
+
+                def _qcf(label, text):
+                    m = re.search(label + r"[\s:]+([^\n|]+)", text, re.IGNORECASE)
+                    return m.group(1).strip() if m else ""
+
+                raw_class   = _qcf(r"Company Class", page_text) or _qcf(r"Class of Company", page_text)
+                raw_cat     = _qcf(r"Company Category", page_text) or _qcf(r"Category", page_text)
+                client_type = _map_mca_constitution(raw_class or raw_cat)
+                if client_type == "other" and company_name:
+                    client_type = _map_mca_constitution(company_name)
+
+                address = _qcf(r"Registered Address", page_text) or _qcf(r"Registered Office", page_text)
+                city = state = pin = ""
+                if address:
+                    pin_m2 = re.search(r"\b(\d{6})\b", address)
+                    pin = pin_m2.group(1) if pin_m2 else ""
+                    parts = [p.strip() for p in address.split(",") if p.strip()]
+                    if len(parts) >= 2:
+                        state = parts[-1].strip().rstrip(".")
+                        city  = parts[-2].strip()
+
+                doi_raw = _qcf(r"Date of Incorporation", page_text)
+                doi_iso = ""
+                if doi_raw:
+                    try:
+                        from dateutil import parser as dp
+                        doi_iso = dp.parse(doi_raw.strip(), dayfirst=True).strftime("%Y-%m-%d")
+                    except Exception:
+                        doi_iso = doi_raw.strip()
+
+                email_m = re.search(r"[\w.+\-]+@[\w.\-]+\.\w+", page_text)
+                email   = email_m.group(0) if email_m else ""
+                status  = _qcf(r"Company Status", page_text)
+
+                return {
+                    "company_name":          company_name,
+                    "cin":                   found_cin,
+                    "llpin":                 None,
+                    "client_type":           client_type,
+                    "date_of_incorporation": doi_iso,
+                    "email":                 email,
+                    "address":               address,
+                    "city":                  city,
+                    "state":                 state,
+                    "gst_pin":               pin,
+                    "pan":                   "",
+                    "directors":             [],
+                    "company_status":        status,
+                    "authorized_capital":    _qcf(r"Authorised Capital", page_text),
+                    "paid_up_capital":       _qcf(r"Paid Up Capital", page_text),
+                    "mca_fetch_date":        _date.today().isoformat(),
+                    "source":                "quickcompany.in",
+                }
+            except Exception as exc:
+                logger.debug(f"quickcompany scrape error for {url}: {exc}")
+                continue
+    return {}
+
+
+async def _scrape_zaubacorp(query: str) -> dict:
+    """Scrape company details from zaubacorp.com. Returns {} on failure."""
+    from bs4 import BeautifulSoup
+    from datetime import date as _date
+
+    q = query.strip()
+    is_cin = bool(_CIN_RE.match(q.upper()))
+
+    search_urls = [f"https://www.zaubacorp.com/companies?p={q}"]
+    if is_cin:
+        search_urls.insert(0, f"https://www.zaubacorp.com/company-search?q={q.upper()}")
+
+    hdrs = {**_SCRAPE_HEADERS, "Referer": "https://www.zaubacorp.com/"}
+    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, headers=hdrs) as client:
+        for url in search_urls:
+            try:
+                resp = await client.get(url)
+                if resp.status_code != 200:
+                    continue
+                soup = BeautifulSoup(resp.text, "html.parser")
+                page_text = soup.get_text(" ", strip=True)
+
+                cin_m     = re.search(r'\b([UL]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6})\b', page_text)
+                found_cin = cin_m.group(1) if cin_m else ""
+                company_name = ""
+
+                # Zaubacorp results: table with CIN + company name columns
+                for row in soup.find_all("tr"):
+                    cells = row.find_all(["td", "th"])
+                    if len(cells) >= 2:
+                        c0 = cells[0].get_text(strip=True)
+                        c1 = cells[1].get_text(strip=True)
+                        if re.match(r"[UL]\d{5}", c0):
+                            found_cin    = c0
+                            company_name = c1
+                            break
+                        if re.match(r"[UL]\d{5}", c1):
+                            found_cin    = c1
+                            company_name = c0
+                            break
+
+                if not company_name:
+                    for lk in soup.find_all("a", href=re.compile(r"/company/")):
+                        href = lk.get("href", "")
+                        cm = re.search(r"([UL]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6})", href)
+                        if cm:
+                            found_cin    = cm.group(1)
+                            company_name = lk.get_text(strip=True)
+                            break
+
+                if found_cin:
+                    try:
+                        slug = re.sub(r"[^A-Z0-9]", "-", (company_name or found_cin).upper())[:60]
+                        dr   = await client.get(f"https://www.zaubacorp.com/company/{slug}/{found_cin}")
+                        if dr.status_code == 200:
+                            ds = BeautifulSoup(dr.text, "html.parser")
+                            page_text    = ds.get_text(" ", strip=True)
+                            dh1 = ds.find("h1")
+                            if dh1:
+                                company_name = dh1.get_text(strip=True).split("(")[0].strip()
+                    except Exception:
+                        pass
+
+                if not found_cin and not company_name:
+                    continue
+
+                def _zcf(label, text):
+                    m = re.search(label + r"[\s:]+([^\n|<]+)", text, re.IGNORECASE)
+                    return m.group(1).strip() if m else ""
+
+                raw_class   = _zcf(r"Company Class", page_text) or _zcf(r"Class", page_text)
+                raw_cat     = _zcf(r"Company Category", page_text) or _zcf(r"Category", page_text)
+                client_type = _map_mca_constitution(raw_class or raw_cat)
+                if client_type == "other" and company_name:
+                    client_type = _map_mca_constitution(company_name)
+
+                address = _zcf(r"Registered Address", page_text) or _zcf(r"Address", page_text)
+                city = state = pin = ""
+                if address:
+                    pin_m2 = re.search(r"\b(\d{6})\b", address)
+                    pin    = pin_m2.group(1) if pin_m2 else ""
+                    parts  = [p.strip() for p in address.split(",") if p.strip()]
+                    if len(parts) >= 2:
+                        state = parts[-1].strip().rstrip(".")
+                        city  = parts[-2].strip()
+
+                doi_raw = _zcf(r"Date of Incorporation", page_text) or _zcf(r"Incorporation Date", page_text)
+                doi_iso = ""
+                if doi_raw:
+                    try:
+                        from dateutil import parser as dp
+                        doi_iso = dp.parse(doi_raw.strip(), dayfirst=True).strftime("%Y-%m-%d")
+                    except Exception:
+                        doi_iso = doi_raw.strip()
+
+                email_m = re.search(r"[\w.+\-]+@[\w.\-]+\.\w+", page_text)
+                email   = email_m.group(0) if email_m else ""
+                status  = _zcf(r"Company Status", page_text)
+
+                return {
+                    "company_name":          company_name,
+                    "cin":                   found_cin,
+                    "llpin":                 None,
+                    "client_type":           client_type,
+                    "date_of_incorporation": doi_iso,
+                    "email":                 email,
+                    "address":               address,
+                    "city":                  city,
+                    "state":                 state,
+                    "gst_pin":               pin,
+                    "pan":                   "",
+                    "directors":             [],
+                    "company_status":        status,
+                    "authorized_capital":    _zcf(r"Authorised Capital", page_text),
+                    "paid_up_capital":       _zcf(r"Paid Up Capital", page_text),
+                    "mca_fetch_date":        _date.today().isoformat(),
+                    "source":                "zaubacorp.com",
+                }
+            except Exception as exc:
+                logger.debug(f"zaubacorp scrape error for {url}: {exc}")
+                continue
+    return {}
 
 
 @api_router.get("/clients/fetch-mca-details")
 async def fetch_mca_details(
-    cin: str,
+    query: str = "",
+    cin: str = "",
     current_user: User = Depends(get_current_user)
 ):
-    if not cin or len(cin.strip()) < 5:
-        raise HTTPException(status_code=400, detail="Please provide a valid CIN or LLPIN.")
-    if not MCA_API_KEY:
-        raise HTTPException(status_code=503, detail="MCA API key not configured. Add MCA_API_KEY to your .env file.")
+    """
+    Fetch company details by company name OR CIN/LLPIN.
+    Priority: quickcompany.in → zaubacorp.com → data.gov.in (fallback, needs MCA_API_KEY).
+    """
+    q = (query or cin or "").strip()
+    if not q or len(q) < 3:
+        raise HTTPException(status_code=400, detail="Please enter a company name or CIN (minimum 3 characters).")
 
-    cin_clean = cin.strip().upper()
-    RESOURCE_ID = "ec58dab7-d891-4abb-936e-d5d274a6ce9b"
+    q_upper  = q.upper()
+    is_cin   = bool(_CIN_RE.match(q_upper))
+    is_llpin = bool(_LLPIN_RE.match(q_upper))
 
+    # ── 1. quickcompany.in ───────────────────────────────────────────────────
     try:
-        async with httpx.AsyncClient(timeout=20.0) as http:
-            resp = await http.get(
-                f"https://api.data.gov.in/resource/{RESOURCE_ID}",
-                params={
-                    "api-key": MCA_API_KEY,
-                    "format": "json",
-                    "limit": "1",
-                    "filters[CIN]": cin_clean,
-                }
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        result = await _scrape_quickcompany(q)
+        if result and (result.get("company_name") or result.get("cin")):
+            return result
+    except Exception as exc:
+        logger.warning(f"quickcompany scrape failed: {exc}")
 
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="data.gov.in API timed out. Please try again.")
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=f"API error: {e.response.text[:300]}")
-    except Exception as e:
-        logger.error(f"fetch_mca_details error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to fetch from MCA: {str(e)}")
+    # ── 2. zaubacorp.com ─────────────────────────────────────────────────────
+    try:
+        result = await _scrape_zaubacorp(q)
+        if result and (result.get("company_name") or result.get("cin")):
+            return result
+    except Exception as exc:
+        logger.warning(f"zaubacorp scrape failed: {exc}")
 
-    records = data.get("records", [])
-    if not records:
-        raise HTTPException(status_code=404, detail=f"No company found for CIN: {cin_clean}. Verify the CIN is correct.")
-
-    r = records[0]
-
-    doi_iso = ""
-    raw_doi = r.get("DATE_OF_REGISTRATION") or r.get("date_of_registration") or ""
-    if raw_doi:
+    # ── 3. data.gov.in API (requires MCA_API_KEY, CIN/LLPIN only) ────────────
+    if (is_cin or is_llpin) and MCA_API_KEY:
         try:
-            from dateutil import parser as dp
-            doi_iso = dp.parse(str(raw_doi), dayfirst=True).strftime("%Y-%m-%d")
-        except Exception:
-            doi_iso = str(raw_doi)
+            async with httpx.AsyncClient(timeout=20.0) as http:
+                resp = await http.get(
+                    "https://api.data.gov.in/resource/ec58dab7-d891-4abb-936e-d5d274a6ce9b",
+                    params={"api-key": MCA_API_KEY, "format": "json", "limit": "1", "filters[CIN]": q_upper}
+                )
+                resp.raise_for_status()
+                records = resp.json().get("records", [])
+                if records:
+                    from datetime import date as _date
+                    r   = records[0]
+                    doi = ""
+                    raw_doi = r.get("DATE_OF_REGISTRATION") or r.get("date_of_registration") or ""
+                    if raw_doi:
+                        try:
+                            from dateutil import parser as dp
+                            doi = dp.parse(str(raw_doi), dayfirst=True).strftime("%Y-%m-%d")
+                        except Exception:
+                            doi = str(raw_doi)
+                    raw_class = r.get("COMPANY_CLASS") or r.get("company_class") or ""
+                    return {
+                        "company_name":          r.get("COMPANY_NAME") or r.get("company_name") or "",
+                        "cin":                   q_upper,
+                        "llpin":                 None,
+                        "client_type":           _map_mca_constitution(raw_class),
+                        "date_of_incorporation": doi,
+                        "email":                 "",
+                        "address":               r.get("REGISTERED_OFFICE_ADDRESS") or r.get("registered_office_address") or "",
+                        "city":                  "",
+                        "state":                 r.get("REGISTERED_STATE") or r.get("registered_state") or "",
+                        "gst_pin":               "",
+                        "pan":                   "",
+                        "directors":             [],
+                        "company_status":        r.get("COMPANY_STATUS") or r.get("company_status") or "",
+                        "authorized_capital":    r.get("AUTHORISED_CAPITAL_IN_INR") or "",
+                        "paid_up_capital":       r.get("PAIDUP_CAPITAL_IN_INR") or "",
+                        "mca_fetch_date":        _date.today().isoformat(),
+                        "source":                "data.gov.in",
+                    }
+        except Exception as exc:
+            logger.warning(f"data.gov.in fallback failed: {exc}")
 
-    raw_class = r.get("COMPANY_CLASS") or r.get("company_class") or ""
-    client_type = _map_mca_constitution(raw_class)
-    address = r.get("REGISTERED_OFFICE_ADDRESS") or r.get("registered_office_address") or ""
-    state   = r.get("REGISTERED_STATE") or r.get("registered_state") or ""
-
-    from datetime import date as _date
-    return {
-        "company_name":          r.get("COMPANY_NAME") or r.get("company_name") or "",
-        "cin":                   cin_clean,
-        "llpin":                 None,
-        "client_type":           client_type,
-        "date_of_incorporation": doi_iso,
-        "email":                 "",
-        "address":               address,
-        "city":                  "",
-        "state":                 state,
-        "gst_pin":               "",
-        "pan":                   "",
-        "directors":             [],
-        "company_status":        r.get("COMPANY_STATUS") or r.get("company_status") or "",
-        "authorized_capital":    r.get("AUTHORISED_CAPITAL_IN_INR") or "",
-        "paid_up_capital":       r.get("PAIDUP_CAPITAL_IN_INR") or "",
-        "mca_fetch_date":        _date.today().isoformat(),
-    }
-
-
+    raise HTTPException(
+        status_code=404,
+        detail=f"No company found for '{q}'. Try a more specific name or the exact CIN/LLPIN."
+    )
 def _parse_mca_pdf(pdf_bytes: bytes) -> dict:
     """
     Parse an MCA Company Master Data PDF (printed from mca.gov.in).
@@ -6868,7 +7152,21 @@ async def parse_mds_excel_for_client_form(
         company_info.get("Incorporation Date") or ""
     )
     birthday = parse_date(raw_doi)
-    client_type = detect_type(company_name)
+    # Use Company Class/Category from master data first; fall back to name-based detection
+    raw_mca_class = (
+        company_info.get("Company Class") or
+        company_info.get("Company Category") or
+        company_info.get("Company SubCategory") or
+        company_info.get("Class of Company") or
+        company_info.get("Type of Company") or ""
+    ).strip()
+    if raw_mca_class and raw_mca_class not in ("-", "nan", ""):
+        client_type = _map_mca_constitution(raw_mca_class)
+        # If class alone maps to "other", also try combining with company name
+        if client_type == "other":
+            client_type = _map_mca_constitution(raw_mca_class + " " + company_name)
+    else:
+        client_type = detect_type(company_name)
 
     address = (
         company_info.get("Registered Address") or
