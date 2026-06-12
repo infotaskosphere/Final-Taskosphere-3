@@ -5425,24 +5425,54 @@ async def sync_master_sheets(
 # ==============================================================
 
 def _strip_watermark(s: str) -> str:
-    """
-    GST REG-06 PDFs contain a diagonal 'Goods and Services Tax' watermark
-    whose single letters bleed into the extracted text.  This helper removes:
-      • a leading single letter followed by a space before an uppercase word
-        e.g. "S JUHIL DIPAK" → "JUHIL DIPAK"
-      • a trailing single letter at the end of a value
-        e.g. "MAHALAXMI MEDICAL a" → "MAHALAXMI MEDICAL"
-    """
-    s = re.sub(r'^[A-Za-z]\s+(?=[A-Z])', '', s.strip())   # leading wm char
-    s = re.sub(r'\s+[a-zA-Z]$', '', s.strip())             # trailing wm char
+    """Remove single/short watermark chars from start/end of a string."""
+    if not s:
+        return s
+    s = s.strip()
+    s = re.sub(r'^[A-Za-z]\s+(?=[A-Z])', '', s)
+    s = re.sub(r'\s+[A-Za-z]\s*$', '', s)
     return re.sub(r'\s{2,}', ' ', s).strip()
+
+
+def _clean_gst_watermark(text: str) -> str:
+    """
+    Remove GST certificate 'Goods and Services Tax Network' watermark fragments.
+    The watermark appears as isolated 1-3 character syllables interspersed in the
+    extracted text (e.g. x, Ta, es, ic, rv, Se, d, an, ds, oo, G).
+    Strategy: remove tokens that are 1-3 chars, all-alpha, and all chars belong
+    to the watermark character set, when surrounded by longer real-word neighbors.
+    """
+    if not text:
+        return text
+    WM_CHARS = set('goodservicstaxnewrk')
+    result_lines = []
+    for line in text.splitlines():
+        tokens = line.split()
+        cleaned = []
+        for i, tok in enumerate(tokens):
+            tok_alpha = re.sub(r'[^a-zA-Z]', '', tok)
+            is_wm_candidate = (
+                1 <= len(tok) <= 3 and
+                len(tok_alpha) >= 1 and
+                all(c.lower() in WM_CHARS for c in tok_alpha) and
+                tok_alpha.isalpha()
+            )
+            if is_wm_candidate:
+                prev_alpha_len = len(re.sub(r'[^a-zA-Z]', '', tokens[i-1])) if i > 0 else 0
+                next_alpha_len = len(re.sub(r'[^a-zA-Z]', '', tokens[i+1])) if i+1 < len(tokens) else 0
+                if prev_alpha_len > 3 and next_alpha_len > 3:
+                    continue  # surrounded by real words — discard as watermark
+            cleaned.append(tok)
+        result_lines.append(' '.join(cleaned))
+    return '\n'.join(result_lines)
 
 
 def _parse_gst_reg06_pdf(pdf_bytes: bytes) -> dict:
     """
     Parse a GST Form REG-06 PDF using pdfplumber + regex.
-    Handles both the structured (labelled fields) and the inline address formats
-    used in digital GST REG-06 certificates.
+    Handles PDFs with diagonal 'Goods and Services Tax Network' watermark whose
+    individual syllables (x, Ta, es, ic, rv, Se, d, an, ds, oo, G ...) bleed
+    into the extracted text and contaminate address fields.
     Returns: gstin, legal_name, trade_name, constitution, constitution_raw,
              address, city, state, pin, full_address, registration_type,
              valid_from, partners[{name, designation}].
@@ -5450,7 +5480,6 @@ def _parse_gst_reg06_pdf(pdf_bytes: bytes) -> dict:
     from io import BytesIO
     import pdfplumber
 
-    # All known Indian states / UTs in lowercase for address parsing
     _INDIAN_STATES = {
         "andhra pradesh", "arunachal pradesh", "assam", "bihar", "chhattisgarh",
         "goa", "gujarat", "haryana", "himachal pradesh", "jharkhand", "karnataka",
@@ -5464,60 +5493,56 @@ def _parse_gst_reg06_pdf(pdf_bytes: bytes) -> dict:
     }
 
     with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
-        pages = [p.extract_text() or "" for p in pdf.pages]
+        raw_pages = [p.extract_text() or "" for p in pdf.pages]
 
+    # Apply watermark cleaning to every page
+    pages      = [_clean_gst_watermark(p) for p in raw_pages]
     page1      = pages[0] if pages else ""
     annexure_b = next(
-        (p for p in pages if "Annexure B" in p or "Details of Managing" in p), ""
+        (p for p in pages
+         if "Annexure B" in p or "Details of Managing" in p or "Details of Proprietor" in p),
+        ""
     )
 
     def _find(pat, text, group=1, flags=re.IGNORECASE | re.MULTILINE):
         m = re.search(pat, text, flags)
         return _strip_watermark(m.group(group).strip()) if m else ""
 
-    def _addr_field(label, text):
-        m = re.search(label + r'[:\s]+([^\n]+)', text, re.IGNORECASE)
-        return _strip_watermark(m.group(1)) if m else ""
-
     # ── Core fields ──────────────────────────────────────────────────────────
-    gstin      = _find(r'Registration Number\s*[:\-]?\s*([A-Z0-9]{15})', page1)
-    # Patterns handle both "1. Legal Name <VALUE>" and "Legal Name\n<VALUE>" layouts
-    legal_name = _find(r'(?:^\d+\.\s+)?Legal Name\s+([A-Z3][A-Z0-9 &.\-,]+?)(?=\n\s*\d+\.\s|\Z)', page1)
+    gstin = _find(r'Registration Number\s*[:\-]?\s*([A-Z0-9]{15})', page1)
+
+    legal_name = _find(
+        r'(?:^\d+\.\s+)?Legal Name\s+([A-Z][A-Z0-9 &.\-,]+?)(?=\s*\n\s*\d+\.|\Z)', page1
+    )
     if not legal_name:
-        legal_name = _find(r'Legal Name\s*\n\s*([A-Z3][A-Z0-9 &.\-,]+)', page1)
-    trade_name = _find(r'Trade Name,?\s*if any\s+([A-Z3][A-Z0-9 &.\-,]+?)(?=\n\s*\d+\.\s|\Z)', page1)
+        legal_name = _find(r'Legal Name\s*\n\s*([A-Z][A-Z0-9 &.\-,]+)', page1)
+
+    trade_name = _find(
+        r'Trade Name,?\s*if any\s+([A-Z][A-Z0-9 &.\-,]+?)(?=\s*\n\s*\d+\.|\Z)', page1
+    )
     if not trade_name:
-        trade_name = _find(r'Trade Name.*?\n\s*([A-Z3][A-Z0-9 &.\-,]+)', page1)
-    const_raw  = _find(r'Constitution of Business\s+([A-Za-z ]+?)(?=\n\s*\d+\.\s|\Z)', page1)
+        trade_name = _find(r'Trade Name.*?\n\s*([A-Z][A-Z0-9 &.\-,]+)', page1)
+
+    const_raw = _find(
+        r'Constitution of Business\s+([A-Za-z ]+?)(?=\s*\n\s*\d+\.|\Z)', page1
+    )
     if not const_raw:
         const_raw = _find(r'Constitution of Business\s*\n\s*([A-Za-z ]+)', page1)
 
-    # ── Constitution mapping — exact first, then substring ────────────────────
     _cmap = {
-        "proprietorship":              "proprietor",
-        "proprietary":                 "proprietor",
-        "sole proprietorship":         "proprietor",
-        "proprietor":                  "proprietor",
-        "private limited company":     "pvt_ltd",
-        "private limited":             "pvt_ltd",
-        "pvt ltd":                     "pvt_ltd",
-        "pvt. ltd.":                   "pvt_ltd",
-        "limited liability partnership": "llp",
-        "llp":                         "llp",
-        "partnership firm":            "partnership",
-        "partnership":                 "partnership",
-        "huf":                         "huf",
-        "hindu undivided family":      "huf",
-        "trust":                       "trust",
-        "public limited company":      "pvt_ltd",
-        "public limited":              "pvt_ltd",
-        "society":                     "other",
-        "cooperative":                 "other",
+        "proprietorship": "proprietor", "proprietary": "proprietor",
+        "sole proprietorship": "proprietor", "proprietor": "proprietor",
+        "private limited company": "pvt_ltd", "private limited": "pvt_ltd",
+        "pvt ltd": "pvt_ltd", "pvt. ltd.": "pvt_ltd",
+        "limited liability partnership": "llp", "llp": "llp",
+        "partnership firm": "partnership", "partnership": "partnership",
+        "huf": "huf", "hindu undivided family": "huf",
+        "trust": "trust", "public limited company": "pvt_ltd",
+        "public limited": "pvt_ltd", "society": "other", "cooperative": "other",
     }
     lc_const = const_raw.lower().strip()
     constitution = _cmap.get(lc_const, "")
     if not constitution:
-        # Substring fallback — most reliable for real-world PDFs
         if "private limited" in lc_const or "pvt" in lc_const:
             constitution = "pvt_ltd"
         elif "llp" in lc_const or "limited liability" in lc_const:
@@ -5535,92 +5560,107 @@ def _parse_gst_reg06_pdf(pdf_bytes: bytes) -> dict:
         else:
             constitution = "other"
 
-    # ── Address section ───────────────────────────────────────────────────────
-    # Step 1: Extract the raw address block from page 1.
-    # Two formats exist:
-    #   (A) Structured: field labels like "Floor No.", "Building No.", etc.
-    #   (B) Inline:    "Address of Principal Place of <full address>\nBusiness ..."
+    # ── Address: extract the raw address block after watermark cleaning ───────
     addr_block_m = re.search(
-        r'Address of Principal Place of\s*(Business)?\s*(.+?)(?=\n\s*\d+\.\s|Date of Liability|6\.|$)',
+        r'Address of Principal Place of\s*(?:Business)?\s*(.+?)(?=\n\s*\d+\.\s+|Date of Liability|6\.\s|$)',
         page1, re.DOTALL | re.IGNORECASE
     )
     addr_block_raw = ""
     if addr_block_m:
-        chunk = addr_block_m.group(2) or addr_block_m.group(0)
-        # Remove any leading "Business" label that wraps to next line
+        chunk = addr_block_m.group(1) or ""
         chunk = re.sub(r'(?i)^Business\s*[:\-]?\s*', '', chunk.strip())
         chunk = re.sub(r'(?i)\nBusiness\s*[:\-]?\s*', ' ', chunk)
+        chunk = re.sub(r'(?i)^Address\s+of\s+Principal\s+Place\s+of\s+Business\s*[:\-]?\s*', '', chunk.strip())
+        chunk = re.sub(r'^\d+\.\s+', '', chunk.strip())
         addr_block_raw = re.sub(r'\s+', ' ', chunk).strip()
-        # KEY FIX: strip any "Address:" / label artifact that pdfplumber bleeds into captured text
-        addr_block_raw = re.sub(r'(?i)^Address\s*[:\-]\s*', '', addr_block_raw).strip()
-        addr_block_raw = re.sub(r'(?i)^(?:Address\s+of\s+)?(?:Principal\s+Place\s+of\s+)?Business\s*[:\-]?\s*', '', addr_block_raw).strip()
-        addr_block_raw = re.sub(r'(?i)^Address\s+of\s+Principal\s+Place\s+of\s+Business\s*[:\-]?\s*', '', addr_block_raw).strip()
-        # Remove any leading digit-dot prefix like "4." that bleeds in
-        addr_block_raw = re.sub(r'^\d+\.\s+', '', addr_block_raw).strip()
 
     address = city = state = pin = full_address = ""
 
     if addr_block_raw:
-        # ── Try structured (labelled) format first ────────────────────────────
-        floor    = _addr_field(r'Floor No\.', addr_block_raw)
-        building = _addr_field(r'Building No\./Flat No\.', addr_block_raw)
-        premises = _addr_field(r'Name Of Premises/Building', addr_block_raw)
-        road     = _addr_field(r'Road/Street', addr_block_raw)
-        locality = _addr_field(r'Locality/Sub Loc?ality', addr_block_raw)
-        city_lbl = _addr_field(r'City/Town/Village', addr_block_raw)
-        state_lbl= _addr_field(r'State', addr_block_raw)
+        # ── Structured label-bounded extraction ────────────────────────────────
+        # After watermark cleaning, the address block looks like:
+        # "Building No./Flat No.: 81 Name Of Premises/Building: SHRIJI NAGAR 2
+        #  Road/Street: GODADARA Locality/Sub Locality: Limbayat
+        #  City/Town/Village: Surat District: Surat State: Gujarat PIN Code: 394210"
+        # Some 1-2 char WM residues may still remain between labels.
+
+        ALL_LABELS = [
+            r'Floor No\.',
+            r'Building No\./Flat No\.',
+            r'Name Of Premises/Building',
+            r'Road/Street(?:/Lane)?',
+            r'Locality/Sub Loc(?:ality)?',
+            r'City/Town/Village',
+            r'District',
+            r'State',
+            r'PIN Code',
+        ]
+
+        def _lbl(start_pat, stop_pats, text):
+            """Extract value between start label and first stop label."""
+            stop_re = '|'.join(stop_pats)
+            m = re.search(
+                start_pat + r'[:\s]+(?:[A-Za-z]{1,3}\s+)?(.+?)(?=\s+(?:' + stop_re + r')|$)',
+                text, re.IGNORECASE | re.DOTALL
+            )
+            if not m:
+                return ""
+            val = m.group(1).strip()
+            val = re.sub(r'\s+[A-Za-z]{1,3}\s*$', '', val).strip()
+            val = re.sub(r'^[A-Za-z]{1,3}\s+(?=[A-Z0-9])', '', val).strip()
+            return _strip_watermark(val)
+
+        floor    = _lbl(r'Floor No\.',                ALL_LABELS[2:], addr_block_raw)
+        building = _lbl(r'Building No\./Flat No\.',  ALL_LABELS[2:], addr_block_raw)
+        premises = _lbl(r'Name Of Premises/Building',  ALL_LABELS[3:], addr_block_raw)
+        road     = _lbl(r'Road/Street(?:/Lane)?',      ALL_LABELS[4:], addr_block_raw)
+        locality = _lbl(r'Locality/Sub Loc(?:ality)?', ALL_LABELS[5:], addr_block_raw)
+        city_lbl = _lbl(r'City/Town/Village',          ALL_LABELS[6:], addr_block_raw)
+        district = _lbl(r'District',                   ALL_LABELS[7:], addr_block_raw)
+        state_lbl= _lbl(r'State',                      ALL_LABELS[8:], addr_block_raw)
         pin_lbl  = _find(r'PIN Code[:\s]+(\d{6})', addr_block_raw)
 
-        if any([floor, building, premises, road, locality, city_lbl]):
-            # Structured format — use the labelled fields directly
-            address      = ", ".join(x for x in [floor, building, premises, road, locality] if x)
-            city         = city_lbl
+        if any([building, premises, road, city_lbl, state_lbl, pin_lbl]):
+            addr_parts   = [x for x in [floor, building, premises, road, locality] if x]
+            address      = ", ".join(addr_parts)
+            city         = city_lbl or district
             state        = state_lbl
             pin          = pin_lbl
             full_address = ", ".join(x for x in [address, city, state, pin] if x)
         else:
-            # ── Inline format — parse comma-separated address string ──────────
-            full_address = addr_block_raw  # preserve original
-
-            # Remove trailing watermark/signature noise
-            raw = re.sub(r'(?i)(signature not verified|digitally signed|date:.*|goods and services tax.*)', '', addr_block_raw).strip()
-
+            # ── Fallback: comma-separated inline address ────────────────────
+            full_address = addr_block_raw
+            raw = re.sub(
+                r'(?i)(signature not verified|digitally signed|date:.*|goods and services tax.*)',
+                '', addr_block_raw
+            ).strip()
             parts = [p.strip() for p in re.split(r',\s*', raw) if p.strip()]
-            # Strip any residual "Address:" label from any part (safety net)
             parts = [re.sub(r'(?i)^address\s*[:\-]\s*', '', p).strip() for p in parts if p.strip()]
 
-            # Extract 6-digit PIN
             for i, p in enumerate(parts):
-                cleaned_p = re.sub(r'\s+', '', p)
-                if re.match(r'^\d{6}$', cleaned_p):
-                    pin = cleaned_p
+                if re.match(r'^\d{6}$', re.sub(r'\s+', '', p)):
+                    pin = re.sub(r'\s+', '', p)
                     parts = parts[:i] + parts[i+1:]
                     break
 
-            # Extract state (scan from right, match known Indian state)
             for i in range(len(parts) - 1, -1, -1):
-                candidate = parts[i].lower().strip()
-                if candidate in _INDIAN_STATES:
+                if parts[i].lower().strip() in _INDIAN_STATES:
                     state = parts[i].strip().title()
                     parts = parts[:i] + parts[i+1:]
                     break
 
-            # City is typically the last part after removing state & PIN
-            # Skip if it duplicates the preceding part (GST often repeats city)
             if parts:
                 last = parts[-1].strip()
                 prev = parts[-2].strip() if len(parts) > 1 else ""
                 if last.lower() == prev.lower():
-                    parts = parts[:-1]  # remove duplicate
+                    parts = parts[:-1]
                 city = parts[-1].strip() if parts else ""
                 if city:
                     parts = parts[:-1]
-
-            # Remaining parts form the street address
             address = ", ".join(p for p in parts if p)
 
     # ── Other fields ──────────────────────────────────────────────────────────
-    reg_type   = _find(r'Type of Registration\s*[\n\r]+\s*([A-Za-z ]+)', page1)
+    reg_type = _find(r'Type of Registration\s*[\n\r]+\s*([A-Za-z ]+)', page1)
     if not reg_type:
         reg_type = _find(r'Type of Registration\s+([A-Za-z ]+)', page1)
     valid_from = _find(r'Period of Validity\s+From\s+(\d{2}/\d{2}/\d{4})', page1)
@@ -5630,17 +5670,15 @@ def _parse_gst_reg06_pdf(pdf_bytes: bytes) -> dict:
     if annexure_b:
         clean_lines = [
             ln for ln in annexure_b.split('\n')
-            if not re.fullmatch(r'\s*[a-zA-Z]\s*', ln)
+            if not re.fullmatch(r'\s*[a-zA-Z]{1,2}\s*', ln)
         ]
-        clean = '\n'.join(clean_lines)
+        clean = _clean_gst_watermark('\n'.join(clean_lines))
         clean = re.sub(r'(?m)^[a-zA-Z]\s+(Designation/Status)', r'\1', clean)
 
-        # Try numbered block pattern first
         entries = re.findall(
             r'\d+\s+Name\s+([A-Z][A-Z \-]+?)\s*\n\s*Designation/Status\s+([A-Za-z /]+)',
             clean, re.IGNORECASE
         )
-        # Fallback: adjacent Name / Designation lines without number prefix
         if not entries:
             entries = re.findall(
                 r'Name\s+([A-Z][A-Z \-]+?)\s*\n\s*Designation(?:/Status)?\s+([A-Za-z /]+)',
@@ -5667,40 +5705,6 @@ def _parse_gst_reg06_pdf(pdf_bytes: bytes) -> dict:
         "valid_from":        valid_from,
         "partners":          partners,
     }
-
-
-@api_router.post("/clients/parse-gst-pdf")
-async def parse_gst_pdf(
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Parse a GST REG-06 certificate PDF and return extracted client fields.
-    Uses pdfplumber + regex entirely server-side — no AI / 3rd-party API.
-    """
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
-
-    content = await file.read()
-    if len(content) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="PDF too large — max 10 MB.")
-
-    try:
-        result = _parse_gst_reg06_pdf(content)
-    except Exception as e:
-        logger.error(f"parse_gst_pdf error: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=422,
-            detail="Could not extract data from this PDF. Please ensure it is a valid GST REG-06 certificate."
-        )
-
-    if not result.get("gstin"):
-        raise HTTPException(
-            status_code=422,
-            detail="No GSTIN found in PDF. Please upload a valid Form GST REG-06 certificate."
-        )
-
-    return result
 
 
 @api_router.get("/clients/check-gstin")
@@ -5730,11 +5734,12 @@ async def check_gstin(
 
 
 # ==============================================================
-# UDYAM CERTIFICATE PDF PARSER
+# # UDYAM CERTIFICATE PDF PARSER
 # ==============================================================
 def _parse_udyam_pdf(pdf_bytes: bytes) -> dict:
     """
     Parse a Udyam Registration Certificate PDF.
+    Handles single-column and two-column (side-by-side field) layouts.
     Returns: udyam_number, enterprise_name, msme_type, major_activity,
              mobile, email, date_of_incorporation, address, city, state, pin,
              social_category, pan.
@@ -5752,9 +5757,7 @@ def _parse_udyam_pdf(pdf_bytes: bytes) -> dict:
         return m.group(group).strip() if m else ""
 
     # Udyam registration number
-    udyam_number = _find(r'UDYAM[- ]REGISTRATION[- ]NUMBER\s+(UDYAM-[A-Z]{2}-\d{2}-\d+)', full_text)
-    if not udyam_number:
-        udyam_number = _find(r'(UDYAM-[A-Z]{2}-\d{2}-\d+)', full_text)
+    udyam_number = _find(r'(UDYAM-[A-Z]{2}-\d{2}-\d+)', full_text)
 
     # Enterprise name — strip M/S prefix
     enterprise_name_raw = _find(r'NAME OF ENTERPRISE\s+([^\n]+)', full_text)
@@ -5762,7 +5765,7 @@ def _parse_udyam_pdf(pdf_bytes: bytes) -> dict:
         enterprise_name_raw = _find(r'Name of Enterprise\s*[:\-]?\s*([^\n]+)', full_text)
     enterprise_name = re.sub(r'(?i)^M[/\.]?S[/\.]?\s+', '', enterprise_name_raw.strip()).strip()
 
-    # MSME type — most recent year classification
+    # MSME type — most recent classification year entry
     type_matches = re.findall(r'\d{4}-\d{2,4}\s+(Micro|Small|Medium)', full_text, re.IGNORECASE)
     msme_type = type_matches[0].title() if type_matches else _find(r'\b(Micro|Small|Medium)\b', full_text)
 
@@ -5771,24 +5774,28 @@ def _parse_udyam_pdf(pdf_bytes: bytes) -> dict:
     if not major_activity:
         major_activity = _find(r'Major Activity\s*[:\-]?\s*([^\n]+)', full_text)
 
-    # Social category — layout is: "SOCIAL CATEGORY OF\nGENERAL\nENTREPRENEUR"
-    social_category = _find(r'SOCIAL CATEGORY OF\s*\n\s*([A-Z][A-Z ]+?)(?=\s*\n\s*ENTREPRENEUR|\s*ENTREPRENEUR)', full_text)
+    # Social category
+    social_category = _find(
+        r'SOCIAL CATEGORY OF\s*\n\s*([A-Z][A-Z ]+?)(?=\s*\n\s*ENTREPRENEUR|\s*ENTREPRENEUR)',
+        full_text
+    )
     if not social_category:
-        social_category = _find(r'SOCIAL CATEGORY[^\n]*\n([A-Z][A-Z ]+?)(?=\n)', full_text)
-    if not social_category:
-        social_category = _find(r'Social Category.*?([^\n]+)\n', full_text)
+        social_category = _find(r'Social Category.*?([A-Z][A-Z ]+?)(?=\n)', full_text)
 
-    # Mobile
-    mobile = _find(r'Mobile\s*[:\-]?\s*(\d{10})', full_text)
-    if not mobile:
-        mobile = _find(r'Mobile No\.?\s*[:\-]?\s*(\d{10})', full_text)
+    # Mobile — prefer 10-digit Indian mobile number
+    mobile = _find(r'Mobile(?:\s*No\.?)?\s*[:\-]?\s*(\d{10})', full_text)
 
     # Email
-    email = _find(r'Email\s*[:\-]?\s*([\w.+\-]+@[\w.\-]+\.\w+)', full_text)
+    email = _find(r'Email(?:[\s:]|\s*Id)?\s*[:\-]?\s*([\w.+\-]+@[\w.\-]+\.\w+)', full_text)
 
-    # Date of incorporation
+    # PAN
+    pan = _find(r'\bPAN\s+([A-Z]{5}\d{4}[A-Z])\b', full_text)
+    if not pan:
+        pan = _find(r'\bPAN\b[:\s]+([A-Z]{5}\d{4}[A-Z])\b', full_text)
+
+    # Date of incorporation / registration
     doi_raw = _find(
-        r'DATE OF (?:INCORPORATION|COMMENCEMENT)\s*/?\s*REGISTRATION OF ENTERPRISE\s+(\d{2}/\d{2}/\d{4})',
+        r'DATE OF (?:INCORPORATION|REGISTRATION)[^\n]*\n[^\n]*\n\s*(\d{2}/\d{2}/\d{4})',
         full_text
     )
     if not doi_raw:
@@ -5801,87 +5808,73 @@ def _parse_udyam_pdf(pdf_bytes: bytes) -> dict:
         except Exception:
             date_of_incorporation = doi_raw
 
-    # PAN
-    pan = _find(r'\bPAN\s+([A-Z]{5}\d{4}[A-Z])\b', full_text)
+    # ── Address — two-column pdfplumber layout ─────────────────────────────────
+    # Fields appear as: "LABEL VALUE   LABEL VALUE" on same line (two columns merged)
+    # E.g.: "Flat/Door/Block No. PLOT NO. A-8-9-10-11   Name of Premises/ Building DIAMOND ESTATE"
 
-    # ── Address — handle two-column pdfplumber layout ────────────────────────
-    # pdfplumber merges two-column Udyam certificate into a single stream like:
-    # "Flat/Door/Block\n5, Premises/ ASHISH BUILDING,\nNo.\nBuilding\n
-    #  Village/Town VARACHHA Block B/H KIRAN EXPORT\n
-    #  UMIYADHAM\nRoad/Street/Lane City SURAT\nROAD\nState GUJARAT District SURAT , Pin 395006"
-    # Strategy: grab the block between "Flat/Door/Block" and "Mobile" then extract field values
-    addr_section_m = re.search(r'Flat/Door/Block(.+?)(?:Mobile\s|DATE OF INCORP)', full_text, re.DOTALL | re.IGNORECASE)
-    addr_section = addr_section_m.group(1) if addr_section_m else ""
+    def _addr_val(label_pat, text, stop_pats=None):
+        if stop_pats:
+            stop = '|'.join(stop_pats)
+            m = re.search(
+                label_pat + r'\s+([^\n]+?)(?=\s{2,}(?:' + stop + r')\s|\n|$)',
+                text, re.IGNORECASE
+            )
+            if not m:
+                m = re.search(
+                    label_pat + r'\s+(.+?)(?=\s+(?:' + stop + r')\s|\n|$)',
+                    text, re.IGNORECASE | re.DOTALL
+                )
+        else:
+            m = re.search(label_pat + r'\s+([^\n]+)', text, re.IGNORECASE)
+        return m.group(1).strip().rstrip(',') if m else ""
 
-    # Flatten to single line removing label noise
-    def _grab_after(label_pat, text, stop_pat=None):
-        m = re.search(label_pat + r'\s+([^\n]+)', text, re.IGNORECASE)
-        if m:
-            val = m.group(1).strip()
-            if stop_pat:
-                val = re.split(stop_pat, val, flags=re.IGNORECASE)[0].strip()
-            return val
-        return ""
+    flat_no   = _addr_val(
+        r'Flat/Door/Block No\.?',  full_text,
+        stop_pats=[r'Name of Premises', r'Building', r'Village/Town']
+    )
+    premises  = _addr_val(
+        r'Name of Premises/?\s*Building', full_text,
+        stop_pats=[r'Village/Town', r'Block', r'Road/Street']
+    )
+    village   = _addr_val(
+        r'Village/Town', full_text,
+        stop_pats=[r'Block\b', r'Road/Street', r'City\b', r'State\b']
+    )
+    block_val = _addr_val(
+        r'\bBlock\b', full_text,
+        stop_pats=[r'Road/Street', r'City\b', r'State\b', r'Flat/Door']
+    )
+    if len(block_val) <= 1:
+        block_val = ""
+    road = _addr_val(
+        r'Road/Street(?:/Lane)?', full_text,
+        stop_pats=[r'City\b', r'State\b', r'District\b']
+    )
 
-    # The flat number is typically the first non-label line after "Flat/Door/Block...No."
-    flat_raw = ""
-    flat_section_m = re.search(r'Flat/Door/Block\s*\n([^\n]+)', full_text, re.IGNORECASE)
-    if flat_section_m:
-        raw_val = flat_section_m.group(1).strip()
-        # Remove label artifacts like "Premises/ ASHISH BUILDING," — flat is just the number part
-        flat_num_m = re.match(r'^(\d[\w,\s/]*?)(?:,\s*Premises/|,\s*Building|$)', raw_val)
-        flat_raw = flat_num_m.group(1).strip().rstrip(',') if flat_num_m else ""
-        # Extract building name from same line if present
-        bld_m = re.search(r'Premises/\s*(?:ASHISH )?([A-Z][A-Z0-9 ,]+?)(?:,$|,\s*$|$)', raw_val, re.IGNORECASE)
-        building = bld_m.group(0).replace('Premises/', '').strip().rstrip(',') if bld_m else ""
-        # More reliable: take everything after "Premises/ " or before first comma after it
-        bld_m2 = re.search(r'Premises/\s*([A-Z][A-Z0-9 ]+)', raw_val, re.IGNORECASE)
-        building = bld_m2.group(1).strip().rstrip(',') if bld_m2 else building
-    else:
-        flat_raw = ""
-        building = ""
+    city_m   = re.search(r'\bCity\s+([A-Z][A-Z0-9 ]+?)(?=\s+State\b|\s+District\b|\s*$)',
+                         full_text, re.IGNORECASE | re.MULTILINE)
+    city     = city_m.group(1).strip().title() if city_m else ""
 
-    # Village/Town
-    village_m = re.search(r'Village/Town\s+([A-Z][A-Z0-9 ]+?)(?=\s+Block\b|\s*\n)', full_text, re.IGNORECASE)
-    village = village_m.group(1).strip() if village_m else ""
+    state_m  = re.search(r'\bState\s+([A-Z][A-Z ]+?)(?=\s+District\b|\s*,|\s*$)',
+                         full_text, re.IGNORECASE | re.MULTILINE)
+    state    = state_m.group(1).strip().title() if state_m else ""
 
-    # Block (value after "Block" on the same line)
-    block_m = re.search(r'\bBlock\s+([B/H][^\n]+?)(?=\s*\n)', full_text, re.IGNORECASE)
-    if not block_m:
-        block_m = re.search(r'\bBlock\s+([A-Z][^\n]+?)(?=\s*\n)', full_text, re.IGNORECASE)
-    block = block_m.group(1).strip() if block_m else ""
-    # Skip label-only blocks like "B" or single letters
-    if len(block) <= 2:
-        block = ""
-
-    # Road — the road name is split: line before "Road/Street/Lane" + line after it
-    # e.g. "UMIYADHAM\nRoad/Street/Lane City SURAT\nROAD"
-    road_m = re.search(r'([A-Z][A-Z0-9 ]+)\nRoad/Street(?:/Lane)?\s+City\s+[A-Z]+\s*\n([A-Z][A-Z0-9 ]+)', full_text, re.IGNORECASE)
-    if road_m:
-        road = (road_m.group(1).strip() + " " + road_m.group(2).strip()).strip()
-    else:
-        road_m = re.search(r'Road/Street(?:/Lane)?\s+City\s+[A-Z]+\s*\n([A-Z][A-Z0-9 ]+)', full_text, re.IGNORECASE)
-        if not road_m:
-            road_m = re.search(r'Road/Street(?:/Lane)?\s*\n([A-Z][A-Z0-9 ]+)', full_text, re.IGNORECASE)
-        if not road_m:
-            road_m = re.search(r'Road/Street(?:/Lane)?\s+([A-Z][A-Z0-9 ]+?)(?=\s+City\b|\s*\n)', full_text, re.IGNORECASE)
-        road = road_m.group(1).strip() if road_m else ""
-
-    city_m  = re.search(r'City\s+([A-Z][A-Z ]+?)(?=\s+State\b|\s*\n)', full_text, re.IGNORECASE)
-    city    = city_m.group(1).strip().title() if city_m else ""
-    state_m = re.search(r'State\s+([A-Z][A-Z ]+?)(?=\s+District\b|\s*\n)', full_text, re.IGNORECASE)
-    state   = state_m.group(1).strip().title() if state_m else ""
-    pin_m   = re.search(r'\bPin\s*[:\-,]?\s*(\d{6})', full_text, re.IGNORECASE)
-    pin     = pin_m.group(1) if pin_m else ""
+    pin_m    = re.search(r'\bPin\s*[:\-,]?\s*(\d{6})', full_text, re.IGNORECASE)
+    pin      = pin_m.group(1) if pin_m else ""
     if not pin:
         pin_m2 = re.search(r',\s*(\d{6})\b', full_text)
-        pin = pin_m2.group(1) if pin_m2 else ""
+        pin    = pin_m2.group(1) if pin_m2 else ""
 
-    # Build clean address — deduplicate and skip blanks/short noise
-    addr_candidate = [flat_raw, building, village, block, road]
-    addr_parts = []
+    district_m = re.search(r'\bDistrict\s+([A-Z][A-Z ]+?)(?=\s*,|\s+Pin|\s*$)',
+                           full_text, re.IGNORECASE | re.MULTILINE)
+    district   = district_m.group(1).strip().title() if district_m else ""
+    if not city and district:
+        city = district
+
+    addr_parts_raw = [flat_no, premises, block_val, village, road]
     seen_lower = set()
-    for p in addr_candidate:
+    addr_parts = []
+    for p in addr_parts_raw:
         p = p.strip().rstrip(',')
         if not p or len(p) <= 1:
             continue
@@ -5907,34 +5900,6 @@ def _parse_udyam_pdf(pdf_bytes: bytes) -> dict:
         "pin":                   pin,
     }
 
-
-@api_router.post("/clients/parse-udyam-pdf")
-async def parse_udyam_pdf(
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Parse a Udyam Registration Certificate PDF and return extracted client fields.
-    """
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
-    content = await file.read()
-    if len(content) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="PDF too large — max 10 MB.")
-    try:
-        result = _parse_udyam_pdf(content)
-    except Exception as e:
-        logger.error(f"parse_udyam_pdf error: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=422,
-            detail="Could not extract data from this PDF. Ensure it is a valid Udyam Registration Certificate."
-        )
-    if not result.get("udyam_number") and not result.get("enterprise_name"):
-        raise HTTPException(
-            status_code=422,
-            detail="No Udyam data found. Please upload a valid Udyam Registration Certificate PDF."
-        )
-    return result
 
 # ── ITR Computation PDF parser ────────────────────────────────────────────────
 def _parse_itr_computation_pdf(pdf_bytes: bytes) -> dict:
@@ -6332,10 +6297,10 @@ async def fetch_mca_details(
 
 def _parse_mca_pdf(pdf_bytes: bytes) -> dict:
     """
-    Parse an MCA (Ministry of Corporate Affairs) company information PDF.
-    Handles the real MCA website print format where:
-      - Address label appears AFTER the first address line
-      - Director names are split across separate lines from the row data
+    Parse an MCA Company Master Data PDF (printed from mca.gov.in).
+    Handles the 'Company Master Data' format where:
+      - Address appears on the line BEFORE the 'Registered Address' label
+      - Director DIN and name may be on separate lines
     """
     from io import BytesIO
     import pdfplumber
@@ -6352,25 +6317,40 @@ def _parse_mca_pdf(pdf_bytes: bytes) -> dict:
         return m.group(group).strip() if m else ""
 
     def _line_val(label, default=""):
-        """Extract value on the SAME line as label: 'Label VALUE'"""
-        pat = re.compile(r'^\s*' + re.escape(label) + r'\s+(.+)$', re.IGNORECASE)
+        """Extract value that follows label on the same line (tab or multi-space separated)."""
+        # Try wide-spaced: "Label              VALUE"
+        pat = re.compile(r'^\s*' + re.escape(label) + r'\s{2,}(.+)$', re.IGNORECASE)
         for line in lines:
             m = pat.match(line)
             if m:
                 val = m.group(1).strip()
-                return val if val not in ("-", "nan", "") else default
+                if val and val not in ("-", "nan", ""):
+                    return val
+        # Fallback: single-space separated
+        pat2 = re.compile(r'^\s*' + re.escape(label) + r'\s+(.+)$', re.IGNORECASE)
+        for line in lines:
+            m = pat2.match(line)
+            if m:
+                val = m.group(1).strip()
+                if val and val not in ("-", "nan", ""):
+                    return val
         return default
 
     # ── CIN / LLPIN ──────────────────────────────────────────────────────────
-    cin = _find(r'\bCIN\s+([UL]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6})\b', full_text)
-    if not cin:
-        cin = _find(r'\bCIN\b\s+([A-Z0-9]{21})\b', full_text)
+    cin   = _find(r'\bCIN\s+([UL]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6})\b', full_text)
     llpin = _find(r'\bLLPIN\s+([A-Z]{3}-\d{4,})\b', full_text)
+    if not cin and not llpin:
+        cin = _find(r'\bCIN\b\s+([A-Z0-9]{21})\b', full_text)
 
-    # ── Company Name ─────────────────────────────────────────────────────────
+    # ── Company / LLP Name ────────────────────────────────────────────────────
     company_name = _line_val("Company Name")
     if not company_name:
         company_name = _line_val("LLP Name")
+    if not company_name:
+        m = re.search(r'^Company Name\s*\n\s*([A-Z][A-Z0-9 &.\-]+)',
+                      full_text, re.IGNORECASE | re.MULTILINE)
+        if m:
+            company_name = m.group(1).strip()
 
     # ── Date of Incorporation ─────────────────────────────────────────────────
     doi_raw = _line_val("Date of Incorporation")
@@ -6381,117 +6361,111 @@ def _parse_mca_pdf(pdf_bytes: bytes) -> dict:
         except Exception:
             date_of_incorporation = ""
 
-    # ── Email (MCA obfuscates with [at] and [dot]) ───────────────────────────
+    # ── Email (MCA may obfuscate with [at] / [dot]) ───────────────────────────
     email_raw = _line_val("Email Id") or _line_val("Email")
     email = re.sub(r'\[at\]', '@', email_raw, flags=re.IGNORECASE)
     email = re.sub(r'\[dot\]', '.', email, flags=re.IGNORECASE).strip()
     if not re.match(r'[\w.+\-]+@[\w.\-]+\.\w+', email):
-        email = ""
+        em = re.search(r'[\w.+\-]+@[\w.\-]+\.\w+', full_text)
+        email = em.group(0) if em else ""
 
     # ── Registered Address ───────────────────────────────────────────────────
-    # In real MCA PDFs the address is BEFORE the "Registered Address" label:
-    #   "SHOP-528, AVADH KONTINA, ..."   ← address line 1
-    #   "Registered Address"             ← label (alone on next line)
-    #   "Surat, Gujarat, India, 395007"  ← address continuation
-    address = ""
-    city = state = pin = ""
+    # MCA website format: address text BEFORE the label line
+    address = city = state = pin = ""
     for i, line in enumerate(lines):
         if re.match(r'^\s*Registered Address\s*$', line, re.IGNORECASE):
-            # Line before label is the first part of address
             part1 = lines[i - 1].strip() if i > 0 else ""
-            # Line after label is continuation
             part2 = lines[i + 1].strip() if i + 1 < len(lines) else ""
-            # Exclude non-address noise lines
             skip_pat = re.compile(
-                r'^(Address at which|Listed in|Authorised|Date of|Company Status|Small Company|'
-                r'Category of|Subcategory|Class of|ACTIVE|No Records|Director|Sr\.|DIN)', re.IGNORECASE
+                r'^(Address at which|Listed|Authorised|Date of|Company Status|'
+                r'Small Company|Category|Subcategory|Class of|ACTIVE|Director|Sr\.|DIN)',
+                re.IGNORECASE
             )
             if skip_pat.match(part2):
                 part2 = ""
-            # Combine
-            if part1 and part2:
-                address = part1.rstrip(",") + ", " + part2
-            elif part1:
-                address = part1
-            elif part2:
-                address = part2
+            address = (part1.rstrip(",") + ", " + part2).strip(", ") if (part1 and part2) else (part1 or part2)
             break
-        # Fallback: label and value on same line
-        m = re.match(r'^\s*Registered Address\s+(.+)$', line, re.IGNORECASE)
+        m = re.match(r'^\s*Registered Address\s{2,}(.+)$', line, re.IGNORECASE)
         if m:
             address = m.group(1).strip()
             break
 
+    if not address:
+        m = re.search(r'Registered(?:\s+Office)?\s+Address\s*\n([^\n]+)', full_text, re.IGNORECASE)
+        if m:
+            address = m.group(1).strip()
+
     if address:
         pin_m = re.search(r'\b(\d{6})\b', address)
         pin = pin_m.group(1) if pin_m else ""
-        addr_clean = re.sub(r',?\s*\d{6}\s*$', '', address).strip()
-        addr_clean = re.sub(r',?\s*India\s*$', '', addr_clean, flags=re.IGNORECASE).strip()
+        STATE_CODES = {
+            "GJ": "Gujarat", "MH": "Maharashtra", "DL": "Delhi", "KA": "Karnataka",
+            "TN": "Tamil Nadu", "UP": "Uttar Pradesh", "RJ": "Rajasthan",
+            "WB": "West Bengal", "AP": "Andhra Pradesh", "TS": "Telangana",
+            "HR": "Haryana", "PB": "Punjab", "MP": "Madhya Pradesh",
+            "OR": "Odisha", "BR": "Bihar", "KL": "Kerala", "UK": "Uttarakhand",
+            "JH": "Jharkhand", "HP": "Himachal Pradesh", "GA": "Goa",
+            "AS": "Assam", "CG": "Chhattisgarh", "JK": "Jammu and Kashmir",
+        }
+        sc_m = re.search(r'\b([A-Z]{2})\s+\d{6}\b', address)
+        if sc_m and sc_m.group(1) in STATE_CODES:
+            state = STATE_CODES[sc_m.group(1)]
+        addr_clean = re.sub(r',?\s*\d{6}\s*', '', address).strip()
+        addr_clean = re.sub(r',?\s*IN\s*$', '', addr_clean, flags=re.IGNORECASE).strip()
+        addr_clean = re.sub(r',?\s*[A-Z]{2}\s*$', '', addr_clean).strip()
         parts = [p.strip() for p in addr_clean.split(",") if p.strip()]
-        if len(parts) >= 2:
-            state = parts[-1]
-            city = parts[-2]
+        if parts and not city:
+            city = parts[-1].strip().title()
 
     # ── Company Status ────────────────────────────────────────────────────────
-    company_status = _line_val("Company Status")
+    company_status = _line_val("Company Status(for efiling)") or _line_val("Company Status")
 
     # ── Directors ─────────────────────────────────────────────────────────────
-    # Real MCA PDF format splits director name across lines:
-    #   "RRITESH"                              ← name part 1 (line before row)
-    #   "1 08839383 Director Promoter 06/05/2026 - Yes"
-    #   "SIPANY"                               ← name part 2 (line after row)
     directors = []
     dir_start = None
     for i, line in enumerate(lines):
-        if re.search(r'Director/Signatory Details', line, re.IGNORECASE):
+        if re.search(r'Director[s/]*Signatory Details', line, re.IGNORECASE):
             dir_start = i + 1
             break
 
     if dir_start is not None:
         dir_lines = lines[dir_start:]
-        # Row pattern: "N DIN/PAN Designation Category DATE - Signatory"
-        # Name parts appear on surrounding lines
         row_re = re.compile(
-            r'^\s*(\d+)\s+'                               # Sr. No
-            r'(\d{8}|[A-Z]{5}\d{4}[A-Z])\s+'            # DIN or PAN
-            r'(Director|Partner|Designated Partner|Manager|Secretary|Chief|Chairman|Managing)\s*'
-            r'(Promoter|Independent|[A-Z][a-z]+[A-Za-z ]*)?\s*'
-            r'(\d{2}/\d{2}/\d{4})',                       # Date of appointment
+            r'^\s*(\d{8}|[A-Z]{5}\d{4}[A-Z])\s+'
+            r'(Director|Partner|Designated Partner|Manager|Secretary|Chief|Chairman|Managing)[A-Za-z ]*'
+            r'\s+(\d{2}/\d{2}/\d{4})',
             re.IGNORECASE
         )
         for j, line in enumerate(dir_lines):
-            m = row_re.match(line)
+            m = row_re.search(line)
             if m:
-                din   = m.group(2).strip()
-                desig = m.group(3).strip()
-                date_appt = m.group(5).strip()
-
-                # Name: line before (first name part) + line after (surname)
-                name_before = dir_lines[j - 1].strip() if j > 0 else ""
-                name_after  = dir_lines[j + 1].strip() if j + 1 < len(dir_lines) else ""
-
-                # Validate name parts — skip lines that look like headers/noise
+                din   = m.group(1).strip()
+                desig = m.group(2).strip()
+                nb = dir_lines[j-1].strip() if j > 0 else ""
+                na = dir_lines[j+1].strip() if j+1 < len(dir_lines) else ""
                 noise_re = re.compile(
                     r'^(Sr\.|No|DIN|PAN|Name|Designation|Category|Date|Signatory|Cessation|\d+|-)$',
                     re.IGNORECASE
                 )
-                if noise_re.match(name_before):
-                    name_before = ""
-                if noise_re.match(name_after) or row_re.match(name_after):
-                    name_after = ""
-
-                full_name = (name_before + " " + name_after).strip().title()
-                if not full_name:
-                    full_name = "Unknown"
-
+                if noise_re.match(nb): nb = ""
+                if noise_re.match(na) or row_re.search(na): na = ""
+                full_name = (nb + " " + na).strip().title() or "Unknown"
                 directors.append({
-                    "name":        full_name,
-                    "designation": desig,
-                    "email":       None,
-                    "phone":       None,
-                    "birthday":    None,
-                    "din":         din if din not in ("-", "") else None,
+                    "name": full_name, "designation": desig,
+                    "email": None, "phone": None, "birthday": None,
+                    "din": din if din not in ("-", "") else None,
                 })
+        # Fallback: DIN followed by Name on same line
+        if not directors:
+            din_re = re.compile(r'(\d{8})\s+([A-Z][A-Z ]+?)\s+(\d{2}/\d{2}/\d{4})', re.IGNORECASE)
+            for line in dir_lines:
+                m = din_re.search(line)
+                if m:
+                    directors.append({
+                        "name": m.group(2).strip().title(), "designation": "Director",
+                        "email": None, "phone": None, "birthday": None,
+                        "din": m.group(1).strip(),
+                    })
 
     return {
         "company_name":          company_name,
@@ -6509,17 +6483,16 @@ def _parse_mca_pdf(pdf_bytes: bytes) -> dict:
         "raw":                   {},
     }
 
-
 @api_router.post("/clients/parse-multi-documents")
 async def parse_multi_documents(
     files: list[UploadFile] = File(...),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Accept up to 3 documents (GST Certificate PDF, Udyam Certificate PDF,
-    MCA Master Data Excel OR MCA PDF from the MCA website).
-    Auto-detect each document type, parse all, merge into a single client record.
-    Priority: GST > Udyam > MCA Excel.
+    Accept 1-3 documents: GST Registration Certificate (PDF),
+    Udyam/MSME Certificate (PDF), or MCA Company Master Data (PDF or Excel).
+    Auto-detects document type for each file, parses, and merges into one
+    client record.  Field priority: GST > Udyam > MCA.
     """
     gst_data: dict   = {}
     udyam_data: dict = {}
@@ -6527,54 +6500,64 @@ async def parse_multi_documents(
     doc_types_found: list = []
 
     for file in files:
-        content = await file.read()
-        fname   = (file.filename or "").lower()
-        ext     = fname.rsplit(".", 1)[-1] if "." in fname else ""
+        raw_content = await file.read()
+        fname = (file.filename or "").lower()
+        ext   = fname.rsplit(".", 1)[-1] if "." in fname else ""
 
         if ext == "pdf":
             try:
                 import pdfplumber
-                with pdfplumber.open(BytesIO(content)) as pdf:
-                    first_page_text = (pdf.pages[0].extract_text() or "") if pdf.pages else ""
+                with pdfplumber.open(BytesIO(raw_content)) as pdf:
+                    fp_text  = (pdf.pages[0].extract_text() or "") if pdf.pages else ""
+                    sp_text  = (pdf.pages[1].extract_text() or "") if len(pdf.pages) > 1 else ""
             except Exception:
-                first_page_text = ""
+                fp_text = sp_text = ""
 
-            text_lower = first_page_text.lower()
-            is_gst   = (("registration number" in text_lower and
-                        bool(re.search(r'[A-Z0-9]{15}', first_page_text))) or
-                       "gst reg" in text_lower or "form gst" in text_lower)
-            is_udyam = "udyam" in text_lower or "udyam registration" in text_lower
-            is_mca   = (
-                "ministry of corporate affairs" in text_lower or
-                "mca services" in text_lower or
-                (
-                    "company information" in text_lower and
-                    bool(re.search(r'\b(CIN|LLPIN)\b', first_page_text))
-                )
+            combined = (fp_text + "\n" + sp_text).lower()
+
+            # ── Document type detection ─────────────────────────────────────
+            # Udyam: unambiguous — UDYAM-XX-YY-NNNNN pattern
+            is_udyam = bool(re.search(r'UDYAM-[A-Z]{2}-\d{2}-\d+', fp_text + sp_text))
+
+            # GST REG-06: form title + 15-char GSTIN (2 digits + 5 alpha + 4 digits + 1 alpha + 1 digit + Z + 1 alphanum)
+            is_gst = bool(re.search(
+                r'\b\d{2}[A-Z]{5}\d{4}[A-Z]\d[Z][A-Z0-9]\b',
+                fp_text + sp_text, re.IGNORECASE
+            )) or ("form gst" in combined or "gst reg-06" in combined)
+
+            # MCA: Company Master Data / Ministry of Corporate Affairs PDFs
+            is_mca = (
+                "company master data" in combined or
+                "ministry of corporate affairs" in combined or
+                "mca services" in combined or
+                (bool(re.search(r'\bCIN\s+[UL]\d{5}', fp_text, re.IGNORECASE)) and
+                 any(k in combined for k in ["company name", "llp name", "registered address",
+                                             "date of incorporation", "company status"]))
             )
 
+            # Resolve: Udyam > GST > MCA (most-specific first)
             if is_udyam and not udyam_data:
                 try:
-                    udyam_data = _parse_udyam_pdf(content)
+                    udyam_data = _parse_udyam_pdf(raw_content)
                     doc_types_found.append("Udyam Certificate")
                 except Exception as e:
                     logger.warning(f"Udyam parse failed: {e}")
-            elif is_mca and not mca_data:
-                try:
-                    mca_data = _parse_mca_pdf(content)
-                    doc_types_found.append("MCA Master Data")
-                except Exception as e:
-                    logger.warning(f"MCA PDF parse failed: {e}")
             elif is_gst and not gst_data:
                 try:
-                    gst_data = _parse_gst_reg06_pdf(content)
+                    gst_data = _parse_gst_reg06_pdf(raw_content)
                     doc_types_found.append("GST Certificate")
                 except Exception as e:
                     logger.warning(f"GST parse failed: {e}")
+            elif is_mca and not mca_data:
+                try:
+                    mca_data = _parse_mca_pdf(raw_content)
+                    doc_types_found.append("MCA Master Data")
+                except Exception as e:
+                    logger.warning(f"MCA PDF parse failed: {e}")
 
         elif ext in ("xlsx", "xls") and not mca_data:
             try:
-                excel = pd.ExcelFile(BytesIO(content))
+                excel = pd.ExcelFile(BytesIO(raw_content))
                 company_info: dict = {}
                 directors: list   = []
 
@@ -6590,17 +6573,17 @@ async def parse_multi_documents(
                     elif any(k in sheet_lower for k in ["director", "signatory", "partner"]):
                         rows_list = df.values.tolist()
                         header_row_idx = None
-                        for idx, row in enumerate(rows_list):
+                        for idx2, row in enumerate(rows_list):
                             row_strs = [str(c).strip() for c in row]
                             if any(h in row_strs for h in ["Name", "DIN/PAN", "DIN"]):
-                                header_row_idx = idx
+                                header_row_idx = idx2
                                 break
                         if header_row_idx is not None:
                             headers = [str(h).strip() for h in rows_list[header_row_idx]]
                             for row in rows_list[header_row_idx + 1:]:
                                 row_dict = {
-                                    headers[i]: str(row[i]).strip() if i < len(row) else ""
-                                    for i in range(len(headers))
+                                    headers[i2]: str(row[i2]).strip() if i2 < len(row) else ""
+                                    for i2 in range(len(headers))
                                 }
                                 name = row_dict.get("Name", "").strip()
                                 if name and name != "nan":
@@ -6617,8 +6600,7 @@ async def parse_multi_documents(
                     company_info.get("Registered Office Address") or
                     company_info.get("Address") or ""
                 ).strip()
-                if raw_addr in ("-", "nan"):
-                    raw_addr = ""
+                if raw_addr in ("-", "nan"): raw_addr = ""
 
                 mca_city = mca_state = ""
                 if raw_addr:
@@ -6627,10 +6609,7 @@ async def parse_multi_documents(
                         mca_state = addr_parts[-3]
                         mca_city  = addr_parts[-4] if len(addr_parts) >= 4 else ""
 
-                raw_doi = (
-                    company_info.get("Date of Incorporation") or
-                    company_info.get("Incorporation Date") or ""
-                )
+                raw_doi = company_info.get("Date of Incorporation") or company_info.get("Incorporation Date") or ""
                 mca_doi = ""
                 if raw_doi:
                     try:
@@ -6641,8 +6620,7 @@ async def parse_multi_documents(
 
                 mca_data = {
                     "company_name": (
-                        company_info.get("Company Name") or
-                        company_info.get("LLP Name") or ""
+                        company_info.get("Company Name") or company_info.get("LLP Name") or ""
                     ).strip(),
                     "email":                 company_info.get("Email Id") or company_info.get("Email") or "",
                     "phone":                 company_info.get("Phone") or company_info.get("Mobile") or "",
@@ -6655,25 +6633,26 @@ async def parse_multi_documents(
                     "directors":             directors,
                     "raw":                   company_info,
                 }
-                doc_types_found.append("MCA Master Data")
+                doc_types_found.append("MCA Master Data (Excel)")
             except Exception as e:
                 logger.warning(f"MCA Excel parse failed: {e}")
 
     if not doc_types_found:
         raise HTTPException(
             status_code=422,
-            detail="No recognizable documents found. Upload GST Certificate (PDF), Udyam Certificate (PDF), MCA Master Data (Excel .xlsx/.xls), or MCA Company Info PDF from the MCA website."
+            detail=(
+                "No recognizable documents found. Upload a GST Registration Certificate (PDF), "
+                "Udyam/MSME Certificate (PDF), or MCA Company Master Data (PDF or Excel .xlsx/.xls)."
+            )
         )
 
     def _first(*vals):
         return next((v for v in vals if v and str(v).strip() not in ("", "nan", "-")), "")
 
-    # Merge with priority: GST > Udyam > MCA
+    # ── Merge: GST > Udyam > MCA ──────────────────────────────────────────────
     merged_name = _first(
-        gst_data.get("legal_name"),
-        gst_data.get("trade_name"),
-        udyam_data.get("enterprise_name"),
-        mca_data.get("company_name"),
+        gst_data.get("legal_name"), gst_data.get("trade_name"),
+        udyam_data.get("enterprise_name"), mca_data.get("company_name"),
     )
     merged_name = re.sub(r'(?i)^M[/\.]?S[/\.]?\s+', '', merged_name).strip()
 
@@ -6691,7 +6670,6 @@ async def parse_multi_documents(
     pin     = _first(gst_data.get("pin"),      udyam_data.get("pin"))
     gst_full_address = gst_data.get("full_address") or ""
 
-    # Directors: MCA (has DIN) + GST Annexure B, deduplicated
     mca_directors = mca_data.get("directors", [])
     gst_partners  = [
         {"name": p["name"], "designation": p.get("designation", "Director"),
@@ -6707,7 +6685,7 @@ async def parse_multi_documents(
     if not all_contacts:
         all_contacts = [{"name": "", "designation": "", "email": "", "phone": "", "birthday": "", "din": ""}]
 
-    email = _first(udyam_data.get("email"), mca_data.get("email"))
+    email     = _first(udyam_data.get("email"), mca_data.get("email"))
     phone_raw = _first(udyam_data.get("mobile"), mca_data.get("phone"))
     phone_digits = re.sub(r"\D", "", phone_raw or "")
     if len(phone_digits) == 12 and phone_digits.startswith("91"):
