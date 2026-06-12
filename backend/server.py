@@ -1296,6 +1296,107 @@ async def create_referrer(data: dict, current_user: User = Depends(get_current_u
     return referrer
 
 
+# =========================
+# REFERRERS EDIT / DELETE
+# =========================
+
+@api_router.put("/referrers")
+async def update_referrer(data: dict, current_user: User = Depends(get_current_user)):
+    old_name = (data.get("old_name") or "").strip()
+    new_name = (data.get("new_name") or "").strip()
+    if not old_name or not new_name:
+        raise HTTPException(status_code=400, detail="old_name and new_name are required")
+    conflict = await db.referrers.find_one(
+        {"name": {"$regex": f"^{re.escape(new_name)}$", "$options": "i"}}, {"_id": 0}
+    )
+    if conflict and conflict.get("name", "").lower() != old_name.lower():
+        raise HTTPException(status_code=400, detail=f'"{new_name}" already exists in the referrer list')
+    result = await db.referrers.update_one(
+        {"name": {"$regex": f"^{re.escape(old_name)}$", "$options": "i"}},
+        {"$set": {"name": new_name}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail=f'Referrer "{old_name}" not found')
+    await db.clients.update_many({"referred_by": old_name}, {"$set": {"referred_by": new_name}})
+    return {"ok": True, "name": new_name}
+
+
+@api_router.delete("/referrers")
+async def delete_referrer(name: str, current_user: User = Depends(get_current_user)):
+    if not name:
+        raise HTTPException(status_code=400, detail="name query param required")
+    result = await db.referrers.delete_one(
+        {"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}}
+    )
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail=f'Referrer "{name}" not found')
+    return {"ok": True}
+
+
+# =========================
+# AUDITORS ROUTES
+# =========================
+
+@api_router.get("/auditors")
+async def get_auditors(current_user: User = Depends(get_current_user)):
+    auditors = await db.auditors.find({}, {"_id": 0}).to_list(500)
+    return auditors
+
+
+@api_router.post("/auditors")
+async def create_auditor(data: dict, current_user: User = Depends(get_current_user)):
+    name = (data.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Auditor name required")
+    existing = await db.auditors.find_one(
+        {"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}}, {"_id": 0}
+    )
+    if existing:
+        return existing
+    auditor = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "created_by": current_user.id,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.auditors.insert_one(auditor)
+    auditor.pop("_id", None)
+    return auditor
+
+
+@api_router.put("/auditors")
+async def update_auditor(data: dict, current_user: User = Depends(get_current_user)):
+    old_name = (data.get("old_name") or "").strip()
+    new_name = (data.get("new_name") or "").strip()
+    if not old_name or not new_name:
+        raise HTTPException(status_code=400, detail="old_name and new_name are required")
+    conflict = await db.auditors.find_one(
+        {"name": {"$regex": f"^{re.escape(new_name)}$", "$options": "i"}}, {"_id": 0}
+    )
+    if conflict and conflict.get("name", "").lower() != old_name.lower():
+        raise HTTPException(status_code=400, detail=f'"{new_name}" already exists in the auditor list')
+    result = await db.auditors.update_one(
+        {"name": {"$regex": f"^{re.escape(old_name)}$", "$options": "i"}},
+        {"$set": {"name": new_name}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail=f'Auditor "{old_name}" not found')
+    await db.clients.update_many({"auditor": old_name}, {"$set": {"auditor": new_name}})
+    return {"ok": True, "name": new_name}
+
+
+@api_router.delete("/auditors")
+async def delete_auditor(name: str, current_user: User = Depends(get_current_user)):
+    if not name:
+        raise HTTPException(status_code=400, detail="name query param required")
+    result = await db.auditors.delete_one(
+        {"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}}
+    )
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail=f'Auditor "{name}" not found')
+    return {"ok": True}
+
+
 # ==========================================================
 # TODO DASHBOARD
 # ==========================================================
