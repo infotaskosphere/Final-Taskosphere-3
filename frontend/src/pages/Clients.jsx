@@ -1491,6 +1491,187 @@ const BulkAssignModal = React.memo(({ open, onClose, filteredClients, users, isD
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// EDITABLE DROPDOWN — select with per-item Edit & Delete buttons
+// ═══════════════════════════════════════════════════════════════════════════
+const EditableDropdown = React.memo(({
+  value, onChange, options = [], staticOptions = [],
+  onEdit, onDelete, onAddNew,
+  placeholder = '— Select —', icon, isDark,
+}) => {
+  const [open,        setOpen]        = React.useState(false);
+  const [editingItem, setEditingItem] = React.useState(null);
+  const [editValue,   setEditValue]   = React.useState('');
+  const [saving,      setSaving]      = React.useState(false);
+  const ref = React.useRef(null);
+
+  React.useEffect(() => {
+    const handler = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const startEdit = (item, e) => {
+    e.stopPropagation();
+    setEditingItem(item);
+    setEditValue(item);
+  };
+
+  const commitEdit = async (oldName) => {
+    const nv = editValue.trim();
+    if (!nv || nv === oldName) { setEditingItem(null); return; }
+    setSaving(true);
+    try { await onEdit(oldName, nv); } finally { setSaving(false); setEditingItem(null); }
+  };
+
+  const handleDelete = async (item, e) => {
+    e.stopPropagation();
+    if (!window.confirm(`Remove "${item}" from the list?`)) return;
+    await onDelete(item);
+    if (value === item) onChange('');
+  };
+
+  const choose = (v) => { onChange(v); setOpen(false); };
+
+  const displayLabel = value || placeholder;
+  const hasValue     = !!value;
+
+  return (
+    <div className="relative" ref={ref}>
+      {/* Trigger */}
+      <div
+        role="combobox"
+        tabIndex={0}
+        onKeyDown={e => e.key === 'Enter' && setOpen(o => !o)}
+        onClick={() => setOpen(o => !o)}
+        className={`h-11 flex items-center gap-2 px-3 rounded-xl border cursor-pointer select-none text-sm transition-colors
+          ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 hover:border-slate-500' : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'}`}
+      >
+        {icon && <span className="text-slate-400 flex-shrink-0">{icon}</span>}
+        <span className={`flex-1 truncate ${!hasValue ? (isDark ? 'text-slate-400' : 'text-slate-400') : ''}`}>{displayLabel}</span>
+        <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform flex-shrink-0 ${open ? 'rotate-180' : ''}`} />
+      </div>
+
+      {/* Panel */}
+      {open && (
+        <div className={`absolute z-[200] left-0 right-0 mt-1 rounded-xl border shadow-2xl overflow-auto max-h-64
+          ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+
+          {/* Blank / deselect */}
+          <div
+            onClick={() => choose('')}
+            className={`px-4 py-2.5 text-sm cursor-pointer ${isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-slate-400 hover:bg-slate-50'}`}
+          >
+            {placeholder}
+          </div>
+
+          {/* Static options (e.g. "Our Client") — no edit/delete */}
+          {staticOptions.map(opt => (
+            <div
+              key={opt}
+              onClick={() => choose(opt)}
+              className={`px-4 py-2.5 text-sm cursor-pointer font-medium flex items-center
+                ${value === opt
+                  ? (isDark ? 'bg-violet-900/30 text-violet-300' : 'bg-violet-50 text-violet-700')
+                  : (isDark ? 'text-slate-200 hover:bg-slate-700' : 'text-slate-700 hover:bg-slate-50')
+                }`}
+            >
+              {opt}
+            </div>
+          ))}
+
+          {/* Editable options */}
+          {options.map(opt => (
+            <div
+              key={opt}
+              className={`flex items-center gap-1 px-3 py-1.5 group
+                ${value === opt
+                  ? (isDark ? 'bg-violet-900/20' : 'bg-violet-50')
+                  : (isDark ? 'hover:bg-slate-700/60' : 'hover:bg-slate-50')
+                }`}
+            >
+              {editingItem === opt ? (
+                /* ── Inline edit row ── */
+                <div className="flex items-center gap-1 flex-1 py-0.5" onClick={e => e.stopPropagation()}>
+                  <input
+                    autoFocus
+                    value={editValue}
+                    onChange={e => setEditValue(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') commitEdit(opt);
+                      if (e.key === 'Escape') setEditingItem(null);
+                    }}
+                    className={`flex-1 h-7 px-2 rounded-lg text-xs border outline-none
+                      ${isDark ? 'bg-slate-600 border-slate-500 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
+                  />
+                  <button
+                    disabled={saving}
+                    onClick={() => commitEdit(opt)}
+                    className="h-7 px-2.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold disabled:opacity-50"
+                  >
+                    {saving ? '…' : 'Save'}
+                  </button>
+                  <button
+                    onClick={() => setEditingItem(null)}
+                    className={`h-7 px-2 rounded-lg text-xs font-semibold ${isDark ? 'bg-slate-600 text-slate-300' : 'bg-slate-100 text-slate-500'}`}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* Option name — click to select */}
+                  <span
+                    onClick={() => choose(opt)}
+                    className={`flex-1 text-sm cursor-pointer truncate py-1
+                      ${value === opt
+                        ? (isDark ? 'text-violet-300 font-semibold' : 'text-violet-700 font-semibold')
+                        : (isDark ? 'text-slate-200' : 'text-slate-700')
+                      }`}
+                  >
+                    {opt}
+                  </span>
+                  {/* Edit button */}
+                  <button
+                    onClick={e => startEdit(opt, e)}
+                    title="Edit name"
+                    className={`h-6 w-6 flex-shrink-0 flex items-center justify-center rounded-md opacity-0 group-hover:opacity-100 transition-opacity
+                      ${isDark ? 'text-slate-400 hover:text-blue-300 hover:bg-slate-600' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}
+                  >
+                    <svg viewBox="0 0 16 16" className="h-3 w-3 fill-current">
+                      <path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61Zm1.414 1.06a.25.25 0 0 0-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354l-1.086-1.086ZM11.189 6.25 9.75 4.81 3.569 10.99c-.04.04-.067.084-.078.108l-1.85.528.53-1.851c.024-.082.068-.16.108-.2L11.189 6.25Z"/>
+                    </svg>
+                  </button>
+                  {/* Delete button */}
+                  <button
+                    onClick={e => handleDelete(opt, e)}
+                    title="Delete"
+                    className={`h-6 w-6 flex-shrink-0 flex items-center justify-center rounded-md opacity-0 group-hover:opacity-100 transition-opacity
+                      ${isDark ? 'text-slate-400 hover:text-red-300 hover:bg-slate-600' : 'text-slate-400 hover:text-red-600 hover:bg-red-50'}`}
+                  >
+                    <svg viewBox="0 0 16 16" className="h-3 w-3 fill-current">
+                      <path d="M11 1.75V3h2.25a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1 0-1.5H5V1.75C5 .784 5.784 0 6.75 0h2.5C10.216 0 11 .784 11 1.75ZM4.496 6.675l.66 6.6a.25.25 0 0 0 .249.225h5.19a.25.25 0 0 0 .249-.225l.66-6.6a.75.75 0 0 1 1.492.149l-.66 6.6A1.748 1.748 0 0 1 10.595 15h-5.19a1.75 1.75 0 0 1-1.741-1.575l-.66-6.6a.75.75 0 1 1 1.492-.15ZM6.5 1.75V3h3V1.75a.25.25 0 0 0-.25-.25h-2.5a.25.25 0 0 0-.25.25Z"/>
+                    </svg>
+                  </button>
+                </>
+              )}
+            </div>
+          ))}
+
+          {/* "+ Add new" item */}
+          <div
+            onClick={() => { setOpen(false); onAddNew?.(); }}
+            className={`px-4 py-2.5 text-sm cursor-pointer font-semibold border-t
+              ${isDark ? 'border-slate-700 text-violet-400 hover:bg-slate-700' : 'border-slate-100 text-violet-600 hover:bg-violet-50'}`}
+          >
+            + Add new
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // BULK AUDITOR DIALOG
 // ═══════════════════════════════════════════════════════════════════════════
 const BulkAuditorDialog = React.memo(({ open, onClose, filteredClients, savedAuditors, saveAuditor, onBulkSave, isDark }) => {
@@ -4997,6 +5178,58 @@ export default function Clients() {
     toast.success(`"${saved}" added to auditor list`);
   }, [auditorInput, savedAuditors, saveAuditor]);
 
+  // ── Referrer edit / delete ────────────────────────────────────────────────
+  const updateReferrer = useCallback(async (oldName, newName) => {
+    try {
+      await api.put('/referrers', { old_name: oldName, new_name: newName });
+      setSavedReferrers(prev => prev.map(r => r === oldName ? newName : r));
+      setClients(prev => prev.map(c => c.referred_by === oldName ? { ...c, referred_by: newName } : c));
+      if (referrerSelectValue === oldName) {
+        setReferrerSelectValue(newName);
+        setFormData(p => ({ ...p, referred_by: newName }));
+      }
+      toast.success(`Renamed to "${newName}"`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not rename referrer');
+    }
+  }, [referrerSelectValue]);
+
+  const deleteReferrer = useCallback(async (name) => {
+    try {
+      await api.delete('/referrers', { params: { name } });
+      setSavedReferrers(prev => prev.filter(r => r !== name));
+      toast.success(`"${name}" removed`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not delete referrer');
+    }
+  }, []);
+
+  // ── Auditor edit / delete ─────────────────────────────────────────────────
+  const updateAuditor = useCallback(async (oldName, newName) => {
+    try {
+      await api.put('/auditors', { old_name: oldName, new_name: newName });
+      setSavedAuditors(prev => prev.map(a => a === oldName ? newName : a));
+      setClients(prev => prev.map(c => c.auditor === oldName ? { ...c, auditor: newName } : c));
+      if (auditorSelectValue === oldName) {
+        setAuditorSelectValue(newName);
+        setFormData(p => ({ ...p, auditor: newName }));
+      }
+      toast.success(`Renamed to "${newName}"`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not rename auditor');
+    }
+  }, [auditorSelectValue]);
+
+  const deleteAuditor = useCallback(async (name) => {
+    try {
+      await api.delete('/auditors', { params: { name } });
+      setSavedAuditors(prev => prev.filter(a => a !== name));
+      toast.success(`"${name}" removed`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not delete auditor');
+    }
+  }, []);
+
   // ── CSV / Excel imports ───────────────────────────────────────────────────
   const downloadTemplate = useCallback(() => {
     const headers = ['company_name','client_type','client_type_label','email','phone','birthday','address','city','state','referred_by','services','notes','status','contact_name_1','contact_designation_1','contact_email_1','contact_phone_1','contact_birthday_1','contact_din_1'];
@@ -5843,14 +6076,18 @@ export default function Clients() {
                       </div>
                       <div>
                         <label className={labelCls}>Referred By</label>
-                        <div className="relative"><Share2 className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none z-10" />
-                          <select className="h-11 bg-white border border-slate-200 focus:border-blue-400 rounded-xl text-sm pl-10 pr-4 w-full appearance-none outline-none transition-colors cursor-pointer" value={referrerSelectValue} onChange={e => handleReferrerSelectChange(e.target.value)}>
-                            <option value="">— Select referral source —</option>
-                            <option value="Our Client">Our Client</option>
-                            {savedReferrers.filter(r => r !== 'Our Client').map(r => <option key={r} value={r}>{r}</option>)}
-                            <option value="__other__">+ Other</option>
-                          </select>
-                        </div>
+                        <EditableDropdown
+                          value={referrerSelectValue === '__other__' ? '' : referrerSelectValue}
+                          onChange={v => handleReferrerSelectChange(v || '')}
+                          options={savedReferrers.filter(r => r !== 'Our Client')}
+                          staticOptions={['Our Client']}
+                          onEdit={updateReferrer}
+                          onDelete={deleteReferrer}
+                          onAddNew={() => handleReferrerSelectChange('__other__')}
+                          placeholder="— Select referral source —"
+                          icon={<Share2 className="h-4 w-4" />}
+                          isDark={isDark}
+                        />
                         {referrerSelectValue === '__other__' && (
                           <div className="flex gap-2 mt-2">
                             <Input className={`flex-1 h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} placeholder="Type referrer's name…" value={referrerInput} onChange={e => handleReferrerInputChange(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSaveReferrer(); } }} autoFocus />
@@ -5866,13 +6103,18 @@ export default function Clients() {
                       </div>
                       <div>
                         <label className={labelCls}>Auditor <span className="text-slate-400 font-normal">(optional)</span></label>
-                        <div className="relative"><FileCheck className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none z-10" />
-                          <select className={`h-11 border focus:border-purple-400 rounded-xl text-sm pl-10 pr-4 w-full appearance-none outline-none transition-colors cursor-pointer ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} value={auditorSelectValue} onChange={e => handleAuditorSelectChange(e.target.value)}>
-                            <option value="">— Select auditor —</option>
-                            {savedAuditors.map(a => <option key={a} value={a}>{a}</option>)}
-                            <option value="__other__">+ Add New Auditor</option>
-                          </select>
-                        </div>
+                        <EditableDropdown
+                          value={auditorSelectValue === '__other__' ? '' : auditorSelectValue}
+                          onChange={v => handleAuditorSelectChange(v || '')}
+                          options={savedAuditors}
+                          staticOptions={[]}
+                          onEdit={updateAuditor}
+                          onDelete={deleteAuditor}
+                          onAddNew={() => handleAuditorSelectChange('__other__')}
+                          placeholder="— Select auditor —"
+                          icon={<FileCheck className="h-4 w-4" />}
+                          isDark={isDark}
+                        />
                         {auditorSelectValue === '__other__' && (
                           <div className="flex gap-2 mt-2">
                             <Input className={`flex-1 h-11 focus:border-purple-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} placeholder="Type auditor's name…" value={auditorInput} onChange={e => handleAuditorInputChange(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSaveAuditor(); } }} autoFocus />
