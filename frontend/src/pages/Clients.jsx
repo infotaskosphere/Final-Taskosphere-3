@@ -4291,6 +4291,7 @@ export default function Clients() {
   const [formErrors, setFormErrors]     = useState({});
   const [contactErrors, setContactErrors] = useState([]);
   const [mcaFetching, setMcaFetching]   = useState(false);
+  const [mcaQuery, setMcaQuery]         = useState('');
 
   // ── Refs ────────────────────────────────────────────────────────────────
   const fileInputRef  = useRef(null);
@@ -5726,7 +5727,7 @@ export default function Clients() {
                         </div>
                         <div>
                           <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Auto-fill from MCA Portal</p>
-                          <p className="text-xs text-slate-500 mt-0.5">Enter CIN or LLPIN to fetch company details instantly</p>
+                          <p className="text-xs text-slate-500 mt-0.5">Enter company name or CIN / LLPIN to auto-fill details</p>
                         </div>
                         {formData.mca_fetch_date && (
                           <span className="ml-auto text-[10px] px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 font-medium">
@@ -5738,78 +5739,47 @@ export default function Clients() {
                         <div className="flex-1">
                           <input
                             type="text"
-                            placeholder={formData.client_type === 'llp' ? 'Enter LLPIN (e.g. AAA-1234)' : 'Enter CIN (e.g. U74999GJ2015PTC083870)'}
-                            value={formData.cin || formData.llpin || ''}
-                            onChange={e => {
-                              const v = e.target.value.toUpperCase();
-                              const isLLP = v.startsWith('AAA') || formData.client_type === 'llp';
-                              setFormData(p => ({ ...p, cin: isLLP ? '' : v, llpin: isLLP ? v : '' }));
+                            placeholder="Enter company name or CIN / LLPIN (e.g. IKYRAA JEWELS LLP or AAA-1234)"
+                            value={mcaQuery}
+                            onChange={e => setMcaQuery(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' && mcaQuery.trim().length >= 3 && !mcaFetching) {
+                                e.preventDefault();
+                                e.currentTarget.closest('div').querySelector('button').click();
+                              }
                             }}
-                            className={`w-full h-11 px-3 rounded-xl border text-sm font-mono tracking-wide ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder-slate-400' : 'bg-white border-slate-200 text-slate-800 placeholder-slate-400'} focus:outline-none focus:border-violet-400`}
+                            className={`w-full h-11 px-3 rounded-xl border text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder-slate-400' : 'bg-white border-slate-200 text-slate-800 placeholder-slate-400'} focus:outline-none focus:border-violet-400`}
                           />
                           {formData.mca_fetch_date && (
-                            <p className="text-[10px] text-slate-400 mt-1">Company data loaded from MCA. You can still edit fields below.</p>
+                            <p className="text-[10px] text-slate-400 mt-1">Company data loaded. You can still edit fields below.</p>
                           )}
                         </div>
                         <button
                           type="button"
-                          disabled={mcaFetching || (!formData.cin && !formData.llpin)}
+                          disabled={mcaFetching || mcaQuery.trim().length < 3}
                           onClick={async () => {
-                            const cinVal = (formData.cin || formData.llpin || '').trim().toUpperCase();
-                            if (!cinVal) return;
+                            const q = mcaQuery.trim();
+                            if (!q) return;
                             setMcaFetching(true);
                             try {
-                                const govRes = await fetch(
-                                  `https://api.data.gov.in/resource/ec58dab7-d891-4abb-936e-d5d274a6ce9b?api-key=YOUR_NEW_REGENERATED_KEY&format=json&limit=1&filters[CIN]=${encodeURIComponent(cinVal)}`
-                                );
-                                if (!govRes.ok) throw new Error(`API error: ${govRes.status}`);
-                                const govData = await govRes.json();
-                                const records = govData.records || [];
-                                if (!records.length) throw new Error(`No company found for CIN: ${cinVal}`);
-                                const rec = records[0];
-                                const MCA_CLASS_MAP = {
-                                  'private': 'pvt_ltd', 'public': 'public_ltd',
-                                  'llp': 'llp', 'section 8': 'section_8',
-                                };
-                                const rawClass = (rec.COMPANY_CLASS || rec.company_class || '').toLowerCase();
-                                const mappedType = Object.entries(MCA_CLASS_MAP).find(([k]) => rawClass.includes(k))?.[1] || formData.client_type;
-                                let doiIso = '';
-                                const rawDoi = rec.DATE_OF_REGISTRATION || rec.date_of_registration || '';
-                                if (rawDoi) {
-                                  try {
-                                    const parts = rawDoi.includes('/') ? rawDoi.split('/') : rawDoi.split('-');
-                                    doiIso = parts.length === 3
-                                      ? (parts[0].length === 4 ? rawDoi : `${parts[2]}-${parts[1]}-${parts[0]}`)
-                                      : rawDoi;
-                                  } catch { doiIso = rawDoi; }
-                                }
-                                const d = {
-                                  company_name: rec.COMPANY_NAME || rec.company_name || '',
-                                  cin: cinVal,
-                                  llpin: null,
-                                  client_type: mappedType,
-                                  date_of_incorporation: doiIso,
-                                  address: rec.REGISTERED_OFFICE_ADDRESS || rec.registered_office_address || '',
-                                  city: '',
-                                  state: rec.REGISTERED_STATE || rec.registered_state || '',
-                                  gst_pin: '', pan: '', email: '', directors: [],
-                                  mca_fetch_date: new Date().toISOString().slice(0, 10),
-                                };
+                              const res = await api.get('/clients/fetch-mca-details', { params: { query: q } });
+                              const d = res.data;
+                              const isLLP = (d.client_type === 'llp') || /llp/i.test(d.company_name || '');
                               setFormData(p => ({
                                 ...p,
-                                company_name:         d.company_name        || p.company_name,
-                                client_type:          mappedType,
+                                company_name:          d.company_name          || p.company_name,
+                                client_type:           d.client_type           || p.client_type,
                                 date_of_incorporation: d.date_of_incorporation || p.date_of_incorporation,
-                                address:              d.address             || p.address,
-                                city:                 d.city                || p.city,
-                                state:                d.state               || p.state,
-                                email:                d.email               || p.email,
-                                pan:                  d.pan                 || p.pan,
-                                gst_pin:              d.gst_pin             || p.gst_pin,
-                                cin:                  d.cin                 || p.cin  || '',
-                                llpin:                d.llpin               || p.llpin || '',
-                                mca_fetch_date:       d.mca_fetch_date      || '',
-                                contact_persons:      d.directors?.length
+                                address:               d.address               || p.address,
+                                city:                  d.city                  || p.city,
+                                state:                 d.state                 || p.state,
+                                email:                 d.email                 || p.email,
+                                pan:                   d.pan                   || p.pan,
+                                gst_pin:               d.gst_pin               || p.gst_pin,
+                                cin:                   isLLP ? '' : (d.cin     || p.cin   || ''),
+                                llpin:                 isLLP ? (d.cin          || p.llpin || '') : '',
+                                mca_fetch_date:        d.mca_fetch_date        || new Date().toISOString().slice(0, 10),
+                                contact_persons:       d.directors?.length
                                   ? d.directors.map(dir => ({
                                       name:        dir.name        || '',
                                       designation: dir.designation || 'Director',
@@ -5820,9 +5790,10 @@ export default function Clients() {
                                     }))
                                   : p.contact_persons,
                               }));
+                              toast.success(`Company details fetched${d.source ? ' from ' + d.source : ''}`);
                             } catch (err) {
-                              const msg = err?.response?.data?.detail || 'Could not fetch from MCA. Check CIN/LLPIN or configure MCA_API_KEY in .env';
-                              alert(msg);
+                              const msg = err?.response?.data?.detail || err?.message || 'Could not fetch company details. Try a different name or CIN.';
+                              toast.error(msg);
                             } finally {
                               setMcaFetching(false);
                             }
