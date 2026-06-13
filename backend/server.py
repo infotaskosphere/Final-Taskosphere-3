@@ -108,9 +108,6 @@ from backend.dependencies import (
 
 # External Services
 from fpdf import FPDF
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # ====================== CONFIG ======================
@@ -216,26 +213,25 @@ async def _mark_absent_for_date(target_date_str: str) -> dict:
         existing = await db.attendance.find_one({"user_id": uid, "date": target_date_str}, {"_id": 0})
 
         if existing:
-            if existing.get("status") in ("present", "leave", "absent", "auto_absent", "half_day"):
+            if existing.get("status") in ("present", "leave", "absent"):
                 already_recorded += 1
                 continue
-            # Record exists but status is unexpected → update to auto_absent
+            # Record exists but status is unexpected → update to absent
             await db.attendance.update_one(
                 {"user_id": uid, "date": target_date_str},
                 {"$set": {
-                    "status": "auto_absent",
+                    "status": "absent",
                     "auto_marked": True,
-                    "attendance_points": -10,
                     "auto_marked_at": datetime.now(timezone.utc).isoformat(),
                 }}
             )
             marked_count += 1
         else:
-            # No record at all → insert auto_absent
+            # No record at all → insert absent
             await db.attendance.insert_one({
                 "user_id": uid,
                 "date": target_date_str,
-                "status": "auto_absent",
+                "status": "absent",
                 "punch_in": None,
                 "punch_out": None,
                 "duration_minutes": 0,
@@ -243,7 +239,6 @@ async def _mark_absent_for_date(target_date_str: str) -> dict:
                 "punched_out_early": False,
                 "leave_reason": None,
                 "auto_marked": True,
-                "attendance_points": -10,
                 "auto_marked_at": datetime.now(timezone.utc).isoformat(),
             })
             marked_count += 1
@@ -768,8 +763,8 @@ def fetch_indian_holidays_task():
 api_router = APIRouter(prefix="/api")
 
 # HELPERS - Email Service Functions
-def _brevo_send(to_email: str, subject: str, body_plain: str, body_html: str = None):
-    """Core Brevo HTTP API sender — SMTP (port 587) is blocked on Render free tier."""
+async def _brevo_send(to_email: str, subject: str, body_plain: str, body_html: str = None):
+    """Core Brevo HTTP API sender — async, non-blocking."""
     api_key      = os.getenv("BREVO_API_KEY")
     sender_email = os.getenv("SENDER_EMAIL")
     sender_name  = os.getenv("SENDER_NAME", "TaskoSphere")
@@ -789,23 +784,23 @@ def _brevo_send(to_email: str, subject: str, body_plain: str, body_html: str = N
     if body_html:
         payload["htmlContent"] = body_html
 
-    response = httpx.post(
-        "https://api.brevo.com/v3/smtp/email",
-        headers={
-            "api-key": api_key,
-            "Content-Type": "application/json",
-        },
-        json=payload,
-        timeout=30,
-    )
+    async with httpx.AsyncClient(timeout=30.0) as http_client:
+        response = await http_client.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={
+                "api-key": api_key,
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
 
     if response.status_code not in (200, 201):
         raise Exception(f"Brevo API error {response.status_code}: {response.text}")
     return True
 
 
-def send_birthday_email(recipient_email: str, client_name: str):
-    """Send birthday wish email to client via Brevo SMTP."""
+async def send_birthday_email(recipient_email: str, client_name: str):
+    """Send birthday wish email to client via Brevo API (async)."""
     subject = f"Happy Birthday, {client_name}!"
     body_plain = (
         f"Dear {client_name},\n\n"
@@ -837,7 +832,7 @@ def send_birthday_email(recipient_email: str, client_name: str):
     </html>
     """
     try:
-        _brevo_send(recipient_email, subject, body_plain, html_content)
+        await _brevo_send(recipient_email, subject, body_plain, html_content)
         logger.info(f"Birthday email sent to {recipient_email}")
         return True
     except Exception as e:
@@ -852,16 +847,15 @@ async def test_email_service(current_user: User = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Admin only")
 
     missing = [k for k, v in {
-        "BREVO_SMTP_USER": os.getenv("BREVO_SMTP_USER"),
-        "BREVO_SMTP_PASS": os.getenv("BREVO_SMTP_PASS"),
-        "SENDER_EMAIL":    os.getenv("SENDER_EMAIL"),
+        "BREVO_API_KEY": os.getenv("BREVO_API_KEY"),
+        "SENDER_EMAIL":  os.getenv("SENDER_EMAIL"),
     }.items() if not v]
 
     if missing:
         raise HTTPException(status_code=500, detail=f"Missing env vars: {', '.join(missing)}")
 
     try:
-        _brevo_send(
+        await _brevo_send(
             to_email   = current_user.email,
             subject    = "✅ TaskoSphere — Mail Service Test",
             body_plain = (
@@ -1157,13 +1151,13 @@ def verify_password(plain_password, hashed_password):
 def get_password_hash(password):
     return pwd_context.hash(password)
 
-def send_email(to_email: str, subject: str, body: str):
-    """Send plain text email via Brevo SMTP."""
+async def send_email(to_email: str, subject: str, body: str):
+    """Send plain text email via Brevo API (async)."""
     try:
-        _brevo_send(to_email, subject, body)
+        await _brevo_send(to_email, subject, body)
         return True
     except Exception as e:
-        raise Exception(f"Brevo SMTP error: {str(e)}")
+        raise Exception(f"Brevo API error: {str(e)}")
 
 
 #===========================================================
@@ -1850,7 +1844,7 @@ async def forgot_password(data: ForgotPasswordRequest):
             f"— TaskoSphere"
         )
         try:
-            send_email(data.email.strip(), subject, body)
+            await send_email(data.email.strip(), subject, body)
             logger.info(f"Password reset email sent to {data.email}")
         except Exception as e:
             logger.error(f"Failed to send password reset email to {data.email}: {e}")
@@ -2443,23 +2437,13 @@ async def handle_attendance(
         punch_in_ist = punch_in_utc.astimezone(ZoneInfo("Asia/Kolkata"))
         is_late = check_is_late(user_doc or {}, punch_in_ist)
         location_data = data.get("location")
-        # Determine status: if auto_absent record exists and user now punches in,
-        # apply correction — present if on time, half_day if late
-        was_auto_absent = attendance and attendance.get("status") == "auto_absent"
-        if was_auto_absent and is_late:
-            new_status = "half_day"
-            att_points = 5
-        else:
-            new_status = "present"
-            att_points = 10
         update_fields = {
-            "status": new_status,
+            "status": "present",
             "punch_in": punch_in_utc,
             "is_late": is_late,
             "leave_reason": None,
             # Clear auto_absent flag if user punches in manually
             "auto_marked": False,
-            "attendance_points": att_points,
         }
         location_verified = True
         if location_data:
@@ -2568,8 +2552,7 @@ async def mark_leave_today(current_user: User = Depends(get_current_user)):
                 "status": "leave",
                 "punch_in": None,
                 "punch_out": None,
-                "leave_reason": "Marked on leave today",
-                "attendance_points": 0,
+                "leave_reason": "Marked on leave today"
             }
         },
         upsert=True
@@ -2650,7 +2633,6 @@ async def apply_leave(
                     "punch_in": None,
                     "punch_out": None,
                     "duration_minutes": 0,
-                    "attendance_points": 0,
                 }
 
             elif leave_type == "half_day_morning":
@@ -2808,39 +2790,14 @@ async def get_my_attendance_summary(
         if month not in monthly_data:
             monthly_data[month] = {
                 "total_minutes": 0,
-                "days_present": 0,
-                "half_days": 0,
-                "leave_days": 0,
-                "absent_days": 0,
-                "auto_absent_days": 0,
-                "attendance_points": 0,
+                "days_present": 0
             }
-        status = attendance.get("status", "absent")
         duration = attendance.get("duration_minutes")
-        att_pts = attendance.get("attendance_points")
-        if att_pts is None:
-            _pts_map = {"present": 10, "half_day": 5, "leave": 0, "holiday": 0,
-                        "absent": -5, "auto_absent": -10, "late": 10, "wfh": 10}
-            att_pts = _pts_map.get(status, 0)
-        monthly_data[month]["attendance_points"] += att_pts
-        if status in ("present", "late", "wfh"):
-            if isinstance(duration, (int, float)):
-                monthly_data[month]["total_minutes"] += duration
-                total_minutes_all += duration
+        if isinstance(duration, (int, float)):
+            monthly_data[month]["total_minutes"] += duration
+            total_minutes_all += duration
             monthly_data[month]["days_present"] += 1
             total_days += 1
-        elif status == "half_day":
-            monthly_data[month]["half_days"] += 1
-            if isinstance(duration, (int, float)):
-                monthly_data[month]["total_minutes"] += duration
-                total_minutes_all += duration
-            total_days += 1
-        elif status == "leave":
-            monthly_data[month]["leave_days"] += 1
-        elif status == "auto_absent":
-            monthly_data[month]["auto_absent_days"] += 1
-        elif status == "absent":
-            monthly_data[month]["absent_days"] += 1
     formatted_data = []
     for month, data in monthly_data.items():
         minutes = data["total_minutes"]
@@ -2850,12 +2807,7 @@ async def get_my_attendance_summary(
             "month": month,
             "total_minutes": minutes,
             "total_hours": f"{hours}h {mins}m",
-            "days_present": data["days_present"],
-            "half_days": data["half_days"],
-            "leave_days": data["leave_days"],
-            "absent_days": data["absent_days"],
-            "auto_absent_days": data["auto_absent_days"],
-            "attendance_points": data["attendance_points"],
+            "days_present": data["days_present"]
         })
     return {
         "current_month": current_month,
@@ -2903,49 +2855,30 @@ async def get_staff_attendance_report(
                 "role": user_info.get("role", "staff"),
                 "total_minutes": 0,
                 "days_present": 0,
-                "half_days": 0,
                 "days_absent": 0,
-                "auto_absent_days": 0,
-                "leave_days": 0,
                 "late_days": 0,
                 "early_out_days": 0,
-                "attendance_points": 0,
                 "records": []
             }
-        att_status = attendance.get("status", "absent")
-        att_pts = attendance.get("attendance_points")
-        if att_pts is None:
-            _pts_map = {"present": 10, "half_day": 5, "leave": 0, "holiday": 0,
-                        "absent": -5, "auto_absent": -10, "late": 10, "wfh": 10}
-            att_pts = _pts_map.get(att_status, 0)
-        staff_report[uid]["attendance_points"] += att_pts
-        if att_status == "absent":
+        # count absent days separately
+        if attendance.get("status") == "absent":
             staff_report[uid]["days_absent"] += 1
-        elif att_status == "auto_absent":
-            staff_report[uid]["auto_absent_days"] += 1
-        elif att_status == "leave":
-            staff_report[uid]["leave_days"] += 1
-        elif att_status == "half_day":
-            staff_report[uid]["half_days"] += 1
         duration = attendance.get("duration_minutes")
-        if isinstance(duration, (int, float)) and att_status in ("present", "late", "wfh"):
+        if isinstance(duration, (int, float)) and attendance.get("status") == "present":
             staff_report[uid]["total_minutes"] += duration
             staff_report[uid]["days_present"] += 1
-        elif isinstance(duration, (int, float)) and att_status == "half_day":
-            staff_report[uid]["total_minutes"] += duration
         if attendance.get("is_late"):
             staff_report[uid]["late_days"] += 1
         if attendance.get("punched_out_early"):
             staff_report[uid]["early_out_days"] += 1
         staff_report[uid]["records"].append({
             "date": attendance["date"],
-            "status": att_status,
+            "status": attendance.get("status", "absent"),
             "punch_in": attendance.get("punch_in"),
             "punch_out": attendance.get("punch_out"),
             "duration_minutes": duration,
             "is_late": attendance.get("is_late", False),
-            "punched_out_early": attendance.get("punched_out_early", False),
-            "attendance_points": att_pts,
+            "punched_out_early": attendance.get("punched_out_early", False)
         })
     result = []
     for uid, data in staff_report.items():
@@ -3054,17 +2987,12 @@ async def edit_attendance_record(
         {"user_id": user_id, "date": date_str}, {"_id": 0}
     )
 
-    _att_points_map = {
-        "present": 10, "half_day": 5, "late": 10,
-        "leave": 0, "wfh": 10, "absent": -5, "auto_absent": -10,
-    }
     update_fields = {
-        "status":            status,
-        "edited_by":         current_user.id,
-        "edited_at":         datetime.now(timezone.utc).isoformat(),
-        "admin_note":        note or None,
-        "auto_marked":       False,
-        "attendance_points": _att_points_map.get(status, 0),
+        "status":      status,
+        "edited_by":   current_user.id,
+        "edited_at":   datetime.now(timezone.utc).isoformat(),
+        "admin_note":  note or None,
+        "auto_marked": False,
     }
 
     # Status-specific adjustments
@@ -5214,7 +5142,7 @@ async def send_birthday_wish_manual(
     wa_sent_to = []
 
     if client_email:
-        ok = send_birthday_email(client_email, client_name)
+        ok = await send_birthday_email(client_email, client_name)
         (sent_to if ok else failed).append(client_email)
     else:
         no_email.append(client_name)
@@ -5244,7 +5172,7 @@ async def send_birthday_wish_manual(
         cp_email = cp.get("email")
         cp_name  = cp.get("name") or client_name
         if cp_email:
-            ok = send_birthday_email(cp_email, cp_name)
+            ok = await send_birthday_email(cp_email, cp_name)
             (sent_to if ok else failed).append(cp_email)
         else:
             no_email.append(cp_name)
@@ -5391,6 +5319,7 @@ async def export_reports(
 @api_router.get("/reports/performance-rankings", response_model=List[PerformanceMetric])
 async def get_performance_rankings(
     period: str = Query("monthly", enum=["weekly", "monthly", "all_time"]),
+    # FIX: was check_module_permission("reports","view") → can_view_reports.
     # Called as a secondary/widget call by Attendance page. All roles may see rankings.
     current_user: User = Depends(get_current_user)
 ):
@@ -5399,6 +5328,7 @@ async def get_performance_rankings(
     if (
         cache_key in rankings_cache and
         cache_key in rankings_cache_time and
+        # Use timezone-aware UTC datetime for cache comparison to avoid TypeError
         (datetime.now(timezone.utc) - rankings_cache_time[cache_key]).total_seconds() < 300
     ):
         return rankings_cache[cache_key]
@@ -5427,71 +5357,18 @@ async def get_performance_rankings(
                 "user_id": uid,
                 "date": {"$gte": start_date_str, "$lte": end_date_str}
             },
-            {"_id": 0, "duration_minutes": 1, "is_late": 1, "status": 1, "date": 1}
+            {"_id": 0, "duration_minutes": 1, "is_late": 1}
         ).to_list(1000)
-
-        # ── Attendance counts ─────────────────────────────────────────────
-        present_records = [r for r in att_records if r.get("status") in ("present", "half_day", "wfh", "late")]
-        days_present = len(present_records)
-        auto_absent_records = [r for r in att_records if r.get("status") == "auto_absent"]
-        auto_absent_count = len(auto_absent_records)
-        total_minutes = sum(r.get("duration_minutes", 0) or 0 for r in present_records)
+        days_present = len(att_records)
+        total_minutes = sum(r.get("duration_minutes", 0) or 0 for r in att_records)
         total_hours = round(total_minutes / 60, 1)
         attendance_percent = round(
             (days_present / expected_working_days) * 100, 1
         ) if expected_working_days else 0
-        timely_days = len([r for r in present_records if not r.get("is_late", False)])
+        timely_days = len([r for r in att_records if not r.get("is_late", False)])
         timely_punchin_percent = round(
             (timely_days / days_present) * 100, 1
         ) if days_present else 0
-
-        # ── Consecutive present day streak (for consistency bonus) ────────
-        sorted_dates = sorted(
-            [r["date"] for r in present_records if r.get("date")],
-            reverse=True
-        )
-        max_streak = 0
-        if sorted_dates:
-            streak = 1
-            for _i in range(1, len(sorted_dates)):
-                try:
-                    d1 = date.fromisoformat(sorted_dates[_i - 1])
-                    d2 = date.fromisoformat(sorted_dates[_i])
-                    if (d1 - d2).days == 1:
-                        streak += 1
-                        max_streak = max(max_streak, streak)
-                    else:
-                        streak = 1
-                except Exception:
-                    streak = 1
-            max_streak = max(max_streak, streak if len(sorted_dates) == 1 else max_streak)
-
-        if max_streak >= 20:
-            consistency_bonus = 50.0
-        elif max_streak >= 10:
-            consistency_bonus = 20.0
-        elif max_streak >= 5:
-            consistency_bonus = 10.0
-        else:
-            consistency_bonus = 0.0
-
-        # ── No auto-absent bonus ──────────────────────────────────────────
-        no_auto_absent_bonus = 50.0 if auto_absent_count == 0 else 0.0
-
-        # ── Discipline penalty ────────────────────────────────────────────
-        if auto_absent_count >= 8:
-            discipline_penalty = 100.0
-        elif auto_absent_count >= 5:
-            discipline_penalty = 50.0
-        elif auto_absent_count >= 3:
-            discipline_penalty = 20.0
-        else:
-            discipline_penalty = 0.0
-
-        # ── A. Attendance score (max 250) ─────────────────────────────────
-        attendance_score = round(min(attendance_percent * 2.5, 250.0), 1)
-
-        # ── B. Task completion score (max 300) ────────────────────────────
         tasks_assigned = await db.tasks.count_documents({
             "assigned_to": uid,
             "created_at": {"$gte": start_date}
@@ -5504,30 +5381,15 @@ async def get_performance_rankings(
                 {"updated_at": {"$gte": start_date}}
             ]
         })
-        task_completion_rate = min(
-            (completed_tasks / tasks_assigned) if tasks_assigned else 0.0, 1.0
-        )
-        task_completion_percent = round(task_completion_rate * 100, 1)
-        task_completion_score = round(task_completion_rate * 300.0, 1)
-
-        # ── C. Task timeliness score (max 200) ────────────────────────────
-        completed_on_time_tasks = await db.tasks.count_documents({
-            "assigned_to": uid,
-            "status": "completed",
-            "completed_on_time": True,
-            "$or": [
-                {"completed_at": {"$gte": start_date}},
-                {"updated_at": {"$gte": start_date}}
-            ]
+        completed_todos = await db.todos.count_documents({
+            "user_id": uid,
+            "is_completed": True,
+            "completed_at": {"$gte": start_date}
         })
-        if completed_tasks > 0:
-            task_timeliness_score = round(
-                min(completed_on_time_tasks / completed_tasks, 1.0) * 200.0, 1
-            )
-        else:
-            task_timeliness_score = 0.0
-
-        # ── Todo on-time rate (for backward compat display) ───────────────
+        total_completed = completed_tasks + completed_todos
+        task_completion_percent = round(
+            (total_completed / tasks_assigned) * 100, 1
+        ) if tasks_assigned else 0
         todos = await db.todos.find({
             "user_id": uid,
             "created_at": {"$gte": start_date}
@@ -5536,62 +5398,27 @@ async def get_performance_rankings(
         for t in todos:
             if t.get("is_completed"):
                 due = safe_dt(t.get("due_date"))
-                completed_at_dt = safe_dt(t.get("completed_at"))
-                if due and completed_at_dt and completed_at_dt <= due:
+                completed_at = safe_dt(t.get("completed_at"))
+                if due and completed_at and completed_at <= due:
                     completed_ontime += 1
         todo_ontime_percent = round(
             (completed_ontime / len(todos)) * 100, 1
         ) if todos else 0
-
-        # ── D. Working hours score (max 100) ──────────────────────────────
-        working_hours_score = round(min(total_hours / 180.0, 1.0) * 100.0, 1)
-
-        # ── E. Quality score (max 50, start 50) ───────────────────────────
-        reopened_tasks = await db.tasks.count_documents({
-            "assigned_to": uid,
-            "status": "reopened",
-            "updated_at": {"$gte": start_date}
-        })
-        rejected_tasks = await db.tasks.count_documents({
-            "assigned_to": uid,
-            "status": "rejected",
-            "updated_at": {"$gte": start_date}
-        })
-        quality_score = max(
-            0.0,
-            50.0 - (reopened_tasks * 5.0) - (rejected_tasks * 10.0)
+        safe_hours_ratio = min((total_hours / 180), 1) if total_hours else 0
+        score = (
+            float(attendance_percent or 0) * 0.25 +
+            safe_hours_ratio * 100 * 0.20 +
+            float(task_completion_percent or 0) * 0.25 +
+            float(todo_ontime_percent or 0) * 0.15 +
+            float(timely_punchin_percent or 0) * 0.15
         )
-
-        # ── Final score (0–1000) ──────────────────────────────────────────
-        final_score = max(0.0, min(1000.0, round(
-            attendance_score
-            + no_auto_absent_bonus
-            + consistency_bonus
-            + task_completion_score
-            + task_timeliness_score
-            + working_hours_score
-            + quality_score
-            - discipline_penalty,
-            1
-        )))
-
-        # ── Badge ─────────────────────────────────────────────────────────
-        if final_score >= 950:
-            badge = "Elite Performer"
-        elif final_score >= 850:
+        overall_score = round(min(score, 100), 1)
+        if overall_score >= 95:
             badge = "Star Performer"
-        elif final_score >= 750:
+        elif overall_score >= 85:
             badge = "Top Performer"
-        elif final_score >= 650:
-            badge = "Good Performer"
-        elif final_score >= 500:
-            badge = "Average Performer"
         else:
-            badge = "Needs Improvement"
-
-        # ── Legacy overall_score (0–100) for backward compat ──────────────
-        overall_score = round(final_score / 10.0, 1)
-
+            badge = "Good Performer"
         rankings.append(
             PerformanceMetric(
                 user_id=str(uid),
@@ -5603,23 +5430,14 @@ async def get_performance_rankings(
                 todo_ontime_percent=float(todo_ontime_percent or 0),
                 timely_punchin_percent=float(timely_punchin_percent or 0),
                 overall_score=float(overall_score or 0),
-                badge=str(badge),
-                attendance_score=float(attendance_score),
-                task_completion_score=float(task_completion_score),
-                task_timeliness_score=float(task_timeliness_score),
-                working_hours_score=float(working_hours_score),
-                quality_score=float(quality_score),
-                consistency_bonus=float(consistency_bonus),
-                no_auto_absent_bonus=float(no_auto_absent_bonus),
-                discipline_penalty=float(discipline_penalty),
-                auto_absent_count=int(auto_absent_count),
-                final_score=float(final_score),
+                badge=str(badge)
             )
         )
-    rankings.sort(key=lambda x: x.final_score, reverse=True)
+    rankings.sort(key=lambda x: x.overall_score, reverse=True)
     for i, r in enumerate(rankings):
         r.rank = i + 1
     rankings_cache[cache_key] = rankings
+    # Store as timezone-aware UTC datetime so comparison never throws TypeError
     rankings_cache_time[cache_key] = datetime.now(timezone.utc)
     return rankings
 
@@ -9252,68 +9070,237 @@ async def get_user_activity(
     return activities
 
 # TASK REMINDER ROUTES
-def build_reminder_email(user_name: str, task_list: list) -> tuple[str, str]:
+# ─── Email Template Defaults ──────────────────────────────────────────────────
+_DEFAULT_TASK_EMAIL_TEMPLATE = {
+    "accent_color":      "#4F46E5",
+    "company_name":      "Task-O-Sphere",
+    "tagline":           "Your Productivity. Our Priority.",
+    "support_email":     "info.taskosphere@gmail.com",
+    "website":           "www.taskosphere.com",
+    "footer_note":       "This is an automated notification from Task-O-Sphere. Please do not reply directly to this email.",
+    "subject_prefix":    "⏰ You Have Pending Tasks!",
+    "greeting_line":     "We hope you are doing well. This is an automated reminder from Task-O-Sphere to let you know that you have pending tasks that require your attention. Please review and complete them at your earliest convenience.",
+    "tips": [
+        "Log in to Task-O-Sphere daily to review and update your task status.",
+        "Use the Priority filter to focus on High-priority tasks first.",
+        "Set personal reminders inside the app so you never miss a deadline.",
+        "Reach out to your team lead if you need deadline extensions or support.",
+    ],
+}
+
+
+def build_reminder_email(
+    user_name: str,
+    task_list: list,
+    user_map: dict = None,
+    tpl: dict = None,
+) -> tuple[str, str]:
     """
-    Builds Option-1 style plain-text reminder email.
-    Returns (subject, body).
+    Builds a rich HTML + plain-text task reminder email.
+    tpl: optional dict with customisable template fields (from DB email_templates).
+    user_map: dict of {user_id: full_name} for resolving 'Assigned By'.
+    Returns (subject, html_body).
     """
-    from datetime import datetime
+    from datetime import datetime, timezone
+
+    t = {**_DEFAULT_TASK_EMAIL_TEMPLATE, **(tpl or {})}
+    user_map = user_map or {}
+    acc   = t["accent_color"]
+    first = user_name.split()[0] if user_name else "there"
+    now   = datetime.now(timezone.utc)
 
     def fmt_date(raw):
         if not raw or raw == "N/A":
             return "N/A"
         try:
-            # Handle ISO string like 2026-04-23T00:00:00.000Z
             dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
             return dt.strftime("%d %b %Y")
         except Exception:
-            return str(raw)[:10]  # fallback: take first 10 chars
+            return str(raw)[:10]
 
-    def priority_badge(p):
+    def parse_dt(raw):
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except Exception:
+            return None
+
+    def priority_info(p):
         p = (p or "medium").lower()
-        if p in ("critical", "high"):   return "High  "
-        if p == "medium":               return "Medium"
-        return "Low   "
+        if p in ("critical", "high"):   return ("🔴", "High",   "#dc2626", "#fee2e2")
+        if p == "medium":               return ("🟠", "Medium", "#ea580c", "#fff7ed")
+        return ("🟡", "Low",    "#ca8a04", "#fefce8")
 
-    count = len(task_list)
-    first_name = user_name.split()[0] if user_name else "there"
+    def status_color(s):
+        s = (s or "pending").lower().replace("_", " ")
+        if s in ("completed", "done"):   return ("#16a34a", "#dcfce7")
+        if s in ("in progress",):        return ("#2563eb", "#dbeafe")
+        return ("#6b7280", "#f3f4f6")
 
-    # Column widths
-    W_TASK  = 50
-    W_DATE  = 13
-    W_PRIO  = 8
-
-    def row(task_col, date_col, prio_col, sep="│"):
-        return (
-            f"{sep} {task_col:<{W_TASK}} {sep} {date_col:<{W_DATE}} {sep} {prio_col:<{W_PRIO}} {sep}"
-        )
-
-    top    = f"┌{'─'*(W_TASK+2)}┬{'─'*(W_DATE+2)}┬{'─'*(W_PRIO+2)}┐"
-    header = row("Task", "Due Date", "Priority")
-    mid    = f"├{'─'*(W_TASK+2)}┼{'─'*(W_DATE+2)}┼{'─'*(W_PRIO+2)}┤"
-    bottom = f"└{'─'*(W_TASK+2)}┴{'─'*(W_DATE+2)}┴{'─'*(W_PRIO+2)}┘"
-
-    rows = []
-    for t in task_list:
-        title    = (t.get("title") or "Untitled")[:W_TASK]
-        due      = fmt_date(t.get("due_date", "N/A"))
-        priority = priority_badge(t.get("priority"))
-        rows.append(row(title, due, priority))
-
-    table = "\n".join([top, header, mid] + rows + [bottom])
-
-    subject = f"\u23f0 Task Reminder \u2014 {count} Pending Task{'s' if count != 1 else ''}"
-
-    body = (
-        f"Hello {first_name},\n\n"
-        f"You have {count} pending task{'s' if count != 1 else ''} requiring your attention:\n\n"
-        f"{table}\n\n"
-        f"Please complete them at your earliest convenience.\n\n"
-        f"Regards,\n"
-        f"TaskoSphere"
+    total_count  = len(task_list)
+    overdue_count = sum(
+        1 for t2 in task_list
+        if parse_dt(t2.get("due_date")) and parse_dt(t2.get("due_date")) < now
+    )
+    week_secs = 7 * 86400
+    due_week_count = sum(
+        1 for t2 in task_list
+        if parse_dt(t2.get("due_date")) and
+           0 <= (parse_dt(t2.get("due_date")) - now).total_seconds() <= week_secs
     )
 
-    return subject, body
+    # ── Subject ───────────────────────────────────────────────────────────────
+    subject = f"{t['subject_prefix']} — {total_count} Task{'s' if total_count != 1 else ''} Pending"
+
+    # ── Build task rows ───────────────────────────────────────────────────────
+    task_rows_html = ""
+    for idx, task in enumerate(task_list, start=1):
+        title       = (task.get("title") or "Untitled")
+        assigned_by = user_map.get(task.get("created_by", ""), "Admin")
+        due_str     = fmt_date(task.get("due_date"))
+        prio_ico, prio_label, prio_fg, prio_bg = priority_info(task.get("priority"))
+        status_raw  = (task.get("status") or "Pending").replace("_", " ").title()
+        st_fg, st_bg = status_color(task.get("status"))
+        row_bg = "#ffffff" if idx % 2 == 1 else "#f8fafc"
+        task_rows_html += f"""
+        <tr style="background:{row_bg}">
+          <td style="padding:10px 14px;color:#64748b;font-size:13px;text-align:center;border-bottom:1px solid #e2e8f0">{idx}</td>
+          <td style="padding:10px 14px;color:#1e293b;font-size:13px;font-weight:600;border-bottom:1px solid #e2e8f0">{title}</td>
+          <td style="padding:10px 14px;color:#475569;font-size:13px;border-bottom:1px solid #e2e8f0">{assigned_by}</td>
+          <td style="padding:10px 14px;color:#475569;font-size:13px;border-bottom:1px solid #e2e8f0">{due_str}</td>
+          <td style="padding:10px 14px;border-bottom:1px solid #e2e8f0">
+            <span style="background:{prio_bg};color:{prio_fg};padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700">{prio_ico} {prio_label}</span>
+          </td>
+          <td style="padding:10px 14px;border-bottom:1px solid #e2e8f0">
+            <span style="background:{st_bg};color:{st_fg};padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700">{status_raw}</span>
+          </td>
+        </tr>"""
+
+    # ── Tips rows ─────────────────────────────────────────────────────────────
+    tips_html = "".join(
+        f'<li style="margin:6px 0;color:#475569;font-size:14px">✔&nbsp; {tip}</li>'
+        for tip in t["tips"]
+    )
+
+    # ── Full HTML ─────────────────────────────────────────────────────────────
+    html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:'Segoe UI',Arial,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:30px 0">
+<tr><td align="center">
+<table width="620" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08)">
+
+  <!-- HEADER -->
+  <tr>
+    <td style="background:linear-gradient(135deg,{acc} 0%,#7C3AED 100%);padding:36px 40px 28px;text-align:center">
+      <p style="margin:0 0 6px;color:rgba(255,255,255,0.75);font-size:12px;letter-spacing:2px;text-transform:uppercase">{t['company_name']}</p>
+      <h1 style="margin:0 0 8px;color:#ffffff;font-size:26px;font-weight:800">⏰ You Have Pending Tasks!</h1>
+      <p style="margin:0;color:rgba(255,255,255,0.85);font-size:13px;font-style:italic">{t['tagline']}</p>
+    </td>
+  </tr>
+
+  <!-- GREETING -->
+  <tr>
+    <td style="padding:32px 40px 0">
+      <p style="margin:0 0 8px;color:#1e293b;font-size:16px">Dear <strong>{user_name}</strong>,</p>
+      <p style="margin:0;color:#475569;font-size:14px;line-height:1.7">{t['greeting_line']}</p>
+    </td>
+  </tr>
+
+  <!-- SUMMARY STATS -->
+  <tr>
+    <td style="padding:24px 40px">
+      <p style="margin:0 0 14px;color:#1e293b;font-size:15px;font-weight:700">📊 Task Summary</p>
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td width="33%" style="padding:0 6px 0 0">
+            <div style="background:#f0f4ff;border-radius:12px;padding:16px;text-align:center">
+              <p style="margin:0;font-size:28px;font-weight:800;color:{acc}">{total_count}</p>
+              <p style="margin:4px 0 0;font-size:12px;color:#64748b;font-weight:600">Total Pending</p>
+            </div>
+          </td>
+          <td width="33%" style="padding:0 3px">
+            <div style="background:#fff1f2;border-radius:12px;padding:16px;text-align:center">
+              <p style="margin:0;font-size:28px;font-weight:800;color:#dc2626">{overdue_count}</p>
+              <p style="margin:4px 0 0;font-size:12px;color:#64748b;font-weight:600">Overdue</p>
+            </div>
+          </td>
+          <td width="33%" style="padding:0 0 0 6px">
+            <div style="background:#f0fdf4;border-radius:12px;padding:16px;text-align:center">
+              <p style="margin:0;font-size:28px;font-weight:800;color:#16a34a">{due_week_count}</p>
+              <p style="margin:4px 0 0;font-size:12px;color:#64748b;font-weight:600">Due This Week</p>
+            </div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- TASK TABLE -->
+  <tr>
+    <td style="padding:0 40px 24px">
+      <p style="margin:0 0 14px;color:#1e293b;font-size:15px;font-weight:700">📋 Your Pending Tasks</p>
+      <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden">
+        <thead>
+          <tr style="background:{acc}">
+            <th style="padding:11px 14px;color:#fff;font-size:12px;font-weight:700;text-align:center">#</th>
+            <th style="padding:11px 14px;color:#fff;font-size:12px;font-weight:700;text-align:left">Task Name</th>
+            <th style="padding:11px 14px;color:#fff;font-size:12px;font-weight:700;text-align:left">Assigned By</th>
+            <th style="padding:11px 14px;color:#fff;font-size:12px;font-weight:700;text-align:left">Due Date</th>
+            <th style="padding:11px 14px;color:#fff;font-size:12px;font-weight:700;text-align:left">Priority</th>
+            <th style="padding:11px 14px;color:#fff;font-size:12px;font-weight:700;text-align:left">Status</th>
+          </tr>
+        </thead>
+        <tbody>{task_rows_html}
+        </tbody>
+      </table>
+    </td>
+  </tr>
+
+  <!-- CTA BUTTON -->
+  <tr>
+    <td style="padding:0 40px 28px;text-align:center">
+      <a href="https://{t['website']}" style="display:inline-block;background:linear-gradient(135deg,{acc},#7C3AED);color:#ffffff;font-weight:700;font-size:15px;padding:14px 36px;border-radius:30px;text-decoration:none">🚀 Take Action Now &rarr;</a>
+    </td>
+  </tr>
+
+  <!-- TIPS -->
+  <tr>
+    <td style="padding:0 40px 28px">
+      <div style="background:#f8fafc;border-left:4px solid {acc};border-radius:8px;padding:18px 20px">
+        <p style="margin:0 0 10px;color:#1e293b;font-size:14px;font-weight:700">💡 Quick Tips to Stay on Track</p>
+        <ul style="margin:0;padding-left:16px">{tips_html}</ul>
+      </div>
+    </td>
+  </tr>
+
+  <!-- DIVIDER & FOOTER NOTE -->
+  <tr>
+    <td style="padding:0 40px 24px">
+      <p style="margin:0;color:#64748b;font-size:13px;line-height:1.6">If you have any questions or face issues accessing your tasks, please contact your system administrator or reply to this email.</p>
+      <p style="margin:14px 0 0;color:#1e293b;font-size:14px">Thank you for your continued dedication.</p>
+      <p style="margin:10px 0 0;color:#1e293b;font-size:14px">Warm regards,<br><strong>The {t['company_name']} Team</strong></p>
+      <p style="margin:6px 0 0;color:{acc};font-size:13px">{t['support_email']} &nbsp;|&nbsp; {t['website']}</p>
+    </td>
+  </tr>
+
+  <!-- FOOTER -->
+  <tr>
+    <td style="background:#f8fafc;padding:16px 40px;border-top:1px solid #e2e8f0;text-align:center">
+      <p style="margin:0;color:#94a3b8;font-size:11px">{t['footer_note']}</p>
+      <p style="margin:6px 0 0;color:#94a3b8;font-size:11px">© 2026 {t['company_name']}. All rights reserved.</p>
+    </td>
+  </tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>"""
+
+    return subject, html
 
 @api_router.post("/send-pending-task-reminders")
 async def send_pending_task_reminders(current_user: User = Depends(get_current_user)):
@@ -9342,13 +9329,19 @@ async def send_pending_task_reminders(current_user: User = Depends(get_current_u
             continue
         user_task_map.setdefault(email, {"user": user, "tasks": []})["tasks"].append(task)
 
+    # Fetch all users for "Assigned By" column + email template settings
+    all_users = await db.users.find({}, {"_id": 0, "id": 1, "full_name": 1}).to_list(500)
+    user_map  = {u["id"]: u.get("full_name", "Admin") for u in all_users}
+    tpl_doc   = await db.email_templates.find_one({"type": "task_reminder"}, {"_id": 0})
+    tpl       = tpl_doc.get("settings") if tpl_doc else None
+
     success_count = 0
     failed_emails = []
     for email, data in user_task_map.items():
         try:
             user_name = data["user"].get("full_name", "")
-            subject, body = build_reminder_email(user_name, data["tasks"])
-            sent = send_email(email, subject, body)
+            subject, html_body = build_reminder_email(user_name, data["tasks"], user_map=user_map, tpl=tpl)
+            sent = await _brevo_send(email, subject, body_plain=f"Hello {user_name},\n\nYou have {len(data['tasks'])} pending tasks. Please log in to Task-O-Sphere to review them.", body_html=html_body)
             if sent:
                 success_count += 1
             else:
@@ -9362,6 +9355,322 @@ async def send_pending_task_reminders(current_user: User = Depends(get_current_u
         "emails_sent": success_count,
         "emails_failed": failed_emails
     }
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# EMAIL TEMPLATE SETTINGS  (GET / PUT)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class EmailTemplateUpdateRequest(BaseModel):
+    settings: dict
+
+@api_router.get("/email-templates/{template_type}")
+async def get_email_template(
+    template_type: str,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns the saved customisation for an email template.
+    Falls back to built-in defaults when nothing has been saved yet.
+    template_type: 'task_reminder' | 'compliance_reminder'
+    """
+    doc = await db.email_templates.find_one({"type": template_type}, {"_id": 0})
+    if doc:
+        return {"type": template_type, "settings": doc.get("settings", {})}
+    # Return defaults so the UI can pre-populate the form
+    defaults = {
+        "task_reminder": _DEFAULT_TASK_EMAIL_TEMPLATE,
+        "compliance_reminder": _DEFAULT_COMPLIANCE_EMAIL_TEMPLATE,
+    }
+    return {"type": template_type, "settings": defaults.get(template_type, {})}
+
+
+@api_router.put("/email-templates/{template_type}")
+async def update_email_template(
+    template_type: str,
+    body: EmailTemplateUpdateRequest,
+    current_user: User = Depends(require_admin),
+):
+    """
+    Save (upsert) customisation for an email template. Admin only.
+    Accepts a partial settings dict — only the provided keys are updated.
+    """
+    allowed = ("task_reminder", "compliance_reminder")
+    if template_type not in allowed:
+        raise HTTPException(400, f"template_type must be one of {allowed}")
+
+    # Merge with existing so partial updates don't wipe other keys
+    existing = await db.email_templates.find_one({"type": template_type}, {"_id": 0})
+    current_settings = existing.get("settings", {}) if existing else {}
+    merged = {**current_settings, **body.settings}
+
+    await db.email_templates.update_one(
+        {"type": template_type},
+        {"$set": {
+            "type": template_type,
+            "settings": merged,
+            "updated_by": current_user.id,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True,
+    )
+    return {"message": "Template updated successfully", "settings": merged}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMPLIANCE CLIENT EMAIL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_DEFAULT_COMPLIANCE_EMAIL_TEMPLATE = {
+    "subject_prefix":   "📋 Compliance Reminder",
+    "greeting_line":    "We hope this message finds you well. Please find below the compliance items that require your attention. Kindly ensure timely completion to avoid any penalties or legal implications.",
+    "footer_note":      "This is an automated compliance reminder. For queries, please contact us at the details below.",
+    "cta_label":        "Contact Us Now",
+    "tips": [
+        "Ensure all documents are submitted well before the due date.",
+        "Keep digital copies of all filed returns and acknowledgments.",
+        "Contact us immediately if you need an extension or face any issues.",
+    ],
+}
+
+
+def _status_badge_compliance(s: str) -> tuple:
+    s = (s or "pending").lower().replace("_", " ")
+    if s in ("completed", "filed"):   return ("#16a34a", "#dcfce7")
+    if s in ("in progress",):         return ("#2563eb", "#dbeafe")
+    if s == "overdue":                return ("#dc2626", "#fee2e2")
+    return ("#6b7280", "#f3f4f6")
+
+
+class ComplianceEmailRequest(BaseModel):
+    company_id:    str
+    client_name:   str
+    client_email:  str
+    subject:       Optional[str] = None
+    compliance_items: List[dict]   # [{name, category, due_date, status, notes}]
+
+
+@api_router.post("/compliance/send-client-email")
+async def send_compliance_client_email(
+    req: ComplianceEmailRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Send a branded compliance reminder email to a client.
+    Uses the selected company's logo, name, phone, email, and website.
+    """
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Admin or Manager only")
+
+    company = await db.companies.find_one({"id": req.company_id}, {"_id": 0})
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    # Check Brevo is configured
+    if not os.getenv("BREVO_API_KEY") or not os.getenv("SENDER_EMAIL"):
+        raise HTTPException(500, "Brevo email not configured (set BREVO_API_KEY and SENDER_EMAIL)")
+
+    tpl_doc = await db.email_templates.find_one({"type": "compliance_reminder"}, {"_id": 0})
+    tpl = {**_DEFAULT_COMPLIANCE_EMAIL_TEMPLATE, **(tpl_doc.get("settings", {}) if tpl_doc else {})}
+
+    comp_name    = company.get("name", "Our Firm")
+    comp_phone   = company.get("phone", "")
+    comp_email_c = company.get("email", os.getenv("SENDER_EMAIL", ""))
+    comp_website = company.get("website", "")
+    comp_address = company.get("address", "")
+    comp_gstin   = company.get("gstin", "")
+    logo_b64     = company.get("logo_base64", "")
+
+    # Strip data-URI prefix if present
+    if logo_b64 and "base64," in logo_b64:
+        logo_b64 = logo_b64.split("base64,", 1)[1]
+
+    logo_tag = (
+        f'<img src="data:image/png;base64,{logo_b64}" alt="{comp_name}" '
+        f'style="max-height:54px;max-width:180px;object-fit:contain;margin-bottom:6px">'
+        if logo_b64 else
+        f'<span style="font-size:22px;font-weight:800;color:#ffffff">{comp_name}</span>'
+    )
+
+    now = datetime.now(timezone.utc)
+
+    def fmt_d(raw):
+        if not raw: return "—"
+        try:
+            return datetime.fromisoformat(str(raw).replace("Z","+00:00")).strftime("%d %b %Y")
+        except Exception:
+            return str(raw)[:10]
+
+    total   = len(req.compliance_items)
+    overdue = sum(1 for c in req.compliance_items if c.get("status","").lower() in ("overdue",""))
+    pending = sum(1 for c in req.compliance_items if (c.get("status","") or "pending").lower() not in ("completed","filed","na"))
+
+    rows_html = ""
+    for idx, item in enumerate(req.compliance_items, 1):
+        st_fg, st_bg = _status_badge_compliance(item.get("status",""))
+        status_label = (item.get("status") or "Pending").replace("_"," ").title()
+        row_bg = "#ffffff" if idx % 2 == 1 else "#f8fafc"
+        rows_html += f"""
+        <tr style="background:{row_bg}">
+          <td style="padding:10px 14px;color:#64748b;font-size:13px;text-align:center;border-bottom:1px solid #e2e8f0">{idx}</td>
+          <td style="padding:10px 14px;color:#1e293b;font-size:13px;font-weight:600;border-bottom:1px solid #e2e8f0">{item.get("name","—")}</td>
+          <td style="padding:10px 14px;border-bottom:1px solid #e2e8f0">
+            <span style="background:#ede9fe;color:#5b21b6;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700">{item.get("category","—")}</span>
+          </td>
+          <td style="padding:10px 14px;color:#475569;font-size:13px;border-bottom:1px solid #e2e8f0">{fmt_d(item.get("due_date"))}</td>
+          <td style="padding:10px 14px;border-bottom:1px solid #e2e8f0">
+            <span style="background:{st_bg};color:{st_fg};padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700">{status_label}</span>
+          </td>
+          <td style="padding:10px 14px;color:#64748b;font-size:12px;border-bottom:1px solid #e2e8f0">{item.get("notes") or "—"}</td>
+        </tr>"""
+
+    tips_html = "".join(
+        f'<li style="margin:6px 0;color:#475569;font-size:14px">✔&nbsp; {tip}</li>'
+        for tip in tpl["tips"]
+    )
+
+    contact_parts = [p for p in [comp_phone, comp_email_c, comp_website] if p]
+    contact_line  = " &nbsp;|&nbsp; ".join(contact_parts)
+    addr_line     = f"<p style='margin:4px 0 0;color:rgba(255,255,255,0.75);font-size:12px'>{comp_address}</p>" if comp_address else ""
+    gstin_line    = f"<p style='margin:2px 0 0;color:rgba(255,255,255,0.65);font-size:11px'>GSTIN: {comp_gstin}</p>" if comp_gstin else ""
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:'Segoe UI',Arial,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:30px 0">
+<tr><td align="center">
+<table width="640" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08)">
+
+  <!-- HEADER with company branding -->
+  <tr>
+    <td style="background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%);padding:30px 40px 24px">
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td>{logo_tag}</td>
+          <td style="text-align:right;vertical-align:top">
+            <p style="margin:0;color:rgba(255,255,255,0.7);font-size:11px">{comp_phone}</p>
+            <p style="margin:2px 0 0;color:rgba(255,255,255,0.7);font-size:11px">{comp_email_c}</p>
+          </td>
+        </tr>
+      </table>
+      <h1 style="margin:16px 0 4px;color:#ffffff;font-size:22px;font-weight:800">📋 Compliance Reminder</h1>
+      {addr_line}{gstin_line}
+    </td>
+  </tr>
+
+  <!-- GREETING -->
+  <tr>
+    <td style="padding:28px 40px 0">
+      <p style="margin:0 0 8px;color:#1e293b;font-size:16px">Dear <strong>{req.client_name}</strong>,</p>
+      <p style="margin:0;color:#475569;font-size:14px;line-height:1.7">{tpl['greeting_line']}</p>
+    </td>
+  </tr>
+
+  <!-- SUMMARY STATS -->
+  <tr>
+    <td style="padding:20px 40px">
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td width="33%" style="padding:0 6px 0 0">
+            <div style="background:#eff6ff;border-radius:10px;padding:14px;text-align:center">
+              <p style="margin:0;font-size:26px;font-weight:800;color:#2563eb">{total}</p>
+              <p style="margin:4px 0 0;font-size:12px;color:#64748b;font-weight:600">Total Items</p>
+            </div>
+          </td>
+          <td width="33%" style="padding:0 3px">
+            <div style="background:#fef2f2;border-radius:10px;padding:14px;text-align:center">
+              <p style="margin:0;font-size:26px;font-weight:800;color:#dc2626">{overdue}</p>
+              <p style="margin:4px 0 0;font-size:12px;color:#64748b;font-weight:600">Overdue</p>
+            </div>
+          </td>
+          <td width="33%" style="padding:0 0 0 6px">
+            <div style="background:#fffbeb;border-radius:10px;padding:14px;text-align:center">
+              <p style="margin:0;font-size:26px;font-weight:800;color:#d97706">{pending}</p>
+              <p style="margin:4px 0 0;font-size:12px;color:#64748b;font-weight:600">Pending</p>
+            </div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- COMPLIANCE TABLE -->
+  <tr>
+    <td style="padding:0 40px 24px">
+      <p style="margin:0 0 14px;color:#1e293b;font-size:15px;font-weight:700">📄 Your Compliance Items</p>
+      <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden">
+        <thead>
+          <tr style="background:#1e3a5f">
+            <th style="padding:11px 14px;color:#fff;font-size:12px;font-weight:700;text-align:center">#</th>
+            <th style="padding:11px 14px;color:#fff;font-size:12px;font-weight:700;text-align:left">Compliance Name</th>
+            <th style="padding:11px 14px;color:#fff;font-size:12px;font-weight:700;text-align:left">Category</th>
+            <th style="padding:11px 14px;color:#fff;font-size:12px;font-weight:700;text-align:left">Due Date</th>
+            <th style="padding:11px 14px;color:#fff;font-size:12px;font-weight:700;text-align:left">Status</th>
+            <th style="padding:11px 14px;color:#fff;font-size:12px;font-weight:700;text-align:left">Notes</th>
+          </tr>
+        </thead>
+        <tbody>{rows_html}
+        </tbody>
+      </table>
+    </td>
+  </tr>
+
+  <!-- TIPS -->
+  <tr>
+    <td style="padding:0 40px 24px">
+      <div style="background:#f8fafc;border-left:4px solid #2563eb;border-radius:8px;padding:16px 20px">
+        <p style="margin:0 0 10px;color:#1e293b;font-size:14px;font-weight:700">💡 Important Reminders</p>
+        <ul style="margin:0;padding-left:16px">{tips_html}</ul>
+      </div>
+    </td>
+  </tr>
+
+  <!-- SIGNATURE -->
+  <tr>
+    <td style="padding:0 40px 24px">
+      <p style="margin:0;color:#475569;font-size:14px;line-height:1.6">For any queries or assistance, please feel free to contact us. We are here to help you stay compliant.</p>
+      <p style="margin:14px 0 0;color:#1e293b;font-size:14px">Warm regards,<br><strong>{comp_name}</strong></p>
+      {f'<p style="margin:6px 0 0;color:#2563eb;font-size:13px">{contact_line}</p>' if contact_line else ""}
+    </td>
+  </tr>
+
+  <!-- FOOTER -->
+  <tr>
+    <td style="background:#f8fafc;padding:14px 40px;border-top:1px solid #e2e8f0;text-align:center">
+      <p style="margin:0;color:#94a3b8;font-size:11px">{tpl['footer_note']}</p>
+      <p style="margin:4px 0 0;color:#94a3b8;font-size:11px">© {now.year} {comp_name}. All rights reserved.</p>
+    </td>
+  </tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>"""
+
+    plain = (
+        f"Dear {req.client_name},\n\n"
+        f"{tpl['greeting_line']}\n\n"
+        f"You have {total} compliance item(s) requiring attention ({overdue} overdue).\n\n"
+        + "\n".join(
+            f"- {c.get('name','?')} | Due: {fmt_d(c.get('due_date'))} | Status: {c.get('status','Pending')}"
+            for c in req.compliance_items
+        )
+        + f"\n\nRegards,\n{comp_name}\n{contact_line}"
+    )
+
+    subject = req.subject or f"{tpl['subject_prefix']} — {comp_name}"
+
+    try:
+        await _brevo_send(req.client_email, subject, body_plain=plain, body_html=html)
+    except Exception as e:
+        logger.error(f"Compliance email failed: {e}")
+        raise HTTPException(500, f"Email send failed: {str(e)}")
+
+    logger.info(f"Compliance email sent to {req.client_email} by {current_user.email}")
+    return {"message": f"Compliance email sent to {req.client_email}"}
 
 # AUDIT LOGS ROUTE
 @api_router.get("/audit-logs")
@@ -9427,11 +9736,16 @@ async def send_pending_task_reminders_internal():
         email = user["email"]
         user_task_map.setdefault(email, {"user": user, "tasks": []})["tasks"].append(task)
 
+    all_users = await db.users.find({}, {"_id": 0, "id": 1, "full_name": 1}).to_list(500)
+    user_map  = {u["id"]: u.get("full_name", "Admin") for u in all_users}
+    tpl_doc   = await db.email_templates.find_one({"type": "task_reminder"}, {"_id": 0})
+    tpl       = tpl_doc.get("settings") if tpl_doc else None
+
     for email, data in user_task_map.items():
         try:
             user_name = data["user"].get("full_name", "")
-            subject, body = build_reminder_email(user_name, data["tasks"])
-            send_email(email, subject, body)
+            subject, html_body = build_reminder_email(user_name, data["tasks"], user_map=user_map, tpl=tpl)
+            await _brevo_send(email, subject, body_plain=f"Hello {user_name},\n\nYou have {len(data['tasks'])} pending tasks. Please log in to Task-O-Sphere to review them.", body_html=html_body)
         except Exception as e:
             logger.error(f"Auto reminder failed for {email}: {str(e)}")
 
