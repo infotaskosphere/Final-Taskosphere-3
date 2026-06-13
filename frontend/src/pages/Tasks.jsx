@@ -1465,7 +1465,7 @@ export default function Tasks() {
       } else if (total_users === 0) {
         toast.info('No pending tasks found — nothing to remind.');
       } else {
-        toast.error(`All ${emails_failed.length} reminder email(s) failed. Check SENDGRID_API_KEY.`);
+        toast.error(`All ${emails_failed.length} reminder email(s) failed. Check BREVO_API_KEY and SENDER_EMAIL on the server.`);
       }
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Failed to send reminders');
@@ -2198,7 +2198,7 @@ export default function Tasks() {
               : (isDark ? '#fca5a5' : '#dc2626') }}>
             {reminderResult.emails_sent > 0
               ? `✓ Reminder emails sent to ${reminderResult.emails_sent} / ${reminderResult.total_users} users`
-              : `Reminder emails failed — check SENDGRID_API_KEY on the server`}
+              : `Reminder emails failed — check BREVO_API_KEY + SENDER_EMAIL on the server`}
             {reminderResult.emails_failed?.length > 0 && (
               <span className="ml-2 text-xs opacity-70">
                 (Failed: {reminderResult.emails_failed.join(', ')})
