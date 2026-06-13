@@ -6657,6 +6657,69 @@ def _zaubacorp_pick_row(soup: "BeautifulSoup", q: str, is_cin: bool, is_llpin: b
     return None
 
 
+def _parse_zaubacorp_directors_table(soup: "BeautifulSoup") -> list:
+    """Parse the 'Current Directors & Key Managerial Personnel' table on a
+    ZaubaCorp company/LLP detail page.
+
+    The table is fully server-rendered with columns:
+        DIN | Director Name | Designation | Appointment Date
+    (the DIN and Director Name cells contain links). We only use the
+    *current* directors table (skip any 'Past Directors' table, which has an
+    extra 'Cessation' column).
+
+    Returns a list of {"name", "designation", "din", "appointment_date"} dicts.
+    """
+    directors: list = []
+
+    for table in soup.find_all("table"):
+        header_row = table.find("tr")
+        if not header_row:
+            continue
+        headers = [c.get_text(strip=True).lower() for c in header_row.find_all(["th", "td"])]
+        if not headers or "din" not in headers[0]:
+            continue
+        if "director name" not in " ".join(headers):
+            continue
+        # Skip past-directors tables (they include a "Cessation" column)
+        if any("cessation" in h for h in headers):
+            continue
+
+        din_idx  = next((i for i, h in enumerate(headers) if "din" in h), 0)
+        name_idx = next((i for i, h in enumerate(headers) if "director name" in h or "name" in h), 1)
+        desig_idx = next((i for i, h in enumerate(headers) if "designation" in h), None)
+        appt_idx  = next((i for i, h in enumerate(headers) if "appointment" in h), None)
+
+        for row in table.find_all("tr")[1:]:
+            cells = row.find_all(["td", "th"])
+            if len(cells) <= max(din_idx, name_idx):
+                continue
+            din  = cells[din_idx].get_text(strip=True)
+            name = cells[name_idx].get_text(strip=True)
+            if not name or not re.match(r"^\d{6,8}$", din):
+                continue
+            designation = cells[desig_idx].get_text(strip=True) if desig_idx is not None and len(cells) > desig_idx else "Director"
+            appt_date_raw = cells[appt_idx].get_text(strip=True) if appt_idx is not None and len(cells) > appt_idx else ""
+            appt_date = ""
+            if appt_date_raw:
+                try:
+                    from dateutil import parser as date_parser
+                    appt_date = date_parser.parse(appt_date_raw, dayfirst=True).strftime("%Y-%m-%d")
+                except Exception:
+                    appt_date = appt_date_raw
+
+            directors.append({
+                "name": name.title(),
+                "designation": designation or "Director",
+                "din": din,
+                "appointment_date": appt_date,
+            })
+
+        if directors:
+            break
+
+    return directors
+
+
 async def _scrape_zaubacorp(query: str) -> dict:
     """Scrape company details from zaubacorp.com. Returns {} on failure.
 
@@ -6725,6 +6788,11 @@ async def _scrape_zaubacorp(query: str) -> dict:
             parsed = _parse_zaubacorp_summary(summary_text, company_name)
             parsed["company_name"] = company_name
             parsed["detail_url"] = detail_url
+
+            table_directors = _parse_zaubacorp_directors_table(ds)
+            if table_directors:
+                parsed["directors"] = table_directors
+
             return parsed
         except Exception as exc:
             logger.debug(f"zaubacorp detail fetch error for {detail_url}: {exc}")
