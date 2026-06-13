@@ -1034,6 +1034,17 @@ class PerformanceMetric(BaseModel):
     overall_score: float = 0.0
     rank: int = 0
     badge: str = "Good Performer"
+    # New ranking fields
+    attendance_score: float = 0.0
+    task_completion_score: float = 0.0
+    task_timeliness_score: float = 0.0
+    working_hours_score: float = 0.0
+    quality_score: float = 0.0
+    consistency_bonus: float = 0.0
+    no_auto_absent_bonus: float = 0.0
+    discipline_penalty: float = 0.0
+    auto_absent_count: int = 0
+    final_score: float = 0.0
 
 
 # ======================
