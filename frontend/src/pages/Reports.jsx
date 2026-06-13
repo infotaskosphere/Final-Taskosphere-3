@@ -182,7 +182,7 @@ const PerfRow = ({ m, rank, dark }) => {
         </div>
       </div>
       <div className="text-right flex-shrink-0">
-        <p className="text-sm font-black" style={P?{color:'#fff'}:{color:C.deepBlue}}>{m.overall_score}%</p>
+        <p className="text-sm font-black" style={P?{color:'#fff'}:{color:C.deepBlue}}>{m.final_score??m.overall_score}</p>
         <p className="text-[10px]" style={P?{color:'rgba(255,255,255,0.5)'}:{color:t.textMute}}>{fmtH(m.total_hours)}</p>
       </div>
     </div>
@@ -371,11 +371,11 @@ export default function Reports() {
   const radarData = useMemo(()=>{
     const p=performers[0]; if(!p) return [];
     return [
-      {metric:'Attendance',score:p.attendance_percent||0},
-      {metric:'Task Done', score:p.task_completion_percent||0},
-      {metric:'On Time',   score:p.timely_punchin_percent||0},
-      {metric:'Todo Rate', score:p.todo_ontime_percent||0},
-      {metric:'Overall',   score:p.overall_score||0},
+      {metric:'Attendance',    score:Math.round((p.attendance_score||0)/2.5*10)/10},
+      {metric:'Task Done',     score:Math.round((p.task_completion_score||0)/3*10)/10},
+      {metric:'Timeliness',    score:Math.round((p.task_timeliness_score||0)/2*10)/10},
+      {metric:'Working Hours', score:p.working_hours_score||0},
+      {metric:'Quality',       score:Math.round((p.quality_score||0)/0.5*10)/10},
     ];
   },[performers]);
 
@@ -461,10 +461,10 @@ export default function Reports() {
 
       if(performers.length>0){
         doc.addPage();y=15;
-        doc.setFontSize(12);doc.setTextColor(13,59,102);doc.text('Star Performers',15,y);y+=8;
+        doc.setFontSize(12);doc.setTextColor(13,59,102);doc.text('Performance Leaderboard',15,y);y+=8;
         doc.autoTable({
-          head:[['Rank','Name','Score','Attendance%','Task Done%','Punch-In%','Hours','Badge']],
-          body:performers.map((m,i)=>[`#${i+1}`,m.user_name,`${m.overall_score}%`,`${m.attendance_percent}%`,`${m.task_completion_percent}%`,`${m.timely_punchin_percent}%`,fmtH(m.total_hours),m.badge||'Good']),
+          head:[['Rank','Name','Final Score','Att. Score','Task Done','Timeliness','Hours Score','Quality','Consistency','Auto Absent','Att. %','Badge']],
+          body:performers.map((m,i)=>[`#${i+1}`,m.user_name,m.final_score??m.overall_score*10,m.attendance_score,m.task_completion_score,m.task_timeliness_score,m.working_hours_score,m.quality_score,m.consistency_bonus,m.auto_absent_count,`${m.attendance_percent}%`,m.badge||'Needs Improvement']),
           startY:y,margin:15,theme:'grid',
           headStyles:{fillColor:[31,111,178],textColor:[255,255,255],fontStyle:'bold'},
         });
@@ -956,7 +956,7 @@ export default function Reports() {
         {tab==='performers'&&(
           <motion.div key="pf" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <Sec title={isAdmin?'Star Performers':'Your Rank'} desc="Ranked by overall score" dark={dark}
+              <Sec title={isAdmin?'Star Performers':'Your Rank'} desc="Ranked by final score (0–1000)" dark={dark}
                 action={isAdmin&&(
                   <div className="flex gap-1">
                     {['all','monthly','weekly'].map(p=>(
@@ -977,7 +977,7 @@ export default function Reports() {
                 ):<Empty icon={Award} text="No performance data" dark={dark}/>}
               </Sec>
 
-              <Sec title="Top Performer Breakdown" desc={performers[0]?`${performers[0].user_name} — components`:'Score radar'} dark={dark}>
+              <Sec title="Top Performer Breakdown" desc={performers[0]?`${performers[0].user_name} — score components`:'Score components (0–1000 scale)'} dark={dark}>
                 {radarData.length>0?(
                   <ResponsiveContainer width="100%" height={260}>
                     <RadarChart data={radarData}>
@@ -992,12 +992,12 @@ export default function Reports() {
             </div>
 
             {performers.length>0&&(
-              <Sec title="Full Score Breakdown" desc="All 5 performance dimensions" dark={dark}>
+              <Sec title="Full Score Breakdown" desc="All 11 performance dimensions (0–1000 scale)" dark={dark}>
                 <div className="overflow-x-auto rounded-xl" style={{border:`1px solid ${t.border}`}}>
                   <table className="w-full text-sm min-w-[700px]">
                     <thead>
                       <tr style={{background:t.card2}}>
-                        {['Rank','Employee','Overall','Attendance','Task Done','Punch-In','Todo','Hours','Badge'].map(h=>(
+                        {['Rank','Employee','Final Score','Att. Score','Task Done','Timeliness','Hours Score','Quality','Consistency','Auto Absent','Att. %','Badge'].map(h=>(
                           <th key={h} className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider whitespace-nowrap"
                             style={{color:t.textMute}}>{h}</th>
                         ))}
@@ -1005,7 +1005,15 @@ export default function Reports() {
                     </thead>
                     <tbody>
                       {performers.map((m,i)=>{
-                        const sc=m.overall_score>=85?C.emeraldGreen:m.overall_score>=60?C.amber:'#dc2626';
+                        const fs=m.final_score??m.overall_score*10;
+                        const sc=fs>=850?C.emeraldGreen:fs>=650?C.amber:'#dc2626';
+                        const badgeStyle=
+                          m.badge==='Elite Performer'  ?{background:'#fde68a',color:'#78350f'}
+                         :m.badge==='Star Performer'   ?{background:'#fef9c3',color:'#854d0e'}
+                         :m.badge==='Top Performer'    ?{background:'#d1fae5',color:'#065f46'}
+                         :m.badge==='Good Performer'   ?{background:'#dbeafe',color:'#1e40af'}
+                         :m.badge==='Average Performer'?{background:'#f3f4f6',color:'#374151'}
+                                                       :{background:'#fee2e2',color:'#991b1b'};
                         return (
                           <tr key={m.user_id||i} style={{borderTop:`1px solid ${t.border2}`}}
                             onMouseEnter={e=>e.currentTarget.style.background=t.hover}
@@ -1023,18 +1031,19 @@ export default function Reports() {
                               </div>
                             </td>
                             <td className="px-3 py-2.5">
-                              <span className="text-base font-black" style={{color:sc}}>{m.overall_score}%</span>
+                              <span className="text-base font-black" style={{color:sc}}>{fs}</span>
                             </td>
-                            {[m.attendance_percent,m.task_completion_percent,m.timely_punchin_percent,m.todo_ontime_percent].map((v,j)=>(
-                              <td key={j} className="px-3 py-2.5 text-xs font-semibold" style={{color:t.textSub}}>{v}%</td>
-                            ))}
-                            <td className="px-3 py-2.5 text-xs font-semibold" style={{color:t.textSub}}>{fmtH(m.total_hours)}</td>
+                            <td className="px-3 py-2.5 text-xs font-semibold" style={{color:t.textSub}}>{m.attendance_score}</td>
+                            <td className="px-3 py-2.5 text-xs font-semibold" style={{color:t.textSub}}>{m.task_completion_score}</td>
+                            <td className="px-3 py-2.5 text-xs font-semibold" style={{color:t.textSub}}>{m.task_timeliness_score}</td>
+                            <td className="px-3 py-2.5 text-xs font-semibold" style={{color:t.textSub}}>{m.working_hours_score}</td>
+                            <td className="px-3 py-2.5 text-xs font-semibold" style={{color:t.textSub}}>{m.quality_score}</td>
+                            <td className="px-3 py-2.5 text-xs font-semibold" style={{color:t.textSub}}>{m.consistency_bonus}</td>
+                            <td className="px-3 py-2.5 text-xs font-semibold" style={{color:m.auto_absent_count>0?'#dc2626':t.textSub}}>{m.auto_absent_count}</td>
+                            <td className="px-3 py-2.5 text-xs font-semibold" style={{color:t.textSub}}>{m.attendance_percent}%</td>
                             <td className="px-3 py-2.5">
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
-                                style={m.badge==='Star Performer'?{background:'#fef9c3',color:'#854d0e'}
-                                     :m.badge==='Top Performer' ?{background:'#d1fae5',color:'#065f46'}
-                                     :{background:t.card2,color:t.textSub}}>
-                                {m.badge||'Good Performer'}
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={badgeStyle}>
+                                {m.badge||'Needs Improvement'}
                               </span>
                             </td>
                           </tr>
