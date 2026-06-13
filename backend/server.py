@@ -216,25 +216,26 @@ async def _mark_absent_for_date(target_date_str: str) -> dict:
         existing = await db.attendance.find_one({"user_id": uid, "date": target_date_str}, {"_id": 0})
 
         if existing:
-            if existing.get("status") in ("present", "leave", "absent"):
+            if existing.get("status") in ("present", "leave", "absent", "auto_absent", "half_day"):
                 already_recorded += 1
                 continue
-            # Record exists but status is unexpected → update to absent
+            # Record exists but status is unexpected → update to auto_absent
             await db.attendance.update_one(
                 {"user_id": uid, "date": target_date_str},
                 {"$set": {
-                    "status": "absent",
+                    "status": "auto_absent",
                     "auto_marked": True,
+                    "attendance_points": -10,
                     "auto_marked_at": datetime.now(timezone.utc).isoformat(),
                 }}
             )
             marked_count += 1
         else:
-            # No record at all → insert absent
+            # No record at all → insert auto_absent
             await db.attendance.insert_one({
                 "user_id": uid,
                 "date": target_date_str,
-                "status": "absent",
+                "status": "auto_absent",
                 "punch_in": None,
                 "punch_out": None,
                 "duration_minutes": 0,
@@ -242,6 +243,7 @@ async def _mark_absent_for_date(target_date_str: str) -> dict:
                 "punched_out_early": False,
                 "leave_reason": None,
                 "auto_marked": True,
+                "attendance_points": -10,
                 "auto_marked_at": datetime.now(timezone.utc).isoformat(),
             })
             marked_count += 1
@@ -2441,13 +2443,23 @@ async def handle_attendance(
         punch_in_ist = punch_in_utc.astimezone(ZoneInfo("Asia/Kolkata"))
         is_late = check_is_late(user_doc or {}, punch_in_ist)
         location_data = data.get("location")
+        # Determine status: if auto_absent record exists and user now punches in,
+        # apply correction — present if on time, half_day if late
+        was_auto_absent = attendance and attendance.get("status") == "auto_absent"
+        if was_auto_absent and is_late:
+            new_status = "half_day"
+            att_points = 5
+        else:
+            new_status = "present"
+            att_points = 10
         update_fields = {
-            "status": "present",
+            "status": new_status,
             "punch_in": punch_in_utc,
             "is_late": is_late,
             "leave_reason": None,
             # Clear auto_absent flag if user punches in manually
             "auto_marked": False,
+            "attendance_points": att_points,
         }
         location_verified = True
         if location_data:
@@ -2556,7 +2568,8 @@ async def mark_leave_today(current_user: User = Depends(get_current_user)):
                 "status": "leave",
                 "punch_in": None,
                 "punch_out": None,
-                "leave_reason": "Marked on leave today"
+                "leave_reason": "Marked on leave today",
+                "attendance_points": 0,
             }
         },
         upsert=True
@@ -2637,6 +2650,7 @@ async def apply_leave(
                     "punch_in": None,
                     "punch_out": None,
                     "duration_minutes": 0,
+                    "attendance_points": 0,
                 }
 
             elif leave_type == "half_day_morning":
@@ -2794,14 +2808,39 @@ async def get_my_attendance_summary(
         if month not in monthly_data:
             monthly_data[month] = {
                 "total_minutes": 0,
-                "days_present": 0
+                "days_present": 0,
+                "half_days": 0,
+                "leave_days": 0,
+                "absent_days": 0,
+                "auto_absent_days": 0,
+                "attendance_points": 0,
             }
+        status = attendance.get("status", "absent")
         duration = attendance.get("duration_minutes")
-        if isinstance(duration, (int, float)):
-            monthly_data[month]["total_minutes"] += duration
-            total_minutes_all += duration
+        att_pts = attendance.get("attendance_points")
+        if att_pts is None:
+            _pts_map = {"present": 10, "half_day": 5, "leave": 0, "holiday": 0,
+                        "absent": -5, "auto_absent": -10, "late": 10, "wfh": 10}
+            att_pts = _pts_map.get(status, 0)
+        monthly_data[month]["attendance_points"] += att_pts
+        if status in ("present", "late", "wfh"):
+            if isinstance(duration, (int, float)):
+                monthly_data[month]["total_minutes"] += duration
+                total_minutes_all += duration
             monthly_data[month]["days_present"] += 1
             total_days += 1
+        elif status == "half_day":
+            monthly_data[month]["half_days"] += 1
+            if isinstance(duration, (int, float)):
+                monthly_data[month]["total_minutes"] += duration
+                total_minutes_all += duration
+            total_days += 1
+        elif status == "leave":
+            monthly_data[month]["leave_days"] += 1
+        elif status == "auto_absent":
+            monthly_data[month]["auto_absent_days"] += 1
+        elif status == "absent":
+            monthly_data[month]["absent_days"] += 1
     formatted_data = []
     for month, data in monthly_data.items():
         minutes = data["total_minutes"]
@@ -2811,7 +2850,12 @@ async def get_my_attendance_summary(
             "month": month,
             "total_minutes": minutes,
             "total_hours": f"{hours}h {mins}m",
-            "days_present": data["days_present"]
+            "days_present": data["days_present"],
+            "half_days": data["half_days"],
+            "leave_days": data["leave_days"],
+            "absent_days": data["absent_days"],
+            "auto_absent_days": data["auto_absent_days"],
+            "attendance_points": data["attendance_points"],
         })
     return {
         "current_month": current_month,
@@ -2859,30 +2903,49 @@ async def get_staff_attendance_report(
                 "role": user_info.get("role", "staff"),
                 "total_minutes": 0,
                 "days_present": 0,
+                "half_days": 0,
                 "days_absent": 0,
+                "auto_absent_days": 0,
+                "leave_days": 0,
                 "late_days": 0,
                 "early_out_days": 0,
+                "attendance_points": 0,
                 "records": []
             }
-        # count absent days separately
-        if attendance.get("status") == "absent":
+        att_status = attendance.get("status", "absent")
+        att_pts = attendance.get("attendance_points")
+        if att_pts is None:
+            _pts_map = {"present": 10, "half_day": 5, "leave": 0, "holiday": 0,
+                        "absent": -5, "auto_absent": -10, "late": 10, "wfh": 10}
+            att_pts = _pts_map.get(att_status, 0)
+        staff_report[uid]["attendance_points"] += att_pts
+        if att_status == "absent":
             staff_report[uid]["days_absent"] += 1
+        elif att_status == "auto_absent":
+            staff_report[uid]["auto_absent_days"] += 1
+        elif att_status == "leave":
+            staff_report[uid]["leave_days"] += 1
+        elif att_status == "half_day":
+            staff_report[uid]["half_days"] += 1
         duration = attendance.get("duration_minutes")
-        if isinstance(duration, (int, float)) and attendance.get("status") == "present":
+        if isinstance(duration, (int, float)) and att_status in ("present", "late", "wfh"):
             staff_report[uid]["total_minutes"] += duration
             staff_report[uid]["days_present"] += 1
+        elif isinstance(duration, (int, float)) and att_status == "half_day":
+            staff_report[uid]["total_minutes"] += duration
         if attendance.get("is_late"):
             staff_report[uid]["late_days"] += 1
         if attendance.get("punched_out_early"):
             staff_report[uid]["early_out_days"] += 1
         staff_report[uid]["records"].append({
             "date": attendance["date"],
-            "status": attendance.get("status", "absent"),
+            "status": att_status,
             "punch_in": attendance.get("punch_in"),
             "punch_out": attendance.get("punch_out"),
             "duration_minutes": duration,
             "is_late": attendance.get("is_late", False),
-            "punched_out_early": attendance.get("punched_out_early", False)
+            "punched_out_early": attendance.get("punched_out_early", False),
+            "attendance_points": att_pts,
         })
     result = []
     for uid, data in staff_report.items():
@@ -2991,12 +3054,17 @@ async def edit_attendance_record(
         {"user_id": user_id, "date": date_str}, {"_id": 0}
     )
 
+    _att_points_map = {
+        "present": 10, "half_day": 5, "late": 10,
+        "leave": 0, "wfh": 10, "absent": -5, "auto_absent": -10,
+    }
     update_fields = {
-        "status":      status,
-        "edited_by":   current_user.id,
-        "edited_at":   datetime.now(timezone.utc).isoformat(),
-        "admin_note":  note or None,
-        "auto_marked": False,
+        "status":            status,
+        "edited_by":         current_user.id,
+        "edited_at":         datetime.now(timezone.utc).isoformat(),
+        "admin_note":        note or None,
+        "auto_marked":       False,
+        "attendance_points": _att_points_map.get(status, 0),
     }
 
     # Status-specific adjustments
@@ -5323,7 +5391,6 @@ async def export_reports(
 @api_router.get("/reports/performance-rankings", response_model=List[PerformanceMetric])
 async def get_performance_rankings(
     period: str = Query("monthly", enum=["weekly", "monthly", "all_time"]),
-    # FIX: was check_module_permission("reports","view") → can_view_reports.
     # Called as a secondary/widget call by Attendance page. All roles may see rankings.
     current_user: User = Depends(get_current_user)
 ):
@@ -5332,7 +5399,6 @@ async def get_performance_rankings(
     if (
         cache_key in rankings_cache and
         cache_key in rankings_cache_time and
-        # Use timezone-aware UTC datetime for cache comparison to avoid TypeError
         (datetime.now(timezone.utc) - rankings_cache_time[cache_key]).total_seconds() < 300
     ):
         return rankings_cache[cache_key]
@@ -5361,18 +5427,71 @@ async def get_performance_rankings(
                 "user_id": uid,
                 "date": {"$gte": start_date_str, "$lte": end_date_str}
             },
-            {"_id": 0, "duration_minutes": 1, "is_late": 1}
+            {"_id": 0, "duration_minutes": 1, "is_late": 1, "status": 1, "date": 1}
         ).to_list(1000)
-        days_present = len(att_records)
-        total_minutes = sum(r.get("duration_minutes", 0) or 0 for r in att_records)
+
+        # ── Attendance counts ─────────────────────────────────────────────
+        present_records = [r for r in att_records if r.get("status") in ("present", "half_day", "wfh", "late")]
+        days_present = len(present_records)
+        auto_absent_records = [r for r in att_records if r.get("status") == "auto_absent"]
+        auto_absent_count = len(auto_absent_records)
+        total_minutes = sum(r.get("duration_minutes", 0) or 0 for r in present_records)
         total_hours = round(total_minutes / 60, 1)
         attendance_percent = round(
             (days_present / expected_working_days) * 100, 1
         ) if expected_working_days else 0
-        timely_days = len([r for r in att_records if not r.get("is_late", False)])
+        timely_days = len([r for r in present_records if not r.get("is_late", False)])
         timely_punchin_percent = round(
             (timely_days / days_present) * 100, 1
         ) if days_present else 0
+
+        # ── Consecutive present day streak (for consistency bonus) ────────
+        sorted_dates = sorted(
+            [r["date"] for r in present_records if r.get("date")],
+            reverse=True
+        )
+        max_streak = 0
+        if sorted_dates:
+            streak = 1
+            for _i in range(1, len(sorted_dates)):
+                try:
+                    d1 = date.fromisoformat(sorted_dates[_i - 1])
+                    d2 = date.fromisoformat(sorted_dates[_i])
+                    if (d1 - d2).days == 1:
+                        streak += 1
+                        max_streak = max(max_streak, streak)
+                    else:
+                        streak = 1
+                except Exception:
+                    streak = 1
+            max_streak = max(max_streak, streak if len(sorted_dates) == 1 else max_streak)
+
+        if max_streak >= 20:
+            consistency_bonus = 50.0
+        elif max_streak >= 10:
+            consistency_bonus = 20.0
+        elif max_streak >= 5:
+            consistency_bonus = 10.0
+        else:
+            consistency_bonus = 0.0
+
+        # ── No auto-absent bonus ──────────────────────────────────────────
+        no_auto_absent_bonus = 50.0 if auto_absent_count == 0 else 0.0
+
+        # ── Discipline penalty ────────────────────────────────────────────
+        if auto_absent_count >= 8:
+            discipline_penalty = 100.0
+        elif auto_absent_count >= 5:
+            discipline_penalty = 50.0
+        elif auto_absent_count >= 3:
+            discipline_penalty = 20.0
+        else:
+            discipline_penalty = 0.0
+
+        # ── A. Attendance score (max 250) ─────────────────────────────────
+        attendance_score = round(min(attendance_percent * 2.5, 250.0), 1)
+
+        # ── B. Task completion score (max 300) ────────────────────────────
         tasks_assigned = await db.tasks.count_documents({
             "assigned_to": uid,
             "created_at": {"$gte": start_date}
@@ -5385,15 +5504,30 @@ async def get_performance_rankings(
                 {"updated_at": {"$gte": start_date}}
             ]
         })
-        completed_todos = await db.todos.count_documents({
-            "user_id": uid,
-            "is_completed": True,
-            "completed_at": {"$gte": start_date}
+        task_completion_rate = min(
+            (completed_tasks / tasks_assigned) if tasks_assigned else 0.0, 1.0
+        )
+        task_completion_percent = round(task_completion_rate * 100, 1)
+        task_completion_score = round(task_completion_rate * 300.0, 1)
+
+        # ── C. Task timeliness score (max 200) ────────────────────────────
+        completed_on_time_tasks = await db.tasks.count_documents({
+            "assigned_to": uid,
+            "status": "completed",
+            "completed_on_time": True,
+            "$or": [
+                {"completed_at": {"$gte": start_date}},
+                {"updated_at": {"$gte": start_date}}
+            ]
         })
-        total_completed = completed_tasks + completed_todos
-        task_completion_percent = round(
-            (total_completed / tasks_assigned) * 100, 1
-        ) if tasks_assigned else 0
+        if completed_tasks > 0:
+            task_timeliness_score = round(
+                min(completed_on_time_tasks / completed_tasks, 1.0) * 200.0, 1
+            )
+        else:
+            task_timeliness_score = 0.0
+
+        # ── Todo on-time rate (for backward compat display) ───────────────
         todos = await db.todos.find({
             "user_id": uid,
             "created_at": {"$gte": start_date}
@@ -5402,27 +5536,62 @@ async def get_performance_rankings(
         for t in todos:
             if t.get("is_completed"):
                 due = safe_dt(t.get("due_date"))
-                completed_at = safe_dt(t.get("completed_at"))
-                if due and completed_at and completed_at <= due:
+                completed_at_dt = safe_dt(t.get("completed_at"))
+                if due and completed_at_dt and completed_at_dt <= due:
                     completed_ontime += 1
         todo_ontime_percent = round(
             (completed_ontime / len(todos)) * 100, 1
         ) if todos else 0
-        safe_hours_ratio = min((total_hours / 180), 1) if total_hours else 0
-        score = (
-            float(attendance_percent or 0) * 0.25 +
-            safe_hours_ratio * 100 * 0.20 +
-            float(task_completion_percent or 0) * 0.25 +
-            float(todo_ontime_percent or 0) * 0.15 +
-            float(timely_punchin_percent or 0) * 0.15
+
+        # ── D. Working hours score (max 100) ──────────────────────────────
+        working_hours_score = round(min(total_hours / 180.0, 1.0) * 100.0, 1)
+
+        # ── E. Quality score (max 50, start 50) ───────────────────────────
+        reopened_tasks = await db.tasks.count_documents({
+            "assigned_to": uid,
+            "status": "reopened",
+            "updated_at": {"$gte": start_date}
+        })
+        rejected_tasks = await db.tasks.count_documents({
+            "assigned_to": uid,
+            "status": "rejected",
+            "updated_at": {"$gte": start_date}
+        })
+        quality_score = max(
+            0.0,
+            50.0 - (reopened_tasks * 5.0) - (rejected_tasks * 10.0)
         )
-        overall_score = round(min(score, 100), 1)
-        if overall_score >= 95:
+
+        # ── Final score (0–1000) ──────────────────────────────────────────
+        final_score = max(0.0, min(1000.0, round(
+            attendance_score
+            + no_auto_absent_bonus
+            + consistency_bonus
+            + task_completion_score
+            + task_timeliness_score
+            + working_hours_score
+            + quality_score
+            - discipline_penalty,
+            1
+        )))
+
+        # ── Badge ─────────────────────────────────────────────────────────
+        if final_score >= 950:
+            badge = "Elite Performer"
+        elif final_score >= 850:
             badge = "Star Performer"
-        elif overall_score >= 85:
+        elif final_score >= 750:
             badge = "Top Performer"
-        else:
+        elif final_score >= 650:
             badge = "Good Performer"
+        elif final_score >= 500:
+            badge = "Average Performer"
+        else:
+            badge = "Needs Improvement"
+
+        # ── Legacy overall_score (0–100) for backward compat ──────────────
+        overall_score = round(final_score / 10.0, 1)
+
         rankings.append(
             PerformanceMetric(
                 user_id=str(uid),
@@ -5434,14 +5603,23 @@ async def get_performance_rankings(
                 todo_ontime_percent=float(todo_ontime_percent or 0),
                 timely_punchin_percent=float(timely_punchin_percent or 0),
                 overall_score=float(overall_score or 0),
-                badge=str(badge)
+                badge=str(badge),
+                attendance_score=float(attendance_score),
+                task_completion_score=float(task_completion_score),
+                task_timeliness_score=float(task_timeliness_score),
+                working_hours_score=float(working_hours_score),
+                quality_score=float(quality_score),
+                consistency_bonus=float(consistency_bonus),
+                no_auto_absent_bonus=float(no_auto_absent_bonus),
+                discipline_penalty=float(discipline_penalty),
+                auto_absent_count=int(auto_absent_count),
+                final_score=float(final_score),
             )
         )
-    rankings.sort(key=lambda x: x.overall_score, reverse=True)
+    rankings.sort(key=lambda x: x.final_score, reverse=True)
     for i, r in enumerate(rankings):
         r.rank = i + 1
     rankings_cache[cache_key] = rankings
-    # Store as timezone-aware UTC datetime so comparison never throws TypeError
     rankings_cache_time[cache_key] = datetime.now(timezone.utc)
     return rankings
 
