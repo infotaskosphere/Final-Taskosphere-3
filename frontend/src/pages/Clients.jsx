@@ -5864,11 +5864,16 @@ export default function Clients() {
                                   llp: 'llp', 'limited liability partnership': 'llp',
                                   partnership: 'partnership', 'partnership firm': 'partnership',
                                   huf: 'huf', 'hindu undivided family': 'huf',
-                                  trust: 'trust', 'public limited': 'pvt_ltd', 'public limited company': 'pvt_ltd',
+                                  trust: 'trust', 'public limited': 'public_ltd', 'public limited company': 'public_ltd',
                                 };
-                                const mappedConstitution = parsed.constitution && parsed.constitution !== 'other'
-                                  ? parsed.constitution
-                                  : constitutionMap[(parsed.constitution_raw || '').toLowerCase().trim()] || 'other';
+                                // Prefer the backend's computed client_type (derived from GST constitution
+                                // and/or MCA Company Category / Class of Company), falling back to the
+                                // legacy GST-only mapping if the backend couldn't determine it.
+                                const mappedConstitution = (parsed.client_type && parsed.client_type !== 'other')
+                                  ? parsed.client_type
+                                  : (parsed.constitution && parsed.constitution !== 'other'
+                                      ? parsed.constitution
+                                      : constitutionMap[(parsed.constitution_raw || '').toLowerCase().trim()] || 'other');
                                 const contacts = (parsed.contact_persons || [])
                                   .filter(p => p.name?.trim())
                                   .map(p => ({ name: p.name.trim(), designation: p.designation?.trim() || 'Director', email: p.email || '', phone: p.phone || '', birthday: '', din: p.din || '' }));
@@ -5901,7 +5906,7 @@ export default function Clients() {
                                     ...prev,
                                     company_name:      parsed.company_name || '',
                                     client_type:       mappedConstitution,
-                                    client_type_other: mappedConstitution === 'other' ? (parsed.constitution_raw || '') : '',
+                                    client_type_other: mappedConstitution === 'other' ? (parsed.constitution_raw || parsed.company_category || '') : '',
                                     gstin:             parsed.gstin || '',
                                     pan:               parsed.pan || '',
                                     email:             parsed.email || '',
