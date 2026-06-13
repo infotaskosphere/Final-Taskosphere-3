@@ -1212,7 +1212,7 @@ function EmailComposePanel({ isDark }) {
   const bodyRef = React.useRef(null);
 
   React.useEffect(() => {
-    api.get('/quotations/companies/list').then(r => setCompanies(r.data || [])).catch(() => {});
+    api.get('/companies').then(r => { const d = r.data; setCompanies(Array.isArray(d) ? d : (d?.companies || d?.data || [])); }).catch(() => {});
     api.get('/clients').then(r => { const d = r.data; setClients(Array.isArray(d) ? d : (d?.clients || [])); }).catch(() => {});
     api.get('/email/client-templates').then(r => setTemplates(r.data || [])).catch(() => {});
   }, []);
