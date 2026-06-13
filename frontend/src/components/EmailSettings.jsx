@@ -1196,26 +1196,57 @@ function VariablesBar({ onInsert }) {
 // EmailComposePanel
 // =============================================================================
 function EmailComposePanel({ isDark }) {
-  const [companies, setCompanies]         = React.useState([]);
-  const [clients,   setClients]           = React.useState([]);
-  const [templates, setTemplates]         = React.useState([]);
-  const [selCompany,  setSelCompany]      = React.useState('');
-  const [sendMethod,  setSendMethod]      = React.useState('auto');
-  const [subject,     setSubject]         = React.useState('');
-  const [body,        setBody]            = React.useState('');
-  const [isHtml,      setIsHtml]          = React.useState(false);
-  const [clientSearch,setClientSearch]    = React.useState('');
-  const [selectedIds, setSelectedIds]     = React.useState(new Set());
-  const [showPreview, setShowPreview]     = React.useState(false);
-  const [sending,     setSending]         = React.useState(false);
-  const [progress,    setProgress]        = React.useState(null);
+  const [companies,    setCompanies]   = React.useState([]);
+  const [clients,      setClients]     = React.useState([]);
+  const [clientsLoading, setClientsLoading] = React.useState(true);
+  const [templates,    setTemplates]   = React.useState([]);
+  const [selCompany,   setSelCompany]  = React.useState('');
+  const [sendMethod,   setSendMethod]  = React.useState('auto');
+  const [subject,      setSubject]     = React.useState('');
+  const [body,         setBody]        = React.useState('');
+  const [isHtml,       setIsHtml]      = React.useState(false);
+  const [clientSearch, setClientSearch]= React.useState('');
+  const [serviceFilter,setServiceFilter]= React.useState('all');
+  const [selectedIds,  setSelectedIds] = React.useState(new Set());
+  const [showPreview,  setShowPreview] = React.useState(false);
+  const [sending,      setSending]     = React.useState(false);
+  const [progress,     setProgress]    = React.useState(null);
   const bodyRef = React.useRef(null);
+
+  // Fetch ALL clients by paginating through all pages
+  const fetchAllClients = React.useCallback(async () => {
+    setClientsLoading(true);
+    try {
+      let all = [];
+      let page = 1;
+      const PAGE_SIZE = 200;
+      while (true) {
+        const r = await api.get('/clients', { params: { page, page_size: PAGE_SIZE } });
+        const d = r.data;
+        const batch = Array.isArray(d) ? d : (d?.clients || d?.data || []);
+        all = all.concat(batch);
+        // Stop if we got fewer than PAGE_SIZE (last page) or empty
+        if (batch.length < PAGE_SIZE) break;
+        page++;
+        if (page > 50) break; // safety cap
+      }
+      setClients(all);
+    } catch { setClients([]); }
+    finally { setClientsLoading(false); }
+  }, []);
 
   React.useEffect(() => {
     api.get('/companies').then(r => { const d = r.data; setCompanies(Array.isArray(d) ? d : (d?.companies || d?.data || [])); }).catch(() => {});
-    api.get('/clients').then(r => { const d = r.data; setClients(Array.isArray(d) ? d : (d?.clients || [])); }).catch(() => {});
+    fetchAllClients();
     api.get('/email/client-templates').then(r => setTemplates(r.data || [])).catch(() => {});
-  }, []);
+  }, [fetchAllClients]);
+
+  // Derive unique services list for filter
+  const allServices = React.useMemo(() => {
+    const svcSet = new Set();
+    clients.forEach(c => (c.services || []).forEach(s => { if (s) svcSet.add(s.trim()); }));
+    return Array.from(svcSet).sort();
+  }, [clients]);
 
   const personalize = (text, client) => (text||'')
     .replace(/{name}/gi, client.company_name || 'Valued Client')
@@ -1226,17 +1257,41 @@ function EmailComposePanel({ isDark }) {
     .replace(/{services}/gi, (client.services || []).join(', '));
 
   const filtered = React.useMemo(() => {
-    const base = clients.filter(c => c.email);
-    if (!clientSearch.trim()) return base;
-    const q = clientSearch.toLowerCase();
-    return base.filter(c => (c.company_name||'').toLowerCase().includes(q) || (c.email||'').toLowerCase().includes(q));
-  }, [clients, clientSearch]);
+    let base = clients.filter(c => c.email);
+    // Service filter
+    if (serviceFilter !== 'all') {
+      base = base.filter(c => (c.services || []).some(s => s === serviceFilter));
+    }
+    // Text search
+    if (clientSearch.trim()) {
+      const q = clientSearch.toLowerCase();
+      base = base.filter(c =>
+        (c.company_name||'').toLowerCase().includes(q) ||
+        (c.email||'').toLowerCase().includes(q) ||
+        (c.city||'').toLowerCase().includes(q)
+      );
+    }
+    return base;
+  }, [clients, clientSearch, serviceFilter]);
 
-  const selectedClients = clients.filter(c => selectedIds.has(c.id) && c.email);
+  const allWithEmail = React.useMemo(() => clients.filter(c => c.email), [clients]);
+  const selectedClients = React.useMemo(() => clients.filter(c => selectedIds.has(c.id) && c.email), [clients, selectedIds]);
 
-  const toggleAll = () => selectedIds.size >= filtered.length
-    ? setSelectedIds(new Set())
-    : setSelectedIds(new Set(filtered.map(c => c.id)));
+  // Toggle only filtered results
+  const toggleFiltered = () => {
+    const filteredIds = new Set(filtered.map(c => c.id));
+    const allFilteredSelected = filtered.every(c => selectedIds.has(c.id));
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (allFilteredSelected) { filteredIds.forEach(id => next.delete(id)); }
+      else { filtered.forEach(c => next.add(c.id)); }
+      return next;
+    });
+  };
+  // Select/clear ALL clients across all filters
+  const selectAllClients = () => setSelectedIds(new Set(allWithEmail.map(c => c.id)));
+  const clearAll = () => setSelectedIds(new Set());
+  const allFilteredSelected = filtered.length > 0 && filtered.every(c => selectedIds.has(c.id));
 
   const insertVar = (v) => {
     const el = bodyRef.current;
@@ -1395,25 +1450,90 @@ function EmailComposePanel({ isDark }) {
       {/* Client picker */}
       <SectionCard>
         <CardHeaderRow iconBg="bg-slate-100 dark:bg-slate-700" icon={<Users className="w-4 h-4 text-slate-500" />}
-          title="Select Recipients" subtitle={`${selectedClients.length} selected · ${clients.filter(c=>c.email).length} total with email`}
-          action={<button type="button" onClick={toggleAll} className="text-xs font-semibold text-blue-500">{selectedIds.size>0?'Clear all':'Select all'}</button>} />
+          title="Select Recipients"
+          subtitle={clientsLoading
+            ? 'Loading all clients...'
+            : `${selectedClients.length} selected · ${allWithEmail.length} total with email · ${filtered.length} shown`}
+          action={
+            <div className="flex items-center gap-1.5">
+              <button type="button" onClick={selectAllClients}
+                className="text-[11px] font-bold px-2.5 py-1 rounded-lg transition-colors"
+                style={{ background:'#dbeafe', color:'#1d4ed8' }}>
+                All {allWithEmail.length}
+              </button>
+              <button type="button" onClick={toggleFiltered}
+                className="text-[11px] font-bold px-2.5 py-1 rounded-lg transition-colors"
+                style={{ background: allFilteredSelected?'#fee2e2':'#dcfce7', color: allFilteredSelected?'#dc2626':'#16a34a' }}>
+                {allFilteredSelected ? 'Deselect shown' : `Select ${filtered.length}`}
+              </button>
+              <button type="button" onClick={clearAll}
+                className="text-[11px] font-bold px-2.5 py-1 rounded-lg"
+                style={{ background:'#f1f5f9', color:'#64748b' }}>
+                Clear
+              </button>
+            </div>
+          } />
         <div className="p-3 space-y-2">
-          <input value={clientSearch} onChange={e=>setClientSearch(e.target.value)} placeholder="Search by name or email..."
-            className="w-full border rounded-xl px-3 py-2 text-sm bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400"
-            style={{ borderColor: isDark?'#334155':'#e2e8f0' }} />
-          <div className="max-h-52 overflow-y-auto space-y-0.5">
-            {filtered.length===0 && <p className="text-center text-sm text-slate-400 py-6">No clients with email found</p>}
+          {/* Search + service filter row */}
+          <div className="flex gap-2">
+            <input value={clientSearch} onChange={e=>setClientSearch(e.target.value)}
+              placeholder="Search by name, email or city..."
+              className="flex-1 border rounded-xl px-3 py-2 text-sm bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              style={{ borderColor: isDark?'#334155':'#e2e8f0' }} />
+            <select value={serviceFilter} onChange={e => { setServiceFilter(e.target.value); }}
+              className="border rounded-xl px-3 py-2 text-sm bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-400 shrink-0"
+              style={{ borderColor: isDark?'#334155':'#e2e8f0', minWidth: 130 }}>
+              <option value="all">All Services</option>
+              {allServices.map(s => <option key={s} value={s}>{s.length > 28 ? s.slice(0,28)+'…' : s}</option>)}
+            </select>
+          </div>
+          {/* Count badges */}
+          <div className="flex items-center gap-2 text-[11px]">
+            <span className="px-2 py-0.5 rounded-full font-bold" style={{ background:'#dbeafe', color:'#1d4ed8' }}>
+              {selectedClients.length} selected
+            </span>
+            {serviceFilter !== 'all' && (
+              <span className="px-2 py-0.5 rounded-full font-bold" style={{ background:'#f3e8ff', color:'#7c3aed' }}>
+                Filter: {serviceFilter}
+              </span>
+            )}
+            {clientsLoading && (
+              <span className="flex items-center gap-1 text-slate-400">
+                <Loader2 className="w-3 h-3 animate-spin" /> Loading...
+              </span>
+            )}
+          </div>
+          {/* List */}
+          <div className="max-h-72 overflow-y-auto space-y-0.5 border rounded-xl" style={{ borderColor: isDark?'#334155':'#f1f5f9' }}>
+            {filtered.length===0 && !clientsLoading && (
+              <p className="text-center text-sm text-slate-400 py-8">No clients match</p>
+            )}
             {filtered.map(client => (
               <label key={client.id}
                 onClick={() => setSelectedIds(p => { const n=new Set(p); n.has(client.id)?n.delete(client.id):n.add(client.id); return n; })}
-                className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                className="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors border-b last:border-b-0"
+                style={{ borderColor: isDark?'#1e293b':'#f8fafc' }}>
                 <div className="w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-all"
                   style={{ borderColor: selectedIds.has(client.id)?'#2563eb':'#cbd5e1', background: selectedIds.has(client.id)?'#2563eb':'transparent' }}>
                   {selectedIds.has(client.id) && <Check className="w-2.5 h-2.5 text-white" />}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">{client.company_name||'—'}</p>
+                  <p className="text-xs font-semibold truncate" style={{ color: isDark?'#e2e8f0':'#1e293b' }}>
+                    {client.company_name||'—'}
+                  </p>
                   <p className="text-[10px] text-slate-400 truncate">{client.email}</p>
+                </div>
+                <div className="flex flex-wrap gap-1 shrink-0 max-w-[120px] justify-end">
+                  {(client.services||[]).slice(0,2).map((s,i) => (
+                    <span key={i} className="text-[9px] px-1.5 py-0.5 rounded font-medium truncate max-w-[110px]"
+                      style={{ background:'#f0fdf4', color:'#166534', border:'1px solid #bbf7d0' }}>
+                      {s.slice(0,18)}
+                    </span>
+                  ))}
+                  {client.city && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded"
+                      style={{ background:'#f8fafc', color:'#94a3b8' }}>{client.city}</span>
+                  )}
                 </div>
               </label>
             ))}
