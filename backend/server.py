@@ -6328,6 +6328,41 @@ def _map_mca_constitution(raw: str) -> str:
     return "other"
 
 
+def _clean_obfuscated_email(raw: str) -> str:
+    """Decode MCA-style obfuscated emails, e.g.
+    'indo[dot]jigar[at]gmail[dot]com' -> 'indo.jigar@gmail.com'."""
+    v = (raw or "").strip()
+    if not v:
+        return ""
+    v = re.sub(r'\[\s*at\s*\]', '@', v, flags=re.IGNORECASE)
+    v = re.sub(r'\[\s*dot\s*\]', '.', v, flags=re.IGNORECASE)
+    v = re.sub(r'\(\s*at\s*\)', '@', v, flags=re.IGNORECASE)
+    v = re.sub(r'\(\s*dot\s*\)', '.', v, flags=re.IGNORECASE)
+    v = re.sub(r'\s+at\s+', '@', v, flags=re.IGNORECASE)
+    v = re.sub(r'\s+dot\s+', '.', v, flags=re.IGNORECASE)
+    v = v.replace(" ", "")
+    m = re.search(r'[\w.+\-]+@[\w.\-]+\.\w+', v)
+    return m.group(0).lower() if m else ""
+
+
+def _detect_entity_type_from_name(name: str) -> str:
+    """Best-effort client_type guess from a company/LLP name suffix."""
+    n = (name or "").lower()
+    if any(x in n for x in ["private limited", "pvt ltd", "pvt. ltd", "pvt.ltd", "pvt limited"]):
+        return "pvt_ltd"
+    if "llp" in n or "limited liability" in n:
+        return "llp"
+    if any(x in n for x in [" limited", " ltd"]):
+        return "public_ltd"
+    if "partnership" in n:
+        return "partnership"
+    if "huf" in n or "hindu undivided" in n:
+        return "huf"
+    if "trust" in n:
+        return "trust"
+    return ""
+
+
 # ── Browser-like headers for web scraping ────────────────────────────────────
 _SCRAPE_HEADERS = {
     "User-Agent": (
@@ -6938,6 +6973,24 @@ def _parse_mca_pdf(pdf_bytes: bytes) -> dict:
         if m:
             company_name = m.group(1).strip()
 
+    # ── Company Category / Class (used to derive client_type) ─────────────────
+    company_category = (
+        _line_val("Company Category") or
+        _line_val("Class of Company") or
+        _line_val("Company SubCategory") or
+        _line_val("Type of Company") or
+        ""
+    )
+    client_type = _map_mca_constitution(company_category)
+    if client_type == "other":
+        client_type = _map_mca_constitution(company_category + " " + company_name)
+    if client_type == "other" and llpin:
+        client_type = "llp"
+    if client_type == "other":
+        client_type = _detect_entity_type_from_name(company_name)
+    if not client_type:
+        client_type = "other"
+
     # ── Date of Incorporation ─────────────────────────────────────────────────
     doi_raw = _line_val("Date of Incorporation")
     date_of_incorporation = ""
@@ -6949,11 +7002,10 @@ def _parse_mca_pdf(pdf_bytes: bytes) -> dict:
 
     # ── Email (MCA may obfuscate with [at] / [dot]) ───────────────────────────
     email_raw = _line_val("Email Id") or _line_val("Email")
-    email = re.sub(r'\[at\]', '@', email_raw, flags=re.IGNORECASE)
-    email = re.sub(r'\[dot\]', '.', email, flags=re.IGNORECASE).strip()
-    if not re.match(r'[\w.+\-]+@[\w.\-]+\.\w+', email):
+    email = _clean_obfuscated_email(email_raw)
+    if not email:
         em = re.search(r'[\w.+\-]+@[\w.\-]+\.\w+', full_text)
-        email = em.group(0) if em else ""
+        email = em.group(0).lower() if em else ""
 
     # ── Registered Address ───────────────────────────────────────────────────
     # MCA website format: address text BEFORE the label line
@@ -7056,6 +7108,9 @@ def _parse_mca_pdf(pdf_bytes: bytes) -> dict:
     return {
         "company_name":          company_name,
         "cin":                   cin or llpin,
+        "llpin":                 llpin,
+        "client_type":           client_type,
+        "company_category":      company_category,
         "email":                 email,
         "phone":                 "",
         "date_of_incorporation": date_of_incorporation,
@@ -7204,11 +7259,33 @@ async def parse_multi_documents(
                     except Exception:
                         mca_doi = ""
 
+                mca_company_name = (
+                    company_info.get("Company Name") or company_info.get("LLP Name") or ""
+                ).strip()
+
+                mca_category = (
+                    company_info.get("Company Category") or
+                    company_info.get("Class of Company") or
+                    company_info.get("Company SubCategory") or
+                    company_info.get("Type of Company") or ""
+                ).strip()
+                mca_client_type = _map_mca_constitution(mca_category)
+                if mca_client_type == "other":
+                    mca_client_type = _map_mca_constitution(mca_category + " " + mca_company_name)
+                if mca_client_type == "other" and (company_info.get("LLPIN") or "").strip() not in ("", "-", "nan"):
+                    mca_client_type = "llp"
+                if mca_client_type == "other":
+                    mca_client_type = _detect_entity_type_from_name(mca_company_name) or "other"
+
+                mca_email = _clean_obfuscated_email(
+                    company_info.get("Email Id") or company_info.get("Email") or ""
+                )
+
                 mca_data = {
-                    "company_name": (
-                        company_info.get("Company Name") or company_info.get("LLP Name") or ""
-                    ).strip(),
-                    "email":                 company_info.get("Email Id") or company_info.get("Email") or "",
+                    "company_name":          mca_company_name,
+                    "client_type":           mca_client_type,
+                    "company_category":      mca_category,
+                    "email":                 mca_email,
                     "phone":                 company_info.get("Phone") or company_info.get("Mobile") or "",
                     "date_of_incorporation": mca_doi,
                     "address":               raw_addr,
@@ -7271,7 +7348,7 @@ async def parse_multi_documents(
     if not all_contacts:
         all_contacts = [{"name": "", "designation": "", "email": "", "phone": "", "birthday": "", "din": ""}]
 
-    email     = _first(udyam_data.get("email"), mca_data.get("email"))
+    email     = _clean_obfuscated_email(_first(udyam_data.get("email"), mca_data.get("email")))
     phone_raw = _first(udyam_data.get("mobile"), mca_data.get("phone"))
     phone_digits = re.sub(r"\D", "", phone_raw or "")
     if len(phone_digits) == 12 and phone_digits.startswith("91"):
@@ -7282,6 +7359,16 @@ async def parse_multi_documents(
         udyam_data.get("date_of_incorporation"),
         mca_data.get("date_of_incorporation"),
     )
+
+    # ── client_type: GST constitution > MCA category (Pvt/LLP/Public/etc) > name ──
+    mca_client_type = mca_data.get("client_type") or ""
+    if constitution and constitution != "other":
+        client_type = constitution
+    elif mca_client_type and mca_client_type != "other":
+        client_type = mca_client_type
+    else:
+        client_type = _detect_entity_type_from_name(merged_name) or "other"
+    company_category = mca_data.get("company_category") or ""
 
     notes_parts = []
     if cin:          notes_parts.append(f"CIN/LLPIN: {cin}")
@@ -7295,6 +7382,8 @@ async def parse_multi_documents(
         "company_name":          merged_name,
         "constitution":          constitution,
         "constitution_raw":      const_raw,
+        "client_type":           client_type,
+        "company_category":      company_category,
         "gstin":                 gstin,
         "pan":                   pan,
         "cin":                   cin,
