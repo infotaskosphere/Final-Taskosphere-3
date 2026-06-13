@@ -9672,6 +9672,213 @@ async def send_compliance_client_email(
     logger.info(f"Compliance email sent to {req.client_email} by {current_user.email}")
     return {"message": f"Compliance email sent to {req.client_email}"}
 
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CLIENT EMAIL TEMPLATES  —  Full CRUD
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ClientEmailTemplate(BaseModel):
+    name:     str
+    subject:  str
+    body:     str
+    is_html:  bool = False
+    category: str  = "general"   # general | follow_up | compliance | greeting | custom
+
+@api_router.get("/email/client-templates")
+async def list_client_email_templates(current_user: User = Depends(get_current_user)):
+    docs = await db.client_email_templates.find({}, {"_id": 0}).to_list(200)
+    return sorted(docs, key=lambda d: d.get("updated_at",""), reverse=True)
+
+@api_router.post("/email/client-templates")
+async def create_client_email_template(
+    body: ClientEmailTemplate,
+    current_user: User = Depends(get_current_user),
+):
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": body.name, "subject": body.subject,
+        "body": body.body, "is_html": body.is_html,
+        "category": body.category,
+        "created_by": current_user.id,
+        "created_at": now, "updated_at": now,
+    }
+    await db.client_email_templates.insert_one(doc)
+    return doc
+
+@api_router.put("/email/client-templates/{template_id}")
+async def update_client_email_template(
+    template_id: str,
+    body: ClientEmailTemplate,
+    current_user: User = Depends(get_current_user),
+):
+    now = datetime.now(timezone.utc).isoformat()
+    r = await db.client_email_templates.update_one(
+        {"id": template_id},
+        {"$set": {"name": body.name, "subject": body.subject, "body": body.body,
+                  "is_html": body.is_html, "category": body.category,
+                  "updated_at": now, "updated_by": current_user.id}},
+    )
+    if r.matched_count == 0: raise HTTPException(404, "Template not found")
+    return {"message": "Template updated"}
+
+@api_router.delete("/email/client-templates/{template_id}")
+async def delete_client_email_template(
+    template_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    r = await db.client_email_templates.delete_one({"id": template_id})
+    if r.deleted_count == 0: raise HTTPException(404, "Template not found")
+    return {"message": "Template deleted"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BULK CLIENT EMAIL SEND  —  Brevo API  OR  Company / Gmail SMTP
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class BulkEmailRecipient(BaseModel):
+    email:     str
+    name:      str = ""
+    variables: dict = {}
+
+class BulkClientEmailRequest(BaseModel):
+    recipients:    List[BulkEmailRecipient]
+    subject:       str
+    body_template: str          # plain-text or HTML with {variable} placeholders
+    is_html:       bool = False
+    company_id:    Optional[str] = None   # if set, try company SMTP first
+    send_method:   str = "auto"           # "auto" | "brevo" | "smtp"
+    from_name:     Optional[str] = None
+
+
+def _render_body(template: str, variables: dict) -> str:
+    """Substitute {key} placeholders; unknown keys are left as-is."""
+    result = template
+    for k, v in variables.items():
+        result = result.replace("{" + k + "}", str(v or ""))
+    return result
+
+
+async def _send_one_smtp(
+    smtp_host, smtp_port, smtp_user, smtp_pass, from_name,
+    to_email, subject, body_plain, body_html=None
+):
+    """Synchronous SMTP send wrapped for asyncio."""
+    import smtplib, ssl
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    if body_html:
+        msg = MIMEMultipart("alternative")
+        msg.attach(MIMEText(body_plain, "plain", "utf-8"))
+        msg.attach(MIMEText(body_html, "html", "utf-8"))
+    else:
+        msg = MIMEText(body_plain, "plain", "utf-8")
+
+    msg["Subject"] = subject
+    msg["From"] = f"{from_name} <{smtp_user}>" if from_name else smtp_user
+    msg["To"] = to_email
+
+    ctx = ssl.create_default_context()
+    with smtplib.SMTP(smtp_host, int(smtp_port), timeout=20) as server:
+        server.ehlo()
+        server.starttls(context=ctx)
+        server.login(smtp_user, smtp_pass)
+        server.sendmail(smtp_user, [to_email], msg.as_string())
+
+
+@api_router.post("/email/send-bulk-clients")
+async def send_bulk_client_emails(
+    req: BulkClientEmailRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Send personalised emails to multiple clients.
+    Routing priority:
+      auto / smtp  → company SMTP (if company_id provided and SMTP configured) →
+                     falls back to Brevo if SMTP missing
+      brevo        → always Brevo
+    """
+    if not req.recipients:
+        raise HTTPException(400, "No recipients provided")
+
+    # ── Resolve company SMTP settings if requested ─────────────────────────
+    company_smtp = None
+    company_name = req.from_name or os.getenv("SENDER_NAME", "TaskoSphere")
+
+    if req.company_id and req.send_method in ("auto", "smtp"):
+        comp = await db.companies.find_one({"id": req.company_id}, {"_id": 0})
+        if comp:
+            sh = (comp.get("smtp_host") or "").strip()
+            su = (comp.get("smtp_user") or "").strip()
+            sp = (comp.get("smtp_password") or "").strip()
+            if sh and su and sp:
+                company_smtp = {
+                    "host": sh,
+                    "port": int(comp.get("smtp_port", 587)),
+                    "user": su,
+                    "password": sp,
+                    "from_name": comp.get("smtp_from_name") or comp.get("name") or company_name,
+                }
+                company_name = company_smtp["from_name"]
+
+    use_brevo = (req.send_method == "brevo") or (company_smtp is None)
+
+    if use_brevo:
+        brevo_key  = os.getenv("BREVO_API_KEY")
+        sender_email = os.getenv("SENDER_EMAIL")
+        if not brevo_key or not sender_email:
+            raise HTTPException(500, "Brevo not configured (BREVO_API_KEY + SENDER_EMAIL required). "
+                                     "Or select a company with SMTP settings.")
+
+    # ── Send loop ──────────────────────────────────────────────────────────
+    sent_count  = 0
+    fail_count  = 0
+    failed_list = []
+    import asyncio
+
+    for rec in req.recipients:
+        if not rec.email or "@" not in rec.email:
+            fail_count += 1
+            continue
+        vars_ = {"name": rec.name, "email": rec.email, **rec.variables}
+        subject_rendered = _render_body(req.subject, vars_)
+        body_rendered    = _render_body(req.body_template, vars_)
+        body_html_r = body_rendered if req.is_html else None
+        body_plain_r = body_rendered if not req.is_html else \
+                       body_rendered.replace("<br>","\\n").replace("<br/>","\\n").replace("<p>","\\n").replace("</p>","")
+
+        try:
+            if use_brevo:
+                await _brevo_send(rec.email, subject_rendered, body_plain_r, body_html_r)
+            else:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    None,
+                    lambda: _send_one_smtp(
+                        company_smtp["host"], company_smtp["port"],
+                        company_smtp["user"],  company_smtp["password"],
+                        company_smtp["from_name"],
+                        rec.email, subject_rendered, body_plain_r, body_html_r,
+                    )
+                )
+            sent_count += 1
+        except Exception as e:
+            fail_count += 1
+            failed_list.append({"email": rec.email, "error": str(e)})
+            logger.error(f"Bulk email to {rec.email} failed: {e}")
+
+        await asyncio.sleep(0.05)   # gentle throttle
+
+    logger.info(f"Bulk client email by {current_user.email}: {sent_count} sent, {fail_count} failed")
+    return {
+        "message": f"Sent {sent_count} email(s). {fail_count} failed.",
+        "sent": sent_count,
+        "failed": fail_count,
+        "failed_list": failed_list[:20],
+    }
+
 # AUDIT LOGS ROUTE
 @api_router.get("/audit-logs")
 async def get_audit_logs(
