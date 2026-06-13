@@ -6342,153 +6342,173 @@ _SCRAPE_HEADERS = {
     "Upgrade-Insecure-Requests": "1",
 }
 
+from urllib.parse import quote_plus
+from bs4 import BeautifulSoup
+
 _CIN_RE   = re.compile(r'^[UL]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6}$')
 _LLPIN_RE = re.compile(r'^[A-Z]{2,3}-\d{4,}$')
 
 
+def _slugify_company_name(name: str) -> str:
+    """Convert a company name to the lowercase-hyphen slug QuickCompany.in
+    uses for its /company/<slug> detail pages, e.g.
+    'Maple Leaf Ventures LLP' -> 'maple-leaf-ventures-llp'."""
+    s = re.sub(r"[^a-zA-Z0-9]+", "-", (name or "").strip().lower())
+    return s.strip("-")
+
+
+# ── ZaubaCorp "meta description" sentence parser ─────────────────────────────
+# ZaubaCorp renders a fully static, SEO-friendly paragraph on every company /
+# LLP page (and in the <meta name="description"> tag) of the form:
+#
+#   "<NAME> (CIN: <CIN>) is a <category> company incorporated on <date>. ...
+#    Directors of <NAME> are A and B. ... Its Email address is x@y.com and
+#    its registered address is <ADDRESS>, <STATE>, India - <PIN> Current
+#    status of <NAME> is - Active."
+#
+#   "<NAME> (LLPIN: <LLPIN>) is a Limited Liability Partnership firm
+#    incorporated on <date>. ... Designated Partners of <NAME> are A, and B.
+#    ... Its Email address is x@y.com and its registered address is
+#    <ADDRESS>, <STATE>, India - <PIN> Current status of <NAME> is - Active."
+#
+# This text is present in the static HTML (no JS needed), which makes it a
+# far more reliable extraction target than label/value grids that are
+# populated client-side.
+_ZB_CIN          = re.compile(r'\(CIN:\s*([A-Z0-9]{21})\)|Corporate Identification Number\s*\(CIN\)\s*is\s*([A-Z0-9]{21})', re.I)
+_ZB_LLPIN        = re.compile(r'\(LLPIN:\s*([A-Z]{2,3}-\d{3,})\)|LLP Identification Number is\s*\(LLPIN\)\s*([A-Z]{2,3}-\d{3,})', re.I)
+_ZB_INCORPORATED = re.compile(r'incorporated on\s+(\d{1,2}\s+[A-Za-z]+\s+\d{4})', re.I)
+_ZB_CATEGORY     = re.compile(r'is a\s+(.+?)\s+incorporated on', re.I)
+_ZB_ROC          = re.compile(r'Registrar of Companies,\s*([A-Za-z .]+?)\.', re.I)
+_ZB_DIRECTORS    = re.compile(r'Directors? of [^.]*?\bare\s+(.+?)\.', re.I)
+_ZB_PARTNERS     = re.compile(r'Designated Partners of [^.]*?\bare\s+(.+?)\.', re.I)
+_ZB_EMAIL        = re.compile(r'Email address is\s+([\w.+\-]+@[\w.\-]+\.\w+)', re.I)
+_ZB_ADDRESS_PIN  = re.compile(r'registered address is\s+(.+?)\s*-\s*(\d{6})', re.I)
+_ZB_STATUS       = re.compile(r'Current status of [^.]*?\bis\s*-\s*([A-Za-z][A-Za-z /]*?)\.?\s*$', re.I)
+_ZB_AUTH_CAP     = re.compile(r'authorized?\s+share capital is Rs\.?\s*([\d,]+)', re.I)
+_ZB_PAIDUP_CAP   = re.compile(r'paid[- ]?up capital is Rs\.?\s*([\d,]+)', re.I)
+
+
+def _parse_zaubacorp_summary(text: str, company_name: str = "") -> dict:
+    """Parse ZaubaCorp's descriptive summary paragraph into structured fields."""
+    from datetime import date as _date
+    from dateutil import parser as date_parser
+
+    text = re.sub(r'\s+', ' ', text or "").strip()
+    out: dict = {}
+
+    m = _ZB_CIN.search(text)
+    if m:
+        out["cin"] = (m.group(1) or m.group(2) or "").upper()
+
+    m = _ZB_LLPIN.search(text)
+    if m:
+        out["llpin"] = (m.group(1) or m.group(2) or "").upper()
+
+    m = _ZB_INCORPORATED.search(text)
+    if m:
+        try:
+            out["date_of_incorporation"] = date_parser.parse(m.group(1), dayfirst=True).strftime("%Y-%m-%d")
+        except Exception:
+            out["date_of_incorporation"] = m.group(1)
+
+    category = ""
+    m = _ZB_CATEGORY.search(text)
+    if m:
+        category = m.group(1).strip()
+    elif "limited liability partnership" in text.lower():
+        category = "Limited Liability Partnership"
+
+    client_type = _map_mca_constitution(category or company_name)
+    if client_type == "other" and out.get("llpin"):
+        client_type = "llp"
+    out["client_type"] = client_type
+    out["company_category"] = category
+
+    m = _ZB_ROC.search(text)
+    if m:
+        out["roc"] = m.group(1).strip()
+
+    directors_raw = ""
+    m = _ZB_PARTNERS.search(text) or _ZB_DIRECTORS.search(text)
+    if m:
+        directors_raw = m.group(1)
+    directors = []
+    if directors_raw:
+        # "A, B and C" / "A and B" / "A, and B"
+        directors_raw = re.sub(r'\s+and\s+', ', ', directors_raw, flags=re.I)
+        for part in directors_raw.split(','):
+            nm = part.strip(" .")
+            if nm and len(nm) > 1:
+                directors.append({"name": nm.title(), "designation": "Director" if "llpin" not in out else "Designated Partner", "din": ""})
+    out["directors"] = directors
+
+    m = _ZB_EMAIL.search(text)
+    if m:
+        out["email"] = m.group(1)
+
+    address = city = state = pin = ""
+    m = _ZB_ADDRESS_PIN.search(text)
+    if m:
+        address_full = m.group(1).strip()
+        pin = m.group(2)
+        parts = [p.strip() for p in address_full.split(',') if p.strip()]
+        if parts and parts[-1].strip().lower() in ("india", "in"):
+            parts.pop()
+        if parts:
+            state = parts.pop().strip()
+        if parts:
+            words = parts[-1].split()
+            if words:
+                city = words[-1].strip(" .,")
+        address = address_full
+
+    out["address"] = address
+    out["city"] = city
+    out["state"] = state
+    out["gst_pin"] = pin
+
+    m = _ZB_STATUS.search(text)
+    if m:
+        out["company_status"] = m.group(1).strip().rstrip('.')
+
+    m = _ZB_AUTH_CAP.search(text)
+    if m:
+        out["authorized_capital"] = m.group(1)
+
+    m = _ZB_PAIDUP_CAP.search(text)
+    if m:
+        out["paid_up_capital"] = m.group(1)
+
+    out["mca_fetch_date"] = _date.today().isoformat()
+    out["source"] = "zaubacorp.com"
+    return out
+
+
 async def _scrape_quickcompany(query: str) -> dict:
-    """Scrape company details from quickcompany.in. Returns {} on failure."""
-    from bs4 import BeautifulSoup
+    """Scrape company details from quickcompany.in. Returns {} on failure.
+
+    QuickCompany serves company-detail pages at the static, predictable URL
+    /company/<slug-of-company-name> (e.g. /company/maple-leaf-ventures-llp).
+    The company name, director names and director profile links are present
+    in the server-rendered HTML; most other fields (CIN, address, financials)
+    are populated client-side and are therefore best-effort only here.
+    """
     from datetime import date as _date
 
     q = query.strip()
-    is_cin = bool(_CIN_RE.match(q.upper()))
+    is_cin   = bool(_CIN_RE.match(q.upper()))
+    is_llpin = bool(_LLPIN_RE.match(q.upper()))
 
-    urls_to_try = []
-    if is_cin:
-        urls_to_try.append(f"https://www.quickcompany.in/company/{q.upper()}")
+    urls_to_try: list[str] = []
+    if not is_cin and not is_llpin:
+        urls_to_try.append(f"https://www.quickcompany.in/company/{_slugify_company_name(q)}")
+    # Generic search fallback (best-effort; QuickCompany's /company search is
+    # primarily client-rendered so this mostly helps when it does return a
+    # server-rendered list of matches)
     urls_to_try.append(f"https://www.quickcompany.in/company?q={q}")
 
     async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, headers=_SCRAPE_HEADERS) as client:
         for url in urls_to_try:
-            try:
-                resp = await client.get(url)
-                if resp.status_code not in (200,):
-                    continue
-                soup = BeautifulSoup(resp.text, "html.parser")
-                page_text = soup.get_text(" ", strip=True)
-
-                cin_m     = re.search(r'\b([UL]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6})\b', page_text)
-                found_cin = cin_m.group(1) if cin_m else ""
-
-                company_name = ""
-                h1 = soup.find("h1")
-                if h1:
-                    company_name = h1.get_text(strip=True)
-                if not company_name:
-                    t = soup.find("title")
-                    if t:
-                        company_name = t.get_text(strip=True).split("|")[0].strip()
-
-                # Search results page: follow first company link
-                if "company?q" in url or not found_cin:
-                    links = soup.find_all("a", href=re.compile(r"/company/[UL]\d{5}"))
-                    if not links:
-                        links = soup.find_all("a", href=re.compile(r"/company/"))
-                    if links:
-                        href = links[0].get("href", "")
-                        cin_in_url = re.search(r"/company/([UL]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6})", href)
-                        if cin_in_url:
-                            found_cin = cin_in_url.group(1)
-                        parent = links[0].find_parent(["div", "li", "article"])
-                        if parent:
-                            ne = parent.find(["h2", "h3", "h4", "strong", "b"])
-                            if ne:
-                                company_name = ne.get_text(strip=True)
-                        if not company_name:
-                            company_name = links[0].get_text(strip=True)
-                        # Fetch detail page
-                        if found_cin:
-                            try:
-                                dr = await client.get(
-                                    f"https://www.quickcompany.in/company/{found_cin}",
-                                    headers=_SCRAPE_HEADERS
-                                )
-                                if dr.status_code == 200:
-                                    ds = BeautifulSoup(dr.text, "html.parser")
-                                    page_text = ds.get_text(" ", strip=True)
-                                    dh1 = ds.find("h1")
-                                    if dh1:
-                                        company_name = dh1.get_text(strip=True)
-                            except Exception:
-                                pass
-
-                if not found_cin and not company_name:
-                    continue
-
-                def _qcf(label, text):
-                    m = re.search(label + r"[\s:]+([^\n|]+)", text, re.IGNORECASE)
-                    return m.group(1).strip() if m else ""
-
-                raw_class   = _qcf(r"Company Class", page_text) or _qcf(r"Class of Company", page_text)
-                raw_cat     = _qcf(r"Company Category", page_text) or _qcf(r"Category", page_text)
-                client_type = _map_mca_constitution(raw_class or raw_cat)
-                if client_type == "other" and company_name:
-                    client_type = _map_mca_constitution(company_name)
-
-                address = _qcf(r"Registered Address", page_text) or _qcf(r"Registered Office", page_text)
-                city = state = pin = ""
-                if address:
-                    pin_m2 = re.search(r"\b(\d{6})\b", address)
-                    pin = pin_m2.group(1) if pin_m2 else ""
-                    parts = [p.strip() for p in address.split(",") if p.strip()]
-                    if len(parts) >= 2:
-                        state = parts[-1].strip().rstrip(".")
-                        city  = parts[-2].strip()
-
-                doi_raw = _qcf(r"Date of Incorporation", page_text)
-                doi_iso = ""
-                if doi_raw:
-                    try:
-                        from dateutil import parser as dp
-                        doi_iso = dp.parse(doi_raw.strip(), dayfirst=True).strftime("%Y-%m-%d")
-                    except Exception:
-                        doi_iso = doi_raw.strip()
-
-                email_m = re.search(r"[\w.+\-]+@[\w.\-]+\.\w+", page_text)
-                email   = email_m.group(0) if email_m else ""
-                status  = _qcf(r"Company Status", page_text)
-
-                return {
-                    "company_name":          company_name,
-                    "cin":                   found_cin,
-                    "llpin":                 None,
-                    "client_type":           client_type,
-                    "date_of_incorporation": doi_iso,
-                    "email":                 email,
-                    "address":               address,
-                    "city":                  city,
-                    "state":                 state,
-                    "gst_pin":               pin,
-                    "pan":                   "",
-                    "directors":             [],
-                    "company_status":        status,
-                    "authorized_capital":    _qcf(r"Authorised Capital", page_text),
-                    "paid_up_capital":       _qcf(r"Paid Up Capital", page_text),
-                    "mca_fetch_date":        _date.today().isoformat(),
-                    "source":                "quickcompany.in",
-                }
-            except Exception as exc:
-                logger.debug(f"quickcompany scrape error for {url}: {exc}")
-                continue
-    return {}
-
-
-async def _scrape_zaubacorp(query: str) -> dict:
-    """Scrape company details from zaubacorp.com. Returns {} on failure."""
-    from bs4 import BeautifulSoup
-    from datetime import date as _date
-
-    q = query.strip()
-    is_cin = bool(_CIN_RE.match(q.upper()))
-
-    search_urls = [f"https://www.zaubacorp.com/companies?p={q}"]
-    if is_cin:
-        search_urls.insert(0, f"https://www.zaubacorp.com/company-search?q={q.upper()}")
-
-    hdrs = {**_SCRAPE_HEADERS, "Referer": "https://www.zaubacorp.com/"}
-    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, headers=hdrs) as client:
-        for url in search_urls:
             try:
                 resp = await client.get(url)
                 if resp.status_code != 200:
@@ -6496,106 +6516,219 @@ async def _scrape_zaubacorp(query: str) -> dict:
                 soup = BeautifulSoup(resp.text, "html.parser")
                 page_text = soup.get_text(" ", strip=True)
 
-                cin_m     = re.search(r'\b([UL]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6})\b', page_text)
-                found_cin = cin_m.group(1) if cin_m else ""
                 company_name = ""
+                h1 = soup.find("h1")
+                if h1:
+                    company_name = h1.get_text(strip=True)
 
-                # Zaubacorp results: table with CIN + company name columns
-                for row in soup.find_all("tr"):
-                    cells = row.find_all(["td", "th"])
-                    if len(cells) >= 2:
-                        c0 = cells[0].get_text(strip=True)
-                        c1 = cells[1].get_text(strip=True)
-                        if re.match(r"[UL]\d{5}", c0):
-                            found_cin    = c0
-                            company_name = c1
-                            break
-                        if re.match(r"[UL]\d{5}", c1):
-                            found_cin    = c1
-                            company_name = c0
-                            break
+                detail_soup = soup
+                detail_url  = url
+
+                # If this looks like a search results page (no clean h1, or
+                # h1 doesn't resemble the query), try to follow the first
+                # /company/<slug> link to a real detail page.
+                if not company_name or "search" in page_text.lower()[:200]:
+                    link = soup.find("a", href=re.compile(r"^/company/[a-z0-9\-]+$"))
+                    if link:
+                        href = link.get("href", "")
+                        try:
+                            dr = await client.get(f"https://www.quickcompany.in{href}")
+                            if dr.status_code == 200:
+                                detail_soup = BeautifulSoup(dr.text, "html.parser")
+                                detail_url  = f"https://www.quickcompany.in{href}"
+                                dh1 = detail_soup.find("h1")
+                                if dh1:
+                                    company_name = dh1.get_text(strip=True)
+                                page_text = detail_soup.get_text(" ", strip=True)
+                        except Exception:
+                            pass
 
                 if not company_name:
-                    for lk in soup.find_all("a", href=re.compile(r"/company/")):
-                        href = lk.get("href", "")
-                        cm = re.search(r"([UL]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6})", href)
-                        if cm:
-                            found_cin    = cm.group(1)
-                            company_name = lk.get_text(strip=True)
-                            break
-
-                if found_cin:
-                    try:
-                        slug = re.sub(r"[^A-Z0-9]", "-", (company_name or found_cin).upper())[:60]
-                        dr   = await client.get(f"https://www.zaubacorp.com/company/{slug}/{found_cin}")
-                        if dr.status_code == 200:
-                            ds = BeautifulSoup(dr.text, "html.parser")
-                            page_text    = ds.get_text(" ", strip=True)
-                            dh1 = ds.find("h1")
-                            if dh1:
-                                company_name = dh1.get_text(strip=True).split("(")[0].strip()
-                    except Exception:
-                        pass
-
-                if not found_cin and not company_name:
                     continue
 
-                def _zcf(label, text):
-                    m = re.search(label + r"[\s:]+([^\n|<]+)", text, re.IGNORECASE)
-                    return m.group(1).strip() if m else ""
+                # CIN / LLPIN — may appear in JSON-LD / meta tags even if the
+                # visible "Company Information" grid is populated client-side.
+                found_cin = ""
+                cin_m = re.search(r'\b([UL]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6})\b', page_text)
+                if cin_m:
+                    found_cin = cin_m.group(1)
+                found_llpin = ""
+                llpin_m = re.search(r'\b([A-Z]{2,3}-\d{4,})\b', page_text)
+                if llpin_m and not found_cin:
+                    found_llpin = llpin_m.group(1)
 
-                raw_class   = _zcf(r"Company Class", page_text) or _zcf(r"Class", page_text)
-                raw_cat     = _zcf(r"Company Category", page_text) or _zcf(r"Category", page_text)
-                client_type = _map_mca_constitution(raw_class or raw_cat)
-                if client_type == "other" and company_name:
-                    client_type = _map_mca_constitution(company_name)
+                # Directors — rendered server-side as links to /directors/<din>-<slug>
+                directors = []
+                for a in detail_soup.find_all("a", href=re.compile(r"^/directors/\d")):
+                    dname = a.get_text(strip=True)
+                    if not dname:
+                        continue
+                    dhref = a.get("href", "")
+                    din_m = re.match(r"^/directors/(\d+)", dhref)
+                    directors.append({
+                        "name": dname,
+                        "designation": "Designated Partner" if "llp" in (company_name or "").lower() or found_llpin else "Director",
+                        "din": din_m.group(1) if din_m else "",
+                    })
 
-                address = _zcf(r"Registered Address", page_text) or _zcf(r"Address", page_text)
-                city = state = pin = ""
-                if address:
-                    pin_m2 = re.search(r"\b(\d{6})\b", address)
-                    pin    = pin_m2.group(1) if pin_m2 else ""
-                    parts  = [p.strip() for p in address.split(",") if p.strip()]
-                    if len(parts) >= 2:
-                        state = parts[-1].strip().rstrip(".")
-                        city  = parts[-2].strip()
-
-                doi_raw = _zcf(r"Date of Incorporation", page_text) or _zcf(r"Incorporation Date", page_text)
-                doi_iso = ""
-                if doi_raw:
-                    try:
-                        from dateutil import parser as dp
-                        doi_iso = dp.parse(doi_raw.strip(), dayfirst=True).strftime("%Y-%m-%d")
-                    except Exception:
-                        doi_iso = doi_raw.strip()
-
-                email_m = re.search(r"[\w.+\-]+@[\w.\-]+\.\w+", page_text)
-                email   = email_m.group(0) if email_m else ""
-                status  = _zcf(r"Company Status", page_text)
+                client_type = _map_mca_constitution(company_name)
 
                 return {
                     "company_name":          company_name,
                     "cin":                   found_cin,
-                    "llpin":                 None,
+                    "llpin":                 found_llpin or None,
                     "client_type":           client_type,
-                    "date_of_incorporation": doi_iso,
-                    "email":                 email,
-                    "address":               address,
-                    "city":                  city,
-                    "state":                 state,
-                    "gst_pin":               pin,
+                    "date_of_incorporation": "",
+                    "email":                 "",
+                    "address":               "",
+                    "city":                  "",
+                    "state":                 "",
+                    "gst_pin":               "",
                     "pan":                   "",
-                    "directors":             [],
-                    "company_status":        status,
-                    "authorized_capital":    _zcf(r"Authorised Capital", page_text),
-                    "paid_up_capital":       _zcf(r"Paid Up Capital", page_text),
+                    "directors":             directors,
+                    "company_status":        "",
+                    "authorized_capital":    "",
+                    "paid_up_capital":       "",
                     "mca_fetch_date":        _date.today().isoformat(),
-                    "source":                "zaubacorp.com",
+                    "source":                "quickcompany.in",
+                    "detail_url":            detail_url,
                 }
             except Exception as exc:
-                logger.debug(f"zaubacorp scrape error for {url}: {exc}")
+                logger.debug(f"quickcompany scrape error for {url}: {exc}")
                 continue
     return {}
+
+
+# ── ZaubaCorp search-result table parsing ────────────────────────────────────
+# ZaubaCorp's /companysearchresults/company endpoint returns a fully static
+# HTML table:
+#
+#   ### Companies named <term>
+#   | CIN / LLPIN                                  | Name                        | Address |
+#   |-----------------------------------------------|-----------------------------|---------|
+#   | [<CIN>](https://www.zaubacorp.com/<slug>-<CIN>) | [<NAME>](.../<slug>-<CIN>) | ...     |
+#
+# We try a handful of query-param spellings (the exact one accepted by the
+# backend can vary by deployment / caching layer) and, for each response,
+# only trust it if the rendered heading actually reflects our search term —
+# otherwise it's the generic/default listing and we move on to the next
+# candidate.
+_ZB_SEARCH_PARAM_CANDIDATES = ["company", "q", "value", "search", "term", "p", "name"]
+
+
+def _zaubacorp_pick_row(soup: "BeautifulSoup", q: str, is_cin: bool, is_llpin: bool):
+    """Return (cin_or_llpin, detail_url, name) for the best-matching row in a
+    ZaubaCorp search-results table, or None if nothing usable is found."""
+    q_upper = q.strip().upper()
+    q_words = [w for w in re.findall(r"[A-Za-z0-9]+", q.lower()) if len(w) > 1]
+
+    best = None
+    best_score = -1
+    for row in soup.find_all("tr"):
+        cells = row.find_all(["td", "th"])
+        if len(cells) < 2:
+            continue
+        id_cell, name_cell = cells[0], cells[1]
+        id_text = id_cell.get_text(strip=True).upper()
+
+        name_link = name_cell.find("a", href=True)
+        if not name_link:
+            continue
+        name_text = name_link.get_text(strip=True)
+        href = name_link.get("href", "")
+        if not href.startswith("http"):
+            href = f"https://www.zaubacorp.com{href}"
+
+        if is_cin or is_llpin:
+            if id_text == q_upper:
+                return id_text, href, name_text
+            continue
+
+        # Name-based search: score by how many query words appear in the
+        # candidate company name.
+        name_lower = name_text.lower()
+        score = sum(1 for w in q_words if w in name_lower)
+        if score and score > best_score:
+            best_score = score
+            best = (id_text, href, name_text)
+
+    if best and best_score >= max(1, len(q_words) - 1):
+        return best
+    return None
+
+
+async def _scrape_zaubacorp(query: str) -> dict:
+    """Scrape company details from zaubacorp.com. Returns {} on failure.
+
+    ZaubaCorp pages are fully server-rendered (no JS required), and every
+    company/LLP page carries a structured summary sentence describing the
+    CIN/LLPIN, incorporation date, directors/partners, email, registered
+    address and current status — see _parse_zaubacorp_summary().
+    """
+    q = query.strip()
+    q_upper = q.upper()
+    is_cin   = bool(_CIN_RE.match(q_upper))
+    is_llpin = bool(_LLPIN_RE.match(q_upper))
+
+    hdrs = {**_SCRAPE_HEADERS, "Referer": "https://www.zaubacorp.com/"}
+    detail_url = ""
+    matched_name = ""
+
+    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, headers=hdrs) as client:
+        # ── 1. Resolve a detail-page URL via the search-results table ───────
+        for param in _ZB_SEARCH_PARAM_CANDIDATES:
+            search_url = f"https://www.zaubacorp.com/companysearchresults/company?{param}={quote_plus(q)}"
+            try:
+                resp = await client.get(search_url)
+                if resp.status_code != 200:
+                    continue
+                soup = BeautifulSoup(resp.text, "html.parser")
+
+                heading = soup.find(["h1", "h2", "h3"])
+                heading_text = heading.get_text(" ", strip=True).lower() if heading else ""
+                # Skip the generic/default listing (heading doesn't mention
+                # any part of our query)
+                q_words = [w for w in re.findall(r"[A-Za-z0-9]+", q.lower()) if len(w) > 1]
+                if q_words and not any(w in heading_text for w in q_words) and not (is_cin or is_llpin):
+                    continue
+
+                picked = _zaubacorp_pick_row(soup, q, is_cin, is_llpin)
+                if picked:
+                    _, detail_url, matched_name = picked
+                    break
+            except Exception as exc:
+                logger.debug(f"zaubacorp search error ({param}) for {q!r}: {exc}")
+                continue
+
+        if not detail_url:
+            return {}
+
+        # ── 2. Fetch the detail page and parse the summary sentence ─────────
+        try:
+            dr = await client.get(detail_url)
+            if dr.status_code != 200:
+                return {}
+            ds = BeautifulSoup(dr.text, "html.parser")
+
+            company_name = matched_name
+            dh1 = ds.find("h1")
+            if dh1:
+                h1_text = dh1.get_text(strip=True)
+                if h1_text:
+                    company_name = h1_text
+
+            meta_desc = ds.find("meta", attrs={"name": "description"})
+            summary_text = meta_desc.get("content", "") if meta_desc else ""
+            if not summary_text or len(summary_text) < 40:
+                summary_text = ds.get_text(" ", strip=True)
+
+            parsed = _parse_zaubacorp_summary(summary_text, company_name)
+            parsed["company_name"] = company_name
+            parsed["detail_url"] = detail_url
+            return parsed
+        except Exception as exc:
+            logger.debug(f"zaubacorp detail fetch error for {detail_url}: {exc}")
+            return {}
 
 
 @api_router.get("/clients/fetch-mca-details")
