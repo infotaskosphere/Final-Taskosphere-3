@@ -28,6 +28,8 @@ import {
   Settings2, AlertTriangle,
   CheckSquare, Filter, Tag, BookOpen, Activity, ChevronRight,
   Square, Save, CalendarOff,
+  Send, FileText, Building2, Pencil, Users,
+  ToggleLeft, ToggleRight, Copy, Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -1163,6 +1165,485 @@ function SenderWhitelistManager({ isDark }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
+
+// =============================================================================
+// EMAIL_VARS + VariablesBar
+// =============================================================================
+const EMAIL_VARS = [
+  { token: '{name}',     desc: 'Company / Client name' },
+  { token: '{email}',    desc: 'Email address' },
+  { token: '{phone}',    desc: 'Phone number' },
+  { token: '{gstin}',    desc: 'GSTIN' },
+  { token: '{city}',     desc: 'City' },
+  { token: '{services}', desc: 'Services (comma-list)' },
+];
+function VariablesBar({ onInsert }) {
+  return (
+    <div className="flex flex-wrap gap-1.5 mb-2 items-center">
+      <span className="text-[10px] font-bold text-slate-400 shrink-0">Variables:</span>
+      {EMAIL_VARS.map(v => (
+        <button key={v.token} type="button" onClick={() => onInsert(v.token)} title={v.desc}
+          className="px-2 py-0.5 rounded-md text-[11px] font-mono font-semibold transition-colors"
+          style={{ background: '#eef2ff', color: '#4338ca', border: '1px solid #c7d2fe' }}>
+          {v.token}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// =============================================================================
+// EmailComposePanel
+// =============================================================================
+function EmailComposePanel({ isDark }) {
+  const [companies, setCompanies]         = React.useState([]);
+  const [clients,   setClients]           = React.useState([]);
+  const [templates, setTemplates]         = React.useState([]);
+  const [selCompany,  setSelCompany]      = React.useState('');
+  const [sendMethod,  setSendMethod]      = React.useState('auto');
+  const [subject,     setSubject]         = React.useState('');
+  const [body,        setBody]            = React.useState('');
+  const [isHtml,      setIsHtml]          = React.useState(false);
+  const [clientSearch,setClientSearch]    = React.useState('');
+  const [selectedIds, setSelectedIds]     = React.useState(new Set());
+  const [showPreview, setShowPreview]     = React.useState(false);
+  const [sending,     setSending]         = React.useState(false);
+  const [progress,    setProgress]        = React.useState(null);
+  const bodyRef = React.useRef(null);
+
+  React.useEffect(() => {
+    api.get('/quotations/companies/list').then(r => setCompanies(r.data || [])).catch(() => {});
+    api.get('/clients').then(r => { const d = r.data; setClients(Array.isArray(d) ? d : (d?.clients || [])); }).catch(() => {});
+    api.get('/email/client-templates').then(r => setTemplates(r.data || [])).catch(() => {});
+  }, []);
+
+  const personalize = (text, client) => (text||'')
+    .replace(/{name}/gi, client.company_name || 'Valued Client')
+    .replace(/{email}/gi, client.email || '')
+    .replace(/{phone}/gi, client.phone || '')
+    .replace(/{gstin}/gi, client.gstin || '')
+    .replace(/{city}/gi, client.city || '')
+    .replace(/{services}/gi, (client.services || []).join(', '));
+
+  const filtered = React.useMemo(() => {
+    const base = clients.filter(c => c.email);
+    if (!clientSearch.trim()) return base;
+    const q = clientSearch.toLowerCase();
+    return base.filter(c => (c.company_name||'').toLowerCase().includes(q) || (c.email||'').toLowerCase().includes(q));
+  }, [clients, clientSearch]);
+
+  const selectedClients = clients.filter(c => selectedIds.has(c.id) && c.email);
+
+  const toggleAll = () => selectedIds.size >= filtered.length
+    ? setSelectedIds(new Set())
+    : setSelectedIds(new Set(filtered.map(c => c.id)));
+
+  const insertVar = (v) => {
+    const el = bodyRef.current;
+    if (el) {
+      const s = el.selectionStart, e = el.selectionEnd;
+      const nb = body.slice(0, s) + v + body.slice(e);
+      setBody(nb);
+      setTimeout(() => { el.focus(); el.setSelectionRange(s + v.length, s + v.length); }, 0);
+    } else setBody(b => b + v);
+  };
+
+  const loadTpl = (tpl) => {
+    setSubject(tpl.subject); setBody(tpl.body); setIsHtml(!!tpl.is_html);
+    toast.success(`Template "${tpl.name}" loaded`);
+  };
+
+  const handleSend = async () => {
+    if (!subject.trim()) { toast.error('Subject required'); return; }
+    if (!body.trim())    { toast.error('Email body required'); return; }
+    if (!selectedClients.length) { toast.error('Select at least one client with email'); return; }
+    setSending(true); setProgress({ done: 0, total: selectedClients.length, failed: 0 });
+    try {
+      const recipients = selectedClients.map(c => ({
+        email: c.email, name: c.company_name || '',
+        variables: { name: c.company_name||'Valued Client', email: c.email||'', phone: c.phone||'', gstin: c.gstin||'', city: c.city||'', services: (c.services||[]).join(', ') },
+      }));
+      const r = await api.post('/email/send-bulk-clients', { recipients, subject, body_template: body, is_html: isHtml, company_id: selCompany||null, send_method: sendMethod });
+      setProgress({ done: r.data.sent, total: selectedClients.length, failed: r.data.failed });
+      toast.success(`\u2705 ${r.data.sent} email(s) sent`);
+    } catch (err) { toast.error(err.response?.data?.detail || 'Send failed'); }
+    finally { setSending(false); }
+  };
+
+  const selComp = companies.find(c => c.id === selCompany);
+
+  return (
+    <div className="space-y-4">
+      {/* Sender identity */}
+      <SectionCard>
+        <CardHeaderRow iconBg="bg-blue-50 dark:bg-blue-900/30" icon={<Building2 className="w-4 h-4 text-blue-500" />}
+          title="Sender Identity" subtitle="Company branding and sending method" />
+        <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1.5">Company <span className="font-normal">(for logo &amp; SMTP)</span></label>
+            <select value={selCompany} onChange={e => setSelCompany(e.target.value)}
+              className="w-full border rounded-xl px-3 py-2 text-sm bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+              <option value="">— Use Brevo default —</option>
+              {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            {selComp && (
+              <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
+                {selComp.email && <span>📧 {selComp.email}</span>}
+                {selComp.phone && <span>📞 {selComp.phone}</span>}
+                {selComp.smtp_host
+                  ? <span className="font-semibold text-emerald-600">✅ SMTP ready ({selComp.smtp_host})</span>
+                  : <span className="text-amber-600">⚠ No SMTP — will use Brevo</span>}
+              </div>
+            )}
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1.5">Send Via</label>
+            <div className="space-y-2">
+              {[
+                { v:'auto',  label:'Auto  (SMTP → Brevo fallback)', color:'#7c3aed' },
+                { v:'brevo', label:'Brevo API (environment key)',    color:'#2563eb' },
+                { v:'smtp',  label:'Company SMTP / Gmail',           color:'#16a34a' },
+              ].map(opt => (
+                <label key={opt.v} onClick={() => setSendMethod(opt.v)}
+                  className="flex items-center gap-2.5 cursor-pointer select-none">
+                  <div className="w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 transition-all"
+                    style={{ borderColor: sendMethod===opt.v ? opt.color : '#cbd5e1', background: sendMethod===opt.v ? opt.color : 'transparent' }}>
+                    {sendMethod===opt.v && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                  </div>
+                  <span className="text-xs text-slate-600 dark:text-slate-300">{opt.label}</span>
+                </label>
+              ))}
+            </div>
+            {sendMethod==='smtp' && !selComp?.smtp_host && (
+              <p className="mt-2 text-xs text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 rounded-lg">
+                Set up Gmail SMTP in Quotations → Companies → Edit → SMTP Settings
+              </p>
+            )}
+          </div>
+        </div>
+      </SectionCard>
+
+      {/* Load template */}
+      {templates.length > 0 && (
+        <SectionCard>
+          <CardHeaderRow iconBg="bg-purple-50 dark:bg-purple-900/30" icon={<FileText className="w-4 h-4 text-purple-500" />}
+            title="Load a Saved Template" subtitle="Pre-fills subject and body instantly" />
+          <div className="p-3 flex flex-wrap gap-2">
+            {templates.map(t => (
+              <button key={t.id} type="button" onClick={() => loadTpl(t)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all hover:shadow-sm active:scale-95"
+                style={{ background: isDark?'#1e293b':'#f8fafc', borderColor: isDark?'#334155':'#e2e8f0', color: isDark?'#94a3b8':'#475569' }}>
+                <FileText className="w-3 h-3" />{t.name}
+              </button>
+            ))}
+          </div>
+        </SectionCard>
+      )}
+
+      {/* Compose */}
+      <SectionCard>
+        <CardHeaderRow iconBg="bg-emerald-50 dark:bg-emerald-900/30" icon={<Send className="w-4 h-4 text-emerald-500" />}
+          title="Compose Email" subtitle="Use {variable} tokens for personalisation"
+          action={
+            <button type="button" onClick={() => setIsHtml(h => !h)}
+              className="flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold border transition-all"
+              style={{ borderColor: isHtml?'#2563eb':'#e2e8f0', color: isHtml?'#2563eb':'#94a3b8', background: isHtml?'#eff6ff':'transparent' }}>
+              {isHtml ? <ToggleRight className="w-3.5 h-3.5" /> : <ToggleLeft className="w-3.5 h-3.5" />} HTML
+            </button>
+          } />
+        <div className="p-4 space-y-3">
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1">Subject</label>
+            <input value={subject} onChange={e => setSubject(e.target.value)} placeholder="e.g. Important update for {name}"
+              className="w-full border rounded-xl px-3 py-2 text-sm bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              style={{ borderColor: isDark?'#334155':'#e2e8f0' }} />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1">Message Body</label>
+            <VariablesBar onInsert={insertVar} />
+            <textarea ref={bodyRef} value={body} onChange={e => setBody(e.target.value)} rows={isHtml?14:10}
+              placeholder={isHtml ? '<p>Dear {name},</p>\n<p>Your message here...</p>' : 'Dear {name},\n\nYour message here...\n\nRegards,\nThe Team'}
+              className="w-full border rounded-xl px-3 py-2 text-sm font-mono resize-y bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              style={{ borderColor: isDark?'#334155':'#e2e8f0' }} />
+          </div>
+        </div>
+      </SectionCard>
+
+      {/* Preview */}
+      {body.trim() && selectedClients.length > 0 && (
+        <SectionCard>
+          <CardHeaderRow iconBg="bg-amber-50 dark:bg-amber-900/30" icon={<Eye className="w-4 h-4 text-amber-500" />}
+            title={`Preview for ${selectedClients[0]?.company_name || 'first client'}`}
+            subtitle={personalize(subject, selectedClients[0]||{})}
+            action={<button type="button" onClick={() => setShowPreview(p=>!p)} className="text-xs font-semibold text-blue-500">{showPreview?'Hide':'Show'}</button>} />
+          {showPreview && (
+            <div className="p-4">
+              {isHtml
+                ? <div className="border rounded-xl overflow-hidden bg-white" style={{ borderColor: isDark?'#334155':'#e2e8f0' }}>
+                    <iframe srcDoc={personalize(body, selectedClients[0]||{})} className="w-full" style={{ height:320, border:'none' }} sandbox="allow-same-origin" />
+                  </div>
+                : <pre className="whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-200 bg-slate-50 dark:bg-slate-800/50 rounded-xl p-3 border" style={{ borderColor: isDark?'#334155':'#e2e8f0' }}>
+                    {personalize(body, selectedClients[0]||{})}
+                  </pre>
+              }
+            </div>
+          )}
+        </SectionCard>
+      )}
+
+      {/* Client picker */}
+      <SectionCard>
+        <CardHeaderRow iconBg="bg-slate-100 dark:bg-slate-700" icon={<Users className="w-4 h-4 text-slate-500" />}
+          title="Select Recipients" subtitle={`${selectedClients.length} selected · ${clients.filter(c=>c.email).length} total with email`}
+          action={<button type="button" onClick={toggleAll} className="text-xs font-semibold text-blue-500">{selectedIds.size>0?'Clear all':'Select all'}</button>} />
+        <div className="p-3 space-y-2">
+          <input value={clientSearch} onChange={e=>setClientSearch(e.target.value)} placeholder="Search by name or email..."
+            className="w-full border rounded-xl px-3 py-2 text-sm bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400"
+            style={{ borderColor: isDark?'#334155':'#e2e8f0' }} />
+          <div className="max-h-52 overflow-y-auto space-y-0.5">
+            {filtered.length===0 && <p className="text-center text-sm text-slate-400 py-6">No clients with email found</p>}
+            {filtered.map(client => (
+              <label key={client.id}
+                onClick={() => setSelectedIds(p => { const n=new Set(p); n.has(client.id)?n.delete(client.id):n.add(client.id); return n; })}
+                className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                <div className="w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-all"
+                  style={{ borderColor: selectedIds.has(client.id)?'#2563eb':'#cbd5e1', background: selectedIds.has(client.id)?'#2563eb':'transparent' }}>
+                  {selectedIds.has(client.id) && <Check className="w-2.5 h-2.5 text-white" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">{client.company_name||'—'}</p>
+                  <p className="text-[10px] text-slate-400 truncate">{client.email}</p>
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+      </SectionCard>
+
+      {/* Progress */}
+      {progress && (
+        <div className="px-4 py-3 rounded-2xl border flex items-center gap-3"
+          style={{ background: progress.failed>0?'#fff7ed':'#f0fdf4', borderColor: progress.failed>0?'#fed7aa':'#bbf7d0' }}>
+          <CheckCircle2 className={`w-5 h-5 shrink-0 ${progress.failed>0?'text-amber-500':'text-emerald-500'}`} />
+          <div className="flex-1">
+            <p className="text-sm font-semibold" style={{ color: progress.failed>0?'#92400e':'#14532d' }}>
+              {progress.done} sent{progress.failed>0 ? ` · ${progress.failed} failed` : ''}
+            </p>
+            <div className="mt-1.5 h-1.5 rounded-full bg-slate-200 overflow-hidden">
+              <div className="h-full rounded-full bg-emerald-500 transition-all"
+                style={{ width: `${Math.round((progress.done/(progress.total||1))*100)}%` }} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Send */}
+      <button type="button" disabled={sending||!subject.trim()||!body.trim()||selectedClients.length===0}
+        onClick={handleSend}
+        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl font-bold text-white text-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+        style={{ background:'linear-gradient(135deg,#0D3B66,#1F6FB2)', boxShadow:'0 4px 20px rgba(13,59,102,0.25)' }}>
+        {sending
+          ? <><Loader2 className="w-4 h-4 animate-spin" />Sending...</>
+          : <><Send className="w-4 h-4" />Send to {selectedClients.length} Client{selectedClients.length!==1?'s':''}</>}
+      </button>
+    </div>
+  );
+}
+
+// =============================================================================
+// EmailTemplatesPanel
+// =============================================================================
+const TCAT_COLORS = { general:'#2563eb', follow_up:'#7c3aed', compliance:'#dc2626', greeting:'#16a34a', custom:'#d97706' };
+
+function EmailTemplatesPanel({ isDark }) {
+  const [templates, setTemplates] = React.useState([]);
+  const [loading, setLoading]     = React.useState(true);
+  const [editing, setEditing]     = React.useState(null);
+  const [form, setForm]           = React.useState({ name:'', subject:'', body:'', is_html:false, category:'general' });
+  const [saving, setSaving]       = React.useState(false);
+  const [deleting, setDeleting]   = React.useState(null);
+  const bodyRef = React.useRef(null);
+
+  const load = async () => {
+    setLoading(true);
+    try { const r = await api.get('/email/client-templates'); setTemplates(r.data||[]); }
+    catch { toast.error('Failed to load templates'); }
+    finally { setLoading(false); }
+  };
+  React.useEffect(() => { load(); }, []);
+
+  const startEdit = t => { setForm({ name:t.name, subject:t.subject, body:t.body, is_html:!!t.is_html, category:t.category||'general' }); setEditing(t.id); };
+  const startNew  = ()  => { setForm({ name:'', subject:'', body:'', is_html:false, category:'general' }); setEditing('new'); };
+  const cancel    = ()  => setEditing(null);
+
+  const save = async () => {
+    if (!form.name.trim()||!form.subject.trim()||!form.body.trim()) { toast.error('Name, subject and body required'); return; }
+    setSaving(true);
+    try {
+      if (editing==='new') { await api.post('/email/client-templates', form); toast.success('Template created'); }
+      else { await api.put(`/email/client-templates/${editing}`, form); toast.success('Template updated'); }
+      setEditing(null); load();
+    } catch (e) { toast.error(e.response?.data?.detail||'Save failed'); }
+    finally { setSaving(false); }
+  };
+
+  const del = async id => {
+    setDeleting(id);
+    try { await api.delete(`/email/client-templates/${id}`); toast.success('Deleted'); load(); }
+    catch { toast.error('Delete failed'); }
+    finally { setDeleting(null); }
+  };
+
+  const copyTpl = t => navigator.clipboard?.writeText(`Subject: ${t.subject}\n\n${t.body}`)
+    .then(()=>toast.success('Copied to clipboard'));
+
+  const insertVar = v => {
+    const el = bodyRef.current;
+    if (el) {
+      const s=el.selectionStart, e=el.selectionEnd;
+      const nb = form.body.slice(0,s)+v+form.body.slice(e);
+      setForm(f=>({...f,body:nb}));
+      setTimeout(()=>{ el.focus(); el.setSelectionRange(s+v.length,s+v.length); },0);
+    } else setForm(f=>({...f,body:f.body+v}));
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="font-bold text-sm" style={{color:isDark?'#f1f5f9':'#1e293b'}}>Saved Email Templates</h3>
+          <p className="text-xs mt-0.5" style={{color:isDark?'#64748b':'#94a3b8'}}>{templates.length} template{templates.length!==1?'s':''} · load into Compose tab</p>
+        </div>
+        <button type="button" onClick={startNew}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-white transition-all active:scale-95"
+          style={{ background:'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
+          <Plus className="w-4 h-4" /> New Template
+        </button>
+      </div>
+
+      {editing!==null && (
+        <SectionCard>
+          <CardHeaderRow iconBg="bg-indigo-50 dark:bg-indigo-900/30" icon={<FileText className="w-4 h-4 text-indigo-500" />}
+            title={editing==='new'?'New Template':'Edit Template'} subtitle="Use {variable} tokens for personalisation"
+            action={<button type="button" onClick={cancel} className="text-slate-400 hover:text-slate-600"><X className="w-4 h-4"/></button>} />
+          <div className="p-4 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">Template Name</label>
+                <input value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} placeholder="e.g. Monthly Follow-Up"
+                  className="w-full border rounded-xl px-3 py-2 text-sm bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  style={{ borderColor: isDark?'#334155':'#e2e8f0' }} />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">Category</label>
+                <select value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))}
+                  className="w-full border rounded-xl px-3 py-2 text-sm bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  style={{ borderColor: isDark?'#334155':'#e2e8f0' }}>
+                  {['general','follow_up','compliance','greeting','custom'].map(c=><option key={c} value={c}>{c.replace('_',' ')}</option>)}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 mb-1">Subject</label>
+              <input value={form.subject} onChange={e=>setForm(f=>({...f,subject:e.target.value}))} placeholder="e.g. Update for {name}"
+                className="w-full border rounded-xl px-3 py-2 text-sm bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                style={{ borderColor: isDark?'#334155':'#e2e8f0' }} />
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-semibold text-slate-400">Message Body</label>
+                <label className="flex items-center gap-1.5 cursor-pointer text-xs text-slate-400 select-none">
+                  <input type="checkbox" checked={form.is_html} onChange={e=>setForm(f=>({...f,is_html:e.target.checked}))} className="rounded" />
+                  HTML mode
+                </label>
+              </div>
+              <VariablesBar onInsert={insertVar} />
+              <textarea ref={bodyRef} value={form.body} onChange={e=>setForm(f=>({...f,body:e.target.value}))}
+                rows={form.is_html?16:12}
+                placeholder={form.is_html?'<p>Dear {name},</p>':'Dear {name},\n\nYour message...\n\nRegards'}
+                className="w-full border rounded-xl px-3 py-2 text-sm font-mono resize-y bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                style={{ borderColor: isDark?'#334155':'#e2e8f0' }} />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button type="button" onClick={save} disabled={saving}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-bold text-white transition-all active:scale-95 disabled:opacity-50"
+                style={{ background:'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
+                {saving?<Loader2 className="w-4 h-4 animate-spin"/>:<Save className="w-4 h-4"/>}
+                {saving?'Saving...':(editing==='new'?'Create Template':'Save Changes')}
+              </button>
+              <button type="button" onClick={cancel}
+                className="px-6 py-2.5 rounded-xl text-sm font-semibold border transition-all"
+                style={{ borderColor: isDark?'#334155':'#e2e8f0', color: isDark?'#94a3b8':'#64748b' }}>Cancel</button>
+            </div>
+          </div>
+        </SectionCard>
+      )}
+
+      {loading ? (
+        <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-blue-500" /></div>
+      ) : templates.length===0 && editing===null ? (
+        <SectionCard>
+          <div className="py-14 text-center space-y-4">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto bg-slate-100 dark:bg-slate-700">
+              <FileText className="w-8 h-8 text-slate-400" />
+            </div>
+            <p className="font-semibold" style={{color:isDark?'#f1f5f9':'#374151'}}>No templates yet</p>
+            <p className="text-sm text-slate-400">Create reusable templates to save time</p>
+            <button type="button" onClick={startNew}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all active:scale-95"
+              style={{ background:'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
+              <Plus className="w-4 h-4" /> Create First Template
+            </button>
+          </div>
+        </SectionCard>
+      ) : (
+        <div className="space-y-3">
+          {templates.map(tpl => (
+            <SectionCard key={tpl.id}>
+              <div className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <span className="font-bold text-sm" style={{color:isDark?'#f1f5f9':'#1e293b'}}>{tpl.name}</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase text-white"
+                        style={{background:TCAT_COLORS[tpl.category]||'#64748b'}}>
+                        {(tpl.category||'general').replace('_',' ')}
+                      </span>
+                      {tpl.is_html&&<span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 text-orange-600">HTML</span>}
+                    </div>
+                    <p className="text-xs font-medium text-slate-500 truncate">📧 {tpl.subject}</p>
+                    <p className="text-xs text-slate-400 mt-0.5 line-clamp-2">{(tpl.body||'').replace(/<[^>]*>/g,'').slice(0,140)}</p>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {['name','email','phone','gstin','city','services'].filter(k=>tpl.body?.includes('{'+k+'}')||tpl.subject?.includes('{'+k+'}')).map(k=>(
+                        <span key={k} className="px-1.5 py-0.5 rounded text-[10px] font-mono" style={{background:'#eef2ff',color:'#4338ca'}}>{'{'+k+'}'}</span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button type="button" onClick={()=>copyTpl(tpl)} title="Copy"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400">
+                      <Copy className="w-3.5 h-3.5" />
+                    </button>
+                    <button type="button" onClick={()=>startEdit(tpl)} title="Edit"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors hover:bg-blue-50 dark:hover:bg-blue-900/20 text-blue-400">
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button type="button" onClick={()=>del(tpl.id)} disabled={deleting===tpl.id} title="Delete"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors hover:bg-red-50 dark:hover:bg-red-900/20 text-red-400 disabled:opacity-50">
+                      {deleting===tpl.id?<Loader2 className="w-3.5 h-3.5 animate-spin"/>:<Trash2 className="w-3.5 h-3.5"/>}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </SectionCard>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function EmailSettings() {
   const isDark = useDark();
 
@@ -1316,9 +1797,11 @@ export default function EmailSettings() {
   const futureEventCount = extractedEvents.filter(e => !isEventPast(e) && !savedKeys.has(eventKey(e))).length;
 
   const TAB_CONFIG = [
-    { id: "accounts",  label: "Accounts",    icon: Mail   },
-    { id: "whitelist", label: "Whitelist",   icon: Filter },
-    { id: "rules",     label: "Smart Rules", icon: Tag    },
+    { id: "accounts",  label: "Accounts",      icon: Mail      },
+    { id: "whitelist", label: "Whitelist",     icon: Filter    },
+    { id: "rules",     label: "Smart Rules",   icon: Tag       },
+    { id: "compose",   label: "Compose & Send", icon: Send    },
+    { id: "templates", label: "Templates",     icon: FileText  },
   ];
 
   return (
@@ -1535,6 +2018,37 @@ export default function EmailSettings() {
             </div>
             <CategoryRulesPanel isDark={isDark} />
 
+          </motion.div>
+        )}
+
+        {/* ══ COMPOSE TAB ══ */}
+        {activeTab === "compose" && (
+          <motion.div variants={itemVariants} className="space-y-4">
+            <div className="px-4 py-3.5 rounded-2xl border flex items-start gap-3"
+              style={{ backgroundColor: isDark?"rgba(79,70,229,0.08)":"#eef2ff", borderColor: isDark?"#4338ca":"#c7d2fe" }}>
+              <Send className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
+              <div className="text-xs" style={{ color: isDark?"#a5b4fc":"#3730a3" }}>
+                <span className="font-bold">Send personalised emails directly to your clients.</span>
+                {" "}Pick a company for branding (logo, SMTP/Gmail), compose with {'{variable}'} tokens, select recipients, and send.
+                Use <strong>Compose &amp; Send</strong> tab for one-off emails, <strong>Templates</strong> tab to save reusable formats.
+              </div>
+            </div>
+            <EmailComposePanel isDark={isDark} />
+          </motion.div>
+        )}
+
+        {/* ══ TEMPLATES TAB ══ */}
+        {activeTab === "templates" && (
+          <motion.div variants={itemVariants} className="space-y-4">
+            <div className="px-4 py-3.5 rounded-2xl border flex items-start gap-3"
+              style={{ backgroundColor: isDark?"rgba(16,185,129,0.08)":"#f0fdf4", borderColor: isDark?"#065f46":"#a7f3d0" }}>
+              <FileText className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+              <div className="text-xs" style={{ color: isDark?"#6ee7b7":"#064e3b" }}>
+                <span className="font-bold">Reusable email templates.</span>
+                {" "}Create templates with {'{name}'}, {'{services}'}, {'{gstin}'} and other tokens — then load any template in the Compose tab to send instantly.
+              </div>
+            </div>
+            <EmailTemplatesPanel isDark={isDark} />
           </motion.div>
         )}
 
