@@ -564,14 +564,26 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
     } catch { toast.error('Could not copy to clipboard.'); }
   }, [message, selectedClients]);
 
-  const handleEmail = useCallback(() => {
+  const handleEmail = useCallback(async () => {
+    const emailClients = selectedClients.filter(c => c.email);
+    if (emailClients.length === 0) { toast.error('No email addresses found for selected clients'); return; }
     if (!message.trim()) { toast.error('Please write a message first'); return; }
-    if (selectedClients.length === 0) { toast.error('Please select at least one client'); return; }
-    const bcc = selectedClients.map(c => c.email).filter(Boolean).join(',');
-    if (!bcc) { toast.error('No email addresses found for selected clients'); return; }
     const lines = message.trim().split('\n');
-    window.location.href = `mailto:?bcc=${encodeURIComponent(bcc)}&subject=${encodeURIComponent(lines[0].substring(0, 80))}&body=${encodeURIComponent(message.trim())}`;
-    toast.success(`Opening mail client with ${emailCount} recipients in BCC`);
+    const subjectLine = lines[0].substring(0, 120) || 'Message from TaskoSphere';
+    setSendingBulk(true);
+    setSendProgress({ done: 0, total: emailClients.length, results: [] });
+    try {
+      const recipients = emailClients.map(c => ({
+        email: c.email, name: c.company_name || '',
+        variables: { name: c.company_name || 'Valued Client', email: c.email || '', phone: c.phone || '', gstin: c.gstin || '', city: c.city || '', services: (c.services || []).join(', ') },
+      }));
+      const r = await api.post('/email/send-bulk-clients', { recipients, subject: subjectLine, body_template: message.trim(), is_html: false, send_method: 'auto' });
+      setSendProgress({ done: r.data.sent, total: emailClients.length, results: r.data.failed_list || [] });
+      toast.success(r.data.sent + ' email(s) sent' + (r.data.failed > 0 ? ', ' + r.data.failed + ' failed' : ''));
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Email send failed. Check Settings -> Email Accounts.');
+      setSendProgress(null);
+    } finally { setSendingBulk(false); }
   }, [message, selectedClients, emailCount]);
 
   const WA_GREEN = '#25D366';
@@ -1146,10 +1158,14 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
                     )}
                   </>
                 ) : (
-                  <Button type="button" disabled={!message.trim() || selectedClients.length === 0} onClick={handleEmail}
+                  <Button type="button"
+                    disabled={!message.trim() || selectedClients.length === 0 || sendingBulk}
+                    onClick={handleEmail}
                     className="h-10 px-6 text-sm rounded-xl text-white font-semibold gap-2 shadow-sm disabled:opacity-50"
-                    style={{ background: !message.trim() || selectedClients.length === 0 ? '#94a3b8' : 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
-                    <ExternalLink className="h-4 w-4" /> Open in Mail Client
+                    style={{ background: (!message.trim() || selectedClients.length === 0) ? '#94a3b8' : 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+                    {sendingBulk
+                      ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full inline-block animate-spin" />Sending...</>
+                      : <>Send {emailCount} Email{emailCount !== 1 ? 's' : ''}</>}
                   </Button>
                 )}
               </div>
