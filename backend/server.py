@@ -9881,13 +9881,15 @@ class BulkEmailRecipient(BaseModel):
     variables: dict = {}
 
 class BulkClientEmailRequest(BaseModel):
-    recipients:    List[BulkEmailRecipient]
-    subject:       str
-    body_template: str          # plain-text or HTML with {variable} placeholders
-    is_html:       bool = False
-    company_id:    Optional[str] = None   # if set, try company SMTP first
-    send_method:   str = "auto"           # "auto" | "brevo" | "smtp"
-    from_name:     Optional[str] = None
+    recipients:              List[BulkEmailRecipient]
+    subject:                 str
+    body_template:           str          # plain-text or HTML with {variable} placeholders
+    is_html:                 bool = False
+    company_id:              Optional[str] = None   # if set, try company SMTP first
+    send_method:             str = "auto"           # "auto" | "brevo" | "smtp"
+    from_name:               Optional[str] = None
+    override_sender_email:   Optional[str] = None   # per-request sender override (Clients bulk modal)
+    override_sender_name:    Optional[str] = None
 
 
 def _render_body(template: str, variables: dict) -> str:
@@ -9945,6 +9947,10 @@ async def send_bulk_client_emails(
     company_smtp = None
     company_name = req.from_name or os.getenv("SENDER_NAME", "TaskoSphere")
 
+    # Per-request sender override from Clients bulk modal (takes highest priority for Brevo)
+    _override_email = (req.override_sender_email or "").strip()
+    _override_name  = (req.override_sender_name  or "").strip()
+
     if req.company_id and req.send_method in ("auto", "smtp"):
         comp = await db.companies.find_one({"id": req.company_id}, {"_id": 0})
         if comp:
@@ -9965,7 +9971,20 @@ async def send_bulk_client_emails(
 
     if use_brevo:
         brevo_key  = os.getenv("BREVO_API_KEY")
-        sender_email = os.getenv("SENDER_EMAIL")
+        # Use per-request override if provided, else fall back to DB active sender, then env
+        if _override_email:
+            sender_email = _override_email
+            company_name = _override_name or company_name
+        else:
+            try:
+                _s_doc = await db.email_sender_settings.find_one({"type": "active_sender"}, {"_id": 0})
+                sender_email = (_s_doc.get("email") or "").strip() if _s_doc else ""
+                if _s_doc and _s_doc.get("name"):
+                    company_name = _s_doc["name"].strip()
+            except Exception:
+                sender_email = ""
+            if not sender_email:
+                sender_email = os.getenv("SENDER_EMAIL")
         if not brevo_key or not sender_email:
             raise HTTPException(500, "Brevo not configured (BREVO_API_KEY + SENDER_EMAIL required). "
                                      "Or select a company with SMTP settings.")
