@@ -764,10 +764,22 @@ api_router = APIRouter(prefix="/api")
 
 # HELPERS - Email Service Functions
 async def _brevo_send(to_email: str, subject: str, body_plain: str, body_html: str = None):
-    """Core Brevo HTTP API sender — async, non-blocking."""
-    api_key      = (os.getenv("BREVO_API_KEY") or "").strip()
-    sender_email = (os.getenv("SENDER_EMAIL") or "").strip()
-    sender_name  = (os.getenv("SENDER_NAME") or "TaskoSphere").strip()
+    """Core Brevo HTTP API sender — async, non-blocking.
+    Sender email/name: DB active_sender setting → env vars fallback.
+    """
+    api_key = (os.getenv("BREVO_API_KEY") or "").strip()
+    # Try DB active sender first, fall back to env vars
+    try:
+        _sender_doc = await db.email_sender_settings.find_one({"type": "active_sender"}, {"_id": 0})
+        if _sender_doc and _sender_doc.get("email"):
+            sender_email = _sender_doc["email"].strip()
+            sender_name  = (_sender_doc.get("name") or "TaskoSphere").strip()
+        else:
+            sender_email = (os.getenv("SENDER_EMAIL") or "").strip()
+            sender_name  = (os.getenv("SENDER_NAME") or "TaskoSphere").strip()
+    except Exception:
+        sender_email = (os.getenv("SENDER_EMAIL") or "").strip()
+        sender_name  = (os.getenv("SENDER_NAME") or "TaskoSphere").strip()
 
     if not api_key or not sender_email:
         raise Exception(
@@ -845,6 +857,121 @@ async def send_birthday_email(recipient_email: str, client_name: str):
     except Exception as e:
         logger.error(f"Failed to send birthday email: {str(e)}")
         return False
+
+# ─── ACTIVE SENDER HELPER ─────────────────────────────────────────────────────
+async def _get_active_sender():
+    """
+    Returns (email, name) for the active sender.
+    Priority: DB setting → env vars fallback.
+    """
+    try:
+        doc = await db.email_sender_settings.find_one({"type": "active_sender"}, {"_id": 0})
+        if doc and doc.get("email"):
+            return doc["email"].strip(), (doc.get("name") or "TaskoSphere").strip()
+    except Exception:
+        pass
+    return (os.getenv("SENDER_EMAIL") or "").strip(), (os.getenv("SENDER_NAME") or "TaskoSphere").strip()
+
+
+# ─── SENDER MANAGEMENT ENDPOINTS ──────────────────────────────────────────────
+@api_router.get("/email/senders/active")
+async def get_active_sender(current_user: User = Depends(get_current_user)):
+    """Get the currently active sender email and name."""
+    email, name = await _get_active_sender()
+    # Also return env fallback info
+    env_email = (os.getenv("SENDER_EMAIL") or "").strip()
+    env_name  = (os.getenv("SENDER_NAME") or "TaskoSphere").strip()
+    doc = await db.email_sender_settings.find_one({"type": "active_sender"}, {"_id": 0})
+    return {
+        "active_email":  email,
+        "active_name":   name,
+        "source":        "db" if (doc and doc.get("email")) else "env",
+        "env_email":     env_email,
+        "env_name":      env_name,
+        "db_senders":    doc.get("all_senders", []) if doc else [],
+    }
+
+
+@api_router.get("/email/senders/list")
+async def list_saved_senders(current_user: User = Depends(get_current_user)):
+    """List all saved verified sender options."""
+    doc = await db.email_sender_settings.find_one({"type": "active_sender"}, {"_id": 0})
+    senders = doc.get("all_senders", []) if doc else []
+    env_email = (os.getenv("SENDER_EMAIL") or "").strip()
+    env_name  = (os.getenv("SENDER_NAME") or "TaskoSphere").strip()
+    # Always include env sender if present and not already in list
+    if env_email and not any(s["email"] == env_email for s in senders):
+        senders = [{"email": env_email, "name": env_name, "source": "env"}] + senders
+    return {"senders": senders}
+
+
+@api_router.post("/email/senders/set-active")
+async def set_active_sender(body: dict, current_user: User = Depends(get_current_user)):
+    """Switch which sender email is used for all outgoing emails."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    email = (body.get("email") or "").strip()
+    name  = (body.get("name") or "TaskoSphere").strip()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=422, detail="Valid email required")
+    # Load existing doc to preserve all_senders list
+    doc = await db.email_sender_settings.find_one({"type": "active_sender"}, {"_id": 0}) or {}
+    all_senders = doc.get("all_senders", [])
+    # Add to list if not already there
+    if not any(s["email"] == email for s in all_senders):
+        all_senders.append({"email": email, "name": name, "source": "brevo", "added_at": __import__("datetime").datetime.utcnow().isoformat()})
+    await db.email_sender_settings.update_one(
+        {"type": "active_sender"},
+        {"$set": {
+            "type":        "active_sender",
+            "email":       email,
+            "name":        name,
+            "all_senders": all_senders,
+            "updated_at":  __import__("datetime").datetime.utcnow().isoformat(),
+            "updated_by":  str(current_user.id),
+        }},
+        upsert=True,
+    )
+    return {"status": "ok", "active_email": email, "active_name": name}
+
+
+@api_router.post("/email/senders/add")
+async def add_sender_option(body: dict, current_user: User = Depends(get_current_user)):
+    """Add a new verified sender to the saved list (without switching active)."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    email = (body.get("email") or "").strip()
+    name  = (body.get("name") or email).strip()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=422, detail="Valid email required")
+    doc = await db.email_sender_settings.find_one({"type": "active_sender"}, {"_id": 0}) or {}
+    all_senders = doc.get("all_senders", [])
+    if any(s["email"] == email for s in all_senders):
+        return {"status": "already_exists", "senders": all_senders}
+    all_senders.append({"email": email, "name": name, "source": "brevo", "added_at": __import__("datetime").datetime.utcnow().isoformat()})
+    await db.email_sender_settings.update_one(
+        {"type": "active_sender"},
+        {"$set": {"all_senders": all_senders}},
+        upsert=True,
+    )
+    return {"status": "added", "senders": all_senders}
+
+
+@api_router.delete("/email/senders/{sender_email}")
+async def remove_sender_option(sender_email: str, current_user: User = Depends(get_current_user)):
+    """Remove a sender from the saved list."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    doc = await db.email_sender_settings.find_one({"type": "active_sender"}, {"_id": 0}) or {}
+    all_senders = [s for s in doc.get("all_senders", []) if s["email"] != sender_email]
+    # If active sender was removed, reset to env
+    updates = {"all_senders": all_senders}
+    if doc.get("email") == sender_email:
+        updates["email"] = (os.getenv("SENDER_EMAIL") or "").strip()
+        updates["name"]  = (os.getenv("SENDER_NAME") or "TaskoSphere").strip()
+    await db.email_sender_settings.update_one({"type": "active_sender"}, {"$set": updates}, upsert=True)
+    return {"status": "removed", "senders": all_senders}
+
 
 # ─── TEST EMAIL ENDPOINT ──────────────────────────────────────────────────────
 @api_router.post("/email/test")
