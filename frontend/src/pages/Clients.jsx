@@ -299,6 +299,11 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
   const mediaInputRef = React.useRef(null);
   const [showVariables, setShowVariables] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState('');
+  // Sender selector state (email mode only)
+  const [activeSender, setActiveSender]   = useState(null);   // { email, name } from DB
+  const [senderList,   setSenderList]     = useState([]);      // all saved senders
+  const [senderLoading, setSenderLoading] = useState(false);
+  const [showSenderPicker, setShowSenderPicker] = useState(false);
   // WhatsApp history state
   const [showHistory, setShowHistory] = useState(false);
   const [historyLogs, setHistoryLogs] = useState([]);
@@ -317,6 +322,15 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
       setMessage(''); setClientSearch(''); setCopied(false); setExportDone(false); setSelectedTemplate('');
       setSendProgress(null); setSendingBulk(false);
       setMediaFile(null);
+      // Fetch active sender info for email mode
+      setSenderLoading(true);
+      Promise.all([
+        fetch('/api/email/senders/active').then(r => r.json()).catch(() => null),
+        fetch('/api/email/senders/list').then(r => r.json()).catch(() => null),
+      ]).then(([activeRes, listRes]) => {
+        if (activeRes?.active_email) setActiveSender({ email: activeRes.active_email, name: activeRes.active_name || '' });
+        if (listRes?.senders)        setSenderList(listRes.senders);
+      }).finally(() => setSenderLoading(false));
       // Set default schedule to tomorrow 09:00
       const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
       setScheduleDate(tomorrow.toISOString().split('T')[0]);
@@ -577,7 +591,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
         email: c.email, name: c.company_name || '',
         variables: { name: c.company_name || 'Valued Client', email: c.email || '', phone: c.phone || '', gstin: c.gstin || '', city: c.city || '', services: (c.services || []).join(', ') },
       }));
-      const r = await api.post('/email/send-bulk-clients', { recipients, subject: subjectLine, body_template: message.trim(), is_html: false, send_method: 'auto' });
+      const r = await api.post('/email/send-bulk-clients', { recipients, subject: subjectLine, body_template: message.trim(), is_html: false, send_method: 'auto', override_sender_email: activeSender?.email || null, override_sender_name: activeSender?.name || null });
       setSendProgress({ done: r.data.sent, total: emailClients.length, results: r.data.failed_list || [] });
       toast.success(r.data.sent + ' email(s) sent' + (r.data.failed > 0 ? ', ' + r.data.failed + ' failed' : ''));
     } catch (err) {
@@ -1098,6 +1112,70 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
                     </div>
                   )}
                 </>
+              )}
+
+              {/* Email sender selector */}
+              {!isWhatsApp && (
+                <div className="rounded-xl border p-3" style={{ background: isDark ? '#0a1628' : '#f0f9ff', borderColor: isDark ? '#1e3a5f' : '#bae6fd' }}>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: isDark ? '#7dd3fc' : '#0369a1' }}>📤 Sending From</p>
+                    <button
+                      type="button"
+                      onClick={() => setShowSenderPicker(v => !v)}
+                      className="text-[10px] font-bold px-2 py-0.5 rounded-lg border transition-all"
+                      style={{ borderColor: isDark ? '#1e3a5f' : '#bae6fd', color: isDark ? '#7dd3fc' : '#0369a1', background: isDark ? 'rgba(125,211,252,0.1)' : '#e0f2fe' }}>
+                      {showSenderPicker ? '▲ Close' : '⇄ Switch'}
+                    </button>
+                  </div>
+                  {senderLoading ? (
+                    <p className="text-[11px]" style={{ color: isDark ? '#475569' : '#94a3b8' }}>Loading sender…</p>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-[10px] font-black flex-shrink-0"
+                        style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+                        {(activeSender?.name || activeSender?.email || '?').charAt(0).toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-bold truncate" style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>
+                          {activeSender?.name || 'Not configured'}
+                        </p>
+                        <p className="text-[10px] truncate" style={{ color: isDark ? '#64748b' : '#94a3b8' }}>
+                          {activeSender?.email || 'Set SENDER_EMAIL in Render'}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  {/* Sender picker dropdown */}
+                  {showSenderPicker && senderList.length > 0 && (
+                    <div className="mt-2.5 pt-2.5 border-t space-y-1" style={{ borderColor: isDark ? '#1e3a5f' : '#bae6fd' }}>
+                      <p className="text-[9px] font-bold uppercase tracking-wider mb-1.5" style={{ color: isDark ? '#475569' : '#94a3b8' }}>
+                        Choose sender for this batch:
+                      </p>
+                      {senderList.map(s => {
+                        const isActive = s.email === activeSender?.email;
+                        return (
+                          <button key={s.email} type="button"
+                            onClick={() => { setActiveSender({ email: s.email, name: s.name || s.email }); setShowSenderPicker(false); }}
+                            className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border transition-all text-left"
+                            style={{
+                              borderColor: isActive ? '#0D3B66' : (isDark ? '#1e3a5f' : '#e2e8f0'),
+                              background: isActive ? (isDark ? 'rgba(13,59,102,0.3)' : '#dbeafe') : (isDark ? 'rgba(255,255,255,0.03)' : '#fff'),
+                            }}>
+                            <div className="w-5 h-5 rounded-md flex items-center justify-center text-white text-[9px] font-black flex-shrink-0"
+                              style={{ background: isActive ? '#0D3B66' : (isDark ? '#334155' : '#94a3b8') }}>
+                              {(s.name || s.email).charAt(0).toUpperCase()}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[11px] font-semibold truncate" style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>{s.name || s.email}</p>
+                              <p className="text-[9px] truncate" style={{ color: isDark ? '#64748b' : '#94a3b8' }}>{s.email}</p>
+                            </div>
+                            {isActive && <span className="text-[9px] font-bold text-emerald-500 flex-shrink-0">✓</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* Email compose hint */}
