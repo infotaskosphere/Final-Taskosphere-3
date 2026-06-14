@@ -322,11 +322,11 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
       setMessage(''); setClientSearch(''); setCopied(false); setExportDone(false); setSelectedTemplate('');
       setSendProgress(null); setSendingBulk(false);
       setMediaFile(null);
-      // Fetch active sender info for email mode
+      // Fetch active sender info for email mode (use authenticated api instance)
       setSenderLoading(true);
       Promise.all([
-        fetch('/api/email/senders/active').then(r => r.json()).catch(() => null),
-        fetch('/api/email/senders/list').then(r => r.json()).catch(() => null),
+        api.get('/email/senders/active').then(r => r.data).catch(() => null),
+        api.get('/email/senders/list').then(r => r.data).catch(() => null),
       ]).then(([activeRes, listRes]) => {
         if (activeRes?.active_email) setActiveSender({ email: activeRes.active_email, name: activeRes.active_name || '' });
         if (listRes?.senders)        setSenderList(listRes.senders);
