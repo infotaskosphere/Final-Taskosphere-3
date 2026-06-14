@@ -765,9 +765,9 @@ api_router = APIRouter(prefix="/api")
 # HELPERS - Email Service Functions
 async def _brevo_send(to_email: str, subject: str, body_plain: str, body_html: str = None):
     """Core Brevo HTTP API sender — async, non-blocking."""
-    api_key      = os.getenv("BREVO_API_KEY")
-    sender_email = os.getenv("SENDER_EMAIL")
-    sender_name  = os.getenv("SENDER_NAME", "TaskoSphere")
+    api_key      = (os.getenv("BREVO_API_KEY") or "").strip()
+    sender_email = (os.getenv("SENDER_EMAIL") or "").strip()
+    sender_name  = (os.getenv("SENDER_NAME") or "TaskoSphere").strip()
 
     if not api_key or not sender_email:
         raise Exception(
@@ -794,6 +794,13 @@ async def _brevo_send(to_email: str, subject: str, body_plain: str, body_html: s
             json=payload,
         )
 
+    if response.status_code == 401:
+        raise Exception(
+            f"Brevo 401 Unauthorized — API key is invalid or expired. "
+            f"Go to app.brevo.com → SMTP & API → API Keys, regenerate the key, "
+            f"and update BREVO_API_KEY in your Render environment variables. "
+            f"Brevo response: {response.text}"
+        )
     if response.status_code not in (200, 201):
         raise Exception(f"Brevo API error {response.status_code}: {response.text}")
     return True
@@ -9122,7 +9129,11 @@ def build_reminder_email(
         if not raw:
             return None
         try:
-            return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            # Ensure always timezone-aware so comparison with now (UTC) never crashes
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
         except Exception:
             return None
 
