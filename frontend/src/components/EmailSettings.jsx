@@ -1764,6 +1764,231 @@ function EmailTemplatesPanel({ isDark }) {
   );
 }
 
+
+// =============================================================================
+// SenderSelectorPanel — switch active Brevo sender on the fly
+// =============================================================================
+function SenderSelectorPanel({ isDark }) {
+  const [senders,       setSenders]       = useState([]);
+  const [activeEmail,   setActiveEmail]   = useState("");
+  const [activeName,    setActiveName]    = useState("");
+  const [source,        setSource]        = useState("env");
+  const [loading,       setLoading]       = useState(true);
+  const [switching,     setSwitching]     = useState(false);
+  const [adding,        setAdding]        = useState(false);
+  const [newEmail,      setNewEmail]      = useState("");
+  const [newName,       setNewName]       = useState("");
+  const [showAdd,       setShowAdd]       = useState(false);
+
+  const inputStyle = { backgroundColor: isDark ? D.raised : "#ffffff", borderColor: isDark ? D.border : "#d1d5db", color: isDark ? D.text : "#1e293b" };
+  const inputCls   = "px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all";
+
+  const fetchSenders = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.get("/email/senders/list");
+      setSenders(res.data?.senders || []);
+      const active = await api.get("/email/senders/active");
+      setActiveEmail(active.data?.active_email || "");
+      setActiveName(active.data?.active_name || "");
+      setSource(active.data?.source || "env");
+    } catch { setSenders([]); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchSenders(); }, [fetchSenders]);
+
+  const handleSwitch = async (email, name) => {
+    setSwitching(email);
+    try {
+      await api.post("/email/senders/set-active", { email, name });
+      setActiveEmail(email);
+      setActiveName(name);
+      setSource("db");
+      toast.success(`✓ Now sending from ${email}`);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to switch sender");
+    } finally { setSwitching(false); }
+  };
+
+  const handleAdd = async () => {
+    const em = newEmail.trim().toLowerCase();
+    const nm = newName.trim() || em;
+    if (!em || !em.includes("@")) { toast.error("Enter a valid email address"); return; }
+    setAdding(true);
+    try {
+      await api.post("/email/senders/add", { email: em, name: nm });
+      toast.success(`${em} added to sender list`);
+      setNewEmail(""); setNewName(""); setShowAdd(false);
+      fetchSenders();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to add sender");
+    } finally { setAdding(false); }
+  };
+
+  const handleRemove = async (email) => {
+    if (!window.confirm(`Remove ${email} from sender list?`)) return;
+    try {
+      await api.delete(`/email/senders/${encodeURIComponent(email)}`);
+      toast.success(`${email} removed`);
+      fetchSenders();
+    } catch { toast.error("Failed to remove"); }
+  };
+
+  return (
+    <SectionCard>
+      <CardHeaderRow
+        iconBg={isDark ? "bg-blue-900/40" : "bg-blue-50"}
+        icon={<Send className="w-4 h-4 text-blue-500" />}
+        title="Active Sender Email"
+        subtitle="Switch which Brevo-verified email sends all outgoing emails"
+        action={
+          <button onClick={() => setShowAdd(s => !s)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all"
+            style={{ color: COLORS.mediumBlue, borderColor: COLORS.mediumBlue + "50", backgroundColor: isDark ? COLORS.mediumBlue + "15" : COLORS.mediumBlue + "0a" }}>
+            <Plus className="w-3 h-3" /> Add Sender
+          </button>
+        }
+      />
+
+      {/* Current active banner */}
+      <div className="mx-4 mt-4 p-3.5 rounded-xl border-2 flex items-center gap-3"
+        style={{ borderColor: COLORS.emeraldGreen, backgroundColor: isDark ? "rgba(31,175,90,0.1)" : "#f0fdf4" }}>
+        <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+          style={{ backgroundColor: isDark ? "rgba(31,175,90,0.2)" : "#dcfce7" }}>
+          <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-500 mb-0.5">Currently Active Sender</p>
+          <p className="text-sm font-bold truncate" style={{ color: isDark ? D.text : "#1e293b" }}>
+            {activeEmail || "Not configured"}
+          </p>
+          {activeName && <p className="text-xs" style={{ color: isDark ? D.muted : "#64748b" }}>{activeName}</p>}
+        </div>
+        <span className="text-[10px] font-bold px-2 py-1 rounded-full flex-shrink-0"
+          style={{ backgroundColor: isDark ? "rgba(31,175,90,0.2)" : "#dcfce7", color: COLORS.emeraldGreen }}>
+          {source === "db" ? "DB Setting" : "Env Var"}
+        </span>
+      </div>
+
+      {/* Add new sender form */}
+      <AnimatePresence>
+        {showAdd && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden">
+            <div className="mx-4 mt-3 p-4 rounded-xl border space-y-3"
+              style={{ borderColor: isDark ? D.border : "#e2e8f0", backgroundColor: isDark ? D.raised : "#f8fafc" }}>
+              <p className="text-xs font-bold" style={{ color: isDark ? D.text : "#374151" }}>
+                Add a Brevo-verified email address
+              </p>
+              <div className="flex gap-2">
+                <input value={newEmail} onChange={e => setNewEmail(e.target.value)}
+                  placeholder="info@yourdomain.com"
+                  onKeyDown={e => e.key === "Enter" && handleAdd()}
+                  className={inputCls + " flex-1"} style={inputStyle} />
+                <input value={newName} onChange={e => setNewName(e.target.value)}
+                  placeholder="Display Name"
+                  onKeyDown={e => e.key === "Enter" && handleAdd()}
+                  className={inputCls + " w-36"} style={inputStyle} />
+                <Button onClick={handleAdd} disabled={adding}
+                  className="h-10 px-4 rounded-xl text-sm font-semibold text-white flex-shrink-0"
+                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                  {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                </Button>
+              </div>
+              <p className="text-[10px]" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+                ⚠️ The email must be verified in your Brevo account (Senders, domains &amp; IPs) before it can be used.
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Sender list */}
+      <div className="p-4 space-y-2">
+        {loading ? (
+          <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-blue-400" /></div>
+        ) : senders.length === 0 ? (
+          <div className="py-6 text-center">
+            <Mail className="w-7 h-7 mx-auto mb-2 opacity-20" />
+            <p className="text-xs" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+              No saved senders yet. Add your Brevo-verified emails above.
+            </p>
+          </div>
+        ) : (
+          senders.map(s => {
+            const isActive = s.email === activeEmail;
+            return (
+              <motion.div key={s.email} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                className="flex items-center gap-3 p-3 rounded-xl border transition-all"
+                style={{
+                  borderColor: isActive ? COLORS.emeraldGreen : (isDark ? D.border : "#e2e8f0"),
+                  backgroundColor: isActive
+                    ? (isDark ? "rgba(31,175,90,0.08)" : "#f0fdf4")
+                    : (isDark ? D.raised : "#f8fafc"),
+                }}>
+                {/* Avatar */}
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center font-black text-white flex-shrink-0 text-sm"
+                  style={{ backgroundColor: isActive ? COLORS.emeraldGreen : (isDark ? "#475569" : "#94a3b8") }}>
+                  {s.name?.charAt(0)?.toUpperCase() || s.email?.charAt(0)?.toUpperCase() || "?"}
+                </div>
+
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold truncate" style={{ color: isDark ? D.text : "#1e293b" }}>
+                    {s.name || s.email}
+                  </p>
+                  <p className="text-xs truncate" style={{ color: isDark ? D.muted : "#64748b" }}>{s.email}</p>
+                </div>
+
+                {/* Status / Action */}
+                {isActive ? (
+                  <span className="flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: isDark ? "rgba(31,175,90,0.2)" : "#dcfce7", color: COLORS.emeraldGreen }}>
+                    <CheckCircle2 className="w-3 h-3" /> Active
+                  </span>
+                ) : (
+                  <button
+                    disabled={switching === s.email}
+                    onClick={() => handleSwitch(s.email, s.name || s.email)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all active:scale-95 flex-shrink-0"
+                    style={{ color: COLORS.mediumBlue, borderColor: COLORS.mediumBlue + "50", backgroundColor: isDark ? COLORS.mediumBlue + "15" : COLORS.mediumBlue + "0a" }}>
+                    {switching === s.email
+                      ? <Loader2 className="w-3 h-3 animate-spin" />
+                      : <Zap className="w-3 h-3" />}
+                    Use This
+                  </button>
+                )}
+
+                {/* Remove */}
+                {!isActive && s.source !== "env" && (
+                  <button onClick={() => handleRemove(s.email)}
+                    className="w-7 h-7 flex items-center justify-center rounded-lg transition-all flex-shrink-0"
+                    style={{ color: isDark ? D.muted : "#94a3b8" }}
+                    onMouseEnter={e => { e.currentTarget.style.color = COLORS.red; e.currentTarget.style.backgroundColor = isDark ? "rgba(239,68,68,0.12)" : "#fef2f2"; }}
+                    onMouseLeave={e => { e.currentTarget.style.color = isDark ? D.muted : "#94a3b8"; e.currentTarget.style.backgroundColor = "transparent"; }}>
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </motion.div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Info note */}
+      <div className="mx-4 mb-4 p-3 rounded-xl border flex items-start gap-2"
+        style={{ backgroundColor: isDark ? "rgba(59,130,246,0.08)" : "#eff6ff", borderColor: isDark ? "#1d4ed8" : "#bfdbfe" }}>
+        <Info className="w-3.5 h-3.5 text-blue-400 flex-shrink-0 mt-0.5" />
+        <p className="text-[11px]" style={{ color: isDark ? "#93c5fd" : "#1e40af" }}>
+          Switching sender takes effect immediately for all new emails — no server restart or redeployment needed.
+          The display name shown to recipients can be different from the email address (e.g. "MDA Associates" using info.taskosphere@gmail.com).
+        </p>
+      </div>
+    </SectionCard>
+  );
+}
+
 export default function EmailSettings() {
   const isDark = useDark();
 
@@ -1922,6 +2147,7 @@ export default function EmailSettings() {
     { id: "rules",     label: "Smart Rules",   icon: Tag       },
     { id: "compose",   label: "Compose & Send", icon: Send    },
     { id: "templates", label: "Templates",     icon: FileText  },
+    { id: "sender",    label: "Sender",        icon: Send      },
   ];
 
   return (
@@ -2169,6 +2395,22 @@ export default function EmailSettings() {
               </div>
             </div>
             <EmailTemplatesPanel isDark={isDark} />
+          </motion.div>
+        )}
+
+        {/* ══ SENDER TAB ══ */}
+        {activeTab === "sender" && (
+          <motion.div variants={itemVariants} className="space-y-4">
+            <div className="px-4 py-3.5 rounded-2xl border flex items-start gap-3"
+              style={{ backgroundColor: isDark ? "rgba(59,130,246,0.08)" : "#eff6ff", borderColor: isDark ? "#1d4ed8" : "#bfdbfe" }}>
+              <Send className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
+              <div className="text-xs" style={{ color: isDark ? "#93c5fd" : "#1e40af" }}>
+                <span className="font-bold">Switch your Brevo sender email on the fly.</span>
+                {" "}No redeploy needed — just click "Use This" to switch. All emails (reminders, birthday wishes, compliance alerts) will immediately send from the selected address.
+                Both emails must be verified in Brevo under Senders, domains &amp; IPs.
+              </div>
+            </div>
+            <SenderSelectorPanel isDark={isDark} />
           </motion.div>
         )}
 
