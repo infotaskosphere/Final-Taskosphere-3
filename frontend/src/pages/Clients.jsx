@@ -299,6 +299,9 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
   const mediaInputRef = React.useRef(null);
   const [showVariables, setShowVariables] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState('');
+  // Saved email templates (from Settings → Email Templates) — linked into bulk email
+  const [emailTemplates, setEmailTemplates] = useState([]);
+  const [subjectLine, setSubjectLine] = useState('');
   // Sender selector state (email mode only)
   const [activeSender, setActiveSender]   = useState(null);   // { email, name } from DB
   const [senderList,   setSenderList]     = useState([]);      // all saved senders
@@ -321,7 +324,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
       setSelectedIds(new Set(activeClients.map(c => c.id)));
       setMessage(''); setClientSearch(''); setCopied(false); setExportDone(false); setSelectedTemplate('');
       setSendProgress(null); setSendingBulk(false);
-      setMediaFile(null);
+      setMediaFile(null); setSubjectLine('');
       // Fetch active sender info for email mode (use authenticated api instance)
       setSenderLoading(true);
       Promise.all([
@@ -331,6 +334,10 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
         if (activeRes?.active_email) setActiveSender({ email: activeRes.active_email, name: activeRes.active_name || '' });
         if (listRes?.senders)        setSenderList(listRes.senders);
       }).finally(() => setSenderLoading(false));
+      // Load saved email templates (shared with Settings → Email Templates) for email mode
+      if (mode !== 'whatsapp') {
+        api.get('/email/client-templates').then(r => setEmailTemplates(r.data || [])).catch(() => setEmailTemplates([]));
+      }
       // Set default schedule to tomorrow 09:00
       const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
       setScheduleDate(tomorrow.toISOString().split('T')[0]);
@@ -583,7 +590,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
     if (emailClients.length === 0) { toast.error('No email addresses found for selected clients'); return; }
     if (!message.trim()) { toast.error('Please write a message first'); return; }
     const lines = message.trim().split('\n');
-    const subjectLine = lines[0].substring(0, 120) || 'Message from TaskoSphere';
+    const subj = (subjectLine.trim() || lines[0].substring(0, 120) || 'Message from TaskoSphere');
     setSendingBulk(true);
     setSendProgress({ done: 0, total: emailClients.length, results: [] });
     try {
@@ -591,14 +598,18 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
         email: c.email, name: c.company_name || '',
         variables: { name: c.company_name || 'Valued Client', email: c.email || '', phone: c.phone || '', gstin: c.gstin || '', city: c.city || '', services: (c.services || []).join(', ') },
       }));
-      const r = await api.post('/email/send-bulk-clients', { recipients, subject: subjectLine, body_template: message.trim(), is_html: false, send_method: 'auto', override_sender_email: activeSender?.email || null, override_sender_name: activeSender?.name || null });
+      const r = await api.post('/email/send-bulk-clients', {
+        recipients, subject: subj, body_template: message.trim(), is_html: false, send_method: 'auto',
+        override_sender_email: activeSender?.email || null, override_sender_name: activeSender?.name || null,
+        attachment_name: mediaFile?.name || '', attachment_base64: mediaFile?.base64 || '',
+      });
       setSendProgress({ done: r.data.sent, total: emailClients.length, results: r.data.failed_list || [] });
       toast.success(r.data.sent + ' email(s) sent' + (r.data.failed > 0 ? ', ' + r.data.failed + ' failed' : ''));
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Email send failed. Check Settings -> Email Accounts.');
       setSendProgress(null);
     } finally { setSendingBulk(false); }
-  }, [message, selectedClients, emailCount]);
+  }, [message, subjectLine, mediaFile, selectedClients, emailCount, activeSender]);
 
   const WA_GREEN = '#25D366';
   const WA_DARK  = '#128C7E';
@@ -913,6 +924,51 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
                 );
               })()}
 
+              {/* Email template picker — loads saved templates from Settings → Email */}
+              {!isWhatsApp && emailTemplates.length > 0 && (
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-widest mb-1.5 block" style={{ color: isDark ? '#64748b' : '#94a3b8' }}>Load Saved Email Template</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {emailTemplates.map(t => (
+                      <button key={t.id}
+                        onClick={() => {
+                          setMessage(t.body || '');
+                          setSubjectLine(t.subject || '');
+                          setSelectedTemplate(t.id);
+                          if (t.attachment_base64) {
+                            setMediaFile({
+                              name: t.attachment_name || 'attachment',
+                              mimeType: 'application/octet-stream',
+                              base64: t.attachment_base64,
+                              previewUrl: null,
+                              size: Math.round((t.attachment_base64.length * 3) / 4),
+                            });
+                          }
+                        }}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all flex items-center gap-1"
+                        style={{ background: selectedTemplate === t.id ? accentColor + '22' : (isDark ? '#1e293b' : '#f8fafc'), borderColor: selectedTemplate === t.id ? accentColor : (isDark ? '#334155' : '#e2e8f0'), color: selectedTemplate === t.id ? accentColor : (isDark ? '#94a3b8' : '#64748b') }}>
+                        {t.attachment_name ? <Paperclip className="h-3 w-3" /> : null}
+                        {t.name}
+                      </button>
+                    ))}
+                    <span className="text-[10px] self-center" style={{ color: isDark ? '#475569' : '#94a3b8' }}>or write your own</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Subject (email only) */}
+              {!isWhatsApp && (
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-widest mb-1.5 block" style={{ color: isDark ? '#64748b' : '#94a3b8' }}>Subject</label>
+                  <input
+                    value={subjectLine}
+                    onChange={e => setSubjectLine(e.target.value)}
+                    placeholder="e.g. GST filing reminder for {name}"
+                    className="w-full border rounded-xl text-sm px-3.5 py-2.5 outline-none transition-all"
+                    style={{ background: isDark ? '#1e293b' : '#f8fafc', borderColor: isDark ? '#334155' : '#e2e8f0', color: isDark ? '#e2e8f0' : '#0f172a' }} />
+                </div>
+              )}
+
               {/* Message composer */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
@@ -940,12 +996,13 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
                 <p className="text-[10px] mt-1" style={{ color: isDark ? '#475569' : '#94a3b8' }}>{message.length} chars · Use variables above for personalization per client</p>
               </div>
 
-              {/* ── Media Attachment ── */}
-              {isWhatsApp && (
+              {/* ── Media / File Attachment (WhatsApp + Email) ── */}
+              {(
                 <div>
                   <label className="text-[10px] font-bold uppercase tracking-widest mb-1.5 block" style={{ color: isDark ? '#64748b' : '#94a3b8' }}>
-                    Attach Media <span style={{ color: isDark ? '#334155' : '#cbd5e1', fontWeight: 400 }}>(image, PDF, Excel, Word — max 16 MB)</span>
+                    {isWhatsApp ? 'Attach Media' : 'Attach File'} <span style={{ color: isDark ? '#334155' : '#cbd5e1', fontWeight: 400 }}>{isWhatsApp ? '(image, PDF, Excel, Word — max 16 MB)' : '(PDF, Excel, Word, image — sent with every email)'}</span>
                   </label>
+
                   <input
                     type="file"
                     ref={mediaInputRef}
