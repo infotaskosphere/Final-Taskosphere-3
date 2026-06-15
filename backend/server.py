@@ -763,9 +763,11 @@ def fetch_indian_holidays_task():
 api_router = APIRouter(prefix="/api")
 
 # HELPERS - Email Service Functions
-async def _brevo_send(to_email: str, subject: str, body_plain: str, body_html: str = None):
+async def _brevo_send(to_email: str, subject: str, body_plain: str, body_html: str = None,
+                      attachments: list = None):
     """Core Brevo HTTP API sender — async, non-blocking.
     Sender email/name: DB active_sender setting → env vars fallback.
+    `attachments` is an optional list of {"name": str, "content": base64str}.
     """
     api_key = (os.getenv("BREVO_API_KEY") or "").strip()
     # Try DB active sender first, fall back to env vars
@@ -795,6 +797,13 @@ async def _brevo_send(to_email: str, subject: str, body_plain: str, body_html: s
     }
     if body_html:
         payload["htmlContent"] = body_html
+    if attachments:
+        clean = [
+            {"name": a.get("name") or "attachment", "content": a.get("content")}
+            for a in attachments if a and a.get("content")
+        ]
+        if clean:
+            payload["attachment"] = clean
 
     async with httpx.AsyncClient(timeout=30.0) as http_client:
         response = await http_client.post(
@@ -9822,6 +9831,8 @@ class ClientEmailTemplate(BaseModel):
     body:     str
     is_html:  bool = False
     category: str  = "general"   # general | follow_up | compliance | greeting | custom
+    attachment_name:   Optional[str] = ""    # optional file attached to every send
+    attachment_base64: Optional[str] = ""    # base64 (no data: prefix) of the attachment
 
 @api_router.get("/email/client-templates")
 async def list_client_email_templates(current_user: User = Depends(get_current_user)):
@@ -9839,10 +9850,19 @@ async def create_client_email_template(
         "name": body.name, "subject": body.subject,
         "body": body.body, "is_html": body.is_html,
         "category": body.category,
+        "attachment_name": (body.attachment_name or ""),
+        "attachment_base64": (body.attachment_base64 or ""),
         "created_by": current_user.id,
         "created_at": now, "updated_at": now,
     }
-    await db.client_email_templates.insert_one(doc)
+    try:
+        await db.client_email_templates.insert_one(doc)
+    except Exception as e:
+        logger.error(f"Create client email template failed: {e}")
+        raise HTTPException(500, f"Could not save template: {str(e)}")
+    # insert_one mutates `doc` to add a BSON _id which is not JSON-serializable —
+    # return a clean copy without it to avoid a 500 on the response.
+    doc.pop("_id", None)
     return doc
 
 @api_router.put("/email/client-templates/{template_id}")
@@ -9856,6 +9876,8 @@ async def update_client_email_template(
         {"id": template_id},
         {"$set": {"name": body.name, "subject": body.subject, "body": body.body,
                   "is_html": body.is_html, "category": body.category,
+                  "attachment_name": (body.attachment_name or ""),
+                  "attachment_base64": (body.attachment_base64 or ""),
                   "updated_at": now, "updated_by": current_user.id}},
     )
     if r.matched_count == 0: raise HTTPException(404, "Template not found")
@@ -9890,6 +9912,8 @@ class BulkClientEmailRequest(BaseModel):
     from_name:               Optional[str] = None
     override_sender_email:   Optional[str] = None   # per-request sender override (Clients bulk modal)
     override_sender_name:    Optional[str] = None
+    attachment_name:         Optional[str] = ""     # optional single attachment for all recipients
+    attachment_base64:       Optional[str] = ""     # base64 (no data: prefix)
 
 
 def _render_body(template: str, variables: dict) -> str:
@@ -9902,19 +9926,44 @@ def _render_body(template: str, variables: dict) -> str:
 
 async def _send_one_smtp(
     smtp_host, smtp_port, smtp_user, smtp_pass, from_name,
-    to_email, subject, body_plain, body_html=None
+    to_email, subject, body_plain, body_html=None, attachments=None
 ):
-    """Synchronous SMTP send wrapped for asyncio."""
-    import smtplib, ssl
+    """Synchronous SMTP send wrapped for asyncio.
+    `attachments` is an optional list of {"name": str, "content": base64str}.
+    """
+    import smtplib, ssl, base64 as _b64, mimetypes
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
+    from email.mime.base import MIMEBase
+    from email import encoders
 
+    body_part = None
     if body_html:
-        msg = MIMEMultipart("alternative")
-        msg.attach(MIMEText(body_plain, "plain", "utf-8"))
-        msg.attach(MIMEText(body_html, "html", "utf-8"))
+        body_part = MIMEMultipart("alternative")
+        body_part.attach(MIMEText(body_plain, "plain", "utf-8"))
+        body_part.attach(MIMEText(body_html, "html", "utf-8"))
     else:
-        msg = MIMEText(body_plain, "plain", "utf-8")
+        body_part = MIMEText(body_plain, "plain", "utf-8")
+
+    clean_atts = [a for a in (attachments or []) if a and a.get("content")]
+    if clean_atts:
+        msg = MIMEMultipart("mixed")
+        msg.attach(body_part)
+        for a in clean_atts:
+            fname = a.get("name") or "attachment"
+            try:
+                raw = _b64.b64decode(a["content"])
+            except Exception:
+                continue
+            ctype, _ = mimetypes.guess_type(fname)
+            maintype, subtype = (ctype.split("/", 1) if ctype else ("application", "octet-stream"))
+            part = MIMEBase(maintype, subtype)
+            part.set_payload(raw)
+            encoders.encode_base64(part)
+            part.add_header("Content-Disposition", "attachment", filename=fname)
+            msg.attach(part)
+    else:
+        msg = body_part
 
     msg["Subject"] = subject
     msg["From"] = f"{from_name} <{smtp_user}>" if from_name else smtp_user
@@ -9926,6 +9975,7 @@ async def _send_one_smtp(
         server.starttls(context=ctx)
         server.login(smtp_user, smtp_pass)
         server.sendmail(smtp_user, [to_email], msg.as_string())
+
 
 
 @api_router.post("/email/send-bulk-clients")
@@ -9989,6 +10039,14 @@ async def send_bulk_client_emails(
             raise HTTPException(500, "Brevo not configured (BREVO_API_KEY + SENDER_EMAIL required). "
                                      "Or select a company with SMTP settings.")
 
+    # ── Optional attachment (sent with every recipient) ─────────────────────
+    _attachments = None
+    if (req.attachment_base64 or "").strip():
+        _attachments = [{
+            "name": (req.attachment_name or "attachment"),
+            "content": req.attachment_base64.strip(),
+        }]
+
     # ── Send loop ──────────────────────────────────────────────────────────
     sent_count  = 0
     fail_count  = 0
@@ -10008,7 +10066,8 @@ async def send_bulk_client_emails(
 
         try:
             if use_brevo:
-                await _brevo_send(rec.email, subject_rendered, body_plain_r, body_html_r)
+                await _brevo_send(rec.email, subject_rendered, body_plain_r, body_html_r,
+                                  attachments=_attachments)
             else:
                 loop = asyncio.get_event_loop()
                 await loop.run_in_executor(
@@ -10018,6 +10077,7 @@ async def send_bulk_client_emails(
                         company_smtp["user"],  company_smtp["password"],
                         company_smtp["from_name"],
                         rec.email, subject_rendered, body_plain_r, body_html_r,
+                        attachments=_attachments,
                     )
                 )
             sent_count += 1
