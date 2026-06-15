@@ -283,6 +283,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
   const [exportDone, setExportDone] = useState(false);
   const [clientScope, setClientScope] = useState('active'); // 'active' | 'all'
   const [waServiceFilter, setWaServiceFilter] = useState('all'); // service filter inside WA popup
+  const [waClientTypeFilter, setWaClientTypeFilter] = useState('all'); // client-type filter inside WA/Email popup
   // Direct send & scheduling state
   const [sendMode, setSendMode] = useState(SEND_MODES.DIRECT); // direct | web | export | schedule
   const [waConnected, setWaConnected] = useState(null); // null=loading, true, false
@@ -321,6 +322,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
     if (open) {
       setClientScope('active');
       setWaServiceFilter('all');
+      setWaClientTypeFilter('all');
       setSelectedIds(new Set(activeClients.map(c => c.id)));
       setMessage(''); setClientSearch(''); setCopied(false); setExportDone(false); setSelectedTemplate('');
       setSendProgress(null); setSendingBulk(false);
@@ -403,14 +405,19 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
     if (waServiceFilter !== 'all') {
       base = base.filter(c => (c?.services ?? []).some(s => (s || '').toLowerCase().includes(waServiceFilter.toLowerCase())));
     }
+    // Apply client-type filter
+    if (waClientTypeFilter !== 'all') {
+      base = base.filter(c => (c?.client_type || 'proprietor') === waClientTypeFilter);
+    }
     if (!clientSearch.trim()) return base;
     const q = clientSearch.toLowerCase();
     return base.filter(c =>
       (c?.company_name || '').toLowerCase().includes(q) ||
       (c?.phone || '').includes(q) ||
-      (c?.email || '').toLowerCase().includes(q)
+      (c?.email || '').toLowerCase().includes(q) ||
+      (c?.gstin || '').toLowerCase().includes(q)
     );
-  }, [filteredClients, clientSearch, waServiceFilter]);
+  }, [filteredClients, clientSearch, waServiceFilter, waClientTypeFilter]);
 
   const selectedClients = useMemo(() => filteredClients.filter(c => selectedIds.has(c.id)), [filteredClients, selectedIds]);
 
@@ -814,23 +821,13 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
                   placeholder="Search clients…" value={clientSearch} onChange={e => setClientSearch(e.target.value)} />
               </div>
             </div>
-            {/* Service filter */}
-            <div className="px-3 py-2 border-b flex-shrink-0" style={{ borderColor: isDark ? '#1e3a5f' : '#f1f5f9' }}>
+            {/* Service + Client Type filters */}
+            <div className="px-3 py-2 border-b flex-shrink-0 space-y-1.5" style={{ borderColor: isDark ? '#1e3a5f' : '#f1f5f9' }}>
               <div className="flex items-center gap-1.5">
-                <span className="text-[9px] font-bold uppercase tracking-widest flex-shrink-0" style={{ color: isDark ? '#475569' : '#94a3b8' }}>Service</span>
+                <span className="text-[9px] font-bold uppercase tracking-widest flex-shrink-0 w-12" style={{ color: isDark ? '#475569' : '#94a3b8' }}>Service</span>
                 <select
                   value={waServiceFilter}
-                  onChange={e => {
-                    setWaServiceFilter(e.target.value);
-                    // Auto-select visible clients after filter change
-                    setTimeout(() => {
-                      setSelectedIds(prev => {
-                        const next = new Set(prev);
-                        // We'll let selectAllVisible handle this on next render
-                        return next;
-                      });
-                    }, 0);
-                  }}
+                  onChange={e => setWaServiceFilter(e.target.value)}
                   className="flex-1 h-7 text-[10px] font-semibold rounded-lg border px-2 focus:outline-none"
                   style={{ borderColor: waServiceFilter !== 'all' ? accentColor : (isDark ? '#334155' : '#e2e8f0'), background: waServiceFilter !== 'all' ? accentColor + '15' : (isDark ? '#1e293b' : '#fff'), color: waServiceFilter !== 'all' ? accentColor : (isDark ? '#94a3b8' : '#64748b') }}
                 >
@@ -839,18 +836,34 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
                     <option key={svc} value={svc}>{svc}</option>
                   ))}
                 </select>
-                {waServiceFilter !== 'all' && (
-                  <button onClick={() => setWaServiceFilter('all')}
-                    className="text-[9px] font-bold px-1.5 py-0.5 rounded"
-                    style={{ background: isDark ? '#334155' : '#f1f5f9', color: isDark ? '#94a3b8' : '#64748b' }}>
-                    ✕
-                  </button>
-                )}
               </div>
-              {waServiceFilter !== 'all' && (
-                <p className="text-[9px] mt-1" style={{ color: isDark ? '#475569' : '#94a3b8' }}>
-                  {displayedClients.length} client{displayedClients.length !== 1 ? 's' : ''} with "{waServiceFilter}"
-                </p>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] font-bold uppercase tracking-widest flex-shrink-0 w-12" style={{ color: isDark ? '#475569' : '#94a3b8' }}>Type</span>
+                <select
+                  value={waClientTypeFilter}
+                  onChange={e => setWaClientTypeFilter(e.target.value)}
+                  className="flex-1 h-7 text-[10px] font-semibold rounded-lg border px-2 focus:outline-none"
+                  style={{ borderColor: waClientTypeFilter !== 'all' ? accentColor : (isDark ? '#334155' : '#e2e8f0'), background: waClientTypeFilter !== 'all' ? accentColor + '15' : (isDark ? '#1e293b' : '#fff'), color: waClientTypeFilter !== 'all' ? accentColor : (isDark ? '#94a3b8' : '#64748b') }}
+                >
+                  <option value="all">All Types</option>
+                  {CLIENT_TYPES.map(t => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </select>
+              </div>
+              {(waServiceFilter !== 'all' || waClientTypeFilter !== 'all') && (
+                <div className="flex items-center justify-between pt-0.5">
+                  <p className="text-[9px]" style={{ color: isDark ? '#475569' : '#94a3b8' }}>
+                    {displayedClients.length} match{displayedClients.length !== 1 ? 'es' : ''}
+                  </p>
+                  <button
+                    onClick={() => { setWaServiceFilter('all'); setWaClientTypeFilter('all'); }}
+                    className="text-[9px] font-bold px-1.5 py-0.5 rounded"
+                    style={{ background: isDark ? '#334155' : '#f1f5f9', color: isDark ? '#94a3b8' : '#64748b' }}
+                  >
+                    Clear filters ✕
+                  </button>
+                </div>
               )}
             </div>
             {/* Select/clear */}
