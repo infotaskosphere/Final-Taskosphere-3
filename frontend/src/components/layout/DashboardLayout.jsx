@@ -15,6 +15,7 @@ import NotificationBell from './NotificationBell';
 import GifLoader from '@/components/ui/GifLoader.jsx';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
+import api from '@/lib/api';
 
 const COLORS = {
   deepBlue:     '#0D3B66',
@@ -202,11 +203,9 @@ const DashboardLayout = ({ children }) => {
   useEffect(() => {
     const fetchUnread = async () => {
       try {
-        const res = await fetch('/notifications/unread-count', { credentials: 'include' });
-        if (!res.ok) return;
-        const data = await res.json();
-        setHasUnread(data.count > 0);
-      } catch { /* ignore */ }
+        const { data } = await api.get('/notifications/unread-count', { _silent: true });
+        setHasUnread((data?.count ?? 0) > 0);
+      } catch { /* ignore — 401/403 handled globally by api interceptor */ }
     };
     fetchUnread();
     const interval = setInterval(fetchUnread, 30000);
