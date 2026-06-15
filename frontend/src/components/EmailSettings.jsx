@@ -29,7 +29,7 @@ import {
   CheckSquare, Filter, Tag, BookOpen, Activity, ChevronRight,
   Square, Save, CalendarOff,
   Send, FileText, Building2, Pencil, Users,
-  ToggleLeft, ToggleRight, Copy, Zap,
+  ToggleLeft, ToggleRight, Copy, Zap, Paperclip,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -1211,6 +1211,9 @@ function EmailComposePanel({ isDark }) {
   const [showPreview,  setShowPreview] = React.useState(false);
   const [sending,      setSending]     = React.useState(false);
   const [progress,     setProgress]    = React.useState(null);
+  const [composeAttachName,   setComposeAttachName]   = React.useState('');
+  const [composeAttachB64,    setComposeAttachB64]    = React.useState('');
+  const composeAttachRef = React.useRef(null);
   const bodyRef = React.useRef(null);
 
   // Fetch ALL clients by paginating through all pages
@@ -1305,7 +1308,22 @@ function EmailComposePanel({ isDark }) {
 
   const loadTpl = (tpl) => {
     setSubject(tpl.subject); setBody(tpl.body); setIsHtml(!!tpl.is_html);
-    toast.success(`Template "${tpl.name}" loaded`);
+    setComposeAttachName(tpl.attachment_name || '');
+    setComposeAttachB64(tpl.attachment_base64 || '');
+    toast.success(`Template "${tpl.name}" loaded${tpl.attachment_name ? ` · 📎 ${tpl.attachment_name}` : ''}`);
+  };
+
+  const handleComposeAttachFile = e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { toast.error('Attachment must be under 5 MB'); e.target.value=''; return; }
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const b64 = ev.target.result.split(',')[1];
+      setComposeAttachB64(b64);
+      setComposeAttachName(file.name);
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleSend = async () => {
@@ -1318,9 +1336,14 @@ function EmailComposePanel({ isDark }) {
         email: c.email, name: c.company_name || '',
         variables: { name: c.company_name||'Valued Client', email: c.email||'', phone: c.phone||'', gstin: c.gstin||'', city: c.city||'', services: (c.services||[]).join(', ') },
       }));
-      const r = await api.post('/email/send-bulk-clients', { recipients, subject, body_template: body, is_html: isHtml, company_id: selCompany||null, send_method: sendMethod });
+      const r = await api.post('/email/send-bulk-clients', {
+        recipients, subject, body_template: body, is_html: isHtml,
+        company_id: selCompany||null, send_method: sendMethod,
+        attachment_base64: composeAttachB64 || null,
+        attachment_name:   composeAttachName || null,
+      });
       setProgress({ done: r.data.sent, total: selectedClients.length, failed: r.data.failed });
-      toast.success(`\u2705 ${r.data.sent} email(s) sent`);
+      toast.success(`✅ ${r.data.sent} email(s) sent`);
     } catch (err) { toast.error(err.response?.data?.detail || 'Send failed'); }
     finally { setSending(false); }
   };
@@ -1421,6 +1444,31 @@ function EmailComposePanel({ isDark }) {
               placeholder={isHtml ? '<p>Dear {name},</p>\n<p>Your message here...</p>' : 'Dear {name},\n\nYour message here...\n\nRegards,\nThe Team'}
               className="w-full border rounded-xl px-3 py-2 text-sm font-mono resize-y bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400"
               style={{ borderColor: isDark?'#334155':'#e2e8f0' }} />
+          </div>
+
+          {/* ── Compose attachment ── */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1.5">Attachment <span className="font-normal text-slate-300">(optional · max 5 MB)</span></label>
+            {composeAttachName ? (
+              <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl border"
+                style={{ borderColor: isDark?'#334155':'#e2e8f0', background: isDark?'#1e293b':'#f8fafc' }}>
+                <Paperclip className="w-4 h-4 text-blue-400 flex-shrink-0"/>
+                <span className="text-xs font-medium flex-1 truncate" style={{ color: isDark?'#e2e8f0':'#1e293b' }}>{composeAttachName}</span>
+                <button type="button" onClick={() => { setComposeAttachName(''); setComposeAttachB64(''); if(composeAttachRef.current) composeAttachRef.current.value=''; }}
+                  className="w-5 h-5 flex items-center justify-center rounded-full hover:bg-red-100 dark:hover:bg-red-900/30 text-slate-400 hover:text-red-500 transition-colors flex-shrink-0">
+                  <X className="w-3 h-3"/>
+                </button>
+              </div>
+            ) : (
+              <label className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed cursor-pointer transition-colors hover:border-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-900/10"
+                style={{ borderColor: isDark?'#334155':'#cbd5e1' }}>
+                <Paperclip className="w-4 h-4 text-slate-400"/>
+                <span className="text-xs text-slate-400">Click to attach a file (PDF, DOCX, XLSX, image…)</span>
+                <input ref={composeAttachRef} type="file" className="hidden"
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.jpg,.jpeg,.png,.gif"
+                  onChange={handleComposeAttachFile}/>
+              </label>
+            )}
           </div>
         </div>
       </SectionCard>
@@ -1580,7 +1628,8 @@ function EmailTemplatesPanel({ isDark }) {
   const [templates, setTemplates] = React.useState([]);
   const [loading, setLoading]     = React.useState(true);
   const [editing, setEditing]     = React.useState(null);
-  const [form, setForm]           = React.useState({ name:'', subject:'', body:'', is_html:false, category:'general' });
+  const [form, setForm]           = React.useState({ name:'', subject:'', body:'', is_html:false, category:'general', attachment_name:'', attachment_base64:'' });
+  const attachInputRef = React.useRef(null);
   const [saving, setSaving]       = React.useState(false);
   const [deleting, setDeleting]   = React.useState(null);
   const bodyRef = React.useRef(null);
@@ -1593,19 +1642,39 @@ function EmailTemplatesPanel({ isDark }) {
   };
   React.useEffect(() => { load(); }, []);
 
-  const startEdit = t => { setForm({ name:t.name, subject:t.subject, body:t.body, is_html:!!t.is_html, category:t.category||'general' }); setEditing(t.id); };
-  const startNew  = ()  => { setForm({ name:'', subject:'', body:'', is_html:false, category:'general' }); setEditing('new'); };
-  const cancel    = ()  => setEditing(null);
+  const startEdit = t => { setForm({ name:t.name, subject:t.subject, body:t.body, is_html:!!t.is_html, category:t.category||'general', attachment_name:t.attachment_name||'', attachment_base64:t.attachment_base64||'' }); setEditing(t.id); };
+  const startNew  = ()  => { setForm({ name:'', subject:'', body:'', is_html:false, category:'general', attachment_name:'', attachment_base64:'' }); setEditing('new'); };
+  const cancel    = ()  => { setEditing(null); if(attachInputRef.current) attachInputRef.current.value=''; };
 
   const save = async () => {
     if (!form.name.trim()||!form.subject.trim()||!form.body.trim()) { toast.error('Name, subject and body required'); return; }
     setSaving(true);
     try {
-      if (editing==='new') { await api.post('/email/client-templates', form); toast.success('Template created'); }
-      else { await api.put(`/email/client-templates/${editing}`, form); toast.success('Template updated'); }
-      setEditing(null); load();
-    } catch (e) { toast.error(e.response?.data?.detail||'Save failed'); }
+      const payload = { ...form };
+      if (editing==='new') { await api.post('/email/client-templates', payload); toast.success('Template created'); }
+      else { await api.put(`/email/client-templates/${editing}`, payload); toast.success('Template updated'); }
+      setEditing(null);
+      if(attachInputRef.current) attachInputRef.current.value='';
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || `Save failed (${e.response?.status || 'network error'})`); }
     finally { setSaving(false); }
+  };
+
+  const handleAttachFile = e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { toast.error('Attachment must be under 5 MB'); e.target.value=''; return; }
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const b64 = ev.target.result.split(',')[1];
+      setForm(f => ({ ...f, attachment_name: file.name, attachment_base64: b64 }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeAttachment = () => {
+    setForm(f => ({ ...f, attachment_name: '', attachment_base64: '' }));
+    if(attachInputRef.current) attachInputRef.current.value='';
   };
 
   const del = async id => {
@@ -1685,6 +1754,32 @@ function EmailTemplatesPanel({ isDark }) {
                 className="w-full border rounded-xl px-3 py-2 text-sm font-mono resize-y bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-400"
                 style={{ borderColor: isDark?'#334155':'#e2e8f0' }} />
             </div>
+
+            {/* ── Attachment ── */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 mb-1.5">Attachment <span className="font-normal text-slate-300">(optional · max 5 MB · sent with every email using this template)</span></label>
+              {form.attachment_name ? (
+                <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl border"
+                  style={{ borderColor: isDark?'#334155':'#e2e8f0', background: isDark?'#1e293b':'#f8fafc' }}>
+                  <Paperclip className="w-4 h-4 text-indigo-400 flex-shrink-0"/>
+                  <span className="text-xs font-medium flex-1 truncate" style={{ color: isDark?'#e2e8f0':'#1e293b' }}>{form.attachment_name}</span>
+                  <button type="button" onClick={removeAttachment}
+                    className="w-5 h-5 flex items-center justify-center rounded-full hover:bg-red-100 dark:hover:bg-red-900/30 text-slate-400 hover:text-red-500 transition-colors flex-shrink-0">
+                    <X className="w-3 h-3"/>
+                  </button>
+                </div>
+              ) : (
+                <label className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed cursor-pointer transition-colors hover:border-indigo-400 hover:bg-indigo-50/50 dark:hover:bg-indigo-900/10"
+                  style={{ borderColor: isDark?'#334155':'#cbd5e1' }}>
+                  <Paperclip className="w-4 h-4 text-slate-400"/>
+                  <span className="text-xs text-slate-400">Click to attach a file (PDF, DOCX, XLSX, image…)</span>
+                  <input ref={attachInputRef} type="file" className="hidden"
+                    accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.jpg,.jpeg,.png,.gif"
+                    onChange={handleAttachFile}/>
+                </label>
+              )}
+            </div>
+
             <div className="flex gap-2 pt-1">
               <button type="button" onClick={save} disabled={saving}
                 className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-bold text-white transition-all active:scale-95 disabled:opacity-50"
@@ -1731,6 +1826,7 @@ function EmailTemplatesPanel({ isDark }) {
                         {(tpl.category||'general').replace('_',' ')}
                       </span>
                       {tpl.is_html&&<span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 text-orange-600">HTML</span>}
+                      {tpl.attachment_name&&<span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-100 text-violet-600 flex items-center gap-1"><Paperclip className="w-2.5 h-2.5"/>{tpl.attachment_name.length>18?tpl.attachment_name.slice(0,18)+'…':tpl.attachment_name}</span>}
                     </div>
                     <p className="text-xs font-medium text-slate-500 truncate">📧 {tpl.subject}</p>
                     <p className="text-xs text-slate-400 mt-0.5 line-clamp-2">{(tpl.body||'').replace(/<[^>]*>/g,'').slice(0,140)}</p>
