@@ -18,6 +18,7 @@ from datetime import datetime, date, timezone, timedelta
 # --- FIXED ROUTER IMPORTS ---
 # Added 'backend.' to invoicing to match the others
 from backend.quickcompany_trademark_router import router as qc_trademark_router
+from backend.whatsapp_hub import router as whatsapp_hub_router
 from backend.compliance import router as compliance_router, create_compliance_indexes
 from backend.ai_document_reader import router as ai_document_reader_router
 from backend.gst_reconciliation import router as gst_reconciliation_router
@@ -11170,3 +11171,4 @@ from backend.attendance_identix import iclock_getrequest, iclock_cdata, iclock_d
 app.add_api_route("/iclock/cdata",       iclock_cdata,       methods=["GET", "POST"])
 app.add_api_route("/iclock/getrequest",  iclock_getrequest,  methods=["GET", "POST"])
 app.add_api_route("/iclock/devicecmd",   iclock_devicecmd,   methods=["GET", "POST"])
+app.include_router(whatsapp_hub_router, prefix="/api")
