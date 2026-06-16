@@ -79,6 +79,35 @@ def _invalidate_sessions_cache():
     _sessions_cache["ts"] = 0.0
 
 
+# ── Keep-alive ping (prevents Render free-tier wa-bridge from sleeping) ──────
+# Render free instances spin down after ~15 min of no inbound traffic. When
+# that happens, the next real request (e.g. "Connect a WhatsApp Number")
+# arrives while the instance is cold-starting, and Render's edge returns 429s
+# during that window — which the browser then reports as a CORS error because
+# the failed/incomplete response has no CORS headers to read.
+# Pinging a cheap endpoint every few minutes keeps the instance warm so real
+# user requests never hit that cold-start window.
+async def ping_wa_bridge_keep_alive():
+    try:
+        async with httpx.AsyncClient(timeout=10) as c:
+            r = await c.get(f"{WA_BRIDGE_URL}/status")
+            logger.info(f"WA bridge keep-alive ping: {r.status_code}")
+    except Exception as e:
+        logger.warning(f"WA bridge keep-alive ping failed (non-fatal): {e}")
+
+
+def wa_bridge_keepalive_job():
+    """APScheduler sync wrapper — run every 5 minutes to keep wa-bridge warm."""
+    try:
+        from backend.server import app_event_loop
+        if app_event_loop is None or app_event_loop.is_closed():
+            return
+        future = asyncio.run_coroutine_threadsafe(ping_wa_bridge_keep_alive(), app_event_loop)
+        future.result(timeout=15)
+    except Exception as exc:
+        logger.warning(f"wa_bridge_keepalive_job failed (non-fatal): {exc}")
+
+
 # ── Pydantic models ──────────────────────────────────────────────────────────
 
 class WASessionCreate(BaseModel):
