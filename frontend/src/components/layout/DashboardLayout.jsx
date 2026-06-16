@@ -96,7 +96,7 @@ const NAV_GROUPS = [
       { path: '/users',          icon: Users,      label: 'Users',            permission: 'can_view_user_page'   },
       { path: '/staff-activity', icon: Activity,   label: 'Staff Activity',   adminOnly: true                    },
       { path: '/client-portal-manager', icon: Building2, label: 'Client Portal', permission: 'can_view_client_portal' },
-      { path: '/whatsapp-hub', icon: MessageCircle, label: 'WhatsApp Hub' },
+      { path: '/whatsapp-hub', icon: MessageCircle, label: 'WhatsApp Hub', permission: 'can_access_whatsapp_hub' },
     ],
   },
   {
