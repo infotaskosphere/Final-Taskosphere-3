@@ -47,7 +47,7 @@ from backend.client_portal import router as client_portal_router
 from backend.activity_monitor import router as activity_monitor_router
 from backend.whatsapp_integration import router as whatsapp_router
 from backend.whatsapp_scheduler import wa_birthday_job, wa_dsc_expiry_job, wa_compliance_job
-from backend.whatsapp_integration import wa_scheduled_bulk_job
+from backend.whatsapp_integration import wa_scheduled_bulk_job, wa_bridge_keepalive_job
 
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -522,6 +522,13 @@ async def startup_event():
             wa_scheduled_bulk_job,
             'interval', minutes=1,
             id="wa_scheduled_bulk", replace_existing=True,
+        )
+        # Keep wa-bridge warm so Render's free instance never spins down —
+        # fixes the 429/CORS/502 cascade caused by cold-start request bursts.
+        scheduler.add_job(
+            wa_bridge_keepalive_job,
+            'interval', minutes=5,
+            id="wa_bridge_keepalive", replace_existing=True,
         )
 
         scheduler.start()
