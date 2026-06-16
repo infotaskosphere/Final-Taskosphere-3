@@ -129,7 +129,7 @@ function QRModal({ sessionId, label, onClose, isDark }) {
       if (data.status === 'connected') { setStatus('connected'); clearTimeout(timerRef.current); setTimeout(onClose, 1400); return; }
       if (data.qr) { setQr(data.qr); setStatus('ready'); }
       else          { setStatus(data.status || 'waiting'); }
-      timerRef.current = setTimeout(poll, 6000);
+      timerRef.current = setTimeout(poll, 10000);
     } catch { setStatus('error'); }
   }, [sessionId, onClose]);
 
@@ -170,7 +170,7 @@ function PairCodeModal({ sessionId, label, onClose, isDark }) {
       if (data.status === 'connected') { setStatus('connected'); clearTimeout(timerRef.current); setTimeout(onClose, 1400); return; }
       if (data.code) { setCode(data.code); setStatus('ready'); }
       else           { setStatus(data.status || 'waiting'); }
-      timerRef.current = setTimeout(poll, 4000);
+      timerRef.current = setTimeout(poll, 8000);
     } catch { setStatus('error'); }
   }, [sessionId, onClose]);
 
@@ -207,11 +207,19 @@ function PairCodeModal({ sessionId, label, onClose, isDark }) {
 
 /* ── Add Number Panel (inline, inside hub) ─────────────────────────────────── */
 function AddNumberPanel({ isDark, onSuccess }) {
-  const [authMode, setAuthMode] = useState('qr');
-  const [label,   setLabel]   = useState('');
-  const [phone,   setPhone]   = useState('');
-  const [loading, setLoading] = useState(false);
-  const [result,  setResult]  = useState(null); // { sessionId, label, mode }
+  const [authMode,  setAuthMode]  = useState('qr');
+  const [label,     setLabel]     = useState('');
+  const [phone,     setPhone]     = useState('');
+  const [loading,   setLoading]   = useState(false);
+  const [result,    setResult]    = useState(null); // { sessionId, label, mode }
+  const [cooldown,  setCooldown]  = useState(0);   // seconds until retry allowed
+  const cooldownRef = useRef(null);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    cooldownRef.current = setTimeout(() => setCooldown(c => Math.max(0, c - 1)), 1000);
+    return () => clearTimeout(cooldownRef.current);
+  }, [cooldown]);
 
   const card   = isDark ? '#1e293b' : '#fff';
   const inner  = isDark ? '#0f172a' : '#f8fafc';
@@ -225,7 +233,8 @@ function AddNumberPanel({ isDark, onSuccess }) {
   };
 
   async function handleAdd() {
-    if (!label.trim()) { toast.error('Enter a name for this number'); return; }
+    if (cooldown > 0) return;
+    if (!label.trim()) { toast.error('Enter a label for this number'); return; }
     if (authMode === 'phone' && !phone.trim()) { toast.error('Enter the phone number with country code'); return; }
     setLoading(true);
     try {
@@ -235,7 +244,17 @@ function AddNumberPanel({ isDark, onSuccess }) {
       toast.success(authMode === 'phone' ? 'Session started — get your pairing code!' : 'Session started — scan the QR code!');
       setResult({ sessionId: data.sessionId, label: label.trim(), mode: authMode });
       setLabel(''); setPhone('');
-    } catch (e) { toast.error(e?.response?.data?.detail || 'Failed to start session'); }
+    } catch (e) {
+      const status = e?.response?.status;
+      const msg    = e?.response?.data?.detail || 'Failed to start session';
+      if (status === 429) {
+        const wait = parseInt(e?.response?.headers?.['retry-after'] || '30', 10);
+        setCooldown(wait || 30);
+        toast.error(`Bridge is rate-limiting. Please wait ${wait || 30} seconds.`);
+      } else {
+        toast.error(msg);
+      }
+    }
     finally { setLoading(false); }
   }
 
@@ -278,9 +297,16 @@ function AddNumberPanel({ isDark, onSuccess }) {
         )}
         <div style={{ display:'flex', gap:8 }}>
           <input style={{ ...inputStyle, flex:1 }} placeholder='Label — e.g. "GST Office", "Support Line"…' value={label} onChange={e => setLabel(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAdd()}/>
-          <button onClick={handleAdd} disabled={loading} style={{ display:'flex', alignItems:'center', gap:6, background:GRAD_BTN, color:'#fff', border:'none', borderRadius:10, padding:'9px 18px', cursor:'pointer', fontWeight:700, fontSize:13, whiteSpace:'nowrap', opacity: loading ? 0.6 : 1 }}>
-            {loading ? <RefreshCw size={13} style={{ animation:'spin 1s linear infinite' }}/> : (authMode === 'phone' ? <Hash size={13}/> : <QrCode size={13}/>)}
-            {loading ? 'Starting…' : (authMode === 'phone' ? 'Get Code' : 'Get QR')}
+          <button onClick={handleAdd} disabled={loading || cooldown > 0}
+            style={{ display:'flex', alignItems:'center', gap:6, border:'none', borderRadius:10, padding:'9px 18px', fontWeight:700, fontSize:13, whiteSpace:'nowrap', transition:'all 0.2s',
+              background: (loading || cooldown > 0) ? (isDark ? '#334155' : '#e2e8f0') : GRAD_BTN,
+              color:       (loading || cooldown > 0) ? muted : '#fff',
+              cursor:      (loading || cooldown > 0) ? 'not-allowed' : 'pointer' }}>
+            {loading
+              ? <><RefreshCw size={13} style={{ animation:'spin 1s linear infinite' }}/> Starting…</>
+              : cooldown > 0
+                ? <>{cooldown}s — wait</>
+                : <>{authMode === 'phone' ? <Hash size={13}/> : <QrCode size={13}/>} {authMode === 'phone' ? 'Get Code' : 'Get QR'}</>}
           </button>
         </div>
         <div style={{ background: inner, borderRadius:10, padding:'10px 12px', fontSize:12, color:muted, lineHeight:1.6 }}>
@@ -506,7 +532,7 @@ export default function WhatsAppHub() {
 
   useEffect(() => {
     loadSessions();
-    const schedule = () => { sessTimerRef.current = setTimeout(async () => { await loadSessions(); schedule(); }, 30000); };
+    const schedule = () => { sessTimerRef.current = setTimeout(async () => { await loadSessions(); schedule(); }, 60000); };
     schedule();
     return () => clearTimeout(sessTimerRef.current);
   }, [loadSessions]);
@@ -526,7 +552,7 @@ export default function WhatsAppHub() {
 
   useEffect(() => { loadContacts(); }, [loadContacts]);
   useEffect(() => {
-    const t = setInterval(loadContacts, 12000);
+    const t = setInterval(loadContacts, 30000);
     return () => clearInterval(t);
   }, [loadContacts]);
 
@@ -553,7 +579,7 @@ export default function WhatsAppHub() {
 
   useEffect(() => {
     if (!activeJid) return;
-    const t = setInterval(() => loadThread(activeJid), 8000);
+    const t = setInterval(() => loadThread(activeJid), 20000);
     return () => clearInterval(t);
   }, [activeJid, loadThread]);
 
