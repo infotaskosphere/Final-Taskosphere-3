@@ -132,8 +132,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_edit_attendance: true, can_view_compliance: true, can_manage_compliance: true,
       can_view_gst_reconciliation: true,
       can_view_all_visits: true, can_edit_visits: true, can_delete_visits: true, can_delete_own_visits: true,
-      can_view_client_portal: true,
-      can_manage_whatsapp: true,
+      can_view_client_portal: true,      can_manage_whatsapp: true,
+      can_access_whatsapp_hub: true,
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
       view_other_attendance: [], view_other_reports: [], view_other_todos: [],
       view_other_activity: [], view_other_visits: [],
@@ -186,8 +186,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_view_all_visits: false,     // own + team visits scoped server-side via department query
       can_edit_visits: true,          // Client Visits → EDIT/UPDATE (Own + Team)
       can_delete_visits: false,       // admin-granted only
-      can_delete_own_visits: true,    // always allowed for own records
-      can_manage_whatsapp: false,     // admin-granted only
+      can_delete_own_visits: true,    // always allowed for own records      can_manage_whatsapp: false,     // admin-granted only
+      can_access_whatsapp_hub: false,  // admin-granted only
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
       view_other_attendance: [], view_other_reports: [], view_other_todos: [],
       view_other_activity: [], view_other_visits: [],
@@ -240,8 +240,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_view_all_visits: false,     // scope: own visits only (server-side scoped)
       can_edit_visits: true,          // Client Visits → EDIT/UPDATE (Own)
       can_delete_visits: false,       // admin-granted only
-      can_delete_own_visits: true,    // always allowed for own records
-      can_manage_whatsapp: false,     // admin-granted only
+      can_delete_own_visits: true,    // always allowed for own records      can_manage_whatsapp: false,     // admin-granted only
+      can_access_whatsapp_hub: false,  // admin-granted only
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
       view_other_attendance: [], view_other_reports: [], view_other_todos: [],
       view_other_activity: [], view_other_visits: [],
@@ -292,6 +292,7 @@ const GLOBAL_PERMS = [
   { key: 'can_create_quotations',           label: 'Quotations Module',            desc: 'Create, edit, export and share quotations',              icon: Receipt     },
   { key: 'can_view_client_portal',          label: 'Client Portal Manager',        desc: 'Access the Client Portal Manager (admin-level module)',   icon: Building2   },
   { key: 'can_manage_whatsapp',             label: 'WhatsApp Settings',            desc: 'Access and configure WhatsApp integration settings',     icon: MessageSquare },
+  { key: 'can_access_whatsapp_hub',         label: 'WhatsApp Hub',                 desc: 'Access the WhatsApp Hub (unified inbox for all numbers)', icon: MessageCircle },
 ];
 
 const OPS_PERMS = [
