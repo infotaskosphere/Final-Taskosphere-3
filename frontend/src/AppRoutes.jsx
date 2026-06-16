@@ -147,7 +147,7 @@ function AppRoutes() {
       <Route path="/visits"     element={<Protected><PageLoader><VisitsPage /></PageLoader></Protected>} />
       <Route path="/reports"    element={<Protected><PageLoader><Reports /></PageLoader></Protected>} />
       <Route path="/ai-reader" element={<Protected><PageLoader><AIDocumentReader /></PageLoader></Protected>} />
-      <Route path="/whatsapp-hub" element={<Protected><PageLoader><WhatsAppHub /></PageLoader></Protected>} />
+      <Route path="/whatsapp-hub" element={<Permission permission="can_access_whatsapp_hub"><PageLoader><WhatsAppHub /></PageLoader></Permission>} />
 
 
       {/* ── COMPLIANCE GROUP ── */}
