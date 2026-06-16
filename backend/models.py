@@ -64,6 +64,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_manage_compliance": True,     # Create / edit / delete compliance masters
           "can_view_gst_reconciliation": True,  # GST Reconciliation — admin always has access
           "can_view_trademark_sphere": True,    # Trademark Sphere — admin always has access
+          "can_access_whatsapp_hub": True,    # WhatsApp Hub — admin always has access
           "can_view_all_visits": True,
           "can_edit_attendance": True,
           "can_edit_visits": True,
@@ -136,6 +137,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "view_other_todos": [],
           "view_other_activity": [],
           "assigned_clients": [],
+          "can_access_whatsapp_hub": False,     # ADMIN_GRANTED_ONLY
       },
       "staff": {
           # Staff: SCOPE = OWN only
@@ -194,6 +196,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "view_other_todos": [],
           "view_other_activity": [],
           "assigned_clients": [],
+          "can_access_whatsapp_hub": False,     # ADMIN_GRANTED_ONLY
       },
   }
 
