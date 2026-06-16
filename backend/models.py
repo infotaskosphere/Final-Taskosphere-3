@@ -76,6 +76,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "view_other_reports": [],
           "view_other_todos": [],
           "view_other_activity": [],
+                    "can_access_whatsapp_hub": False,     # ADMIN_GRANTED_ONLY
           "assigned_clients": [],
       },
       "manager": {
@@ -136,8 +137,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "view_other_reports": [],
           "view_other_todos": [],
           "view_other_activity": [],
+                    "can_access_whatsapp_hub": False,     # ADMIN_GRANTED_ONLY
           "assigned_clients": [],
-          "can_access_whatsapp_hub": False,     # ADMIN_GRANTED_ONLY
       },
       "staff": {
           # Staff: SCOPE = OWN only
@@ -195,8 +196,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "view_other_reports": [],
           "view_other_todos": [],
           "view_other_activity": [],
+                    "can_access_whatsapp_hub": False,     # ADMIN_GRANTED_ONLY
           "assigned_clients": [],
-          "can_access_whatsapp_hub": False,     # ADMIN_GRANTED_ONLY
       },
   }
 
@@ -276,6 +277,7 @@ class UserPermissions(BaseModel):
     view_other_todos: List[str] = Field(default_factory=list)
     view_other_activity: List[str] = Field(default_factory=list)
     assigned_clients: List[str] = Field(default_factory=list)
+    can_access_whatsapp_hub: bool = False
     governed_users: List[str] = Field(default_factory=list)   # users this person can manage (when can_manage_users=True)
 
     model_config = ConfigDict(extra="ignore")
