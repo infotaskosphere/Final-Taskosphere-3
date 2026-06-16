@@ -227,13 +227,14 @@ async function notifyHubIncoming(sessionId, sessionLabel, msg) {
 // SESSION MANAGEMENT
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function startSession(sessionId, webhookOnConnect = true) {
+async function startSession(sessionId, webhookOnConnect = true, pairingPhone = null) {
   const sessionDir = path.join(SESSIONS_DIR, sessionId);
   if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
 
   sessions[sessionId] = sessions[sessionId] || {};
   sessions[sessionId].status     = "connecting";
   sessions[sessionId].qrBase64   = null;
+  sessions[sessionId].pairCode   = null;
   sessions[sessionId].retryCount = (sessions[sessionId].retryCount || 0);
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
@@ -251,6 +252,23 @@ async function startSession(sessionId, webhookOnConnect = true) {
   });
 
   sessions[sessionId].socket = sock;
+
+  // ── Phone pairing: request an 8-digit code instead of showing a QR ───────
+  // Baileys requires the socket to NOT already be registered, and the
+  // pairing code can only be requested once the connection starts (but
+  // before a QR is scanned). We request it shortly after socket creation.
+  if (pairingPhone && !state.creds?.registered) {
+    try {
+      const code = await sock.requestPairingCode(pairingPhone);
+      sessions[sessionId].pairCode = code;
+      sessions[sessionId].status   = "awaiting_pairing";
+      console.log(`[${sessionId}] Pairing code generated: ${code}`);
+    } catch (e) {
+      console.error(`[${sessionId}] requestPairingCode failed:`, e.message);
+      sessions[sessionId].status = "error";
+      sessions[sessionId].error  = e.message;
+    }
+  }
 
   // ── Connection state changes ──────────────────────────────────────────────
   sock.ev.on("connection.update", async (update) => {
