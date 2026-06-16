@@ -1,50 +1,58 @@
 /**
- * WhatsAppHub.jsx  —  Unified WhatsApp inbox + Hub management
+ * WhatsAppHub.jsx — Multi-account WhatsApp Web
  *
- * Access model (enforced at route level via Permission guard):
- *   - Admin                           → always visible
- *   - User with can_access_whatsapp_hub → visible
- *   - Others                          → redirected to /dashboard by router
+ * A fully self-contained WhatsApp Web-style page.
+ * ─ Connect up to 10 WhatsApp numbers (QR code or phone pairing).
+ * ─ All conversations from all numbers appear in one unified inbox.
+ * ─ Each conversation shows which number it came from.
+ * ─ Send replies from any connected number.
+ * ─ Completely independent from WhatsApp Settings (that page is for
+ *   message templates only; this page owns all number management).
  *
- * Tabs:
- *   Inbox           — unified message thread viewer (all sessions)
- *   Connected Numbers — link / manage WhatsApp sessions (admin only tab)
- *   How It Works    — info
- *
- * NOTE: "Manage Hub Access" has been moved to User Governance (/users).
- *       Grant access there via the can_access_whatsapp_hub permission toggle.
+ * Access:  Admin → always. Others → via can_access_whatsapp_hub permission.
+ * Number management (add / remove) → Admin only tab inside this page.
  */
 
 import React, {
-  useState, useEffect, useCallback, useRef,
+  useState, useEffect, useCallback, useRef, useMemo,
 } from 'react';
 import {
   MessageCircle, Send, ChevronLeft, Search, RefreshCw,
-  CheckCheck, User2, AlertCircle, Phone, Loader2, Filter,
-  UserCheck, Trash2, Smartphone, QrCode, Wifi, WifiOff,
-  Plus, Pencil, Check, X, Hash, Copy, ShieldCheck, Eye,
-  ChevronDown,
+  CheckCheck, AlertCircle, Phone, Loader2, Filter,
+  Trash2, Smartphone, QrCode, Wifi, WifiOff,
+  Plus, Pencil, Check, X, Hash, Copy, ShieldCheck,
+  Settings2, Users2, Circle,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import api from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 
-// ─── Brand colours ─────────────────────────────────────────────────────────────
-const EMERALD  = '#128C7E';
-const GREEN    = '#25D366';
-const GRADIENT = `linear-gradient(135deg, ${EMERALD} 0%, ${GREEN} 100%)`;
-const GRAD_BTN = `linear-gradient(135deg, ${EMERALD}, ${GREEN})`;
+// ─── Brand colours ────────────────────────────────────────────────────────────
+const EMERALD   = '#128C7E';
+const GREEN     = '#25D366';
+const GRAD_BTN  = `linear-gradient(135deg, ${EMERALD}, ${GREEN})`;
 
-/* ── helpers ──────────────────────────────────────────────────────────────── */
+// Colour palette for session chips (up to 10 accounts)
+const SESSION_COLORS = [
+  '#25D366', '#128C7E', '#3b82f6', '#8b5cf6',
+  '#f59e0b', '#ef4444', '#06b6d4', '#10b981',
+  '#f97316', '#ec4899',
+];
+
+function sessionColor(idx) {
+  return SESSION_COLORS[idx % SESSION_COLORS.length];
+}
+
+/* ── Helpers ──────────────────────────────────────────────────────────────── */
 function fmtTime(ts) {
   if (!ts) return '';
-  const d = new Date(ts);
+  const d   = new Date(ts);
   const now = new Date();
-  const diffDays = Math.floor((now - d) / 86400000);
-  if (diffDays === 0) return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
-  if (diffDays === 1) return 'Yesterday';
-  if (diffDays < 7)  return d.toLocaleDateString('en-IN', { weekday: 'short' });
+  const diff = Math.floor((now - d) / 86400000);
+  if (diff === 0) return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+  if (diff === 1) return 'Yesterday';
+  if (diff < 7)  return d.toLocaleDateString('en-IN', { weekday: 'short' });
   return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
 }
 
@@ -61,385 +69,340 @@ function initials(name) {
   return name.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase();
 }
 
-function avatarColor(jid) {
-  const colors = [
-    'bg-emerald-500', 'bg-blue-500', 'bg-purple-500', 'bg-amber-500',
-    'bg-rose-500', 'bg-cyan-500', 'bg-indigo-500', 'bg-teal-500',
-  ];
-  let hash = 0;
-  for (const c of (jid || '')) hash = (hash * 31 + c.charCodeAt(0)) & 0xffff;
-  return colors[hash % colors.length];
+const AVATAR_COLORS = [
+  '#10b981','#3b82f6','#8b5cf6','#f59e0b',
+  '#ef4444','#06b6d4','#6366f1','#0f766e',
+];
+function avatarBg(jid) {
+  let h = 0;
+  for (const c of (jid || '')) h = (h * 31 + c.charCodeAt(0)) & 0xffff;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
 }
 
-/* ── Status badge ────────────────────────────────────────────────────────────*/
+/* ── Status badge ─────────────────────────────────────────────────────────── */
+function StatusDot({ status, size = 8 }) {
+  const map = {
+    connected:     '#22c55e',
+    awaiting_scan: '#f59e0b',
+    connecting:    '#6366f1',
+    reconnecting:  '#f97316',
+    disconnected:  '#ef4444',
+  };
+  return (
+    <span style={{
+      display: 'inline-block',
+      width: size, height: size,
+      borderRadius: '50%',
+      background: map[status] || '#9ca3af',
+      flexShrink: 0,
+    }} />
+  );
+}
+
 function StatusBadge({ status }) {
   const map = {
-    connected:     { label: 'Connected',    color: '#22c55e', bg: '#dcfce7' },
-    awaiting_scan: { label: 'Scan QR',      color: '#f59e0b', bg: '#fef3c7' },
-    connecting:    { label: 'Connecting…',  color: '#6366f1', bg: '#ede9fe' },
-    reconnecting:  { label: 'Reconnecting', color: '#f97316', bg: '#ffedd5' },
-    disconnected:  { label: 'Disconnected', color: '#ef4444', bg: '#fee2e2' },
+    connected:     { label: 'Connected',    bg: '#dcfce7', color: '#16a34a' },
+    awaiting_scan: { label: 'Scan QR',      bg: '#fef3c7', color: '#d97706' },
+    connecting:    { label: 'Connecting',   bg: '#ede9fe', color: '#7c3aed' },
+    reconnecting:  { label: 'Reconnecting', bg: '#ffedd5', color: '#ea580c' },
+    disconnected:  { label: 'Disconnected', bg: '#fee2e2', color: '#dc2626' },
   };
-  const s = map[status] || { label: status || 'Unknown', color: '#6b7280', bg: '#f3f4f6' };
+  const s = map[status] || { label: status || 'Unknown', bg: '#f3f4f6', color: '#6b7280' };
   return (
-    <span style={{ background: s.bg, color: s.color, padding: '2px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700 }}>
+    <span style={{ background: s.bg, color: s.color, padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 700 }}>
       {s.label}
     </span>
   );
 }
 
-/* ── QR Modal ────────────────────────────────────────────────────────────────*/
-const QR_POLL_BASE_MS = 6000;
+/* ── QR Modal ─────────────────────────────────────────────────────────────── */
 function QRModal({ sessionId, label, onClose, isDark }) {
-  const [qr, setQr]         = useState(null);
+  const [qr,     setQr]     = useState(null);
   const [status, setStatus] = useState('loading');
-  const pollRef             = useRef(null);
-  const backoffRef          = useRef(QR_POLL_BASE_MS);
-
-  const scheduleNext = useCallback((delayMs) => {
-    clearTimeout(pollRef.current);
-    pollRef.current = setTimeout(() => fetchQR(), delayMs); // eslint-disable-line
-  }, []); // eslint-disable-line
-
-  const fetchQR = useCallback(async () => {
-    try {
-      const { data } = await api.get(`/whatsapp/sessions/${sessionId}/qr`);
-      backoffRef.current = QR_POLL_BASE_MS;
-      if (data.status === 'connected') { setStatus('connected'); clearTimeout(pollRef.current); setTimeout(onClose, 1500); return; }
-      if (data.qr) { setQr(data.qr); setStatus('ready'); } else { setStatus(data.status || 'waiting'); }
-      scheduleNext(QR_POLL_BASE_MS);
-    } catch (err) {
-      if (err?.response?.status === 429) { backoffRef.current = Math.min(backoffRef.current * 2, 60000); scheduleNext(backoffRef.current); }
-      else setStatus('error');
-    }
-  }, [sessionId, onClose, scheduleNext]);
-
-  useEffect(() => { fetchQR(); return () => clearTimeout(pollRef.current); }, [fetchQR]);
-
+  const timerRef            = useRef(null);
   const card  = isDark ? '#1e293b' : '#fff';
   const muted = isDark ? '#94a3b8' : '#64748b';
 
+  const poll = useCallback(async () => {
+    try {
+      const { data } = await api.get(`/whatsapp/sessions/${sessionId}/qr`);
+      if (data.status === 'connected') { setStatus('connected'); clearTimeout(timerRef.current); setTimeout(onClose, 1400); return; }
+      if (data.qr) { setQr(data.qr); setStatus('ready'); }
+      else          { setStatus(data.status || 'waiting'); }
+      timerRef.current = setTimeout(poll, 6000);
+    } catch { setStatus('error'); }
+  }, [sessionId, onClose]);
+
+  useEffect(() => { poll(); return () => clearTimeout(timerRef.current); }, [poll]);
+
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)' }} onClick={onClose}>
-      <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} style={{ background: card, borderRadius: 20, padding: 32, maxWidth: 380, width: '90%', boxShadow: '0 24px 80px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: isDark ? '#f1f5f9' : '#0f172a' }}>Scan QR Code</h3>
-            <p style={{ margin: '4px 0 0', fontSize: 12, color: muted }}>{label}</p>
-          </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: muted, padding: 4 }}><X size={18} /></button>
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.65)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(4px)' }} onClick={onClose}>
+      <motion.div initial={{ scale:0.9, opacity:0 }} animate={{ scale:1, opacity:1 }} style={{ background:card, borderRadius:20, padding:28, maxWidth:360, width:'90%', boxShadow:'0 24px 80px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:16 }}>
+          <div><div style={{ fontWeight:700, fontSize:16, color: isDark ? '#f1f5f9' : '#0f172a' }}>Scan QR Code</div><div style={{ fontSize:12, color:muted, marginTop:2 }}>{label}</div></div>
+          <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', color:muted }}><X size={18}/></button>
         </div>
-        <div style={{ background: isDark ? '#0f172a' : '#f8fafc', borderRadius: 16, padding: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 280, flexDirection: 'column', gap: 12 }}>
-          {status === 'connected' && (<motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} style={{ textAlign: 'center' }}><CheckCheck size={56} color='#22c55e' /><p style={{ color: '#22c55e', fontWeight: 700, marginTop: 12 }}>Connected!</p></motion.div>)}
-          {status === 'ready' && qr && (<motion.img key={qr} initial={{ opacity: 0 }} animate={{ opacity: 1 }} src={qr} alt='WhatsApp QR' style={{ width: 220, height: 220, borderRadius: 8 }} />)}
-          {(status === 'loading' || status === 'connecting' || status === 'waiting') && (
-            <div style={{ textAlign: 'center' }}>
-              <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}><RefreshCw size={36} color={GREEN} /></motion.div>
-              <p style={{ color: muted, fontSize: 13, marginTop: 12 }}>{status === 'loading' ? 'Loading QR code…' : 'Waiting for QR code…'}</p>
-            </div>
-          )}
-          {status === 'error' && (
-            <div style={{ textAlign: 'center' }}>
-              <AlertCircle size={36} color='#ef4444' />
-              <p style={{ color: '#ef4444', fontSize: 13, marginTop: 8 }}>Failed to load QR</p>
-              <button onClick={fetchQR} style={{ marginTop: 8, background: GRAD_BTN, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13 }}>Retry</button>
-            </div>
-          )}
+        <div style={{ background: isDark ? '#0f172a' : '#f8fafc', borderRadius:14, padding:20, display:'flex', alignItems:'center', justifyContent:'center', minHeight:260, flexDirection:'column', gap:12 }}>
+          {status === 'connected' && <motion.div initial={{ scale:0 }} animate={{ scale:1 }} style={{ textAlign:'center' }}><CheckCheck size={52} color='#22c55e'/><p style={{ color:'#22c55e', fontWeight:700, marginTop:8 }}>Connected!</p></motion.div>}
+          {status === 'ready' && qr && <motion.img key={qr} initial={{ opacity:0 }} animate={{ opacity:1 }} src={qr} alt='QR' style={{ width:210, height:210, borderRadius:8 }}/>}
+          {['loading','waiting','connecting'].includes(status) && <div style={{ textAlign:'center' }}><motion.div animate={{ rotate:360 }} transition={{ repeat:Infinity, duration:1, ease:'linear' }}><RefreshCw size={34} color={GREEN}/></motion.div><p style={{ color:muted, fontSize:13, marginTop:10 }}>Waiting for QR…</p></div>}
+          {status === 'error' && <div style={{ textAlign:'center' }}><AlertCircle size={34} color='#ef4444'/><p style={{ color:'#ef4444', fontSize:13, marginTop:8 }}>Failed</p><button onClick={poll} style={{ marginTop:6, background:GRAD_BTN, color:'#fff', border:'none', borderRadius:8, padding:'6px 14px', cursor:'pointer', fontSize:12 }}>Retry</button></div>}
         </div>
-        {status === 'ready' && <p style={{ textAlign: 'center', fontSize: 12, color: muted, marginTop: 16, lineHeight: 1.6 }}>Open WhatsApp → Linked Devices → Link a Device → Scan this QR</p>}
-        <p style={{ textAlign: 'center', fontSize: 11, color: muted, marginTop: 8 }}>QR refreshes automatically every 6 seconds</p>
+        <p style={{ textAlign:'center', fontSize:12, color:muted, marginTop:12, lineHeight:1.6 }}>Open WhatsApp → Linked Devices → Link a Device → Scan this QR</p>
+        <p style={{ textAlign:'center', fontSize:11, color:muted, marginTop:4, opacity:0.7 }}>QR refreshes automatically</p>
       </motion.div>
     </div>
   );
 }
 
-/* ── Pair Code Modal ─────────────────────────────────────────────────────────*/
-const PAIR_POLL_BASE_MS = 4000;
+/* ── Pair Code Modal ──────────────────────────────────────────────────────── */
 function PairCodeModal({ sessionId, label, onClose, isDark }) {
   const [code,   setCode]   = useState(null);
   const [status, setStatus] = useState('loading');
   const [copied, setCopied] = useState(false);
-  const pollRef             = useRef(null);
-  const backoffRef          = useRef(PAIR_POLL_BASE_MS);
-
-  const scheduleNext = useCallback((ms) => { clearTimeout(pollRef.current); pollRef.current = setTimeout(() => fetchCode(), ms); }, []); // eslint-disable-line
-  const fetchCode = useCallback(async () => {
-    try {
-      const { data } = await api.get(`/whatsapp/sessions/${sessionId}/pair-code`);
-      backoffRef.current = PAIR_POLL_BASE_MS;
-      if (data.status === 'connected') { setStatus('connected'); clearTimeout(pollRef.current); setTimeout(onClose, 1500); return; }
-      if (data.code) { setCode(data.code); setStatus('ready'); } else { setStatus(data.status || 'waiting'); }
-      scheduleNext(PAIR_POLL_BASE_MS);
-    } catch (err) {
-      if (err?.response?.status === 429) { backoffRef.current = Math.min(backoffRef.current * 2, 30000); scheduleNext(backoffRef.current); }
-      else setStatus('error');
-    }
-  }, [sessionId, onClose, scheduleNext]);
-
-  useEffect(() => { fetchCode(); return () => clearTimeout(pollRef.current); }, [fetchCode]);
-  const handleCopy = () => { if (code) { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 2000); } };
+  const timerRef            = useRef(null);
   const card  = isDark ? '#1e293b' : '#fff';
   const muted = isDark ? '#94a3b8' : '#64748b';
-  const formatted = code ? `${code.slice(0, 4)}-${code.slice(4)}` : null;
+
+  const poll = useCallback(async () => {
+    try {
+      const { data } = await api.get(`/whatsapp/sessions/${sessionId}/pair-code`);
+      if (data.status === 'connected') { setStatus('connected'); clearTimeout(timerRef.current); setTimeout(onClose, 1400); return; }
+      if (data.code) { setCode(data.code); setStatus('ready'); }
+      else           { setStatus(data.status || 'waiting'); }
+      timerRef.current = setTimeout(poll, 4000);
+    } catch { setStatus('error'); }
+  }, [sessionId, onClose]);
+
+  useEffect(() => { poll(); return () => clearTimeout(timerRef.current); }, [poll]);
+
+  const formatted = code ? `${code.slice(0,4)}-${code.slice(4)}` : null;
+  const handleCopy = () => { if (code) { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 2000); } };
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)' }} onClick={onClose}>
-      <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} style={{ background: card, borderRadius: 20, padding: 32, maxWidth: 400, width: '90%', boxShadow: '0 24px 80px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-          <div><h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: isDark ? '#f1f5f9' : '#0f172a' }}>Phone Pairing Code</h3><p style={{ margin: '4px 0 0', fontSize: 12, color: muted }}>{label}</p></div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: muted, padding: 4 }}><X size={18} /></button>
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.65)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(4px)' }} onClick={onClose}>
+      <motion.div initial={{ scale:0.9, opacity:0 }} animate={{ scale:1, opacity:1 }} style={{ background:card, borderRadius:20, padding:28, maxWidth:380, width:'90%', boxShadow:'0 24px 80px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:16 }}>
+          <div><div style={{ fontWeight:700, fontSize:16, color: isDark ? '#f1f5f9' : '#0f172a' }}>Phone Pairing Code</div><div style={{ fontSize:12, color:muted, marginTop:2 }}>{label}</div></div>
+          <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', color:muted }}><X size={18}/></button>
         </div>
-        <div style={{ background: isDark ? '#0f172a' : '#f8fafc', borderRadius: 16, padding: 24, minHeight: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
-          {status === 'connected' && (<motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} style={{ textAlign: 'center' }}><CheckCheck size={56} color='#22c55e' /><p style={{ color: '#22c55e', fontWeight: 700, marginTop: 12 }}>Connected!</p></motion.div>)}
+        <div style={{ background: isDark ? '#0f172a' : '#f8fafc', borderRadius:14, padding:24, minHeight:200, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:14 }}>
+          {status === 'connected' && <motion.div initial={{ scale:0 }} animate={{ scale:1 }} style={{ textAlign:'center' }}><CheckCheck size={52} color='#22c55e'/><p style={{ color:'#22c55e', fontWeight:700, marginTop:8 }}>Connected!</p></motion.div>}
           {status === 'ready' && formatted && (
-            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ textAlign: 'center', width: '100%' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 8 }}><Hash size={20} color={GREEN} /><span style={{ fontSize: 13, fontWeight: 600, color: muted }}>Your Pairing Code</span></div>
-              <div style={{ fontSize: 38, fontWeight: 900, letterSpacing: '0.12em', color: isDark ? '#f1f5f9' : '#0f172a', fontFamily: 'monospace', marginBottom: 16 }}>{formatted}</div>
-              <button onClick={handleCopy} style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 auto', background: copied ? '#22c55e22' : GRAD_BTN, color: copied ? '#22c55e' : '#fff', border: copied ? '1.5px solid #22c55e' : 'none', borderRadius: 10, padding: '10px 20px', cursor: 'pointer', fontSize: 13, fontWeight: 700, transition: 'all 0.2s' }}>
-                {copied ? <><Check size={14} /> Copied!</> : <><Copy size={14} /> Copy Code</>}
+            <motion.div initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }} style={{ textAlign:'center', width:'100%' }}>
+              <div style={{ fontSize:38, fontWeight:900, letterSpacing:'0.12em', color: isDark ? '#f1f5f9' : '#0f172a', fontFamily:'monospace', marginBottom:14 }}>{formatted}</div>
+              <button onClick={handleCopy} style={{ display:'flex', alignItems:'center', gap:8, margin:'0 auto', background: copied ? '#22c55e22' : GRAD_BTN, color: copied ? '#22c55e' : '#fff', border: copied ? '1.5px solid #22c55e' : 'none', borderRadius:10, padding:'9px 18px', cursor:'pointer', fontSize:13, fontWeight:700 }}>
+                {copied ? <><Check size={13}/> Copied!</> : <><Copy size={13}/> Copy Code</>}
               </button>
             </motion.div>
           )}
-          {(status === 'loading' || status === 'connecting' || status === 'waiting') && (
-            <div style={{ textAlign: 'center' }}>
-              <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}><RefreshCw size={36} color={GREEN} /></motion.div>
-              <p style={{ color: muted, fontSize: 13, marginTop: 12 }}>Generating pairing code…</p>
-            </div>
-          )}
-          {status === 'error' && (
-            <div style={{ textAlign: 'center' }}>
-              <AlertCircle size={36} color='#ef4444' />
-              <p style={{ color: '#ef4444', fontSize: 13, marginTop: 8 }}>Failed to get pairing code</p>
-              <button onClick={fetchCode} style={{ marginTop: 8, background: GRAD_BTN, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13 }}>Retry</button>
-            </div>
-          )}
+          {['loading','waiting','connecting'].includes(status) && <div style={{ textAlign:'center' }}><motion.div animate={{ rotate:360 }} transition={{ repeat:Infinity, duration:1, ease:'linear' }}><RefreshCw size={34} color={GREEN}/></motion.div><p style={{ color:muted, fontSize:13, marginTop:10 }}>Generating code…</p></div>}
+          {status === 'error' && <div style={{ textAlign:'center' }}><AlertCircle size={34} color='#ef4444'/><p style={{ color:'#ef4444', fontSize:13, marginTop:8 }}>Failed</p><button onClick={poll} style={{ marginTop:6, background:GRAD_BTN, color:'#fff', border:'none', borderRadius:8, padding:'6px 14px', cursor:'pointer', fontSize:12 }}>Retry</button></div>}
         </div>
-        {status === 'ready' && (
-          <div style={{ marginTop: 16 }}>
-            <p style={{ fontSize: 12, color: muted, lineHeight: 1.7, margin: 0 }}>
-              <strong style={{ color: isDark ? '#e2e8f0' : '#334155' }}>Steps:</strong><br />
-              1. Open WhatsApp → Linked Devices → Link a Device<br />
-              2. Tap "Link with phone number instead"<br />
-              3. Enter your phone number, then type the code above
-            </p>
-          </div>
-        )}
+        {status === 'ready' && <p style={{ fontSize:12, color:muted, lineHeight:1.7, marginTop:14 }}><strong style={{ color: isDark ? '#e2e8f0' : '#334155' }}>Steps:</strong><br/>1. Open WhatsApp → Linked Devices → Link a Device<br/>2. Tap "Link with phone number instead"<br/>3. Enter your phone, then enter the code above</p>}
       </motion.div>
     </div>
   );
 }
 
-/* ── Connected Numbers Tab (Hub Settings) ────────────────────────────────────*/
-const SESSIONS_POLL_MS = 30000;
-function ConnectedNumbersTab({ isDark }) {
-  const [sessions,    setSessions]    = useState([]);
-  const [loading,     setLoading]     = useState(true);
-  const [newLabel,    setNewLabel]    = useState('');
-  const [newPhone,    setNewPhone]    = useState('');
-  const [authMode,    setAuthMode]    = useState('qr');
-  const [adding,      setAdding]      = useState(false);
-  const [qrSession,   setQrSession]   = useState(null);
-  const [pairSession, setPairSession] = useState(null);
-  const [editingId,   setEditingId]   = useState(null);
-  const [editLabel,   setEditLabel]   = useState('');
-  const [deletingId,  setDeletingId]  = useState(null);
-  const backoffRef = useRef(SESSIONS_POLL_MS);
-  const timerRef   = useRef(null);
+/* ── Add Number Panel (inline, inside hub) ─────────────────────────────────── */
+function AddNumberPanel({ isDark, onSuccess }) {
+  const [authMode, setAuthMode] = useState('qr');
+  const [label,   setLabel]   = useState('');
+  const [phone,   setPhone]   = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result,  setResult]  = useState(null); // { sessionId, label, mode }
 
-  const card   = isDark ? 'bg-slate-800 border-slate-700'  : 'bg-white border-slate-200';
-  const inner  = isDark ? 'bg-slate-900 border-slate-700'  : 'bg-slate-50 border-slate-200';
-  const txt    = isDark ? 'text-slate-100'                  : 'text-slate-800';
-  const muted  = isDark ? 'text-slate-400'                  : 'text-slate-500';
-  const inputC = ['w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-400 transition',
-                   isDark ? 'bg-slate-900 border-slate-700 text-slate-100 placeholder-slate-600' : 'bg-white border-slate-300 text-slate-800 placeholder-slate-400'].join(' ');
+  const card   = isDark ? '#1e293b' : '#fff';
+  const inner  = isDark ? '#0f172a' : '#f8fafc';
+  const border = isDark ? '#334155' : '#e2e8f0';
+  const txt    = isDark ? '#f1f5f9' : '#0f172a';
+  const muted  = isDark ? '#94a3b8' : '#64748b';
+  const inputStyle = {
+    width: '100%', border: `1px solid ${border}`, borderRadius: 10,
+    padding: '9px 12px', fontSize: 14, outline: 'none',
+    background: inner, color: txt, boxSizing: 'border-box',
+  };
 
-  const fetchSessions = useCallback(async () => {
-    if (document.hidden) return;
+  async function handleAdd() {
+    if (!label.trim()) { toast.error('Enter a name for this number'); return; }
+    if (authMode === 'phone' && !phone.trim()) { toast.error('Enter the phone number with country code'); return; }
     setLoading(true);
     try {
-      const { data } = await api.get('/whatsapp/sessions');
-      backoffRef.current = SESSIONS_POLL_MS;
-      setSessions(data.sessions || []);
-    } catch (err) {
-      if (err?.response?.status === 429) backoffRef.current = Math.min(backoffRef.current * 2, 120000);
-      else toast.error('Could not reach WhatsApp bridge — is wa-bridge running?');
-    } finally { setLoading(false); }
-  }, []);
-
-  useEffect(() => {
-    fetchSessions();
-    const schedule = () => { timerRef.current = setTimeout(async () => { await fetchSessions(); schedule(); }, backoffRef.current); };
-    schedule();
-    const onVis = () => { if (!document.hidden) { clearTimeout(timerRef.current); fetchSessions().then(schedule); } };
-    document.addEventListener('visibilitychange', onVis);
-    return () => { clearTimeout(timerRef.current); document.removeEventListener('visibilitychange', onVis); };
-  }, [fetchSessions]);
-
-  const handleAddSession = async () => {
-    if (!newLabel.trim()) { toast.error('Enter a label for this number'); return; }
-    if (authMode === 'phone' && !newPhone.trim()) { toast.error('Enter the phone number with country code'); return; }
-    setAdding(true);
-    try {
-      const payload = { label: newLabel.trim() };
-      if (authMode === 'phone') payload.pairing_phone = newPhone.replace(/\D/g, '');
+      const payload = { label: label.trim() };
+      if (authMode === 'phone') payload.pairing_phone = phone.replace(/\D/g, '');
       const { data } = await api.post('/whatsapp/sessions', payload);
       toast.success(authMode === 'phone' ? 'Session started — get your pairing code!' : 'Session started — scan the QR code!');
-      setNewLabel(''); setNewPhone('');
-      await fetchSessions();
-      if (authMode === 'phone') setPairSession({ sessionId: data.sessionId, label: data.label || newLabel });
-      else                      setQrSession(  { sessionId: data.sessionId, label: data.label || newLabel });
+      setResult({ sessionId: data.sessionId, label: label.trim(), mode: authMode });
+      setLabel(''); setPhone('');
     } catch (e) { toast.error(e?.response?.data?.detail || 'Failed to start session'); }
-    finally { setAdding(false); }
-  };
+    finally { setLoading(false); }
+  }
+
+  if (result) {
+    return (
+      <div>
+        {result.mode === 'qr'
+          ? <QRModal   sessionId={result.sessionId} label={result.label} isDark={isDark} onClose={() => { setResult(null); onSuccess(); }} />
+          : <PairCodeModal sessionId={result.sessionId} label={result.label} isDark={isDark} onClose={() => { setResult(null); onSuccess(); }} />
+        }
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: card, border: `1px solid ${border}`, borderRadius: 16, padding: 20, marginBottom: 16 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:14 }}>
+        <Plus size={16} color={GREEN} />
+        <span style={{ fontSize:14, fontWeight:700, color:txt }}>Connect a WhatsApp Number</span>
+      </div>
+
+      {/* Auth mode toggle */}
+      <div style={{ display:'flex', gap:4, background: inner, padding:4, borderRadius:12, marginBottom:14, width:'fit-content' }}>
+        {[{id:'qr', label:'QR Code', icon:QrCode}, {id:'phone', label:'Phone Number', icon:Phone}].map(({ id, label: lbl, icon: Icon }) => (
+          <button key={id} onClick={() => setAuthMode(id)}
+            style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 14px', borderRadius:9, fontSize:12, fontWeight:700, cursor:'pointer', border:'none', transition:'all 0.15s',
+              background: authMode === id ? GRAD_BTN : 'transparent',
+              color: authMode === id ? '#fff' : muted }}>
+            <Icon size={12}/>{lbl}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+        {authMode === 'phone' && (
+          <div>
+            <input style={inputStyle} placeholder='Phone with country code, e.g. 919876543210' value={phone} onChange={e => setPhone(e.target.value)} type='tel'/>
+            <p style={{ fontSize:11, color:muted, marginTop:4 }}>No + or spaces — country code + number, e.g. 91 for India</p>
+          </div>
+        )}
+        <div style={{ display:'flex', gap:8 }}>
+          <input style={{ ...inputStyle, flex:1 }} placeholder='Label — e.g. "GST Office", "Support Line"…' value={label} onChange={e => setLabel(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAdd()}/>
+          <button onClick={handleAdd} disabled={loading} style={{ display:'flex', alignItems:'center', gap:6, background:GRAD_BTN, color:'#fff', border:'none', borderRadius:10, padding:'9px 18px', cursor:'pointer', fontWeight:700, fontSize:13, whiteSpace:'nowrap', opacity: loading ? 0.6 : 1 }}>
+            {loading ? <RefreshCw size={13} style={{ animation:'spin 1s linear infinite' }}/> : (authMode === 'phone' ? <Hash size={13}/> : <QrCode size={13}/>)}
+            {loading ? 'Starting…' : (authMode === 'phone' ? 'Get Code' : 'Get QR')}
+          </button>
+        </div>
+        <div style={{ background: inner, borderRadius:10, padding:'10px 12px', fontSize:12, color:muted, lineHeight:1.6 }}>
+          {authMode === 'phone'
+            ? <><strong style={{ color:txt }}>Phone pairing:</strong> No QR camera needed. An 8-digit code appears — enter it in WhatsApp → Linked Devices → Link with phone number.</>
+            : <><strong style={{ color:txt }}>QR code:</strong> A QR code appears on screen. Scan it in WhatsApp → Linked Devices → Link a Device.</>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Sessions Manager Panel ───────────────────────────────────────────────── */
+function SessionsManager({ isDark, sessions, loading, onRefresh }) {
+  const [deletingId,  setDeletingId]  = useState(null);
+  const [editingId,   setEditingId]   = useState(null);
+  const [editLabel,   setEditLabel]   = useState('');
+
+  const card   = isDark ? '#1e293b' : '#fff';
+  const inner  = isDark ? '#0f172a' : '#f8fafc';
+  const border = isDark ? '#334155' : '#e2e8f0';
+  const txt    = isDark ? '#f1f5f9' : '#0f172a';
+  const muted  = isDark ? '#94a3b8' : '#64748b';
+  const inputStyle = { border: `1px solid ${border}`, borderRadius:8, padding:'5px 10px', fontSize:13, outline:'none', background:inner, color:txt, flex:1 };
 
   const handleDelete = async (sessionId) => {
     setDeletingId(sessionId);
-    try {
-      await api.delete(`/whatsapp/sessions/${sessionId}`);
-      toast.success('WhatsApp number disconnected');
-      await fetchSessions();
-    } catch { toast.error('Failed to remove session'); }
+    try { await api.delete(`/whatsapp/sessions/${sessionId}`); toast.success('Number disconnected'); onRefresh(); }
+    catch { toast.error('Failed to remove'); }
     finally { setDeletingId(null); }
   };
 
   const handleSaveLabel = async (sessionId) => {
-    try {
-      await api.patch(`/whatsapp/sessions/${sessionId}/label`, { label: editLabel });
-      setEditingId(null);
-      await fetchSessions();
-    } catch { toast.error('Failed to update label'); }
+    try { await api.patch(`/whatsapp/sessions/${sessionId}/label`, { label: editLabel }); setEditingId(null); onRefresh(); }
+    catch { toast.error('Failed to update label'); }
   };
 
   const connectedCount = sessions.filter(s => s.status === 'connected').length;
 
   return (
-    <div className="space-y-4">
-      {qrSession   && <QRModal       sessionId={qrSession.sessionId}   label={qrSession.label}   isDark={isDark} onClose={() => { setQrSession(null);   fetchSessions(); }} />}
-      {pairSession && <PairCodeModal sessionId={pairSession.sessionId} label={pairSession.label} isDark={isDark} onClose={() => { setPairSession(null); fetchSessions(); }} />}
-
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: 'Connected',    value: connectedCount,                                         color: '#22c55e' },
-          { label: 'Total Linked', value: sessions.length,                                        color: GREEN },
-          { label: 'Pending',      value: sessions.filter(s => s.status !== 'connected').length,  color: '#f59e0b' },
-        ].map(s => (
-          <div key={s.label} className={`rounded-xl border p-4 text-center ${card}`}>
-            <div style={{ fontSize: 28, fontWeight: 800, color: s.color }}>{s.value}</div>
-            <div className={`text-xs mt-1 ${muted}`}>{s.label}</div>
-          </div>
-        ))}
+    <div style={{ background: card, border: `1px solid ${border}`, borderRadius:16, overflow:'hidden' }}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'14px 16px', borderBottom:`1px solid ${border}` }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+          <Smartphone size={15} color={GREEN}/>
+          <span style={{ fontSize:14, fontWeight:700, color:txt }}>Connected Numbers</span>
+          <span style={{ background:'#dcfce7', color:'#16a34a', fontSize:11, fontWeight:700, padding:'1px 8px', borderRadius:20 }}>{connectedCount}/{sessions.length}</span>
+        </div>
+        <button onClick={onRefresh} style={{ background:'none', border:'none', cursor:'pointer', color:muted, padding:4 }}>
+          <RefreshCw size={14} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }}/>
+        </button>
       </div>
 
-      {/* Add new number */}
-      <div className={`rounded-2xl border shadow-sm p-5 ${card}`}>
-        <div className="flex items-center gap-2 mb-4">
-          <Plus size={16} className="text-emerald-500" />
-          <span className={`text-sm font-bold ${txt}`}>Add WhatsApp Number</span>
+      {sessions.length === 0 ? (
+        <div style={{ padding:24, textAlign:'center', color:muted, fontSize:13 }}>
+          <Smartphone size={32} style={{ margin:'0 auto 8px', opacity:0.3, display:'block' }}/>
+          No numbers connected yet — add one above
         </div>
-        <div className={`flex gap-1 p-1 rounded-xl mb-4 ${isDark ? 'bg-slate-900' : 'bg-slate-100'}`} style={{ width: 'fit-content' }}>
-          {[{ id: 'qr', label: 'QR Code', icon: QrCode }, { id: 'phone', label: 'Phone Number', icon: Phone }].map(({ id, label, icon: Icon }) => (
-            <button key={id} onClick={() => setAuthMode(id)}
-              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold transition ${authMode === id ? 'bg-white text-slate-800 shadow' : (isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700')}`}
-              style={authMode === id ? { background: isDark ? '#1e293b' : '#fff' } : {}}>
-              <Icon size={12} />{label}
+      ) : (
+        sessions.map((s, idx) => (
+          <div key={s.sessionId} style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 16px', borderBottom: idx < sessions.length-1 ? `1px solid ${border}` : 'none' }}>
+            <div style={{ width:10, height:10, borderRadius:'50%', background: sessionColor(idx), flexShrink:0 }}/>
+            <div style={{ width:36, height:36, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, background: s.status === 'connected' ? '#dcfce7' : (isDark ? '#1e293b' : '#f1f5f9') }}>
+              {s.status === 'connected' ? <Wifi size={16} color='#22c55e'/> : <WifiOff size={16} color='#9ca3af'/>}
+            </div>
+            <div style={{ flex:1, minWidth:0 }}>
+              {editingId === s.sessionId ? (
+                <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+                  <input style={inputStyle} value={editLabel} onChange={e => setEditLabel(e.target.value)} onKeyDown={e => { if (e.key==='Enter') handleSaveLabel(s.sessionId); if (e.key==='Escape') setEditingId(null); }} autoFocus/>
+                  <button onClick={() => handleSaveLabel(s.sessionId)} style={{ background:'none', border:'none', cursor:'pointer', color:'#22c55e', padding:4 }}><Check size={14}/></button>
+                  <button onClick={() => setEditingId(null)} style={{ background:'none', border:'none', cursor:'pointer', color:muted, padding:4 }}><X size={14}/></button>
+                </div>
+              ) : (
+                <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                  <span style={{ fontSize:13, fontWeight:600, color:txt, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.label || s.sessionId}</span>
+                  <button onClick={() => { setEditingId(s.sessionId); setEditLabel(s.label || ''); }} style={{ background:'none', border:'none', cursor:'pointer', color:muted, padding:2 }}><Pencil size={11}/></button>
+                </div>
+              )}
+              <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:3 }}>
+                <StatusBadge status={s.status}/>
+                {s.phoneNumber && <span style={{ fontSize:11, color:muted }}>+{s.phoneNumber}</span>}
+              </div>
+            </div>
+            <button onClick={() => handleDelete(s.sessionId)} disabled={deletingId === s.sessionId} style={{ background:'none', border:'none', cursor:'pointer', color:muted, padding:6, borderRadius:8, opacity: deletingId===s.sessionId ? 0.4 : 1 }}>
+              {deletingId === s.sessionId ? <RefreshCw size={14} style={{ animation:'spin 1s linear infinite' }}/> : <Trash2 size={14}/>}
             </button>
-          ))}
-        </div>
-        {authMode === 'phone' && (
-          <div className="mb-3">
-            <input className={`${inputC} mb-1`} placeholder="Phone with country code, e.g. 919876543210" value={newPhone} onChange={e => setNewPhone(e.target.value)} type="tel" />
-            <p className={`text-[11px] ${muted}`}>Include country code, no + or spaces — e.g. 91 for India</p>
           </div>
-        )}
-        <div className="flex gap-3">
-          <input className={`${inputC} flex-1`} placeholder='Label e.g. "MDA GST", "Office Line"…' value={newLabel} onChange={e => setNewLabel(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddSession()} />
-          <button onClick={handleAddSession} disabled={adding} className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold text-white transition hover:opacity-90 active:scale-95 disabled:opacity-60" style={{ background: GRAD_BTN, whiteSpace: 'nowrap' }}>
-            {adding ? <RefreshCw size={14} className="animate-spin" /> : (authMode === 'phone' ? <Hash size={14} /> : <QrCode size={14} />)}
-            {adding ? 'Starting…' : (authMode === 'phone' ? 'Get Code' : 'Get QR')}
-          </button>
-        </div>
-        <div className={`mt-3 p-3 rounded-xl text-xs ${isDark ? 'bg-slate-900/60 text-slate-400' : 'bg-slate-50 text-slate-500'}`}>
-          {authMode === 'phone'
-            ? <span><strong className={isDark ? 'text-slate-300' : 'text-slate-700'}>Phone Number method:</strong> No QR camera needed. An 8-digit code appears — enter it in WhatsApp → Linked Devices → Link with phone number.</span>
-            : <span><strong className={isDark ? 'text-slate-300' : 'text-slate-700'}>QR Code method:</strong> A QR code appears — scan it in WhatsApp → Linked Devices → Link a Device.</span>
-          }
-        </div>
-      </div>
-
-      {/* Session list */}
-      <div className={`rounded-2xl border shadow-sm ${card}`}>
-        <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
-          <div className="flex items-center gap-2"><Smartphone size={16} className="text-emerald-500" /><span className={`text-sm font-bold ${txt}`}>Linked Numbers</span></div>
-          <div className="flex items-center gap-2">
-            {connectedCount > 0 && <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-500"><ShieldCheck size={12} /> Auto-reconnect ON</span>}
-            <button onClick={fetchSessions} className={`p-1.5 rounded-lg transition hover:bg-slate-100 ${muted}`}><RefreshCw size={14} className={loading ? 'animate-spin' : ''} /></button>
-          </div>
-        </div>
-        {loading && sessions.length === 0 ? (
-          <div className={`p-8 text-center ${muted} text-sm`}><RefreshCw size={24} className="animate-spin mx-auto mb-3 opacity-50" />Connecting to bridge…</div>
-        ) : sessions.length === 0 ? (
-          <div className={`p-10 text-center ${muted}`}><Smartphone size={40} className="mx-auto mb-3 opacity-30" /><p className="text-sm font-medium">No numbers linked yet</p><p className="text-xs mt-1 opacity-70">Add a number above to get started</p></div>
-        ) : (
-          <div className="divide-y" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
-            <AnimatePresence>
-              {sessions.map(s => (
-                <motion.div key={s.sessionId} initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, height: 0 }} className="flex items-center gap-4 p-4">
-                  <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: s.status === 'connected' ? '#dcfce7' : (isDark ? '#1e293b' : '#f1f5f9') }}>
-                    {s.status === 'connected' ? <Wifi size={18} color='#22c55e' /> : <WifiOff size={18} color='#94a3b8' />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    {editingId === s.sessionId ? (
-                      <div className="flex gap-2 items-center">
-                        <input className={`${inputC} text-xs py-1`} value={editLabel} onChange={e => setEditLabel(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleSaveLabel(s.sessionId); if (e.key === 'Escape') setEditingId(null); }} autoFocus />
-                        <button onClick={() => handleSaveLabel(s.sessionId)} className="p-1 rounded text-emerald-500 hover:bg-emerald-50"><Check size={14} /></button>
-                        <button onClick={() => setEditingId(null)} className={`p-1 rounded ${muted} hover:bg-slate-100`}><X size={14} /></button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1.5">
-                        <span className={`text-sm font-semibold truncate ${txt}`}>{s.label}</span>
-                        <button onClick={() => { setEditingId(s.sessionId); setEditLabel(s.label || ''); }} className={`p-0.5 rounded hover:opacity-100 ${muted}`}><Pencil size={11} /></button>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2 mt-1">
-                      <StatusBadge status={s.status} />
-                      {s.phoneNumber && <span className={`text-[11px] ${muted}`}>+{s.phoneNumber}</span>}
-                    </div>
-                  </div>
-                  <button onClick={() => handleDelete(s.sessionId)} disabled={deletingId === s.sessionId} className={`p-2 rounded-lg transition ${muted} hover:bg-red-50 hover:text-red-500 disabled:opacity-40`}>
-                    {deletingId === s.sessionId ? <RefreshCw size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                  </button>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </div>
-        )}
-      </div>
+        ))
+      )}
     </div>
   );
 }
 
-/* ── Contact list item ───────────────────────────────────────────────────────*/
-function ContactItem({ contact, active, onClick }) {
-  const color   = avatarColor(contact.jid);
+/* ── Contact list item ────────────────────────────────────────────────────── */
+function ContactItem({ contact, active, onClick, sessionColorMap }) {
   const name    = contact.display_name || contact.phone;
   const preview = contact.latest_message?.body || '';
   const isOut   = contact.latest_message?.direction === 'out';
+  const bg      = avatarBg(contact.jid);
+  const numColor = sessionColorMap[contact.session_id] || '#25d366';
+
   return (
-    <button onClick={onClick} className={`w-full flex items-start gap-3 px-4 py-3 text-left transition-colors ${active ? 'bg-emerald-50 dark:bg-emerald-900/20 border-r-2 border-emerald-500' : 'hover:bg-[var(--bg-secondary)]'}`}>
-      <div className={`flex-shrink-0 w-11 h-11 rounded-full ${color} flex items-center justify-center text-white text-sm font-bold`}>{initials(name)}</div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between gap-1">
-          <span className="font-medium text-sm text-[var(--text-primary)] truncate">{name}</span>
-          <span className="text-xs text-[var(--text-secondary)] flex-shrink-0">{fmtTime(contact.last_message_at)}</span>
+    <button onClick={onClick}
+      style={{ width:'100%', display:'flex', alignItems:'flex-start', gap:12, padding:'12px 14px', textAlign:'left', cursor:'pointer', border:'none', borderRight: active ? '2.5px solid #25D366' : '2.5px solid transparent', background: active ? 'rgba(37,211,102,0.08)' : 'transparent', transition:'background 0.12s' }}>
+      {/* Avatar */}
+      <div style={{ flexShrink:0, width:44, height:44, borderRadius:'50%', background:bg, display:'flex', alignItems:'center', justifyContent:'center', color:'#fff', fontWeight:700, fontSize:14, position:'relative' }}>
+        {initials(name)}
+        {/* Session dot */}
+        <div style={{ position:'absolute', bottom:1, right:1, width:11, height:11, borderRadius:'50%', background:numColor, border:'2px solid white' }}/>
+      </div>
+      {/* Body */}
+      <div style={{ flex:1, minWidth:0 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:4 }}>
+          <span style={{ fontWeight:600, fontSize:13, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{name}</span>
+          <span style={{ fontSize:11, color:'#94a3b8', flexShrink:0 }}>{fmtTime(contact.last_message_at)}</span>
         </div>
-        <div className="flex items-center justify-between gap-1 mt-0.5">
-          <p className="text-xs text-[var(--text-secondary)] truncate">
-            {isOut && <span className="mr-1 opacity-60">↑</span>}
-            {preview || <span className="italic opacity-60">No messages</span>}
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:4, marginTop:2 }}>
+          <p style={{ fontSize:12, color:'#94a3b8', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', margin:0 }}>
+            {isOut && <span style={{ marginRight:4, opacity:0.6 }}>↑</span>}
+            {preview || <span style={{ fontStyle:'italic' }}>No messages</span>}
           </p>
           {contact.unread_count > 0 && (
-            <span className="flex-shrink-0 min-w-[18px] h-[18px] rounded-full bg-emerald-500 text-white text-[10px] font-bold flex items-center justify-center px-1">
+            <span style={{ flexShrink:0, minWidth:18, height:18, borderRadius:9, background:'#25D366', color:'#fff', fontSize:10, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', padding:'0 4px' }}>
               {contact.unread_count > 99 ? '99+' : contact.unread_count}
             </span>
           )}
@@ -450,93 +413,133 @@ function ContactItem({ contact, active, onClick }) {
 }
 
 /* ── Message bubble ───────────────────────────────────────────────────────── */
-function Bubble({ msg }) {
-  const isOut = msg.direction === 'out';
+function Bubble({ msg, sessionColorMap }) {
+  const isOut  = msg.direction === 'out';
+  const numColor = sessionColorMap[msg.session_id];
   return (
-    <div className={`flex ${isOut ? 'justify-end' : 'justify-start'} mb-1`}>
-      <div className={`max-w-[75%] px-3 py-2 rounded-2xl text-sm ${isOut ? 'bg-emerald-500 text-white rounded-br-sm' : 'bg-[var(--bg-secondary)] text-[var(--text-primary)] rounded-bl-sm border border-[var(--border)]'}`}>
-        {msg.session_label && !isOut && <p className="text-[10px] font-semibold mb-0.5 opacity-60 uppercase tracking-wide">via {msg.session_label}</p>}
-        <p className="whitespace-pre-wrap break-words">{msg.body}</p>
-        <p className={`text-[10px] mt-1 text-right ${isOut ? 'text-emerald-100' : 'text-[var(--text-secondary)]'}`}>{fmtFull(msg.timestamp)}</p>
+    <div style={{ display:'flex', justifyContent: isOut ? 'flex-end' : 'flex-start', marginBottom:4 }}>
+      <div style={{ maxWidth:'75%', padding:'8px 12px', borderRadius: isOut ? '16px 16px 4px 16px' : '16px 16px 16px 4px', fontSize:13, lineHeight:1.5,
+        background: isOut ? (numColor || '#25D366') : 'var(--bg-secondary, #f1f5f9)',
+        color: isOut ? '#fff' : 'var(--text-primary, #0f172a)',
+        border: isOut ? 'none' : '1px solid var(--border, #e2e8f0)' }}>
+        {msg.session_label && !isOut && (
+          <p style={{ fontSize:10, fontWeight:700, marginBottom:3, opacity:0.6, textTransform:'uppercase', letterSpacing:'0.05em', margin:'0 0 3px' }}>
+            via {msg.session_label}
+          </p>
+        )}
+        <p style={{ margin:0, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{msg.body}</p>
+        <p style={{ margin:'4px 0 0', fontSize:10, textAlign:'right', opacity: isOut ? 0.75 : 0.6 }}>{fmtFull(msg.timestamp)}</p>
       </div>
     </div>
   );
 }
 
-/* ── Main page ────────────────────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────────────────── */
+/* ── Main Page                                                              ── */
+/* ─────────────────────────────────────────────────────────────────────────── */
+
 export default function WhatsAppHub() {
   const { user } = useAuth();
   const isAdmin  = user?.role === 'admin';
 
-  // Dark mode
+  /* dark mode */
   const [isDark, setIsDark] = useState(() => typeof window !== 'undefined' && localStorage.getItem('theme') === 'dark');
   useEffect(() => {
-    const handler = () => setIsDark(document.documentElement.classList.contains('dark'));
-    const observer = new MutationObserver(handler);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-    return () => observer.disconnect();
+    const obs = new MutationObserver(() => setIsDark(document.documentElement.classList.contains('dark')));
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => obs.disconnect();
   }, []);
 
-  const [activeTab, setActiveTab] = useState('inbox');
+  /* view state */
+  const [activeTab,  setActiveTab]  = useState('inbox');    // 'inbox' | 'numbers'
+  const [mobileView, setMobileView] = useState('list');     // 'list'  | 'thread'
 
-  // Inbox state
-  const [contacts,        setContacts]        = useState([]);
-  const [sessions,        setSessions]        = useState([]);
-  const [activeJid,       setActiveJid]       = useState(null);
-  const [thread,          setThread]          = useState([]);
-  const [contact,         setContact]         = useState(null);
-  const [reply,           setReply]           = useState('');
-  const [search,          setSearch]          = useState('');
-  const [sessionFilter,   setSessionFilter]   = useState('');
-  const [unreadOnly,      setUnreadOnly]      = useState(false);
-  const [loadingContacts, setLoadingContacts] = useState(false);
-  const [loadingThread,   setLoadingThread]   = useState(false);
-  const [sending,         setSending]         = useState(false);
-  const [mobileView,      setMobileView]      = useState('list');
-  const [selectedSession, setSelectedSession] = useState('');
+  /* sessions */
+  const [sessions,     setSessions]     = useState([]);
+  const [sessLoading,  setSessLoading]  = useState(true);
+  const sessTimerRef = useRef(null);
+
+  /* inbox */
+  const [contacts,    setContacts]    = useState([]);
+  const [activeJid,   setActiveJid]   = useState(null);
+  const [thread,      setThread]      = useState([]);
+  const [contact,     setContact]     = useState(null);
+  const [search,      setSearch]      = useState('');
+  const [numFilter,   setNumFilter]   = useState('');       // session_id filter
+  const [unreadOnly,  setUnreadOnly]  = useState(false);
+  const [loadingC,    setLoadingC]    = useState(false);
+  const [loadingT,    setLoadingT]    = useState(false);
+
+  /* compose */
+  const [reply,       setReply]       = useState('');
+  const [sending,     setSending]     = useState(false);
+  const [fromSession, setFromSession] = useState('');
+
   const threadEndRef = useRef(null);
-  const pollRef      = useRef(null);
 
-  const card   = isDark ? 'bg-slate-800 border-slate-700'  : 'bg-white border-slate-200';
-  const txt    = isDark ? 'text-slate-100'                  : 'text-slate-800';
-  const muted  = isDark ? 'text-slate-400'                  : 'text-slate-500';
+  /* ── CSS for spin ── */
+  useEffect(() => {
+    if (!document.getElementById('wa-hub-spin')) {
+      const s = document.createElement('style');
+      s.id = 'wa-hub-spin';
+      s.textContent = '@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}';
+      document.head.appendChild(s);
+    }
+  }, []);
+
+  /* ── colour map: sessionId → colour ── */
+  const sessionColorMap = useMemo(() => {
+    const map = {};
+    sessions.forEach((s, i) => { map[s.sessionId] = sessionColor(i); });
+    return map;
+  }, [sessions]);
 
   /* ── load sessions ── */
-  useEffect(() => {
-    api.get('/whatsapp/sessions').then(({ data }) => setSessions(data?.sessions || [])).catch(() => {});
+  const loadSessions = useCallback(async () => {
+    setSessLoading(true);
+    try {
+      const { data } = await api.get('/whatsapp/sessions');
+      setSessions(data?.sessions || []);
+    } catch { /* bridge may be offline */ }
+    finally { setSessLoading(false); }
   }, []);
+
+  useEffect(() => {
+    loadSessions();
+    const schedule = () => { sessTimerRef.current = setTimeout(async () => { await loadSessions(); schedule(); }, 30000); };
+    schedule();
+    return () => clearTimeout(sessTimerRef.current);
+  }, [loadSessions]);
 
   /* ── load contacts ── */
   const loadContacts = useCallback(async () => {
-    setLoadingContacts(true);
+    setLoadingC(true);
     try {
-      const params = new URLSearchParams();
-      params.set('limit', '60');
-      if (sessionFilter) params.set('session_id', sessionFilter);
-      if (unreadOnly)    params.set('unread_only', 'true');
-      const { data } = await api.get(`/whatsapp/hub/inbox?${params}`);
+      const p = new URLSearchParams({ limit: '80' });
+      if (numFilter)  p.set('session_id', numFilter);
+      if (unreadOnly) p.set('unread_only', 'true');
+      const { data } = await api.get(`/whatsapp/hub/inbox?${p}`);
       setContacts(data.contacts || []);
-    } catch (e) { console.error(e); }
-    finally { setLoadingContacts(false); }
-  }, [sessionFilter, unreadOnly]);
+    } catch { /* silently */ }
+    finally { setLoadingC(false); }
+  }, [numFilter, unreadOnly]);
 
   useEffect(() => { loadContacts(); }, [loadContacts]);
-
   useEffect(() => {
-    pollRef.current = setInterval(loadContacts, 15000);
-    return () => clearInterval(pollRef.current);
+    const t = setInterval(loadContacts, 12000);
+    return () => clearInterval(t);
   }, [loadContacts]);
 
   /* ── load thread ── */
   const loadThread = useCallback(async (jid) => {
     if (!jid) return;
-    setLoadingThread(true);
+    setLoadingT(true);
     try {
       const { data } = await api.get(`/whatsapp/hub/conversations/${encodeURIComponent(jid)}`);
       setThread(data.messages || []);
       setContact(data.contact);
-    } catch (e) { console.error(e); }
-    finally { setLoadingThread(false); }
+    } catch { /* silently */ }
+    finally { setLoadingT(false); }
   }, []);
 
   useEffect(() => {
@@ -554,234 +557,278 @@ export default function WhatsAppHub() {
     return () => clearInterval(t);
   }, [activeJid, loadThread]);
 
-  /* ── send reply ── */
+  /* ── send ── */
   async function handleSend() {
     if (!reply.trim() || !activeJid || sending) return;
     setSending(true);
     try {
-      await api.post('/whatsapp/hub/reply', { jid: activeJid, message: reply.trim(), session_id: selectedSession || null });
+      await api.post('/whatsapp/hub/reply', { jid: activeJid, message: reply.trim(), session_id: fromSession || null });
       setReply('');
       await loadThread(activeJid);
       await loadContacts();
-    } catch (e) { alert(e?.response?.data?.detail || 'Failed to send message.'); }
+    } catch (e) { toast.error(e?.response?.data?.detail || 'Failed to send message'); }
     finally { setSending(false); }
   }
 
-  /* ── filtered contacts ── */
-  const filteredContacts = contacts.filter(c => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (c.display_name || '').toLowerCase().includes(q) || (c.phone || '').includes(q);
-  });
+  /* ── derived ── */
+  const filteredContacts = useMemo(() =>
+    contacts.filter(c => {
+      if (!search) return true;
+      const q = search.toLowerCase();
+      return (c.display_name || '').toLowerCase().includes(q) || (c.phone || '').includes(q);
+    }),
+  [contacts, search]);
 
-  const TABS = [
-    { id: 'inbox',   label: 'Inbox',             icon: MessageCircle },
-    ...(isAdmin ? [{ id: 'settings', label: 'Connected Numbers', icon: Smartphone }] : []),
-    { id: 'info',    label: 'How It Works',       icon: Eye },
+  const connectedSessions = sessions.filter(s => s.status === 'connected');
+  const noSessions        = sessions.length === 0 && !sessLoading;
+
+  /* ── colours for light/dark ── */
+  const bg     = isDark ? '#0f172a' : '#f0f2f5';
+  const panel  = isDark ? '#1e293b' : '#fff';
+  const border = isDark ? '#334155' : '#e2e8f0';
+  const txt    = isDark ? '#f1f5f9' : '#0f172a';
+  const muted  = isDark ? '#94a3b8' : '#64748b';
+
+  /* ── Number tabs ── */
+  const numTabs = [
+    { id: '', label: 'All', color: '#25D366' },
+    ...sessions.map((s, i) => ({ id: s.sessionId, label: s.label || `Acct ${i+1}`, color: sessionColor(i) })),
   ];
 
   return (
-    <div className="flex flex-col h-full min-h-0 space-y-0 -m-4 sm:-m-6">
-      {/* ── Header ── */}
-      <div className="relative overflow-hidden px-4 sm:px-6 pt-4 pb-0 flex-shrink-0"
-        style={{ background: GRADIENT, boxShadow: '0 4px 24px rgba(18,140,126,0.2)' }}>
-        <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
-          style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
-        <div className="relative flex items-center gap-3 mb-3">
-          <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0">
-            <MessageCircle className="h-5 w-5 text-white" />
+    <div style={{ display:'flex', flexDirection:'column', height:'100%', minHeight:0, margin:'-16px', overflow:'hidden', background:bg }}>
+
+      {/* ─── Top bar ─────────────────────────────────────────────────────── */}
+      <div style={{ flexShrink:0, background: `linear-gradient(135deg, ${EMERALD} 0%, ${GREEN} 100%)`, padding:'12px 16px 0', boxShadow:'0 2px 12px rgba(18,140,126,0.25)' }}>
+        {/* Title row */}
+        <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:10 }}>
+          <div style={{ width:38, height:38, borderRadius:10, background:'rgba(255,255,255,0.18)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+            <MessageCircle size={20} color='#fff'/>
           </div>
-          <div className="flex-1 min-w-0">
-            <h1 className="text-xl font-bold text-white tracking-tight leading-tight">WhatsApp Hub</h1>
-            <p className="text-white/60 text-[10px] font-semibold uppercase tracking-widest">
-              Unified inbox · All connected numbers
+          <div style={{ flex:1, minWidth:0 }}>
+            <h1 style={{ margin:0, fontSize:18, fontWeight:800, color:'#fff', lineHeight:1.2 }}>WhatsApp Hub</h1>
+            <p style={{ margin:0, fontSize:10, color:'rgba(255,255,255,0.6)', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.08em' }}>
+              {connectedSessions.length} of {sessions.length} number{sessions.length !== 1 ? 's' : ''} connected
             </p>
           </div>
-          {activeTab === 'inbox' && (
-            <div className="flex items-center gap-2">
-              <button onClick={() => setUnreadOnly(v => !v)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${unreadOnly ? 'bg-white text-emerald-700' : 'bg-white/15 text-white hover:bg-white/25'}`}>
-                <Filter size={12} />{unreadOnly ? 'Unread' : 'All'}
+          {/* Actions */}
+          <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+            {activeTab === 'inbox' && (
+              <>
+                <button onClick={() => setUnreadOnly(v => !v)}
+                  style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 10px', borderRadius:8, border:'none', cursor:'pointer', fontSize:11, fontWeight:700, background: unreadOnly ? '#fff' : 'rgba(255,255,255,0.18)', color: unreadOnly ? '#128C7E' : '#fff' }}>
+                  <Filter size={11}/>{unreadOnly ? 'Unread' : 'All'}
+                </button>
+                <button onClick={loadContacts} style={{ padding:6, borderRadius:8, border:'none', cursor:'pointer', background:'rgba(255,255,255,0.18)', color:'#fff' }}>
+                  <RefreshCw size={13} style={{ animation: loadingC ? 'spin 1s linear infinite' : 'none' }}/>
+                </button>
+              </>
+            )}
+            {isAdmin && (
+              <button onClick={() => setActiveTab(t => t === 'numbers' ? 'inbox' : 'numbers')}
+                style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 10px', borderRadius:8, border:'none', cursor:'pointer', fontSize:11, fontWeight:700, background: activeTab==='numbers' ? '#fff' : 'rgba(255,255,255,0.18)', color: activeTab==='numbers' ? '#128C7E' : '#fff' }}>
+                <Settings2 size={11}/> Manage Numbers
               </button>
-              <button onClick={loadContacts} className="p-1.5 rounded-lg bg-white/15 text-white hover:bg-white/25 transition">
-                <RefreshCw size={14} className={loadingContacts ? 'animate-spin' : ''} />
-              </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
-        {/* Tabs */}
-        <div className="flex gap-1">
-          {TABS.map(t => {
-            const I = t.icon;
-            const active = activeTab === t.id;
-            return (
-              <button key={t.id} onClick={() => setActiveTab(t.id)}
-                className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold border-b-2 transition ${active ? 'border-white text-white' : 'border-transparent text-white/60 hover:text-white/90'}`}>
-                <I size={13} />{t.label}
+
+        {/* Number filter tabs (inbox mode) */}
+        {activeTab === 'inbox' && sessions.length > 0 && (
+          <div style={{ display:'flex', gap:4, overflowX:'auto', paddingBottom:10, scrollbarWidth:'none' }}>
+            {numTabs.map(t => (
+              <button key={t.id} onClick={() => setNumFilter(t.id)}
+                style={{ flexShrink:0, display:'flex', alignItems:'center', gap:5, padding:'4px 12px', borderRadius:20, border:'none', cursor:'pointer', fontSize:11, fontWeight:700, transition:'all 0.15s',
+                  background: numFilter === t.id ? '#fff' : 'rgba(255,255,255,0.15)',
+                  color: numFilter === t.id ? t.color : 'rgba(255,255,255,0.85)' }}>
+                {t.id !== '' && <Circle size={8} fill={t.color} color={t.color}/>}
+                {t.label}
               </button>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        )}
+        {activeTab === 'inbox' && sessions.length === 0 && (
+          <div style={{ paddingBottom:10 }}/>
+        )}
       </div>
 
-      {/* ── Inbox Tab ── */}
+      {/* ─── Manage Numbers (admin tab) ─────────────────────────────────── */}
+      {activeTab === 'numbers' && isAdmin && (
+        <div style={{ flex:1, overflowY:'auto', padding:16 }}>
+          <AddNumberPanel isDark={isDark} onSuccess={() => { loadSessions(); loadContacts(); }}/>
+          <SessionsManager isDark={isDark} sessions={sessions} loading={sessLoading} onRefresh={loadSessions}/>
+          <p style={{ textAlign:'center', fontSize:12, color:muted, marginTop:12 }}>
+            You can connect up to 10 WhatsApp numbers. All messages appear in the Inbox tab.
+          </p>
+        </div>
+      )}
+
+      {/* ─── Inbox ──────────────────────────────────────────────────────── */}
       {activeTab === 'inbox' && (
-        <div className="flex flex-1 min-h-0 overflow-hidden">
-          {/* Contact list */}
-          <div className={`${mobileView === 'thread' ? 'hidden lg:flex' : 'flex'} flex-col border-r border-[var(--border)] flex-shrink-0`}
-            style={{ width: 320, minWidth: 240 }}>
-            {/* Search + session filter */}
-            <div className="p-3 border-b border-[var(--border)] space-y-2">
-              <div className="relative">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" />
-                <input
-                  className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-emerald-400"
-                  placeholder="Search contacts…"
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                />
+        <div style={{ flex:1, display:'flex', minHeight:0, overflow:'hidden' }}>
+
+          {/* ── Contact list ── */}
+          <div style={{ width:320, minWidth:240, flexShrink:0, display: mobileView === 'thread' ? 'none' : 'flex', flexDirection:'column', borderRight:`1px solid ${border}`, background:panel }}>
+            {/* Search */}
+            <div style={{ padding:'10px 12px', borderBottom:`1px solid ${border}`, background:panel }}>
+              <div style={{ position:'relative' }}>
+                <Search size={13} style={{ position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', color:muted }}/>
+                <input style={{ width:'100%', paddingLeft:32, paddingRight:12, paddingTop:7, paddingBottom:7, fontSize:13, border:`1px solid ${border}`, borderRadius:10, outline:'none', background: isDark ? '#0f172a' : '#f8fafc', color:txt, boxSizing:'border-box' }}
+                  placeholder='Search contacts…' value={search} onChange={e => setSearch(e.target.value)}/>
               </div>
-              {sessions.length > 1 && (
-                <select
-                  className="w-full px-3 py-1.5 text-xs rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] text-[var(--text-primary)] outline-none"
-                  value={sessionFilter}
-                  onChange={e => setSessionFilter(e.target.value)}
-                >
-                  <option value="">All numbers</option>
-                  {sessions.map(s => <option key={s.sessionId} value={s.sessionId}>{s.label || s.sessionId}</option>)}
-                </select>
-              )}
             </div>
 
-            {/* Contacts */}
-            <div className="flex-1 overflow-y-auto">
-              {loadingContacts && contacts.length === 0 ? (
-                <div className="p-8 text-center text-[var(--text-secondary)] text-sm">
-                  <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2 opacity-50" />Loading…
+            {/* Contact items */}
+            <div style={{ flex:1, overflowY:'auto', color:txt }}>
+              {/* No sessions connected — inline prompt (no redirect to Settings) */}
+              {noSessions && (
+                <div style={{ padding:24, textAlign:'center', color:muted }}>
+                  <Smartphone size={40} style={{ margin:'0 auto 10px', display:'block', opacity:0.3 }}/>
+                  <p style={{ fontSize:13, fontWeight:600, marginBottom:6 }}>No WhatsApp numbers connected</p>
+                  <p style={{ fontSize:12, lineHeight:1.6, marginBottom:14, opacity:0.8 }}>
+                    Connect a WhatsApp number to start receiving and sending messages from all your company accounts in one place.
+                  </p>
+                  {isAdmin ? (
+                    <button onClick={() => setActiveTab('numbers')}
+                      style={{ background:GRAD_BTN, color:'#fff', border:'none', borderRadius:10, padding:'9px 18px', cursor:'pointer', fontSize:13, fontWeight:700, display:'inline-flex', alignItems:'center', gap:6 }}>
+                      <Plus size={14}/> Connect a Number
+                    </button>
+                  ) : (
+                    <p style={{ fontSize:12, color:muted, fontStyle:'italic' }}>Ask your admin to connect a WhatsApp number.</p>
+                  )}
                 </div>
-              ) : filteredContacts.length === 0 ? (
-                <div className="p-8 text-center text-[var(--text-secondary)]">
-                  <MessageCircle size={36} className="mx-auto mb-2 opacity-20" />
-                  <p className="text-sm">{search ? 'No contacts match your search' : 'No conversations yet'}</p>
-                  {!search && <p className="text-xs mt-1 opacity-60">Messages will appear here when WhatsApp numbers receive them</p>}
-                </div>
-              ) : (
-                filteredContacts.map(c => (
-                  <ContactItem
-                    key={c.jid}
-                    contact={c}
-                    active={activeJid === c.jid}
-                    onClick={() => { setActiveJid(c.jid); setMobileView('thread'); }}
-                  />
-                ))
               )}
+
+              {/* Sessions exist but contacts empty */}
+              {!noSessions && filteredContacts.length === 0 && !loadingC && (
+                <div style={{ padding:24, textAlign:'center', color:muted }}>
+                  <MessageCircle size={36} style={{ margin:'0 auto 8px', display:'block', opacity:0.25 }}/>
+                  <p style={{ fontSize:13 }}>{search ? 'No contacts match' : 'No conversations yet'}</p>
+                  {!search && sessions.length > 0 && connectedSessions.length === 0 && (
+                    <p style={{ fontSize:12, marginTop:4, opacity:0.7 }}>Numbers are not connected. {isAdmin ? <button onClick={() => setActiveTab('numbers')} style={{ background:'none', border:'none', cursor:'pointer', color:'#25D366', fontWeight:700, fontSize:12, padding:0 }}>Fix in Manage Numbers →</button> : 'Ask admin to connect.'}</p>
+                  )}
+                </div>
+              )}
+              {loadingC && contacts.length === 0 && (
+                <div style={{ padding:20, textAlign:'center', color:muted }}>
+                  <RefreshCw size={20} style={{ margin:'0 auto 6px', display:'block', animation:'spin 1s linear infinite' }}/>
+                  <p style={{ fontSize:12 }}>Loading…</p>
+                </div>
+              )}
+
+              {filteredContacts.map(c => (
+                <ContactItem key={c.jid} contact={c} active={activeJid === c.jid} sessionColorMap={sessionColorMap}
+                  onClick={() => { setActiveJid(c.jid); setMobileView('thread'); }}/>
+              ))}
             </div>
           </div>
 
-          {/* Thread panel */}
-          <div className={`${mobileView === 'list' ? 'hidden lg:flex' : 'flex'} flex-1 flex-col min-w-0`}>
+          {/* ── Thread panel ── */}
+          <div style={{ flex:1, display: mobileView === 'list' ? 'none' : 'flex', flexDirection:'column', minWidth:0, background: isDark ? '#0b141a' : '#efeae2' }}>
             {!activeJid ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-[var(--text-secondary)] gap-3">
-                <MessageCircle size={48} className="opacity-20" />
-                <p className="text-sm font-medium">Select a conversation</p>
-                <p className="text-xs opacity-60">Choose a contact from the list to view messages</p>
+              <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:12, color:muted, padding:32 }}>
+                <div style={{ width:80, height:80, borderRadius:'50%', background: isDark ? '#1e293b' : '#fff', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 2px 12px rgba(0,0,0,0.1)' }}>
+                  <MessageCircle size={36} color={GREEN}/>
+                </div>
+                <div style={{ textAlign:'center' }}>
+                  <p style={{ fontSize:16, fontWeight:700, color:txt, margin:'0 0 4px' }}>WhatsApp Hub</p>
+                  <p style={{ fontSize:13, color:muted, margin:0 }}>Select a conversation from the left</p>
+                  {sessions.length > 1 && <p style={{ fontSize:12, color:muted, marginTop:6 }}>{sessions.length} numbers active · {contacts.length} conversations</p>}
+                </div>
               </div>
             ) : (
               <>
                 {/* Thread header */}
-                <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--border)] flex-shrink-0">
-                  <button onClick={() => { setMobileView('list'); setActiveJid(null); }} className="lg:hidden p-1 rounded-lg text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]">
-                    <ChevronLeft size={20} />
+                <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px', background:panel, borderBottom:`1px solid ${border}`, flexShrink:0 }}>
+                  <button onClick={() => { setMobileView('list'); setActiveJid(null); }} style={{ background:'none', border:'none', cursor:'pointer', color:muted, padding:4, display: mobileView==='thread' ? 'block' : 'none' }}>
+                    <ChevronLeft size={20}/>
                   </button>
-                  <div className={`w-9 h-9 rounded-full ${avatarColor(activeJid)} flex items-center justify-center text-white text-sm font-bold flex-shrink-0`}>
+                  <div style={{ width:38, height:38, borderRadius:'50%', background: avatarBg(activeJid), display:'flex', alignItems:'center', justifyContent:'center', color:'#fff', fontWeight:700, fontSize:14, flexShrink:0 }}>
                     {initials(contact?.display_name || contact?.phone)}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-sm text-[var(--text-primary)] truncate">{contact?.display_name || contact?.phone || activeJid}</p>
-                    {contact?.phone && <p className="text-xs text-[var(--text-secondary)]">+{contact.phone}</p>}
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <p style={{ margin:0, fontWeight:700, fontSize:14, color:txt, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{contact?.display_name || contact?.phone || activeJid}</p>
+                    {contact?.session_id && sessionColorMap[contact.session_id] && (
+                      <div style={{ display:'flex', alignItems:'center', gap:4, marginTop:1 }}>
+                        <Circle size={8} fill={sessionColorMap[contact.session_id]} color={sessionColorMap[contact.session_id]}/>
+                        <span style={{ fontSize:11, color:muted }}>{sessions.find(s=>s.sessionId===contact.session_id)?.label || contact.session_id}</span>
+                      </div>
+                    )}
                   </div>
                   {isAdmin && (
-                    <button onClick={() => { if (window.confirm('Delete this conversation and all messages?')) { api.delete(`/whatsapp/hub/conversations/${encodeURIComponent(activeJid)}`).then(() => { setActiveJid(null); setThread([]); loadContacts(); }).catch(() => alert('Failed to delete')); } }}
-                      className="p-1.5 rounded-lg text-[var(--text-secondary)] hover:text-red-500 hover:bg-red-50 transition">
-                      <Trash2 size={15} />
+                    <button title='Delete conversation' onClick={() => {
+                      if (window.confirm('Delete this conversation and all its messages?')) {
+                        api.delete(`/whatsapp/hub/conversations/${encodeURIComponent(activeJid)}`)
+                          .then(() => { setActiveJid(null); setThread([]); loadContacts(); })
+                          .catch(() => toast.error('Failed to delete'));
+                      }
+                    }} style={{ background:'none', border:'none', cursor:'pointer', color:muted, padding:6, borderRadius:8 }}>
+                      <Trash2 size={15}/>
                     </button>
                   )}
                 </div>
 
                 {/* Messages */}
-                <div className="flex-1 overflow-y-auto px-4 py-3">
-                  {loadingThread && thread.length === 0 ? (
-                    <div className="flex items-center justify-center h-full"><Loader2 className="w-5 h-5 animate-spin text-emerald-500" /></div>
+                <div style={{ flex:1, overflowY:'auto', padding:'12px 14px' }}>
+                  {loadingT && thread.length === 0 ? (
+                    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100%' }}><Loader2 size={20} color={GREEN} style={{ animation:'spin 1s linear infinite' }}/></div>
                   ) : (
-                    thread.map(msg => <Bubble key={msg.id} msg={msg} />)
+                    thread.map(msg => <Bubble key={msg.id} msg={msg} sessionColorMap={sessionColorMap}/>)
                   )}
-                  <div ref={threadEndRef} />
+                  <div ref={threadEndRef}/>
                 </div>
 
                 {/* Reply box */}
-                <div className="p-3 border-t border-[var(--border)] flex-shrink-0 space-y-2">
-                  {sessions.length > 1 && (
-                    <select
-                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] text-[var(--text-primary)] outline-none"
-                      value={selectedSession}
-                      onChange={e => setSelectedSession(e.target.value)}
-                    >
-                      <option value="">Auto-pick session</option>
-                      {sessions.filter(s => s.status === 'connected').map(s => <option key={s.sessionId} value={s.sessionId}>{s.label || s.sessionId}</option>)}
-                    </select>
+                <div style={{ padding:12, background:panel, borderTop:`1px solid ${border}`, flexShrink:0 }}>
+                  {/* Session picker */}
+                  {connectedSessions.length > 1 && (
+                    <div style={{ display:'flex', gap:4, marginBottom:8, flexWrap:'wrap' }}>
+                      <span style={{ fontSize:11, color:muted, alignSelf:'center', marginRight:4 }}>Send from:</span>
+                      {[{sessionId:'', label:'Auto'}, ...connectedSessions].map((s, i) => {
+                        const col = s.sessionId ? sessionColorMap[s.sessionId] : '#94a3b8';
+                        const active = fromSession === s.sessionId;
+                        return (
+                          <button key={s.sessionId||'auto'} onClick={() => setFromSession(s.sessionId)}
+                            style={{ padding:'3px 10px', borderRadius:20, border:`1.5px solid ${active ? col : (isDark?'#334155':'#e2e8f0')}`, cursor:'pointer', fontSize:11, fontWeight:700, background: active ? col+'22' : 'transparent', color: active ? col : muted }}>
+                            {s.sessionId !== '' && <Circle size={7} fill={col} color={col} style={{ marginRight:4, verticalAlign:'middle' }}/>}
+                            {s.label || `Acct ${i}`}
+                          </button>
+                        );
+                      })}
+                    </div>
                   )}
-                  <div className="flex gap-2">
-                    <textarea
-                      className="flex-1 px-3 py-2 text-sm rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-emerald-400 resize-none"
-                      rows={2}
-                      placeholder="Type a message…"
-                      value={reply}
-                      onChange={e => setReply(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-                    />
-                    <button
-                      onClick={handleSend}
-                      disabled={sending || !reply.trim()}
-                      className="px-4 rounded-xl text-white font-bold flex items-center gap-1.5 disabled:opacity-40 transition hover:opacity-90"
-                      style={{ background: GRAD_BTN }}
-                    >
-                      {sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+                  <div style={{ display:'flex', gap:8, alignItems:'flex-end' }}>
+                    <textarea rows={2} value={reply} onChange={e => setReply(e.target.value)}
+                      onKeyDown={e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                      placeholder='Type a message…  (Enter to send · Shift+Enter for new line)'
+                      style={{ flex:1, border:`1px solid ${border}`, borderRadius:12, padding:'10px 14px', fontSize:13, resize:'none', outline:'none', background: isDark ? '#0f172a' : '#f8fafc', color:txt, lineHeight:1.5 }}/>
+                    <button onClick={handleSend} disabled={sending || !reply.trim()}
+                      style={{ padding:'10px 16px', borderRadius:12, border:'none', cursor:'pointer', background: (!sending && reply.trim()) ? GRAD_BTN : (isDark?'#334155':'#e2e8f0'), color: (!sending && reply.trim()) ? '#fff' : muted, display:'flex', alignItems:'center', gap:6, fontWeight:700, fontSize:13, flexShrink:0 }}>
+                      {sending ? <Loader2 size={16} style={{ animation:'spin 1s linear infinite' }}/> : <Send size={16}/>}
                     </button>
                   </div>
                 </div>
               </>
             )}
           </div>
-        </div>
-      )}
 
-      {/* ── Connected Numbers Tab (Hub Settings — Admin only) ── */}
-      {activeTab === 'settings' && isAdmin && (
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-          <ConnectedNumbersTab isDark={isDark} />
-        </div>
-      )}
-
-      {/* ── How It Works ── */}
-      {activeTab === 'info' && (
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-          <div className={`rounded-2xl border shadow-sm p-6 max-w-2xl ${card}`}>
-            <div className="flex items-center gap-2 mb-4"><Eye className="h-4 w-4 text-emerald-500" /><span className={`text-base font-bold ${txt}`}>How WhatsApp Hub Works</span></div>
-            <div className="space-y-4 text-sm">
-              {[
-                { step: '1', title: 'Unified inbox for all numbers',      desc: 'All incoming and outgoing messages from every connected WhatsApp number appear here in one place, sorted by recency.' },
-                { step: '2', title: 'Connect numbers in Hub Settings',    desc: 'Admin can link WhatsApp numbers using QR code or phone pairing from the Connected Numbers tab above. Numbers auto-reconnect on restart.' },
-                { step: '3', title: 'Access is managed in User Governance', desc: 'Admins can grant WhatsApp Hub access to other users from the Users page → select a user → enable "WhatsApp Hub" permission. Admin always has access.' },
-                { step: '4', title: 'Reply from any connected number',    desc: 'When multiple numbers are connected, use the session picker to choose which number to reply from. Or leave it on Auto to use the first connected number.' },
-                { step: '5', title: 'Message templates in WhatsApp Settings', desc: 'Configure how messages look when sent from Invoicing, DSC alerts, Clients, and Password Vault — those settings live in WhatsApp Settings (sidebar).' },
-              ].map(item => (
-                <div key={item.step} className="flex gap-4">
-                  <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0 mt-0.5" style={{ background: GRAD_BTN }}>{item.step}</div>
-                  <div><p className={`font-semibold mb-0.5 ${txt}`}>{item.title}</p><p className={muted}>{item.desc}</p></div>
-                </div>
-              ))}
+          {/* Desktop: always show both panels */}
+          {mobileView === 'list' && (
+            <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:12, color:muted, background: isDark ? '#0b141a' : '#efeae2', padding:32 }}>
+              <div style={{ width:80, height:80, borderRadius:'50%', background: isDark ? '#1e293b' : '#fff', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 2px 12px rgba(0,0,0,0.1)' }}>
+                <MessageCircle size={36} color={GREEN}/>
+              </div>
+              <div style={{ textAlign:'center' }}>
+                <p style={{ fontSize:16, fontWeight:700, color:txt, margin:'0 0 4px' }}>WhatsApp Hub</p>
+                <p style={{ fontSize:13, color:muted, margin:0 }}>
+                  {noSessions
+                    ? (isAdmin ? 'Click "Manage Numbers" to connect your first WhatsApp number.' : 'No numbers connected yet — ask your admin.')
+                    : 'Select a conversation to view messages.'}
+                </p>
+                {sessions.length > 0 && <p style={{ fontSize:12, color:muted, marginTop:6 }}>{sessions.length} number{sessions.length!==1?'s':''} · {contacts.length} conversation{contacts.length!==1?'s':''}</p>}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
     </div>
