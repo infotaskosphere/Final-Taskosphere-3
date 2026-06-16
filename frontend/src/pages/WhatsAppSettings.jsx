@@ -1,35 +1,18 @@
 // =============================================================================
-// WhatsAppSettings.jsx — Multi-number WhatsApp Web + Message Templates
-// =============================================================================
-//
-// FIX SUMMARY (429 Too Many Requests / 502 Bad Gateway on Render free tier)
-// ─────────────────────────────────────────────────────────────────────────────
-// Root cause: the old code polled the wa-bridge far too aggressively.
-//   • ConnectedNumbersTab polled /sessions every 8 s — any open tab hammered
-//     the bridge constantly, causing 429 rate-limit responses.
-//   • QRModal polled the QR endpoint every 3 s — even more aggressive.
-//   • No pause when the browser tab was hidden/background.
-//   • No backoff after a 429 — the next poll still fired at the normal rate.
-//
-// Changes in this file:
-//   1. ConnectedNumbersTab: interval 8 s → 30 s.
-//   2. ConnectedNumbersTab: polling paused when tab is hidden (visibilitychange).
-//   3. ConnectedNumbersTab: exponential backoff (up to 120 s) after a 429.
-//   4. QRModal: interval 3 s → 6 s.
-//   5. QRModal: exponential backoff after a 429.
-//   6. Updated the "QR refreshes every N seconds" hint to match new interval.
+// frontend/src/pages/WhatsAppSettings.jsx
+// PURPOSE: Message templates for sending WhatsApp messages to clients.
+// INDEPENDENT from WhatsApp Hub (connected numbers are managed in Hub).
+// Accessible to ALL authenticated users (not admin-only).
 // =============================================================================
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { useDark } from "@/hooks/useDark";
 import { useAuth } from "@/contexts/AuthContext";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { toast } from "sonner";
 import {
   MessageCircle, Settings, Save, CheckCircle2, FileText, Users,
-  Shield, Key, Eye, Building2, Plus, Trash2, Smartphone, QrCode,
-  Wifi, WifiOff, RefreshCw, Link, Unlink, ChevronRight, AlertCircle,
-  Pencil, Check, X, Phone, Hash, Copy, ShieldCheck,
+  Shield, Key, Eye, Building2,
 } from "lucide-react";
 import { getWASettings, saveWASettings } from "@/hooks/useWhatsApp";
 import api from "@/lib/api";
@@ -70,534 +53,15 @@ function Toggle({ on, onChange, isDark }) {
   );
 }
 
-// ─── Status badge ─────────────────────────────────────────────────────────────
-function StatusBadge({ status }) {
-  const map = {
-    connected:     { label: "Connected",     color: "#22c55e", bg: "#dcfce7" },
-    awaiting_scan: { label: "Scan QR",       color: "#f59e0b", bg: "#fef3c7" },
-    connecting:    { label: "Connecting…",   color: "#6366f1", bg: "#ede9fe" },
-    reconnecting:  { label: "Reconnecting",  color: "#f97316", bg: "#ffedd5" },
-    disconnected:  { label: "Disconnected",  color: "#ef4444", bg: "#fee2e2" },
-  };
-  const s = map[status] || { label: status || "Unknown", color: "#6b7280", bg: "#f3f4f6" };
-  return (
-    <span style={{ background: s.bg, color: s.color, padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700 }}>
-      {s.label}
-    </span>
-  );
-}
-
-// ─── QR Modal ─────────────────────────────────────────────────────────────────
-// FIX: interval increased from 3 s → 6 s; exponential backoff on 429.
-const QR_POLL_BASE_MS = 6000;
-
-function QRModal({ sessionId, label, onClose, isDark }) {
-  const [qr, setQr]         = useState(null);
-  const [status, setStatus] = useState("loading");
-  const pollRef             = useRef(null);
-  const backoffRef          = useRef(QR_POLL_BASE_MS);
-
-  const scheduleNext = useCallback((delayMs) => {
-    clearTimeout(pollRef.current);
-    pollRef.current = setTimeout(() => fetchQR(), delayMs); // eslint-disable-line
-  }, []); // eslint-disable-line
-
-  const fetchQR = useCallback(async () => {
-    try {
-      const { data } = await api.get(`/whatsapp/sessions/${sessionId}/qr`);
-      backoffRef.current = QR_POLL_BASE_MS;
-      if (data.status === "connected") {
-        setStatus("connected");
-        clearTimeout(pollRef.current);
-        setTimeout(onClose, 1500);
-        return;
-      }
-      if (data.qr) { setQr(data.qr); setStatus("ready"); }
-      else         { setStatus(data.status || "waiting"); }
-      scheduleNext(QR_POLL_BASE_MS);
-    } catch (err) {
-      const statusCode = err?.response?.status;
-      if (statusCode === 429) {
-        // Back off: double the current interval, cap at 60 s
-        backoffRef.current = Math.min(backoffRef.current * 2, 60000);
-        scheduleNext(backoffRef.current);
-      } else {
-        setStatus("error");
-      }
-    }
-  }, [sessionId, onClose, scheduleNext]);
-
-  useEffect(() => {
-    fetchQR();
-    return () => clearTimeout(pollRef.current);
-  }, [fetchQR]);
-
-  const card  = isDark ? "#1e293b" : "#fff";
-  const muted = isDark ? "#94a3b8" : "#64748b";
-
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(4px)" }} onClick={onClose}>
-      <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} style={{ background: card, borderRadius: 20, padding: 32, maxWidth: 380, width: "90%", boxShadow: "0 24px 80px rgba(0,0,0,0.3)" }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: isDark ? "#f1f5f9" : "#0f172a" }}>Scan QR Code</h3>
-            <p style={{ margin: "4px 0 0", fontSize: 12, color: muted }}>{label}</p>
-          </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: muted, padding: 4 }}><X size={18} /></button>
-        </div>
-
-        <div style={{ background: isDark ? "#0f172a" : "#f8fafc", borderRadius: 16, padding: 20, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 280, flexDirection: "column", gap: 12 }}>
-          {status === "connected" && (
-            <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} style={{ textAlign: "center" }}>
-              <CheckCircle2 size={56} color="#22c55e" />
-              <p style={{ color: "#22c55e", fontWeight: 700, marginTop: 12 }}>Connected!</p>
-            </motion.div>
-          )}
-          {status === "ready" && qr && (
-            <motion.img key={qr} initial={{ opacity: 0 }} animate={{ opacity: 1 }} src={qr} alt="WhatsApp QR" style={{ width: 220, height: 220, borderRadius: 8 }} />
-          )}
-          {(status === "loading" || status === "connecting" || status === "waiting") && (
-            <div style={{ textAlign: "center" }}>
-              <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }}>
-                <RefreshCw size={36} color={GREEN} />
-              </motion.div>
-              <p style={{ color: muted, fontSize: 13, marginTop: 12 }}>
-                {status === "loading" ? "Loading QR code…" : "Waiting for QR code…"}
-              </p>
-            </div>
-          )}
-          {status === "error" && (
-            <div style={{ textAlign: "center" }}>
-              <AlertCircle size={36} color="#ef4444" />
-              <p style={{ color: "#ef4444", fontSize: 13, marginTop: 8 }}>Failed to load QR</p>
-              <button onClick={fetchQR} style={{ marginTop: 8, background: GRAD_BTN, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontSize: 13 }}>Retry</button>
-            </div>
-          )}
-        </div>
-
-        {status === "ready" && (
-          <p style={{ textAlign: "center", fontSize: 12, color: muted, marginTop: 16, lineHeight: 1.6 }}>
-            Open WhatsApp on your phone → Linked Devices → Link a Device → Scan this QR code
-          </p>
-        )}
-
-        <p style={{ textAlign: "center", fontSize: 11, color: muted, marginTop: 8 }}>
-          QR refreshes automatically every 6 seconds
-        </p>
-      </motion.div>
-    </div>
-  );
-}
-
-// ─── Pairing Code Modal ───────────────────────────────────────────────────────
-const PAIR_POLL_BASE_MS = 4000;
-
-function PairCodeModal({ sessionId, label, onClose, isDark }) {
-  const [code,   setCode]   = useState(null);
-  const [status, setStatus] = useState("loading");
-  const [copied, setCopied] = useState(false);
-  const pollRef             = useRef(null);
-  const backoffRef          = useRef(PAIR_POLL_BASE_MS);
-
-  const scheduleNext = useCallback((ms) => {
-    clearTimeout(pollRef.current);
-    pollRef.current = setTimeout(() => fetchCode(), ms); // eslint-disable-line
-  }, []); // eslint-disable-line
-
-  const fetchCode = useCallback(async () => {
-    try {
-      const { data } = await api.get(`/whatsapp/sessions/${sessionId}/pair-code`);
-      backoffRef.current = PAIR_POLL_BASE_MS;
-      if (data.status === "connected") { setStatus("connected"); clearTimeout(pollRef.current); setTimeout(onClose, 1500); return; }
-      if (data.code) { setCode(data.code); setStatus("ready"); }
-      else           { setStatus(data.status || "waiting"); }
-      scheduleNext(PAIR_POLL_BASE_MS);
-    } catch (err) {
-      if (err?.response?.status === 429) {
-        backoffRef.current = Math.min(backoffRef.current * 2, 30000);
-        scheduleNext(backoffRef.current);
-      } else { setStatus("error"); }
-    }
-  }, [sessionId, onClose, scheduleNext]);
-
-  useEffect(() => { fetchCode(); return () => clearTimeout(pollRef.current); }, [fetchCode]);
-
-  const handleCopy = () => { if (code) { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 2000); } };
-
-  const card  = isDark ? "#1e293b" : "#fff";
-  const muted = isDark ? "#94a3b8" : "#64748b";
-
-  // Format code as XXXX-XXXX
-  const formatted = code ? `${code.slice(0, 4)}-${code.slice(4)}` : null;
-
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(4px)" }} onClick={onClose}>
-      <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} style={{ background: card, borderRadius: 20, padding: 32, maxWidth: 400, width: "90%", boxShadow: "0 24px 80px rgba(0,0,0,0.3)" }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: isDark ? "#f1f5f9" : "#0f172a" }}>Phone Pairing Code</h3>
-            <p style={{ margin: "4px 0 0", fontSize: 12, color: muted }}>{label}</p>
-          </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: muted, padding: 4 }}><X size={18} /></button>
-        </div>
-
-        <div style={{ background: isDark ? "#0f172a" : "#f8fafc", borderRadius: 16, padding: 24, minHeight: 200, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16 }}>
-          {status === "connected" && (
-            <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} style={{ textAlign: "center" }}>
-              <CheckCircle2 size={56} color="#22c55e" />
-              <p style={{ color: "#22c55e", fontWeight: 700, marginTop: 12 }}>Connected!</p>
-            </motion.div>
-          )}
-          {status === "ready" && formatted && (
-            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ textAlign: "center", width: "100%" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 8 }}>
-                <Hash size={20} color={GREEN} />
-                <span style={{ fontSize: 13, fontWeight: 600, color: muted }}>Your Pairing Code</span>
-              </div>
-              <div style={{ fontSize: 38, fontWeight: 900, letterSpacing: "0.12em", color: isDark ? "#f1f5f9" : "#0f172a", fontFamily: "monospace", marginBottom: 16 }}>
-                {formatted}
-              </div>
-              <button onClick={handleCopy} style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 auto", background: copied ? "#22c55e22" : GRAD_BTN, color: copied ? "#22c55e" : "#fff", border: copied ? "1.5px solid #22c55e" : "none", borderRadius: 10, padding: "10px 20px", cursor: "pointer", fontSize: 13, fontWeight: 700, transition: "all 0.2s" }}>
-                {copied ? <><Check size={14} /> Copied!</> : <><Copy size={14} /> Copy Code</>}
-              </button>
-            </motion.div>
-          )}
-          {(status === "loading" || status === "connecting" || status === "waiting") && (
-            <div style={{ textAlign: "center" }}>
-              <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }}>
-                <RefreshCw size={36} color={GREEN} />
-              </motion.div>
-              <p style={{ color: muted, fontSize: 13, marginTop: 12 }}>Generating pairing code…</p>
-            </div>
-          )}
-          {status === "error" && (
-            <div style={{ textAlign: "center" }}>
-              <AlertCircle size={36} color="#ef4444" />
-              <p style={{ color: "#ef4444", fontSize: 13, marginTop: 8 }}>Failed to get pairing code</p>
-              <button onClick={fetchCode} style={{ marginTop: 8, background: GRAD_BTN, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontSize: 13 }}>Retry</button>
-            </div>
-          )}
-        </div>
-
-        {status === "ready" && (
-          <div style={{ marginTop: 16 }}>
-            <p style={{ fontSize: 12, color: muted, lineHeight: 1.7, margin: 0 }}>
-              <strong style={{ color: isDark ? "#e2e8f0" : "#334155" }}>Steps:</strong><br />
-              1. Open WhatsApp on your phone<br />
-              2. Go to <strong>Linked Devices</strong> → <strong>Link a Device</strong><br />
-              3. Tap <strong>"Link with phone number instead"</strong><br />
-              4. Enter your phone number, then type the code above
-            </p>
-          </div>
-        )}
-      </motion.div>
-    </div>
-  );
-}
-
-// ─── Connected Numbers Tab ────────────────────────────────────────────────────
-// FIX: interval 8 s → 30 s; paused when tab is hidden; exponential backoff on 429.
-const SESSIONS_POLL_MS = 30000;
-
-function ConnectedNumbersTab({ isDark }) {
-  const [sessions,    setSessions]    = useState([]);
-  const [loading,     setLoading]     = useState(true);
-  const [newLabel,    setNewLabel]    = useState("");
-  const [newPhone,    setNewPhone]    = useState("");
-  const [authMode,    setAuthMode]    = useState("qr");   // "qr" | "phone"
-  const [adding,      setAdding]      = useState(false);
-  const [qrSession,   setQrSession]   = useState(null);
-  const [pairSession, setPairSession] = useState(null);
-  const [editingId,   setEditingId]   = useState(null);
-  const [editLabel,   setEditLabel]   = useState("");
-  const [deletingId,  setDeletingId]  = useState(null);
-
-  const backoffRef  = useRef(SESSIONS_POLL_MS);
-  const timerRef    = useRef(null);
-
-  const card   = isDark ? "bg-slate-800 border-slate-700"  : "bg-white border-slate-200";
-  const inner  = isDark ? "bg-slate-900 border-slate-700"  : "bg-slate-50 border-slate-200";
-  const txt    = isDark ? "text-slate-100"                  : "text-slate-800";
-  const muted  = isDark ? "text-slate-400"                  : "text-slate-500";
-  const inputC = ["w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-400 transition",
-                   isDark ? "bg-slate-900 border-slate-700 text-slate-100 placeholder-slate-600" : "bg-white border-slate-300 text-slate-800 placeholder-slate-400"].join(" ");
-
-  const fetchSessions = useCallback(async () => {
-    if (document.hidden) return;
-    setLoading(true);
-    try {
-      const { data } = await api.get("/whatsapp/sessions");
-      backoffRef.current = SESSIONS_POLL_MS;
-      setSessions(data.sessions || []);
-    } catch (err) {
-      const statusCode = err?.response?.status;
-      if (statusCode === 429) {
-        backoffRef.current = Math.min(backoffRef.current * 2, 120000);
-      } else {
-        toast.error("Could not reach WhatsApp bridge — is wa-bridge running?");
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchSessions();
-    const schedule = () => {
-      timerRef.current = setTimeout(async () => { await fetchSessions(); schedule(); }, backoffRef.current);
-    };
-    schedule();
-    const onVisibility = () => {
-      if (!document.hidden) { clearTimeout(timerRef.current); fetchSessions().then(schedule); }
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => { clearTimeout(timerRef.current); document.removeEventListener("visibilitychange", onVisibility); };
-  }, [fetchSessions]);
-
-  const handleAddSession = async () => {
-    if (!newLabel.trim()) { toast.error("Enter a label for this number"); return; }
-    if (authMode === "phone" && !newPhone.trim()) { toast.error("Enter the phone number with country code"); return; }
-    setAdding(true);
-    try {
-      const payload = { label: newLabel.trim() };
-      if (authMode === "phone") payload.pairing_phone = newPhone.replace(/\D/g, "");
-      const { data } = await api.post("/whatsapp/sessions", payload);
-      toast.success(authMode === "phone" ? "Session started — get your pairing code!" : "Session started — scan the QR code!");
-      setNewLabel(""); setNewPhone("");
-      await fetchSessions();
-      if (authMode === "phone") setPairSession({ sessionId: data.sessionId, label: data.label || newLabel });
-      else                      setQrSession(  { sessionId: data.sessionId, label: data.label || newLabel });
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Failed to start session");
-    } finally {
-      setAdding(false);
-    }
-  };
-
-  const handleDelete = async (sessionId) => {
-    setDeletingId(sessionId);
-    try {
-      await api.delete(`/whatsapp/sessions/${sessionId}`);
-      toast.success("WhatsApp number disconnected");
-      await fetchSessions();
-    } catch {
-      toast.error("Failed to remove session");
-    } finally {
-      setDeletingId(null);
-    }
-  };
-
-  const handleSaveLabel = async (sessionId) => {
-    try {
-      await api.patch(`/whatsapp/sessions/${sessionId}/label`, { label: editLabel });
-      setEditingId(null);
-      await fetchSessions();
-    } catch {
-      toast.error("Failed to update label");
-    }
-  };
-
-  const connectedCount = sessions.filter(s => s.status === "connected").length;
-
-  return (
-    <div className="space-y-4">
-      {qrSession   && <QRModal       sessionId={qrSession.sessionId}   label={qrSession.label}   isDark={isDark} onClose={() => { setQrSession(null);   fetchSessions(); }} />}
-      {pairSession && <PairCodeModal sessionId={pairSession.sessionId} label={pairSession.label} isDark={isDark} onClose={() => { setPairSession(null); fetchSessions(); }} />}
-
-      {/* Stats bar */}
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: "Connected",    value: connectedCount,                                       color: "#22c55e" },
-          { label: "Total Linked", value: sessions.length,                                      color: GREEN },
-          { label: "Pending",      value: sessions.filter(s => s.status !== "connected").length, color: "#f59e0b" },
-        ].map(s => (
-          <div key={s.label} className={`rounded-xl border p-4 text-center ${card}`}>
-            <div style={{ fontSize: 28, fontWeight: 800, color: s.color }}>{s.value}</div>
-            <div className={`text-xs mt-1 ${muted}`}>{s.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Add new number */}
-      <div className={`rounded-2xl border shadow-sm p-5 ${card}`}>
-        <div className="flex items-center gap-2 mb-4">
-          <Plus size={16} className="text-emerald-500" />
-          <span className={`text-sm font-bold ${txt}`}>Add WhatsApp Number</span>
-        </div>
-
-        {/* Auth mode toggle */}
-        <div className={`flex gap-1 p-1 rounded-xl mb-4 ${isDark ? "bg-slate-900" : "bg-slate-100"}`} style={{ width: "fit-content" }}>
-          {[
-            { id: "qr",    label: "QR Code",     icon: QrCode },
-            { id: "phone", label: "Phone Number", icon: Phone  },
-          ].map(({ id, label, icon: Icon }) => (
-            <button key={id} onClick={() => setAuthMode(id)}
-              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold transition ${authMode === id ? "bg-white text-slate-800 shadow" : (isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700")}`}
-              style={authMode === id ? { background: isDark ? "#1e293b" : "#fff" } : {}}>
-              <Icon size={12} />{label}
-            </button>
-          ))}
-        </div>
-
-        {/* Phone number input (only for phone mode) */}
-        {authMode === "phone" && (
-          <div className="mb-3">
-            <input
-              className={`${inputC} mb-1`}
-              placeholder="Phone with country code, e.g. 919876543210"
-              value={newPhone}
-              onChange={e => setNewPhone(e.target.value)}
-              type="tel"
-            />
-            <p className={`text-[11px] ${muted}`}>Include country code, no + or spaces — e.g. 91 for India</p>
-          </div>
-        )}
-
-        <div className="flex gap-3">
-          <input
-            className={`${inputC} flex-1`}
-            placeholder='Label e.g. "MDA GST", "Office Line"…'
-            value={newLabel}
-            onChange={e => setNewLabel(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && handleAddSession()}
-          />
-          <button
-            onClick={handleAddSession}
-            disabled={adding}
-            className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold text-white transition hover:opacity-90 active:scale-95 disabled:opacity-60"
-            style={{ background: GRAD_BTN, whiteSpace: "nowrap" }}
-          >
-            {adding ? <RefreshCw size={14} className="animate-spin" /> : (authMode === "phone" ? <Hash size={14} /> : <QrCode size={14} />)}
-            {adding ? "Starting…" : (authMode === "phone" ? "Get Code" : "Get QR")}
-          </button>
-        </div>
-
-        <div className={`mt-3 p-3 rounded-xl text-xs ${isDark ? "bg-slate-900/60 text-slate-400" : "bg-slate-50 text-slate-500"}`}>
-          {authMode === "phone"
-            ? <span><strong className={isDark ? "text-slate-300" : "text-slate-700"}>Phone Number method:</strong> No QR camera needed. An 8-digit code appears — enter it in WhatsApp → Linked Devices → Link with phone number.</span>
-            : <span><strong className={isDark ? "text-slate-300" : "text-slate-700"}>QR Code method:</strong> A QR code appears — scan it in WhatsApp → Linked Devices → Link a Device.</span>
-          }
-        </div>
-      </div>
-
-      {/* Session list */}
-      <div className={`rounded-2xl border shadow-sm ${card}`}>
-        <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: isDark ? "#334155" : "#e2e8f0" }}>
-          <div className="flex items-center gap-2">
-            <Smartphone size={16} className="text-emerald-500" />
-            <span className={`text-sm font-bold ${txt}`}>Linked Numbers</span>
-          </div>
-          <div className="flex items-center gap-2">
-            {connectedCount > 0 && (
-              <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-500">
-                <ShieldCheck size={12} /> Auto-reconnect ON
-              </span>
-            )}
-            <button onClick={fetchSessions} className={`p-1.5 rounded-lg transition hover:bg-slate-100 ${muted}`}>
-              <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-            </button>
-          </div>
-        </div>
-
-        {loading && sessions.length === 0 ? (
-          <div className={`p-8 text-center ${muted} text-sm`}>
-            <RefreshCw size={24} className="animate-spin mx-auto mb-3 opacity-50" />
-            Connecting to bridge…
-          </div>
-        ) : sessions.length === 0 ? (
-          <div className={`p-10 text-center ${muted}`}>
-            <Smartphone size={40} className="mx-auto mb-3 opacity-30" />
-            <p className="text-sm font-medium">No numbers linked yet</p>
-            <p className="text-xs mt-1 opacity-70">Add a number above to get started</p>
-          </div>
-        ) : (
-          <div className="divide-y" style={{ borderColor: isDark ? "#334155" : "#e2e8f0" }}>
-            <AnimatePresence>
-              {sessions.map(s => (
-                <motion.div key={s.sessionId} initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, height: 0 }}
-                  className="flex items-center gap-4 p-4">
-                  <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
-                    style={{ background: s.status === "connected" ? "#dcfce7" : (isDark ? "#1e293b" : "#f1f5f9") }}>
-                    {s.status === "connected" ? <Wifi size={18} color="#22c55e" /> : <WifiOff size={18} color="#94a3b8" />}
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    {editingId === s.sessionId ? (
-                      <div className="flex gap-2 items-center">
-                        <input
-                          className={`${inputC} text-xs py-1`}
-                          value={editLabel}
-                          onChange={e => setEditLabel(e.target.value)}
-                          onKeyDown={e => { if (e.key === "Enter") handleSaveLabel(s.sessionId); if (e.key === "Escape") setEditingId(null); }}
-                          autoFocus
-                        />
-                        <button onClick={() => handleSaveLabel(s.sessionId)} className="p-1 rounded text-emerald-500 hover:bg-emerald-50"><Check size={14} /></button>
-                        <button onClick={() => setEditingId(null)} className={`p-1 rounded ${muted} hover:bg-slate-100`}><X size={14} /></button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1.5">
-                        <span className={`text-sm font-semibold truncate ${txt}`}>{s.label}</span>
-                        <button onClick={() => { setEditingId(s.sessionId); setEditLabel(s.label || ""); }} className={`p-0.5 rounded opacity-0 group-hover:opacity-100 hover:opacity-100 ${muted}`}><Pencil size={11} /></button>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2 mt-1">
-                      <StatusBadge status={s.status} />
-                      {s.phoneNumber && <span className={`text-[11px] ${muted}`}>+{s.phoneNumber}</span>}
-                      {s.displayName && <span className={`text-[11px] font-medium truncate ${muted}`}>{s.displayName}</span>}
-                      {s.status === "reconnecting" && <span className={`text-[10px] italic ${muted}`}>auto-retrying…</span>}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-1 flex-shrink-0">
-                    {s.status !== "connected" && (
-                      <>
-                        <button
-                          onClick={() => setQrSession({ sessionId: s.sessionId, label: s.label })}
-                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-white transition hover:opacity-90"
-                          style={{ background: GRAD_BTN }}
-                          title="Show QR to reconnect"
-                        >
-                          <QrCode size={12} /> QR
-                        </button>
-                        <button
-                          onClick={() => setPairSession({ sessionId: s.sessionId, label: s.label })}
-                          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition hover:bg-emerald-50 ${muted}`}
-                          style={{ borderColor: isDark ? "#334155" : "#e2e8f0" }}
-                          title="Show phone pairing code"
-                        >
-                          <Hash size={12} /> Code
-                        </button>
-                      </>
-                    )}
-                    <button
-                      onClick={() => handleDelete(s.sessionId)}
-                      disabled={deletingId === s.sessionId}
-                      className={`p-1.5 rounded-lg transition hover:bg-red-50 hover:text-red-500 ${muted} disabled:opacity-40`}
-                      title="Disconnect number"
-                    >
-                      {deletingId === s.sessionId ? <RefreshCw size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                    </button>
-                  </div>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ─── Main export ──────────────────────────────────────────────────────────────
 export default function WhatsAppSettings() {
   const isDark   = useDark();
   const { user } = useAuth();
-  const isAdmin  = user?.role === "admin";
 
   const [settings,   setSettings]   = useState(getWASettings);
   const [saved,      setSaved]      = useState(false);
   const [previewKey, setPreviewKey] = useState("invoice");
-  const [activeTab,  setActiveTab]  = useState(isAdmin ? "numbers" : "templates");
+  const [activeTab,  setActiveTab]  = useState("templates");
   const [companies,  setCompanies]  = useState([]);
 
   useEffect(() => { api.get("/companies").then(r => setCompanies(r.data || [])).catch(() => {}); }, []);
@@ -628,9 +92,8 @@ export default function WhatsAppSettings() {
   const labelCls = `block text-[11px] font-semibold uppercase tracking-wider mb-1 ${muted}`;
 
   const TABS = [
-    ...(isAdmin ? [{ id: "numbers",   label: "Connected Numbers", icon: Smartphone  }] : []),
-    ...(isAdmin ? [{ id: "templates", label: "Message Templates", icon: MessageCircle }] : []),
-    { id: "info", label: "How It Works", icon: Eye },
+    { id: "templates", label: "Message Templates", icon: MessageCircle },
+    { id: "info",      label: "How It Works",      icon: Eye },
   ];
 
   const previewText = buildPreviewText(settings, previewKey);
@@ -650,7 +113,7 @@ export default function WhatsAppSettings() {
             <div>
               <h1 className="text-2xl font-bold text-white tracking-tight leading-tight">WhatsApp Settings</h1>
               <p className="text-white/60 text-[10px] font-semibold uppercase tracking-widest mt-0.5">
-                {isAdmin ? "Multi-number connection · Message templates" : "Message templates · Shared across all pages"}
+                Message templates · Shared across all pages
               </p>
             </div>
           </div>
@@ -669,15 +132,8 @@ export default function WhatsAppSettings() {
         </div>
       </motion.div>
 
-      {/* Connected Numbers Tab */}
-      {activeTab === "numbers" && isAdmin && (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-          <ConnectedNumbersTab isDark={isDark} />
-        </motion.div>
-      )}
-
-      {/* Templates Tab */}
-      {activeTab === "templates" && isAdmin && (
+      {/* Templates Tab — available to all users */}
+      {activeTab === "templates" && (
         <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
           <motion.div initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.05 }} className="xl:col-span-3">
             <div className={`rounded-2xl border shadow-sm p-5 sm:p-6 space-y-5 ${card}`}>
@@ -756,6 +212,16 @@ export default function WhatsAppSettings() {
                 <p className={`text-right text-[10px] mt-1 ${muted}`}>Delivered ✓✓</p>
               </div>
             </div>
+            {/* Info card */}
+            <div className={`rounded-2xl border shadow-sm p-4 ${card}`}>
+              <p className={`text-xs font-semibold mb-2 ${txt}`}>About These Templates</p>
+              <p className={`text-xs leading-relaxed ${muted}`}>
+                Templates here control how WhatsApp messages look when sent from Invoicing, DSC alerts, Client pages, and Password Vault. Save once — updates apply everywhere.
+              </p>
+              <p className={`text-xs mt-3 ${muted}`}>
+                To manage connected WhatsApp numbers and the unified inbox, visit <strong className={txt}>WhatsApp Hub</strong> in the sidebar.
+              </p>
+            </div>
           </motion.div>
         </div>
       )}
@@ -764,14 +230,14 @@ export default function WhatsAppSettings() {
       {activeTab === "info" && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
           <div className={`rounded-2xl border shadow-sm p-6 max-w-2xl ${card}`}>
-            <div className="flex items-center gap-2 mb-4"><Eye className="h-4 w-4 text-emerald-500" /><span className={`text-base font-bold ${txt}`}>How WhatsApp Integration Works</span></div>
+            <div className="flex items-center gap-2 mb-4"><Eye className="h-4 w-4 text-emerald-500" /><span className={`text-base font-bold ${txt}`}>How WhatsApp Messaging Works</span></div>
             <div className="space-y-4 text-sm">
               {[
-                { step: "1", title: "Two ways to link your number",         desc: "QR Code: scan with your phone camera like WhatsApp Web. Phone Number: get an 8-digit pairing code, enter it in WhatsApp → Linked Devices → Link with phone number. The phone method avoids QR rate-limit errors on Render free tier." },
-                { step: "2", title: "Multiple numbers can be connected",    desc: "You can link as many numbers as needed. Each session is stored and reconnects automatically on restart — there's no hard retry limit, so connections persist until you manually disconnect." },
-                { step: "3", title: "Auto-reconnect until manually removed", desc: "If the bridge restarts or loses connection, it will keep retrying with exponential backoff (up to 2 min between attempts). Only an explicit Disconnect removes the number permanently." },
-                { step: "4", title: "All users share the connected numbers", desc: "Once admin connects a number, every user with WhatsApp access can send messages through it." },
-                { step: "5", title: "Messages are sent directly via bridge", desc: "The wa-bridge service (Node.js) handles the WhatsApp Web protocol — no Meta API or third-party fees." },
+                { step: "1", title: "Set up message templates here",       desc: "Configure how WhatsApp messages look when sent from Invoicing, DSC expiry alerts, Client pages, and Password Vault. Templates are shared across all pages — save once, updated everywhere." },
+                { step: "2", title: "Connect WhatsApp numbers in the Hub", desc: "Go to WhatsApp Hub (sidebar) to link your WhatsApp numbers using QR code or phone pairing. Hub is accessible to Admins and users granted permission from User Governance." },
+                { step: "3", title: "Messages are sent via the bridge",    desc: "The wa-bridge service handles the WhatsApp Web protocol — no Meta API or third-party fees required." },
+                { step: "4", title: "All users share connected numbers",   desc: "Once Admin connects a number in the Hub, all authorised users can send messages through it using the templates configured here." },
+                { step: "5", title: "Template variables are auto-filled",  desc: "Variables like {number}, {amount}, {name} are automatically replaced when a message is sent from the relevant module." },
               ].map(item => (
                 <div key={item.step} className="flex gap-4">
                   <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0 mt-0.5" style={{ background: GRAD_BTN }}>{item.step}</div>
