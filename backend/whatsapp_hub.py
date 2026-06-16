@@ -70,6 +70,10 @@ def _db():
 async def _has_hub_access(user: User) -> bool:
     if user.role == "admin":
         return True
+    # Check the new permission flag from user permissions model
+    if getattr(user.permissions, "can_access_whatsapp_hub", False):
+        return True
+    # Legacy fallback: also honour the old wa_hub_access field on the DB doc
     doc = await _db()["users"].find_one({"_id": user.id})
     return bool(doc and doc.get("wa_hub_access"))
 
