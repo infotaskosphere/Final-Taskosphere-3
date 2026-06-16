@@ -27,6 +27,7 @@ const Quotations        = lazy(() => import("@/pages/Quotations.jsx"));
 const GeneralSettings   = lazy(() => import("@/pages/GeneralSettings.jsx"));
 const WhatsAppSettings  = lazy(() => import("@/pages/WhatsAppSettings.jsx"));
 const Passvault         = lazy(() => import("@/pages/Passvault.jsx"));
+const WhatsAppHub       = lazy(() => import("@/pages/WhatsAppHub.jsx"));
 const Invoicing         = lazy(() => import("@/pages/Invoicing.jsx"));
 const Reminders         = lazy(() => import("@/pages/Reminders.jsx"));
 const CompliancePage    = lazy(() => import("@/pages/CompliancePage.jsx"));
@@ -146,6 +147,7 @@ function AppRoutes() {
       <Route path="/visits"     element={<Protected><PageLoader><VisitsPage /></PageLoader></Protected>} />
       <Route path="/reports"    element={<Protected><PageLoader><Reports /></PageLoader></Protected>} />
       <Route path="/ai-reader" element={<Protected><PageLoader><AIDocumentReader /></PageLoader></Protected>} />
+      <Route path="/whatsapp-hub" element={<Protected><PageLoader><WhatsAppHub /></PageLoader></Protected>} /
 
 
       {/* ── COMPLIANCE GROUP ── */}
