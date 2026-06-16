@@ -132,6 +132,24 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
+// ─── Lightweight in-memory throttle for /sessions ────────────────────────────
+// Prevents bursts (frontend polling + scheduled jobs firing at the same time)
+// from queuing up and amplifying retries on a cold/slow instance.
+// Allows max 1 request per 2 seconds per route; extra requests get a fast,
+// CORS-safe 429 instead of piling up behind a slow upstream call.
+const _lastHit = {};
+function throttle(routeKey, minIntervalMs = 2000) {
+  return (req, res, next) => {
+    const now = Date.now();
+    const last = _lastHit[routeKey] || 0;
+    if (now - last < minIntervalMs) {
+      return res.status(429).json({ error: "Too many requests, please slow down.", retryAfterMs: minIntervalMs - (now - last) });
+    }
+    _lastHit[routeKey] = now;
+    next();
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ★ NEW: Hub incoming-message notifier
 //
@@ -367,7 +385,7 @@ function buildMediaPayload(buffer, mimeType, filename, caption) {
 // ── GET /sessions ─────────────────────────────────────────────────────────────
 // Added "id" and "label" fields alongside existing ones so the Hub UI
 // session picker works without breaking any existing frontend code.
-app.get("/sessions", (req, res) => {
+app.get("/sessions", throttle("get_sessions", 1500), (req, res) => {
   const list = Object.entries(sessions).map(([id, s]) => ({
     id,                                      // ★ used by Hub session picker
     sessionId:   id,
