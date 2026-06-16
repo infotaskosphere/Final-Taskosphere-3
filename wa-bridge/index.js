@@ -10,6 +10,7 @@
  *  - Webhook back to Taskosphere backend on connect/disconnect
  *  - Rate-limit resilience: exponential backoff on WA 429s
  *  - Media send: image / PDF / document via /send-media
+ *  - ★ NEW: Incoming message webhook → WhatsApp Hub unified inbox
  *
  * Uses @whiskeysockets/baileys (open-source WhatsApp Web library)
  * Port: 3002 (set WA_BRIDGE_PORT env to override)
@@ -132,6 +133,79 @@ app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ★ NEW: Hub incoming-message notifier
+//
+// Called by the messages.upsert Baileys event for every incoming message.
+// Forwards the message to the Taskosphere backend → WhatsApp Hub inbox.
+// Fire-and-forget — never blocks the WA event loop.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function notifyHubIncoming(sessionId, sessionLabel, msg) {
+  try {
+    // Only handle real incoming messages — skip anything sent by us
+    const isFromMe = msg.key?.fromMe;
+    if (isFromMe) return;
+
+    const jid = msg.key?.remoteJid || "";
+
+    // Skip group chats and broadcast lists — Hub is for 1-to-1 only
+    if (jid.endsWith("@g.us") || jid === "status@broadcast") return;
+
+    // Extract text body — Baileys nests content differently per message type
+    const body =
+      msg.message?.conversation ||
+      msg.message?.extendedTextMessage?.text ||
+      msg.message?.imageMessage?.caption ||
+      msg.message?.videoMessage?.caption ||
+      msg.message?.documentMessage?.caption ||
+      msg.message?.buttonsResponseMessage?.selectedDisplayText ||
+      msg.message?.listResponseMessage?.title ||
+      "[media]";
+
+    // Determine media type if present (text messages have no media)
+    let mediaType = null;
+    if (msg.message?.imageMessage)         mediaType = "image";
+    else if (msg.message?.videoMessage)    mediaType = "video";
+    else if (msg.message?.audioMessage)    mediaType = "audio";
+    else if (msg.message?.documentMessage) mediaType = "document";
+    else if (msg.message?.stickerMessage)  mediaType = "sticker";
+
+    const phone = jid.split("@")[0];
+
+    // pushName = sender's display name from their WA profile (may be null)
+    const contactName = msg.pushName || null;
+
+    // messageTimestamp can be a plain number or a protobuf Long object
+    const ts = msg.messageTimestamp;
+    const timestamp = ts
+      ? (typeof ts === "object" ? ts.low : ts)
+      : Math.floor(Date.now() / 1000);
+
+    await axios.post(
+      `${BACKEND_URL}/api/whatsapp/hub/webhook/message`,
+      {
+        session_id:    sessionId,
+        session_label: sessionLabel || sessionId,
+        jid,
+        message_id:    msg.key?.id || "",
+        from:          phone,
+        contact_name:  contactName,
+        body,
+        media_url:     null,   // we don't auto-download media to keep things lean
+        media_type:    mediaType,
+        timestamp,
+      },
+      { timeout: 5000 }
+    );
+
+    console.log(`[${sessionId}] Hub: forwarded incoming from ${phone}`);
+  } catch (err) {
+    // Never crash the bridge over a failed hub notification
+    console.warn(`[${sessionId}] Hub webhook failed:`, err.message);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // SESSION MANAGEMENT
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -140,8 +214,8 @@ async function startSession(sessionId, webhookOnConnect = true) {
   if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
 
   sessions[sessionId] = sessions[sessionId] || {};
-  sessions[sessionId].status    = "connecting";
-  sessions[sessionId].qrBase64  = null;
+  sessions[sessionId].status     = "connecting";
+  sessions[sessionId].qrBase64   = null;
   sessions[sessionId].retryCount = (sessions[sessionId].retryCount || 0);
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
@@ -160,6 +234,7 @@ async function startSession(sessionId, webhookOnConnect = true) {
 
   sessions[sessionId].socket = sock;
 
+  // ── Connection state changes ──────────────────────────────────────────────
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
@@ -185,14 +260,14 @@ async function startSession(sessionId, webhookOnConnect = true) {
 
       if (webhookOnConnect) {
         try {
-          await axios.post(`${BACKEND_URL}/whatsapp/webhook/connected`, {
+          await axios.post(`${BACKEND_URL}/api/whatsapp/webhook/connected`, {
             sessionId,
             phoneNumber:  sessions[sessionId].phoneNumber,
             displayName:  sessions[sessionId].displayName,
             connectedAt:  sessions[sessionId].connectedAt,
           });
         } catch (e) {
-          console.warn(`[${sessionId}] Webhook failed:`, e.message);
+          console.warn(`[${sessionId}] Connect webhook failed:`, e.message);
         }
       }
     }
@@ -203,11 +278,11 @@ async function startSession(sessionId, webhookOnConnect = true) {
       const shouldReconnect = code !== DisconnectReason.loggedOut;
 
       console.log(`[${sessionId}] Disconnected (${reason}). Reconnect: ${shouldReconnect}`);
-      sessions[sessionId].status  = shouldReconnect ? "reconnecting" : "disconnected";
-      sessions[sessionId].socket  = null;
+      sessions[sessionId].status = shouldReconnect ? "reconnecting" : "disconnected";
+      sessions[sessionId].socket = null;
 
       try {
-        await axios.post(`${BACKEND_URL}/whatsapp/webhook/disconnected`, { sessionId, reason });
+        await axios.post(`${BACKEND_URL}/api/whatsapp/webhook/disconnected`, { sessionId, reason });
       } catch (_) {}
 
       if (shouldReconnect && sessions[sessionId].retryCount < 5) {
@@ -222,9 +297,28 @@ async function startSession(sessionId, webhookOnConnect = true) {
     }
   });
 
+  // ── Credentials persistence ───────────────────────────────────────────────
   sock.ev.on("creds.update", saveCreds);
+
+  // ── ★ NEW: Incoming messages → WhatsApp Hub ───────────────────────────────
+  //
+  // "messages.upsert" fires for every message event:
+  //   type="notify"  → new real-time incoming message  ← we handle this
+  //   type="append"  → history loaded on reconnect     ← skip to avoid replaying
+  //
+  sock.ev.on("messages.upsert", async ({ messages: msgs, type }) => {
+    if (type !== "notify") return;
+
+    const sessionLabel = sessions[sessionId]?.displayName || sessionId;
+
+    for (const msg of msgs) {
+      // Fire-and-forget — don't let a failed webhook crash the message loop
+      notifyHubIncoming(sessionId, sessionLabel, msg).catch(() => {});
+    }
+  });
 }
 
+// ─── Boot persisted sessions on startup ──────────────────────────────────────
 async function bootPersistedSessions() {
   if (!fs.existsSync(SESSIONS_DIR)) return;
   const dirs = fs.readdirSync(SESSIONS_DIR).filter(d =>
@@ -270,10 +364,15 @@ function buildMediaPayload(buffer, mimeType, filename, caption) {
 // REST API
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── GET /sessions ─────────────────────────────────────────────────────────────
+// Added "id" and "label" fields alongside existing ones so the Hub UI
+// session picker works without breaking any existing frontend code.
 app.get("/sessions", (req, res) => {
   const list = Object.entries(sessions).map(([id, s]) => ({
+    id,                                      // ★ used by Hub session picker
     sessionId:   id,
     status:      s.status,
+    label:       s.displayName || id,        // ★ used by Hub session picker
     phoneNumber: s.phoneNumber || null,
     displayName: s.displayName || null,
     connectedAt: s.connectedAt || null,
@@ -282,6 +381,7 @@ app.get("/sessions", (req, res) => {
   res.json({ sessions: list });
 });
 
+// ── POST /sessions ────────────────────────────────────────────────────────────
 app.post("/sessions", async (req, res) => {
   const sessionId = req.body.sessionId || `session_${Date.now()}`;
   if (sessions[sessionId]?.status === "connected") {
@@ -296,12 +396,15 @@ app.post("/sessions", async (req, res) => {
   }
 });
 
+// ── GET /sessions/:id ─────────────────────────────────────────────────────────
 app.get("/sessions/:id", (req, res) => {
   const s = sessions[req.params.id];
   if (!s) return res.status(404).json({ error: "Session not found" });
   res.json({
+    id:          req.params.id,
     sessionId:   req.params.id,
     status:      s.status,
+    label:       s.displayName || req.params.id,
     phoneNumber: s.phoneNumber || null,
     displayName: s.displayName || null,
     connectedAt: s.connectedAt || null,
@@ -309,6 +412,7 @@ app.get("/sessions/:id", (req, res) => {
   });
 });
 
+// ── GET /sessions/:id/qr ──────────────────────────────────────────────────────
 app.get("/sessions/:id/qr", (req, res) => {
   const s = sessions[req.params.id];
   if (!s) return res.status(404).json({ error: "Session not found" });
@@ -318,6 +422,7 @@ app.get("/sessions/:id/qr", (req, res) => {
   res.json({ qr: s.qrBase64, status: s.status });
 });
 
+// ── DELETE /sessions/:id ──────────────────────────────────────────────────────
 app.delete("/sessions/:id", async (req, res) => {
   const s = sessions[req.params.id];
   if (!s) return res.status(404).json({ error: "Session not found" });
@@ -353,7 +458,6 @@ app.post("/send", async (req, res) => {
 });
 
 // ── POST /send-media — send image / PDF / Excel / doc (multipart upload) ──────
-//    Multipart fields: to, sessionId (opt), caption (opt), file (binary)
 app.post("/send-media", upload.single("file"), async (req, res) => {
   try {
     const { to, sessionId, caption } = req.body;
@@ -386,7 +490,6 @@ app.post("/send-media", upload.single("file"), async (req, res) => {
 });
 
 // ── POST /send-media-base64 — send media via base64 JSON (no multer) ──────────
-//    JSON fields: to, sessionId (opt), caption (opt), mimeType, base64, filename
 app.post("/send-media-base64", express.json({ limit: "25mb" }), async (req, res) => {
   try {
     const { to, sessionId, caption, base64, mimeType, filename } = req.body;
@@ -420,8 +523,8 @@ app.post("/send-media-base64", express.json({ limit: "25mb" }), async (req, res)
 app.get("/status", (req, res) => {
   const connected = Object.values(sessions).find(s => s.status === "connected");
   res.json({
-    connected:   !!connected,
-    qrAvailable: Object.values(sessions).some(s => s.qrBase64),
+    connected:     !!connected,
+    qrAvailable:   Object.values(sessions).some(s => s.qrBase64),
     sessionsCount: Object.keys(sessions).length,
   });
 });
