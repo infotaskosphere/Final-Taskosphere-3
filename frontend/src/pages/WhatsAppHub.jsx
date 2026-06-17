@@ -22,7 +22,8 @@ import {
   Camera, Users, MessageCircle, Plus, ArrowLeft, Trash2,
   Settings, QrCode, Hash, Copy, ChevronDown, ChevronRight,
   AlertCircle, Wifi, WifiOff, Smartphone, Filter, Star, Reply,
-  Volume2, File,
+  Volume2, File, Archive, ArchiveRestore, Info, UserPlus, Crown,
+  StarOff, SearchX, ArrowRight,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
@@ -103,6 +104,11 @@ function getDisplayName(contact) {
   if (contact.display_name && !contact.display_name.includes('@')) return contact.display_name;
   if (contact.phone) return `+${contact.phone}`;
   return displayJid(contact.jid) || contact.jid || '';
+}
+
+function participantsLabel(count) {
+  if (!count) return '';
+  return `${count} participant${count !== 1 ? 's' : ''}`;
 }
 
 function initials(name) {
@@ -283,7 +289,7 @@ function DateSep({ ts, isDark }) {
 }
 
 // ── Message bubble ────────────────────────────────────────────────────────────
-function Bubble({ msg, prev, next, isDark, sessionColorMap, onReply, onStar, onDelete }) {
+function Bubble({ msg, prev, next, isDark, sessionColorMap, isGrp, onReply, onStar, onDelete }) {
   const [menu, setMenu] = useState(false);
   const menuRef = useRef(null);
   const isOut   = msg.direction === 'out';
@@ -291,6 +297,7 @@ function Bubble({ msg, prev, next, isDark, sessionColorMap, onReply, onStar, onD
   const numCol  = sessionColorMap[msg.session_id] || WA.green;
   const bg      = isOut ? (isDark ? WA.dBubbleOut : WA.bubbleOut) : (isDark ? WA.dBubbleIn : WA.bubbleIn);
   const txtCol  = isDark ? '#e9edef' : '#111b21';
+  const senderCol = avatarColor(msg.sender_phone || msg.session_id || '');
 
   // Tail shape (SVG)
   const tailColor = bg;
@@ -327,8 +334,13 @@ function Bubble({ msg, prev, next, isDark, sessionColorMap, onReply, onStar, onD
           {/* Tail */}
           {showTail && (isOut ? tailOut : tailIn)}
 
-          {/* Session label */}
-          {!isOut && msg.session_label && (
+          {/* Sender label — group: per-participant phone; DM multi-account: session label */}
+          {!isOut && isGrp && msg.sender_phone && (
+            <p style={{ margin:'0 0 2px', fontSize:12.5, fontWeight:700, color:senderCol }}>
+              +{msg.sender_phone}
+            </p>
+          )}
+          {!isOut && !isGrp && msg.session_label && (
             <p style={{ margin:'0 0 2px', fontSize:10, fontWeight:700, color:numCol, textTransform:'uppercase', letterSpacing:'0.04em' }}>
               {msg.session_label}
             </p>
@@ -352,6 +364,7 @@ function Bubble({ msg, prev, next, isDark, sessionColorMap, onReply, onStar, onD
             <span style={{ display:'flex', alignItems:'center', gap:3, fontSize:11,
               color:isOut?(isDark?'rgba(233,237,239,0.6)':'rgba(0,92,75,0.65)'):(isDark?'#8696a0':'#667781'),
               flexShrink:0, alignSelf:'flex-end', whiteSpace:'nowrap' }}>
+              {msg.starred && <Star size={12} fill={isOut?'rgba(0,92,75,0.65)':WA.green} color={isOut?'rgba(0,92,75,0.65)':WA.green} style={{ marginRight:1 }}/>}
               {fmtMsgTime(msg.timestamp)}
               {isOut && (msg.read
                 ? <CheckCheck size={14} color='#53bdeb'/>
@@ -366,10 +379,10 @@ function Bubble({ msg, prev, next, isDark, sessionColorMap, onReply, onStar, onD
                 transition={{duration:0.1}}
                 style={{ position:'absolute', top:0, right:isOut?0:'auto', left:isOut?'auto':0, zIndex:50,
                   background:isDark?'#233138':'#fff', borderRadius:8, boxShadow:'0 4px 16px rgba(0,0,0,0.24)',
-                  border:`1px solid ${isDark?'#3b4a54':'#e9edef'}`, overflow:'hidden', minWidth:130 }}>
+                  border:`1px solid ${isDark?'#3b4a54':'#e9edef'}`, overflow:'hidden', minWidth:140 }}>
                 {[
-                  { label:'Reply',  icon:Reply,  fn:()=>{ onReply(msg); setMenu(false); } },
-                  { label:'Star',   icon:Star,   fn:()=>{ onStar(msg);  setMenu(false); } },
+                  { label:'Reply', icon:Reply, fn:()=>{ onReply(msg); setMenu(false); } },
+                  { label: msg.starred ? 'Unstar' : 'Star', icon: msg.starred ? StarOff : Star, fn:()=>{ onStar(msg); setMenu(false); } },
                   { label:'Delete', icon:Trash2, fn:()=>{ onDelete(msg);setMenu(false); }, danger:true },
                 ].map(item => (
                   <button key={item.label} onClick={item.fn}
@@ -391,53 +404,74 @@ function Bubble({ msg, prev, next, isDark, sessionColorMap, onReply, onStar, onD
 }
 
 // ── Chat list item ────────────────────────────────────────────────────────────
-function ChatItem({ contact, active, onClick, sessionColorMap, isDark }) {
+function ChatItem({ contact, active, onClick, onArchiveToggle, sessionColorMap, isDark }) {
+  const [hover, setHover] = useState(false);
   const name    = getDisplayName(contact);
   const preview = contact.latest_message?.body || '';
   const isOut   = contact.latest_message?.direction === 'out';
-  const isGrp   = isGroup(contact.jid);
+  const isGrp   = isGroup(contact.jid) || contact.is_group;
   const numCol  = sessionColorMap[contact.session_id] || WA.green;
   const bg      = active ? (isDark ? WA.dSideActive : WA.sideActive) : 'transparent';
   const txt     = isDark ? '#e9edef' : '#111b21';
   const muted   = isDark ? '#8696a0' : '#667781';
   return (
-    <button onClick={onClick} style={{ width:'100%', display:'flex', alignItems:'center', gap:0, padding:'0', textAlign:'left', background:bg, border:'none', cursor:'pointer',
-      borderBottom:`1px solid ${isDark?'rgba(233,237,239,0.1)':'rgba(0,0,0,0.05)'}`, transition:'background 0.1s' }}
-      onMouseEnter={e=>{ if(!active) e.currentTarget.style.background=isDark?'rgba(255,255,255,0.04)':'rgba(0,0,0,0.03)'; }}
-      onMouseLeave={e=>{ if(!active) e.currentTarget.style.background=bg; }}>
-      {/* Active indicator */}
-      <div style={{ width:3, alignSelf:'stretch', background:active?WA.green:'transparent', flexShrink:0, borderRadius:'0 2px 2px 0' }}/>
-      <div style={{ flex:1, display:'flex', alignItems:'center', gap:12, padding:'12px 14px 12px 12px' }}>
-        <div style={{ position:'relative', flexShrink:0 }}>
-          <Avatar jid={contact.jid} name={name} size={49} isGrp={isGrp} url={contact.profile_pic_url}/>
-          {/* Session colour ring */}
-          <div style={{ position:'absolute', bottom:1, right:1, width:13, height:13, borderRadius:'50%',
-            background:numCol, border:`2px solid ${isDark?WA.dSideBg:WA.sideBg}` }}/>
-        </div>
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:4 }}>
-            <span style={{ fontWeight:500, fontSize:16, color:txt, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
-              {isGrp && <span style={{ fontSize:10, background:'rgba(0,168,132,0.18)', color:WA.green, borderRadius:3, padding:'1px 5px', marginRight:6, fontWeight:700 }}>GROUP</span>}
-              {name}
-            </span>
-            <span style={{ fontSize:12, color:contact.unread_count>0?WA.green:muted, flexShrink:0, fontWeight:contact.unread_count>0?600:400 }}>
-              {fmtChatTime(contact.last_message_at)}
-            </span>
+    <div
+      onMouseEnter={()=>setHover(true)}
+      onMouseLeave={()=>setHover(false)}
+      style={{ position:'relative', width:'100%', display:'flex', alignItems:'center', background:bg,
+        borderBottom:`1px solid ${isDark?'rgba(233,237,239,0.1)':'rgba(0,0,0,0.05)'}`, transition:'background 0.1s' }}
+      onMouseOver={e=>{ if(!active) e.currentTarget.style.background=isDark?'rgba(255,255,255,0.04)':'rgba(0,0,0,0.03)'; }}
+      onMouseOut={e=>{ if(!active) e.currentTarget.style.background=bg; }}>
+      <button onClick={onClick} style={{ flex:1, display:'flex', alignItems:'center', gap:0, padding:'0', textAlign:'left', background:'none', border:'none', cursor:'pointer', minWidth:0 }}>
+        {/* Active indicator */}
+        <div style={{ width:3, alignSelf:'stretch', background:active?WA.green:'transparent', flexShrink:0, borderRadius:'0 2px 2px 0' }}/>
+        <div style={{ flex:1, minWidth:0, display:'flex', alignItems:'center', gap:12, padding:'12px 14px 12px 12px' }}>
+          <div style={{ position:'relative', flexShrink:0 }}>
+            <Avatar jid={contact.jid} name={name} size={49} isGrp={isGrp} url={contact.profile_pic_url}/>
+            {/* Session colour ring */}
+            <div style={{ position:'absolute', bottom:1, right:1, width:13, height:13, borderRadius:'50%',
+              background:numCol, border:`2px solid ${isDark?WA.dSideBg:WA.sideBg}` }}/>
           </div>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:4, marginTop:3 }}>
-            <p style={{ fontSize:14, color:muted, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', margin:0, flex:1, display:'flex', alignItems:'center', gap:4 }}>
-              {isOut && <CheckCheck size={14} color={muted} style={{ flexShrink:0 }}/>}
-              {preview || <span style={{ fontStyle:'italic' }}>No messages yet</span>}
-            </p>
-            {contact.unread_count > 0 && (
-              <span style={{ background:WA.green, color:'#fff', fontSize:12, fontWeight:700, minWidth:20, height:20, borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', padding:'0 5px', flexShrink:0 }}>
-                {contact.unread_count>99?'99+':contact.unread_count}
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:4 }}>
+              <span style={{ fontWeight:500, fontSize:16, color:txt, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
+                {isGrp && <span style={{ fontSize:10, background:'rgba(0,168,132,0.18)', color:WA.green, borderRadius:3, padding:'1px 5px', marginRight:6, fontWeight:700 }}>GROUP</span>}
+                {name}
               </span>
-            )}
+              <span style={{ fontSize:12, color:contact.unread_count>0?WA.green:muted, flexShrink:0, fontWeight:contact.unread_count>0?600:400 }}>
+                {fmtChatTime(contact.last_message_at)}
+              </span>
+            </div>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:4, marginTop:3 }}>
+              <p style={{ fontSize:14, color:muted, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', margin:0, flex:1, display:'flex', alignItems:'center', gap:4 }}>
+                {isOut && <CheckCheck size={14} color={muted} style={{ flexShrink:0 }}/>}
+                {isGrp && contact.latest_message?.sender_phone && !isOut && (
+                  <span style={{ flexShrink:0 }}>+{contact.latest_message.sender_phone}:</span>
+                )}
+                {preview || <span style={{ fontStyle:'italic' }}>No messages yet</span>}
+              </p>
+              {contact.unread_count > 0 && (
+                <span style={{ background:WA.green, color:'#fff', fontSize:12, fontWeight:700, minWidth:20, height:20, borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', padding:'0 5px', flexShrink:0 }}>
+                  {contact.unread_count>99?'99+':contact.unread_count}
+                </span>
+              )}
+            </div>
           </div>
         </div>
-      </div>
-    </button>
+      </button>
+      {/* Hover-revealed archive toggle */}
+      {hover && onArchiveToggle && (
+        <button
+          onClick={(e)=>{ e.stopPropagation(); onArchiveToggle(contact); }}
+          title={contact.archived ? 'Unarchive' : 'Archive'}
+          style={{ position:'absolute', right:10, top:'50%', transform:'translateY(-50%)',
+            width:32, height:32, borderRadius:'50%', border:'none', cursor:'pointer',
+            background:isDark?'#2a3942':'#fff', color:muted, display:'flex', alignItems:'center', justifyContent:'center',
+            boxShadow:'0 1px 4px rgba(0,0,0,0.18)' }}>
+          {contact.archived ? <ArchiveRestore size={15}/> : <Archive size={15}/>}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -677,6 +711,202 @@ function ManageModal({ isDark, sessions, onClose, onRefresh }) {
   );
 }
 
+// ── Contact / Group Info side panel ──────────────────────────────────────────
+function InfoPanel({ jid, contact, sessionLabel, isAdmin, onClose, onArchiveToggle, isDark }) {
+  const isGrp = isGroup(jid);
+  const [groupMeta, setGroupMeta] = useState(null);
+  const [loadingMeta, setLoadingMeta] = useState(false);
+
+  useEffect(() => {
+    if (!isGrp) return;
+    setLoadingMeta(true);
+    api.get(`/whatsapp/hub/groups/${encodeURIComponent(jid)}`)
+      .then(({data}) => setGroupMeta(data))
+      .catch(() => setGroupMeta(null))
+      .finally(() => setLoadingMeta(false));
+  }, [jid, isGrp]);
+
+  const bg    = isDark ? WA.dSideBg : WA.sideBg;
+  const hdr   = isDark ? WA.dSideHeader : WA.sideHeader;
+  const txt   = isDark ? '#e9edef' : '#111b21';
+  const muted = isDark ? '#8696a0' : '#667781';
+  const brd   = isDark ? 'rgba(233,237,239,0.12)' : 'rgba(0,0,0,0.08)';
+  const card  = isDark ? '#202c33' : '#f7f8fa';
+
+  const name = getDisplayName(contact) || displayJid(jid);
+
+  return (
+    <motion.div initial={{x:40,opacity:0}} animate={{x:0,opacity:1}} exit={{x:40,opacity:0}} transition={{duration:0.18}}
+      style={{ width:380, minWidth:320, display:'flex', flexDirection:'column', background:bg, borderLeft:`1px solid ${brd}`, flexShrink:0 }}>
+      {/* Header */}
+      <div style={{ background:hdr, padding:'18px 16px', display:'flex', alignItems:'center', gap:16, flexShrink:0 }}>
+        <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', color:txt, display:'flex' }}><X size={20}/></button>
+        <span style={{ fontSize:16, fontWeight:600, color:txt }}>{isGrp ? 'Group info' : 'Contact info'}</span>
+      </div>
+
+      <div style={{ flex:1, overflowY:'auto' }}>
+        {/* Avatar + name */}
+        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', padding:'28px 20px', background:bg }}>
+          <Avatar jid={jid} name={name} size={140} isGrp={isGrp} url={contact?.profile_pic_url}/>
+          <h3 style={{ margin:'18px 0 4px', fontSize:20, fontWeight:500, color:txt, textAlign:'center' }}>{name}</h3>
+          {!isGrp && <p style={{ margin:0, fontSize:14, color:muted }}>{displayJid(jid)}</p>}
+          {isGrp && (
+            <p style={{ margin:0, fontSize:13, color:muted }}>
+              {participantsLabel(groupMeta?.participants_count || contact?.participants_count) || 'Group'}
+            </p>
+          )}
+          {sessionLabel && (
+            <div style={{ marginTop:10, display:'flex', alignItems:'center', gap:6, fontSize:12, color:muted, background:card, padding:'4px 12px', borderRadius:20 }}>
+              <Smartphone size={12}/> via {sessionLabel}
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div style={{ padding:'8px 0', borderTop:`8px solid ${isDark?'#0b141a':'#f0f2f5'}`, borderBottom:`8px solid ${isDark?'#0b141a':'#f0f2f5'}` }}>
+          <button onClick={()=>onArchiveToggle(contact)}
+            style={{ width:'100%', display:'flex', alignItems:'center', gap:16, padding:'14px 20px', background:'none', border:'none', cursor:'pointer', color:txt, fontSize:15 }}
+            onMouseEnter={e=>e.currentTarget.style.background=isDark?'rgba(255,255,255,0.04)':'rgba(0,0,0,0.03)'}
+            onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+            {contact?.archived ? <ArchiveRestore size={19} color={muted}/> : <Archive size={19} color={muted}/>}
+            {contact?.archived ? 'Unarchive chat' : 'Archive chat'}
+          </button>
+        </div>
+
+        {/* Group participants */}
+        {isGrp && (
+          <div style={{ padding:'12px 0' }}>
+            <div style={{ padding:'4px 20px 10px', fontSize:14, fontWeight:600, color:WA.green, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+              <span>{participantsLabel(groupMeta?.participants_count) || 'Participants'}</span>
+            </div>
+            {loadingMeta ? (
+              <div style={{ padding:20, textAlign:'center' }}><Loader2 size={18} color={WA.green} style={{ animation:'waSpinKf 1s linear infinite' }}/></div>
+            ) : groupMeta?.participants?.length ? (
+              groupMeta.participants.map(p => (
+                <div key={p.jid} style={{ display:'flex', alignItems:'center', gap:12, padding:'8px 20px' }}>
+                  <Avatar jid={p.jid} name={`+${p.phone}`} size={40}/>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:14, color:txt, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>+{p.phone}</div>
+                  </div>
+                  {p.admin && (
+                    <span style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, color:WA.green, fontWeight:600 }}>
+                      <Crown size={12}/> {p.admin === 'superadmin' ? 'Creator' : 'Admin'}
+                    </span>
+                  )}
+                </div>
+              ))
+            ) : (
+              <p style={{ padding:'0 20px', fontSize:13, color:muted }}>Participant list unavailable.</p>
+            )}
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+// ── Starred messages modal ────────────────────────────────────────────────────
+function StarredModal({ onClose, onOpenChat, isDark }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const bg = isDark?'#111b21':'#fff', card = isDark?'#233138':'#f7f8fa';
+  const txt = isDark?'#e9edef':'#111b21', muted = isDark?'#8696a0':'#667781';
+
+  useEffect(() => {
+    api.get('/whatsapp/hub/starred').then(({data})=>setItems(data.messages||[])).catch(()=>{}).finally(()=>setLoading(false));
+  }, []);
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', zIndex:1500, display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(3px)' }} onClick={onClose}>
+      <motion.div initial={{scale:0.93,opacity:0}} animate={{scale:1,opacity:1}} onClick={e=>e.stopPropagation()}
+        style={{ background:bg, borderRadius:20, width:460, maxWidth:'95vw', maxHeight:'80vh', overflow:'hidden', display:'flex', flexDirection:'column', boxShadow:'0 24px 80px rgba(0,0,0,0.4)' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10, padding:'18px 20px', borderBottom:`1px solid ${isDark?'#3b4a54':'#e9edef'}` }}>
+          <Star size={18} color={WA.green} fill={WA.green}/>
+          <span style={{ flex:1, fontWeight:700, fontSize:16, color:txt }}>Starred messages</span>
+          <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', color:muted }}><X size={18}/></button>
+        </div>
+        <div style={{ overflowY:'auto', flex:1 }}>
+          {loading ? (
+            <div style={{ padding:30, textAlign:'center' }}><Loader2 size={20} color={WA.green} style={{animation:'waSpinKf 1s linear infinite'}}/></div>
+          ) : items.length===0 ? (
+            <div style={{ padding:30, textAlign:'center', color:muted }}>
+              <Star size={32} style={{ opacity:0.2, marginBottom:8 }}/>
+              <p style={{ fontSize:13 }}>No starred messages yet</p>
+            </div>
+          ) : items.map(m => (
+            <button key={m.id} onClick={()=>{ onOpenChat(m.jid); onClose(); }}
+              style={{ width:'100%', textAlign:'left', display:'flex', flexDirection:'column', gap:4, padding:'12px 20px', background:card, border:'none', borderBottom:`1px solid ${isDark?'#182229':'#fff'}`, cursor:'pointer' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', gap:8 }}>
+                <span style={{ fontSize:13, fontWeight:700, color:txt }}>{m.display_name}</span>
+                <span style={{ fontSize:11, color:muted, flexShrink:0 }}>{fmtChatTime(m.timestamp)}</span>
+              </div>
+              <p style={{ margin:0, fontSize:13, color:muted, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.body}</p>
+            </button>
+          ))}
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+// ── In-chat search overlay (top bar replaces header when active) ─────────────
+function ChatSearchBar({ jid, onClose, onJumpTo, isDark }) {
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const inputRef = useRef(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  useEffect(() => {
+    if (!q.trim()) { setResults([]); return; }
+    setSearching(true);
+    const t = setTimeout(() => {
+      api.get(`/whatsapp/hub/conversations/${encodeURIComponent(jid)}/search`, { params:{ q: q.trim() } })
+        .then(({data}) => setResults(data.messages||[]))
+        .catch(() => setResults([]))
+        .finally(() => setSearching(false));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [q, jid]);
+
+  const bg = isDark ? WA.dSideHeader : WA.sideHeader;
+  const txt = isDark ? '#e9edef' : '#111b21';
+  const muted = isDark ? '#8696a0' : '#667781';
+
+  return (
+    <div style={{ position:'absolute', inset:0, zIndex:60, display:'flex', flexDirection:'column', background:isDark?WA.dChatBg:WA.chatBg }}>
+      <div style={{ background:bg, padding:'10px 16px', display:'flex', alignItems:'center', gap:12, flexShrink:0, boxShadow:'0 1px 3px rgba(0,0,0,0.1)' }}>
+        <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', color:txt, display:'flex' }}><ArrowLeft size={20}/></button>
+        <div style={{ flex:1, display:'flex', alignItems:'center', gap:8, background:isDark?'#2a3942':'#fff', borderRadius:8, padding:'7px 12px' }}>
+          <Search size={15} color={muted}/>
+          <input ref={inputRef} value={q} onChange={e=>setQ(e.target.value)} placeholder='Search in conversation'
+            style={{ flex:1, background:'none', border:'none', outline:'none', fontSize:14, color:txt }}/>
+          {searching && <Loader2 size={14} color={muted} style={{animation:'waSpinKf 1s linear infinite'}}/>}
+        </div>
+      </div>
+      <div style={{ flex:1, overflowY:'auto', background:isDark?WA.dSideBg:WA.sideBg }}>
+        {q.trim() && !searching && results.length===0 && (
+          <div style={{ padding:30, textAlign:'center', color:muted }}>
+            <SearchX size={28} style={{ opacity:0.3, marginBottom:8 }}/>
+            <p style={{ fontSize:13 }}>No messages found</p>
+          </div>
+        )}
+        {results.map(m => (
+          <button key={m.id} onClick={()=>onJumpTo(m)}
+            style={{ width:'100%', textAlign:'left', display:'flex', flexDirection:'column', gap:3, padding:'10px 16px',
+              background:'none', border:'none', borderBottom:`1px solid ${isDark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.05)'}`, cursor:'pointer' }}
+            onMouseEnter={e=>e.currentTarget.style.background=isDark?'rgba(255,255,255,0.04)':'rgba(0,0,0,0.03)'}
+            onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+            <span style={{ fontSize:11, color:muted }}>{fmtChatTime(m.timestamp)} · {m.direction==='out'?'You':'Them'}</span>
+            <span style={{ fontSize:14, color:txt, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.body}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ── MAIN PAGE
 // ─────────────────────────────────────────────────────────────────────────────
@@ -730,33 +960,60 @@ export default function WhatsAppHub() {
   // ── Contacts / chat list ───────────────────────────────────────────────────
   const [contacts,   setContacts]   = useState([]);
   const [groups,     setGroups]     = useState([]);
+  const [archived,   setArchived]   = useState([]);
   const [loadingC,   setLoadingC]   = useState(false);
-  const [filterMode, setFilterMode] = useState('all');   // all | unread | groups
+  const [filterMode, setFilterMode] = useState('all');   // all | unread | groups | archived
+
+  const splitContactsAndGroups = (all) => {
+    const isGrpRow = c => c.is_group || isGroup(c.jid);
+    const plain = all.filter(c => !isGrpRow(c));
+    const grps  = all.filter(c => isGrpRow(c));
+    const byName = {};
+    for (const g of grps) {
+      const key = (g.display_name||g.jid).toLowerCase().trim();
+      if (!byName[key] || new Date(g.last_message_at)>new Date(byName[key].last_message_at)) byName[key] = g;
+    }
+    const dedupedGroups = Object.values(byName).sort((a,b)=>new Date(b.last_message_at||0)-new Date(a.last_message_at||0));
+    return { plain, dedupedGroups };
+  };
 
   const loadContacts = useCallback(async () => {
     setLoadingC(true);
     try {
       const { data } = await api.get('/whatsapp/hub/inbox?limit=200');
-      const all = data.contacts || [];
-      setContacts(all.filter(c => !isGroup(c.jid)));
-      // Deduplicate groups by display name
-      const grps = all.filter(c => isGroup(c.jid));
-      const byName = {};
-      for (const g of grps) {
-        const key = (g.display_name||g.jid).toLowerCase().trim();
-        if (!byName[key] || new Date(g.last_message_at)>new Date(byName[key].last_message_at)) byName[key] = g;
-      }
-      setGroups(Object.values(byName).sort((a,b)=>new Date(b.last_message_at||0)-new Date(a.last_message_at||0)));
+      const { plain, dedupedGroups } = splitContactsAndGroups(data.contacts || []);
+      setContacts(plain);
+      setGroups(dedupedGroups);
     } catch { /* silently */ } finally { setLoadingC(false); }
   }, []);
 
+  const loadArchived = useCallback(async () => {
+    try {
+      const { data } = await api.get('/whatsapp/hub/inbox?limit=200&archived=true');
+      setArchived(data.contacts || []);
+    } catch { /* silently */ }
+  }, []);
+
   useEffect(() => { loadContacts(); const t=setInterval(loadContacts,30000); return ()=>clearInterval(t); }, [loadContacts]);
+  useEffect(() => { if (filterMode==='archived') loadArchived(); }, [filterMode, loadArchived]);
+
+  const toggleArchive = useCallback(async (c) => {
+    if (!c) return;
+    const next = !c.archived;
+    try {
+      await api.patch(`/whatsapp/hub/conversations/${encodeURIComponent(c.jid)}/archive`, { archived: next });
+      toast.success(next ? 'Chat archived' : 'Chat unarchived');
+      await loadContacts();
+      await loadArchived();
+      if (next && activeJidRef.current === c.jid) closeChatRef.current?.();
+    } catch { toast.error('Failed to update archive status'); }
+  }, [loadContacts, loadArchived]);
 
   // ── Search ─────────────────────────────────────────────────────────────────
   const [search, setSearch] = useState('');
 
   const filteredList = useMemo(() => {
-    let list = filterMode==='groups' ? groups : contacts;
+    let list = filterMode==='groups' ? groups : filterMode==='archived' ? archived : contacts;
     if (filterMode==='unread') list = list.filter(c=>c.unread_count>0);
     if (!search) return list;
     const q = search.toLowerCase();
@@ -764,7 +1021,7 @@ export default function WhatsAppHub() {
       (getDisplayName(c)||'').toLowerCase().includes(q) ||
       (c.phone||'').includes(q)
     );
-  }, [contacts, groups, filterMode, search]);
+  }, [contacts, groups, archived, filterMode, search]);
 
   // ── Active conversation ────────────────────────────────────────────────────
   const [activeJid,  setActiveJid]  = useState(null);
