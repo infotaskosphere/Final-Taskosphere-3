@@ -27,6 +27,29 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/whatsapp/hub", tags=["whatsapp-hub"])
 
 
+def _safe(doc: dict) -> dict:
+    """Strip MongoDB _id (ObjectId) so FastAPI can serialize the document."""
+    if not doc:
+        return {}
+    from bson import ObjectId
+    from datetime import datetime
+    out = {}
+    for k, v in doc.items():
+        if k == "_id":
+            continue
+        if isinstance(v, ObjectId):
+            out[k] = str(v)
+        elif isinstance(v, datetime):
+            out[k] = v.isoformat()
+        elif isinstance(v, dict):
+            out[k] = _safe(v)
+        elif isinstance(v, list):
+            out[k] = [_safe(i) if isinstance(i, dict) else i for i in v]
+        else:
+            out[k] = v
+    return out
+
+
 def _db():
     from backend.server import db
     return db
@@ -310,12 +333,15 @@ async def hub_inbox(
     result = []
     for c in contacts:
         latest = await db["whatsapp_hub_messages"].find_one({"jid": c["jid"]}, sort=[("timestamp", -1)])
+        from datetime import datetime as _dt
+        def _ts(v):
+            return v.isoformat() if isinstance(v, _dt) else v
         result.append({
             "jid":             c["jid"],
             "phone":           c.get("phone"),
             "display_name":    c.get("display_name"),
             "is_group":        bool(c.get("is_group")),
-            "last_message_at": c.get("last_message_at"),
+            "last_message_at": _ts(c.get("last_message_at")),
             "unread_count":    c.get("unread_count", 0),
             "session_id":      c.get("session_id"),
             "profile_pic_url": c.get("profile_pic_url"),
@@ -324,7 +350,7 @@ async def hub_inbox(
             "latest_message":  {
                 "body":         latest.get("body", "") if latest else "",
                 "direction":    latest.get("direction", "in") if latest else "in",
-                "timestamp":    latest.get("timestamp") if latest else None,
+                "timestamp":    _ts(latest.get("timestamp")) if latest else None,
                 "sender_phone": latest.get("sender_phone") if latest else None,
             } if latest else None,
         })
@@ -427,38 +453,65 @@ async def hub_contact_profile_pic(
 @router.get("/conversations/{contact_jid:path}")
 async def hub_conversation(
     contact_jid: str,
-    limit: int = 80,
+    limit: int = 100,
+    before: Optional[str] = None,
     current_user: User = Depends(get_current_user),
 ):
     if not await _has_hub_access(current_user):
         raise HTTPException(403, "No access")
     db   = _db()
-    msgs = await db["whatsapp_hub_messages"].find({"jid": contact_jid}) \
+
+    # Build query — support pagination via `before` message _id
+    query: Dict[str, Any] = {"jid": contact_jid}
+    if before:
+        from bson import ObjectId as ObjId
+        try:
+            query["_id"] = {"$lt": ObjId(before)}
+        except Exception:
+            pass
+
+    msgs = await db["whatsapp_hub_messages"].find(query) \
         .sort("timestamp", -1).limit(limit).to_list(limit)
     msgs.reverse()
+
     contact = await db["whatsapp_hub_contacts"].find_one({"jid": contact_jid})
-    return {
-        "contact":  contact,
-        "is_group": bool(contact and contact.get("is_group")),
-        "messages": [{
+
+    logger.info(
+        "WA Hub conversation: jid=%s messages_found=%d contact_found=%s",
+        contact_jid, len(msgs), bool(contact)
+    )
+
+    def _fmt_msg(m: dict) -> dict:
+        from bson import ObjectId as ObjId
+        from datetime import datetime
+        ts = m.get("timestamp")
+        if isinstance(ts, datetime):
+            ts = ts.isoformat()
+        return {
             "id":            str(m["_id"]),
             "message_id":    m.get("message_id"),
             "session_id":    m.get("session_id"),
             "session_label": m.get("session_label"),
-            "direction":     m.get("direction"),
+            "direction":     m.get("direction", "in"),
             "from":          m.get("from"),
             "is_group":      bool(m.get("is_group")),
             "sender_jid":    m.get("sender_jid"),
             "sender_phone":  m.get("sender_phone"),
             "contact_name":  m.get("contact_name"),
-            "body":          m.get("body"),
+            "body":          m.get("body", ""),
             "media_url":     m.get("media_url"),
             "media_type":    m.get("media_type"),
             "filename":      m.get("filename"),
-            "timestamp":     m.get("timestamp"),
+            "timestamp":     ts,
             "read":          m.get("read", False),
+            "starred":       bool(m.get("starred")),
             "assigned_to":   m.get("assigned_to"),
-        } for m in msgs],
+        }
+
+    return {
+        "contact":  _safe(contact) if contact else None,
+        "is_group": bool(contact and contact.get("is_group")),
+        "messages": [_fmt_msg(m) for m in msgs],
     }
 
 
