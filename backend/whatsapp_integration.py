@@ -112,6 +112,7 @@ def wa_bridge_keepalive_job():
 
 class WASessionCreate(BaseModel):
     label: Optional[str] = None
+    pairing_phone: Optional[str] = None   # e.g. "919876543210" — triggers phone pairing instead of QR
 
 class WAAccessRequest(BaseModel):
     reason: str = Field(..., min_length=5, max_length=500)
@@ -288,24 +289,44 @@ async def list_sessions(current_user: User = Depends(get_current_user)):
 @router.post("/sessions")
 async def add_session(body: WASessionCreate, current_user: User = Depends(require_admin())):
     session_id = f"wa_{int(_time.time() * 1000)}"
-    bridge_resp = await _bridge_post("/sessions", {"sessionId": session_id})
+    bridge_payload: Dict[str, Any] = {"sessionId": session_id}
+    if body.pairing_phone:
+        # Strip any non-digit characters before sending to bridge
+        bridge_payload["pairingPhone"] = "".join(c for c in body.pairing_phone if c.isdigit())
+    bridge_resp = await _bridge_post("/sessions", bridge_payload)
+    label = body.label or f"Number {session_id[-6:]}"
     db = _db()
     await db["whatsapp_sessions"].insert_one({
         "session_id": session_id,
-        "label": body.label or f"Number {session_id[-6:]}",
+        "label": label,
         "added_by": current_user.id,
         "added_by_name": current_user.full_name,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "status": "connecting",
     })
     _invalidate_sessions_cache()  # force fresh data on next poll
-    return {"sessionId": session_id, "label": body.label,
-            "message": "Poll /whatsapp/sessions/{id}/qr for QR code."}
+    mode = "pair-code" if body.pairing_phone else "qr"
+    return {
+        "sessionId": session_id,
+        "label": label,
+        "message": f"Poll /whatsapp/sessions/{{id}}/{mode} for {'pairing code' if body.pairing_phone else 'QR code'}.",
+    }
 
 
 @router.get("/sessions/{session_id}/qr")
 async def get_session_qr(session_id: str, current_user: User = Depends(require_admin())):
     return await _bridge_get(f"/sessions/{session_id}/qr")
+
+
+@router.get("/sessions/{session_id}/pair-code")
+async def get_session_pair_code(session_id: str, current_user: User = Depends(require_admin())):
+    """
+    Return the phone pairing code for a session started in phone-pairing mode.
+    The wa-bridge stores the code in sessions[sessionId].pairCode after calling
+    sock.requestPairingCode(). This endpoint proxies that value back to the frontend.
+    Returns: { code: "ABCD1234" | null, status: str }
+    """
+    return await _bridge_get(f"/sessions/{session_id}/pair-code")
 
 
 @router.delete("/sessions/{session_id}")
