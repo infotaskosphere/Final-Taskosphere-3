@@ -1178,6 +1178,55 @@ export default function WhatsAppHub() {
       };
     }, [connectSSE]);
 
+  // ── Active conversation ────────────────────────────────────────────────────
+  // (Moved above the SSE effect below because that effect's dependency array
+  // references activeJid/loadThread — they must be declared first or React
+  // throws "Cannot access before initialization" during render.)
+  const [activeJid,  setActiveJid]  = useState(null);
+  const [thread,     setThread]     = useState([]);
+  const [contact,    setContact]    = useState(null);
+  const [loadingT,   setLoadingT]   = useState(false);
+  const [replyTo,    setReplyTo]    = useState(null);
+  const [hasMore,    setHasMore]    = useState(false);
+  const [loadingMore,setLoadingMore] = useState(false);
+  const threadEndRef = useRef(null);
+
+  const loadThread = useCallback(async (jid) => {
+    if (!jid) return;
+    setLoadingT(true);
+    try {
+      const { data } = await api.get(`/whatsapp/hub/conversations/${encodeURIComponent(jid)}?limit=200`);
+      setThread(data.messages || []);
+      setHasMore((data.messages || []).length >= 200);
+      // Only override contact if we got one back (avoids wiping display on reload)
+      if (data.contact) setContact(data.contact);
+    } catch (err) {
+      console.error('[WA Hub] loadThread failed for jid:', jid, err?.response?.data || err.message);
+      toast.error('Could not load messages: ' + (err?.response?.data?.detail || err.message));
+    } finally {
+      setLoadingT(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!activeJid) return;
+    loadThread(activeJid);
+    api.patch(`/whatsapp/hub/conversations/${encodeURIComponent(activeJid)}/read`).catch(()=>{});
+    const t = setInterval(()=>loadThread(activeJid), 5000);
+    return () => clearInterval(t);
+  }, [activeJid, loadThread]);
+
+  useEffect(() => { threadEndRef.current?.scrollIntoView({ behavior:'smooth' }); }, [thread]);
+
+  const activeJidRef  = useRef(null);
+  const closeChatRef  = useRef(null);
+
+  const openChat = (c) => { setActiveJid(c.jid); activeJidRef.current = c.jid; setContact(c); setThread([]); setReplyTo(null); clearAttachment(); clearCompose(); };
+  const closeChat = () => { setActiveJid(null); activeJidRef.current = null; setThread([]); setContact(null); setReplyTo(null); };
+
+  // keep closeChatRef in sync so toggleArchive can call it
+  useEffect(() => { closeChatRef.current = closeChat; });
+
     // Reload active thread faster on SSE message event
     const activeJidForSSE = activeJid;
     useEffect(() => {
@@ -1232,44 +1281,7 @@ export default function WhatsAppHub() {
     );
   }, [contacts, groups, archived, filterMode, search]);
 
-  // ── Active conversation ────────────────────────────────────────────────────
-  const [activeJid,  setActiveJid]  = useState(null);
-  const [thread,     setThread]     = useState([]);
-  const [contact,    setContact]    = useState(null);
-  const [loadingT,   setLoadingT]   = useState(false);
-  const [replyTo,    setReplyTo]    = useState(null);
-  const [hasMore,    setHasMore]    = useState(false);
-  const [loadingMore,setLoadingMore] = useState(false);
-  const threadEndRef = useRef(null);
-
-  const loadThread = useCallback(async (jid) => {
-    if (!jid) return;
-    setLoadingT(true);
-    try {
-      const { data } = await api.get(`/whatsapp/hub/conversations/${encodeURIComponent(jid)}?limit=200`);
-      setThread(data.messages || []);
-      setHasMore((data.messages || []).length >= 200);
-      // Only override contact if we got one back (avoids wiping display on reload)
-      if (data.contact) setContact(data.contact);
-    } catch (err) {
-      console.error('[WA Hub] loadThread failed for jid:', jid, err?.response?.data || err.message);
-      toast.error('Could not load messages: ' + (err?.response?.data?.detail || err.message));
-    } finally {
-      setLoadingT(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!activeJid) return;
-    loadThread(activeJid);
-    api.patch(`/whatsapp/hub/conversations/${encodeURIComponent(activeJid)}/read`).catch(()=>{});
-    const t = setInterval(()=>loadThread(activeJid), 5000);
-    return () => clearInterval(t);
-  }, [activeJid, loadThread]);
-
-  useEffect(() => { threadEndRef.current?.scrollIntoView({ behavior:'smooth' }); }, [thread]);
-  
-    const loadMoreMessages = useCallback(async () => {
+  const loadMoreMessages = useCallback(async () => {
       if (!activeJid || loadingMore || !hasMore) return;
       setLoadingMore(true);
       try {
@@ -1285,17 +1297,6 @@ export default function WhatsAppHub() {
         setLoadingMore(false);
       }
     }, [activeJid, loadingMore, hasMore, thread]);
-
-  
-
-  const activeJidRef  = useRef(null);
-  const closeChatRef  = useRef(null);
-
-  const openChat = (c) => { setActiveJid(c.jid); activeJidRef.current = c.jid; setContact(c); setThread([]); setReplyTo(null); clearAttachment(); clearCompose(); };
-  const closeChat = () => { setActiveJid(null); activeJidRef.current = null; setThread([]); setContact(null); setReplyTo(null); };
-
-  // keep closeChatRef in sync so toggleArchive can call it
-  useEffect(() => { closeChatRef.current = closeChat; });
 
   // ── Compose ────────────────────────────────────────────────────────────────
   const [reply,      setReply]      = useState('');
