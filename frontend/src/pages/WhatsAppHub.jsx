@@ -294,6 +294,137 @@ function DateSep({ ts, isDark }) {
   );
 }
 
+// ── Media Lightbox (full-screen image/video viewer) ───────────────────────────
+function MediaLightbox({ url, type, filename, onClose }) {
+  useEffect(() => {
+    const h = e => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  return (
+    <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}
+      style={{ position:'fixed', inset:0, zIndex:9999, background:'rgba(0,0,0,0.92)',
+        display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column' }}
+      onClick={onClose}>
+      <button onClick={onClose} style={{ position:'absolute', top:16, right:20, background:'none', border:'none',
+        color:'#fff', cursor:'pointer', zIndex:10000, opacity:0.8, fontSize:28, lineHeight:1 }}>✕</button>
+      {filename && (
+        <div style={{ position:'absolute', top:16, left:20, color:'rgba(255,255,255,0.7)', fontSize:13 }}>{filename}</div>
+      )}
+      <div onClick={e=>e.stopPropagation()} style={{ maxWidth:'90vw', maxHeight:'90vh', display:'flex', alignItems:'center', justifyContent:'center' }}>
+        {type === 'image' ? (
+          <img src={url} alt={filename||'media'} style={{ maxWidth:'90vw', maxHeight:'88vh', objectFit:'contain', borderRadius:4, boxShadow:'0 8px 40px rgba(0,0,0,0.5)' }}/>
+        ) : type === 'video' ? (
+          <video src={url} controls autoPlay style={{ maxWidth:'90vw', maxHeight:'88vh', borderRadius:4, boxShadow:'0 8px 40px rgba(0,0,0,0.5)' }}/>
+        ) : null}
+      </div>
+      <a href={url} download={filename||'file'} target='_blank' rel='noreferrer'
+        onClick={e=>e.stopPropagation()}
+        style={{ marginTop:16, color:'rgba(255,255,255,0.6)', fontSize:12, textDecoration:'none',
+          display:'flex', alignItems:'center', gap:6, padding:'6px 14px', border:'1px solid rgba(255,255,255,0.2)',
+          borderRadius:20, cursor:'pointer' }}>
+        ⬇ Download
+      </a>
+    </motion.div>
+  );
+}
+
+// ── Media Renderer (inside bubble) ───────────────────────────────────────────
+function MediaRenderer({ msg, isDark }) {
+  const [lightbox, setLightbox] = useState(false);
+  const [imgError, setImgError] = useState(false);
+  const url      = msg.media_url;
+  const type     = msg.media_type;
+  const filename = msg.filename;
+  const txt      = isDark ? '#e9edef' : '#111b21';
+  const sub      = isDark ? '#8696a0' : '#667781';
+  const docBg    = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)';
+
+  if (type === 'image') {
+    if (imgError) {
+      return (
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6, padding:'8px 12px', background:docBg, borderRadius:8 }}>
+          <Image size={18} color={sub}/><span style={{ fontSize:12, color:sub, fontStyle:'italic' }}>Photo (could not load)</span>
+          <a href={url} target='_blank' rel='noreferrer' style={{ marginLeft:'auto', color:WA.green, fontSize:12, textDecoration:'none' }}>Open ↗</a>
+        </div>
+      );
+    }
+    return (
+      <>
+        <div style={{ marginBottom:4, cursor:'pointer', borderRadius:8, overflow:'hidden', maxWidth:300 }} onClick={()=>setLightbox(true)}>
+          <img src={url} alt={filename||'photo'} onError={()=>setImgError(true)}
+            style={{ width:'100%', maxWidth:300, maxHeight:220, objectFit:'cover', display:'block', borderRadius:8 }}/>
+        </div>
+        <AnimatePresence>
+          {lightbox && <MediaLightbox url={url} type='image' filename={filename} onClose={()=>setLightbox(false)}/>}
+        </AnimatePresence>
+      </>
+    );
+  }
+
+  if (type === 'video') {
+    return (
+      <>
+        <div style={{ marginBottom:4, position:'relative', borderRadius:8, overflow:'hidden', maxWidth:300, cursor:'pointer' }}
+          onClick={()=>setLightbox(true)}>
+          <video src={url} style={{ width:'100%', maxWidth:300, maxHeight:200, objectFit:'cover', display:'block', borderRadius:8, pointerEvents:'none' }}/>
+          <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center',
+            background:'rgba(0,0,0,0.3)', borderRadius:8 }}>
+            <div style={{ width:48, height:48, borderRadius:'50%', background:'rgba(255,255,255,0.85)',
+              display:'flex', alignItems:'center', justifyContent:'center' }}>
+              <span style={{ fontSize:20, marginLeft:3 }}>▶</span>
+            </div>
+          </div>
+        </div>
+        {filename && <div style={{ fontSize:11, color:sub, marginBottom:4 }}>{filename}</div>}
+        <AnimatePresence>
+          {lightbox && <MediaLightbox url={url} type='video' filename={filename} onClose={()=>setLightbox(false)}/>}
+        </AnimatePresence>
+      </>
+    );
+  }
+
+  if (type === 'audio' || type === 'ptt') {
+    return (
+      <div style={{ marginBottom:4, display:'flex', alignItems:'center', gap:10,
+        background:docBg, borderRadius:24, padding:'8px 14px', maxWidth:280 }}>
+        <Volume2 size={18} color={WA.green} style={{ flexShrink:0 }}/>
+        <audio src={url} controls style={{ flex:1, height:32, minWidth:0, maxWidth:'100%', outline:'none' }}/>
+      </div>
+    );
+  }
+
+  if (type === 'document' || type === 'sticker') {
+    const ext = filename ? filename.split('.').pop()?.toUpperCase() : 'FILE';
+    return (
+      <a href={url} download={filename||'document'} target='_blank' rel='noreferrer'
+        style={{ display:'flex', alignItems:'center', gap:10, marginBottom:4, padding:'10px 14px',
+          background:docBg, borderRadius:10, textDecoration:'none', maxWidth:280,
+          border:`1px solid ${isDark?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.08)'}` }}>
+        <div style={{ width:36, height:44, background:'#ef4444', borderRadius:5, display:'flex', alignItems:'center',
+          justifyContent:'center', flexShrink:0, fontSize:9, fontWeight:800, color:'#fff', letterSpacing:'0.03em' }}>
+          {ext?.slice(0,4)}
+        </div>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:13, fontWeight:600, color:txt, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{filename||'Document'}</div>
+          <div style={{ fontSize:11, color:sub, marginTop:2 }}>{fmtFileSize(msg.file_size)} · {ext}</div>
+        </div>
+        <FileText size={16} color={sub} style={{ flexShrink:0 }}/>
+      </a>
+    );
+  }
+
+  // Fallback for unknown media types with a URL
+  return (
+    <a href={url} target='_blank' rel='noreferrer'
+      style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4, padding:'8px 12px',
+        background:docBg, borderRadius:8, textDecoration:'none', color:WA.green, fontSize:13 }}>
+      <File size={16}/>{filename || 'Open media ↗'}
+    </a>
+  );
+}
+
 // ── Message bubble ────────────────────────────────────────────────────────────
 function Bubble({ msg, prev, next, isDark, sessionColorMap, isGrp, onReply, onStar, onDelete }) {
   const [menu, setMenu] = useState(false);
@@ -352,14 +483,22 @@ function Bubble({ msg, prev, next, isDark, sessionColorMap, isGrp, onReply, onSt
             </p>
           )}
 
-          {/* Media icon row */}
-          {isMedia && (
-            <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:4, color:isDark?'#8696a0':'#667781' }}>
-              {msg.media_type==='image'    && <Image size={15}/>}
-              {msg.media_type==='video'    && <Camera size={15}/>}
-              {msg.media_type==='audio'    && <Volume2 size={15}/>}
-              {msg.media_type==='document' && <FileText size={15}/>}
-              {msg.filename && <span style={{ fontSize:11, fontStyle:'italic', color:isDark?'#8696a0':'#667781' }}>{msg.filename}</span>}
+          {/* ── Full media rendering ── */}
+          {isMedia && msg.media_url && (
+            <MediaRenderer msg={msg} isDark={isDark} />
+          )}
+          {/* Fallback icon row when no media_url yet (downloading/pending) */}
+          {isMedia && !msg.media_url && (
+            <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:4, color:isDark?'#8696a0':'#667781',
+              background:isDark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.05)', borderRadius:8, padding:'8px 12px' }}>
+              {msg.media_type==='image'    && <Image size={18}/>}
+              {msg.media_type==='video'    && <Camera size={18}/>}
+              {msg.media_type==='audio'    && <Volume2 size={18}/>}
+              {msg.media_type==='document' && <FileText size={18}/>}
+              <span style={{ fontSize:12, color:isDark?'#8696a0':'#667781', fontStyle:'italic' }}>
+                {msg.filename || (msg.media_type==='image'?'Photo':msg.media_type==='video'?'Video':msg.media_type==='audio'?'Voice message':'Document')}
+              </span>
+              <Loader2 size={13} style={{ animation:'waSpinKf 1s linear infinite', marginLeft:'auto' }}/>
             </div>
           )}
 
@@ -1000,7 +1139,7 @@ export default function WhatsAppHub() {
     } catch { /* silently */ }
   }, []);
 
-  useEffect(() => { loadContacts(); const t=setInterval(loadContacts,30000); return ()=>clearInterval(t); }, [loadContacts]);
+  useEffect(() => { loadContacts(); const t=setInterval(loadContacts,5000); return ()=>clearInterval(t); }, [loadContacts]);
   useEffect(() => { if (filterMode==='archived') loadArchived(); }, [filterMode, loadArchived]);
 
   const toggleArchive = useCallback(async (c) => {
