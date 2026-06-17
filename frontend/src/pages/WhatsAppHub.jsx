@@ -720,7 +720,7 @@ function InfoPanel({ jid, contact, sessionLabel, isAdmin, onClose, onArchiveTogg
   useEffect(() => {
     if (!isGrp) return;
     setLoadingMeta(true);
-    api.get(`/whatsapp/hub/groups/${encodeURIComponent(jid)}`)
+    api.get(`/whatsapp/hub/groups/${encodeURIComponent(jid)}/participants`)
       .then(({data}) => setGroupMeta(data))
       .catch(() => setGroupMeta(null))
       .finally(() => setLoadingMeta(false));
@@ -1051,8 +1051,14 @@ export default function WhatsAppHub() {
 
   useEffect(() => { threadEndRef.current?.scrollIntoView({ behavior:'smooth' }); }, [thread]);
 
-  const openChat = (c) => { setActiveJid(c.jid); setContact(c); setThread([]); setReplyTo(null); clearAttachment(); clearCompose(); };
-  const closeChat = () => { setActiveJid(null); setThread([]); setContact(null); setReplyTo(null); };
+  const activeJidRef  = useRef(null);
+  const closeChatRef  = useRef(null);
+
+  const openChat = (c) => { setActiveJid(c.jid); activeJidRef.current = c.jid; setContact(c); setThread([]); setReplyTo(null); clearAttachment(); clearCompose(); };
+  const closeChat = () => { setActiveJid(null); activeJidRef.current = null; setThread([]); setContact(null); setReplyTo(null); };
+
+  // keep closeChatRef in sync so toggleArchive can call it
+  useEffect(() => { closeChatRef.current = closeChat; });
 
   // ── Compose ────────────────────────────────────────────────────────────────
   const [reply,      setReply]      = useState('');
@@ -1348,7 +1354,15 @@ export default function WhatsAppHub() {
                         <React.Fragment key={msg.id}>
                           {showDateSep && <DateSep ts={msg.timestamp} isDark={isDark}/>}
                           <Bubble msg={msg} prev={prev} next={next} isDark={isDark} sessionColorMap={sessionColorMap}
-                            onReply={m=>setReplyTo(m)} onStar={()=>{}} onDelete={deleteMsg}/>
+                            onReply={m=>setReplyTo(m)}
+                            onStar={async (msg) => {
+                              const next = !msg.starred;
+                              try {
+                                await api.patch(`/whatsapp/hub/messages/${msg.id}/star`, { starred: next });
+                                setThread(t => t.map(m => m.id === msg.id ? {...m, starred: next} : m));
+                              } catch { toast.error('Failed to star message'); }
+                            }}
+                            onDelete={deleteMsg}/>
                         </React.Fragment>
                       );
                     })
