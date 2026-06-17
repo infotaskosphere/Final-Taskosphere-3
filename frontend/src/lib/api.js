@@ -13,6 +13,7 @@ if (!_raw.endsWith("/api")) {
 }
 
 const BASE_URL = _raw;
+export { BASE_URL };
 
 // ─── Token Helpers ───────────────────────────────────────────
 // NOTE: Must match the key used by AuthContext ("token") so that
