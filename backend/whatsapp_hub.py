@@ -286,6 +286,7 @@ async def hub_inbox(
     unread_only: bool = False,
     include_groups: bool = True,
     groups_only: bool = False,
+    archived: bool = False,
     limit: int = 200,
     skip: int = 0,
     current_user: User = Depends(get_current_user),
@@ -296,6 +297,8 @@ async def hub_inbox(
     filt: Dict[str, Any] = {}
     if session_id:  filt["session_id"]   = session_id
     if unread_only: filt["unread_count"] = {"$gt": 0}
+    # Archived filter — show archived only when explicitly requested
+    filt["archived"] = True if archived else {"$ne": True}
     if groups_only:
         filt["is_group"] = True
     elif not include_groups:
@@ -316,6 +319,8 @@ async def hub_inbox(
             "unread_count":    c.get("unread_count", 0),
             "session_id":      c.get("session_id"),
             "profile_pic_url": c.get("profile_pic_url"),
+            "archived":        bool(c.get("archived")),
+            "starred":         bool(c.get("starred")),
             "latest_message":  {
                 "body":         latest.get("body", "") if latest else "",
                 "direction":    latest.get("direction", "in") if latest else "in",
@@ -610,6 +615,134 @@ async def hub_assign(contact_jid: str, body: ConversationAssign, current_user: U
         await db["whatsapp_hub_messages"].update_one({"_id": latest["_id"]}, {"$set": {"assigned_to": body.user_id}})
     return {"ok": True, "assigned_to": body.user_id}
 
+
+
+
+# ── Archive / Unarchive conversation ─────────────────────────────────────────
+
+class ArchiveBody(BaseModel):
+    archived: bool
+
+@router.patch("/conversations/{contact_jid:path}/archive")
+async def hub_archive_conversation(
+    contact_jid: str,
+    body: ArchiveBody,
+    current_user: User = Depends(get_current_user),
+):
+    if not await _has_hub_access(current_user):
+        raise HTTPException(403, "No access")
+    db = _db()
+    await db["whatsapp_hub_contacts"].update_one(
+        {"jid": contact_jid},
+        {"$set": {"archived": body.archived}},
+    )
+    return {"ok": True, "archived": body.archived}
+
+
+# ── Star / Unstar a single message ──────────────────────────────────────────
+
+class StarBody(BaseModel):
+    starred: bool
+
+@router.patch("/messages/{message_id}/star")
+async def hub_star_message(
+    message_id: str,
+    body: StarBody,
+    current_user: User = Depends(get_current_user),
+):
+    if not await _has_hub_access(current_user):
+        raise HTTPException(403, "No access")
+    from bson import ObjectId
+    db = _db()
+    try:
+        oid = ObjectId(message_id)
+    except Exception:
+        raise HTTPException(400, "Invalid message id")
+    await db["whatsapp_hub_messages"].update_one({"_id": oid}, {"$set": {"starred": body.starred}})
+    return {"ok": True, "starred": body.starred}
+
+
+# ── Starred messages list ────────────────────────────────────────────────────
+
+@router.get("/starred")
+async def hub_starred_messages(
+    limit: int = 100,
+    current_user: User = Depends(get_current_user),
+):
+    if not await _has_hub_access(current_user):
+        raise HTTPException(403, "No access")
+    db   = _db()
+    msgs = await db["whatsapp_hub_messages"].find({"starred": True}) \
+        .sort("timestamp", -1).limit(limit).to_list(limit)
+    result = []
+    for m in msgs:
+        contact = await db["whatsapp_hub_contacts"].find_one({"jid": m.get("jid")})
+        result.append({
+            "id":           str(m["_id"]),
+            "jid":          m.get("jid"),
+            "body":         m.get("body"),
+            "direction":    m.get("direction"),
+            "timestamp":    m.get("timestamp"),
+            "display_name": contact.get("display_name") if contact else m.get("jid"),
+        })
+    return {"messages": result}
+
+
+# ── Search within a conversation ─────────────────────────────────────────────
+
+@router.get("/conversations/{contact_jid:path}/search")
+async def hub_conversation_search(
+    contact_jid: str,
+    q: str = "",
+    limit: int = 50,
+    current_user: User = Depends(get_current_user),
+):
+    if not await _has_hub_access(current_user):
+        raise HTTPException(403, "No access")
+    if not q.strip():
+        return {"messages": []}
+    db   = _db()
+    # Simple case-insensitive text search on body
+    msgs = await db["whatsapp_hub_messages"].find({
+        "jid":  contact_jid,
+        "body": {"$regex": q.strip(), "$options": "i"},
+    }).sort("timestamp", -1).limit(limit).to_list(limit)
+    msgs.reverse()
+    return {"messages": [{
+        "id":        str(m["_id"]),
+        "body":      m.get("body"),
+        "direction": m.get("direction"),
+        "timestamp": m.get("timestamp"),
+    } for m in msgs]}
+
+
+# ── Global search (name + phone + message) ───────────────────────────────────
+
+@router.get("/search")
+async def hub_global_search(
+    q: str = "",
+    limit: int = 30,
+    current_user: User = Depends(get_current_user),
+):
+    if not await _has_hub_access(current_user):
+        raise HTTPException(403, "No access")
+    if not q.strip():
+        return {"contacts": [], "messages": []}
+    db      = _db()
+    pattern = {"$regex": q.strip(), "$options": "i"}
+
+    contacts = await db["whatsapp_hub_contacts"].find({
+        "$or": [{"display_name": pattern}, {"phone": pattern}]
+    }).limit(limit).to_list(limit)
+
+    messages = await db["whatsapp_hub_messages"].find({
+        "body": pattern
+    }).sort("timestamp", -1).limit(limit).to_list(limit)
+
+    return {
+        "contacts": [{"jid": c["jid"], "display_name": c.get("display_name"), "phone": c.get("phone")} for c in contacts],
+        "messages": [{"id": str(m["_id"]), "jid": m.get("jid"), "body": m.get("body"), "timestamp": m.get("timestamp")} for m in messages],
+    }
 
 # ── Access management (unchanged) ────────────────────────────────────────────
 
