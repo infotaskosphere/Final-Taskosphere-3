@@ -1125,7 +1125,7 @@ export default function WhatsAppHub() {
   const loadContacts = useCallback(async () => {
     setLoadingC(true);
     try {
-      const { data } = await api.get('/whatsapp/hub/inbox?limit=200');
+      const { data } = await api.get('/whatsapp/hub/inbox?limit=500');
       const { plain, dedupedGroups } = splitContactsAndGroups(data.contacts || []);
       setContacts(plain);
       setGroups(dedupedGroups);
@@ -1134,7 +1134,7 @@ export default function WhatsAppHub() {
 
   const loadArchived = useCallback(async () => {
     try {
-      const { data } = await api.get('/whatsapp/hub/inbox?limit=200&archived=true');
+      const { data } = await api.get('/whatsapp/hub/inbox?limit=500&archived=true');
       setArchived(data.contacts || []);
     } catch { /* silently */ }
   }, []);
@@ -1142,7 +1142,71 @@ export default function WhatsAppHub() {
   useEffect(() => { loadContacts(); const t=setInterval(loadContacts,5000); return ()=>clearInterval(t); }, [loadContacts]);
   useEffect(() => { if (filterMode==='archived') loadArchived(); }, [filterMode, loadArchived]);
 
-  const toggleArchive = useCallback(async (c) => {
+
+    // ── SSE: real-time updates ────────────────────────────────────────────────
+    const eventSourceRef = useRef(null);
+    const reconnectTimerRef = useRef(null);
+
+    const connectSSE = useCallback(() => {
+      try {
+        if (eventSourceRef.current) { try { eventSourceRef.current.close(); } catch(_){} }
+        const token = document.cookie.match(/token=([^;]+)/)?.[1]
+          || localStorage.getItem('token')
+          || sessionStorage.getItem('token');
+        const url = token
+          ? `/api/whatsapp/hub/events?token=${encodeURIComponent(token)}`
+          : '/api/whatsapp/hub/events';
+        const es = new EventSource(url, { withCredentials: true });
+        es.addEventListener('message', () => { loadContacts(); });
+        es.addEventListener('sync',    () => { loadContacts(); });
+        es.addEventListener('connected', () => { clearTimeout(reconnectTimerRef.current); });
+        es.onerror = () => {
+          try { es.close(); } catch(_){}
+          eventSourceRef.current = null;
+          reconnectTimerRef.current = setTimeout(connectSSE, 8000);
+        };
+        eventSourceRef.current = es;
+      } catch(_) {}
+    }, [loadContacts]);
+
+    // Connect SSE on mount; auto-reload active thread on new message
+    useEffect(() => {
+      connectSSE();
+      return () => {
+        clearTimeout(reconnectTimerRef.current);
+        try { eventSourceRef.current?.close(); } catch(_){}
+      };
+    }, [connectSSE]);
+
+    // Reload active thread faster on SSE message event
+    const activeJidForSSE = activeJid;
+    useEffect(() => {
+      const es = eventSourceRef.current;
+      if (!es || !activeJidForSSE) return;
+      const handler = (e) => {
+        try {
+          const d = JSON.parse(e.data || '{}');
+          if (d.jid === activeJidForSSE) loadThread(activeJidForSSE);
+        } catch(_) {}
+      };
+      es.addEventListener('message', handler);
+      return () => { try { es.removeEventListener('message', handler); } catch(_){} };
+    }, [activeJidForSSE, loadThread]);
+
+  
+    const handleForceSync = useCallback(async () => {
+      try {
+        const connected = sessions.filter(s=>s.status==='connected');
+        if (!connected.length) { toast.error('No connected WhatsApp session'); return; }
+        for (const sess of connected) {
+          await api.post(`/whatsapp/bridge/sessions/${sess.sessionId}/sync`).catch(()=>{});
+        }
+        await loadContacts();
+        toast.success('Sync triggered — new chats will appear shortly');
+      } catch { toast.error('Sync failed'); }
+    }, [sessions, loadContacts]);
+
+    const toggleArchive = useCallback(async (c) => {
     if (!c) return;
     const next = !c.archived;
     try {
@@ -1174,14 +1238,17 @@ export default function WhatsAppHub() {
   const [contact,    setContact]    = useState(null);
   const [loadingT,   setLoadingT]   = useState(false);
   const [replyTo,    setReplyTo]    = useState(null);
+  const [hasMore,    setHasMore]    = useState(false);
+  const [loadingMore,setLoadingMore] = useState(false);
   const threadEndRef = useRef(null);
 
   const loadThread = useCallback(async (jid) => {
     if (!jid) return;
     setLoadingT(true);
     try {
-      const { data } = await api.get(`/whatsapp/hub/conversations/${encodeURIComponent(jid)}?limit=100`);
+      const { data } = await api.get(`/whatsapp/hub/conversations/${encodeURIComponent(jid)}?limit=200`);
       setThread(data.messages || []);
+      setHasMore((data.messages || []).length >= 200);
       // Only override contact if we got one back (avoids wiping display on reload)
       if (data.contact) setContact(data.contact);
     } catch (err) {
@@ -1196,11 +1263,30 @@ export default function WhatsAppHub() {
     if (!activeJid) return;
     loadThread(activeJid);
     api.patch(`/whatsapp/hub/conversations/${encodeURIComponent(activeJid)}/read`).catch(()=>{});
-    const t = setInterval(()=>loadThread(activeJid), 15000);
+    const t = setInterval(()=>loadThread(activeJid), 5000);
     return () => clearInterval(t);
   }, [activeJid, loadThread]);
 
   useEffect(() => { threadEndRef.current?.scrollIntoView({ behavior:'smooth' }); }, [thread]);
+  
+    const loadMoreMessages = useCallback(async () => {
+      if (!activeJid || loadingMore || !hasMore) return;
+      setLoadingMore(true);
+      try {
+        const oldest = thread[0];
+        const before = oldest?.id || '';
+        const { data } = await api.get(`/whatsapp/hub/conversations/${encodeURIComponent(activeJid)}?limit=200&before=${before}`);
+        const more = data.messages || [];
+        setThread(prev => [...more, ...prev]);
+        setHasMore(more.length >= 200);
+      } catch (err) {
+        toast.error('Could not load more messages');
+      } finally {
+        setLoadingMore(false);
+      }
+    }, [activeJid, loadingMore, hasMore, thread]);
+
+  
 
   const activeJidRef  = useRef(null);
   const closeChatRef  = useRef(null);
@@ -1518,7 +1604,22 @@ export default function WhatsAppHub() {
                       );
                     })
               }
-              <div ref={threadEndRef}/>
+              {/* ★ Load More button */}
+                {hasMore && !loadingT && (
+                  <div style={{ display:'flex', justifyContent:'center', padding:'12px 0 4px' }}>
+                    <button
+                      onClick={loadMoreMessages}
+                      disabled={loadingMore}
+                      style={{ background:'transparent', border:`1px solid ${isDark?'rgba(255,255,255,0.2)':'rgba(0,0,0,0.15)'}`,
+                        color: isDark?'#e9edef':'#111b21', borderRadius:16, padding:'6px 20px', fontSize:12,
+                        cursor:loadingMore?'default':'pointer', display:'flex', alignItems:'center', gap:6 }}>
+                      {loadingMore
+                        ? <><Loader2 size={13} style={{animation:'waSpinKf 1s linear infinite'}}/> Loading…</>
+                        : '↑ Load older messages'}
+                    </button>
+                  </div>
+                )}
+                <div ref={threadEndRef}/>
             </div>
 
             {/* Input area */}
