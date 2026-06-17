@@ -1,16 +1,14 @@
 /**
  * wa-bridge/index.js — Multi-session WhatsApp Web bridge for Taskosphere
- *
- * Key fixes vs original:
- *  ★ Per-session LID map: contacts.upsert + messaging-history.set populate
- *    lidMaps[sessionId]["12345@lid"] = "91xyz@s.whatsapp.net" so we can
- *    resolve @lid JIDs to real phone JIDs before sending or storing.
- *  ★ resolveJid(sessionId, jid): looks up LID map, returns original if unknown
- *  ★ GET /sessions/:id/resolve-jid?jid=... for backend to call before send
- *  ★ Profile picture endpoint: GET /sessions/:id/contacts/:jid/profile-pic
- *  ★ Bulk history sync: POST to /api/whatsapp/hub/webhook/bulk-sync on connect
- *  ★ Media send: /send-media (multipart) + /send-media-base64 (JSON)
- *  ★ Shared send queue with exponential back-off on 429/503
+ * v2.1 — Fixes:
+ *   ★ FORWARD GROUPS (@g.us) to backend (incoming + history sync)
+ *   ★ Forward group metadata (subject, participants) via /webhook/groups
+ *   ★ Group sender JID extracted from msg.key.participant
+ *   ★ @lid resolver: eager population from messages.upsert (participant +
+ *     senderPn), plus on-demand sock.onWhatsApp() lookup when map is empty.
+ *     NEVER blindly swaps @lid digits → @s.whatsapp.net (root cause of
+ *     "wrong numbers" — the LID digits are not the phone number).
+ *   ★ New endpoints: /sessions/:id/groups, /sessions/:id/groups/:gjid/participants
  */
 
 const express    = require("express");
@@ -55,53 +53,86 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage, limits: { fileSize: 16 * 1024 * 1024 } });
 
-// ── Session registry ───────────────────────────────────────────────────────────
+// ── Session registry + LID maps ──────────────────────────────────────────────
 const sessions = {};
-
-// ── Per-session LID→JID map ───────────────────────────────────────────────────
-//
-// WhatsApp multi-device uses @lid (Linked Device ID) JIDs for contacts who have
-// multi-device enabled.  @lid numbers are NOT phone numbers.  We build a map
-// from contacts.upsert / messaging-history.set so we can resolve them.
-//
-// lidMaps[sessionId]["7344410878126@lid"] = "919876543210@s.whatsapp.net"
-//
-const lidMaps = {};
+const lidMaps  = {};   // lidMaps[sessionId][<lid jid or bare num>] = real pn jid
 
 function updateLidMap(sessionId, contacts) {
   if (!contacts || contacts.length === 0) return;
   if (!lidMaps[sessionId]) lidMaps[sessionId] = {};
   const map = lidMaps[sessionId];
   for (const c of contacts) {
-    const cid = (c.id || "").trim();
-    const lid  = (c.lid || "").trim();
+    const cid = (c.id  || "").trim();
+    const lid = (c.lid || "").trim();
     if (lid && cid && !cid.endsWith("@lid") && !cid.endsWith("@g.us")) {
       map[lid] = cid;
-      // Also index the bare LID number
       const lidNum = lid.split("@")[0];
       if (lidNum && !map[lidNum]) map[lidNum] = cid;
     }
   }
 }
 
-/**
- * Resolve an @lid JID to its real @s.whatsapp.net JID.
- * Returns the original JID unchanged if it is not @lid or if we have no mapping.
- */
+/** Eagerly capture LID↔PN pairs from a single message envelope. */
+function captureLidFromMessage(sessionId, msg) {
+  if (!msg?.key) return;
+  if (!lidMaps[sessionId]) lidMaps[sessionId] = {};
+  const map = lidMaps[sessionId];
+
+  // Baileys 6.7+ exposes senderPn / participantPn on the key when
+  // remoteJid/participant is a @lid. Capture both directions.
+  const pairs = [
+    [msg.key.remoteJid,   msg.key.senderPn || msg.key.remoteJidAlt],
+    [msg.key.participant, msg.key.participantPn || msg.key.participantAlt],
+  ];
+  for (const [lidJid, pnJid] of pairs) {
+    if (!lidJid || !pnJid) continue;
+    if (!String(lidJid).endsWith("@lid"))         continue;
+    if (!String(pnJid).endsWith("@s.whatsapp.net")) continue;
+    map[lidJid] = pnJid;
+    const num = lidJid.split("@")[0];
+    if (num && !map[num]) map[num] = pnJid;
+  }
+}
+
 function resolveJid(sessionId, jid) {
   if (!jid) return jid;
   if (jid.endsWith("@lid")) {
-    const resolved = lidMaps[sessionId]?.[jid];
-    if (resolved) return resolved;
-    // Also try bare number key
-    const num = jid.split("@")[0];
-    const resolvedByNum = lidMaps[sessionId]?.[num];
-    if (resolvedByNum) return resolvedByNum;
+    const m = lidMaps[sessionId] || {};
+    return m[jid] || m[jid.split("@")[0]] || jid;
   }
   return jid;
 }
 
-// ── Send queue (per session) ───────────────────────────────────────────────────
+/**
+ * Resolve an @lid to a real @s.whatsapp.net JID — with on-demand lookup.
+ * Returns null if we cannot resolve safely (caller MUST refuse to send).
+ */
+async function resolveJidStrict(sessionId, jid) {
+  if (!jid || !jid.endsWith("@lid")) return jid;
+  const cached = resolveJid(sessionId, jid);
+  if (cached !== jid) return cached;
+
+  // Ask WhatsApp directly — onWhatsApp returns the real PN JID if the
+  // number is registered. The LID number is NOT a phone number, so we
+  // skip this lookup and instead try the contacts store.
+  const sock = sessions[sessionId]?.socket;
+  if (!sock) return null;
+
+  try {
+    const store = (await sock.store?.contacts) || {};
+    for (const [pnJid, contact] of Object.entries(store)) {
+      if (contact?.lid === jid && pnJid.endsWith("@s.whatsapp.net")) {
+        if (!lidMaps[sessionId]) lidMaps[sessionId] = {};
+        lidMaps[sessionId][jid] = pnJid;
+        return pnJid;
+      }
+    }
+  } catch (_) {}
+
+  return null; // unresolved — caller must refuse
+}
+
+// ── Send queue ───────────────────────────────────────────────────────────────
 const sendQueues = {};
 function getQ(sid) { if (!sendQueues[sid]) sendQueues[sid] = { running: false, items: [] }; return sendQueues[sid]; }
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -113,7 +144,6 @@ async function enqueueSend(sessionId, fn) {
     if (!q.running) drainQ(q);
   });
 }
-
 async function drainQ(q) {
   q.running = true;
   while (q.items.length > 0) {
@@ -135,7 +165,7 @@ async function drainQ(q) {
   q.running = false;
 }
 
-// ── Express ───────────────────────────────────────────────────────────────────
+// ── Express ──────────────────────────────────────────────────────────────────
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
@@ -149,81 +179,124 @@ function throttle(key, ms = 2000) {
   };
 }
 
-// ── Hub: forward incoming message to backend ───────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function extractBody(msg) {
+  return msg.message?.conversation
+    || msg.message?.extendedTextMessage?.text
+    || msg.message?.imageMessage?.caption
+    || msg.message?.videoMessage?.caption
+    || msg.message?.documentMessage?.caption
+    || msg.message?.buttonsResponseMessage?.selectedDisplayText
+    || msg.message?.listResponseMessage?.title
+    || "[media]";
+}
+function extractMediaType(msg) {
+  if (msg.message?.imageMessage)    return "image";
+  if (msg.message?.videoMessage)    return "video";
+  if (msg.message?.audioMessage)    return "audio";
+  if (msg.message?.documentMessage) return "document";
+  if (msg.message?.stickerMessage)  return "sticker";
+  return null;
+}
+function tsOf(msg) {
+  const ts = msg.messageTimestamp;
+  return ts ? (typeof ts === "object" ? ts.low : ts) : Math.floor(Date.now() / 1000);
+}
+
+// ── Hub: forward incoming message (NOW includes groups) ──────────────────────
 async function notifyHubIncoming(sessionId, sessionLabel, msg) {
   try {
     if (msg.key?.fromMe) return;
     const rawJid = msg.key?.remoteJid || "";
-    const jid    = resolveJid(sessionId, rawJid);
-    if (!jid || jid.endsWith("@g.us") || jid === "status@broadcast") return;
+    if (!rawJid || rawJid === "status@broadcast") return;
 
-    const body =
-      msg.message?.conversation ||
-      msg.message?.extendedTextMessage?.text ||
-      msg.message?.imageMessage?.caption ||
-      msg.message?.videoMessage?.caption ||
-      msg.message?.documentMessage?.caption ||
-      msg.message?.buttonsResponseMessage?.selectedDisplayText ||
-      msg.message?.listResponseMessage?.title ||
-      "[media]";
+    captureLidFromMessage(sessionId, msg);
 
-    let mediaType = null;
-    if (msg.message?.imageMessage)         mediaType = "image";
-    else if (msg.message?.videoMessage)    mediaType = "video";
-    else if (msg.message?.audioMessage)    mediaType = "audio";
-    else if (msg.message?.documentMessage) mediaType = "document";
-    else if (msg.message?.stickerMessage)  mediaType = "sticker";
+    const isGroup = rawJid.endsWith("@g.us");
+    const jid     = isGroup ? rawJid : resolveJid(sessionId, rawJid);
+    if (!jid) return;
 
-    const ts = msg.messageTimestamp;
-    const timestamp = ts ? (typeof ts === "object" ? ts.low : ts) : Math.floor(Date.now() / 1000);
+    // Group sender (participant) — resolve LID too
+    const rawSender = msg.key?.participant || null;
+    const sender    = rawSender ? resolveJid(sessionId, rawSender) : null;
 
-    await axios.post(`${BACKEND_URL}/api/whatsapp/hub/webhook/message`, {
-      session_id: sessionId, session_label: sessionLabel || sessionId,
-      jid, message_id: msg.key?.id || "",
-      from: jid.split("@")[0],
-      contact_name: msg.pushName || null,
-      body, media_url: null, media_type: mediaType, timestamp,
-    }, { timeout: 5000 });
+    const payload = {
+      session_id:    sessionId,
+      session_label: sessionLabel || sessionId,
+      jid,
+      is_group:      isGroup,
+      group_subject: isGroup ? (sessions[sessionId]?.groupSubjects?.[jid] || null) : null,
+      sender_jid:    sender,
+      sender_phone:  sender ? sender.split("@")[0] : null,
+      message_id:    msg.key?.id || "",
+      from:          (sender || jid).split("@")[0],
+      contact_name:  msg.pushName || null,
+      body:          extractBody(msg),
+      media_url:     null,
+      media_type:    extractMediaType(msg),
+      timestamp:     tsOf(msg),
+    };
+
+    await axios.post(`${BACKEND_URL}/api/whatsapp/hub/webhook/message`, payload, { timeout: 5000 });
   } catch (err) {
     console.warn(`[${sessionId}] Hub webhook failed:`, err.message);
   }
 }
 
-// ── Hub: bulk history sync on connect ─────────────────────────────────────────
+// ── Hub: bulk history sync (NOW includes groups) ─────────────────────────────
 async function syncHubHistory(sessionId, sessionLabel, chats, messages, contacts) {
   try {
-    const MAX_C = 150, MAX_M = 300;
+    const MAX_C = 250, MAX_M = 500;
     const contactPayloads = [];
     for (const c of (chats || []).slice(0, MAX_C)) {
-      const cjid = resolveJid(sessionId, c.id);
+      const isGroup = (c.id || "").endsWith("@g.us");
+      const cjid    = isGroup ? c.id : resolveJid(sessionId, c.id);
       if (!cjid) continue;
       const phone  = cjid.split("@")[0];
       const ts     = c.lastMsgTimestamp;
       const lastAt = ts ? new Date((typeof ts === "object" ? ts.low : ts) * 1000).toISOString() : null;
       const info   = (contacts || []).find(ct => resolveJid(sessionId, ct.id) === cjid);
-      contactPayloads.push({ jid: cjid, phone, display_name: info?.name || c.name || phone, last_message_at: lastAt });
+      contactPayloads.push({
+        jid: cjid, phone,
+        display_name:    info?.name || c.name || (isGroup ? c.name || "Group" : phone),
+        is_group:        isGroup,
+        last_message_at: lastAt,
+      });
     }
+
     const messagePayloads = [];
     for (const msg of (messages || []).slice(0, MAX_M)) {
-      const jid = resolveJid(sessionId, msg.key?.remoteJid || "");
-      if (!jid || jid === "status@broadcast") continue;
-      const body =
-        msg.message?.conversation ||
-        msg.message?.extendedTextMessage?.text ||
-        (msg.message?.imageMessage   ? `[image]${msg.message.imageMessage.caption ? ": " + msg.message.imageMessage.caption : ""}` : null) ||
-        (msg.message?.videoMessage   ? `[video]${msg.message.videoMessage.caption ? ": " + msg.message.videoMessage.caption : ""}` : null) ||
-        (msg.message?.audioMessage   ? "[voice message]" : null) ||
-        (msg.message?.documentMessage ? `[${msg.message.documentMessage.fileName || "document"}]` : null) ||
-        null;
+      captureLidFromMessage(sessionId, msg);
+      const raw     = msg.key?.remoteJid || "";
+      if (!raw || raw === "status@broadcast") continue;
+      const isGroup = raw.endsWith("@g.us");
+      const jid     = isGroup ? raw : resolveJid(sessionId, raw);
+      if (!jid) continue;
+
+      const body = msg.message?.conversation
+        || msg.message?.extendedTextMessage?.text
+        || (msg.message?.imageMessage    ? `[image]${msg.message.imageMessage.caption ? ": " + msg.message.imageMessage.caption : ""}` : null)
+        || (msg.message?.videoMessage    ? `[video]${msg.message.videoMessage.caption ? ": " + msg.message.videoMessage.caption : ""}` : null)
+        || (msg.message?.audioMessage    ? "[voice message]" : null)
+        || (msg.message?.documentMessage ? `[${msg.message.documentMessage.fileName || "document"}]` : null)
+        || null;
       if (!body) continue;
-      const ts = msg.messageTimestamp;
-      const timestamp = ts ? (typeof ts === "object" ? ts.low : ts) : Math.floor(Date.now() / 1000);
+
+      const sender = msg.key?.participant ? resolveJid(sessionId, msg.key.participant) : null;
+
       messagePayloads.push({
-        session_id: sessionId, session_label: sessionLabel,
-        jid, message_id: msg.key?.id || "",
-        from: jid.split("@")[0],
-        contact_name: msg.pushName || null,
-        body, direction: msg.key?.fromMe ? "out" : "in", timestamp,
+        session_id:    sessionId,
+        session_label: sessionLabel,
+        jid,
+        is_group:      isGroup,
+        sender_jid:    sender,
+        sender_phone:  sender ? sender.split("@")[0] : null,
+        message_id:    msg.key?.id || "",
+        from:          (sender || jid).split("@")[0],
+        contact_name:  msg.pushName || null,
+        body,
+        direction:     msg.key?.fromMe ? "out" : "in",
+        timestamp:     tsOf(msg),
       });
     }
     if (contactPayloads.length === 0 && messagePayloads.length === 0) return;
@@ -231,20 +304,48 @@ async function syncHubHistory(sessionId, sessionLabel, chats, messages, contacts
       session_id: sessionId, session_label: sessionLabel,
       contacts: contactPayloads, messages: messagePayloads,
     }, { timeout: 30000 });
-    console.log(`[${sessionId}] Hub sync: ${contactPayloads.length} contacts, ${messagePayloads.length} messages`);
+    console.log(`[${sessionId}] Hub sync: ${contactPayloads.length} contacts (incl groups), ${messagePayloads.length} messages`);
   } catch (err) {
     console.warn(`[${sessionId}] Hub history sync failed:`, err.message);
   }
 }
 
-// ── Start a session ────────────────────────────────────────────────────────────
+// ── Hub: forward group metadata ──────────────────────────────────────────────
+async function notifyHubGroups(sessionId, sessionLabel, groupsArray) {
+  try {
+    if (!groupsArray?.length) return;
+    const payload = groupsArray.map(g => ({
+      jid:          g.id,
+      subject:      g.subject || "Group",
+      description:  g.desc    || null,
+      owner:        g.owner   || null,
+      participants: (g.participants || []).map(p => ({
+        jid:    resolveJid(sessionId, p.id),
+        admin:  p.admin || null,   // 'admin' | 'superadmin' | null
+      })),
+      created_at:   g.creation || null,
+    }));
+    // Remember subjects so single-message webhook can label them
+    if (!sessions[sessionId].groupSubjects) sessions[sessionId].groupSubjects = {};
+    for (const g of payload) sessions[sessionId].groupSubjects[g.jid] = g.subject;
+
+    await axios.post(`${BACKEND_URL}/api/whatsapp/hub/webhook/groups`, {
+      session_id: sessionId, session_label: sessionLabel, groups: payload,
+    }, { timeout: 15000 }).catch(e => console.warn(`[${sessionId}] groups webhook (non-fatal):`, e.message));
+  } catch (err) {
+    console.warn(`[${sessionId}] notifyHubGroups failed:`, err.message);
+  }
+}
+
+// ── Start a session ──────────────────────────────────────────────────────────
 async function startSession(sessionId, webhookOnConnect = true, pairingPhone = null) {
   const sessionDir = path.join(SESSIONS_DIR, sessionId);
   if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
 
   sessions[sessionId] = sessions[sessionId] || {};
   Object.assign(sessions[sessionId], { status: "connecting", qrBase64: null, pairCode: null });
-  sessions[sessionId].retryCount = sessions[sessionId].retryCount || 0;
+  sessions[sessionId].retryCount    = sessions[sessionId].retryCount    || 0;
+  sessions[sessionId].groupSubjects = sessions[sessionId].groupSubjects || {};
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
   const version = await getWAVersion();
@@ -255,10 +356,10 @@ async function startSession(sessionId, webhookOnConnect = true, pairingPhone = n
     browser: ["Taskosphere", "Chrome", "1.0"],
     generateHighQualityLinkPreview: false,
     retryRequestDelayMs: 2000,
+    syncFullHistory: true,            // ← pull groups + full history
   });
   sessions[sessionId].socket = sock;
 
-  // Phone pairing
   if (pairingPhone && !state.creds?.registered) {
     setTimeout(async () => {
       try {
@@ -274,7 +375,6 @@ async function startSession(sessionId, webhookOnConnect = true, pairingPhone = n
     }, 3000);
   }
 
-  // Connection state
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
@@ -293,6 +393,17 @@ async function startSession(sessionId, webhookOnConnect = true, pairingPhone = n
         retryCount: 0,
       });
       console.log(`[${sessionId}] Connected as ${sessions[sessionId].displayName}`);
+
+      // ★ Pull full group list once connected
+      try {
+        const groups = await sock.groupFetchAllParticipating();
+        const arr    = Object.values(groups || {});
+        console.log(`[${sessionId}] Fetched ${arr.length} groups`);
+        notifyHubGroups(sessionId, sessions[sessionId].displayName, arr).catch(() => {});
+      } catch (e) {
+        console.warn(`[${sessionId}] groupFetchAllParticipating failed:`, e.message);
+      }
+
       if (webhookOnConnect) {
         axios.post(`${BACKEND_URL}/api/whatsapp/webhook/connected`, {
           sessionId, phoneNumber: sessions[sessionId].phoneNumber,
@@ -319,33 +430,46 @@ async function startSession(sessionId, webhookOnConnect = true, pairingPhone = n
 
   sock.ev.on("creds.update", saveCreds);
 
-  // ★ Build LID map from contacts.upsert
-  sock.ev.on("contacts.upsert", (list) => {
-    updateLidMap(sessionId, list);
-  });
-  sock.ev.on("contacts.update", (list) => {
-    updateLidMap(sessionId, list);
-  });
+  sock.ev.on("contacts.upsert", (list) => updateLidMap(sessionId, list));
+  sock.ev.on("contacts.update", (list) => updateLidMap(sessionId, list));
 
-  // ★ History sync → bulk-forward to backend + build LID map
   sock.ev.on("messaging-history.set", async ({ chats, messages, contacts }) => {
     const label = sessions[sessionId]?.displayName || sessionId;
-    // Build LID map BEFORE resolving JIDs
     updateLidMap(sessionId, contacts);
     syncHubHistory(sessionId, label, chats, messages, contacts).catch(() => {});
   });
 
-  // ★ Real-time incoming messages
   sock.ev.on("messages.upsert", async ({ messages: msgs, type }) => {
     if (type !== "notify") return;
     const label = sessions[sessionId]?.displayName || sessionId;
     for (const msg of msgs) {
+      captureLidFromMessage(sessionId, msg);
       notifyHubIncoming(sessionId, label, msg).catch(() => {});
     }
   });
+
+  // ★ Real-time group metadata updates
+  sock.ev.on("groups.upsert", (groups) => {
+    const label = sessions[sessionId]?.displayName || sessionId;
+    notifyHubGroups(sessionId, label, groups).catch(() => {});
+  });
+  sock.ev.on("groups.update", async (updates) => {
+    try {
+      const label = sessions[sessionId]?.displayName || sessionId;
+      const full  = [];
+      for (const u of updates) {
+        if (!u.id) continue;
+        try {
+          const meta = await sock.groupMetadata(u.id);
+          full.push(meta);
+        } catch (_) {}
+      }
+      if (full.length) notifyHubGroups(sessionId, label, full).catch(() => {});
+    } catch (_) {}
+  });
 }
 
-// ── Boot persisted sessions ────────────────────────────────────────────────────
+// ── Boot persisted sessions ──────────────────────────────────────────────────
 async function bootPersistedSessions() {
   if (!fs.existsSync(SESSIONS_DIR)) return;
   const dirs = fs.readdirSync(SESSIONS_DIR).filter(d =>
@@ -367,19 +491,25 @@ function buildMediaPayload(buffer, mimeType, filename, caption) {
   return { document: buffer, mimetype: mimeType, fileName: filename || "file", caption: caption || undefined };
 }
 
-/** Resolve JID for sending: handle @lid → real JID, then format for Baileys */
-function buildSendJid(sessionId, to) {
+/**
+ * Resolve JID for sending. Group JIDs pass through. @lid is resolved via the
+ * LID map (with a strict on-demand lookup); if still unresolved we RETURN
+ * NULL so the caller refuses to send — never silently mis-route.
+ */
+async function buildSendJid(sessionId, to) {
+  if (!to) return null;
   let jid = to.includes("@") ? to : `${to.replace(/\D/g, "")}@s.whatsapp.net`;
+  if (jid.endsWith("@g.us"))           return jid;        // groups: send as-is
+  if (jid.endsWith("@s.whatsapp.net")) return jid;        // already a phone JID
   if (jid.endsWith("@lid")) {
-    const resolved = resolveJid(sessionId, jid);
-    jid = resolved.endsWith("@lid")
-      ? `${jid.split("@")[0]}@s.whatsapp.net`  // last-resort fallback
-      : resolved;
+    const resolved = await resolveJidStrict(sessionId, jid);
+    if (!resolved || resolved.endsWith("@lid")) return null;
+    return resolved;
   }
   return jid;
 }
 
-// ─── REST API ─────────────────────────────────────────────────────────────────
+// ─── REST API ────────────────────────────────────────────────────────────────
 
 app.get("/sessions", throttle("get_sessions", 1500), (req, res) => {
   res.json({ sessions: Object.entries(sessions).map(([id, s]) => ({
@@ -430,12 +560,18 @@ app.delete("/sessions/:id", async (req, res) => {
   res.json({ message: "Session deleted" });
 });
 
-// ★ Resolve @lid JID to real JID
-app.get("/sessions/:id/resolve-jid", (req, res) => {
+// ★ Resolve @lid JID (now uses strict resolver)
+app.get("/sessions/:id/resolve-jid", async (req, res) => {
   const jid = req.query.jid || "";
   if (!jid) return res.status(400).json({ error: "jid query param required" });
-  const resolved = resolveJid(req.params.id, jid);
-  res.json({ jid, resolved_jid: resolved, resolved: resolved !== jid, lid_map_size: Object.keys(lidMaps[req.params.id] || {}).length });
+  const resolved = await resolveJidStrict(req.params.id, jid);
+  res.json({
+    jid,
+    resolved_jid:  resolved || jid,
+    resolved:      !!resolved && resolved !== jid,
+    safe_to_send:  !!resolved && !resolved.endsWith("@lid"),
+    lid_map_size:  Object.keys(lidMaps[req.params.id] || {}).length,
+  });
 });
 
 // ★ Profile picture
@@ -454,16 +590,57 @@ app.get("/sessions/:id/contacts/:jid/profile-pic", async (req, res) => {
   }
 });
 
+// ★ NEW: list groups
+app.get("/sessions/:id/groups", async (req, res) => {
+  const s = sessions[req.params.id];
+  if (!s || s.status !== "connected" || !s.socket)
+    return res.status(503).json({ error: "Session not connected" });
+  try {
+    const groups = await s.socket.groupFetchAllParticipating();
+    const out = Object.values(groups || {}).map(g => ({
+      jid:          g.id,
+      subject:      g.subject,
+      description:  g.desc || null,
+      owner:        g.owner || null,
+      size:         g.size || (g.participants?.length || 0),
+      participants: (g.participants || []).map(p => ({ jid: resolveJid(req.params.id, p.id), admin: p.admin || null })),
+      created_at:   g.creation || null,
+    }));
+    res.json({ groups: out });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ★ NEW: group participants only
+app.get("/sessions/:id/groups/:gjid/participants", async (req, res) => {
+  const s = sessions[req.params.id];
+  if (!s || s.status !== "connected" || !s.socket)
+    return res.status(503).json({ error: "Session not connected" });
+  try {
+    const gjid = decodeURIComponent(req.params.gjid);
+    const meta = await s.socket.groupMetadata(gjid);
+    res.json({
+      jid:          meta.id,
+      subject:      meta.subject,
+      participants: (meta.participants || []).map(p => ({ jid: resolveJid(req.params.id, p.id), admin: p.admin || null })),
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ★ Send text message
 app.post("/send", async (req, res) => {
   const { to, message, sessionId } = req.body;
   if (!to || !message) return res.status(400).json({ error: "to and message required" });
   const session = pickSession(sessionId);
   if (!session || !session.socket) return res.status(503).json({ error: "No connected session" });
-  const jid = buildSendJid(sessionId, to);
+  const jid = await buildSendJid(sessionId, to);
+  if (!jid) return res.status(422).json({ error: "Could not resolve @lid recipient to a real phone JID. Wait for contact sync or pass a phone number directly." });
   try {
     const result = await enqueueSend(sessionId || "default", () => session.socket.sendMessage(jid, { text: message }));
-    res.json({ success: true, messageId: result?.key?.id });
+    res.json({ success: true, messageId: result?.key?.id, sentTo: jid });
   } catch (e) {
     const status = e?.output?.statusCode || e?.status || 500;
     res.status(status === 429 ? 429 : 500).json({ error: e.message, retryable: status === 429 });
@@ -477,7 +654,8 @@ app.post("/send-media", upload.single("file"), async (req, res) => {
     if (!to || !req.file) return res.status(400).json({ error: "to and file required" });
     const session = pickSession(sessionId);
     if (!session || !session.socket) return res.status(503).json({ error: "No connected session" });
-    const jid    = buildSendJid(sessionId, to);
+    const jid = await buildSendJid(sessionId, to);
+    if (!jid) return res.status(422).json({ error: "Could not resolve @lid recipient." });
     const buffer = fs.readFileSync(req.file.path);
     fs.unlink(req.file.path, () => {});
     const result = await enqueueSend(sessionId || "default", () =>
@@ -487,14 +665,15 @@ app.post("/send-media", upload.single("file"), async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ★ Send media (base64 JSON) — for backend proxy
+// ★ Send media (base64 JSON)
 app.post("/send-media-base64", express.json({ limit: "25mb" }), async (req, res) => {
   try {
     const { to, sessionId, caption, base64, mimeType, filename } = req.body;
     if (!to || !base64 || !mimeType) return res.status(400).json({ error: "to, base64, mimeType required" });
     const session = pickSession(sessionId);
     if (!session || !session.socket) return res.status(503).json({ error: "No connected session" });
-    const jid    = buildSendJid(sessionId, to);
+    const jid = await buildSendJid(sessionId, to);
+    if (!jid) return res.status(422).json({ error: "Could not resolve @lid recipient." });
     const buffer = Buffer.from(base64, "base64");
     const result = await enqueueSend(sessionId || "default", () =>
       session.socket.sendMessage(jid, buildMediaPayload(buffer, mimeType, filename || "file", caption))
@@ -514,6 +693,6 @@ app.get("/status", (req, res) => {
 });
 
 app.listen(PORT, async () => {
-  console.log(`WA Bridge running on port ${PORT}`);
+  console.log(`WA Bridge v2.1 running on port ${PORT}`);
   await bootPersistedSessions();
 });
