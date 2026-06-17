@@ -64,7 +64,8 @@ const sc = i => SESSION_COLORS[i % SESSION_COLORS.length];
 
 function fmtChatTime(ts) {
   if (!ts) return '';
-  const d = new Date(ts), n = new Date();
+  const d = new Date(typeof ts === 'string' ? ts.endsWith('Z') ? ts : ts + 'Z' : ts), n = new Date();
+  if (isNaN(d)) return '';
   const diff = Math.floor((n - d) / 86400000);
   if (diff === 0) return d.toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', hour12:true });
   if (diff === 1) return 'Yesterday';
@@ -73,11 +74,14 @@ function fmtChatTime(ts) {
 }
 function fmtMsgTime(ts) {
   if (!ts) return '';
-  return new Date(ts).toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', hour12:true });
+  const d = new Date(typeof ts === 'string' ? ts.endsWith('Z') ? ts : ts + 'Z' : ts);
+  if (isNaN(d)) return '';
+  return d.toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', hour12:true });
 }
 function fmtDateSep(ts) {
   if (!ts) return '';
-  const d = new Date(ts), n = new Date();
+  const d = new Date(typeof ts === 'string' ? ts.endsWith('Z') ? ts : ts + 'Z' : ts), n = new Date();
+  if (isNaN(d)) return 'Unknown date';
   const diff = Math.floor((n - d) / 86400000);
   if (diff === 0) return 'Today';
   if (diff === 1) return 'Yesterday';
@@ -85,7 +89,9 @@ function fmtDateSep(ts) {
 }
 
 function isSameDay(a, b) {
-  const da = new Date(a), db = new Date(b);
+  const da = new Date(typeof a==='string' ? (a.endsWith('Z')?a:a+'Z') : a);
+  const db = new Date(typeof b==='string' ? (b.endsWith('Z')?b:b+'Z') : b);
+  if (isNaN(da)||isNaN(db)) return false;
   return da.getFullYear()===db.getFullYear() && da.getMonth()===db.getMonth() && da.getDate()===db.getDate();
 }
 
@@ -1035,10 +1041,16 @@ export default function WhatsAppHub() {
     if (!jid) return;
     setLoadingT(true);
     try {
-      const { data } = await api.get(`/whatsapp/hub/conversations/${encodeURIComponent(jid)}?limit=80`);
-      setThread(data.messages||[]);
-      setContact(data.contact||null);
-    } catch { /* silently */ } finally { setLoadingT(false); }
+      const { data } = await api.get(`/whatsapp/hub/conversations/${encodeURIComponent(jid)}?limit=100`);
+      setThread(data.messages || []);
+      // Only override contact if we got one back (avoids wiping display on reload)
+      if (data.contact) setContact(data.contact);
+    } catch (err) {
+      console.error('[WA Hub] loadThread failed for jid:', jid, err?.response?.data || err.message);
+      toast.error('Could not load messages: ' + (err?.response?.data?.detail || err.message));
+    } finally {
+      setLoadingT(false);
+    }
   }, []);
 
   useEffect(() => {
