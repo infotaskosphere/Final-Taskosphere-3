@@ -452,6 +452,27 @@ async def startup_event():
             background=True
         )
         await db.holidays.create_index("date", unique=True, background=True)
+
+        # ── WhatsApp Hub indexes ─────────────────────────────────────────────
+        # message_id + session_id: used by duplicate check on every bulk-sync insert
+        # Without this index, bulk-sync with 1000+ messages does a full collection scan
+        # per message → extremely slow, times out, and appears to store nothing.
+        await db.whatsapp_hub_messages.create_index(
+            [("message_id", 1), ("session_id", 1)],
+            background=True, sparse=True
+        )
+        await db.whatsapp_hub_messages.create_index(
+            [("jid", 1), ("timestamp", -1)],
+            background=True
+        )
+        await db.whatsapp_hub_messages.create_index("timestamp", background=True)
+        await db.whatsapp_hub_contacts.create_index("jid", unique=True, background=True)
+        await db.whatsapp_hub_contacts.create_index(
+            [("last_message_at", -1)],
+            background=True
+        )
+        await db.whatsapp_hub_contacts.create_index("session_id", background=True)
+        await db.whatsapp_hub_groups.create_index("jid", unique=True, background=True)
     except Exception as e:
         # Log index creation errors but do NOT crash the server
         logger.warning(f"Index creation warning (non-fatal): {e}")
