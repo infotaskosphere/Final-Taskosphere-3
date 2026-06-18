@@ -30,6 +30,7 @@ import {
   Shield, Key, Eye, Building2, Plus, Trash2, Smartphone, QrCode,
   Wifi, WifiOff, RefreshCw, Link, Unlink, ChevronRight, AlertCircle,
   Pencil, Check, X, Phone, Hash, Copy, ShieldCheck,
+  Clock, Calendar, Send, Cake, Power,
 } from "lucide-react";
 import { getWASettings, saveWASettings } from "@/hooks/useWhatsApp";
 import api from "@/lib/api";
@@ -588,7 +589,161 @@ function ConnectedNumbersTab({ isDark }) {
   );
 }
 
+// ─── Auto-Send & Scheduling Tab ───────────────────────────────────────────────
+function AutoSendTab({ isDark }) {
+  const [auto, setAuto] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState({ connected: false, loading: true });
+
+  // one-off scheduler
+  const [phone, setPhone] = useState("");
+  const [message, setMessage] = useState("");
+  const [when, setWhen] = useState("");
+  const [jobs, setJobs] = useState([]);
+  const [scheduling, setScheduling] = useState(false);
+
+  const card  = isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200";
+  const txt   = isDark ? "text-slate-100" : "text-slate-800";
+  const muted = isDark ? "text-slate-400" : "text-slate-500";
+  const inputCls = ["w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-400 transition",
+    isDark ? "bg-slate-900 border-slate-700 text-slate-100" : "bg-white border-slate-300 text-slate-800"].join(" ");
+  const labelCls = `block text-[11px] font-semibold uppercase tracking-wider mb-1 ${muted}`;
+
+  const loadJobs = useCallback(() => {
+    api.get("/whatsapp/scheduled-bulk").then(r => setJobs(r.data?.jobs || [])).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    api.get("/whatsapp/auto-settings").then(r => setAuto(r.data)).catch(() => setAuto({}));
+    api.get("/whatsapp/status").then(r => setStatus({ ...r.data, loading: false })).catch(() => setStatus({ connected: false, loading: false }));
+    loadJobs();
+  }, [loadJobs]);
+
+  const set = (k, v) => setAuto(a => ({ ...a, [k]: v }));
+
+  const saveAuto = async () => {
+    setSaving(true);
+    try {
+      const r = await api.put("/whatsapp/auto-settings", auto);
+      setAuto(r.data);
+      toast.success("Auto-send settings saved");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to save");
+    } finally { setSaving(false); }
+  };
+
+  const schedule = async () => {
+    if (!phone.trim() || !message.trim() || !when) { toast.error("Phone, message and time are required"); return; }
+    setScheduling(true);
+    try {
+      const iso = new Date(when).toISOString();
+      await api.post("/whatsapp/schedule-bulk", {
+        recipients: [{ phone: phone.replace(/\D/g, ""), message }],
+        scheduled_at: iso,
+        message_type: "manual_scheduled",
+      });
+      toast.success("Message scheduled");
+      setPhone(""); setMessage(""); setWhen("");
+      loadJobs();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to schedule");
+    } finally { setScheduling(false); }
+  };
+
+  const cancelJob = async (jobId) => {
+    try { await api.delete(`/whatsapp/scheduled-bulk/${jobId}`); toast.success("Cancelled"); loadJobs(); }
+    catch { toast.error("Failed to cancel"); }
+  };
+
+  if (!auto) return <div className={`text-sm ${muted}`}>Loading…</div>;
+
+  const rows = [
+    { k: "birthday_enabled", label: "Birthday wishes", desc: "Daily at 9:00 AM IST", icon: Cake, color: "#ec4899" },
+    { k: "dsc_enabled", label: "DSC expiry alerts", desc: "7-day & 1-day warnings", icon: Shield, color: "#f59e0b" },
+    { k: "compliance_enabled", label: "Compliance reminders", desc: "7-day & 1-day due-date alerts", icon: FileText, color: "#3b82f6" },
+  ];
+
+  return (
+    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      {/* Connection notice */}
+      {!status.loading && !status.connected && (
+        <div className="xl:col-span-2 flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <AlertCircle className="h-4 w-4 flex-shrink-0" />
+          No WhatsApp number is connected. Scheduled and automatic messages will not be sent until you connect a number under <b className="mx-1">Connected Numbers</b>.
+        </div>
+      )}
+
+      {/* Auto-send toggles */}
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+        <div className={`rounded-2xl border shadow-sm p-5 ${card}`}>
+          <div className="flex items-center gap-2 mb-4"><Power className="h-4 w-4 text-emerald-500" /><span className={`text-sm font-bold ${txt}`}>Automatic Messages</span></div>
+          <div className="space-y-3">
+            {rows.map(r => {
+              const I = r.icon;
+              return (
+                <div key={r.k} className={`flex items-center justify-between rounded-xl border p-3 ${isDark ? "border-slate-700" : "border-slate-200"}`}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: r.color + "22" }}><I className="h-4 w-4" style={{ color: r.color }} /></div>
+                    <div><p className={`text-sm font-semibold ${txt}`}>{r.label}</p><p className={`text-[11px] ${muted}`}>{r.desc}</p></div>
+                  </div>
+                  <Toggle on={auto[r.k] !== false} onChange={v => set(r.k, v)} isDark={isDark} />
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-4">
+            <label className={labelCls}>Default birthday message <span className="normal-case font-normal opacity-70">(use {"{name}"})</span></label>
+            <textarea rows={4} className={`${inputCls} resize-none font-mono text-xs`} value={auto.birthday_template || ""} onChange={e => set("birthday_template", e.target.value)} placeholder="🎂 Happy Birthday, {name}!" />
+            <p className={`text-[10px] mt-1 ${muted}`}>Used for clients without a custom message. Per-client overrides live on each client's page.</p>
+          </div>
+          <button onClick={saveAuto} disabled={saving} className="w-full mt-4 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold text-white transition hover:opacity-90" style={{ background: GRAD_BTN }}>
+            <Save className="h-4 w-4" /> {saving ? "Saving…" : "Save Settings"}
+          </button>
+        </div>
+      </motion.div>
+
+      {/* Scheduler */}
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
+        <div className={`rounded-2xl border shadow-sm p-5 ${card}`}>
+          <div className="flex items-center gap-2 mb-4"><Clock className="h-4 w-4 text-emerald-500" /><span className={`text-sm font-bold ${txt}`}>Schedule a Message</span></div>
+          <div className="space-y-3">
+            <div><label className={labelCls}>Phone number</label><input className={inputCls} value={phone} onChange={e => setPhone(e.target.value)} placeholder="e.g. 9876543210" /></div>
+            <div><label className={labelCls}>Message</label><textarea rows={4} className={`${inputCls} resize-none`} value={message} onChange={e => setMessage(e.target.value)} placeholder="Type the WhatsApp message…" /></div>
+            <div><label className={labelCls}>Send at</label><input type="datetime-local" className={inputCls} value={when} onChange={e => setWhen(e.target.value)} /></div>
+            <button onClick={schedule} disabled={scheduling} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold text-white transition hover:opacity-90" style={{ background: GRAD_BTN }}>
+              <Send className="h-4 w-4" /> {scheduling ? "Scheduling…" : "Schedule Message"}
+            </button>
+          </div>
+
+          <div className="mt-5">
+            <div className="flex items-center justify-between mb-2">
+              <span className={`text-xs font-bold ${txt}`}>Upcoming scheduled</span>
+              <button onClick={loadJobs} className={`p-1 rounded hover:bg-slate-100 ${muted}`}><RefreshCw className="h-3.5 w-3.5" /></button>
+            </div>
+            {jobs.length === 0 ? (
+              <p className={`text-xs ${muted}`}>No pending scheduled messages.</p>
+            ) : (
+              <div className="space-y-2">
+                {jobs.map(j => (
+                  <div key={j.id} className={`flex items-center justify-between rounded-lg border px-3 py-2 text-xs ${isDark ? "border-slate-700" : "border-slate-200"}`}>
+                    <div>
+                      <p className={`font-semibold ${txt}`}><Calendar className="inline h-3 w-3 mr-1" />{new Date(j.scheduled_at).toLocaleString()}</p>
+                      <p className={muted}>{j.recipient_count} recipient(s) · {j.message_type}</p>
+                    </div>
+                    <button onClick={() => cancelJob(j.job_id)} className="text-red-500 hover:bg-red-50 p-1 rounded"><Trash2 className="h-3.5 w-3.5" /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
+
 export default function WhatsAppSettings() {
   const isDark   = useDark();
   const { user } = useAuth();
@@ -630,6 +785,7 @@ export default function WhatsAppSettings() {
   const TABS = [
     ...(isAdmin ? [{ id: "numbers",   label: "Connected Numbers", icon: Smartphone  }] : []),
     ...(isAdmin ? [{ id: "templates", label: "Message Templates", icon: MessageCircle }] : []),
+    ...(isAdmin ? [{ id: "autosend", label: "Auto-Send & Scheduling", icon: Clock }] : []),
     { id: "info", label: "How It Works", icon: Eye },
   ];
 
@@ -675,6 +831,13 @@ export default function WhatsAppSettings() {
           <ConnectedNumbersTab isDark={isDark} />
         </motion.div>
       )}
+
+      {/* Auto-Send & Scheduling Tab */}
+      {activeTab === "autosend" && isAdmin && (
+        <AutoSendTab isDark={isDark} />
+      )}
+
+
 
       {/* Templates Tab */}
       {activeTab === "templates" && isAdmin && (
