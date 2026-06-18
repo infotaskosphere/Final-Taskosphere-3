@@ -7113,24 +7113,33 @@ def _parse_mca_pdf(pdf_bytes: bytes) -> dict:
         email = em.group(0).lower() if em else ""
 
     # ── Registered Address ───────────────────────────────────────────────────
-    # MCA website format: address text BEFORE the label line
+    # MCA website format: address text may wrap and the label can appear BETWEEN
+    # the two address lines, e.g.
+    #   1088 A, RAJMAHAL MALL DINDOLI, KHARWASA ROAD, Surat, SURAT,
+    #   Registered Address
+    #   Gujarat, India, 394210
     address = city = state = pin = ""
+    SKIP_RE = re.compile(
+        r'^(Address at which|Listed|Authorised|Auth\.?|Paid|Date of|Company Status|'
+        r'Small Company|Category|Subcategory|Class of|Type of|ACTIVE|Director|Sr\.|DIN|'
+        r'Index of|Jurisdiction|ROC|RD\b|Email|CIN|LLPIN|Registration Number|'
+        r'Company Name|LLP Name)',
+        re.IGNORECASE
+    )
     for i, line in enumerate(lines):
-        if re.match(r'^\s*Registered Address\s*$', line, re.IGNORECASE):
+        if re.match(r'^\s*Registered\s+(Office\s+)?Address\s*$', line, re.IGNORECASE):
             part1 = lines[i - 1].strip() if i > 0 else ""
             part2 = lines[i + 1].strip() if i + 1 < len(lines) else ""
-            skip_pat = re.compile(
-                r'^(Address at which|Listed|Authorised|Date of|Company Status|'
-                r'Small Company|Category|Subcategory|Class of|ACTIVE|Director|Sr\.|DIN)',
-                re.IGNORECASE
-            )
-            if skip_pat.match(part2):
-                part2 = ""
+            if SKIP_RE.match(part1): part1 = ""
+            if SKIP_RE.match(part2): part2 = ""
             address = (part1.rstrip(",") + ", " + part2).strip(", ") if (part1 and part2) else (part1 or part2)
             break
-        m = re.match(r'^\s*Registered Address\s{2,}(.+)$', line, re.IGNORECASE)
+        m = re.match(r'^\s*Registered\s+(?:Office\s+)?Address\s{2,}(.+)$', line, re.IGNORECASE)
         if m:
             address = m.group(1).strip()
+            # may continue on next line until label
+            if i + 1 < len(lines) and lines[i + 1].strip() and not SKIP_RE.match(lines[i + 1].strip()):
+                address = (address.rstrip(",") + ", " + lines[i + 1].strip()).strip(", ")
             break
 
     if not address:
@@ -7138,27 +7147,73 @@ def _parse_mca_pdf(pdf_bytes: bytes) -> dict:
         if m:
             address = m.group(1).strip()
 
+    # Collapse double commas / stray whitespace
     if address:
+        address = re.sub(r'\s*,\s*,+\s*', ', ', address)
+        address = re.sub(r'\s+', ' ', address).strip(' ,')
+
+    INDIAN_STATES = [
+        "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
+        "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka",
+        "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram",
+        "Nagaland", "Odisha", "Orissa", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu",
+        "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
+        "Andaman and Nicobar Islands", "Chandigarh",
+        "Dadra and Nagar Haveli and Daman and Diu",
+        "Daman and Diu", "Delhi", "Jammu and Kashmir", "Ladakh", "Lakshadweep",
+        "Puducherry", "Pondicherry",
+    ]
+    STATE_CODES = {
+        "GJ": "Gujarat", "MH": "Maharashtra", "DL": "Delhi", "KA": "Karnataka",
+        "TN": "Tamil Nadu", "UP": "Uttar Pradesh", "RJ": "Rajasthan",
+        "WB": "West Bengal", "AP": "Andhra Pradesh", "TS": "Telangana",
+        "HR": "Haryana", "PB": "Punjab", "MP": "Madhya Pradesh",
+        "OR": "Odisha", "BR": "Bihar", "KL": "Kerala", "UK": "Uttarakhand",
+        "JH": "Jharkhand", "HP": "Himachal Pradesh", "GA": "Goa",
+        "AS": "Assam", "CG": "Chhattisgarh", "JK": "Jammu and Kashmir",
+    }
+    GENERIC_LOC = {"india", "bharat", "in"}
+
+    if address:
+        # PIN
         pin_m = re.search(r'\b(\d{6})\b', address)
         pin = pin_m.group(1) if pin_m else ""
-        STATE_CODES = {
-            "GJ": "Gujarat", "MH": "Maharashtra", "DL": "Delhi", "KA": "Karnataka",
-            "TN": "Tamil Nadu", "UP": "Uttar Pradesh", "RJ": "Rajasthan",
-            "WB": "West Bengal", "AP": "Andhra Pradesh", "TS": "Telangana",
-            "HR": "Haryana", "PB": "Punjab", "MP": "Madhya Pradesh",
-            "OR": "Odisha", "BR": "Bihar", "KL": "Kerala", "UK": "Uttarakhand",
-            "JH": "Jharkhand", "HP": "Himachal Pradesh", "GA": "Goa",
-            "AS": "Assam", "CG": "Chhattisgarh", "JK": "Jammu and Kashmir",
-        }
-        sc_m = re.search(r'\b([A-Z]{2})\s+\d{6}\b', address)
-        if sc_m and sc_m.group(1) in STATE_CODES:
-            state = STATE_CODES[sc_m.group(1)]
-        addr_clean = re.sub(r',?\s*\d{6}\s*', '', address).strip()
-        addr_clean = re.sub(r',?\s*IN\s*$', '', addr_clean, flags=re.IGNORECASE).strip()
-        addr_clean = re.sub(r',?\s*[A-Z]{2}\s*$', '', addr_clean).strip()
-        parts = [p.strip() for p in addr_clean.split(",") if p.strip()]
+
+        # State: prefer full name match, fall back to 2-letter code before PIN
+        addr_lower = address.lower()
+        for s in sorted(INDIAN_STATES, key=len, reverse=True):
+            if re.search(r'(^|[,\s])' + re.escape(s.lower()) + r'($|[,\s])', addr_lower):
+                state = s
+                break
+        if not state:
+            sc_m = re.search(r'\b([A-Z]{2})\s+\d{6}\b', address)
+            if sc_m and sc_m.group(1) in STATE_CODES:
+                state = STATE_CODES[sc_m.group(1)]
+
+        # City: strip PIN, country, state, and trailing state-code; take last token
+        addr_clean = re.sub(r',?\s*\d{6}\s*$', '', address).strip(' ,')
+        addr_clean = re.sub(r',?\s*(India|Bharat|IN)\s*$', '', addr_clean, flags=re.IGNORECASE).strip(' ,')
+        if state:
+            addr_clean = re.sub(r',?\s*' + re.escape(state) + r'\s*$', '', addr_clean, flags=re.IGNORECASE).strip(' ,')
+        # Strip trailing 2-letter state code ONLY if it's a known code,
+        # otherwise we mangle words like 'SURAT' -> 'SUR'.
+        m_sc = re.search(r',\s*([A-Z]{2})\s*$', addr_clean)
+        if m_sc and m_sc.group(1) in STATE_CODES:
+            addr_clean = addr_clean[:m_sc.start()].strip(' ,')
+        parts = [x.strip() for x in addr_clean.split(",") if x.strip()]
+        # Drop trailing generic tokens
+        while parts and parts[-1].lower() in GENERIC_LOC:
+            parts.pop()
+        # Drop trailing token if it equals the state
+        while parts and state and parts[-1].lower() == state.lower():
+            parts.pop()
         if parts and not city:
-            city = parts[-1].strip().title()
+            # Pick last non-numeric token >= 2 chars
+            for tok in reversed(parts):
+                t = tok.strip().strip('.')
+                if len(t) >= 2 and not re.fullmatch(r'\d+', t):
+                    city = t.title()
+                    break
 
     # ── Company Status ────────────────────────────────────────────────────────
     company_status = _line_val("Company Status(for efiling)") or _line_val("Company Status")
@@ -7173,34 +7228,66 @@ def _parse_mca_pdf(pdf_bytes: bytes) -> dict:
 
     if dir_start is not None:
         dir_lines = lines[dir_start:]
+        # Row may be one of:
+        #   <Sr.No>? <DIN/PAN> <NAME?> <Designation> <Category?> <Date> ...
+        # The director name may also wrap onto the line above and/or below.
+        # Match: optional leading Sr.No, DIN/PAN, anything (incl. partial name),
+        # then a designation keyword, then a date.
         row_re = re.compile(
-            r'^\s*(\d{8}|[A-Z]{5}\d{4}[A-Z])\s+'
-            r'(Director|Partner|Designated Partner|Manager|Secretary|Chief|Chairman|Managing)[A-Za-z ]*'
-            r'\s+(\d{2}/\d{2}/\d{4})',
+            r'^\s*(?:\d{1,3}\s+)?'                               # optional Sr.No
+            r'(\d{8}|[A-Z]{5}\d{4}[A-Z])\s+'                     # DIN (8 digits) or PAN
+            r'(.*?)'                                                # middle (may include name fragment + category)
+            r'\b(Director|Designated Partner|Partner|Manager|Whole[- ]?Time Director|'
+            r'Managing Director|Additional Director|Nominee Director|Independent Director|'
+            r'Secretary|Chief[A-Za-z ]*|Chairman)\b'
+            r'[A-Za-z ]*?\s+'                                      # optional category words
+            r'(\d{2}/\d{2}/\d{4})',                                # appointment date
             re.IGNORECASE
         )
+        noise_re = re.compile(
+            r'^(Sr\.|Sr|No|DIN|PAN|Name|Designation|Category|Date|Signatory|'
+            r'Cessation|Appointment|of|-)$',
+            re.IGNORECASE
+        )
+        def _clean_name_part(s):
+            s = (s or "").strip()
+            # Remove a known designation/category word if it leaks in
+            s = re.sub(r'\b(Director|Partner|Promoter|Independent|Nominee|Additional|'
+                       r'Managing|Whole[- ]?Time|Designated|Secretary|Manager|Chairman|'
+                       r'Chief[A-Za-z ]*|Professional|Shareholder)\b', '', s, flags=re.IGNORECASE)
+            s = re.sub(r'\d', '', s)               # strip digits / dates leftovers
+            s = re.sub(r'[\.\-/]+', ' ', s)
+            s = re.sub(r'\s+', ' ', s).strip()
+            # Keep only letters and spaces
+            s = re.sub(r'[^A-Za-z ]', '', s).strip()
+            return s
         for j, line in enumerate(dir_lines):
             m = row_re.search(line)
-            if m:
-                din   = m.group(1).strip()
-                desig = m.group(2).strip()
-                nb = dir_lines[j-1].strip() if j > 0 else ""
-                na = dir_lines[j+1].strip() if j+1 < len(dir_lines) else ""
-                noise_re = re.compile(
-                    r'^(Sr\.|No|DIN|PAN|Name|Designation|Category|Date|Signatory|Cessation|\d+|-)$',
-                    re.IGNORECASE
-                )
-                if noise_re.match(nb): nb = ""
-                if noise_re.match(na) or row_re.search(na): na = ""
-                full_name = (nb + " " + na).strip().title() or "Unknown"
-                directors.append({
-                    "name": full_name, "designation": desig,
-                    "email": None, "phone": None, "birthday": None,
-                    "din": din if din not in ("-", "") else None,
-                })
-        # Fallback: DIN followed by Name on same line
+            if not m:
+                continue
+            din    = m.group(1).strip()
+            middle = _clean_name_part(m.group(2))
+            desig  = m.group(3).strip().title()
+            # Collect name fragments from line above / below (single-token wrap is common)
+            nb = dir_lines[j - 1].strip() if j > 0 else ""
+            na = dir_lines[j + 1].strip() if j + 1 < len(dir_lines) else ""
+            if noise_re.match(nb) or row_re.search(nb): nb = ""
+            if noise_re.match(na) or row_re.search(na): na = ""
+            nb_clean = _clean_name_part(nb) if nb and re.match(r'^[A-Za-z .\-]+$', nb) else ""
+            na_clean = _clean_name_part(na) if na and re.match(r'^[A-Za-z .\-]+$', na) else ""
+            full_name = " ".join(x for x in [nb_clean, middle, na_clean] if x).strip()
+            full_name = re.sub(r'\s+', ' ', full_name).title() or "Unknown"
+            # Skip duplicates by DIN
+            if din and any(d.get("din") == din for d in directors):
+                continue
+            directors.append({
+                "name": full_name, "designation": desig,
+                "email": None, "phone": None, "birthday": None,
+                "din": din if din not in ("-", "") else None,
+            })
+        # Fallback: DIN followed by Name on same line (no leading Sr.No)
         if not directors:
-            din_re = re.compile(r'(\d{8})\s+([A-Z][A-Z ]+?)\s+(\d{2}/\d{2}/\d{4})', re.IGNORECASE)
+            din_re = re.compile(r'(\d{8})\s+([A-Z][A-Z .\-]+?)\s+(\d{2}/\d{2}/\d{4})', re.IGNORECASE)
             for line in dir_lines:
                 m = din_re.search(line)
                 if m:
