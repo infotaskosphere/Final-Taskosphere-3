@@ -558,6 +558,82 @@ async def send_whatsapp_notification(to, message, message_type="general", contex
         pass
 
 
+# ── Auto-Send Settings (global) ───────────────────────────────────────────────
+# Stored in the `whatsapp_settings` collection as a single doc (_id="global").
+# Controls whether each automatic WhatsApp job runs, plus the default birthday
+# message template. NOTHING is ever sent unless a WhatsApp number is connected.
+
+DEFAULT_AUTO_SETTINGS = {
+    "birthday_enabled": True,
+    "dsc_enabled": True,
+    "compliance_enabled": True,
+    "birthday_template": (
+        "🎂 *Happy Birthday, {name}!*\n\n"
+        "Wishing you a wonderful birthday filled with joy and prosperity! 🎉\n\n"
+        "Best wishes,\n_Taskosphere Team_"
+    ),
+}
+
+
+async def get_auto_settings() -> Dict[str, Any]:
+    """Return the global auto-send settings, merged over defaults."""
+    try:
+        doc = await _db()["whatsapp_settings"].find_one({"_id": "global"}) or {}
+    except Exception:
+        doc = {}
+    merged = dict(DEFAULT_AUTO_SETTINGS)
+    for k in DEFAULT_AUTO_SETTINGS:
+        if doc.get(k) is not None:
+            merged[k] = doc[k]
+    return merged
+
+
+class WAAutoSettings(BaseModel):
+    birthday_enabled: Optional[bool] = None
+    dsc_enabled: Optional[bool] = None
+    compliance_enabled: Optional[bool] = None
+    birthday_template: Optional[str] = None
+
+
+@router.get("/auto-settings")
+async def read_auto_settings(current_user: User = Depends(get_current_user)):
+    return await get_auto_settings()
+
+
+@router.put("/auto-settings")
+async def update_auto_settings(body: WAAutoSettings, current_user: User = Depends(require_admin())):
+    update = {k: v for k, v in body.dict().items() if v is not None}
+    if update:
+        await _db()["whatsapp_settings"].update_one(
+            {"_id": "global"}, {"$set": update}, upsert=True
+        )
+    return await get_auto_settings()
+
+
+class WAClientAutoSend(BaseModel):
+    auto_birthday_enabled: Optional[bool] = None
+    birthday_message: Optional[str] = None
+
+
+@router.put("/client-autosend/{client_id}")
+async def update_client_autosend(client_id: str, body: WAClientAutoSend, current_user: User = Depends(get_current_user)):
+    """Per-client WhatsApp auto-send config (on/off + custom birthday message)."""
+    if not await _has_wa_access(current_user):
+        raise HTTPException(403, "WhatsApp access not granted")
+    update: Dict[str, Any] = {}
+    if body.auto_birthday_enabled is not None:
+        update["wa_auto_birthday"] = body.auto_birthday_enabled
+    if body.birthday_message is not None:
+        update["wa_birthday_message"] = body.birthday_message
+    if not update:
+        raise HTTPException(400, "No fields to update")
+    result = await _db()["clients"].update_one({"id": client_id}, {"$set": update})
+    if result.matched_count == 0:
+        raise HTTPException(404, "Client not found")
+    return {"client_id": client_id, **update}
+
+
+
 @router.post("/jobs/run/{job_name}")
 async def trigger_job_manually(job_name: str, current_user: User = Depends(require_admin())):
     from backend.whatsapp_scheduler import _send_birthday_wishes, _send_dsc_expiry_alerts, _send_compliance_reminders
@@ -646,6 +722,15 @@ async def _run_scheduled_bulk_jobs():
     has passed and sends them via the WA bridge.
     """
     db = _db()
+    # Never send unless a WhatsApp number is connected
+    try:
+        sessions = await _get_cached_sessions()
+        if not any(s.get("status") == "connected" for s in sessions):
+            logger.info("[WA Scheduled Bulk] skipped — no WhatsApp connected")
+            return
+    except Exception:
+        logger.info("[WA Scheduled Bulk] skipped — connection check failed")
+        return
     now_str = datetime.now(timezone.utc).isoformat()
     jobs = await db["whatsapp_scheduled_bulk"].find({
         "status": "pending",
