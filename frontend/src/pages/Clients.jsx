@@ -39,6 +39,7 @@ import ClientGroupsPanel from '@/components/ClientGroupsPanel';
 import ClientPortalManager from '@/components/ClientPortalManager';
 import ITRClientDialog from '@/components/ITRClientDialog';
 import ITRBulkImportDialog from '@/components/ITRBulkImportDialog';
+import ClientWAAutoSend from '@/components/ClientWAAutoSend';
 import DSCLinkerSection from '@/components/DSCLinkerSection';
 import { format, startOfDay, differenceInDays } from 'date-fns';
 import WhatsAppSendDialog from '@/components/ui/WhatsAppSendDialog';
@@ -2868,6 +2869,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 )}
                 {selectedClient.city && <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 bg-white/70 border border-slate-200 px-2.5 py-1 rounded-full"><MapPin className="h-3 w-3" />{[selectedClient.city, selectedClient.state].filter(Boolean).join(', ')}</span>}
                 {selectedClient.gstin && <span className="inline-flex items-center gap-1.5 text-xs font-mono text-slate-600 bg-white/70 border border-slate-200 px-2.5 py-1 rounded-full">GSTIN: {selectedClient.gstin}</span>}
+                <ClientWAAutoSend client={selectedClient} />
               </div>
             </div>
           </div>
