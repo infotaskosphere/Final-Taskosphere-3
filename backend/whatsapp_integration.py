@@ -344,6 +344,28 @@ async def update_session_label(session_id: str, body: WASessionCreate, current_u
     return {"message": "Label updated"}
 
 
+@router.post("/bridge/sessions/{session_id}/sync")
+async def force_session_sync(session_id: str, current_user: User = Depends(get_current_user)):
+    """
+    Proxy for the WhatsApp Hub's manual/auto "Force Sync" action.
+
+    This route was missing entirely — the frontend (WhatsAppHub.jsx
+    handleForceSync, and the auto-sync-on-connect effect) has always called
+    POST /whatsapp/bridge/sessions/{id}/sync, but no backend route existed
+    for it, so every call 404'd silently (swallowed by a .catch on the
+    frontend). That meant sessions could show "connected" while the Hub's
+    inbox stayed empty forever, with no visible error.
+
+    The bridge's /sessions/:id/sync endpoint (now fixed to re-push cached
+    chat/message history, not just groups) is what actually repopulates
+    MongoDB so GET /whatsapp/hub/inbox has something to return.
+    """
+    from backend.whatsapp_hub import _has_hub_access
+    if not (current_user.role == "admin" or await _has_hub_access(current_user)):
+        raise HTTPException(403, "You do not have WhatsApp Hub access.")
+    return await _bridge_post(f"/sessions/{session_id}/sync", {})
+
+
 # ── Webhooks from bridge ─────────────────────────────────────────────────────
 
 @router.post("/webhook/connected")
