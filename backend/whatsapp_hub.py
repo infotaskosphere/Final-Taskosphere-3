@@ -181,6 +181,7 @@ async def hub_incoming_message(request: Request):
     })
 
     contact_name = group_subj if is_group else (payload.get("contact_name") or phone)
+    media_type   = payload.get("media_type")
     await db["whatsapp_hub_contacts"].update_one(
         {"jid": jid},
         {"$set": {
@@ -189,6 +190,14 @@ async def hub_incoming_message(request: Request):
             "is_group": is_group,
             "last_message_at": ts,
             "session_id": session_id,
+            # Cache latest message inline — eliminates the N+1 per-contact query in GET /inbox
+            "latest_message": {
+                "body":         body,
+                "direction":    "in",
+                "timestamp":    ts,
+                "sender_phone": sender_phone,
+                "media_type":   media_type,
+            },
         },
          "$inc": {"unread_count": 1}},
         upsert=True,
@@ -234,10 +243,14 @@ async def hub_bulk_sync(request: Request):
             except Exception:
                 pass
         last_at = last_at or datetime.now(timezone.utc)
+        # Use $set (not $setOnInsert) for display_name so contacts get their real name
+        # on every sync — previously $setOnInsert meant names only wrote on first insert
+        # and re-syncs always left contacts showing only their phone number.
         await db["whatsapp_hub_contacts"].update_one(
             {"jid": jid},
-            {"$setOnInsert": {"display_name": display_name, "unread_count": 0, "session_id": session_id},
-             "$set":         {"jid": jid, "phone": phone, "is_group": is_group},
+            {"$set":         {"jid": jid, "phone": phone, "is_group": is_group,
+                              "display_name": display_name, "session_id": session_id},
+             "$setOnInsert": {"unread_count": 0},
              "$max":         {"last_message_at": last_at}},
             upsert=True,
         )
@@ -260,6 +273,7 @@ async def hub_bulk_sync(request: Request):
 
         phone      = jid.split("@")[0]
         contact_nm = m.get("contact_name")
+        media_type = m.get("media_type")
         await db["whatsapp_hub_messages"].insert_one({
             "jid":           jid,
             "message_id":    msg_id,
@@ -274,7 +288,7 @@ async def hub_bulk_sync(request: Request):
             "contact_name":  contact_nm,
             "body":          body,
             "media_url":     m.get("media_url"),
-            "media_type":    m.get("media_type"),
+            "media_type":    media_type,
             "filename":      m.get("filename"),
             "file_size":     None,
             "timestamp":     ts,
@@ -283,11 +297,24 @@ async def hub_bulk_sync(request: Request):
         })
         messages_stored += 1
 
+        # Cache latest_message inline on the contact doc so the inbox GET
+        # doesn't need a separate per-contact DB query (eliminates N+1).
+        # $max on last_message_at ensures we only update forward in time.
+        latest_msg_cache = {
+            "body":         body,
+            "direction":    direction,
+            "timestamp":    ts,
+            "sender_phone": m.get("sender_phone"),
+            "media_type":   media_type,
+        }
         await db["whatsapp_hub_contacts"].update_one(
             {"jid": jid},
-            {"$set":         {"jid": jid, "phone": phone, "session_id": m_session, "is_group": is_group},
+            {"$set":         {"jid": jid, "phone": phone, "session_id": m_session,
+                              "is_group": is_group,
+                              "display_name": contact_nm or phone,
+                              "latest_message": latest_msg_cache},
              "$max":         {"last_message_at": ts},
-             "$setOnInsert": {"display_name": contact_nm or phone, "unread_count": 0}},
+             "$setOnInsert": {"unread_count": 0}},
             upsert=True,
         )
 
@@ -368,11 +395,15 @@ async def hub_inbox(
         .sort("last_message_at", -1).skip(skip).limit(limit).to_list(limit)
 
     result = []
+    from datetime import datetime as _dt
+    def _ts(v):
+        return v.isoformat() if isinstance(v, _dt) else v
+
     for c in contacts:
-        latest = await db["whatsapp_hub_messages"].find_one({"jid": c["jid"]}, sort=[("timestamp", -1)])
-        from datetime import datetime as _dt
-        def _ts(v):
-            return v.isoformat() if isinstance(v, _dt) else v
+        # Use the latest_message cached inline on the contact doc (written by both the
+        # incoming-message webhook and the bulk-sync handler). This avoids the previous
+        # N+1 pattern (one extra DB query per contact) which caused 500ms+ inbox loads.
+        cached_latest = c.get("latest_message")
         result.append({
             "jid":             c["jid"],
             "phone":           c.get("phone"),
@@ -384,13 +415,13 @@ async def hub_inbox(
             "profile_pic_url": c.get("profile_pic_url"),
             "archived":        bool(c.get("archived")),
             "starred":         bool(c.get("starred")),
-            "latest_message":  {
-                "body":         latest.get("body", "") if latest else "",
-                "direction":    latest.get("direction", "in") if latest else "in",
-                "timestamp":    _ts(latest.get("timestamp")) if latest else None,
-                "sender_phone": latest.get("sender_phone") if latest else None,
-                "media_type":   latest.get("media_type") if latest else None,
-            } if latest else None,
+            "latest_message": {
+                "body":         cached_latest.get("body", "") if cached_latest else "",
+                "direction":    cached_latest.get("direction", "in") if cached_latest else "in",
+                "timestamp":    _ts(cached_latest.get("timestamp")) if cached_latest else None,
+                "sender_phone": cached_latest.get("sender_phone") if cached_latest else None,
+                "media_type":   cached_latest.get("media_type") if cached_latest else None,
+            } if cached_latest else None,
         })
     total = await db["whatsapp_hub_contacts"].count_documents(filt)
     return {"contacts": result, "total": total}
@@ -565,7 +596,16 @@ async def hub_reply(body: HubReply, current_user: User = Depends(get_current_use
     })
     await db["whatsapp_hub_contacts"].update_one(
         {"jid": body.jid},
-        {"$set": {"last_message_at": ts}},
+        {"$set": {
+            "last_message_at": ts,
+            "latest_message": {
+                "body":         body.message,
+                "direction":    "out",
+                "timestamp":    ts,
+                "sender_phone": None,
+                "media_type":   None,
+            },
+        }},
         upsert=False,
     )
     return {"ok": True, "messageId": result.get("messageId")}
