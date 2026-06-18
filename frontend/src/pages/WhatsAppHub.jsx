@@ -1122,6 +1122,8 @@ export default function WhatsAppHub() {
     return { plain, dedupedGroups };
   };
 
+  const [inboxError, setInboxError] = useState(null);
+
   const loadContacts = useCallback(async () => {
     setLoadingC(true);
     try {
@@ -1129,7 +1131,14 @@ export default function WhatsAppHub() {
       const { plain, dedupedGroups } = splitContactsAndGroups(data.contacts || []);
       setContacts(plain);
       setGroups(dedupedGroups);
-    } catch { /* silently */ } finally { setLoadingC(false); }
+      setInboxError(null);
+    } catch (err) {
+      // Surface the failure instead of swallowing it — previously this caught
+      // every error silently, so a dead/unreachable backend or bridge left
+      // the sidebar stuck on "Loading chats…" forever with no indication of
+      // what actually went wrong.
+      setInboxError(err?.response?.data?.detail || err.message || 'Failed to load chats');
+    } finally { setLoadingC(false); }
   }, []);
 
   const loadArchived = useCallback(async () => {
@@ -1243,17 +1252,51 @@ export default function WhatsAppHub() {
     }, [activeJidForSSE, loadThread]);
 
   
+    const [syncing, setSyncing] = useState(false);
+
     const handleForceSync = useCallback(async () => {
-      try {
-        const connected = sessions.filter(s=>s.status==='connected');
-        if (!connected.length) { toast.error('No connected WhatsApp session'); return; }
+      const connected = sessions.filter(s=>s.status==='connected');
+      if (!connected.length) { toast.error('No connected WhatsApp session'); return; }
+      setSyncing(true);
+      let anyOk = false, lastErr = null;
+      for (const sess of connected) {
+        try {
+          await api.post(`/whatsapp/bridge/sessions/${sess.sessionId}/sync`);
+          anyOk = true;
+        } catch (err) {
+          lastErr = err?.response?.data?.detail || err.message;
+        }
+      }
+      await loadContacts();
+      setSyncing(false);
+      if (anyOk) {
+        toast.success('Sync triggered — new chats will appear shortly');
+      } else {
+        toast.error(`Sync failed: ${lastErr || 'unknown error'}`);
+      }
+    }, [sessions, loadContacts]);
+
+    // ★ Auto-recover from the "connected but never loaded" state: if at least
+    // one session is connected, contacts have finished their first load, and
+    // the inbox is still empty, automatically trigger one force-sync. This
+    // covers sessions that were already connected before the bridge last
+    // restarted (so messaging-history.set never re-fired) without requiring
+    // the admin to know to click "Force Sync" — silently, no toast spam.
+    const autoSyncTriedRef = useRef(false);
+    useEffect(() => {
+      if (autoSyncTriedRef.current) return;
+      if (sessLoading || loadingC) return;
+      const connected = sessions.filter(s=>s.status==='connected');
+      if (!connected.length) return;
+      if (contacts.length > 0 || groups.length > 0) { autoSyncTriedRef.current = true; return; }
+      autoSyncTriedRef.current = true;
+      (async () => {
         for (const sess of connected) {
           await api.post(`/whatsapp/bridge/sessions/${sess.sessionId}/sync`).catch(()=>{});
         }
         await loadContacts();
-        toast.success('Sync triggered — new chats will appear shortly');
-      } catch { toast.error('Sync failed'); }
-    }, [sessions, loadContacts]);
+      })();
+    }, [sessions, sessLoading, loadingC, contacts.length, groups.length, loadContacts]);
 
     const toggleArchive = useCallback(async (c) => {
     if (!c) return;
@@ -1421,10 +1464,10 @@ export default function WhatsAppHub() {
             </div>
           </div>
           <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-            <button onClick={loadContacts} style={iconBtn} title='Refresh'
+            <button onClick={handleForceSync} disabled={syncing} style={iconBtn} title='Refresh (re-syncs chat history from WhatsApp)'
               onMouseEnter={e=>e.currentTarget.style.background=isDark?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.06)'}
               onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-              <RefreshCw size={18} style={{animation:loadingC?'waSpinKf 1s linear infinite':'none'}}/>
+              <RefreshCw size={18} style={{animation:(loadingC||syncing)?'waSpinKf 1s linear infinite':'none'}}/>
             </button>
             {isAdmin && (
               <button onClick={()=>setShowManage(true)} style={iconBtn} title='Manage Numbers'
@@ -1435,6 +1478,13 @@ export default function WhatsAppHub() {
             )}
           </div>
         </div>
+        {inboxError && (
+          <div style={{ background:isDark?'#3a1f1f':'#fdecea', borderBottom:`1px solid ${isDark?'#5c2b2b':'#f5c6c2'}`, color:isDark?'#ffb4ab':'#a13a32', fontSize:12, padding:'8px 16px', display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
+            <AlertCircle size={14}/>
+            <span style={{ flex:1 }}>Couldn't load chats: {inboxError}</span>
+            <button onClick={loadContacts} style={{ background:'none', border:'none', color:'inherit', textDecoration:'underline', cursor:'pointer', fontSize:12, fontWeight:600 }}>Retry</button>
+          </div>
+        )}
 
         {/* Search */}
         <div style={{ padding:'8px 12px', background:sideBg, flexShrink:0 }}>
