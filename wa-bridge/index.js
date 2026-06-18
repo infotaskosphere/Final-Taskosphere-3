@@ -403,7 +403,11 @@
           timestamp:     tsOf(msg),
         });
       }
-      if (contactPayloads.length === 0 && messagePayloads.length === 0) return;
+      // Don't skip if only contacts arrived — chats without messages still populate the sidebar.
+      if (contactPayloads.length === 0 && messagePayloads.length === 0) {
+        console.log(`[${sessionId}] Hub sync: nothing to push (0 contacts, 0 messages)`);
+        return;
+      }
       await axios.post(`${BACKEND_URL}/api/whatsapp/hub/webhook/bulk-sync`, {
         session_id: sessionId, session_label: sessionLabel,
         contacts: contactPayloads, messages: messagePayloads,
@@ -510,6 +514,27 @@
           console.warn(`[${sessionId}] groupFetchAllParticipating failed:`, e.message);
         }
 
+        // ★ Delayed history push: messaging-history.set only fires once on a FRESH
+        //   QR/pairing-code login. On every subsequent reconnect (saved-creds restore,
+        //   Render restart, network blip) it does NOT fire, so the Hub inbox stays empty.
+        //   After 8 seconds (enough time for Baileys to complete its internal chat load),
+        //   push whatever is already in the cache. If the cache is also empty (very first
+        //   boot with no prior history), it's a no-op — the user can click Force Sync.
+        setTimeout(async () => {
+          try {
+            const label = sessions[sessionId]?.displayName || sessionId;
+            const cache = historyCache[sessionId];
+            if (cache && (cache.chats.length > 0 || cache.messages.length > 0)) {
+              console.log(`[${sessionId}] On-connect delayed push: ${cache.chats.length} chats, ${cache.messages.length} msgs`);
+              await syncHubHistory(sessionId, label, cache.chats, cache.messages, cache.contacts);
+            } else {
+              console.log(`[${sessionId}] On-connect: no cached history yet (will arrive via messaging-history.set)`);
+            }
+          } catch (e) {
+            console.warn(`[${sessionId}] On-connect delayed push failed:`, e.message);
+          }
+        }, 8000);
+
         if (webhookOnConnect) {
           axios.post(`${BACKEND_URL}/api/whatsapp/webhook/connected`, {
             sessionId, phoneNumber: sessions[sessionId].phoneNumber,
@@ -539,7 +564,7 @@
     sock.ev.on("contacts.upsert", (list) => updateLidMap(sessionId, list));
     sock.ev.on("contacts.update", (list) => updateLidMap(sessionId, list));
 
-    sock.ev.on("messaging-history.set", async ({ chats, messages, contacts }) => {
+    sock.ev.on("messaging-history.set", async ({ chats, messages, contacts, isLatest }) => {
       const label = sessions[sessionId]?.displayName || sessionId;
       updateLidMap(sessionId, contacts);
 
@@ -552,6 +577,11 @@
       cache.contacts = mergeById(cache.contacts, contacts || [], c => c.id);
       cache.messages = mergeById(cache.messages, messages || [], m => m.key?.id);
 
+      console.log(`[${sessionId}] messaging-history.set: ${(chats||[]).length} chats, ${(messages||[]).length} msgs, isLatest=${isLatest}`);
+
+      // Always push — even if messages is empty, we still have chats which give us the contact list.
+      // Previously syncHubHistory returned early when BOTH contactPayloads AND messagePayloads were 0,
+      // but the chats array alone (even with no messages) is enough to populate the inbox sidebar.
       syncHubHistory(sessionId, label, chats, messages, contacts).catch(() => {});
     });
 
@@ -894,4 +924,3 @@
 
     await bootPersistedSessions();
   });
-  
