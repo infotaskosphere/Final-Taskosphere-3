@@ -144,9 +144,10 @@ class BulkAssignRequest(BaseModel):
 
 
 class AssignmentUpdate(BaseModel):
-    status:      str
-    notes:       Optional[str] = None
-    assigned_to: Optional[str] = None
+    status:        str
+    notes:         Optional[str] = None
+    assigned_to:   Optional[str] = None
+    applicability: Optional[bool] = None   # True = applicable, False = not applicable
 
 
 class BulkStatusUpdate(BaseModel):
@@ -815,8 +816,9 @@ async def update_single_assignment(
         "updated_at": _now(),
         "updated_by": current_user.id,
     }
-    if data.notes       is not None: upd["notes"]       = data.notes
-    if data.assigned_to is not None: upd["assigned_to"] = data.assigned_to
+    if data.notes         is not None: upd["notes"]         = data.notes
+    if data.assigned_to   is not None: upd["assigned_to"]   = data.assigned_to
+    if data.applicability is not None: upd["applicability"] = bool(data.applicability)
     if data.status == "completed":   upd["completed_at"] = _now()
     if data.status == "filed":       upd["filed_at"]     = _now()
 
