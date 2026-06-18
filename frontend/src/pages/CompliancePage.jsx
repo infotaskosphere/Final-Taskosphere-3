@@ -1094,20 +1094,71 @@ function AssignClientsModal({compliance,onClose,onAssigned,isDark,allUsers=[]}){
     }
   },[allUsers,compliance.category]);
 
+  // Fetch ALL clients via pagination (backend caps page_size at 500)
   useEffect(()=>{
-    api.get('/clients')
-      .then(r=>{const all=Array.isArray(r.data)?r.data:(r.data?.clients||[]);setClients(all);})
-      .catch(e=>{
+    let cancelled=false;
+    (async()=>{
+      try{
+        const PAGE_SIZE=500;
+        let page=1;
+        const all=[];
+        // Loop until we get a short page (last) or hit a safety cap
+        while(page<=50){
+          const r=await api.get('/clients',{params:{page,page_size:PAGE_SIZE}});
+          const batch=Array.isArray(r.data)?r.data:(r.data?.clients||[]);
+          all.push(...batch);
+          if(batch.length<PAGE_SIZE)break;
+          page+=1;
+        }
+        if(!cancelled)setClients(all);
+      }catch(e){
         if(e?.response?.status===403) toast.error("You don't have permission to view clients.");
-      })
-      .finally(()=>setLoading(false));
+      }finally{ if(!cancelled)setLoading(false); }
+    })();
+    return()=>{cancelled=true;};
   },[]);
   const[clientScope,setClientScope]=useState('active');
   const activeClientsList=useMemo(()=>clients.filter(c=>!c.status||c.status==='active'),[clients]);
   const scopedClients=useMemo(()=>clientScope==='active'?activeClientsList:clients,[clientScope,activeClientsList,clients]);
-  const clientTypes=useMemo(()=>[...new Set(scopedClients.map(c=>c.client_type).filter(Boolean))],[scopedClients]);
+
+  // Normalize raw client_type values to a canonical key so the filter
+  // matches regardless of how the value was stored (pvt_ltd / "Private Limited" / etc.)
+  const normalizeClientType=(v)=>{
+    if(!v) return 'other';
+    const s=String(v).toLowerCase().replace(/[\s_\-.]/g,'');
+    if(['pvtltd','privatelimited','privateltd','pvt','privatelimitedcompany'].includes(s))return 'pvt_ltd';
+    if(['publtd','publicltd','publiclimited','public','publiclimitedcompany'].includes(s))return 'pub_ltd';
+    if(s==='llp'||s==='limitedliabilitypartnership')return 'llp';
+    if(s==='opc'||s==='onepersoncompany')return 'opc';
+    if(['partnership','partnershipfirm','firm'].includes(s))return 'partnership';
+    if(['proprietorship','proprietor','prop','sole','soleproprietor','soleproprietorship'].includes(s))return 'proprietorship';
+    if(['trust','ngo','trustngo','section8','section8company','sec8','sec8company'].includes(s))return 'trust';
+    if(s==='huf'||s==='hinduundividedfamily')return 'huf';
+    if(s==='individual')return 'individual';
+    return 'other';
+  };
+  // Curated dropdown options matching the Clients page
+  const TYPE_OPTIONS=[
+    {value:'proprietorship',label:'Proprietor'},
+    {value:'pvt_ltd',       label:'Private Limited'},
+    {value:'llp',           label:'LLP'},
+    {value:'pub_ltd',       label:'Public Limited'},
+    {value:'trust',         label:'Section 8 / Trust / NGO'},
+    {value:'partnership',   label:'Partnership'},
+    {value:'huf',           label:'HUF'},
+    {value:'individual',    label:'Individual'},
+    {value:'opc',           label:'OPC'},
+    {value:'other',         label:'Other'},
+  ];
+  const typeCounts=useMemo(()=>{
+    const m={};
+    scopedClients.forEach(c=>{const k=normalizeClientType(c.client_type);m[k]=(m[k]||0)+1;});
+    return m;
+  },[scopedClients]);
   const filtered=useMemo(()=>{
-    let list=typeFilter!=='all'?scopedClients.filter(c=>c.client_type===typeFilter):scopedClients;
+    let list=typeFilter!=='all'
+      ? scopedClients.filter(c=>normalizeClientType(c.client_type)===typeFilter)
+      : scopedClients;
     if(search)list=list.filter(c=>(c.company_name||'').toLowerCase().includes(search.toLowerCase()));
     return list;
   },[scopedClients,search,typeFilter]);
@@ -1187,8 +1238,10 @@ function AssignClientsModal({compliance,onClose,onAssigned,isDark,allUsers=[]}){
           <select value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}
             className="px-3 py-2 border rounded-xl text-sm focus:outline-none"
             style={{backgroundColor:isDark?D.raised:'#fff',borderColor:isDark?D.border:'#d1d5db',color:isDark?D.text:'#1e293b'}}>
-            <option value="all">All Types</option>
-            {clientTypes.map(t=><option key={t} value={t}>{t}</option>)}
+            <option value="all">All Types ({scopedClients.length})</option>
+            {TYPE_OPTIONS.filter(o=>(typeCounts[o.value]||0)>0).map(o=>(
+              <option key={o.value} value={o.value}>{o.label} ({typeCounts[o.value]||0})</option>
+            ))}
           </select>
           </div>
         </div>
