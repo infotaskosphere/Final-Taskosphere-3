@@ -56,11 +56,18 @@ async def _send_birthday_wishes():
     whose birthday falls on today's date.
     """
     from backend.server import db
-    from backend.whatsapp_integration import send_whatsapp_notification
+    from backend.whatsapp_integration import send_whatsapp_notification, get_auto_settings
 
     if not await _is_wa_connected():
         logger.info("[WA Scheduler] Birthday job skipped — WhatsApp not connected")
         return
+
+    auto = await get_auto_settings()
+    if not auto.get("birthday_enabled", True):
+        logger.info("[WA Scheduler] Birthday job skipped — birthday auto-send disabled")
+        return
+    template = auto.get("birthday_template") or "🎂 Happy Birthday, {name}!"
+
 
     today = date.today()
     today_month = today.month
@@ -70,6 +77,10 @@ async def _send_birthday_wishes():
 
     sent, skipped = 0, 0
     for client in clients:
+        # Per-client opt-out: skip if birthday auto-send turned off for this client
+        if client.get("wa_auto_birthday") is False:
+            continue
+
         targets = []  # (phone, name) pairs to wish
 
         # Check main client birthday
@@ -106,12 +117,15 @@ async def _send_birthday_wishes():
             except (ValueError, TypeError):
                 pass
 
+        # Custom per-client message overrides the global template
+        client_msg = client.get("wa_birthday_message")
+        raw_tpl = client_msg if (client_msg and client_msg.strip()) else template
         for phone, name in targets:
-            message = (
-                f"🎂 *Happy Birthday, {name}!*\n\n"
-                f"Wishing you a wonderful birthday filled with joy and prosperity! 🎉\n\n"
-                f"Best wishes,\n_Taskosphere Team_"
-            )
+            try:
+                message = raw_tpl.format(name=name)
+            except (KeyError, IndexError, ValueError):
+                message = raw_tpl
+
             await send_whatsapp_notification(
                 to=phone,
                 message=message,
@@ -131,11 +145,16 @@ async def _send_dsc_expiry_alerts():
     Looks up the assigned client's phone number from the DSC record.
     """
     from backend.server import db
-    from backend.whatsapp_integration import send_whatsapp_notification
+    from backend.whatsapp_integration import send_whatsapp_notification, get_auto_settings
 
     if not await _is_wa_connected():
         logger.info("[WA Scheduler] DSC expiry job skipped — WhatsApp not connected")
         return
+
+    if not (await get_auto_settings()).get("dsc_enabled", True):
+        logger.info("[WA Scheduler] DSC expiry job skipped — disabled in settings")
+        return
+
 
     today = date.today()
     alert_offsets = [7, 1]  # days before expiry
@@ -201,11 +220,16 @@ async def _send_compliance_reminders():
     Fetches client phone from the compliance master's client_id.
     """
     from backend.server import db
-    from backend.whatsapp_integration import send_whatsapp_notification
+    from backend.whatsapp_integration import send_whatsapp_notification, get_auto_settings
 
     if not await _is_wa_connected():
         logger.info("[WA Scheduler] Compliance job skipped — WhatsApp not connected")
         return
+
+    if not (await get_auto_settings()).get("compliance_enabled", True):
+        logger.info("[WA Scheduler] Compliance job skipped — disabled in settings")
+        return
+
 
     today = date.today()
     alert_offsets = [7, 1]
