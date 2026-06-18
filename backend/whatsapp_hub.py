@@ -78,7 +78,10 @@ def _db():
 async def _has_hub_access(user: User) -> bool:
     if user.role == "admin":
         return True
-    doc = await _db()["users"].find_one({"_id": user.id})
+    # Users are stored with a UUID string in the "id" field, not MongoDB's "_id".
+    # Querying by "_id" (ObjectId) against a UUID string always returns None →
+    # every non-admin call was silently returning False (403). Fixed to use "id".
+    doc = await _db()["users"].find_one({"id": user.id})
     return bool(doc and doc.get("wa_hub_access"))
 
 
@@ -761,10 +764,47 @@ async def hub_conversation_search(
 # ── SSE: real-time event stream ──────────────────────────────────────────────
 
 @router.get("/events")
-async def hub_events(current_user: User = Depends(get_current_user)):
-    """Server-Sent Events — streams new-message events to the frontend in real time."""
-    if not await _has_hub_access(current_user):
-        raise HTTPException(403, "No access")
+async def hub_events(
+    request: Request,
+    token: Optional[str] = None,
+):
+    """Server-Sent Events — streams new-message events to the frontend in real time.
+
+    EventSource (browser API) cannot send custom headers, so we accept the JWT
+    via ?token= query param as a fallback when no Authorization header is present.
+    The frontend already appends ?token=<jwt> when opening the EventSource URL.
+    """
+    from backend.dependencies import JWT_SECRET, ALGORITHM
+    from jose import jwt as _jwt, JWTError
+
+    # Try Authorization header first; fall back to ?token= query param.
+    auth_header = request.headers.get("Authorization", "")
+    raw_token = None
+    if auth_header.startswith("Bearer "):
+        raw_token = auth_header[7:]
+    elif token:
+        raw_token = token
+
+    if not raw_token:
+        raise HTTPException(401, "Authentication required")
+
+    try:
+        payload = _jwt.decode(raw_token, JWT_SECRET, algorithms=[ALGORITHM])
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(401, "Invalid token")
+    except JWTError:
+        raise HTTPException(401, "Invalid token")
+
+    db = _db()
+    user_doc = await db["users"].find_one({"id": user_id})
+    if not user_doc:
+        raise HTTPException(401, "User not found")
+
+    # Check hub access: admin always OK; others need wa_hub_access flag
+    role = user_doc.get("role", "")
+    if role != "admin" and not user_doc.get("wa_hub_access"):
+        raise HTTPException(403, "No WhatsApp Hub access")
 
     q: asyncio.Queue = asyncio.Queue(maxsize=100)
     _sse_queues.append(q)
@@ -829,17 +869,15 @@ async def hub_global_search(
 @router.get("/access")
 async def hub_list_access(current_user: User = Depends(require_admin())):
     db    = _db()
-    users = await db["users"].find({}, {"_id":1,"name":1,"email":1,"role":1,"wa_hub_access":1}).to_list(200)
-    return {"users": [{"id": str(u["_id"]), "name": u.get("name"), "email": u.get("email"), "role": u.get("role"), "wa_hub_access": u.get("wa_hub_access", False)} for u in users]}
+    users = await db["users"].find({}, {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1, "wa_hub_access": 1}).to_list(200)
+    return {"users": [{"id": u.get("id"), "name": u.get("name"), "email": u.get("email"), "role": u.get("role"), "wa_hub_access": u.get("wa_hub_access", False)} for u in users]}
 
 
 @router.patch("/access/{user_id}")
 async def hub_update_access(user_id: str, body: HubAccessUpdate, current_user: User = Depends(require_admin())):
-    from bson import ObjectId
+    # Users are keyed by UUID string in the "id" field, not by MongoDB ObjectId "_id".
     db = _db()
-    try:    oid = ObjectId(user_id)
-    except Exception: raise HTTPException(400, "Invalid user_id")
-    result = await db["users"].update_one({"_id": oid}, {"$set": {"wa_hub_access": body.grant}})
+    result = await db["users"].update_one({"id": user_id}, {"$set": {"wa_hub_access": body.grant}})
     if result.matched_count == 0:
         raise HTTPException(404, "User not found")
     return {"ok": True, "user_id": user_id, "wa_hub_access": body.grant}
@@ -886,5 +924,6 @@ async def hub_decide_access(body: HubAccessDecision, current_user: User = Depend
     status = "approved" if body.approved else "rejected"
     await db["whatsapp_hub_access_requests"].update_one({"_id": ObjectId(body.request_id)}, {"$set": {"status": status}})
     if body.approved:
-        await db["users"].update_one({"_id": ObjectId(req["user_id"])}, {"$set": {"wa_hub_access": True}})
+        # req["user_id"] is a UUID string stored in the "id" field (not MongoDB "_id")
+        await db["users"].update_one({"id": req["user_id"]}, {"$set": {"wa_hub_access": True}})
     return {"ok": True, "status": status}
