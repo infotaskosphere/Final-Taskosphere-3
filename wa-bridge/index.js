@@ -55,8 +55,12 @@
   const upload = multer({ storage, limits: { fileSize: 16 * 1024 * 1024 } });
 
   // ── Session registry + LID maps ──────────────────────────────────────────────
-  const sessions = {};
-  const lidMaps  = {};
+  const sessions    = {};
+  const lidMaps     = {};
+  // ★ Cache of the last messaging-history.set payload per session, so a manual
+  //   "Force Sync" can re-push it even when WhatsApp doesn't re-fire the event
+  //   (which only happens once, right after a fresh QR/pairing-code login).
+  const historyCache = {};
 
   function updateLidMap(sessionId, contacts) {
     if (!contacts || contacts.length === 0) return;
@@ -98,6 +102,26 @@
       return m[jid] || m[jid.split("@")[0]] || jid;
     }
     return jid;
+  }
+
+  // ★ Merge a batch of new items into an existing cached array, keyed by id,
+  //   so repeated messaging-history.set chunks (or live messages) don't
+  //   duplicate entries and newer copies overwrite older ones.
+  function mergeById(existing, incoming, keyFn) {
+    if (!incoming || incoming.length === 0) return existing;
+    const map = new Map();
+    for (const item of existing) {
+      const k = keyFn(item);
+      if (k) map.set(k, item);
+    }
+    for (const item of incoming) {
+      const k = keyFn(item);
+      if (k) map.set(k, item);
+    }
+    // Cap size so long-running sessions don't grow the cache unbounded
+    const arr = Array.from(map.values());
+    const MAX = 5000;
+    return arr.length > MAX ? arr.slice(arr.length - MAX) : arr;
   }
 
   async function resolveJidStrict(sessionId, jid) {
@@ -518,12 +542,24 @@
     sock.ev.on("messaging-history.set", async ({ chats, messages, contacts }) => {
       const label = sessions[sessionId]?.displayName || sessionId;
       updateLidMap(sessionId, contacts);
+
+      // ★ Merge into the per-session cache (Baileys may fire this event in
+      //   several chunks during initial sync) so a later manual sync has
+      //   something to re-push even if WhatsApp never sends this again.
+      if (!historyCache[sessionId]) historyCache[sessionId] = { chats: [], messages: [], contacts: [] };
+      const cache = historyCache[sessionId];
+      cache.chats    = mergeById(cache.chats,    chats    || [], c => c.id);
+      cache.contacts = mergeById(cache.contacts, contacts || [], c => c.id);
+      cache.messages = mergeById(cache.messages, messages || [], m => m.key?.id);
+
       syncHubHistory(sessionId, label, chats, messages, contacts).catch(() => {});
     });
 
     sock.ev.on("messages.upsert", async ({ messages: msgs, type }) => {
       if (type !== "notify") return;
       const label = sessions[sessionId]?.displayName || sessionId;
+      if (!historyCache[sessionId]) historyCache[sessionId] = { chats: [], messages: [], contacts: [] };
+      historyCache[sessionId].messages = mergeById(historyCache[sessionId].messages, msgs || [], m => m.key?.id);
       for (const msg of msgs) {
         captureLidFromMessage(sessionId, msg);
         notifyHubIncoming(sessionId, label, msg).catch(() => {});
@@ -645,10 +681,18 @@
     try { if (s.socket) await s.socket.logout(); } catch (_) {}
     try { fs.rmSync(path.join(SESSIONS_DIR, req.params.id), { recursive: true, force: true }); } catch (_) {}
     delete sessions[req.params.id];
+    delete historyCache[req.params.id];
     res.json({ message: "Session deleted" });
   });
 
   // ★ Force history re-sync
+  // Previously this only re-fetched groups, so a session that was already
+  // connected (e.g. restored after a bridge restart, instead of freshly
+  // QR/pairing-code logged-in) could show "connected" forever with 0 chats —
+  // messaging-history.set only fires once, right after a brand-new login.
+  // Now it also re-pushes whatever chat/message history we have cached from
+  // that event (or from live messages since), and falls back to asking
+  // Baileys for fresh on-demand history when nothing is cached yet.
   app.post("/sessions/:id/sync", async (req, res) => {
     const id  = req.params.id;
     const s   = sessions[id];
@@ -660,8 +704,37 @@
       const arr    = Object.values(groups || {});
       await notifyHubGroups(id, s.displayName, arr);
 
-      // Request fresh history sync from WhatsApp
-      res.json({ ok: true, message: "Sync triggered", groups: arr.length });
+      // Re-push cached chat/message history (covers sessions that were
+      // already connected before this server start, where Baileys won't
+      // fire messaging-history.set again).
+      const cache = historyCache[id];
+      let pushedContacts = 0, pushedMessages = 0;
+      if (cache && (cache.chats.length || cache.messages.length)) {
+        await syncHubHistory(id, s.displayName, cache.chats, cache.messages, cache.contacts);
+        pushedContacts = cache.chats.length;
+        pushedMessages = cache.messages.length;
+      } else {
+        // Nothing cached at all (e.g. server restarted and this session
+        // reconnected from saved creds with no history.set yet). Ask
+        // WhatsApp for on-demand history on each known chat so the next
+        // sync has something to push.
+        try {
+          const chats = Object.values(groups || {}).map(g => ({ id: g.id }));
+          for (const chat of chats.slice(0, 50)) {
+            await s.socket.fetchMessageHistory(20, { remoteJid: chat.id, fromMe: false, id: "" }, 0).catch(() => {});
+          }
+        } catch (_) { /* fetchMessageHistory not always available; non-fatal */ }
+      }
+
+      res.json({
+        ok: true,
+        message: pushedMessages || pushedContacts
+          ? "Sync triggered — re-pushed cached history"
+          : "Sync triggered — no cached history yet, requested fresh data",
+        groups: arr.length,
+        contacts: pushedContacts,
+        messages: pushedMessages,
+      });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
@@ -795,6 +868,30 @@
 
   app.listen(PORT, async () => {
     console.log(`WA Bridge v3.0 running on port ${PORT} — public URL: ${BRIDGE_PUBLIC_URL}`);
+    console.log(`BACKEND_URL is set to: ${BACKEND_URL}`);
+
+    // ★ Startup self-test: BACKEND_URL is the #1 cause of "session shows
+    //   connected but the Hub never gets any chats" — every webhook/sync
+    //   call below silently swallows its own errors (.catch(()=>{})) so a
+    //   wrong URL here produces zero visible errors anywhere in the UI.
+    //   render.yaml ships this as a *placeholder* domain; if it wasn't
+    //   updated to the real backend URL in the Render dashboard, every
+    //   POST to ${BACKEND_URL}/api/whatsapp/hub/webhook/* fails forever.
+    try {
+      const probe = await axios.get(`${BACKEND_URL}/health`, { timeout: 8000 }).catch(e => e.response || null);
+      if (!probe) {
+        console.error(`⚠️  STARTUP CHECK FAILED: could not reach BACKEND_URL (${BACKEND_URL}). ` +
+          `Chat history will NEVER sync to the Hub until this is fixed. ` +
+          `Set the correct backend URL as the BACKEND_URL env var on this service.`);
+      } else if (probe.status >= 500) {
+        console.warn(`⚠️  STARTUP CHECK: BACKEND_URL responded with ${probe.status} — backend may be misconfigured.`);
+      } else {
+        console.log(`✓ BACKEND_URL reachable (status ${probe.status})`);
+      }
+    } catch (e) {
+      console.warn("Startup BACKEND_URL check errored (non-fatal):", e.message);
+    }
+
     await bootPersistedSessions();
   });
   
