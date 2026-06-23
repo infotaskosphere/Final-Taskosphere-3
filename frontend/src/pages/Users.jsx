@@ -2239,6 +2239,7 @@ export default function Users() {
     punch_in_time: '10:30', grace_time: '00:10', punch_out_time: '19:00',
     telegram_id: '', is_active: true, status: 'active',
     company_id: '', company_name: '',
+    joining_date: '', training_period_end: '', payroll_date: '',
   });
   const [permissions, setPermissions] = useState({ ...EMPTY_PERMISSIONS });
 
@@ -2310,6 +2311,9 @@ export default function Users() {
       telegram_id: userData.telegram_id != null ? String(userData.telegram_id) : '',
       is_active: userData.is_active !== false, status: userData.status || 'active',
       company_id: userData.company_id || '', company_name: userData.company_name || '',
+      joining_date: userData.joining_date ? userData.joining_date.slice(0, 10) : '',
+      training_period_end: userData.training_period_end ? userData.training_period_end.slice(0, 10) : '',
+      payroll_date: userData.payroll_date ? userData.payroll_date.slice(0, 10) : '',
     });
     setDialogOpen(true);
   }, []);
@@ -2329,6 +2333,9 @@ export default function Users() {
           is_active: formData.is_active,
           company_id: formData.company_id || null,
           company_name: formData.company_name || null,
+          joining_date: formData.joining_date || null,
+          training_period_end: formData.training_period_end || null,
+          payroll_date: formData.payroll_date || null,
           ...(isAdmin && { email: formData.email.trim(), role: formData.role, status: formData.status, departments: formData.departments }),
           ...(isAdmin && formData.password.trim() && { password: formData.password.trim() }),
         };
@@ -2346,6 +2353,9 @@ export default function Users() {
           is_active: false, status: 'pending_approval',
           company_id: formData.company_id || null,
           company_name: formData.company_name || null,
+          joining_date: formData.joining_date || null,
+          training_period_end: formData.training_period_end || null,
+          payroll_date: formData.payroll_date || null,
         });
         toast.success('✓ Member registered — awaiting approval');
       }
@@ -2551,7 +2561,7 @@ export default function Users() {
                   <Button
                     onClick={() => {
                       setSelectedUser(null);
-                      setFormData({ full_name:'',email:'',password:'',role:'staff',departments:[],phone:'',birthday:'',profile_picture:'',punch_in_time:'10:30',grace_time:'00:10',punch_out_time:'19:00',telegram_id:'',is_active:true,status:'active',company_id:'',company_name:'' });
+                      setFormData({ full_name:'',email:'',password:'',role:'staff',departments:[],phone:'',birthday:'',profile_picture:'',punch_in_time:'10:30',grace_time:'00:10',punch_out_time:'19:00',telegram_id:'',is_active:true,status:'active',company_id:'',company_name:'',joining_date:'',training_period_end:'',payroll_date:'' });
                       setDialogOpen(true);
                     }}
                     className="h-10 px-6 rounded-xl font-semibold text-sm shadow-lg bg-white/20 hover:bg-white/30 text-white border border-white/20 hover:border-white/30 transition-all">
@@ -2900,6 +2910,32 @@ export default function Users() {
                 <Input type="number" name="telegram_id" value={formData.telegram_id} onChange={handleInput} placeholder="123456789" className="h-11 rounded-xl" />
               </div>
             </div>
+
+            {/* ── Employment Details ── */}
+            <div className="rounded-xl border border-blue-100 bg-blue-50/60 dark:bg-blue-900/10 dark:border-blue-800/40 p-4 space-y-4">
+              <div className="flex items-center gap-2">
+                <Calendar className="h-3.5 w-3.5 text-blue-600" />
+                <span className="font-semibold text-sm text-blue-700 dark:text-blue-400 uppercase tracking-wider">Employment Details</span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] font-semibold tracking-widest text-slate-500 uppercase">Joining Date</Label>
+                  <Input type="date" name="joining_date" value={formData.joining_date} onChange={handleInput} className="h-11 rounded-xl" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] font-semibold tracking-widest text-slate-500 uppercase">Training Period End</Label>
+                  <Input type="date" name="training_period_end" value={formData.training_period_end} onChange={handleInput} className="h-11 rounded-xl" />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] font-semibold tracking-widest text-slate-500 uppercase">Payroll Date</Label>
+                  <Input type="date" name="payroll_date" value={formData.payroll_date} onChange={handleInput} className="h-11 rounded-xl" />
+                  <p className="text-[10px] text-slate-400">Monthly salary processing date</p>
+                </div>
+              </div>
+            </div>
+
             {isAdmin && (
               <>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
