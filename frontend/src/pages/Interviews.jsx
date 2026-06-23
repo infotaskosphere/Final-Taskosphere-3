@@ -102,20 +102,25 @@ export default function Interviews() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       const f = res.data.fields || {};
+      // Merge parsed fields — always overwrite with parsed value if non-empty
       setForm(prev => ({
         ...prev,
-        full_name: f.full_name || prev.full_name,
-        email: f.email || prev.email,
-        phone: f.phone || prev.phone,
-        position: f.position || prev.position,
-        department: f.department || prev.department,
-        experience_years: f.experience_years ?? prev.experience_years,
-        current_company: f.current_company || prev.current_company,
-        skills: (f.skills && f.skills.length) ? f.skills : prev.skills,
-        education: f.education || prev.education,
+        full_name: (f.full_name && f.full_name.trim()) ? f.full_name.trim() : prev.full_name,
+        email: (f.email && f.email.trim()) ? f.email.trim() : prev.email,
+        phone: (f.phone && f.phone.trim()) ? f.phone.trim() : prev.phone,
+        position: (f.position && f.position.trim()) ? f.position.trim() : prev.position,
+        department: (f.department && f.department.trim()) ? f.department.trim() : prev.department,
+        experience_years: (f.experience_years != null && f.experience_years !== 0)
+          ? String(f.experience_years) : prev.experience_years,
+        current_company: (f.current_company && f.current_company.trim()) ? f.current_company.trim() : prev.current_company,
+        skills: (Array.isArray(f.skills) && f.skills.length > 0) ? f.skills : prev.skills,
+        education: (f.education && f.education.trim()) ? f.education.trim() : prev.education,
         resume_text: res.data.resume_text || prev.resume_text,
       }));
-      toast.success('✓ Resume parsed — review the auto-filled details below');
+      const filled = Object.entries(f).filter(([k, v]) =>
+        v && (Array.isArray(v) ? v.length > 0 : String(v).trim())
+      ).length;
+      toast.success(`✓ Resume parsed — ${filled} fields auto-filled`);
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Could not parse resume');
     } finally { setParsing(false); }
