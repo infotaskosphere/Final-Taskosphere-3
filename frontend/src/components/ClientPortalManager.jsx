@@ -153,6 +153,13 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [createFolderResult, setCreateFolderResult] = useState(null);
 
+  // ── Link Existing Drive Folder state ──────────────────────────────────
+  const [showLinkFolder, setShowLinkFolder] = useState(false);
+  const [linkFolderUrl, setLinkFolderUrl] = useState("");
+  const [linkFolderName, setLinkFolderName] = useState("");
+  const [linkingFolder, setLinkingFolder] = useState(false);
+  const [linkFolderResult, setLinkFolderResult] = useState(null);
+
   // Ref to scroll the credentials form into view after auto-open
   const credFormRef = useRef(null);
 
@@ -256,6 +263,30 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
     if (!window.confirm("Delete this portal user?")) return;
     await api.delete(`/client-portal/users/${id}`);
     loadUsers();
+  };
+
+  const linkExistingFolder = async () => {
+    const url = linkFolderUrl.trim();
+    if (!url) return;
+    setLinkingFolder(true);
+    setLinkFolderResult(null);
+    try {
+      const body = { folder_id_or_url: url };
+      if (linkFolderName.trim()) body.folder_name = linkFolderName.trim();
+      const res = await api.put(`/client-portal/clients/${clientId}/link-drive-folder`, body);
+      setLinkFolderResult(res.data);
+      // Pre-fill credentials form with the linked folder
+      setForm(f => ({
+        ...f,
+        google_drive_folder_id: res.data.folder_id,
+        google_drive_folder_name: res.data.folder_name,
+      }));
+      await loadUsers();
+    } catch (err) {
+      setLinkFolderResult({ error: extractErrorMessage(err, "Failed to link folder.") });
+    } finally {
+      setLinkingFolder(false);
+    }
   };
 
   const createDriveFolder = async () => {
@@ -465,6 +496,82 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
                 {createFolderResult?.error && (
                   <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
                     ⚠️ {createFolderResult.error}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* ── Link Existing Drive Folder Panel ────────────────────────── */}
+          <div className="border border-emerald-200 rounded-xl overflow-hidden">
+            <button
+              onClick={() => { setShowLinkFolder(v => !v); setLinkFolderResult(null); }}
+              className="w-full flex items-center justify-between px-4 py-3 bg-emerald-50 hover:bg-emerald-100 transition text-left"
+            >
+              <span className="flex items-center gap-2 text-sm font-semibold text-emerald-800">
+                🔗 Link Existing Drive Folder
+              </span>
+              <span className="text-emerald-400 text-xs">{showLinkFolder ? "▲ Hide" : "▼ Expand"}</span>
+            </button>
+
+            {showLinkFolder && (
+              <div className="p-4 space-y-3 bg-white">
+                <p className="text-xs text-gray-500">
+                  Paste a Google Drive folder URL or bare folder ID. The folder will be linked to this client's
+                  portal account and all their existing portal users will be updated automatically.
+                  Make sure the folder is already shared with your service account email.
+                </p>
+                <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">
+                    Folder URL or Folder ID <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    value={linkFolderUrl}
+                    onChange={e => setLinkFolderUrl(e.target.value)}
+                    placeholder="https://drive.google.com/drive/folders/1BxiMVs… or bare ID"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">
+                    Folder Label <span className="font-normal text-gray-400">(optional — shown to client, defaults to folder name)</span>
+                  </label>
+                  <input
+                    value={linkFolderName}
+                    onChange={e => setLinkFolderName(e.target.value)}
+                    placeholder="My Documents"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                  />
+                </div>
+                <button
+                  onClick={linkExistingFolder}
+                  disabled={linkingFolder || !linkFolderUrl.trim()}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-semibold py-2 rounded-lg transition flex items-center justify-center gap-2"
+                >
+                  {linkingFolder ? (
+                    <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Linking…</>
+                  ) : "🔗 Link This Folder"}
+                </button>
+
+                {linkFolderResult && !linkFolderResult.error && (
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-3 space-y-1">
+                    <p className="text-sm font-semibold text-green-800">✅ Folder linked!</p>
+                    <p className="text-xs text-green-700">
+                      📁 <strong>{linkFolderResult.folder_name}</strong>
+                      {linkFolderResult.folder_link && (
+                        <a href={linkFolderResult.folder_link} target="_blank" rel="noopener noreferrer" className="ml-2 text-blue-600 underline">Open in Drive ↗</a>
+                      )}
+                    </p>
+                    {linkFolderResult.portal_users_updated > 0 && (
+                      <p className="text-xs text-green-700">✓ Updated {linkFolderResult.portal_users_updated} portal user{linkFolderResult.portal_users_updated !== 1 ? "s" : ""} automatically</p>
+                    )}
+                    <p className="text-gray-500 font-mono text-[10px] select-all">Folder ID: {linkFolderResult.folder_id}</p>
+                  </div>
+                )}
+
+                {linkFolderResult?.error && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
+                    ⚠️ {linkFolderResult.error}
                   </div>
                 )}
               </div>
