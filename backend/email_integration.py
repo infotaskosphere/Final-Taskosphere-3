@@ -130,10 +130,19 @@ class AutoSavePrefOut(BaseModel):
     next_scan_at: Optional[str] = None
 
 class ManualSaveReminderRequest(BaseModel):
-    event_id: str
+    # event_id is optional — manual reminders created from the Reminders page
+    # (rather than from an Action Center email event) don't have one. When
+    # omitted, the backend generates a synthetic id so dedup logic still works.
+    event_id: Optional[str] = None
     title: str
     description: Optional[str] = None
     remind_at: str
+    # Optional Trademark Hearing outcome fields — only stored when provided.
+    brand_name: Optional[str] = None
+    hearing_attended: Optional[str] = None     # "yes" | "no"
+    hearing_decision: Optional[str] = None     # "favourable" | "unfavourable"
+    hearing_adjourned: Optional[bool] = None
+    hearing_notes: Optional[str] = None
 
 class ManualSaveVisitRequest(BaseModel):
     event_id: str
@@ -710,18 +719,32 @@ def _extract_sender_email(from_header: str) -> str:
 def _scan_mailbox_sync(
     host: str, port: int, email_addr: str, password: str,
     max_msgs: int = 50, sender_whitelist: Optional[List[str]] = None,
+    since_date: Optional[str] = None,
 ) -> List[Dict]:
+    """
+    since_date: IMAP-format date string "dd-Mon-yyyy" (e.g. "01-Jan-2025").
+    When provided, searches SINCE that date instead of "ALL" — this is what
+    powers retrospective syncing of mail older than the normal rolling window.
+    max_msgs: caps how many matched messages are fetched. Pass 0 to fetch
+    everything matched by the search (used for retrospective scans, capped
+    upstream instead).
+    """
     results = []
     try:
         password = _clean_password(password)
         conn = imaplib.IMAP4_SSL(host, int(port))
         conn.login(email_addr, password)
         conn.select("INBOX", readonly=True)
-        _, data = conn.search(None, "ALL")
+        if since_date:
+            _, data = conn.search(None, f'(SINCE "{since_date}")')
+        else:
+            _, data = conn.search(None, "ALL")
         if not data or not data[0]:
             conn.logout()
             return results
-        ids = data[0].split()[-max_msgs:]
+        ids = data[0].split()
+        if max_msgs:
+            ids = ids[-max_msgs:]
         for msg_id in reversed(ids):
             try:
                 _, msg_data = conn.fetch(msg_id, "(RFC822)")
@@ -1658,19 +1681,48 @@ async def save_as_reminder(body: ManualSaveReminderRequest, current_user=Depends
             remind_dt = datetime.fromisoformat(body.remind_at.replace("Z", "+00:00"))
         except Exception:
             remind_dt = datetime.now(IST) + timedelta(days=1)
-        existing = await db["reminders"].find_one(
-            {"user_id": str(current_user.id), "title": body.title}, {"_id": 0, "id": 1}
-        )
+
+        incoming_event_id = (body.event_id or "").strip() or None
+        # Synthetic id for purely-manual reminders (no source email/event) —
+        # keeps every reminder row keyed so later dedup/lookups stay consistent.
+        event_id = incoming_event_id or f"manual-{_uuid.uuid4()}"
+
+        # Duplicate guard. When the reminder originates from a known event
+        # (Action Center / email auto-save), match on that event_id — it's a
+        # far stronger key than title, since two different hearings can share
+        # a generic title like "Hearing Notice". Purely manual reminders
+        # (no event_id supplied) fall back to a title match, same as before.
+        dup_query = {"user_id": str(current_user.id)}
+        if incoming_event_id:
+            dup_query["event_id"] = incoming_event_id
+        else:
+            dup_query["title"] = body.title
+        existing = await db["reminders"].find_one(dup_query, {"_id": 0, "id": 1})
         if existing:
             return {"status": "already_exists", "id": existing.get("id", "")}
+
         nid = str(_uuid.uuid4())
-        await db["reminders"].insert_one({
+        doc = {
             "id": nid, "user_id": str(current_user.id), "title": body.title,
             "description": _clean_text(body.description or "", 500),
             "remind_at": remind_dt.isoformat(), "is_dismissed": False,
-            "source": "email_manual", "event_id": body.event_id,
+            "source": "email_manual", "event_id": event_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
-        })
+        }
+        # Optional Trademark Hearing outcome fields — stored only if sent,
+        # so creating a hearing reminder no longer silently drops them.
+        if body.brand_name is not None:
+            doc["brand_name"] = body.brand_name
+        if body.hearing_attended is not None:
+            doc["hearing_attended"] = body.hearing_attended
+        if body.hearing_decision is not None:
+            doc["hearing_decision"] = body.hearing_decision
+        if body.hearing_adjourned is not None:
+            doc["hearing_adjourned"] = body.hearing_adjourned
+        if body.hearing_notes is not None:
+            doc["hearing_notes"] = body.hearing_notes
+
+        await db["reminders"].insert_one(doc)
         return {"status": "created", "id": nid}
     except HTTPException:
         raise
@@ -1780,6 +1832,9 @@ async def update_reminder(
     allowed_fields = {
         "title", "description", "remind_at", "is_dismissed",
         "urgency", "tm_app_no", "updated_at",
+        # Trademark Hearing outcome fields — previously dropped on edit.
+        "brand_name", "hearing_attended", "hearing_decision",
+        "hearing_adjourned", "hearing_notes",
     }
     updates = {k: v for k, v in body.items() if k in allowed_fields}
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -1825,13 +1880,32 @@ async def delete_reminder(
 async def extract_events(
     current_user=Depends(check_module_permission("email_accounts", "view")),
     limit: int = Query(30),
-    force_refresh: bool = Query(False)
+    force_refresh: bool = Query(False),
+    since_date: Optional[str] = Query(
+        None,
+        description="YYYY-MM-DD. Re-scans mail received on/after this date instead "
+                    "of just the recent rolling window — used for retrospective sync "
+                    "of older mail. Safe to repeat: duplicates are skipped via Message-ID.",
+    ),
+    email: Optional[str] = Query(
+        None, description="Restrict the sync to a single connected email account."
+    ),
 ):
     conns = await db[COL_CONNECTIONS].find(
         {"user_id": str(current_user.id), "is_active": True}, {"_id": 0}
     ).to_list(50)
+    if email:
+        conns = [c for c in conns if c["email_address"] == email]
     if not conns:
         return []
+
+    # Convert "YYYY-MM-DD" → IMAP's "dd-Mon-yyyy" SINCE format.
+    imap_since = None
+    if since_date:
+        try:
+            imap_since = datetime.fromisoformat(since_date[:10]).strftime("%d-%b-%Y")
+        except Exception:
+            imap_since = None
 
     prefs_doc = await db[COL_AUTO_PREFS].find_one(
         {"user_id": str(current_user.id)}, {"_id": 0}
@@ -1846,7 +1920,9 @@ async def extract_events(
     async def process_account(conn):
         email_addr = conn["email_address"]
 
-        if not force_refresh and conn.get("last_synced"):
+        # The 30-minute result cache only applies to the normal rolling-window
+        # scan. A retrospective sync (since_date) always hits the mailbox.
+        if not force_refresh and not imap_since and conn.get("last_synced"):
             try:
                 last = datetime.fromisoformat(conn["last_synced"])
                 if (datetime.now(timezone.utc) - last).total_seconds() < 1800:
@@ -1859,10 +1935,14 @@ async def extract_events(
                 pass
 
         loop       = asyncio.get_event_loop()
+        # No 50-message cap for a date-bounded retrospective scan — the SINCE
+        # filter already bounds the result set. Otherwise keep the normal cap.
+        fetch_cap  = 0 if imap_since else 50
         raw_emails = await loop.run_in_executor(
             None, _scan_mailbox_sync,
             conn["imap_host"], conn["imap_port"], email_addr,
-            _decrypt(conn["app_password_enc"]), 50, sender_whitelist or None,
+            _decrypt(conn["app_password_enc"]), fetch_cap, sender_whitelist or None,
+            imap_since,
         )
         acc = []
         for raw in raw_emails:
