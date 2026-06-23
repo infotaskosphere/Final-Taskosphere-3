@@ -56,7 +56,11 @@ class CandidateBase(BaseModel):
     education: Optional[str] = None
 
     interview_date: Optional[str] = None  # ISO date (YYYY-MM-DD)
+    interview_time: Optional[str] = None  # HH:MM (24h)
     interviewer: Optional[str] = None
+
+    attendance: Literal["pending", "attended", "not_attended"] = "pending"
+    interview_feedback: Optional[str] = None
 
     pay_scale_offered: Optional[str] = None
     conditions: Optional[str] = None
@@ -71,7 +75,8 @@ class CandidateBase(BaseModel):
     resume_text: Optional[str] = None
 
     @field_validator("email", "phone", "position", "department", "current_company",
-                      "education", "interview_date", "interviewer", "pay_scale_offered",
+                      "education", "interview_date", "interview_time", "interviewer",
+                      "interview_feedback", "pay_scale_offered",
                       "conditions", "training_period", "notes", mode="before")
     @classmethod
     def empty_to_none(cls, v):
@@ -110,7 +115,10 @@ class CandidateUpdate(BaseModel):
     skills: Optional[List[str]] = None
     education: Optional[str] = None
     interview_date: Optional[str] = None
+    interview_time: Optional[str] = None
     interviewer: Optional[str] = None
+    attendance: Optional[Literal["pending", "attended", "not_attended"]] = None
+    interview_feedback: Optional[str] = None
     pay_scale_offered: Optional[str] = None
     conditions: Optional[str] = None
     training_period: Optional[str] = None
@@ -164,6 +172,122 @@ def _regex_fields(text: str) -> dict:
     m = _PHONE_RE.search(text)
     if m:
         out["phone"] = m.group(0)
+    return out
+
+
+def _heuristic_fields(text: str) -> dict:
+    """Section-aware heuristic extraction that works with NO external AI call.
+    Used to fill any gaps the AI model leaves (or as the sole source if the
+    AI call fails / no API key is configured), so parsing stays useful for
+    any resume layout — not just ones the model happens to handle well."""
+    import calendar
+    from datetime import date as ddate
+
+    out = {}
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    if not lines:
+        return out
+
+    # ── Name: first short, mostly-alphabetic line near the top ──────────────
+    for l in lines[:6]:
+        if "@" in l or any(ch.isdigit() for ch in l):
+            continue
+        words = l.split()
+        if 1 <= len(words) <= 5 and all(re.match(r"^[A-Za-z.\-']+$", w) for w in words):
+            out["full_name"] = l.title() if l.isupper() else l
+            break
+
+    # ── Split into sections by common resume headings ────────────────────────
+    section_pat = re.compile(
+        r"^(SUMMARY|OBJECTIVE|PROFILE|WORK EXPERIENCE|EXPERIENCE|EMPLOYMENT( HISTORY)?|"
+        r"EDUCATION|KEY SKILLS|SKILLS|TECHNICAL SKILLS|PROJECTS|CERTIFICATIONS)\s*$",
+        re.I,
+    )
+    sections, current, buf = {}, "header", []
+    for l in lines:
+        if section_pat.match(l):
+            sections[current] = buf
+            current = l.lower().strip()
+            buf = []
+        else:
+            buf.append(l)
+    sections[current] = buf
+
+    def _get_section(*names):
+        for n in names:
+            if n in sections:
+                return sections[n]
+        return []
+
+    exp_lines = _get_section("work experience", "experience", "employment", "employment history")
+    if exp_lines:
+        first = exp_lines[0]
+        m = re.search(r"(.+?)\bat\b\s*(.+)", first, re.I)
+        if m:
+            out["position"] = m.group(1).strip(" ,")
+            out["current_company"] = re.split(r"\s{2,}", m.group(2))[0].strip(" .")
+        else:
+            out["position"] = first.split(",")[0].strip()
+
+        # Estimate total experience by summing every "Mon YYYY - Mon YYYY" style range
+        date_re = re.compile(
+            r"([A-Za-z]{3,9})\s+(\d{4})\s*[-–to]+\s*([A-Za-z]{3,9}|present)\s*(\d{4})?", re.I
+        )
+
+        def month_num(name):
+            name = name[:3].title()
+            try:
+                return list(calendar.month_abbr).index(name)
+            except ValueError:
+                return None
+
+        months_total = 0
+        for l in exp_lines:
+            m2 = date_re.search(l)
+            if not m2:
+                continue
+            m1n, y1 = month_num(m2.group(1)), int(m2.group(2))
+            if m1n is None:
+                continue
+            if m2.group(3).lower() == "present":
+                end = ddate.today()
+            else:
+                m2n = month_num(m2.group(3))
+                if m2n is None:
+                    continue
+                end = ddate(int(m2.group(4) or y1), m2n, 1)
+            start = ddate(y1, m1n, 1)
+            months = (end.year - start.year) * 12 + (end.month - start.month)
+            if months > 0:
+                months_total += months
+        if months_total:
+            out["experience_years"] = round(months_total / 12, 1)
+
+    edu_lines = _get_section("education")
+    if edu_lines:
+        out["education"] = "; ".join(edu_lines[:4])
+
+    skill_lines = _get_section("key skills", "skills", "technical skills")
+    if skill_lines:
+        skills = []
+        for l in skill_lines:
+            skills.extend([p.strip() for p in re.split(r",|•|;", l) if p.strip()])
+        if skills:
+            out["skills"] = skills[:15]
+
+    dep_map = [
+        ("trademark", "TM"), ("legal", "Legal"), ("law", "Legal"),
+        ("account", "ACC"), ("finance", "ACC"), ("tax", "TDS"), ("gst", "GST"),
+        ("roc", "ROC"), ("compliance", "ROC"), ("software", "IT"), ("developer", "IT"),
+        ("information technology", "IT"), ("human resource", "HR"), (" hr ", "HR"),
+        ("marketing", "Marketing"), ("sales", "Sales"), ("operations", "Operations"),
+    ]
+    haystack = f" {out.get('position', '')} {' '.join(out.get('skills', []))} ".lower()
+    for kw, dep in dep_map:
+        if kw in haystack:
+            out["department"] = dep
+            break
+
     return out
 
 
