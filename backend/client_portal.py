@@ -889,6 +889,121 @@ async def bulk_create_client_drive_folders(
     }
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Link Existing Drive Folder  –  admin links any pre-existing Drive folder
+#   to a client without creating new folders.
+#   Accepts: bare folder ID or any Google Drive share/view URL.
+# ═══════════════════════════════════════════════════════════════════════════
+
+class LinkExistingFolderRequest(BaseModel):
+    folder_id_or_url: str          # paste either a folder ID or a full Drive URL
+    folder_name: Optional[str] = None  # optional override; auto-fetched from Drive if blank
+
+
+@router.put("/clients/{client_id}/link-drive-folder")
+async def link_existing_drive_folder(
+    client_id: str,
+    body: LinkExistingFolderRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Link an **existing** Google Drive folder to a client.
+    No new folders are created — only the stored folder ID is updated.
+
+    The admin can paste:
+      • A bare folder ID:  1nYpYErhuHLGjYWaUUMt7ZDT2sFhAa7FB
+      • A share URL:       https://drive.google.com/drive/folders/1nYp…?usp=drive_link
+      • An open URL:       https://drive.google.com/open?id=1nYp…
+
+    After linking, the client's portal user(s) immediately gain access to that
+    folder via the /drive/files and /drive/download endpoints.
+    """
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Insufficient permissions")
+
+    client_doc = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not client_doc:
+        raise HTTPException(404, "Client not found")
+
+    folder_id = _extract_folder_id(body.folder_id_or_url)
+    if not folder_id:
+        raise HTTPException(400, "Could not extract a valid folder ID from the provided value. "
+                                 "Paste a folder ID or a Google Drive folder URL.")
+
+    # Try to resolve the folder name from Drive if not explicitly provided
+    folder_name = (body.folder_name or "").strip() or None
+    if not folder_name:
+        folder_name = _get_folder_name(folder_id)
+    if not folder_name or folder_name == folder_id:
+        # Fall back to company name if Drive lookup fails (no credentials / wrong scope)
+        folder_name = client_doc.get("company_name") or client_doc.get("name") or "My Documents"
+
+    folder_link = f"https://drive.google.com/drive/folders/{folder_id}"
+
+    # Update the client record so the link persists even before a portal user exists
+    await db.clients.update_one(
+        {"id": client_id},
+        {"$set": {
+            "drive_folder_id":   folder_id,
+            "drive_folder_name": folder_name,
+            "drive_folder_link": folder_link,
+        }},
+    )
+
+    # Also update every portal user linked to this client
+    portal_users = await db.client_portal_users.find(
+        {"client_id": client_id}, {"_id": 0, "id": 1}
+    ).to_list(100)
+
+    if portal_users:
+        await db.client_portal_users.update_many(
+            {"client_id": client_id},
+            {"$set": {
+                "google_drive_folder_id":   folder_id,
+                "google_drive_folder_name": folder_name,
+            }},
+        )
+
+    return {
+        "success": True,
+        "client_id": client_id,
+        "folder_id": folder_id,
+        "folder_name": folder_name,
+        "folder_link": folder_link,
+        "portal_users_updated": len(portal_users),
+    }
+
+
+# ── Admin: browse any Drive folder (not tied to a portal user) ──────────────
+# Useful for previewing a folder before linking it to a client.
+
+@router.get("/drive/admin/browse")
+async def admin_browse_drive_folder(
+    folder_id: str = Query(..., description="Drive folder ID to list"),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Browse any Drive folder by ID so the admin can preview its contents
+    before linking it to a client.  No portal user required.
+    """
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Insufficient permissions")
+
+    try:
+        files = _fetch_drive_files_raw(folder_id)
+    except Exception as exc:
+        raise HTTPException(503, f"Could not reach Google Drive: {exc}")
+
+    for f in files:
+        f["is_folder"] = f.get("mimeType") == "application/vnd.google-apps.folder"
+
+    return {
+        "folder_id": folder_id,
+        "files": files,
+        "total": len(files),
+    }
+
+
 @router.get("/drive/files")
 async def portal_drive_files(
     folder_id: Optional[str] = Query(None, description="Subfolder to browse"),
