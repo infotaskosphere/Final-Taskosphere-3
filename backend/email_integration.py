@@ -1,2186 +1,2655 @@
-import imaplib
-import email
-import email.header
-import re
-import json
-import asyncio
-import logging
-import html
-import uuid as _uuid
-from html.parser import HTMLParser
-from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Dict, Any, Set, Tuple
-from zoneinfo import ZoneInfo
+// ═══════════════════════════════════════════════════════════════════════════════
+// EmailSettings.jsx  v6  — Preview-before-save, past-date filtering, dedup
+// Changes from v5:
+//   1. ScanPreviewPanel — shows all extracted events BEFORE any data is written
+//      - Checkbox per event (checked by default if future & not already saved)
+//      - Past-dated events greyed + unchecked + "PAST — SKIPPED" badge
+//      - Already-saved events get "ALREADY SAVED" badge + disabled checkbox
+//      - Override save-type dropdown per event
+//      - "Select All Future / None" bulk controls
+//      - "Save N Selected" button — saves in one batch call
+//   2. Sync base date — each account's Sync button passes last_synced to API
+//      (?since_date=...) so only new emails since last sync are fetched
+//   3. Session-level dedup — savedKeys Set tracks event keys saved this session;
+//      a new scan deduplicates against it before merging into the panel
+//   4. Old EventRow (individual save buttons) removed — replaced by preview panel
+// ═══════════════════════════════════════════════════════════════════════════════
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from pydantic import BaseModel
-from bson import ObjectId
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
+import { motion, AnimatePresence } from "framer-motion";
+import { toast } from "sonner";
+import api from "@/lib/api";
+import { useDark } from "@/hooks/useDark";
+import {
+  Mail, Plus, Trash2, CheckCircle2, AlertCircle,
+  Loader2, Eye, EyeOff, ExternalLink, ChevronDown, ChevronUp,
+  Wifi, WifiOff, Edit2, Check, X, Info, Shield,
+  RefreshCw, Calendar, Bell, Eraser, Clock,
+  Settings2, AlertTriangle,
+  CheckSquare, Filter, Tag, BookOpen, Activity, ChevronRight,
+  Square, Save, CalendarOff,
+  Send, FileText, Building2, Pencil, Users,
+  ToggleLeft, ToggleRight, Copy, Zap, Paperclip,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { format, parseISO, isBefore, startOfDay } from "date-fns";
 
-from backend.dependencies import get_current_user, db, check_module_permission, get_team_user_ids
+// ─────────────────────────────────────────────────────────────────────────────
+// DESIGN TOKENS
+// ─────────────────────────────────────────────────────────────────────────────
+const COLORS = {
+  deepBlue:     "#0D3B66",
+  mediumBlue:   "#1F6FB2",
+  emeraldGreen: "#1FAF5A",
+  lightGreen:   "#5CCB5F",
+  amber:        "#F59E0B",
+  orange:       "#F97316",
+  red:          "#EF4444",
+  purple:       "#8B5CF6",
+};
 
-try:
-    from cryptography.fernet import Fernet
-    import os as _os
-    _fernet_key = _os.environ.get("EMAIL_ENCRYPT_KEY", "").encode()
-    _fernet = Fernet(_fernet_key) if len(_fernet_key) == 44 else None
-except Exception:
-    _fernet = None
+const D = {
+  bg:      "#0f172a",
+  card:    "#1e293b",
+  raised:  "#263348",
+  border:  "#334155",
+  text:    "#f1f5f9",
+  muted:   "#94a3b8",
+  dimmer:  "#64748b",
+};
 
-try:
-    import google.generativeai as genai
-    import os as _os2
-    _gemini_key = _os2.environ.get("GEMINI_API_KEY", "")
-    if _gemini_key:
-        genai.configure(api_key=_gemini_key)
-        _gemini = genai.GenerativeModel("gemini-2.0-flash-lite")
-    else:
-        _gemini = None
-except Exception:
-    _gemini = None
+const containerVariants = {
+  hidden:  { opacity: 0 },
+  visible: { opacity: 1, transition: { staggerChildren: 0.06, delayChildren: 0.1 } },
+};
+const itemVariants = {
+  hidden:  { opacity: 0, y: 24 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.23, 1, 0.32, 1] } },
+};
+const springPhysics = { lift: { type: "spring", stiffness: 320, damping: 24, mass: 0.9 } };
 
-logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/email", tags=["email"])
+const PROVIDER_COLORS = {
+  gmail: "#EA4335", outlook: "#0078D4", yahoo: "#720E9E", icloud: "#3B82F6", other: "#374151",
+};
+const PROVIDER_ICONS = {
+  gmail: "G", outlook: "M", yahoo: "Y", icloud: "iC", other: "@",
+};
+const CATEGORY_CONFIG = {
+  todo: {
+    label: "Todo", color: COLORS.purple,
+    bg: "#F5F3FF", border: "#DDD6FE", darkBg: "rgba(139,92,246,0.12)",
+  },
+  reminder: {
+    label: "Reminder", color: COLORS.deepBlue,
+    bg: "#EFF6FF", border: "#BFDBFE", darkBg: "rgba(13,59,102,0.18)",
+  },
+  visit: {
+    label: "Visit", color: COLORS.emeraldGreen,
+    bg: "#F0FDF4", border: "#BBF7D0", darkBg: "rgba(31,175,90,0.12)",
+  },
+};
 
-IST = ZoneInfo("Asia/Kolkata")
-
-# =============================================================================
-# IMAP PROVIDER DEFAULTS
-# =============================================================================
-PROVIDER_IMAP: Dict[str, tuple] = {
-    "gmail.com":      ("imap.gmail.com",        993, "gmail"),
-    "googlemail.com": ("imap.gmail.com",        993, "gmail"),
-    "outlook.com":    ("outlook.office365.com", 993, "outlook"),
-    "hotmail.com":    ("outlook.office365.com", 993, "outlook"),
-    "live.com":       ("outlook.office365.com", 993, "outlook"),
-    "yahoo.com":      ("imap.mail.yahoo.com",   993, "yahoo"),
-    "ymail.com":      ("imap.mail.yahoo.com",   993, "yahoo"),
-    "icloud.com":     ("imap.mail.me.com",      993, "icloud"),
-    "me.com":         ("imap.mail.me.com",      993, "icloud"),
+// ─── Date helpers ─────────────────────────────────────────────────────────────
+function isEventPast(event) {
+  if (!event.date) return false;
+  try { return isBefore(startOfDay(parseISO(event.date)), startOfDay(new Date())); }
+  catch { return false; }
 }
 
-COL_CONNECTIONS      = "email_connections"
-COL_EVENTS           = "email_extracted_events"
-COL_AUTO_PREFS       = "email_auto_save_prefs"
-COL_SCAN_SCHEDULE    = "email_scan_schedule"
-COL_SENDER_WHITELIST = "email_sender_whitelist"
+// Stable dedup key: prefer event_id from backend, else title+date+time
+function eventKey(event) {
+  return event.id || event.event_id || `${event.title}||${event.date}||${event.time || ""}`;
+}
 
-# =============================================================================
-# PYDANTIC SCHEMAS
-# =============================================================================
+// Determine category for an event using save_category or event_type fallback
+function resolveCategory(event) {
+  if (event.save_category && ["todo","reminder","visit"].includes(event.save_category)) return event.save_category;
+  const et = event.event_type || "";
+  if (["Visit","Online Meeting","Conference","Interview","Meeting"].includes(et)) return "visit";
+  if (["Trademark Hearing","Court Hearing","Deadline","Appointment"].includes(et)) return "reminder";
+  return "reminder";
+}
 
-class ConnectionCreateRequest(BaseModel):
-    email_address: str
-    app_password: str
-    imap_host: Optional[str] = None
-    imap_port: Optional[int] = 993
-    label: Optional[str] = None
-    linked_page: Optional[str] = "all"
-    auto_sync: Optional[bool] = False
+const QUICK_PROVIDERS = [
+  {
+    id: "gmail", label: "Gmail", color: "#EA4335", icon: "G",
+    domain: "gmail.com", imap_host: "imap.gmail.com", imap_port: 993,
+    app_password_url: "https://myaccount.google.com/apppasswords",
+    imap_enable_url:  "https://mail.google.com/mail/u/0/#settings/fwdandpop",
+    steps: [
+      { num: 1, text: "Enable IMAP:", link: "https://mail.google.com/mail/u/0/#settings/fwdandpop", linkText: "Gmail → Settings → Forwarding and POP/IMAP → Enable IMAP → Save" },
+      { num: 2, text: "Enable 2-Step Verification:", link: "https://myaccount.google.com/security", linkText: "myaccount.google.com/security" },
+      { num: 3, text: "Create App Password:", link: "https://myaccount.google.com/apppasswords", linkText: "myaccount.google.com/apppasswords" },
+      { num: 4, text: "Select App: Mail · Device: Other · Name: Taskosphere → Generate" },
+      { num: 5, text: "Copy the 16-character password shown and paste it below" },
+    ],
+    note: "⚠️ All 3 steps above are required. AUTHENTICATION FAILED means IMAP is off or App Password is wrong.",
+    placeholder: "abcd efgh ijkl mnop",
+  },
+  {
+    id: "outlook", label: "Outlook / Hotmail", color: "#0078D4", icon: "M",
+    domain: "outlook.com", imap_host: "outlook.office365.com", imap_port: 993,
+    app_password_url: "https://account.microsoft.com/security",
+    imap_enable_url: null,
+    steps: [
+      { num: 1, text: "Open", link: "https://account.microsoft.com/security", linkText: "account.microsoft.com/security" },
+      { num: 2, text: "Click 'Advanced security options'" },
+      { num: 3, text: "Under App passwords → Create a new app password" },
+      { num: 4, text: "Copy the generated password and paste below" },
+    ],
+    note: "⚠️ Requires Microsoft account with 2-step verification on.",
+    placeholder: "xxxx xxxx xxxx xxxx",
+  },
+  {
+    id: "yahoo", label: "Yahoo Mail", color: "#720E9E", icon: "Y",
+    domain: "yahoo.com", imap_host: "imap.mail.yahoo.com", imap_port: 993,
+    app_password_url: "https://login.yahoo.com/myaccount/security/",
+    imap_enable_url: null,
+    steps: [
+      { num: 1, text: "Open", link: "https://login.yahoo.com/myaccount/security/", linkText: "Yahoo Account Security" },
+      { num: 2, text: "Click 'Generate app password'" },
+      { num: 3, text: "Select 'Other App' → enter Taskosphere → Get password" },
+      { num: 4, text: "Copy and paste the password below" },
+    ],
+    note: "⚠️ Do NOT use your Yahoo login password here.",
+    placeholder: "xxxx xxxx xxxx xxxx",
+  },
+  {
+    id: "icloud", label: "iCloud Mail", color: "#3B82F6", icon: "iC",
+    domain: "icloud.com", imap_host: "imap.mail.me.com", imap_port: 993,
+    app_password_url: "https://appleid.apple.com",
+    imap_enable_url: null,
+    steps: [
+      { num: 1, text: "Open", link: "https://appleid.apple.com", linkText: "appleid.apple.com" },
+      { num: 2, text: "Sign In & Security → App-Specific Passwords" },
+      { num: 3, text: "Click + → name it Taskosphere → Create" },
+      { num: 4, text: "Copy and paste the password below" },
+    ],
+    note: "⚠️ Apple ID must have 2FA enabled.",
+    placeholder: "xxxx-xxxx-xxxx-xxxx",
+  },
+  {
+    id: "other", label: "Other Email", color: "#374151", icon: "@",
+    domain: "", imap_host: "", imap_port: 993, app_password_url: "",
+    imap_enable_url: null,
+    steps: [
+      { num: 1, text: "Ask your email provider for IMAP settings" },
+      { num: 2, text: "Typical host: imap.yourdomain.com · Port: 993" },
+      { num: 3, text: "Use your regular password or an app password if available" },
+    ],
+    note: "",
+    placeholder: "your email password",
+  },
+];
 
-class ConnectionUpdateRequest(BaseModel):
-    label: Optional[str] = None
-    is_active: Optional[bool] = None
-    linked_page: Optional[str] = None
-    auto_sync: Optional[bool] = None
+const SUGGESTED_SENDERS = [
+  { email_address: "@ipindia.gov.in",            label: "IP India (all)" },
+  { email_address: "noreply@ipindia.gov.in",     label: "IP India No-Reply" },
+  { email_address: "@mca.gov.in",                label: "MCA Portal (all)" },
+  { email_address: "@gst.gov.in",                label: "GST Portal (all)" },
+  { email_address: "@incometax.gov.in",          label: "Income Tax (all)" },
+  { email_address: "@taxinformationnetwork.com", label: "TIN / TDS" },
+  { email_address: "@zoom.us",                   label: "Zoom Meetings" },
+  { email_address: "@calendar.google.com",       label: "Google Calendar" },
+];
 
-class ConnectionOut(BaseModel):
-    email_address: str
-    imap_host: str
-    imap_port: int
-    label: Optional[str] = None
-    provider: str
-    is_active: bool
-    last_synced: Optional[str] = None
-    connected_at: Optional[str] = None
-    sync_error: Optional[str] = None
-    linked_page: Optional[str] = "all"
-    auto_sync: Optional[bool] = False
+// ─────────────────────────────────────────────────────────────────────────────
+// SHARED LAYOUT PRIMITIVES
+// ─────────────────────────────────────────────────────────────────────────────
+function SectionCard({ children, className = "", style = {} }) {
+  return (
+    <div className={`bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm ${className}`} style={style}>
+      {children}
+    </div>
+  );
+}
 
-class ExtractedEventOut(BaseModel):
-    id: Optional[str] = None
-    title: str
-    event_type: str
-    date: Optional[str] = None
-    time: Optional[str] = None
-    location: Optional[str] = None
-    organizer: Optional[str] = None
-    description: Optional[str] = None
-    urgency: str = "medium"
-    source_subject: str
-    source_from: str
-    source_date: str
-    raw_snippet: Optional[str] = None
-    email_account: Optional[str] = None
-    save_category: Optional[str] = None   # "todo" | "reminder" | "visit"
-    tm_app_no: Optional[str] = None       # TM Application Number
+function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
+  return (
+    <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700">
+      <div className="flex items-center gap-2.5">
+        <div className={`p-1.5 rounded-lg ${iconBg}`}>{icon}</div>
+        <div>
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">{title}</h3>
+            {badge !== undefined && badge > 0 && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500 text-white leading-none">{badge}</span>
+            )}
+          </div>
+          {subtitle && <p className="text-xs text-slate-400 dark:text-slate-500">{subtitle}</p>}
+        </div>
+      </div>
+      {action && <div className="flex items-center gap-1.5 flex-shrink-0">{action}</div>}
+    </div>
+  );
+}
 
-class AutoSavePrefRequest(BaseModel):
-    auto_save_reminders: bool
-    auto_save_visits: bool
-    auto_save_todos: bool = False
-    scan_time_hour: int = 12
-    scan_time_minute: int = 0
+function StatCard({ icon: Icon, label, value, unit, color, trend }) {
+  return (
+    <motion.div variants={itemVariants} whileHover={{ y: -3, transition: springPhysics.lift }} whileTap={{ scale: 0.985 }}>
+      <div className="rounded-2xl shadow-sm border h-full bg-white dark:bg-slate-800 border-slate-200/80 dark:border-slate-700 hover:shadow-md transition-all">
+        <div className="p-4">
+          <div className="flex items-start justify-between mb-3">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">{label}</p>
+              <p className="text-2xl font-bold tracking-tight" style={{ color }}>{value}</p>
+              <p className="text-xs font-medium text-slate-400 dark:text-slate-500 mt-0.5">{unit}</p>
+            </div>
+            <div className="p-2 rounded-xl" style={{ backgroundColor: `${color}15` }}>
+              <Icon className="w-4 h-4" style={{ color }} />
+            </div>
+          </div>
+          {trend && (
+            <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500 truncate border-t border-slate-100 dark:border-slate-700 pt-2 mt-1">{trend}</p>
+          )}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
 
-class AutoSavePrefOut(BaseModel):
-    auto_save_reminders: bool
-    auto_save_visits: bool
-    auto_save_todos: bool = False
-    scan_time_hour: int
-    scan_time_minute: int
-    next_scan_at: Optional[str] = None
+function GmailChecklistBanner({ onDismiss, isDark }) {
+  return (
+    <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+      className="rounded-2xl overflow-hidden border"
+      style={{ borderColor: isDark ? "#7f1d1d" : "#fecaca", backgroundColor: isDark ? "rgba(239,68,68,0.08)" : "#fef2f2" }}>
+      <div className="flex items-center gap-3 px-4 py-3 border-b"
+        style={{ borderColor: isDark ? "#7f1d1d" : "#fecaca", backgroundColor: isDark ? "rgba(239,68,68,0.12)" : "#fee2e2" }}>
+        <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
+        <p className="text-sm font-bold text-red-500 flex-1">Authentication Failed — Complete these 3 steps for Gmail</p>
+        <button onClick={onDismiss} className="text-red-400 hover:text-red-300"><X className="w-4 h-4" /></button>
+      </div>
+      <div className="p-4 space-y-3">
+        {[
+          { num: 1, title: "Enable IMAP in Gmail", link: "https://mail.google.com/mail/u/0/#settings/fwdandpop", linkText: "Open Gmail IMAP Settings →", detail: "Settings → See all settings → Forwarding and POP/IMAP → Enable IMAP → Save Changes" },
+          { num: 2, title: "Turn on 2-Step Verification", link: "https://myaccount.google.com/security", linkText: "Open Google Security →", detail: "Security → 2-Step Verification → Turn On" },
+          { num: 3, title: "Generate a fresh App Password", link: "https://myaccount.google.com/apppasswords", linkText: "Create App Password →", detail: "App: Mail · Device: Other (Taskosphere) → Generate → Copy 16 chars" },
+        ].map(step => (
+          <div key={step.num} className="flex items-start gap-3">
+            <div className="w-6 h-6 rounded-full bg-red-500 flex items-center justify-center flex-shrink-0 mt-0.5">
+              <span className="text-[10px] font-black text-white">{step.num}</span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-red-500">{step.title}</p>
+              <p className="text-xs mt-0.5" style={{ color: isDark ? "#fca5a5" : "#dc2626" }}>{step.detail}</p>
+              <a href={step.link} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1 text-xs font-bold text-red-500 underline hover:text-red-400">
+                {step.linkText}<ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+          </div>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
 
-class ManualSaveReminderRequest(BaseModel):
-    # event_id is optional — manual reminders created from the Reminders page
-    # (rather than from an Action Center email event) don't have one. When
-    # omitted, the backend generates a synthetic id so dedup logic still works.
-    event_id: Optional[str] = None
-    title: str
-    description: Optional[str] = None
-    remind_at: str
-    # Optional Trademark Hearing outcome fields — only stored when provided.
-    brand_name: Optional[str] = None
-    hearing_attended: Optional[str] = None     # "yes" | "no"
-    hearing_decision: Optional[str] = None     # "favourable" | "unfavourable"
-    hearing_adjourned: Optional[bool] = None
-    hearing_notes: Optional[str] = None
+function CategoryRulesPanel({ isDark }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <SectionCard>
+      <button onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-4 py-3.5 text-left transition-colors"
+        style={{ backgroundColor: open ? (isDark ? D.raised : "#f8fafc") : "transparent" }}>
+        <div className="flex items-center gap-2.5">
+          <div className="p-1.5 rounded-lg bg-purple-50 dark:bg-purple-900/40">
+            <BookOpen className="w-4 h-4 text-purple-500" />
+          </div>
+          <div>
+            <p className="font-semibold text-sm text-slate-800 dark:text-slate-100">Smart Categorization Rules</p>
+            <p className="text-xs text-slate-400 dark:text-slate-500">How emails are automatically classified</p>
+          </div>
+        </div>
+        {open ? <ChevronUp className="w-4 h-4 text-slate-400 flex-shrink-0" /> : <ChevronDown className="w-4 h-4 text-slate-400 flex-shrink-0" />}
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div initial={{ height: 0 }} animate={{ height: "auto" }} exit={{ height: 0 }} className="overflow-hidden">
+            <div className="px-4 pb-4 pt-1 space-y-3 border-t border-slate-100 dark:border-slate-700">
+              {[
+                { cat: "todo",     label: "→ Saved as Todo",     desc: "Action required notices",      examples: ["Examination Report","Office Action","Objection Raised","Reply Required","Show Cause Notice","Reply within X days"] },
+                { cat: "reminder", label: "→ Saved as Reminder", desc: "Scheduled dates and hearings", examples: ["Trademark Hearing","Court Hearing (NCLT, HC)","GST Filing Dates","Income Tax / Advance Tax","Due Dates","ROC Filing Deadlines"] },
+                { cat: "visit",    label: "→ Saved as Visit",    desc: "Meetings and consultations",   examples: ["Zoom Meeting Invite","Google Meet Link","Microsoft Teams","Client Visit Scheduled","Office Visit","Conference / Webinar"] },
+              ].map(({ cat, label, desc, examples }) => {
+                const cfg = CATEGORY_CONFIG[cat];
+                return (
+                  <div key={cat} className="rounded-xl border p-3.5"
+                    style={{ borderColor: isDark ? `${cfg.color}30` : cfg.border, backgroundColor: isDark ? cfg.darkBg : cfg.bg }}>
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <span className="text-xs font-black px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: cfg.color }}>{cfg.label.toUpperCase()}</span>
+                      <span className="text-xs font-bold" style={{ color: cfg.color }}>{label}</span>
+                      <span className="text-[10px] ml-auto" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>{desc}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {examples.map(ex => (
+                        <span key={ex} className="text-[10px] font-medium px-2 py-0.5 rounded-md border"
+                          style={{ backgroundColor: isDark ? "rgba(255,255,255,0.05)" : "#ffffff", borderColor: isDark ? `${cfg.color}35` : cfg.border, color: cfg.color }}>
+                          {ex}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+              <p className="text-[10px] pt-1" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+                ℹ️ AI uses these rules + context to classify. You can override the category in the preview panel before saving.
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </SectionCard>
+  );
+}
 
-class ManualSaveVisitRequest(BaseModel):
-    event_id: str
-    title: str
-    visit_date: str
-    notes: Optional[str] = None
+// ─────────────────────────────────────────────────────────────────────────────
+// CONNECT FORM
+// ─────────────────────────────────────────────────────────────────────────────
+function ConnectForm({ provider, onSuccess, onCancel, isDark }) {
+  const [emailVal,    setEmailVal]    = useState(provider.domain ? `@${provider.domain}` : "");
+  const [password,    setPassword]    = useState("");
+  const [host,        setHost]        = useState(provider.imap_host);
+  const [port,        setPort]        = useState(provider.imap_port);
+  const [label,       setLabel]       = useState("");
+  const [linkedPage,  setLinkedPage]  = useState("all");
+  const [autoSync,    setAutoSync]    = useState(false);
+  const [showPass,    setShowPass]    = useState(false);
+  const [showSteps,   setShowSteps]   = useState(true);
+  const [loading,     setLoading]     = useState(false);
+  const [authError,   setAuthError]   = useState(false);
+  const emailRef = useRef(null);
 
-class SenderWhitelistEntry(BaseModel):
-    email_address: str
-    label: Optional[str] = None
+  const LINKED_PAGE_OPTIONS = [
+    { value: "all",      label: "All Pages",    icon: "🌐" },
+    { value: "leads",    label: "Leads",        icon: "🎯" },
+    { value: "invoicing",label: "Invoicing",    icon: "📄" },
+    { value: "tasks",    label: "Tasks",        icon: "✅" },
+    { value: "reminders",label: "Reminders",    icon: "🔔" },
+    { value: "visits",   label: "Visits",       icon: "📍" },
+  ];
 
-class SenderWhitelistOut(BaseModel):
-    senders: List[Dict[str, str]]
+  useEffect(() => { setTimeout(() => emailRef.current?.focus(), 50); }, []);
 
+  const inputStyle = { backgroundColor: isDark ? D.raised : "#ffffff", borderColor: isDark ? D.border : "#d1d5db", color: isDark ? D.text : "#1e293b" };
+  const inputCls = "w-full px-3.5 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all";
 
-# =============================================================================
-# HELPERS — encryption
-# =============================================================================
+  const handleConnect = async () => {
+    const trimEmail = emailVal.trim();
+    if (!trimEmail || !trimEmail.includes("@")) { toast.error("Enter a valid email address"); return; }
+    if (!password) { toast.error("App Password is required"); return; }
+    setAuthError(false); setLoading(true);
+    try {
+      await api.post("/email/connections", {
+        email_address: trimEmail, app_password: password,
+        imap_host: host || undefined, imap_port: Number(port), label: label || undefined,
+        linked_page: linkedPage, auto_sync: autoSync,
+      });
+      toast.success(`✓ ${trimEmail} connected successfully!`);
+      onSuccess();
+    } catch (err) {
+      const msg = err?.response?.data?.detail || "Connection failed. Check your credentials.";
+      const isAuthFail = msg.toLowerCase().includes("authentication") || msg.toLowerCase().includes("login failed") || msg.toLowerCase().includes("invalid credentials");
+      if (isAuthFail && provider.id === "gmail") { setAuthError(true); setShowSteps(true); }
+      toast.error(msg);
+    } finally { setLoading(false); }
+  };
 
-def _encrypt(plain: str) -> str:
-    if _fernet:
-        return _fernet.encrypt(plain.encode()).decode()
-    return plain
+  return (
+    <SectionCard>
+      <div className="px-5 py-4 flex items-center gap-3 border-b border-slate-100 dark:border-slate-700"
+        style={{ backgroundColor: provider.color + (isDark ? "20" : "0d") }}>
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-black text-white flex-shrink-0"
+          style={{ backgroundColor: provider.color }}>{provider.icon}</div>
+        <div className="flex-1">
+          <p className="font-bold text-sm" style={{ color: isDark ? D.text : "#1e293b" }}>Connect {provider.label}</p>
+          <p className="text-xs" style={{ color: isDark ? D.muted : "#64748b" }}>IMAP · App Password · No OAuth needed</p>
+        </div>
+        {provider.app_password_url && (
+          <a href={provider.app_password_url} target="_blank" rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all hover:opacity-80"
+            style={{ color: provider.color, borderColor: provider.color + "40", backgroundColor: isDark ? provider.color + "18" : provider.color + "10" }}>
+            <ExternalLink className="w-3 h-3" /> Get App Password
+          </a>
+        )}
+      </div>
+      <div className="p-5 space-y-4">
+        <AnimatePresence>
+          {authError && provider.id === "gmail" && (
+            <GmailChecklistBanner onDismiss={() => setAuthError(false)} isDark={isDark} />
+          )}
+        </AnimatePresence>
+        {provider.steps.length > 0 && (
+          <div className="rounded-xl overflow-hidden border" style={{ borderColor: isDark ? D.border : "#e2e8f0" }}>
+            <button onClick={() => setShowSteps(s => !s)}
+              className="w-full flex items-center justify-between px-4 py-2.5 text-left text-xs font-semibold transition-colors"
+              style={{ backgroundColor: isDark ? D.raised : "#f8fafc", color: isDark ? D.muted : "#64748b" }}>
+              <span className="flex items-center gap-1.5"><Info className="w-3.5 h-3.5" />Setup instructions for {provider.label}</span>
+              {showSteps ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+            <AnimatePresence>
+              {showSteps && (
+                <motion.div initial={{ height: 0 }} animate={{ height: "auto" }} exit={{ height: 0 }} className="overflow-hidden">
+                  <div className="p-4 space-y-2.5 border-t" style={{ borderColor: isDark ? D.border : "#e2e8f0" }}>
+                    {provider.steps.map(step => (
+                      <div key={step.num} className="flex items-start gap-2.5">
+                        <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 text-white text-[10px] font-black"
+                          style={{ backgroundColor: provider.color }}>{step.num}</div>
+                        <p className="text-xs" style={{ color: isDark ? D.muted : "#374151" }}>
+                          {step.text}
+                          {step.link && (
+                            <a href={step.link} target="_blank" rel="noopener noreferrer"
+                              className="ml-1.5 font-semibold underline inline-flex items-center gap-1" style={{ color: provider.color }}>
+                              {step.linkText}<ExternalLink className="w-2.5 h-2.5" />
+                            </a>
+                          )}
+                        </p>
+                      </div>
+                    ))}
+                    {provider.note && (
+                      <p className="text-[11px] font-semibold mt-1 pt-2 border-t"
+                        style={{ borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? "#fbbf24" : "#92400e" }}>
+                        {provider.note}
+                      </p>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-semibold mb-1.5" style={{ color: isDark ? D.muted : "#374151" }}>Email Address</label>
+            <input ref={emailRef} type="email" value={emailVal} onChange={e => setEmailVal(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleConnect()} placeholder={`your@${provider.domain || "email.com"}`}
+              className={inputCls} style={inputStyle} />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold mb-1.5" style={{ color: isDark ? D.muted : "#374151" }}>
+              App Password <span className="font-normal text-slate-400">(not your login password)</span>
+            </label>
+            <div className="relative">
+              <input type={showPass ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && handleConnect()} placeholder={provider.placeholder}
+                className={inputCls + " pr-10"} style={inputStyle} />
+              <button onClick={() => setShowPass(s => !s)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 transition-opacity hover:opacity-70"
+                style={{ color: isDark ? D.muted : "#9ca3af" }}>
+                {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold mb-1.5" style={{ color: isDark ? D.muted : "#374151" }}>
+              Account Label <span className="font-normal text-slate-400">(optional)</span>
+            </label>
+            <input type="text" value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. Work Gmail, CA Office"
+              className={inputCls} style={inputStyle} />
+          </div>
 
-def _decrypt(stored: str) -> str:
-    if _fernet:
-        try:
-            return _fernet.decrypt(stored.encode()).decode()
-        except Exception:
-            return stored
-    return stored
+          {/* ── Linked Page ── */}
+          <div>
+            <label className="block text-xs font-semibold mb-1.5" style={{ color: isDark ? D.muted : "#374151" }}>
+              Link to Page <span className="font-normal text-slate-400">(events from this email appear in selected page)</span>
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {LINKED_PAGE_OPTIONS.map(opt => (
+                <button key={opt.value} type="button"
+                  onClick={() => setLinkedPage(opt.value)}
+                  className="flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold transition-all"
+                  style={{
+                    backgroundColor: linkedPage === opt.value
+                      ? (isDark ? "rgba(31,115,90,0.2)" : "#dcfce7")
+                      : (isDark ? D.raised : "#f8fafc"),
+                    borderColor: linkedPage === opt.value
+                      ? COLORS.emeraldGreen
+                      : (isDark ? D.border : "#e2e8f0"),
+                    color: linkedPage === opt.value
+                      ? COLORS.emeraldGreen
+                      : (isDark ? D.muted : "#64748b"),
+                  }}>
+                  <span>{opt.icon}</span>
+                  <span>{opt.label}</span>
+                  {linkedPage === opt.value && <Check className="w-3 h-3 ml-auto" />}
+                </button>
+              ))}
+            </div>
+          </div>
 
-def _infer_provider(email_address: str):
-    domain = email_address.split("@")[-1].lower()
-    return PROVIDER_IMAP.get(domain, (f"imap.{domain}", 993, "other"))
+          {/* ── Auto Sync ── */}
+          <div className="flex items-center justify-between p-3 rounded-xl border"
+            style={{
+              backgroundColor: isDark ? D.raised : "#f8fafc",
+              borderColor: isDark ? D.border : "#e2e8f0",
+            }}>
+            <div>
+              <p className="text-xs font-semibold" style={{ color: isDark ? D.text : "#374151" }}>Auto Sync</p>
+              <p className="text-[11px] mt-0.5" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+                Automatically sync new emails daily
+              </p>
+            </div>
+            <button type="button" onClick={() => setAutoSync(v => !v)}
+              className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${autoSync ? "bg-emerald-500" : (isDark ? "bg-slate-600" : "bg-slate-300")}`}>
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${autoSync ? "translate-x-5" : "translate-x-0"}`} />
+            </button>
+          </div>
 
-def _clean_password(password: str) -> str:
-    return password.replace(" ", "").strip()
+          {provider.id === "other" && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: isDark ? D.muted : "#374151" }}>IMAP Host</label>
+                <input type="text" value={host} onChange={e => setHost(e.target.value)} placeholder="imap.yourdomain.com" className={inputCls} style={inputStyle} />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: isDark ? D.muted : "#374151" }}>Port</label>
+                <input type="number" value={port} onChange={e => setPort(e.target.value)} placeholder="993" className={inputCls} style={inputStyle} />
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="flex gap-3">
+          <Button variant="outline" onClick={onCancel} className="flex-1 h-10 rounded-xl text-sm font-semibold"
+            style={{ borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.muted : "#374151", backgroundColor: "transparent" }}>Cancel</Button>
+          <Button onClick={handleConnect} disabled={loading} className="flex-1 h-10 rounded-xl text-sm font-bold text-white"
+            style={{ background: loading ? "#9CA3AF" : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+            {loading ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Connecting…</> : <><Wifi className="w-4 h-4 mr-2" />Connect Account</>}
+          </Button>
+        </div>
+        <div className="flex items-center gap-2 p-3 rounded-xl border"
+          style={{ backgroundColor: isDark ? "rgba(31,175,90,0.08)" : "#f0fdf4", borderColor: isDark ? "#14532d" : "#bbf7d0" }}>
+          <Shield className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+          <p className="text-xs text-emerald-600 dark:text-emerald-400">
+            Password is stored securely. We only read email subjects &amp; bodies for event extraction — we never send or modify anything.
+          </p>
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CONNECTED ACCOUNT CARD
+// ─────────────────────────────────────────────────────────────────────────────
+function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, onSyncRetro, onUpdateSettings, isDark }) {
+  const [editingLabel, setEditingLabel] = useState(false);
+  const [labelVal,     setLabelVal]     = useState(conn.label || conn.email_address);
+  const [testing,      setTesting]      = useState(false);
+  const [syncing,      setSyncing]      = useState(false);
+  const [retroSyncing, setRetroSyncing] = useState(false);
+  const [showRetroMenu,setShowRetroMenu]= useState(false);
+  const [retroMenuPos, setRetroMenuPos] = useState(null);
+  const retroBtnRef = useRef(null);
 
-# =============================================================================
-# TEXT CLEANING
-# =============================================================================
+  const RETRO_PRESETS = [
+    { daysBack: 30,   label: "Last 30 days" },
+    { daysBack: 90,   label: "Last 90 days" },
+    { daysBack: 365,  label: "Last 1 year" },
+    { daysBack: null, label: "All time" },
+  ];
 
-class _HTMLTextExtractor(HTMLParser):
-    BLOCK_TAGS = {
-        "p", "div", "br", "tr", "td", "th", "li", "ul", "ol",
-        "h1", "h2", "h3", "h4", "h5", "h6",
-        "blockquote", "pre", "hr", "section", "article", "header",
-        "footer", "table", "thead", "tbody", "tfoot",
+  // The dropdown is rendered through a portal (see below) because this card
+  // sits inside a parent with overflow-hidden (for rounded corners), which
+  // was clipping/hiding a normally-positioned absolute dropdown. Compute its
+  // screen position from the button's own bounding box right before opening.
+  const toggleRetroMenu = () => {
+    if (!showRetroMenu && retroBtnRef.current) {
+      const r = retroBtnRef.current.getBoundingClientRect();
+      setRetroMenuPos({ top: r.bottom + 6, left: r.right - 176 }); // 176px = menu width (w-44)
     }
-    SKIP_TAGS = {"script", "style", "head", "noscript", "iframe", "svg"}
+    setShowRetroMenu(v => !v);
+  };
 
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self._parts: List[str] = []
-        self._skip_depth: int = 0
+  // Close the menu if the page scrolls or resizes so it never appears
+  // anchored to the wrong spot.
+  useEffect(() => {
+    if (!showRetroMenu) return;
+    const close = () => setShowRetroMenu(false);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [showRetroMenu]);
 
-    def handle_starttag(self, tag: str, attrs):
-        tag = tag.lower()
-        if tag in self.SKIP_TAGS:
-            self._skip_depth += 1
-            return
-        if tag in self.BLOCK_TAGS:
-            self._parts.append("\n")
+  const handleRetroSync = async (preset) => {
+    setShowRetroMenu(false);
+    setRetroSyncing(true);
+    try { await onSyncRetro(conn.email_address, preset.daysBack, preset.label); }
+    finally { setRetroSyncing(false); }
+  };
 
-    def handle_endtag(self, tag: str):
-        tag = tag.lower()
-        if tag in self.SKIP_TAGS:
-            self._skip_depth = max(0, self._skip_depth - 1)
-            return
-        if tag in self.BLOCK_TAGS:
-            self._parts.append("\n")
+  const color    = PROVIDER_COLORS[conn.provider] || PROVIDER_COLORS.other;
+  const icon     = PROVIDER_ICONS[conn.provider]  || PROVIDER_ICONS.other;
+  const hasError = !!conn.sync_error;
 
-    def handle_data(self, data: str):
-        if self._skip_depth > 0:
-            return
-        self._parts.append(data)
+  const PAGE_LABELS = {
+    all:      { label: "All Pages",  icon: "🌐" },
+    leads:    { label: "Leads",      icon: "🎯" },
+    invoicing:{ label: "Invoicing",  icon: "📄" },
+    tasks:    { label: "Tasks",      icon: "✅" },
+    reminders:{ label: "Reminders",  icon: "🔔" },
+    visits:   { label: "Visits",     icon: "📍" },
+  };
+  const linkedPageInfo = PAGE_LABELS[conn.linked_page || "all"] || PAGE_LABELS.all;
 
-    def get_text(self) -> str:
-        return "".join(self._parts)
-
-
-def _html_to_text(html_content: str) -> str:
-    if not html_content:
-        return ""
-    text = html.unescape(html_content)
-    text = text.replace("\xa0", " ").replace("&nbsp;", " ")
-    try:
-        extractor = _HTMLTextExtractor()
-        extractor.feed(text)
-        text = extractor.get_text()
-    except Exception:
-        text = re.sub(r"<[^>]+>", " ", text)
-    lines = [line.strip() for line in text.splitlines()]
-    cleaned: List[str] = []
-    prev_blank = False
-    for line in lines:
-        is_blank = (line == "")
-        if is_blank and prev_blank:
-            continue
-        cleaned.append(line)
-        prev_blank = is_blank
-    return "\n".join(cleaned).strip()
+  const handleSaveLabel = async () => {
+    try { await api.patch(`/email/connections/${encodeURIComponent(conn.email_address)}`, { label: labelVal }); toast.success("Label updated"); setEditingLabel(false); }
+    catch { toast.error("Failed to update label"); }
+  };
+  const handleTest  = async () => { setTesting(true); try { await onTest(conn.email_address); } finally { setTesting(false); } };
+  const handleSync  = async () => { setSyncing(true); try { await onSync(conn.email_address, conn.last_synced); } finally { setSyncing(false); } };
 
 
-def _clean_text(text: str, max_chars: int = 0) -> str:
-    if not text:
-        return ""
-    text = html.unescape(text)
-    text = text.replace("\xa0", " ").replace("\r\n", "\n").replace("\r", "\n")
-    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
-    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.splitlines()]
-    text  = "\n".join(lines).strip()
-    if max_chars and len(text) > max_chars:
-        text = text[:max_chars].rstrip()
-    return text
+  return (
+    <motion.div variants={itemVariants} whileHover={{ y: -2, transition: springPhysics.lift }}>
+      <SectionCard>
+        <div className="px-4 py-3.5 flex items-center gap-3 border-b border-slate-100 dark:border-slate-700"
+          style={{ backgroundColor: hasError ? (isDark ? "rgba(239,68,68,0.08)" : "#fef2f2") : undefined }}>
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-black text-white flex-shrink-0"
+            style={{ backgroundColor: conn.is_active ? color : "#9CA3AF" }}>{icon}</div>
+          <div className="flex-1 min-w-0">
+            {editingLabel ? (
+              <div className="flex items-center gap-2">
+                <input autoFocus value={labelVal} onChange={e => setLabelVal(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") handleSaveLabel(); if (e.key === "Escape") setEditingLabel(false); }}
+                  className="flex-1 px-2 py-1 text-sm rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  style={{ backgroundColor: isDark ? D.raised : "#ffffff", borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.text : "#1e293b" }} />
+                <button onClick={handleSaveLabel} className="p-1 text-emerald-500 hover:text-emerald-400"><Check className="w-4 h-4" /></button>
+                <button onClick={() => setEditingLabel(false)} className="p-1" style={{ color: isDark ? D.muted : "#9ca3af" }}><X className="w-4 h-4" /></button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <p className="font-semibold text-sm truncate" style={{ color: isDark ? D.text : "#1e293b" }}>{conn.label || conn.email_address}</p>
+                <button onClick={() => setEditingLabel(true)} className="p-0.5 flex-shrink-0 transition-colors" style={{ color: isDark ? D.dimmer : "#cbd5e1" }}>
+                  <Edit2 className="w-3 h-3" />
+                </button>
+              </div>
+            )}
+            <p className="text-xs truncate" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>{conn.email_address}</p>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Linked page badge */}
+            <span className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg border"
+              style={{
+                backgroundColor: isDark ? "rgba(99,102,241,0.12)" : "#eef2ff",
+                borderColor: isDark ? "rgba(99,102,241,0.3)" : "#c7d2fe",
+                color: isDark ? "#a5b4fc" : "#4f46e5",
+              }}>
+              {linkedPageInfo.icon} {linkedPageInfo.label}
+            </span>
+            {hasError ? (
+              <span className="flex items-center gap-1 text-xs font-semibold text-red-500 px-2 py-1 rounded-full"
+                style={{ backgroundColor: isDark ? "rgba(239,68,68,0.15)" : "#fee2e2" }}>
+                <AlertCircle className="w-3 h-3" /> Error
+              </span>
+            ) : conn.is_active ? (
+              <span className="flex items-center gap-1 text-xs font-semibold text-emerald-500 px-2 py-1 rounded-full"
+                style={{ backgroundColor: isDark ? "rgba(31,175,90,0.15)" : "#dcfce7" }}>
+                <CheckCircle2 className="w-3 h-3" /> Active
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full"
+                style={{ color: isDark ? D.muted : "#64748b", backgroundColor: isDark ? D.raised : "#f1f5f9" }}>
+                <WifiOff className="w-3 h-3" /> Paused
+              </span>
+            )}
+          </div>
+        </div>
+        {hasError && (
+          <div className="mx-4 mt-3 p-3 rounded-xl border text-xs"
+            style={{ backgroundColor: isDark ? "rgba(239,68,68,0.08)" : "#fef2f2", borderColor: isDark ? "#7f1d1d" : "#fecaca", color: isDark ? "#fca5a5" : "#dc2626" }}>
+            {conn.sync_error}
+          </div>
+        )}
+        <div className="px-4 py-2.5 flex items-center gap-2 flex-wrap">
+          {[
+            { color: COLORS.purple,       border: "#DDD6FE", bg: isDark ? "rgba(139,92,246,0.12)" : "#F5F3FF", icon: CheckSquare, label: "Todos"     },
+            { color: COLORS.deepBlue,     border: "#BFDBFE", bg: isDark ? "rgba(13,59,102,0.20)"  : "#EFF6FF", icon: Bell,        label: "Reminders" },
+            { color: COLORS.emeraldGreen, border: "#BBF7D0", bg: isDark ? "rgba(31,175,90,0.12)"  : "#F0FDF4", icon: Calendar,    label: "Visits"    },
+          ].map(item => (
+            <div key={item.label} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border"
+              style={{ backgroundColor: item.bg, borderColor: item.border, color: item.color }}>
+              <item.icon className="w-3 h-3" /> {item.label}
+            </div>
+          ))}
+          {conn.last_synced && (
+            <span className="text-[10px] ml-auto font-mono" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+              Sync base: {format(parseISO(conn.last_synced), "dd MMM yy, h:mm a")}
+            </span>
+          )}
+        </div>
 
 
-# =============================================================================
-# IP INDIA EMAIL PARSER
-# =============================================================================
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-3 border-t border-slate-100 dark:border-slate-700"
+          style={{ backgroundColor: isDark ? D.raised : "#f8fafc" }}>
+          <p className="text-xs truncate" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+            {conn.last_synced
+              ? `Synced ${format(parseISO(conn.last_synced), "MMM d, h:mm a")} · only new emails since this date are fetched`
+              : conn.connected_at ? `Connected ${format(parseISO(conn.connected_at), "MMM d, yyyy")} · first full scan` : ""}
+            {conn.imap_host && <><span className="mx-1.5">·</span><span className="font-medium">{conn.imap_host}</span></>}
+          </p>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <button onClick={handleSync} disabled={syncing}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 hover:bg-slate-200 dark:hover:bg-slate-700 whitespace-nowrap"
+              style={{ color: isDark ? D.muted : "#64748b" }}>
+              {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Sync Now
+            </button>
+            <div className="relative">
+              <button ref={retroBtnRef} onClick={toggleRetroMenu} disabled={retroSyncing}
+                title="Re-scan older mail (e.g. last 90 days / 1 year / all time) — already-imported emails are skipped automatically"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 hover:bg-slate-200 dark:hover:bg-slate-700 whitespace-nowrap"
+                style={{ color: isDark ? D.muted : "#64748b" }}>
+                {retroSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Clock className="w-3.5 h-3.5" />}
+                Sync Older Mail <ChevronDown className="w-3 h-3" />
+              </button>
+              {showRetroMenu && retroMenuPos && createPortal(
+                <>
+                  {/* Invisible full-screen layer to close the menu on outside click */}
+                  <div className="fixed inset-0 z-[9998]" onClick={() => setShowRetroMenu(false)} />
+                  <div className="fixed z-[9999] w-44 rounded-xl border shadow-lg overflow-hidden"
+                    style={{ top: retroMenuPos.top, left: retroMenuPos.left, backgroundColor: isDark ? D.card : "#ffffff", borderColor: isDark ? D.border : "#e2e8f0" }}>
+                    {RETRO_PRESETS.map(preset => (
+                      <button key={preset.label} onClick={() => handleRetroSync(preset)}
+                        className="w-full text-left px-3 py-2 text-xs font-medium transition-colors hover:bg-slate-100 dark:hover:bg-slate-700"
+                        style={{ color: isDark ? D.text : "#1e293b" }}>
+                        {preset.label}
+                      </button>
+                    ))}
+                    <div className="px-3 py-1.5 text-[10px] border-t" style={{ color: isDark ? D.dimmer : "#94a3b8", borderColor: isDark ? D.border : "#f1f5f9" }}>
+                      Duplicates skipped automatically
+                    </div>
+                  </div>
+                </>,
+                document.body
+              )}
+            </div>
+            <button onClick={handleTest} disabled={testing}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 hover:bg-slate-200 dark:hover:bg-slate-700 whitespace-nowrap"
+              style={{ color: isDark ? D.muted : "#64748b" }}>
+              {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wifi className="w-3.5 h-3.5" />} Test
+            </button>
+            <button onClick={() => onToggle(conn.email_address, !conn.is_active)}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 hover:bg-slate-200 dark:hover:bg-slate-700 whitespace-nowrap"
+              style={{ color: isDark ? D.muted : "#64748b" }}>
+              {conn.is_active ? "Pause" : "Resume"}
+            </button>
+            <button onClick={() => onDisconnect(conn.email_address)} className="p-1.5 rounded-lg transition-all active:scale-90"
+              style={{ color: isDark ? D.muted : "#94a3b8" }}
+              onMouseEnter={e => { e.currentTarget.style.color = COLORS.red; e.currentTarget.style.backgroundColor = isDark ? "rgba(239,68,68,0.12)" : "#fef2f2"; }}
+              onMouseLeave={e => { e.currentTarget.style.color = isDark ? D.muted : "#94a3b8"; e.currentTarget.style.backgroundColor = "transparent"; }}>
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      </SectionCard>
+    </motion.div>
+  );
+}
 
-_MONTH_MAP = {
-    "january": 1,  "february": 2,  "march": 3,    "april": 4,
-    "may": 5,      "june": 6,      "july": 7,      "august": 8,
-    "september": 9,"october": 10,  "november": 11, "december": 12,
-    "jan": 1, "feb": 2, "mar": 3, "apr": 4,
-    "jun": 6, "jul": 7, "aug": 8,
-    "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12,
+// ─────────────────────────────────────────────────────────────────────────────
+// SCAN PREVIEW PANEL
+// Shows all extracted events before anything is saved. User checks/unchecks.
+// Past-dated events are greyed out + unchecked. Already-saved are disabled.
+// ─────────────────────────────────────────────────────────────────────────────
+function ScanPreviewPanel({ events, savedKeys, onSaved, onDismiss, isDark }) {
+  // Enrich events with computed flags on first render / when events/savedKeys change
+  const enriched = useMemo(() => events.map(ev => ({
+    ...ev,
+    _key:          eventKey(ev),
+    _past:         isEventPast(ev),
+    _alreadySaved: savedKeys.has(eventKey(ev)),
+    _cat:          resolveCategory(ev),
+  })), [events, savedKeys]);
+
+  // Default checked state: true only if future & not already saved
+  const [checked, setChecked] = useState(() => {
+    const m = {};
+    events.forEach(ev => {
+      const k = eventKey(ev);
+      m[k] = !isEventPast(ev) && !savedKeys.has(k);
+    });
+    return m;
+  });
+
+  // Per-event save-type overrides
+  const [saveTypes, setSaveTypes] = useState(() => {
+    const m = {};
+    events.forEach(ev => { m[eventKey(ev)] = resolveCategory(ev); });
+    return m;
+  });
+
+  const [saving,   setSaving]   = useState(false);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+
+  const futureSelectable = enriched.filter(e => !e._past && !e._alreadySaved);
+  const selectedCount    = futureSelectable.filter(e => checked[e._key]).length;
+  const pastCount        = enriched.filter(e => e._past).length;
+  const dupCount         = enriched.filter(e => e._alreadySaved).length;
+  const futureCount      = futureSelectable.length;
+
+  const toggleAll = (val) => {
+    const next = { ...checked };
+    futureSelectable.forEach(e => { next[e._key] = val; });
+    setChecked(next);
+  };
+
+  // Group by current save-type (which user may have changed via dropdown)
+  const groupedByType = useMemo(() => {
+    const g = { todo: [], reminder: [], visit: [] };
+    enriched.forEach(ev => {
+      const cat = saveTypes[ev._key] || ev._cat;
+      if (g[cat]) g[cat].push(ev);
+    });
+    return g;
+  }, [enriched, saveTypes]);
+
+  const handleSaveSelected = async () => {
+    const toSave = enriched.filter(e => !e._past && !e._alreadySaved && checked[e._key]);
+    if (toSave.length === 0) { toast.error("No future events selected to save"); return; }
+    setSaving(true);
+    setProgress({ done: 0, total: toSave.length });
+
+    const newlySavedKeys = new Set();
+    let ok = 0, fail = 0;
+
+    for (const ev of toSave) {
+      const cat = saveTypes[ev._key] || ev._cat;
+      try {
+        if (cat === "todo") {
+          const dateStr = ev.date || new Date().toISOString().slice(0, 10);
+          await api.post("/email/save-as-todo", {
+            event_id:    ev.id || ev.event_id || "",
+            title:       ev.title,
+            description: [ev.organizer && `From: ${ev.organizer}`, ev.description && `Notes: ${ev.description}`, ev.source_from && `Sender: ${ev.source_from}`].filter(Boolean).join("\n") || null,
+            remind_at:   `${dateStr}T10:00:00`,
+          });
+        } else if (cat === "reminder") {
+          const dateStr = ev.date || new Date().toISOString().slice(0, 10);
+          const timeStr = ev.time || "10:00";
+          let remindAt;
+          try { remindAt = new Date(`${dateStr}T${timeStr}:00+05:30`).toISOString(); }
+          catch { remindAt = new Date(Date.now() + 86400000).toISOString(); }
+          await api.post("/email/save-as-reminder", {
+            event_id:    ev.id || ev.event_id || "",
+            title:       ev.title,
+            description: [ev.organizer && `From: ${ev.organizer}`, ev.description && `Notes: ${ev.description}`, ev.source_subject && `Subject: ${ev.source_subject}`].filter(Boolean).join("\n") || null,
+            remind_at:   remindAt,
+          });
+        } else {
+          await api.post("/email/save-as-visit", {
+            event_id:   ev.id || ev.event_id || "",
+            title:      ev.title,
+            visit_date: ev.date || new Date().toISOString().slice(0, 10),
+            notes:      ev.description || ev.source_subject || "",
+          });
+        }
+        newlySavedKeys.add(ev._key);
+        ok++;
+      } catch { fail++; }
+      setProgress(p => ({ ...p, done: p.done + 1 }));
+    }
+
+    setSaving(false);
+    onSaved(newlySavedKeys);   // bubble up so parent updates savedKeys state
+    if (ok > 0)   toast.success(`✓ Saved ${ok} event${ok > 1 ? "s" : ""} successfully`);
+    if (fail > 0) toast.error(`${fail} event${fail > 1 ? "s" : ""} failed to save`);
+  };
+
+  const catGroups = [
+    { cat: "todo",     icon: CheckSquare, color: COLORS.purple,       label: "Todos — Action Required"           },
+    { cat: "reminder", icon: Bell,        color: COLORS.deepBlue,     label: "Reminders — Hearings & Deadlines"  },
+    { cat: "visit",    icon: Calendar,    color: COLORS.emeraldGreen, label: "Visits — Meetings & Consultations" },
+  ];
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+      <SectionCard>
+        {/* ── Panel Header ── */}
+        <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700"
+          style={{ background: `linear-gradient(135deg,${COLORS.deepBlue}10,${COLORS.mediumBlue}06)` }}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="p-1.5 rounded-lg bg-purple-50 dark:bg-purple-900/40">
+                <Eye className="w-4 h-4 text-purple-500" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-slate-800 dark:text-slate-100">
+                  Preview Before Saving
+                  <span className="ml-2 text-xs font-normal px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400">
+                    {events.length} found
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+                  Review which events to save — past dates and duplicates are pre-filtered out
+                </p>
+              </div>
+            </div>
+            <button onClick={onDismiss}
+              className="p-1.5 rounded-lg transition-all hover:bg-slate-100 dark:hover:bg-slate-700"
+              style={{ color: isDark ? D.muted : "#94a3b8" }}>
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Summary chips */}
+          <div className="flex flex-wrap gap-2 mt-3">
+            <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400">
+              <CheckCircle2 className="w-3 h-3" /> {futureCount} future (saveable)
+            </span>
+            {pastCount > 0 && (
+              <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500">
+                <CalendarOff className="w-3 h-3" /> {pastCount} past (auto-skipped)
+              </span>
+            )}
+            {dupCount > 0 && (
+              <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+                <CheckCircle2 className="w-3 h-3" /> {dupCount} already saved
+              </span>
+            )}
+          </div>
+
+          {/* Select controls */}
+          {futureCount > 0 && (
+            <div className="flex items-center gap-2 mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-700">
+              <span className="text-xs font-semibold" style={{ color: isDark ? D.muted : "#64748b" }}>Select:</span>
+              <button onClick={() => toggleAll(true)}
+                className="text-xs font-bold px-2.5 py-1 rounded-lg transition-all active:scale-95 border"
+                style={{ color: COLORS.mediumBlue, borderColor: COLORS.mediumBlue + "40", backgroundColor: isDark ? COLORS.mediumBlue + "15" : COLORS.mediumBlue + "08" }}>
+                All Future ({futureCount})
+              </button>
+              <button onClick={() => toggleAll(false)}
+                className="text-xs font-semibold px-2.5 py-1 rounded-lg transition-all active:scale-95 border"
+                style={{ color: isDark ? D.muted : "#64748b", borderColor: isDark ? D.border : "#e2e8f0" }}>
+                None
+              </button>
+              <span className="ml-auto text-xs font-bold" style={{ color: isDark ? D.text : "#1e293b" }}>
+                {selectedCount} selected
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* ── Event Groups ── */}
+        <div className="p-4 space-y-5">
+          {catGroups.map(({ cat, icon: Icon, color, label }) => {
+            const group = groupedByType[cat];
+            if (!group || group.length === 0) return null;
+            return (
+              <div key={cat} className="space-y-2">
+                <p className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5" style={{ color }}>
+                  <Icon className="w-3.5 h-3.5" /> {label} ({group.length})
+                </p>
+                {group.map(ev => {
+                  const cfg        = CATEGORY_CONFIG[ev._cat];
+                  const isSelectable = !ev._past && !ev._alreadySaved;
+                  const isChecked    = !!checked[ev._key];
+
+                  return (
+                    <div key={ev._key} className="rounded-xl border transition-all"
+                      style={{
+                        backgroundColor: ev._past || ev._alreadySaved
+                          ? (isDark ? "rgba(255,255,255,0.02)" : "#f8fafc")
+                          : isChecked ? (isDark ? cfg.darkBg : cfg.bg) : (isDark ? "rgba(255,255,255,0.03)" : "#fdfdfe"),
+                        borderColor: ev._past || ev._alreadySaved
+                          ? (isDark ? D.border : "#e2e8f0")
+                          : isChecked ? cfg.border : (isDark ? D.border : "#e2e8f0"),
+                        opacity: ev._past ? 0.5 : 1,
+                      }}>
+                      <div className="p-3 flex items-start gap-3">
+                        {/* Checkbox */}
+                        <button
+                          disabled={!isSelectable}
+                          onClick={() => isSelectable && setChecked(p => ({ ...p, [ev._key]: !p[ev._key] }))}
+                          className={`flex-shrink-0 mt-0.5 transition-all ${isSelectable ? "cursor-pointer hover:opacity-80 active:scale-90" : "cursor-not-allowed opacity-40"}`}
+                          style={{ color: isChecked && isSelectable ? cfg.color : (isDark ? D.dimmer : "#cbd5e1") }}>
+                          {isChecked && isSelectable
+                            ? <CheckSquare className="w-[18px] h-[18px]" />
+                            : <Square      className="w-[18px] h-[18px]" />}
+                        </button>
+
+                        {/* Info */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+                            {ev.save_category && (
+                              <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full text-white"
+                                style={{ backgroundColor: CATEGORY_CONFIG[ev.save_category]?.color || "#6B7280" }}>
+                                AI: {(CATEGORY_CONFIG[ev.save_category]?.label || "").toUpperCase()}
+                              </span>
+                            )}
+                            {ev._past && (
+                              <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-slate-400 text-white flex items-center gap-0.5">
+                                <CalendarOff className="w-2.5 h-2.5" /> PAST DATE — SKIPPED
+                              </span>
+                            )}
+                            {ev._alreadySaved && (
+                              <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-blue-500 text-white flex items-center gap-0.5">
+                                <CheckCircle2 className="w-2.5 h-2.5" /> ALREADY SAVED
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm font-bold truncate"
+                            style={{ color: (ev._past || ev._alreadySaved) ? (isDark ? D.dimmer : "#94a3b8") : (isDark ? D.text : "#1e293b") }}>
+                            {ev.title}
+                          </p>
+                          <p className="text-xs font-mono mt-0.5" style={{ color: ev._past ? (isDark ? D.dimmer : "#94a3b8") : cfg.color }}>
+                            {ev.date ? `📅 ${ev.date}${ev.time ? ` · ${ev.time}` : ""}` : "Date not found"}
+                            {ev.email_account && <span className="ml-2" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>· {ev.email_account}</span>}
+                          </p>
+                          {ev.description && (
+                            <p className="text-xs mt-0.5 truncate" style={{ color: isDark ? D.muted : "#64748b" }}>{ev.description}</p>
+                          )}
+                        </div>
+
+                        {/* Save-type override (only for selectable) */}
+                        {isSelectable && (
+                          <select value={saveTypes[ev._key] || ev._cat}
+                            onChange={e => setSaveTypes(p => ({ ...p, [ev._key]: e.target.value }))}
+                            className="text-[11px] font-bold rounded-lg border px-2 py-1 focus:outline-none cursor-pointer flex-shrink-0"
+                            style={{ borderColor: cfg.border, color: cfg.color, backgroundColor: isDark ? D.raised : cfg.bg }}>
+                            <option value="todo">→ Todo</option>
+                            <option value="reminder">→ Reminder</option>
+                            <option value="visit">→ Visit</option>
+                          </select>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+
+          {futureCount === 0 && (
+            <div className="py-8 text-center">
+              <CalendarOff className="w-8 h-8 mx-auto mb-2" style={{ color: isDark ? D.dimmer : "#cbd5e1" }} />
+              <p className="text-sm font-medium" style={{ color: isDark ? D.muted : "#64748b" }}>
+                {events.length === 0
+                  ? "No events found in scanned emails."
+                  : "All events are past-dated or already saved — nothing new to add."}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* ── Footer / Save button ── */}
+        {futureCount > 0 && (
+          <div className="px-4 py-3 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between gap-3"
+            style={{ backgroundColor: isDark ? D.raised : "#f8fafc" }}>
+            <div className="text-xs" style={{ color: isDark ? D.muted : "#64748b" }}>
+              {saving
+                ? <span className="flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" />Saving {progress.done} / {progress.total}…</span>
+                : <><span className="font-bold" style={{ color: isDark ? D.text : "#1e293b" }}>{selectedCount}</span> of {futureCount} future events selected</>
+              }
+            </div>
+            <div className="flex gap-2">
+              <button onClick={onDismiss} disabled={saving}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all disabled:opacity-40"
+                style={{ borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.muted : "#64748b" }}>
+                Dismiss
+              </button>
+              <button onClick={handleSaveSelected} disabled={saving || selectedCount === 0}
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-bold text-white transition-all active:scale-95 disabled:opacity-50"
+                style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                {saving
+                  ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Saving…</>
+                  : <><Save className="w-3.5 h-3.5" />Save {selectedCount > 0 ? `${selectedCount} Selected` : "Selected"}</>}
+              </button>
+            </div>
+          </div>
+        )}
+      </SectionCard>
+    </motion.div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SENDER WHITELIST MANAGER
+// ─────────────────────────────────────────────────────────────────────────────
+function SenderWhitelistManager({ isDark }) {
+  const [senders,  setSenders]  = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [newEmail, setNewEmail] = useState("");
+  const [newLabel, setNewLabel] = useState("");
+  const [adding,   setAdding]   = useState(false);
+
+  const inputStyle = { backgroundColor: isDark ? D.raised : "#ffffff", borderColor: isDark ? D.border : "#d1d5db", color: isDark ? D.text : "#1e293b" };
+  const inputCls = "px-3.5 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all";
+
+  const fetchSenders = useCallback(async () => {
+    try { const res = await api.get("/email/sender-whitelist"); setSenders(res.data?.senders || []); }
+    catch { setSenders([]); } finally { setLoading(false); }
+  }, []);
+  useEffect(() => { fetchSenders(); }, [fetchSenders]);
+
+  const handleAdd = async (emailAddr, label) => {
+    const addr = (emailAddr || newEmail).trim().toLowerCase();
+    const lbl  = label || newLabel;
+    if (!addr) { toast.error("Enter an email or domain"); return; }
+    if (senders.find(s => s.email_address === addr)) { toast.error("Already in whitelist"); return; }
+    setAdding(true);
+    try {
+      const updated = [...senders, { email_address: addr, label: lbl || addr }];
+      await api.put("/email/sender-whitelist", { senders: updated });
+      setSenders(updated); setNewEmail(""); setNewLabel("");
+      toast.success(`✓ ${addr} added to whitelist`);
+    } catch { toast.error("Failed to add sender"); } finally { setAdding(false); }
+  };
+
+  const handleRemove = async (addr) => {
+    const updated = senders.filter(s => s.email_address !== addr);
+    try { await api.put("/email/sender-whitelist", { senders: updated }); setSenders(updated); toast.success(`${addr} removed`); }
+    catch { toast.error("Failed to remove sender"); }
+  };
+
+  return (
+    <SectionCard>
+      <CardHeaderRow
+        iconBg={isDark ? "bg-emerald-900/40" : "bg-emerald-50"}
+        icon={<Filter className="w-4 h-4 text-emerald-500" />}
+        title="Sender Whitelist"
+        subtitle="Only these senders will be scanned for events"
+        badge={senders.length}
+      />
+      <div className="p-4 space-y-4">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest mb-2.5" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>Quick Add — Recommended Senders</p>
+          <div className="flex flex-wrap gap-2">
+            {SUGGESTED_SENDERS.map(s => {
+              const exists = senders.find(x => x.email_address === s.email_address);
+              return (
+                <button key={s.email_address} onClick={() => !exists && handleAdd(s.email_address, s.label)} disabled={!!exists}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border-2 transition-all active:scale-95"
+                  style={exists
+                    ? { borderColor: isDark ? "#14532d" : "#bbf7d0", backgroundColor: isDark ? "rgba(31,175,90,0.12)" : "#f0fdf4", color: COLORS.emeraldGreen, cursor: "default" }
+                    : { borderColor: isDark ? D.border : "#e2e8f0", backgroundColor: isDark ? D.raised : "#f8fafc", color: isDark ? D.muted : "#374151" }}
+                  onMouseEnter={e => { if (!exists) { e.currentTarget.style.borderColor = COLORS.emeraldGreen + "60"; e.currentTarget.style.color = COLORS.emeraldGreen; } }}
+                  onMouseLeave={e => { if (!exists) { e.currentTarget.style.borderColor = isDark ? D.border : "#e2e8f0"; e.currentTarget.style.color = isDark ? D.muted : "#374151"; } }}>
+                  {exists ? <Check className="w-3 h-3" /> : <Plus className="w-3 h-3" />}{s.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div className="space-y-2">
+          <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>Add Custom Sender</p>
+          <div className="flex gap-2">
+            <input value={newEmail} onChange={e => setNewEmail(e.target.value)} placeholder="@domain.com or user@email.com"
+              onKeyDown={e => e.key === "Enter" && handleAdd()} className={inputCls + " flex-1"} style={inputStyle} />
+            <input value={newLabel} onChange={e => setNewLabel(e.target.value)} placeholder="Label (optional)"
+              onKeyDown={e => e.key === "Enter" && handleAdd()} className={inputCls + " w-36"} style={inputStyle} />
+            <Button onClick={() => handleAdd()} disabled={adding} className="h-10 px-4 rounded-xl text-sm font-semibold text-white"
+              style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+              {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+            </Button>
+          </div>
+        </div>
+        {loading ? (
+          <div className="flex justify-center py-4"><Loader2 className="w-5 h-5 animate-spin text-blue-400" /></div>
+        ) : senders.length === 0 ? (
+          <div className="py-6 text-center">
+            <Filter className="w-7 h-7 mx-auto mb-2 opacity-20" />
+            <p className="text-xs" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+              No whitelist set — all senders are scanned.<br />Add senders above to restrict scanning.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>Active Whitelist ({senders.length})</p>
+            {senders.map(s => (
+              <motion.div key={s.email_address} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-xl border"
+                style={{ backgroundColor: isDark ? "rgba(31,175,90,0.08)" : "#f0fdf4", borderColor: isDark ? "#14532d" : "#bbf7d0" }}>
+                <div className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0"
+                  style={{ backgroundColor: isDark ? "rgba(31,175,90,0.20)" : "#dcfce7" }}>
+                  <Check className="w-3.5 h-3.5 text-emerald-500" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-bold" style={{ color: isDark ? D.text : "#1e293b" }}>{s.label || s.email_address}</p>
+                  {s.label && s.label !== s.email_address && (
+                    <p className="text-[10px] font-mono" style={{ color: isDark ? D.muted : "#94a3b8" }}>{s.email_address}</p>
+                  )}
+                </div>
+                <button onClick={() => handleRemove(s.email_address)} className="w-7 h-7 flex items-center justify-center rounded-lg transition-all active:scale-90"
+                  style={{ color: isDark ? D.muted : "#94a3b8" }}
+                  onMouseEnter={e => { e.currentTarget.style.color = COLORS.red; e.currentTarget.style.backgroundColor = isDark ? "rgba(239,68,68,0.12)" : "#fef2f2"; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = isDark ? D.muted : "#94a3b8"; e.currentTarget.style.backgroundColor = "transparent"; }}>
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </motion.div>
+            ))}
+            <button onClick={async () => {
+              if (!window.confirm("Clear entire whitelist? Emails from ALL senders will be scanned again.")) return;
+              try { await api.put("/email/sender-whitelist", { senders: [] }); setSenders([]); toast.success("Whitelist cleared"); }
+              catch { toast.error("Failed to clear whitelist"); }
+            }} className="text-xs font-semibold flex items-center gap-1 mt-1 active:scale-95 transition-all"
+              style={{ color: isDark ? "#f87171" : COLORS.red }}>
+              <Trash2 className="w-3 h-3" /> Clear entire whitelist
+            </button>
+          </div>
+        )}
+      </div>
+    </SectionCard>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN COMPONENT
+// ─────────────────────────────────────────────────────────────────────────────
+
+// =============================================================================
+// EMAIL_VARS + VariablesBar
+// =============================================================================
+const EMAIL_VARS = [
+  { token: '{name}',     desc: 'Company / Client name' },
+  { token: '{email}',    desc: 'Email address' },
+  { token: '{phone}',    desc: 'Phone number' },
+  { token: '{gstin}',    desc: 'GSTIN' },
+  { token: '{city}',     desc: 'City' },
+  { token: '{services}', desc: 'Services (comma-list)' },
+];
+function VariablesBar({ onInsert }) {
+  return (
+    <div className="flex flex-wrap gap-1.5 mb-2 items-center">
+      <span className="text-[10px] font-bold text-slate-400 shrink-0">Variables:</span>
+      {EMAIL_VARS.map(v => (
+        <button key={v.token} type="button" onClick={() => onInsert(v.token)} title={v.desc}
+          className="px-2 py-0.5 rounded-md text-[11px] font-mono font-semibold transition-colors"
+          style={{ background: '#eef2ff', color: '#4338ca', border: '1px solid #c7d2fe' }}>
+          {v.token}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// =============================================================================
+// EmailComposePanel
+// =============================================================================
+function EmailComposePanel({ isDark }) {
+  const [companies,    setCompanies]   = React.useState([]);
+  const [clients,      setClients]     = React.useState([]);
+  const [clientsLoading, setClientsLoading] = React.useState(true);
+  const [templates,    setTemplates]   = React.useState([]);
+  const [selCompany,   setSelCompany]  = React.useState('');
+  const [sendMethod,   setSendMethod]  = React.useState('auto');
+  const [subject,      setSubject]     = React.useState('');
+  const [body,         setBody]        = React.useState('');
+  const [isHtml,       setIsHtml]      = React.useState(false);
+  const [clientSearch, setClientSearch]= React.useState('');
+  const [serviceFilter,setServiceFilter]= React.useState('all');
+  const [selectedIds,  setSelectedIds] = React.useState(new Set());
+  const [showPreview,  setShowPreview] = React.useState(false);
+  const [sending,      setSending]     = React.useState(false);
+  const [progress,     setProgress]    = React.useState(null);
+  const [composeAttachName,   setComposeAttachName]   = React.useState('');
+  const [composeAttachB64,    setComposeAttachB64]    = React.useState('');
+  const composeAttachRef = React.useRef(null);
+  const bodyRef = React.useRef(null);
+
+  // Fetch ALL clients by paginating through all pages
+  const fetchAllClients = React.useCallback(async () => {
+    setClientsLoading(true);
+    try {
+      let all = [];
+      let page = 1;
+      const PAGE_SIZE = 200;
+      while (true) {
+        const r = await api.get('/clients', { params: { page, page_size: PAGE_SIZE } });
+        const d = r.data;
+        const batch = Array.isArray(d) ? d : (d?.clients || d?.data || []);
+        all = all.concat(batch);
+        // Stop if we got fewer than PAGE_SIZE (last page) or empty
+        if (batch.length < PAGE_SIZE) break;
+        page++;
+        if (page > 50) break; // safety cap
+      }
+      setClients(all);
+    } catch { setClients([]); }
+    finally { setClientsLoading(false); }
+  }, []);
+
+  React.useEffect(() => {
+    api.get('/companies').then(r => { const d = r.data; setCompanies(Array.isArray(d) ? d : (d?.companies || d?.data || [])); }).catch(() => {});
+    fetchAllClients();
+    api.get('/email/client-templates').then(r => setTemplates(r.data || [])).catch(() => {});
+  }, [fetchAllClients]);
+
+  // Derive unique services list for filter
+  const allServices = React.useMemo(() => {
+    const svcSet = new Set();
+    clients.forEach(c => (c.services || []).forEach(s => { if (s) svcSet.add(s.trim()); }));
+    return Array.from(svcSet).sort();
+  }, [clients]);
+
+  const personalize = (text, client) => (text||'')
+    .replace(/{name}/gi, client.company_name || 'Valued Client')
+    .replace(/{email}/gi, client.email || '')
+    .replace(/{phone}/gi, client.phone || '')
+    .replace(/{gstin}/gi, client.gstin || '')
+    .replace(/{city}/gi, client.city || '')
+    .replace(/{services}/gi, (client.services || []).join(', '));
+
+  const filtered = React.useMemo(() => {
+    let base = clients.filter(c => c.email);
+    // Service filter
+    if (serviceFilter !== 'all') {
+      base = base.filter(c => (c.services || []).some(s => s === serviceFilter));
+    }
+    // Text search
+    if (clientSearch.trim()) {
+      const q = clientSearch.toLowerCase();
+      base = base.filter(c =>
+        (c.company_name||'').toLowerCase().includes(q) ||
+        (c.email||'').toLowerCase().includes(q) ||
+        (c.city||'').toLowerCase().includes(q)
+      );
+    }
+    return base;
+  }, [clients, clientSearch, serviceFilter]);
+
+  const allWithEmail = React.useMemo(() => clients.filter(c => c.email), [clients]);
+  const selectedClients = React.useMemo(() => clients.filter(c => selectedIds.has(c.id) && c.email), [clients, selectedIds]);
+
+  // Toggle only filtered results
+  const toggleFiltered = () => {
+    const filteredIds = new Set(filtered.map(c => c.id));
+    const allFilteredSelected = filtered.every(c => selectedIds.has(c.id));
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (allFilteredSelected) { filteredIds.forEach(id => next.delete(id)); }
+      else { filtered.forEach(c => next.add(c.id)); }
+      return next;
+    });
+  };
+  // Select/clear ALL clients across all filters
+  const selectAllClients = () => setSelectedIds(new Set(allWithEmail.map(c => c.id)));
+  const clearAll = () => setSelectedIds(new Set());
+  const allFilteredSelected = filtered.length > 0 && filtered.every(c => selectedIds.has(c.id));
+
+  const insertVar = (v) => {
+    const el = bodyRef.current;
+    if (el) {
+      const s = el.selectionStart, e = el.selectionEnd;
+      const nb = body.slice(0, s) + v + body.slice(e);
+      setBody(nb);
+      setTimeout(() => { el.focus(); el.setSelectionRange(s + v.length, s + v.length); }, 0);
+    } else setBody(b => b + v);
+  };
+
+  const loadTpl = (tpl) => {
+    setSubject(tpl.subject); setBody(tpl.body); setIsHtml(!!tpl.is_html);
+    setComposeAttachName(tpl.attachment_name || '');
+    setComposeAttachB64(tpl.attachment_base64 || '');
+    toast.success(`Template "${tpl.name}" loaded${tpl.attachment_name ? ` · 📎 ${tpl.attachment_name}` : ''}`);
+  };
+
+  const handleComposeAttachFile = e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { toast.error('Attachment must be under 5 MB'); e.target.value=''; return; }
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const b64 = ev.target.result.split(',')[1];
+      setComposeAttachB64(b64);
+      setComposeAttachName(file.name);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSend = async () => {
+    if (!subject.trim()) { toast.error('Subject required'); return; }
+    if (!body.trim())    { toast.error('Email body required'); return; }
+    if (!selectedClients.length) { toast.error('Select at least one client with email'); return; }
+    setSending(true); setProgress({ done: 0, total: selectedClients.length, failed: 0 });
+    try {
+      const recipients = selectedClients.map(c => ({
+        email: c.email, name: c.company_name || '',
+        variables: { name: c.company_name||'Valued Client', email: c.email||'', phone: c.phone||'', gstin: c.gstin||'', city: c.city||'', services: (c.services||[]).join(', ') },
+      }));
+      const r = await api.post('/email/send-bulk-clients', {
+        recipients, subject, body_template: body, is_html: isHtml,
+        company_id: selCompany||null, send_method: sendMethod,
+        attachment_base64: composeAttachB64 || null,
+        attachment_name:   composeAttachName || null,
+      });
+      setProgress({ done: r.data.sent, total: selectedClients.length, failed: r.data.failed });
+      toast.success(`✅ ${r.data.sent} email(s) sent`);
+    } catch (err) { toast.error(err.response?.data?.detail || 'Send failed'); }
+    finally { setSending(false); }
+  };
+
+  const selComp = companies.find(c => c.id === selCompany);
+
+  return (
+    <div className="space-y-4">
+      {/* Sender identity */}
+      <SectionCard>
+        <CardHeaderRow iconBg="bg-blue-50 dark:bg-blue-900/30" icon={<Building2 className="w-4 h-4 text-blue-500" />}
+          title="Sender Identity" subtitle="Company branding and sending method" />
+        <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1.5">Company <span className="font-normal">(for logo &amp; SMTP)</span></label>
+            <select value={selCompany} onChange={e => setSelCompany(e.target.value)}
+              className="w-full border rounded-xl px-3 py-2 text-sm bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+              <option value="">— Use Brevo default —</option>
+              {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            {selComp && (
+              <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
+                {selComp.email && <span>📧 {selComp.email}</span>}
+                {selComp.phone && <span>📞 {selComp.phone}</span>}
+                {selComp.smtp_host
+                  ? <span className="font-semibold text-emerald-600">✅ SMTP ready ({selComp.smtp_host})</span>
+                  : <span className="text-amber-600">⚠ No SMTP — will use Brevo</span>}
+              </div>
+            )}
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1.5">Send Via</label>
+            <div className="space-y-2">
+              {[
+                { v:'auto',  label:'Auto  (SMTP → Brevo fallback)', color:'#7c3aed' },
+                { v:'brevo', label:'Brevo API (environment key)',    color:'#2563eb' },
+                { v:'smtp',  label:'Company SMTP / Gmail',           color:'#16a34a' },
+              ].map(opt => (
+                <label key={opt.v} onClick={() => setSendMethod(opt.v)}
+                  className="flex items-center gap-2.5 cursor-pointer select-none">
+                  <div className="w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 transition-all"
+                    style={{ borderColor: sendMethod===opt.v ? opt.color : '#cbd5e1', background: sendMethod===opt.v ? opt.color : 'transparent' }}>
+                    {sendMethod===opt.v && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                  </div>
+                  <span className="text-xs text-slate-600 dark:text-slate-300">{opt.label}</span>
+                </label>
+              ))}
+            </div>
+            {sendMethod==='smtp' && !selComp?.smtp_host && (
+              <p className="mt-2 text-xs text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 rounded-lg">
+                Set up Gmail SMTP in Quotations → Companies → Edit → SMTP Settings
+              </p>
+            )}
+          </div>
+        </div>
+      </SectionCard>
+
+      {/* Load template */}
+      {templates.length > 0 && (
+        <SectionCard>
+          <CardHeaderRow iconBg="bg-purple-50 dark:bg-purple-900/30" icon={<FileText className="w-4 h-4 text-purple-500" />}
+            title="Load a Saved Template" subtitle="Pre-fills subject and body instantly" />
+          <div className="p-3 flex flex-wrap gap-2">
+            {templates.map(t => (
+              <button key={t.id} type="button" onClick={() => loadTpl(t)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all hover:shadow-sm active:scale-95"
+                style={{ background: isDark?'#1e293b':'#f8fafc', borderColor: isDark?'#334155':'#e2e8f0', color: isDark?'#94a3b8':'#475569' }}>
+                <FileText className="w-3 h-3" />{t.name}
+              </button>
+            ))}
+          </div>
+        </SectionCard>
+      )}
+
+      {/* Compose */}
+      <SectionCard>
+        <CardHeaderRow iconBg="bg-emerald-50 dark:bg-emerald-900/30" icon={<Send className="w-4 h-4 text-emerald-500" />}
+          title="Compose Email" subtitle="Use {variable} tokens for personalisation"
+          action={
+            <button type="button" onClick={() => setIsHtml(h => !h)}
+              className="flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold border transition-all"
+              style={{ borderColor: isHtml?'#2563eb':'#e2e8f0', color: isHtml?'#2563eb':'#94a3b8', background: isHtml?'#eff6ff':'transparent' }}>
+              {isHtml ? <ToggleRight className="w-3.5 h-3.5" /> : <ToggleLeft className="w-3.5 h-3.5" />} HTML
+            </button>
+          } />
+        <div className="p-4 space-y-3">
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1">Subject</label>
+            <input value={subject} onChange={e => setSubject(e.target.value)} placeholder="e.g. Important update for {name}"
+              className="w-full border rounded-xl px-3 py-2 text-sm bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              style={{ borderColor: isDark?'#334155':'#e2e8f0' }} />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1">Message Body</label>
+            <VariablesBar onInsert={insertVar} />
+            <textarea ref={bodyRef} value={body} onChange={e => setBody(e.target.value)} rows={isHtml?14:10}
+              placeholder={isHtml ? '<p>Dear {name},</p>\n<p>Your message here...</p>' : 'Dear {name},\n\nYour message here...\n\nRegards,\nThe Team'}
+              className="w-full border rounded-xl px-3 py-2 text-sm font-mono resize-y bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              style={{ borderColor: isDark?'#334155':'#e2e8f0' }} />
+          </div>
+
+          {/* ── Compose attachment ── */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1.5">Attachment <span className="font-normal text-slate-300">(optional · max 5 MB)</span></label>
+            {composeAttachName ? (
+              <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl border"
+                style={{ borderColor: isDark?'#334155':'#e2e8f0', background: isDark?'#1e293b':'#f8fafc' }}>
+                <Paperclip className="w-4 h-4 text-blue-400 flex-shrink-0"/>
+                <span className="text-xs font-medium flex-1 truncate" style={{ color: isDark?'#e2e8f0':'#1e293b' }}>{composeAttachName}</span>
+                <button type="button" onClick={() => { setComposeAttachName(''); setComposeAttachB64(''); if(composeAttachRef.current) composeAttachRef.current.value=''; }}
+                  className="w-5 h-5 flex items-center justify-center rounded-full hover:bg-red-100 dark:hover:bg-red-900/30 text-slate-400 hover:text-red-500 transition-colors flex-shrink-0">
+                  <X className="w-3 h-3"/>
+                </button>
+              </div>
+            ) : (
+              <label className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed cursor-pointer transition-colors hover:border-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-900/10"
+                style={{ borderColor: isDark?'#334155':'#cbd5e1' }}>
+                <Paperclip className="w-4 h-4 text-slate-400"/>
+                <span className="text-xs text-slate-400">Click to attach a file (PDF, DOCX, XLSX, image…)</span>
+                <input ref={composeAttachRef} type="file" className="hidden"
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.jpg,.jpeg,.png,.gif"
+                  onChange={handleComposeAttachFile}/>
+              </label>
+            )}
+          </div>
+        </div>
+      </SectionCard>
+
+      {/* Preview */}
+      {body.trim() && selectedClients.length > 0 && (
+        <SectionCard>
+          <CardHeaderRow iconBg="bg-amber-50 dark:bg-amber-900/30" icon={<Eye className="w-4 h-4 text-amber-500" />}
+            title={`Preview for ${selectedClients[0]?.company_name || 'first client'}`}
+            subtitle={personalize(subject, selectedClients[0]||{})}
+            action={<button type="button" onClick={() => setShowPreview(p=>!p)} className="text-xs font-semibold text-blue-500">{showPreview?'Hide':'Show'}</button>} />
+          {showPreview && (
+            <div className="p-4">
+              {isHtml
+                ? <div className="border rounded-xl overflow-hidden bg-white" style={{ borderColor: isDark?'#334155':'#e2e8f0' }}>
+                    <iframe srcDoc={personalize(body, selectedClients[0]||{})} className="w-full" style={{ height:320, border:'none' }} sandbox="allow-same-origin" />
+                  </div>
+                : <pre className="whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-200 bg-slate-50 dark:bg-slate-800/50 rounded-xl p-3 border" style={{ borderColor: isDark?'#334155':'#e2e8f0' }}>
+                    {personalize(body, selectedClients[0]||{})}
+                  </pre>
+              }
+            </div>
+          )}
+        </SectionCard>
+      )}
+
+      {/* Client picker */}
+      <SectionCard>
+        <CardHeaderRow iconBg="bg-slate-100 dark:bg-slate-700" icon={<Users className="w-4 h-4 text-slate-500" />}
+          title="Select Recipients"
+          subtitle={clientsLoading
+            ? 'Loading all clients...'
+            : `${selectedClients.length} selected · ${allWithEmail.length} total with email · ${filtered.length} shown`}
+          action={
+            <div className="flex items-center gap-1.5">
+              <button type="button" onClick={selectAllClients}
+                className="text-[11px] font-bold px-2.5 py-1 rounded-lg transition-colors"
+                style={{ background:'#dbeafe', color:'#1d4ed8' }}>
+                All {allWithEmail.length}
+              </button>
+              <button type="button" onClick={toggleFiltered}
+                className="text-[11px] font-bold px-2.5 py-1 rounded-lg transition-colors"
+                style={{ background: allFilteredSelected?'#fee2e2':'#dcfce7', color: allFilteredSelected?'#dc2626':'#16a34a' }}>
+                {allFilteredSelected ? 'Deselect shown' : `Select ${filtered.length}`}
+              </button>
+              <button type="button" onClick={clearAll}
+                className="text-[11px] font-bold px-2.5 py-1 rounded-lg"
+                style={{ background:'#f1f5f9', color:'#64748b' }}>
+                Clear
+              </button>
+            </div>
+          } />
+        <div className="p-3 space-y-2">
+          {/* Search + service filter row */}
+          <div className="flex gap-2">
+            <input value={clientSearch} onChange={e=>setClientSearch(e.target.value)}
+              placeholder="Search by name, email or city..."
+              className="flex-1 border rounded-xl px-3 py-2 text-sm bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              style={{ borderColor: isDark?'#334155':'#e2e8f0' }} />
+            <select value={serviceFilter} onChange={e => { setServiceFilter(e.target.value); }}
+              className="border rounded-xl px-3 py-2 text-sm bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-400 shrink-0"
+              style={{ borderColor: isDark?'#334155':'#e2e8f0', minWidth: 130 }}>
+              <option value="all">All Services</option>
+              {allServices.map(s => <option key={s} value={s}>{s.length > 28 ? s.slice(0,28)+'…' : s}</option>)}
+            </select>
+          </div>
+          {/* Count badges */}
+          <div className="flex items-center gap-2 text-[11px]">
+            <span className="px-2 py-0.5 rounded-full font-bold" style={{ background:'#dbeafe', color:'#1d4ed8' }}>
+              {selectedClients.length} selected
+            </span>
+            {serviceFilter !== 'all' && (
+              <span className="px-2 py-0.5 rounded-full font-bold" style={{ background:'#f3e8ff', color:'#7c3aed' }}>
+                Filter: {serviceFilter}
+              </span>
+            )}
+            {clientsLoading && (
+              <span className="flex items-center gap-1 text-slate-400">
+                <Loader2 className="w-3 h-3 animate-spin" /> Loading...
+              </span>
+            )}
+          </div>
+          {/* List */}
+          <div className="max-h-72 overflow-y-auto space-y-0.5 border rounded-xl" style={{ borderColor: isDark?'#334155':'#f1f5f9' }}>
+            {filtered.length===0 && !clientsLoading && (
+              <p className="text-center text-sm text-slate-400 py-8">No clients match</p>
+            )}
+            {filtered.map(client => (
+              <label key={client.id}
+                onClick={() => setSelectedIds(p => { const n=new Set(p); n.has(client.id)?n.delete(client.id):n.add(client.id); return n; })}
+                className="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors border-b last:border-b-0"
+                style={{ borderColor: isDark?'#1e293b':'#f8fafc' }}>
+                <div className="w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-all"
+                  style={{ borderColor: selectedIds.has(client.id)?'#2563eb':'#cbd5e1', background: selectedIds.has(client.id)?'#2563eb':'transparent' }}>
+                  {selectedIds.has(client.id) && <Check className="w-2.5 h-2.5 text-white" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold truncate" style={{ color: isDark?'#e2e8f0':'#1e293b' }}>
+                    {client.company_name||'—'}
+                  </p>
+                  <p className="text-[10px] text-slate-400 truncate">{client.email}</p>
+                </div>
+                <div className="flex flex-wrap gap-1 shrink-0 max-w-[120px] justify-end">
+                  {(client.services||[]).slice(0,2).map((s,i) => (
+                    <span key={i} className="text-[9px] px-1.5 py-0.5 rounded font-medium truncate max-w-[110px]"
+                      style={{ background:'#f0fdf4', color:'#166534', border:'1px solid #bbf7d0' }}>
+                      {s.slice(0,18)}
+                    </span>
+                  ))}
+                  {client.city && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded"
+                      style={{ background:'#f8fafc', color:'#94a3b8' }}>{client.city}</span>
+                  )}
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+      </SectionCard>
+
+      {/* Progress */}
+      {progress && (
+        <div className="px-4 py-3 rounded-2xl border flex items-center gap-3"
+          style={{ background: progress.failed>0?'#fff7ed':'#f0fdf4', borderColor: progress.failed>0?'#fed7aa':'#bbf7d0' }}>
+          <CheckCircle2 className={`w-5 h-5 shrink-0 ${progress.failed>0?'text-amber-500':'text-emerald-500'}`} />
+          <div className="flex-1">
+            <p className="text-sm font-semibold" style={{ color: progress.failed>0?'#92400e':'#14532d' }}>
+              {progress.done} sent{progress.failed>0 ? ` · ${progress.failed} failed` : ''}
+            </p>
+            <div className="mt-1.5 h-1.5 rounded-full bg-slate-200 overflow-hidden">
+              <div className="h-full rounded-full bg-emerald-500 transition-all"
+                style={{ width: `${Math.round((progress.done/(progress.total||1))*100)}%` }} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Send */}
+      <button type="button" disabled={sending||!subject.trim()||!body.trim()||selectedClients.length===0}
+        onClick={handleSend}
+        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl font-bold text-white text-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+        style={{ background:'linear-gradient(135deg,#0D3B66,#1F6FB2)', boxShadow:'0 4px 20px rgba(13,59,102,0.25)' }}>
+        {sending
+          ? <><Loader2 className="w-4 h-4 animate-spin" />Sending...</>
+          : <><Send className="w-4 h-4" />Send to {selectedClients.length} Client{selectedClients.length!==1?'s':''}</>}
+      </button>
+    </div>
+  );
+}
+
+// =============================================================================
+// EmailTemplatesPanel
+// =============================================================================
+const TCAT_COLORS = { general:'#2563eb', follow_up:'#7c3aed', compliance:'#dc2626', greeting:'#16a34a', custom:'#d97706' };
+
+function EmailTemplatesPanel({ isDark }) {
+  const [templates, setTemplates] = React.useState([]);
+  const [loading, setLoading]     = React.useState(true);
+  const [editing, setEditing]     = React.useState(null);
+  const [form, setForm]           = React.useState({ name:'', subject:'', body:'', is_html:false, category:'general', attachment_name:'', attachment_base64:'' });
+  const attachInputRef = React.useRef(null);
+  const [saving, setSaving]       = React.useState(false);
+  const [deleting, setDeleting]   = React.useState(null);
+  const bodyRef = React.useRef(null);
+
+  const load = async () => {
+    setLoading(true);
+    try { const r = await api.get('/email/client-templates'); setTemplates(r.data||[]); }
+    catch { toast.error('Failed to load templates'); }
+    finally { setLoading(false); }
+  };
+  React.useEffect(() => { load(); }, []);
+
+  const startEdit = t => { setForm({ name:t.name, subject:t.subject, body:t.body, is_html:!!t.is_html, category:t.category||'general', attachment_name:t.attachment_name||'', attachment_base64:t.attachment_base64||'' }); setEditing(t.id); };
+  const startNew  = ()  => { setForm({ name:'', subject:'', body:'', is_html:false, category:'general', attachment_name:'', attachment_base64:'' }); setEditing('new'); };
+  const cancel    = ()  => { setEditing(null); if(attachInputRef.current) attachInputRef.current.value=''; };
+
+  const save = async () => {
+    if (!form.name.trim()||!form.subject.trim()||!form.body.trim()) { toast.error('Name, subject and body required'); return; }
+    setSaving(true);
+    try {
+      const payload = { ...form };
+      if (editing==='new') { await api.post('/email/client-templates', payload); toast.success('Template created'); }
+      else { await api.put(`/email/client-templates/${editing}`, payload); toast.success('Template updated'); }
+      setEditing(null);
+      if(attachInputRef.current) attachInputRef.current.value='';
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || `Save failed (${e.response?.status || 'network error'})`); }
+    finally { setSaving(false); }
+  };
+
+  const handleAttachFile = e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { toast.error('Attachment must be under 5 MB'); e.target.value=''; return; }
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const b64 = ev.target.result.split(',')[1];
+      setForm(f => ({ ...f, attachment_name: file.name, attachment_base64: b64 }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeAttachment = () => {
+    setForm(f => ({ ...f, attachment_name: '', attachment_base64: '' }));
+    if(attachInputRef.current) attachInputRef.current.value='';
+  };
+
+  const del = async id => {
+    setDeleting(id);
+    try { await api.delete(`/email/client-templates/${id}`); toast.success('Deleted'); load(); }
+    catch { toast.error('Delete failed'); }
+    finally { setDeleting(null); }
+  };
+
+  const copyTpl = t => navigator.clipboard?.writeText(`Subject: ${t.subject}\n\n${t.body}`)
+    .then(()=>toast.success('Copied to clipboard'));
+
+  const insertVar = v => {
+    const el = bodyRef.current;
+    if (el) {
+      const s=el.selectionStart, e=el.selectionEnd;
+      const nb = form.body.slice(0,s)+v+form.body.slice(e);
+      setForm(f=>({...f,body:nb}));
+      setTimeout(()=>{ el.focus(); el.setSelectionRange(s+v.length,s+v.length); },0);
+    } else setForm(f=>({...f,body:f.body+v}));
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="font-bold text-sm" style={{color:isDark?'#f1f5f9':'#1e293b'}}>Saved Email Templates</h3>
+          <p className="text-xs mt-0.5" style={{color:isDark?'#64748b':'#94a3b8'}}>{templates.length} template{templates.length!==1?'s':''} · load into Compose tab</p>
+        </div>
+        <button type="button" onClick={startNew}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-white transition-all active:scale-95"
+          style={{ background:'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
+          <Plus className="w-4 h-4" /> New Template
+        </button>
+      </div>
+
+      {editing!==null && (
+        <SectionCard>
+          <CardHeaderRow iconBg="bg-indigo-50 dark:bg-indigo-900/30" icon={<FileText className="w-4 h-4 text-indigo-500" />}
+            title={editing==='new'?'New Template':'Edit Template'} subtitle="Use {variable} tokens for personalisation"
+            action={<button type="button" onClick={cancel} className="text-slate-400 hover:text-slate-600"><X className="w-4 h-4"/></button>} />
+          <div className="p-4 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">Template Name</label>
+                <input value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} placeholder="e.g. Monthly Follow-Up"
+                  className="w-full border rounded-xl px-3 py-2 text-sm bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  style={{ borderColor: isDark?'#334155':'#e2e8f0' }} />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">Category</label>
+                <select value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))}
+                  className="w-full border rounded-xl px-3 py-2 text-sm bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  style={{ borderColor: isDark?'#334155':'#e2e8f0' }}>
+                  {['general','follow_up','compliance','greeting','custom'].map(c=><option key={c} value={c}>{c.replace('_',' ')}</option>)}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 mb-1">Subject</label>
+              <input value={form.subject} onChange={e=>setForm(f=>({...f,subject:e.target.value}))} placeholder="e.g. Update for {name}"
+                className="w-full border rounded-xl px-3 py-2 text-sm bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                style={{ borderColor: isDark?'#334155':'#e2e8f0' }} />
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-semibold text-slate-400">Message Body</label>
+                <label className="flex items-center gap-1.5 cursor-pointer text-xs text-slate-400 select-none">
+                  <input type="checkbox" checked={form.is_html} onChange={e=>setForm(f=>({...f,is_html:e.target.checked}))} className="rounded" />
+                  HTML mode
+                </label>
+              </div>
+              <VariablesBar onInsert={insertVar} />
+              <textarea ref={bodyRef} value={form.body} onChange={e=>setForm(f=>({...f,body:e.target.value}))}
+                rows={form.is_html?16:12}
+                placeholder={form.is_html?'<p>Dear {name},</p>':'Dear {name},\n\nYour message...\n\nRegards'}
+                className="w-full border rounded-xl px-3 py-2 text-sm font-mono resize-y bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                style={{ borderColor: isDark?'#334155':'#e2e8f0' }} />
+            </div>
+
+            {/* ── Attachment ── */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 mb-1.5">Attachment <span className="font-normal text-slate-300">(optional · max 5 MB · sent with every email using this template)</span></label>
+              {form.attachment_name ? (
+                <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl border"
+                  style={{ borderColor: isDark?'#334155':'#e2e8f0', background: isDark?'#1e293b':'#f8fafc' }}>
+                  <Paperclip className="w-4 h-4 text-indigo-400 flex-shrink-0"/>
+                  <span className="text-xs font-medium flex-1 truncate" style={{ color: isDark?'#e2e8f0':'#1e293b' }}>{form.attachment_name}</span>
+                  <button type="button" onClick={removeAttachment}
+                    className="w-5 h-5 flex items-center justify-center rounded-full hover:bg-red-100 dark:hover:bg-red-900/30 text-slate-400 hover:text-red-500 transition-colors flex-shrink-0">
+                    <X className="w-3 h-3"/>
+                  </button>
+                </div>
+              ) : (
+                <label className="flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed cursor-pointer transition-colors hover:border-indigo-400 hover:bg-indigo-50/50 dark:hover:bg-indigo-900/10"
+                  style={{ borderColor: isDark?'#334155':'#cbd5e1' }}>
+                  <Paperclip className="w-4 h-4 text-slate-400"/>
+                  <span className="text-xs text-slate-400">Click to attach a file (PDF, DOCX, XLSX, image…)</span>
+                  <input ref={attachInputRef} type="file" className="hidden"
+                    accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.jpg,.jpeg,.png,.gif"
+                    onChange={handleAttachFile}/>
+                </label>
+              )}
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <button type="button" onClick={save} disabled={saving}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-bold text-white transition-all active:scale-95 disabled:opacity-50"
+                style={{ background:'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
+                {saving?<Loader2 className="w-4 h-4 animate-spin"/>:<Save className="w-4 h-4"/>}
+                {saving?'Saving...':(editing==='new'?'Create Template':'Save Changes')}
+              </button>
+              <button type="button" onClick={cancel}
+                className="px-6 py-2.5 rounded-xl text-sm font-semibold border transition-all"
+                style={{ borderColor: isDark?'#334155':'#e2e8f0', color: isDark?'#94a3b8':'#64748b' }}>Cancel</button>
+            </div>
+          </div>
+        </SectionCard>
+      )}
+
+      {loading ? (
+        <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-blue-500" /></div>
+      ) : templates.length===0 && editing===null ? (
+        <SectionCard>
+          <div className="py-14 text-center space-y-4">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto bg-slate-100 dark:bg-slate-700">
+              <FileText className="w-8 h-8 text-slate-400" />
+            </div>
+            <p className="font-semibold" style={{color:isDark?'#f1f5f9':'#374151'}}>No templates yet</p>
+            <p className="text-sm text-slate-400">Create reusable templates to save time</p>
+            <button type="button" onClick={startNew}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all active:scale-95"
+              style={{ background:'linear-gradient(135deg,#0D3B66,#1F6FB2)' }}>
+              <Plus className="w-4 h-4" /> Create First Template
+            </button>
+          </div>
+        </SectionCard>
+      ) : (
+        <div className="space-y-3">
+          {templates.map(tpl => (
+            <SectionCard key={tpl.id}>
+              <div className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <span className="font-bold text-sm" style={{color:isDark?'#f1f5f9':'#1e293b'}}>{tpl.name}</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase text-white"
+                        style={{background:TCAT_COLORS[tpl.category]||'#64748b'}}>
+                        {(tpl.category||'general').replace('_',' ')}
+                      </span>
+                      {tpl.is_html&&<span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 text-orange-600">HTML</span>}
+                      {tpl.attachment_name&&<span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-100 text-violet-600 flex items-center gap-1"><Paperclip className="w-2.5 h-2.5"/>{tpl.attachment_name.length>18?tpl.attachment_name.slice(0,18)+'…':tpl.attachment_name}</span>}
+                    </div>
+                    <p className="text-xs font-medium text-slate-500 truncate">📧 {tpl.subject}</p>
+                    <p className="text-xs text-slate-400 mt-0.5 line-clamp-2">{(tpl.body||'').replace(/<[^>]*>/g,'').slice(0,140)}</p>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {['name','email','phone','gstin','city','services'].filter(k=>tpl.body?.includes('{'+k+'}')||tpl.subject?.includes('{'+k+'}')).map(k=>(
+                        <span key={k} className="px-1.5 py-0.5 rounded text-[10px] font-mono" style={{background:'#eef2ff',color:'#4338ca'}}>{'{'+k+'}'}</span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button type="button" onClick={()=>copyTpl(tpl)} title="Copy"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400">
+                      <Copy className="w-3.5 h-3.5" />
+                    </button>
+                    <button type="button" onClick={()=>startEdit(tpl)} title="Edit"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors hover:bg-blue-50 dark:hover:bg-blue-900/20 text-blue-400">
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button type="button" onClick={()=>del(tpl.id)} disabled={deleting===tpl.id} title="Delete"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors hover:bg-red-50 dark:hover:bg-red-900/20 text-red-400 disabled:opacity-50">
+                      {deleting===tpl.id?<Loader2 className="w-3.5 h-3.5 animate-spin"/>:<Trash2 className="w-3.5 h-3.5"/>}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </SectionCard>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 
-def _extract_tm_app_no(text: str) -> Optional[str]:
-    """
-    Extract TM application number from text.
-    Priority: explicit "No" prefix first → bare 7-digit fallback.
-    """
-    for pat in [
-        r"Application\s+No\.?\s*(\d{5,9})",
-        r"\bNo\.?\s*(\d{5,9})(?:\s|$|[^\d])",
-        r"Application\s+Number\s*[:\-]?\s*(\d{5,9})",
-        r"App(?:lication)?\s*#\s*(\d{5,9})",
-    ]:
-        m = re.search(pat, text, re.IGNORECASE)
-        if m:
-            candidate = m.group(1)
-            if 5 <= len(candidate) <= 9:
-                return candidate
-
-    for m in re.finditer(r"\b(\d{7})\b", text):
-        return m.group(1)
-
-    for m in re.finditer(r"\b(\d{5,9})\b", text):
-        candidate = m.group(1)
-        if 2000 <= int(candidate) <= 2099:
-            continue
-        return candidate
-
-    return None
-
-
-def _parse_date_from_text(text: str) -> Optional[str]:
-    """Extract first plausible date from text. Returns 'YYYY-MM-DD' or None."""
-    for m in re.finditer(r"\b(\d{1,2})[-/](\d{1,2})[-/](\d{4})\b", text):
-        d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        if 1 <= mo <= 12 and 1 <= d <= 31 and 2020 <= y <= 2035:
-            try:
-                return datetime(y, mo, d).strftime("%Y-%m-%d")
-            except ValueError:
-                continue
-
-    for m in re.finditer(
-        r"\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+),?\s+(\d{4})\b",
-        text, re.IGNORECASE
-    ):
-        d, mo_str, y = int(m.group(1)), m.group(2).lower(), int(m.group(3))
-        mo = _MONTH_MAP.get(mo_str)
-        if mo and 1 <= d <= 31 and 2020 <= y <= 2035:
-            try:
-                return datetime(y, mo, d).strftime("%Y-%m-%d")
-            except ValueError:
-                continue
-
-    for m in re.finditer(
-        r"\b([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b",
-        text, re.IGNORECASE
-    ):
-        mo_str, d, y = m.group(1).lower(), int(m.group(2)), int(m.group(3))
-        mo = _MONTH_MAP.get(mo_str)
-        if mo and 1 <= d <= 31 and 2020 <= y <= 2035:
-            try:
-                return datetime(y, mo, d).strftime("%Y-%m-%d")
-            except ValueError:
-                continue
-
-    return None
-
-
-def _extract_tm_class(text: str) -> Optional[str]:
-    """Extract trademark class number from subject/body."""
-    for pat in [
-        r"in\s+class\s+(\d{1,2})\b",
-        r"(?:class|वर्ग)\s*(?:no\.?)?\s*(\d{1,2})\b",
-        r"वर्ग\s*/\s*in\s+class\s+(\d{1,2})\b",
-    ]:
-        m = re.search(pat, text, re.IGNORECASE)
-        if m:
-            return m.group(1)
-    return None
-
-
-def _is_adjournment(subject: str, body: str) -> bool:
-    combined = (subject + " " + body[:600]).lower()
-    return any(kw in combined for kw in [
-        "adjourned", "adjournment", "rescheduled", "reschedule",
-        "new date", "revised date", "postponed", "new hearing date",
-        "hearing rescheduled", "changed to",
-    ])
-
-
-def _get_reminder_sequence(subject: str) -> int:
-    """Returns 0=original, 1=Reminder-I, 2=Reminder-II, 3=Reminder-III …"""
-    m = re.search(r"Reminder[-\s]*(I{1,3}|IV|V?\d*)", subject, re.IGNORECASE)
-    if not m:
-        return 0
-    roman_map = {"I": 1, "II": 2, "III": 3, "IV": 4, "V": 5}
-    return roman_map.get(m.group(1).upper(), 1)
-
-
-class _IPIndiaResult:
-    __slots__ = [
-        "event_type", "tm_app_no", "tm_class",
-        "event_date",
-        "reply_deadline",
-        "new_date",
-        "title", "description", "urgency", "save_category",
-        "reminder_seq", "is_adjournment",
-    ]
-    def __init__(self):
-        for a in self.__slots__:
-            setattr(self, a, None)
-        self.reminder_seq   = 0
-        self.is_adjournment = False
-
-
-def _parse_ipindia_email(subject: str, body: str, msg_date: str) -> Optional["_IPIndiaResult"]:
-    """
-    Parse an IP India (noreply.tmr@gov.in) email with precision.
-    Handles: Hearing Notices, Examination Reports, Reminder-I/II/III,
-    and Adjournment emails.
-    """
-    r = _IPIndiaResult()
-    subj_lower  = subject.lower()
-    body_lower  = body.lower()
-    full_lower  = subj_lower + " " + body_lower[:800]
-
-    is_hearing = (
-        "hearing notice" in subj_lower
-        or ("hearing" in subj_lower and "application" in subj_lower
-            and "examination" not in subj_lower)
-    )
-    is_exam_report = (
-        "examination report" in subj_lower
-        or "परीक्षा रिपोर्ट" in subject
-        or ("examination report" in body_lower[:400] and "reply" not in subj_lower)
-    )
-    is_reminder_for_exam = (
-        re.search(r"reminder[-\s]*(i{1,3}|iv|v?\d*)", subj_lower) is not None
-        and any(kw in subj_lower for kw in ["examination", "reply", "response", "report"])
-    )
-    is_adjournment = _is_adjournment(subject, body)
-
-    if is_reminder_for_exam:
-        is_exam_report = True
-        is_hearing     = False
-
-    if not is_hearing and not is_exam_report:
-        return None
-
-    r.tm_app_no = (
-        _extract_tm_app_no(subject)
-        or _extract_tm_app_no(body[:800])
-    )
-    if not r.tm_app_no:
-        return None
-
-    r.tm_class     = _extract_tm_class(subject) or _extract_tm_class(body[:400])
-    r.reminder_seq = _get_reminder_sequence(subject)
-    r.is_adjournment = is_adjournment
-
-    class_sfx     = f" (Class {r.tm_class})" if r.tm_class else ""
-    is_show_cause = "show cause" in full_lower
-
-    # ── PATH 1: HEARING NOTICE ─────────────────────────────────────────────
-    if is_hearing:
-        r.event_type = "Trademark Hearing"
-
-        sched_m = re.search(
-            r"scheduled\s+on\s+(\d{1,2}[-/]\d{1,2}[-/]\d{4})",
-            body, re.IGNORECASE
-        )
-        if sched_m:
-            r.event_date = _parse_date_from_text(sched_m.group(1))
-        if not r.event_date:
-            r.event_date = _parse_date_from_text(body[:1200])
-        if not r.event_date:
-            r.event_date = _parse_date_from_text(subject)
-        if not r.event_date and msg_date:
-            r.event_date = _parse_date_from_text(msg_date)
-
-        if is_adjournment:
-            new_m = re.search(
-                r"(?:new|revised|rescheduled|adjourned\s+to|postponed\s+to)"
-                r"\s+(?:date\s+is\s+)?(\d{1,2}[-/]\d{1,2}[-/]\d{4})",
-                body, re.IGNORECASE
-            )
-            if new_m:
-                r.new_date = _parse_date_from_text(new_m.group(1))
-            else:
-                all_dates = [
-                    _parse_date_from_text(m.group(0))
-                    for m in re.finditer(r"\b\d{1,2}[-/]\d{1,2}[-/]\d{4}\b", body)
-                ]
-                valid_dates = sorted([d for d in all_dates if d])
-                r.new_date = valid_dates[-1] if valid_dates else r.event_date
-
-            r.event_type  = "Adjournment"
-            display_date  = r.new_date or "see notice"
-            r.title       = f"Adjourned: Hearing — TM App No. {r.tm_app_no}{class_sfx}"
-            r.description = (
-                f"Hearing for TM Application No. {r.tm_app_no}{class_sfx} has been "
-                f"adjourned. New hearing date: {display_date}."
-            )
-            r.urgency       = "high"
-            r.save_category = "reminder"
-        else:
-            sc_note = " (Show Cause)" if is_show_cause else ""
-            r.title = f"Trademark Hearing{sc_note} — TM App No. {r.tm_app_no}{class_sfx}"
-            r.description = (
-                f"Hearing scheduled on {r.event_date or 'date in notice'} "
-                f"for TM Application No. {r.tm_app_no}{class_sfx}."
-                + (" Show Cause hearing — attendance mandatory." if is_show_cause else "")
-                + " Issued by Registrar of Trade Marks (IP India)."
-            )
-            r.urgency       = "high"
-            r.save_category = "reminder"
-
-    # ── PATH 2: EXAMINATION REPORT ─────────────────────────────────────────
-    elif is_exam_report:
-        r.event_type = "Examination Report"
-
-        dated_m = re.search(
-            r"dated\s+(\d{1,2}[-/]\d{1,2}[-/]\d{4})",
-            subject + " " + body[:400], re.IGNORECASE
-        )
-        if dated_m:
-            r.event_date = _parse_date_from_text(dated_m.group(1))
-        if not r.event_date:
-            r.event_date = _parse_date_from_text(body[:1200])
-        if not r.event_date and msg_date:
-            r.event_date = _parse_date_from_text(msg_date)
-        if not r.event_date:
-            r.event_date = datetime.now(IST).strftime("%Y-%m-%d")
-
-        try:
-            issue_dt         = datetime.strptime(r.event_date, "%Y-%m-%d")
-            r.reply_deadline = (issue_dt + timedelta(days=30)).strftime("%Y-%m-%d")
-        except Exception:
-            r.reply_deadline = None
-
-        r.urgency = {0: "medium", 1: "medium", 2: "high", 3: "high"}.get(
-            r.reminder_seq, "high"
-        )
-
-        roman_labels = {0: "", 1: "I", 2: "II", 3: "III", 4: "IV", 5: "V"}
-        if r.reminder_seq > 0:
-            seq_lbl = roman_labels.get(r.reminder_seq, str(r.reminder_seq))
-            r.title = (
-                f"Reminder-{seq_lbl}: Reply to Examination Report — "
-                f"TM App No. {r.tm_app_no}{class_sfx}"
-            )
-            r.description = (
-                f"Reminder-{seq_lbl} — Reply to Examination Report for "
-                f"TM Application No. {r.tm_app_no}{class_sfx}. "
-                f"Deadline to file response: {r.reply_deadline or '30 days from issue date'}."
-            )
-        else:
-            r.title = f"Examination Report — TM App No. {r.tm_app_no}{class_sfx}"
-            r.description = (
-                f"Examination Report issued on {r.event_date} for "
-                f"TM Application No. {r.tm_app_no}{class_sfx}. "
-                f"Objections raised under Trade Marks Act 1999. "
-                f"File response by {r.reply_deadline or 'N/A'} (30-day deadline)."
-            )
-
-        r.save_category = "todo"
-
-    return r
-
-
-# =============================================================================
-# SMART CATEGORY CLASSIFIER
-# =============================================================================
-
-_TODO_KEYWORDS = [
-    "examination report", "office action", "objection raised",
-    "reply to examination", "response required", "compliance notice",
-    "show cause notice", "response to show cause", "notice to file",
-    "deadline to respond", "reply required", "reply within",
-    "opposition notice", "counter statement", "file reply",
-    "scrutiny notice", "demand notice",
-]
-_REMINDER_KEYWORDS = [
-    "hearing", "show cause hearing", "trademark hearing",
-    "gstr-1", "gstr-3b", "gstr-9", "gst filing", "gst return",
-    "income tax", "itr", "advance tax", "tds return",
-    "roc filing", "mca", "aoc-4", "mgt-7",
-    "court date", "nclt", "high court", "tribunal",
-    "ip india", "ipindia", "due date", "last date", "filing date",
-]
-_VISIT_KEYWORDS = [
-    "zoom", "google meet", "teams meeting", "microsoft teams",
-    "webex", "meeting invite", "meeting scheduled",
-    "visit scheduled", "office visit", "client visit",
-    "appointment", "meeting at", "conference call", "video call",
-]
-
-def _classify_save_category(event_type: str, title: str, body: str) -> str:
-    combined = f"{title} {body}".lower()
-    for kw in _TODO_KEYWORDS:
-        if kw in combined:
-            return "todo"
-    for kw in _VISIT_KEYWORDS:
-        if kw in combined:
-            return "visit"
-    for kw in _REMINDER_KEYWORDS:
-        if kw in combined:
-            return "reminder"
-    if event_type in ("Court Hearing", "Trademark Hearing", "Deadline"):
-        return "reminder"
-    if event_type in ("Visit", "Online Meeting", "Conference"):
-        return "visit"
-    return "reminder"
-
-
-# =============================================================================
-# WHITELIST HELPERS
-# =============================================================================
-
-def _normalize_whitelist_entry(entry: str) -> str:
-    return entry.strip().lower()
-
-def _sender_matches_whitelist(sender_email: str, whitelist: List[str]) -> bool:
-    sender_lower = sender_email.strip().lower()
-    for entry in whitelist:
-        entry = _normalize_whitelist_entry(entry)
-        if not entry:
-            continue
-        if entry.startswith("@"):
-            domain_part = entry[1:]
-            if sender_lower.endswith("@" + domain_part) or sender_lower.endswith("." + domain_part):
-                return True
-        else:
-            if sender_lower == entry:
-                return True
-    return False
-
-
-# =============================================================================
-# IMAP HELPERS
-# =============================================================================
-
-def _test_imap_sync(host: str, port: int, email_addr: str, password: str) -> Optional[str]:
-    try:
-        password = _clean_password(password)
-        conn = imaplib.IMAP4_SSL(host, int(port))
-        conn.login(email_addr, password)
-        conn.logout()
-        return None
-    except imaplib.IMAP4.error as e:
-        return (
-            f"IMAP login failed: {e}. Make sure: (1) IMAP is enabled in Gmail Settings, "
-            "(2) You are using an App Password, (3) 2-Step Verification is enabled."
-        )
-    except ConnectionRefusedError:
-        return f"Could not connect to {host}:{port} — connection refused."
-    except OSError as e:
-        return f"Network error connecting to {host}:{port} — {e}"
-    except Exception as e:
-        return f"Unexpected error: {type(e).__name__}: {e}"
-
-def _decode_header_str(raw: str) -> str:
-    if not raw:
-        return ""
-    try:
-        parts = email.header.decode_header(raw)
-        out = []
-        for part, charset in parts:
-            if isinstance(part, bytes):
-                out.append(part.decode(charset or "utf-8", errors="replace"))
-            else:
-                out.append(str(part))
-        return " ".join(out)
-    except Exception:
-        return str(raw)
-
-def _decode_part_payload(part: email.message.Message) -> str:
-    try:
-        raw_bytes = part.get_payload(decode=True)
-        if raw_bytes is None:
-            return ""
-        charset = part.get_content_charset()
-        if charset:
-            try:
-                return raw_bytes.decode(charset, errors="replace")
-            except (LookupError, UnicodeDecodeError):
-                pass
-        for enc in ("utf-8", "latin-1", "windows-1252", "ascii"):
-            try:
-                return raw_bytes.decode(enc, errors="strict")
-            except (UnicodeDecodeError, LookupError):
-                continue
-        return raw_bytes.decode("utf-8", errors="replace")
-    except Exception:
-        return ""
-
-def _get_plain_body(msg: email.message.Message, max_chars: int = 4000) -> str:
-    """
-    Extract clean plain-text body.
-    Priority: text/plain → text/html (stripped) → raw payload
-    """
-    plain_parts: List[str] = []
-    html_parts:  List[str] = []
-
-    if msg.is_multipart():
-        for part in msg.walk():
-            ctype = part.get_content_type()
-            disp  = str(part.get("Content-Disposition") or "")
-            if "attachment" in disp.lower():
-                continue
-            if ctype == "text/plain":
-                decoded = _decode_part_payload(part)
-                if decoded.strip():
-                    plain_parts.append(decoded)
-            elif ctype == "text/html":
-                decoded = _decode_part_payload(part)
-                if decoded.strip():
-                    html_parts.append(decoded)
-    else:
-        decoded = _decode_part_payload(msg)
-        if msg.get_content_type() == "text/html":
-            html_parts.append(decoded)
-        else:
-            plain_parts.append(decoded)
-
-    if plain_parts:
-        body = _clean_text("\n\n".join(plain_parts))
-    elif html_parts:
-        body = _clean_text(_html_to_text("\n".join(html_parts)))
-    else:
-        body = ""
-
-    if max_chars and len(body) > max_chars:
-        body = body[:max_chars].rstrip() + "…"
-    return body
-
-def _extract_sender_email(from_header: str) -> str:
-    m = re.search(r'<([^>]+)>', from_header)
-    if m:
-        return m.group(1).strip().lower()
-    return from_header.strip().lower()
-
-def _scan_mailbox_sync(
-    host: str, port: int, email_addr: str, password: str,
-    max_msgs: int = 50, sender_whitelist: Optional[List[str]] = None,
-    since_date: Optional[str] = None,
-) -> List[Dict]:
-    """
-    since_date: IMAP-format date string "dd-Mon-yyyy" (e.g. "01-Jan-2025").
-    When provided, searches SINCE that date instead of "ALL" — this is what
-    powers retrospective syncing of mail older than the normal rolling window.
-    max_msgs: caps how many matched messages are fetched. Pass 0 to fetch
-    everything matched by the search (used for retrospective scans, capped
-    upstream instead).
-    """
-    results = []
-    try:
-        password = _clean_password(password)
-        conn = imaplib.IMAP4_SSL(host, int(port))
-        conn.login(email_addr, password)
-        conn.select("INBOX", readonly=True)
-        if since_date:
-            _, data = conn.search(None, f'(SINCE "{since_date}")')
-        else:
-            _, data = conn.search(None, "ALL")
-        if not data or not data[0]:
-            conn.logout()
-            return results
-        ids = data[0].split()
-        if max_msgs:
-            ids = ids[-max_msgs:]
-        for msg_id in reversed(ids):
-            try:
-                _, msg_data = conn.fetch(msg_id, "(RFC822)")
-                if not msg_data or not msg_data[0]:
-                    continue
-                msg          = email.message_from_bytes(msg_data[0][1])
-                from_raw     = _decode_header_str(msg.get("From", ""))
-                sender_clean = _extract_sender_email(from_raw)
-                if sender_whitelist:
-                    if not _sender_matches_whitelist(sender_clean, sender_whitelist):
-                        continue
-                results.append({
-                    "subject":      _clean_text(_decode_header_str(msg.get("Subject", "")), 200),
-                    "from_addr":    from_raw,
-                    "sender_email": sender_clean,
-                    "msg_date":     msg.get("Date", ""),
-                    "body":         _get_plain_body(msg, max_chars=4000),
-                    "message_id":   (msg.get("Message-ID") or "").strip(),
-                })
-            except Exception:
-                continue
-        conn.logout()
-    except Exception as e:
-        logger.error(f"IMAP scan error for {email_addr}: {e}")
-    return results
-
-
-# =============================================================================
-# AI EXTRACTION  (generic fallback after IP India parser)
-# =============================================================================
-
-_AI_SYSTEM = """
-You are a specialized legal and tax assistant for a CA/CS/Legal firm in India.
-Extract ONLY professional/legal events from the email. Be VERY strict.
-
-STRICT RULES:
-1. FOCUS ONLY ON:
-   - Trademark hearings, notices, examination reports, show cause notices (IP India)
-   - Court hearings (NCLT, High Court, Supreme Court, any tribunal)
-   - ROC compliance deadlines (MCA21, annual filing, AOC-4, MGT-7)
-   - GST deadlines (GSTR-1, GSTR-3B, GSTR-9, GST notices)
-   - Income Tax deadlines (ITR filing, advance tax, notices from IT dept)
-   - Client visits or scheduled meetings with clients
-   - Online meetings (Zoom, Google Meet, Teams)
-   - Examination reports / office actions requiring reply
-
-2. STRICTLY DISCARD — return [] for junk:
-   - Jio/Airtel/Vi bills, OTPs, bank alerts, Adobe/Canva subscriptions
-   - Marketing, newsletters, LinkedIn/social media, e-commerce notifications
-   - Any email NOT related to CA/CS/Legal firm work
-
-3. DATES: If year is missing assume 2026.
-
-4. Return ONLY a valid JSON array. No markdown, no preamble.
-   Keys: title, event_type (Trademark Hearing|Court Hearing|Online Meeting|
-   Deadline|Visit|Other|Examination Report|Notice), date (yyyy-MM-dd|null),
-   time (HH:mm|null), organizer (string|null),
-   description (plain text, max 150 chars), urgency (high|medium|low)
-
-5. Junk/irrelevant → return exactly: []
-"""
-
-_JUNK_KEYWORDS = [
-    "jio", "airtel", "vodafone", "vi mobile", "bsnl", "tata sky",
-    "payment received", "payment successful", "transaction successful",
-    "transaction alert", "otp", "one time password",
-    "credit card statement", "bank statement", "debited", "credited",
-    "adobe", "canva", "figma", "coursera", "udemy",
-    "discount", "exclusive offer", "flash sale", "cashback",
-    "linkedin", "facebook", "instagram", "twitter", "youtube",
-    "job application", "resume", "unsubscribe", "newsletter", "promotional",
-    "amazon", "flipkart", "swiggy", "zomato", "uber", "ola",
-    "nykaa", "myntra", "meesho", "bigbasket",
-]
-
-async def _get_dismissed_titles(user_id: str) -> Set[str]:
-    try:
-        docs = await db["reminders"].find(
-            {"user_id": user_id, "is_dismissed": True}, {"_id": 0, "title": 1}
-        ).to_list(500)
-        return {d["title"].lower().strip() for d in docs if d.get("title")}
-    except Exception:
-        return set()
-
-
-async def _extract_events_from_email(
-    subject: str, body: str, from_addr: str, msg_date: str,
-    dismissed_titles: Optional[Set[str]] = None,
-) -> List[Dict]:
-    """
-    Extraction pipeline (priority order):
-      1. IP India dedicated parser   → precise structured result
-      2. Google Gemini AI            → general legal events
-      3. Regex fallback              → last resort
-    """
-    sender_clean = _extract_sender_email(from_addr)
-    combined     = f"{subject.lower()} {body.lower()[:500]}"
-
-    for kw in _JUNK_KEYWORDS:
-        if kw in combined:
-            return []
-
-    if dismissed_titles and subject.lower().strip() in dismissed_titles:
-        return []
-
-    # ── 1. IP India parser ────────────────────────────────────────────────────
-    _IPINDIA_SENDER_PATTERNS = (
-        "noreply.tmr",
-        "tmr.gov.in",
-        "ipindia",
-        "trademarks.gov.in",
-    )
-    is_ipindia = any(pat in sender_clean for pat in _IPINDIA_SENDER_PATTERNS)
-
-    if not is_ipindia:
-        subj_l = subject.lower()
-        is_ipindia = (
-            ("hearing notice" in subj_l and "application no" in subj_l)
-            or "examination report" in subj_l
-            or "परीक्षा रिपोर्ट" in subject
-            or (re.search(r"reminder[-\s]*(i{1,3}|iv)", subj_l) and "examination" in subj_l)
-        )
-
-    if is_ipindia:
-        r = _parse_ipindia_email(subject, body, msg_date)
-        if r:
-            if r.is_adjournment and r.new_date:
-                ev_date = r.new_date
-            elif r.save_category == "todo":
-                ev_date = r.reply_deadline
-            else:
-                ev_date = r.event_date
-
-            ev = {
-                "title":          r.title,
-                "event_type":     r.event_type,
-                "date":           ev_date,
-                "time":           None,
-                "organizer":      "IP India / Trade Marks Registry",
-                "description":    r.description,
-                "urgency":        r.urgency,
-                "save_category":  r.save_category,
-                "tm_app_no":      r.tm_app_no,
-                "tm_class":       r.tm_class,
-                "reminder_seq":   r.reminder_seq,
-                "is_adjournment": r.is_adjournment,
-                "raw_event_date": r.event_date,
-                "reply_deadline": r.reply_deadline,
-            }
-            logger.info(
-                f"[IPIndia] {r.event_type} App#{r.tm_app_no} "
-                f"date={ev_date} seq={r.reminder_seq} adj={r.is_adjournment}"
-            )
-            return [ev]
-
-    # ── 2. Gemini AI ──────────────────────────────────────────────────────────
-    if _gemini:
-        try:
-            prompt = (
-                f"{_AI_SYSTEM}\n\nFrom: {from_addr}\nSubject: {subject}\n"
-                f"Body (plain text):\n{body[:3000]}"
-            )
-            resp   = await _gemini.generate_content_async(prompt)
-            raw    = re.sub(r"```[a-z]*\n?|```", "", resp.text.strip())
-            result = json.loads(raw)
-            if isinstance(result, list):
-                out = []
-                for ev in result:
-                    desc = ev.get("description") or ""
-                    ev["description"]    = _clean_text(_html_to_text(desc) if "<" in desc else desc, 200)
-                    ev["save_category"]  = _classify_save_category(ev.get("event_type",""), subject, body)
-                    ev["tm_app_no"]      = _extract_tm_app_no(subject) or _extract_tm_app_no(body[:600])
-                    ev["is_adjournment"] = False
-                    ev["reminder_seq"]   = 0
-                    out.append(ev)
-                return out
-        except Exception as e:
-            logger.warning(f"Gemini failed for '{subject[:50]}': {e}")
-
-    # ── 3. Regex fallback ─────────────────────────────────────────────────────
-    return _regex_extract(subject, body, from_addr)
-
-
-def _regex_extract(subject: str, body: str, from_addr: str) -> List[Dict]:
-    text = f"{subject} {body}".lower()
-    if any(j in text for j in ["offer", "discount", "otp", "statement",
-                                 "transaction successful", "payment received",
-                                 "jio", "airtel", "adobe", "newsletter",
-                                 "unsubscribe", "cashback"]):
-        return []
-
-    date_str = _parse_date_from_text(body[:1200]) or _parse_date_from_text(subject)
-    if not date_str:
-        return []
-
-    if any(w in text for w in ["trademark","ipindia","ip india","opposition","show cause"]):
-        etype = "Trademark Hearing"
-    elif any(w in text for w in ["court","nclt","tribunal","hearing","high court"]):
-        etype = "Court Hearing"
-    elif any(w in text for w in ["examination report","office action","objection"]):
-        etype = "Examination Report"
-    elif any(w in text for w in ["gst","gstr","income tax","itr","roc","mca","advance tax"]):
-        etype = "Deadline"
-    elif "visit" in text:
-        etype = "Visit"
-    else:
-        etype = "Deadline"
-
-    return [{
-        "title":          subject[:100],
-        "event_type":     etype,
-        "date":           date_str,
-        "time":           None,
-        "organizer":      from_addr[:50],
-        "description":    _clean_text(body[:200], 200),
-        "urgency":        "high",
-        "save_category":  _classify_save_category(etype, subject, body),
-        "tm_app_no":      _extract_tm_app_no(subject) or _extract_tm_app_no(body[:600]),
-        "is_adjournment": False,
-        "reminder_seq":   0,
-    }]
-
-
-# =============================================================================
-# MONGO DOC → PYDANTIC
-# =============================================================================
-
-def _doc_to_out(doc: Dict) -> ExtractedEventOut:
-    # FIX: Prefer string "id" field; fall back to str(_id) for auto-saved docs
-    # that were inserted before v9 (which had no string id field).
-    raw_id = doc.get("id") or doc.get("_id")
-    str_id = str(raw_id) if raw_id is not None else ""
-    return ExtractedEventOut(
-        id=str_id,
-        title=doc.get("title", ""),
-        event_type=doc.get("event_type", "Other"),
-        date=doc.get("date"),
-        time=doc.get("time"),
-        location=doc.get("location"),
-        organizer=doc.get("organizer"),
-        description=doc.get("description"),
-        urgency=doc.get("urgency", "medium"),
-        source_subject=doc.get("source_subject", ""),
-        source_from=doc.get("source_from", ""),
-        source_date=doc.get("source_date", ""),
-        raw_snippet=doc.get("raw_snippet"),
-        email_account=doc.get("email_account"),
-        save_category=doc.get("save_category"),
-        tm_app_no=doc.get("tm_app_no"),
-    )
-
-def _conn_doc_to_out(doc: Dict) -> ConnectionOut:
-    return ConnectionOut(
-        email_address=doc.get("email_address", ""),
-        imap_host=doc.get("imap_host", ""),
-        imap_port=doc.get("imap_port", 993),
-        label=doc.get("label"),
-        provider=doc.get("provider", "other"),
-        is_active=doc.get("is_active", True),
-        last_synced=doc.get("last_synced"),
-        connected_at=doc.get("connected_at"),
-        sync_error=doc.get("sync_error"),
-        linked_page=doc.get("linked_page", "all"),
-        auto_sync=doc.get("auto_sync", False),
-    )
-
-# =============================================================================
-# FIX v9: _reminder_to_dict — always resolves string id for GET /reminders
-# =============================================================================
-# ROOT CAUSE OF "Cannot delete: reminder ID is missing":
-#   Auto-saved reminders inserted by _auto_save_event (v8 and earlier) had no
-#   string "id" field — only MongoDB ObjectId "_id". The GET /reminders route
-#   was serializing docs without always including a string id, so the frontend
-#   resolveId() received undefined and could not construct the DELETE URL.
-#
-# FIX: _reminder_to_dict always resolves id = str(doc["id"]) if present,
-#   else falls back to str(doc["_id"]). Both the "id" field AND a legacy "_id"
-#   field are included in every response so the frontend triple-fallback works.
-# =============================================================================
-
-def _reminder_to_dict(doc: Dict) -> Dict:
-    """
-    Serialize a reminders collection document to a dict safe for API responses.
-    Always includes a non-empty string "id" field — resolves from:
-      1. doc["id"]  (string uuid, set by v9 inserts and migrate-fix-ids)
-      2. str(doc["_id"])  (MongoDB ObjectId fallback for pre-v9 docs)
-    """
-    raw_id = doc.get("id") or doc.get("_id")
-    str_id = str(raw_id) if raw_id is not None else ""
-    return {
-        "id":           str_id,
-        "_id":          str_id,   # legacy field — kept so any old frontend code still works
-        "user_id":      doc.get("user_id", ""),
-        "title":        doc.get("title", ""),
-        "description":  doc.get("description"),
-        "remind_at":    doc.get("remind_at"),
-        "is_dismissed": doc.get("is_dismissed", False),
-        "source":       doc.get("source"),
-        "tm_app_no":    doc.get("tm_app_no"),
-        "urgency":      doc.get("urgency", "medium"),
-        "created_at":   doc.get("created_at"),
-    }
-
-
-# =============================================================================
-# AUTO-SAVE WITH TM APP NUMBER DEDUPLICATION
-# =============================================================================
-
-async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
-    """
-    Save/update event to todos / reminders / visits.
-
-    DEDUPLICATION LOGIC:
-    ─────────────────────
-    IP India events (tm_app_no present):
-      TODO  → key = (user_id, tm_app_no, source="email_auto", is_completed=False)
-              If found & new seq > old seq: UPDATE title + urgency + reminder_seq
-              If found & same seq: skip
-              If not found: INSERT with UUID string "id"
-
-      REMINDER → key = (user_id, tm_app_no, source="email_auto")
-              If found & is_dismissed: skip
-              If found & is_adjournment: UPDATE remind_at + description + title
-              If found & not adjournment: skip
-              If not found: INSERT with UUID string "id"
-
-    Generic events (no tm_app_no):
-      Deduplicate by (user_id, title, source).
-
-    v9 FIX: All INSERT operations now pre-generate a UUID string "id" field
-    so that DELETE /reminders/{id} and PATCH /reminders/{id} routes resolve
-    correctly. Previously auto-saved docs only had MongoDB ObjectId (_id)
-    and the string "id" field was absent, causing 404 errors on delete/update.
-    """
-    dismissed_check = await db["reminders"].find_one(
-        {"user_id": user_id, "title": event.title, "is_dismissed": True},
-        {"_id": 0, "title": 1}
-    )
-    if dismissed_check:
-        return
-
-    try:
-        save_cat       = event.save_category or _classify_save_category(
-            event.event_type, event.title, event.description or ""
-        )
-        email_msg_id   = getattr(event, "_message_id",    None)
-        tm_app_no      = event.tm_app_no
-        clean_desc     = _clean_text(event.description or "", 300)
-        reminder_seq   = getattr(event, "_reminder_seq",   0) or 0
-        is_adjournment = getattr(event, "_is_adjournment", False) or False
-
-        # ──────────────────────────────────────────────────────────────────────
-        #  TODO  (Examination Report / Reminder-I / Reminder-II / Reminder-III)
-        # ──────────────────────────────────────────────────────────────────────
-        if save_cat == "todo" and prefs.get("auto_save_todos"):
-            existing = None
-            if tm_app_no:
-                existing = await db["todos"].find_one(
-                    {
-                        "user_id":      user_id,
-                        "tm_app_no":    tm_app_no,
-                        "source":       "email_auto",
-                        "is_completed": False,
-                    },
-                    {"_id": 1, "reminder_seq": 1, "title": 1, "due_date": 1}
-                )
-            if not existing:
-                existing = await db["todos"].find_one(
-                    {"user_id": user_id, "title": event.title, "source": "email_auto"},
-                    {"_id": 1, "reminder_seq": 1}
-                )
-
-            if existing:
-                old_seq = existing.get("reminder_seq") or 0
-                if reminder_seq > old_seq:
-                    update_fields = {
-                        "title":        event.title,
-                        "urgency":      event.urgency,
-                        "reminder_seq": reminder_seq,
-                        "updated_at":   datetime.now(timezone.utc).isoformat(),
-                    }
-                    if event.date:
-                        existing_due = existing.get("due_date") or ""
-                        if not existing_due or event.date > existing_due:
-                            update_fields["due_date"] = event.date
-                    await db["todos"].update_one(
-                        {"_id": existing["_id"]},
-                        {"$set": update_fields}
-                    )
-                    logger.info(
-                        f"[TODO] Updated TM#{tm_app_no}: "
-                        f"seq {old_seq}→{reminder_seq}, urgency={event.urgency}"
-                    )
-                else:
-                    logger.debug(f"[TODO] Skip duplicate seq={reminder_seq} TM#{tm_app_no}")
-            else:
-                # v9 FIX: generate UUID string "id" before insert
-                new_id = str(_uuid.uuid4())
-                await db["todos"].insert_one({
-                    "id":               new_id,          # ← string id for API routes
-                    "user_id":          user_id,
-                    "title":            event.title,
-                    "description":      (
-                        f"Auto-imported from email.\n"
-                        f"From: {event.source_from}\n"
-                        f"Subject: {event.source_subject}\n"
-                        f"Notes: {clean_desc}"
-                    ),
-                    "is_completed":     False,
-                    "due_date":         event.date or None,
-                    "source":           "email_auto",
-                    "email_message_id": email_msg_id,
-                    "tm_app_no":        tm_app_no,
-                    "reminder_seq":     reminder_seq,
-                    "urgency":          event.urgency,
-                    "created_at":       datetime.now(timezone.utc).isoformat(),
-                    "updated_at":       datetime.now(timezone.utc).isoformat(),
-                })
-                logger.info(f"[TODO] New: {event.title} (TM#{tm_app_no}, id={new_id})")
-
-        # ──────────────────────────────────────────────────────────────────────
-        #  REMINDER  (Hearing / Adjournment)
-        # ──────────────────────────────────────────────────────────────────────
-        elif save_cat == "reminder" and prefs.get("auto_save_reminders"):
-            date_str = event.date or datetime.now(IST).strftime("%Y-%m-%d")
-            time_str = event.time or "10:00"
-            try:
-                remind_dt = datetime.strptime(f"{date_str}T{time_str}", "%Y-%m-%dT%H:%M")
-                remind_dt = remind_dt.replace(tzinfo=IST)
-            except Exception:
-                remind_dt = datetime.now(IST) + timedelta(days=1)
-
-            existing = None
-            if tm_app_no:
-                existing = await db["reminders"].find_one(
-                    {"user_id": user_id, "tm_app_no": tm_app_no, "source": "email_auto"},
-                    {"_id": 1, "is_dismissed": 1, "remind_at": 1, "title": 1}
-                )
-            if not existing:
-                existing = await db["reminders"].find_one(
-                    {"user_id": user_id, "title": event.title, "source": "email_auto"},
-                    {"_id": 1, "is_dismissed": 1}
-                )
-
-            if existing:
-                if existing.get("is_dismissed"):
-                    logger.debug(f"[REMINDER] Skip dismissed TM#{tm_app_no}")
-                    return
-                if is_adjournment:
-                    await db["reminders"].update_one(
-                        {"_id": existing["_id"]},
-                        {"$set": {
-                            "title":       event.title,
-                            "description": (
-                                f"⚠️ ADJOURNED — Hearing rescheduled.\n"
-                                f"New date: {date_str}\n"
-                                f"From: {event.source_from}\n"
-                                f"Notes: {clean_desc}"
-                            ),
-                            "remind_at":   remind_dt.isoformat(),
-                            "urgency":     "high",
-                            "updated_at":  datetime.now(timezone.utc).isoformat(),
-                        }}
-                    )
-                    logger.info(f"[REMINDER] Adjourned TM#{tm_app_no} → new date {date_str}")
-                else:
-                    logger.debug(f"[REMINDER] Skip duplicate hearing TM#{tm_app_no}")
-                return
-
-            # New reminder — build description
-            desc_parts = []
-            if event.organizer:       desc_parts.append(f"From: {event.organizer}")
-            if clean_desc:            desc_parts.append(f"Notes: {clean_desc}")
-            if event.source_subject:  desc_parts.append(f"Subject: {event.source_subject}")
-
-            # v9 FIX: generate UUID string "id" before insert
-            new_id = str(_uuid.uuid4())
-            await db["reminders"].insert_one({
-                "id":               new_id,          # ← string id for DELETE/PATCH routes
-                "user_id":          user_id,
-                "title":            event.title,
-                "description":      "\n".join(desc_parts) or None,
-                "remind_at":        remind_dt.isoformat(),
-                "is_dismissed":     False,
-                "source":           "email_auto",
-                "email_message_id": email_msg_id,
-                "tm_app_no":        tm_app_no,
-                "urgency":          event.urgency,
-                "created_at":       datetime.now(timezone.utc).isoformat(),
-            })
-            logger.info(f"[REMINDER] New: {event.title} (TM#{tm_app_no}, date={date_str}, id={new_id})")
-
-        # ──────────────────────────────────────────────────────────────────────
-        #  VISIT
-        # ──────────────────────────────────────────────────────────────────────
-        elif save_cat == "visit" and prefs.get("auto_save_visits"):
-            date_str = event.date or datetime.now(IST).strftime("%Y-%m-%d")
-            existing = await db["visits"].find_one(
-                {
-                    "user_id":    user_id,
-                    "title":      event.title,
-                    "visit_date": date_str,
-                    "source":     "email_auto",
-                },
-                {"_id": 0}
-            )
-            if not existing:
-                new_id = str(_uuid.uuid4())
-                await db["visits"].insert_one({
-                    "id":               new_id,
-                    "user_id":          user_id,
-                    "title":            event.title,
-                    "visit_date":       date_str,
-                    "notes":            clean_desc or event.source_subject or "",
-                    "status":           "scheduled",
-                    "source":           "email_auto",
-                    "email_message_id": email_msg_id,
-                    "tm_app_no":        tm_app_no,
-                    "created_at":       datetime.now(timezone.utc).isoformat(),
-                })
-                logger.info(f"[VISIT] New: {event.title} on {date_str} (id={new_id})")
-
-    except Exception as e:
-        logger.error(f"Auto-save error '{event.title}': {e}", exc_info=True)
-
-
-# =============================================================================
-# HELPERS — build event doc + attach extra attrs
-# =============================================================================
-
-def _build_event_doc(user_id: str, email_addr: str, raw: Dict, ev: Dict) -> Dict:
-    return {
-        "user_id":        user_id,
-        "email_account":  email_addr,
-        "message_id":     raw.get("message_id"),
-        "title":          _clean_text(ev.get("title") or raw["subject"], 120),
-        "event_type":     ev.get("event_type", "Other"),
-        "date":           ev.get("date"),
-        "time":           ev.get("time"),
-        "organizer":      _clean_text(ev.get("organizer") or "", 100),
-        "description":    _clean_text(ev.get("description") or "", 300),
-        "urgency":        ev.get("urgency", "medium"),
-        "save_category":  ev.get("save_category", "reminder"),
-        "tm_app_no":      ev.get("tm_app_no"),
-        "tm_class":       ev.get("tm_class"),
-        "reminder_seq":   ev.get("reminder_seq", 0),
-        "is_adjournment": ev.get("is_adjournment", False),
-        "raw_event_date": ev.get("raw_event_date"),
-        "reply_deadline": ev.get("reply_deadline"),
-        "source_subject": raw["subject"][:200],
-        "source_from":    raw["from_addr"][:200],
-        "source_date":    raw["msg_date"][:100],
-        "raw_snippet":    _clean_text(raw["body"][:500], 500),
-        "created_at":     datetime.now(timezone.utc).isoformat(),
-    }
-
-def _attach_extra_attrs(ev_out: ExtractedEventOut, ev: Dict, mid: str):
-    ev_out._message_id     = mid
-    ev_out._reminder_seq   = ev.get("reminder_seq", 0)
-    ev_out._is_adjournment = ev.get("is_adjournment", False)
-
-
-# =============================================================================
-# SCHEDULED SCAN LOOP
-# =============================================================================
-
-_scan_task = None
-
-async def _scheduled_scan_loop():
-    logger.info("Email scheduled scan loop started.")
-    while True:
-        try:
-            now_ist    = datetime.now(IST)
-            prefs_list = await db[COL_AUTO_PREFS].find({}).to_list(length=500)
-            for pref in prefs_list:
-                user_id     = pref.get("user_id")
-                scan_hour   = pref.get("scan_time_hour", 12)
-                scan_minute = pref.get("scan_time_minute", 0)
-                target       = now_ist.replace(hour=scan_hour, minute=scan_minute, second=0, microsecond=0)
-                if abs((now_ist - target).total_seconds()) > 300:
-                    continue
-                sched = await db[COL_SCAN_SCHEDULE].find_one({"user_id": user_id}, {"_id": 0})
-                if sched and (sched.get("last_run", "")[:10] == now_ist.strftime("%Y-%m-%d")):
-                    continue
-                logger.info(f"Scheduled scan: user {user_id}")
-                try:
-                    await _run_full_scan_for_user(user_id, pref)
-                    await db[COL_SCAN_SCHEDULE].update_one(
-                        {"user_id": user_id},
-                        {"$set": {"last_run": now_ist.isoformat(), "user_id": user_id}},
-                        upsert=True
-                    )
-                except Exception as e:
-                    logger.error(f"Scheduled scan error user {user_id}: {e}")
-        except Exception as e:
-            logger.error(f"Scan loop error: {e}")
-        await asyncio.sleep(60)
-
-
-async def _run_full_scan_for_user(user_id: str, prefs: Dict, limit: int = 50):
-    conns = await db[COL_CONNECTIONS].find(
-        {"user_id": user_id, "is_active": True}, {"_id": 0}
-    ).to_list(50)
-    if not conns:
-        return
-
-    wl_doc = await db[COL_SENDER_WHITELIST].find_one({"user_id": user_id}, {"_id": 0})
-    sender_whitelist: List[str] = (
-        [s.get("email_address","") for s in wl_doc.get("senders",[]) if s.get("email_address")]
-        if wl_doc else []
-    )
-    dismissed_titles = await _get_dismissed_titles(user_id)
-    loop             = asyncio.get_event_loop()
-
-    for conn in conns:
-        try:
-            email_addr = conn["email_address"]
-            raw_emails = await loop.run_in_executor(
-                None, _scan_mailbox_sync,
-                conn["imap_host"], conn["imap_port"], email_addr,
-                _decrypt(conn["app_password_enc"]), limit,
-                sender_whitelist or None,
-            )
-            for raw in raw_emails:
-                mid    = raw.get("message_id")
-                exists = await db[COL_EVENTS].find_one(
-                    {"user_id": user_id, "message_id": mid}, {"_id": 0}
-                )
-                if exists:
-                    ev_out = _doc_to_out(exists)
-                    ev_out._is_adjournment = exists.get("is_adjournment", False)
-                    ev_out._reminder_seq   = exists.get("reminder_seq", 0)
-                    ev_out._message_id     = mid
-                    await _auto_save_event(user_id, ev_out, prefs)
-                    continue
-
-                extracted = await _extract_events_from_email(
-                    raw["subject"], raw["body"], raw["from_addr"], raw["msg_date"],
-                    dismissed_titles=dismissed_titles,
-                )
-                for ev in extracted:
-                    doc = _build_event_doc(user_id, email_addr, raw, ev)
-                    res = await db[COL_EVENTS].insert_one(doc)
-                    doc["id"] = str(res.inserted_id)
-                    ev_out = _doc_to_out(doc)
-                    _attach_extra_attrs(ev_out, ev, mid)
-                    await _auto_save_event(user_id, ev_out, prefs)
-
-            await db[COL_CONNECTIONS].update_one(
-                {"user_id": user_id, "email_address": email_addr},
-                {"$set": {"last_synced": datetime.now(timezone.utc).isoformat(), "sync_error": None}}
-            )
-        except Exception as e:
-            logger.error(f"Scan error {conn.get('email_address')}: {e}")
-            await db[COL_CONNECTIONS].update_one(
-                {"user_id": user_id, "email_address": conn.get("email_address")},
-                {"$set": {"sync_error": str(e)}}
-            )
-
-def start_scheduled_scan_loop():
-    global _scan_task
-    _scan_task = asyncio.get_event_loop().create_task(_scheduled_scan_loop())
-    logger.info("Scheduled email scan loop registered.")
-
-
-async def create_email_indexes():
-    """
-    Create MongoDB indexes for email integration collections.
-    Call once from app startup (lifespan / on_startup).
-    """
-    try:
-        await db[COL_CONNECTIONS].create_index(
-            [("user_id", 1), ("email_address", 1)], unique=True, background=True
-        )
-        await db[COL_EVENTS].create_index(
-            [("user_id", 1), ("message_id", 1)], unique=True,
-            sparse=True, background=True
-        )
-        await db[COL_EVENTS].create_index(
-            [("user_id", 1), ("tm_app_no", 1)], background=True, sparse=True
-        )
-        await db[COL_EVENTS].create_index(
-            [("user_id", 1), ("date", -1)], background=True
-        )
-        await db["reminders"].create_index(
-            [("user_id", 1), ("tm_app_no", 1)], background=True, sparse=True
-        )
-        await db["reminders"].create_index(
-            [("user_id", 1), ("id", 1)], background=True, sparse=True
-        )
-        await db["todos"].create_index(
-            [("user_id", 1), ("tm_app_no", 1), ("is_completed", 1)],
-            background=True, sparse=True
-        )
-        await db["todos"].create_index(
-            [("user_id", 1), ("id", 1)], background=True, sparse=True
-        )
-        logger.info("Email integration indexes created/verified.")
-    except Exception as e:
-        logger.warning(f"Index creation warning (non-fatal): {e}")
-
-
-# =============================================================================
-# API ROUTES — CONNECTIONS
-# =============================================================================
-
-@router.get("/connections")
-async def list_connections(current_user=Depends(check_module_permission("email_accounts", "view"))):
-    # Issue #9: Staff sees own only; Manager sees own + team members' accounts
-    if current_user.role == "admin":
-        docs = await db[COL_CONNECTIONS].find(
-            {}, {"app_password_enc": 0, "_id": 0}
-        ).to_list(500)
-    elif current_user.role == "manager":
-        team_ids = await get_team_user_ids(current_user.id)
-        visible_ids = [str(current_user.id)] + [str(t) for t in team_ids]
-        docs = await db[COL_CONNECTIONS].find(
-            {"user_id": {"$in": visible_ids}}, {"app_password_enc": 0, "_id": 0}
-        ).to_list(200)
-    else:
-        # Staff: own only (Issue #3)
-        docs = await db[COL_CONNECTIONS].find(
-            {"user_id": str(current_user.id)}, {"app_password_enc": 0, "_id": 0}
-        ).to_list(100)
-    return {"connections": [_conn_doc_to_out(d) for d in docs]}
-
-@router.post("/connections", status_code=201)
-async def add_connection(body: ConnectionCreateRequest, current_user=Depends(check_module_permission("email_accounts", "create"))):
-    try:
-        host, port, provider = _infer_provider(body.email_address)
-        host = body.imap_host or host
-        port = body.imap_port or port
-        err  = await asyncio.get_event_loop().run_in_executor(
-            None, _test_imap_sync, host, port, body.email_address, body.app_password
-        )
-        if err:
-            raise HTTPException(status_code=400, detail=err)
-        clean_email = body.email_address.strip().lower()
-        doc = {
-            "user_id": str(current_user.id), "email_address": clean_email,
-            "app_password_enc": _encrypt(_clean_password(body.app_password)),
-            "imap_host": host, "imap_port": port,
-            "label": body.label or f"{provider.capitalize()} ({clean_email})",
-            "provider": provider, "is_active": True,
-            "connected_at": datetime.now(timezone.utc).isoformat(),
-            "linked_page": body.linked_page or "all",
-            "auto_sync": body.auto_sync or False,
+// =============================================================================
+// SenderSelectorPanel — switch active Brevo sender on the fly
+// =============================================================================
+function SenderSelectorPanel({ isDark }) {
+  const [senders,       setSenders]       = useState([]);
+  const [activeEmail,   setActiveEmail]   = useState("");
+  const [activeName,    setActiveName]    = useState("");
+  const [source,        setSource]        = useState("env");
+  const [loading,       setLoading]       = useState(true);
+  const [switching,     setSwitching]     = useState(false);
+  const [adding,        setAdding]        = useState(false);
+  const [newEmail,      setNewEmail]      = useState("");
+  const [newName,       setNewName]       = useState("");
+  const [showAdd,       setShowAdd]       = useState(false);
+
+  const inputStyle = { backgroundColor: isDark ? D.raised : "#ffffff", borderColor: isDark ? D.border : "#d1d5db", color: isDark ? D.text : "#1e293b" };
+  const inputCls   = "px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all";
+
+  const fetchSenders = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.get("/email/senders/list");
+      setSenders(res.data?.senders || []);
+      const active = await api.get("/email/senders/active");
+      setActiveEmail(active.data?.active_email || "");
+      setActiveName(active.data?.active_name || "");
+      setSource(active.data?.source || "env");
+    } catch { setSenders([]); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchSenders(); }, [fetchSenders]);
+
+  const handleSwitch = async (email, name) => {
+    setSwitching(email);
+    try {
+      await api.post("/email/senders/set-active", { email, name });
+      setActiveEmail(email);
+      setActiveName(name);
+      setSource("db");
+      toast.success(`✓ Now sending from ${email}`);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to switch sender");
+    } finally { setSwitching(false); }
+  };
+
+  const handleAdd = async () => {
+    const em = newEmail.trim().toLowerCase();
+    const nm = newName.trim() || em;
+    if (!em || !em.includes("@")) { toast.error("Enter a valid email address"); return; }
+    setAdding(true);
+    try {
+      await api.post("/email/senders/add", { email: em, name: nm });
+      toast.success(`${em} added to sender list`);
+      setNewEmail(""); setNewName(""); setShowAdd(false);
+      fetchSenders();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to add sender");
+    } finally { setAdding(false); }
+  };
+
+  const handleRemove = async (email) => {
+    if (!window.confirm(`Remove ${email} from sender list?`)) return;
+    try {
+      await api.delete(`/email/senders/${encodeURIComponent(email)}`);
+      toast.success(`${email} removed`);
+      fetchSenders();
+    } catch { toast.error("Failed to remove"); }
+  };
+
+  return (
+    <SectionCard>
+      <CardHeaderRow
+        iconBg={isDark ? "bg-blue-900/40" : "bg-blue-50"}
+        icon={<Send className="w-4 h-4 text-blue-500" />}
+        title="Active Sender Email"
+        subtitle="Switch which Brevo-verified email sends all outgoing emails"
+        action={
+          <button onClick={() => setShowAdd(s => !s)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all"
+            style={{ color: COLORS.mediumBlue, borderColor: COLORS.mediumBlue + "50", backgroundColor: isDark ? COLORS.mediumBlue + "15" : COLORS.mediumBlue + "0a" }}>
+            <Plus className="w-3 h-3" /> Add Sender
+          </button>
         }
-        await db[COL_CONNECTIONS].update_one(
-            {"user_id": str(current_user.id), "email_address": clean_email},
-            {"$set": doc}, upsert=True
-        )
-        return _conn_doc_to_out(doc)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to connect email: {e}")
+      />
 
-@router.patch("/connections/{email_address}")
-async def update_connection(
-    email_address: str, body: ConnectionUpdateRequest, current_user=Depends(check_module_permission("email_accounts", "edit"))
-):
-    # Issue #1: visibility — only own account or manager can touch team accounts
-    query_filter = {"email_address": email_address}
-    if current_user.role != "admin":
-        if current_user.role == "manager":
-            team_ids = await get_team_user_ids(current_user.id)
-            visible_ids = [str(current_user.id)] + [str(t) for t in team_ids]
-            query_filter["user_id"] = {"$in": visible_ids}
-        else:
-            query_filter["user_id"] = str(current_user.id)
-    existing = await db[COL_CONNECTIONS].find_one(query_filter, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Connection not found")
-    updates = {k: v for k, v in body.dict().items() if v is not None or isinstance(v, bool)}
-    if updates.get("is_active"):
-        updates["sync_error"] = None
-    await db[COL_CONNECTIONS].update_one(
-        {"user_id": str(current_user.id), "email_address": email_address}, {"$set": updates}
-    )
-    doc = await db[COL_CONNECTIONS].find_one(
-        {"user_id": str(current_user.id), "email_address": email_address},
-        {"_id": 0, "app_password_enc": 0}
-    )
-    return _conn_doc_to_out(doc)
+      {/* Current active banner */}
+      <div className="mx-4 mt-4 p-3.5 rounded-xl border-2 flex items-center gap-3"
+        style={{ borderColor: COLORS.emeraldGreen, backgroundColor: isDark ? "rgba(31,175,90,0.1)" : "#f0fdf4" }}>
+        <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+          style={{ backgroundColor: isDark ? "rgba(31,175,90,0.2)" : "#dcfce7" }}>
+          <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-500 mb-0.5">Currently Active Sender</p>
+          <p className="text-sm font-bold truncate" style={{ color: isDark ? D.text : "#1e293b" }}>
+            {activeEmail || "Not configured"}
+          </p>
+          {activeName && <p className="text-xs" style={{ color: isDark ? D.muted : "#64748b" }}>{activeName}</p>}
+        </div>
+        <span className="text-[10px] font-bold px-2 py-1 rounded-full flex-shrink-0"
+          style={{ backgroundColor: isDark ? "rgba(31,175,90,0.2)" : "#dcfce7", color: COLORS.emeraldGreen }}>
+          {source === "db" ? "DB Setting" : "Env Var"}
+        </span>
+      </div>
 
-@router.delete("/connections/{email_address}", status_code=204)
-async def delete_connection(email_address: str, current_user=Depends(check_module_permission("email_accounts", "delete"))):
-    # Issue #7 + #9: enforce delete permission + own-only for staff (Issue #3)
-    if current_user.role == "admin":
-        await db[COL_CONNECTIONS].delete_one({"email_address": email_address})
-    else:
-        # Staff & manager can only delete their own connections
-        result = await db[COL_CONNECTIONS].delete_one(
-            {"user_id": str(current_user.id), "email_address": email_address}
-        )
-        if result.deleted_count == 0:
-            raise HTTPException(status_code=404, detail="Connection not found or not owned by you")
+      {/* Add new sender form */}
+      <AnimatePresence>
+        {showAdd && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden">
+            <div className="mx-4 mt-3 p-4 rounded-xl border space-y-3"
+              style={{ borderColor: isDark ? D.border : "#e2e8f0", backgroundColor: isDark ? D.raised : "#f8fafc" }}>
+              <p className="text-xs font-bold" style={{ color: isDark ? D.text : "#374151" }}>
+                Add a Brevo-verified email address
+              </p>
+              <div className="flex gap-2">
+                <input value={newEmail} onChange={e => setNewEmail(e.target.value)}
+                  placeholder="info@yourdomain.com"
+                  onKeyDown={e => e.key === "Enter" && handleAdd()}
+                  className={inputCls + " flex-1"} style={inputStyle} />
+                <input value={newName} onChange={e => setNewName(e.target.value)}
+                  placeholder="Display Name"
+                  onKeyDown={e => e.key === "Enter" && handleAdd()}
+                  className={inputCls + " w-36"} style={inputStyle} />
+                <Button onClick={handleAdd} disabled={adding}
+                  className="h-10 px-4 rounded-xl text-sm font-semibold text-white flex-shrink-0"
+                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                  {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                </Button>
+              </div>
+              <p className="text-[10px]" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+                ⚠️ The email must be verified in your Brevo account (Senders, domains &amp; IPs) before it can be used.
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-@router.post("/connections/{email_address}/test")
-async def test_connection(email_address: str, current_user=Depends(check_module_permission("email_accounts", "view"))):
-    doc = await db[COL_CONNECTIONS].find_one(
-        {"user_id": str(current_user.id), "email_address": email_address}, {"_id": 0}
-    )
-    if not doc:
-        raise HTTPException(status_code=404, detail="Connection not found")
-    err = await asyncio.get_event_loop().run_in_executor(
-        None, _test_imap_sync,
-        doc["imap_host"], doc["imap_port"], email_address, _decrypt(doc["app_password_enc"])
-    )
-    if err:
-        await db[COL_CONNECTIONS].update_one(
-            {"user_id": str(current_user.id), "email_address": email_address},
-            {"$set": {"sync_error": err}}
-        )
-        raise HTTPException(status_code=400, detail=err)
-    await db[COL_CONNECTIONS].update_one(
-        {"user_id": str(current_user.id), "email_address": email_address},
-        {"$set": {"sync_error": None, "last_synced": datetime.now(timezone.utc).isoformat()}}
-    )
-    return {"status": "ok", "message": f"{email_address} connected successfully"}
+      {/* Sender list */}
+      <div className="p-4 space-y-2">
+        {loading ? (
+          <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-blue-400" /></div>
+        ) : senders.length === 0 ? (
+          <div className="py-6 text-center">
+            <Mail className="w-7 h-7 mx-auto mb-2 opacity-20" />
+            <p className="text-xs" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+              No saved senders yet. Add your Brevo-verified emails above.
+            </p>
+          </div>
+        ) : (
+          senders.map(s => {
+            const isActive = s.email === activeEmail;
+            return (
+              <motion.div key={s.email} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                className="flex items-center gap-3 p-3 rounded-xl border transition-all"
+                style={{
+                  borderColor: isActive ? COLORS.emeraldGreen : (isDark ? D.border : "#e2e8f0"),
+                  backgroundColor: isActive
+                    ? (isDark ? "rgba(31,175,90,0.08)" : "#f0fdf4")
+                    : (isDark ? D.raised : "#f8fafc"),
+                }}>
+                {/* Avatar */}
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center font-black text-white flex-shrink-0 text-sm"
+                  style={{ backgroundColor: isActive ? COLORS.emeraldGreen : (isDark ? "#475569" : "#94a3b8") }}>
+                  {s.name?.charAt(0)?.toUpperCase() || s.email?.charAt(0)?.toUpperCase() || "?"}
+                </div>
+
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold truncate" style={{ color: isDark ? D.text : "#1e293b" }}>
+                    {s.name || s.email}
+                  </p>
+                  <p className="text-xs truncate" style={{ color: isDark ? D.muted : "#64748b" }}>{s.email}</p>
+                </div>
+
+                {/* Status / Action */}
+                {isActive ? (
+                  <span className="flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: isDark ? "rgba(31,175,90,0.2)" : "#dcfce7", color: COLORS.emeraldGreen }}>
+                    <CheckCircle2 className="w-3 h-3" /> Active
+                  </span>
+                ) : (
+                  <button
+                    disabled={switching === s.email}
+                    onClick={() => handleSwitch(s.email, s.name || s.email)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all active:scale-95 flex-shrink-0"
+                    style={{ color: COLORS.mediumBlue, borderColor: COLORS.mediumBlue + "50", backgroundColor: isDark ? COLORS.mediumBlue + "15" : COLORS.mediumBlue + "0a" }}>
+                    {switching === s.email
+                      ? <Loader2 className="w-3 h-3 animate-spin" />
+                      : <Zap className="w-3 h-3" />}
+                    Use This
+                  </button>
+                )}
+
+                {/* Remove */}
+                {!isActive && s.source !== "env" && (
+                  <button onClick={() => handleRemove(s.email)}
+                    className="w-7 h-7 flex items-center justify-center rounded-lg transition-all flex-shrink-0"
+                    style={{ color: isDark ? D.muted : "#94a3b8" }}
+                    onMouseEnter={e => { e.currentTarget.style.color = COLORS.red; e.currentTarget.style.backgroundColor = isDark ? "rgba(239,68,68,0.12)" : "#fef2f2"; }}
+                    onMouseLeave={e => { e.currentTarget.style.color = isDark ? D.muted : "#94a3b8"; e.currentTarget.style.backgroundColor = "transparent"; }}>
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </motion.div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Info note */}
+      <div className="mx-4 mb-4 p-3 rounded-xl border flex items-start gap-2"
+        style={{ backgroundColor: isDark ? "rgba(59,130,246,0.08)" : "#eff6ff", borderColor: isDark ? "#1d4ed8" : "#bfdbfe" }}>
+        <Info className="w-3.5 h-3.5 text-blue-400 flex-shrink-0 mt-0.5" />
+        <p className="text-[11px]" style={{ color: isDark ? "#93c5fd" : "#1e40af" }}>
+          Switching sender takes effect immediately for all new emails — no server restart or redeployment needed.
+          The display name shown to recipients can be different from the email address (e.g. "MDA Associates" using info.taskosphere@gmail.com).
+        </p>
+      </div>
+    </SectionCard>
+  );
+}
+
+export default function EmailSettings() {
+  const isDark = useDark();
+
+  const [connections,     setConnections]     = useState([]);
+  const [loading,         setLoading]         = useState(true);
+  const [activeForm,      setActiveForm]      = useState(null);
+  const [showAddOptions,  setShowAddOptions]  = useState(false);
+  const [extractedEvents, setExtractedEvents] = useState([]);
+  const [scanning,        setScanning]        = useState(false);
+  const [clearing,        setClearing]        = useState(false);
+  const [activeTab,       setActiveTab]       = useState("accounts");
+  // Session-level set of saved event keys — prevents duplicates within the session
+  const [savedKeys, setSavedKeys] = useState(() => new Set());
+
+  const loadConnections = useCallback(async () => {
+    try {
+      const res = await api.get("/email/connections");
+      setConnections(res.data?.connections || []);
+    } catch { } finally { setLoading(false); }
+  }, []);
 
 
-# =============================================================================
-# API ROUTES — SENDER WHITELIST
-# =============================================================================
+  useEffect(() => { loadConnections(); }, [loadConnections]);
 
-@router.get("/sender-whitelist")
-async def get_sender_whitelist(current_user=Depends(check_module_permission("email_accounts", "view"))):
-    doc = await db[COL_SENDER_WHITELIST].find_one({"user_id": str(current_user.id)}, {"_id": 0})
-    return {"senders": doc.get("senders", []) if doc else []}
+  const handleDisconnect = async (emailAddress) => {
+    if (!window.confirm(`Disconnect ${emailAddress}? Events already imported will remain.`)) return;
+    try {
+      await api.delete(`/email/connections/${encodeURIComponent(emailAddress)}`);
+      setConnections(prev => prev.filter(c => c.email_address !== emailAddress));
+      toast.success(`${emailAddress} disconnected`);
+    } catch { toast.error("Failed to disconnect"); }
+  };
 
-@router.post("/sender-whitelist")
-async def add_sender_to_whitelist(body: SenderWhitelistEntry, current_user=Depends(check_module_permission("email_accounts", "create"))):
-    clean = body.email_address.strip().lower()
-    if not clean or "@" not in clean:
-        raise HTTPException(status_code=422, detail="Invalid email address or domain.")
-    entry = {"email_address": clean, "label": body.label or clean,
-             "added_at": datetime.now(timezone.utc).isoformat()}
-    existing = await db[COL_SENDER_WHITELIST].find_one({"user_id": str(current_user.id)}, {"_id": 0})
-    if existing:
-        if any(s.get("email_address") == clean for s in existing.get("senders", [])):
-            return {"message": "Sender already in whitelist", "senders": existing.get("senders", [])}
-        await db[COL_SENDER_WHITELIST].update_one(
-            {"user_id": str(current_user.id)}, {"$push": {"senders": entry}}
-        )
-    else:
-        await db[COL_SENDER_WHITELIST].insert_one({"user_id": str(current_user.id), "senders": [entry]})
-    updated = await db[COL_SENDER_WHITELIST].find_one({"user_id": str(current_user.id)}, {"_id": 0})
-    return {"message": "Sender added", "senders": updated.get("senders", [])}
-
-@router.delete("/sender-whitelist/{email_address}")
-async def remove_sender_from_whitelist(email_address: str, current_user=Depends(check_module_permission("email_accounts", "delete"))):
-    await db[COL_SENDER_WHITELIST].update_one(
-        {"user_id": str(current_user.id)},
-        {"$pull": {"senders": {"email_address": email_address.lower()}}}
-    )
-    updated = await db[COL_SENDER_WHITELIST].find_one({"user_id": str(current_user.id)}, {"_id": 0})
-    return {"message": "Sender removed", "senders": (updated or {}).get("senders", [])}
-
-@router.put("/sender-whitelist")
-async def replace_sender_whitelist(body: SenderWhitelistOut, current_user=Depends(check_module_permission("email_accounts", "create"))):
-    senders = [
-        {"email_address": s.get("email_address","").strip().lower(),
-         "label": s.get("label", s.get("email_address","")),
-         "added_at": datetime.now(timezone.utc).isoformat()}
-        for s in body.senders if s.get("email_address","").strip()
-    ]
-    await db[COL_SENDER_WHITELIST].update_one(
-        {"user_id": str(current_user.id)},
-        {"$set": {"senders": senders, "user_id": str(current_user.id)}}, upsert=True
-    )
-    return {"message": "Whitelist updated", "senders": senders}
-
-
-# =============================================================================
-# API ROUTES — AUTO-SAVE PREFERENCES
-# =============================================================================
-
-@router.get("/auto-save-prefs", response_model=AutoSavePrefOut)
-async def get_auto_save_prefs(current_user=Depends(check_module_permission("email_accounts", "view"))):
-    doc = await db[COL_AUTO_PREFS].find_one({"user_id": str(current_user.id)}, {"_id": 0})
-    if not doc:
-        return AutoSavePrefOut(
-            auto_save_reminders=False, auto_save_visits=False, auto_save_todos=False,
-            scan_time_hour=12, scan_time_minute=0, next_scan_at=None
-        )
-    now_ist   = datetime.now(IST)
-    next_scan = now_ist.replace(hour=doc.get("scan_time_hour",12),
-                                minute=doc.get("scan_time_minute",0), second=0, microsecond=0)
-    if next_scan <= now_ist:
-        next_scan += timedelta(days=1)
-    return AutoSavePrefOut(
-        auto_save_reminders=doc.get("auto_save_reminders", False),
-        auto_save_visits=doc.get("auto_save_visits", False),
-        auto_save_todos=doc.get("auto_save_todos", False),
-        scan_time_hour=doc.get("scan_time_hour", 12),
-        scan_time_minute=doc.get("scan_time_minute", 0),
-        next_scan_at=next_scan.isoformat()
-    )
-
-@router.post("/auto-save-prefs", response_model=AutoSavePrefOut)
-async def set_auto_save_prefs(body: AutoSavePrefRequest, current_user=Depends(check_module_permission("email_accounts", "create"))):
-    doc = {
-        "user_id": str(current_user.id),
-        "auto_save_reminders": body.auto_save_reminders,
-        "auto_save_visits": body.auto_save_visits,
-        "auto_save_todos": body.auto_save_todos,
-        "scan_time_hour": max(0, min(23, body.scan_time_hour)),
-        "scan_time_minute": max(0, min(59, body.scan_time_minute)),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+  const handleTest = async (emailAddress) => {
+    try {
+      await api.post(`/email/connections/${encodeURIComponent(emailAddress)}/test`);
+      toast.success(`✓ ${emailAddress} is working`);
+      loadConnections();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Connection test failed");
+      loadConnections();
     }
-    await db[COL_AUTO_PREFS].update_one(
-        {"user_id": str(current_user.id)}, {"$set": doc}, upsert=True
-    )
-    return await get_auto_save_prefs(current_user)
+  };
 
-@router.get("/auto-save-prefs/exists")
-async def check_prefs_exist(current_user=Depends(check_module_permission("email_accounts", "view"))):
-    doc = await db[COL_AUTO_PREFS].find_one(
-        {"user_id": str(current_user.id)}, {"_id": 0, "user_id": 1}
-    )
-    return {"has_set_prefs": doc is not None}
+  const handleToggle = async (emailAddress, isActive) => {
+    try {
+      await api.patch(`/email/connections/${encodeURIComponent(emailAddress)}`, { is_active: isActive });
+      setConnections(prev => prev.map(c => c.email_address === emailAddress ? { ...c, is_active: isActive } : c));
+      toast.success(isActive ? "Account resumed" : "Account paused");
+    } catch { toast.error("Failed to update"); }
+  };
 
+  // handleSync — uses last_synced as the base date so only new emails since
+  // last sync are fetched. Shows events in preview panel, no auto-save.
+  const handleSync = useCallback(async (emailAddress, lastSynced) => {
+    try {
+      const sinceParam = lastSynced ? `&since_date=${encodeURIComponent(lastSynced)}` : "";
+      const emailParam = `&email=${encodeURIComponent(emailAddress)}`;
+      const res = await api.get(
+        `/email/extract-events?force_refresh=true&limit=50${sinceParam}${emailParam}`,
+        { timeout: 60000 }
+      );
+      const raw    = (res.data || []).filter(e => !e.email_account || e.email_account === emailAddress);
+      const deduped = raw.filter(e => !savedKeys.has(eventKey(e)));
 
-# =============================================================================
-# API ROUTES — MANUAL SAVE
-# =============================================================================
+      if (deduped.length === 0) {
+        toast.success("Sync complete — no new legal events found since last sync");
+        loadConnections();
+        return;
+      }
 
-@router.post("/save-as-reminder", status_code=201)
-async def save_as_reminder(body: ManualSaveReminderRequest, current_user=Depends(check_module_permission("email_accounts", "create"))):
-    try:
-        try:
-            remind_dt = datetime.fromisoformat(body.remind_at.replace("Z", "+00:00"))
-        except Exception:
-            remind_dt = datetime.now(IST) + timedelta(days=1)
+      // Merge into panel, avoiding duplicate keys
+      setExtractedEvents(prev => {
+        const existingKeys = new Set(prev.map(eventKey));
+        const newOnes      = deduped.filter(e => !existingKeys.has(eventKey(e)));
+        return [...prev, ...newOnes];
+      });
 
-        incoming_event_id = (body.event_id or "").strip() or None
-        # Synthetic id for purely-manual reminders (no source email/event) —
-        # keeps every reminder row keyed so later dedup/lookups stay consistent.
-        event_id = incoming_event_id or f"manual-{_uuid.uuid4()}"
+      const futureCount = deduped.filter(e => !isEventPast(e)).length;
+      const pastCount   = deduped.filter(e => isEventPast(e)).length;
+      toast.success(`✓ Synced — ${futureCount} new future event${futureCount !== 1 ? "s" : ""}${pastCount > 0 ? ` · ${pastCount} past (filtered)` : ""}`);
+      loadConnections();
+    } catch (err) { toast.error(err?.response?.data?.detail || "Sync failed"); }
+  }, [savedKeys, loadConnections]);
 
-        # Duplicate guard. When the reminder originates from a known event
-        # (Action Center / email auto-save), match on that event_id — it's a
-        # far stronger key than title, since two different hearings can share
-        # a generic title like "Hearing Notice". Purely manual reminders
-        # (no event_id supplied) fall back to a title match, same as before.
-        dup_query = {"user_id": str(current_user.id)}
-        if incoming_event_id:
-            dup_query["event_id"] = incoming_event_id
-        else:
-            dup_query["title"] = body.title
-        existing = await db["reminders"].find_one(dup_query, {"_id": 0, "id": 1})
-        if existing:
-            return {"status": "already_exists", "id": existing.get("id", "")}
+  // handleSyncRetro — retrospective sync: re-scans further back than the
+  // normal rolling window (e.g. last 90 days / 1 year / all time), ignoring
+  // last_synced entirely. Safe to run repeatedly — the backend skips any
+  // email it has already seen (matched by Message-ID) and every save action
+  // is itself deduplicated, so nothing gets added twice.
+  const handleSyncRetro = useCallback(async (emailAddress, daysBack, label) => {
+    try {
+      toast.info(`Scanning ${label || `last ${daysBack} days`} of mail for ${emailAddress}…`, { duration: 4000 });
+      const sinceDate = daysBack
+        ? new Date(Date.now() - daysBack * 86400000).toISOString().slice(0, 10)
+        : "1970-01-01"; // "All time"
+      const res = await api.get(
+        `/email/extract-events?force_refresh=true&limit=300&since_date=${sinceDate}&email=${encodeURIComponent(emailAddress)}`,
+        { timeout: 120000 }
+      );
+      const raw     = (res.data || []).filter(e => !e.email_account || e.email_account === emailAddress);
+      const deduped = raw.filter(e => !savedKeys.has(eventKey(e)));
 
-        nid = str(_uuid.uuid4())
-        doc = {
-            "id": nid, "user_id": str(current_user.id), "title": body.title,
-            "description": _clean_text(body.description or "", 500),
-            "remind_at": remind_dt.isoformat(), "is_dismissed": False,
-            "source": "email_manual", "event_id": event_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        # Optional Trademark Hearing outcome fields — stored only if sent,
-        # so creating a hearing reminder no longer silently drops them.
-        if body.brand_name is not None:
-            doc["brand_name"] = body.brand_name
-        if body.hearing_attended is not None:
-            doc["hearing_attended"] = body.hearing_attended
-        if body.hearing_decision is not None:
-            doc["hearing_decision"] = body.hearing_decision
-        if body.hearing_adjourned is not None:
-            doc["hearing_adjourned"] = body.hearing_adjourned
-        if body.hearing_notes is not None:
-            doc["hearing_notes"] = body.hearing_notes
+      setExtractedEvents(prev => {
+        const existingKeys = new Set(prev.map(eventKey));
+        const newOnes      = deduped.filter(e => !existingKeys.has(eventKey(e)));
+        return [...prev, ...newOnes];
+      });
 
-        await db["reminders"].insert_one(doc)
-        return {"status": "created", "id": nid}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save reminder: {e}")
-
-@router.post("/save-as-visit", status_code=201)
-async def save_as_visit(body: ManualSaveVisitRequest, current_user=Depends(check_module_permission("email_accounts", "create"))):
-    try:
-        existing = await db["visits"].find_one(
-            {"user_id": str(current_user.id), "title": body.title, "visit_date": body.visit_date},
-            {"_id": 0, "id": 1}
-        )
-        if existing:
-            return {"status": "already_exists", "id": existing.get("id", "")}
-        nid = str(_uuid.uuid4())
-        await db["visits"].insert_one({
-            "id": nid, "user_id": str(current_user.id), "title": body.title,
-            "visit_date": body.visit_date, "notes": _clean_text(body.notes or "", 500),
-            "status": "scheduled", "source": "email_manual", "event_id": body.event_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
-        return {"status": "created", "id": nid}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save visit: {e}")
-
-@router.post("/save-as-todo", status_code=201)
-async def save_as_todo(body: ManualSaveReminderRequest, current_user=Depends(check_module_permission("email_accounts", "create"))):
-    try:
-        existing = await db["todos"].find_one(
-            {"user_id": str(current_user.id), "title": body.title}, {"_id": 0, "id": 1}
-        )
-        if existing:
-            return {"status": "already_exists", "id": existing.get("id", "")}
-        nid = str(_uuid.uuid4())
-        await db["todos"].insert_one({
-            "id": nid, "user_id": str(current_user.id), "title": body.title,
-            "description": _clean_text(body.description or "", 500),
-            "is_completed": False, "due_date": body.remind_at[:10] if body.remind_at else None,
-            "source": "email_manual", "event_id": body.event_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        })
-        return {"status": "created", "id": nid}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save todo: {e}")
-
-
-# =============================================================================
-# API ROUTES — REMINDERS (GET / PATCH / DELETE)
-# =============================================================================
-# These routes use _reminder_to_dict to always include a resolved string "id".
-# This is the primary fix for "Cannot delete: reminder ID is missing".
-# =============================================================================
-
-@router.get("/reminders")
-async def get_reminders(
-    current_user=Depends(check_module_permission("email_accounts", "view")),
-    user_id: Optional[str] = Query(None),
-):
-    """
-    Return all non-dismissed reminders for the current user (or a specific
-    user_id if the caller has admin rights).
-    Every returned doc is guaranteed to have a non-empty string "id" field
-    thanks to _reminder_to_dict's fallback to str(_id).
-    """
-    target_uid = user_id if user_id else str(current_user.id)
-    docs = await db["reminders"].find(
-        {"user_id": target_uid}
-    ).sort("remind_at", 1).to_list(500)
-    return [_reminder_to_dict(d) for d in docs]
-
-
-@router.patch("/reminders/{reminder_id}")
-async def update_reminder(
-    reminder_id: str,
-    body: dict,
-    current_user=Depends(check_module_permission("email_accounts", "create")),
-):
-    """
-    Update a reminder by its string id (UUID) or MongoDB ObjectId string.
-    Tries string "id" field first, then falls back to ObjectId "_id" match.
-    """
-    user_id = str(current_user.id)
-
-    # Try string id field first (v9 docs)
-    doc = await db["reminders"].find_one(
-        {"user_id": user_id, "id": reminder_id}, {"_id": 1}
-    )
-
-    # Fallback: try ObjectId match (pre-v9 docs where id == str(_id))
-    if not doc:
-        try:
-            doc = await db["reminders"].find_one(
-                {"user_id": user_id, "_id": ObjectId(reminder_id)}, {"_id": 1}
-            )
-        except Exception:
-            pass
-
-    if not doc:
-        raise HTTPException(status_code=404, detail="Reminder not found")
-
-    allowed_fields = {
-        "title", "description", "remind_at", "is_dismissed",
-        "urgency", "tm_app_no", "updated_at",
-        # Trademark Hearing outcome fields — previously dropped on edit.
-        "brand_name", "hearing_attended", "hearing_decision",
-        "hearing_adjourned", "hearing_notes",
+      toast.success(
+        raw.length === 0
+          ? `No legal events found in ${emailAddress}'s history for that range`
+          : `✓ Retrospective sync complete — ${raw.length} event${raw.length !== 1 ? "s" : ""} found (duplicates auto-skipped)`
+      );
+      loadConnections();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Retrospective sync failed");
     }
-    updates = {k: v for k, v in body.items() if k in allowed_fields}
-    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+  }, [savedKeys, loadConnections]);
 
-    await db["reminders"].update_one({"_id": doc["_id"]}, {"$set": updates})
+  // handleScanAll — scans all accounts; each account's last_synced is the
+  // natural base date on the backend. Shows everything in preview panel.
+  const handleScanAll = async () => {
+    if (connections.length === 0) { toast.error("No email accounts connected"); return; }
+    setScanning(true);
+    try {
+      const res    = await api.get("/email/extract-events?force_refresh=true&limit=100", { timeout: 90000 });
+      const raw    = res.data || [];
+      const deduped = raw.filter(e => !savedKeys.has(eventKey(e)));
 
-    updated = await db["reminders"].find_one({"_id": doc["_id"]}, {"_id": 0})
-    return _reminder_to_dict({**updated, "_id": doc["_id"]})
+      if (raw.length === 0) {
+        toast.success("All emails scanned — no legal events found");
+        return;
+      }
 
+      // Merge avoiding duplicate keys
+      setExtractedEvents(prev => {
+        const existingKeys = new Set(prev.map(eventKey));
+        const newOnes      = deduped.filter(e => !existingKeys.has(eventKey(e)));
+        return [...prev, ...newOnes];
+      });
 
-@router.delete("/reminders/{reminder_id}", status_code=204)
-async def delete_reminder(
-    reminder_id: str,
-    current_user=Depends(check_module_permission("email_accounts", "delete")),
-):
-    """
-    Delete a reminder by its string id (UUID) or MongoDB ObjectId string.
-    Tries string "id" field first, then falls back to ObjectId "_id" match.
-    Returns 204 whether found or not (idempotent).
-    """
-    user_id = str(current_user.id)
+      const futureCount = deduped.filter(e => !isEventPast(e)).length;
+      const pastCount   = deduped.filter(e => isEventPast(e)).length;
+      toast.success(
+        `✓ ${raw.length} event${raw.length !== 1 ? "s" : ""} found · ${futureCount} future (review in preview)${pastCount > 0 ? ` · ${pastCount} past (filtered)` : ""}`
+      );
+    } catch (err) {
+      if (err.code === "ECONNABORTED" || err.message?.includes("timeout"))
+        toast.error("Scan taking too long. Try syncing accounts individually.");
+      else
+        toast.error(err?.response?.data?.detail || "Scan failed");
+    } finally { setScanning(false); }
+  };
 
-    # Try string id field first (v9 docs and migrated docs)
-    result = await db["reminders"].delete_one(
-        {"user_id": user_id, "id": reminder_id}
-    )
+  const handleClearAll = async () => {
+    if (!window.confirm("Clear all extracted events cache? Forces a completely fresh scan.\nNote: Already-saved reminders, todos, and visits will NOT be deleted.")) return;
+    setClearing(true);
+    try {
+      await api.delete("/email/events/clear-all");
+      setExtractedEvents([]);
+      setSavedKeys(new Set()); // also reset session keys when cache cleared
+      toast.success("Cache cleared. Run a fresh scan anytime.");
+    } catch { toast.error("Failed to clear cache"); }
+    finally { setClearing(false); }
+  };
 
-    if result.deleted_count == 0:
-        # Fallback: try ObjectId match for pre-v9 docs
-        try:
-            await db["reminders"].delete_one(
-                {"user_id": user_id, "_id": ObjectId(reminder_id)}
-            )
-        except Exception:
-            pass  # Invalid ObjectId format — silently ignore, return 204 anyway
+  const handleConnectSuccess = () => {
+    setActiveForm(null); setShowAddOptions(false); loadConnections();
+  };
 
+  const handleUpdateSettings = useCallback((emailAddress, updates) => {
+    setConnections(prev => prev.map(c => c.email_address === emailAddress ? { ...c, ...updates } : c));
+  }, []);
 
-# =============================================================================
-# API ROUTES — EVENT EXTRACTION ENGINE
-# =============================================================================
+  // Called by ScanPreviewPanel after successful saves — add keys to session set
+  const handleEventsSaved = useCallback((newKeys) => {
+    setSavedKeys(prev => {
+      const next = new Set(prev);
+      newKeys.forEach(k => next.add(k));
+      return next;
+    });
+  }, []);
 
-@router.get("/extract-events", response_model=List[ExtractedEventOut])
-async def extract_events(
-    current_user=Depends(check_module_permission("email_accounts", "view")),
-    limit: int = Query(30),
-    force_refresh: bool = Query(False),
-    since_date: Optional[str] = Query(
-        None,
-        description="YYYY-MM-DD. Re-scans mail received on/after this date instead "
-                    "of just the recent rolling window — used for retrospective sync "
-                    "of older mail. Safe to repeat: duplicates are skipped via Message-ID.",
-    ),
-    email: Optional[str] = Query(
-        None, description="Restrict the sync to a single connected email account."
-    ),
-):
-    conns = await db[COL_CONNECTIONS].find(
-        {"user_id": str(current_user.id), "is_active": True}, {"_id": 0}
-    ).to_list(50)
-    if email:
-        conns = [c for c in conns if c["email_address"] == email]
-    if not conns:
-        return []
+  const activeProvider   = QUICK_PROVIDERS.find(p => p.id === activeForm);
+  const futureEventCount = extractedEvents.filter(e => !isEventPast(e) && !savedKeys.has(eventKey(e))).length;
 
-    # Convert "YYYY-MM-DD" → IMAP's "dd-Mon-yyyy" SINCE format.
-    imap_since = None
-    if since_date:
-        try:
-            imap_since = datetime.fromisoformat(since_date[:10]).strftime("%d-%b-%Y")
-        except Exception:
-            imap_since = None
+  const TAB_CONFIG = [
+    { id: "accounts",  label: "Accounts",      icon: Mail      },
+    { id: "whitelist", label: "Whitelist",     icon: Filter    },
+    { id: "rules",     label: "Smart Rules",   icon: Tag       },
+    { id: "compose",   label: "Compose & Send", icon: Send    },
+    { id: "templates", label: "Templates",     icon: FileText  },
+    { id: "sender",    label: "Sender",        icon: Send      },
+  ];
 
-    prefs_doc = await db[COL_AUTO_PREFS].find_one(
-        {"user_id": str(current_user.id)}, {"_id": 0}
-    ) or {}
-    wl_doc = await db[COL_SENDER_WHITELIST].find_one({"user_id": str(current_user.id)}, {"_id": 0})
-    sender_whitelist: List[str] = (
-        [s.get("email_address","") for s in wl_doc.get("senders",[]) if s.get("email_address")]
-        if wl_doc else []
-    )
-    dismissed_titles = await _get_dismissed_titles(str(current_user.id))
+  return (
+    <TooltipProvider>
 
-    async def process_account(conn):
-        email_addr = conn["email_address"]
+      <motion.div className="min-h-screen p-5 md:p-6 lg:p-8 space-y-5"
+        style={{ background: isDark ? D.bg : "#f8fafc" }}
+        variants={containerVariants} initial="hidden" animate="visible">
 
-        # The 30-minute result cache only applies to the normal rolling-window
-        # scan. A retrospective sync (since_date) always hits the mailbox.
-        if not force_refresh and not imap_since and conn.get("last_synced"):
-            try:
-                last = datetime.fromisoformat(conn["last_synced"])
-                if (datetime.now(timezone.utc) - last).total_seconds() < 1800:
-                    cached = await db[COL_EVENTS].find(
-                        {"user_id": str(current_user.id), "email_account": email_addr},
-                        {"_id": 0}
-                    ).sort("created_at", -1).limit(limit).to_list(limit)
-                    return [_doc_to_out(d) for d in cached]
-            except Exception:
-                pass
+        {/* ══ PAGE HEADER ══ */}
+        <motion.div variants={itemVariants}>
+          <div className="relative overflow-hidden rounded-2xl px-6 py-5"
+            style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`, boxShadow: "0 8px 32px rgba(13,59,102,0.25)" }}>
+            <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
+              style={{ background: "radial-gradient(circle, white 0%, transparent 70%)" }} />
+            <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <p className="text-white/60 text-xs font-medium uppercase tracking-widest mb-1">Integrations</p>
+                <h1 className="text-2xl font-bold text-white tracking-tight">Email Integration</h1>
+                <p className="text-white/60 text-sm mt-1">
+                  Connect accounts · preview before saving · past dates filtered · no duplicates
+                </p>
+              </div>
+              <div className="flex gap-2 flex-wrap items-center">
+                {connections.length > 0 && (
+                  <>
+                    <button onClick={handleClearAll} disabled={clearing}
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold border transition-all active:scale-95"
+                      style={{ backgroundColor: "rgba(255,255,255,0.12)", borderColor: "rgba(255,255,255,0.22)", color: "#ffffff" }}>
+                      {clearing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eraser className="w-3.5 h-3.5" />} Reset Cache
+                    </button>
+                    <button onClick={handleScanAll} disabled={scanning}
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold border transition-all active:scale-95"
+                      style={{ backgroundColor: "rgba(255,255,255,0.15)", borderColor: "rgba(255,255,255,0.25)", color: "#ffffff" }}>
+                      {scanning ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Scanning…</> : <><RefreshCw className="w-3.5 h-3.5" />Scan All</>}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </motion.div>
 
-        loop       = asyncio.get_event_loop()
-        # No 50-message cap for a date-bounded retrospective scan — the SINCE
-        # filter already bounds the result set. Otherwise keep the normal cap.
-        fetch_cap  = 0 if imap_since else 50
-        raw_emails = await loop.run_in_executor(
-            None, _scan_mailbox_sync,
-            conn["imap_host"], conn["imap_port"], email_addr,
-            _decrypt(conn["app_password_enc"]), fetch_cap, sender_whitelist or None,
-            imap_since,
-        )
-        acc = []
-        for raw in raw_emails:
-            mid    = raw.get("message_id")
-            exists = await db[COL_EVENTS].find_one(
-                {"user_id": str(current_user.id), "message_id": mid}, {"_id": 0}
-            )
-            if exists:
-                ev_out = _doc_to_out(exists)
-                ev_out._is_adjournment = exists.get("is_adjournment", False)
-                ev_out._reminder_seq   = exists.get("reminder_seq", 0)
-                ev_out._message_id     = mid
-                acc.append(ev_out)
-                if prefs_doc:
-                    await _auto_save_event(str(current_user.id), ev_out, prefs_doc)
-                continue
+        {/* ══ STAT CARDS ══ */}
+        <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-3" variants={itemVariants}>
+          <StatCard icon={Mail}     label="Connected"  value={connections.length}              unit="accounts"     color={COLORS.deepBlue}     trend={connections.length > 0 ? "IMAP active" : "Add an account"} />
+          <StatCard icon={Eye}      label="In Preview" value={extractedEvents.length}          unit="events found" color={COLORS.purple}       trend={`${futureEventCount} future · ready to save`} />
+          <StatCard icon={Filter}   label="Whitelist"  value={0}                               unit="senders"      color={COLORS.emeraldGreen} trend="Manage in Whitelist tab" />
+        </motion.div>
 
-            extracted = await _extract_events_from_email(
-                raw["subject"], raw["body"], raw["from_addr"], raw["msg_date"],
-                dismissed_titles=dismissed_titles,
-            )
-            for ev in extracted:
-                doc = _build_event_doc(str(current_user.id), email_addr, raw, ev)
-                res = await db[COL_EVENTS].insert_one(doc)
-                doc["id"] = str(res.inserted_id)
-                ev_out = _doc_to_out(doc)
-                _attach_extra_attrs(ev_out, ev, mid)
-                acc.append(ev_out)
-                if prefs_doc:
-                    await _auto_save_event(str(current_user.id), ev_out, prefs_doc)
+        {/* ══ TAB BAR ══ */}
+        <motion.div variants={itemVariants}>
+          <div className="flex items-center gap-1 p-1 rounded-2xl border"
+            style={{ backgroundColor: isDark ? D.card : "#ffffff", borderColor: isDark ? D.border : "#e2e8f0" }}>
+            {TAB_CONFIG.map(tab => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all"
+                style={activeTab === tab.id
+                  ? { backgroundColor: isDark ? D.raised : "#f1f5f9", color: isDark ? D.text : "#1e293b", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }
+                  : { color: isDark ? D.muted : "#64748b" }}>
+                <tab.icon className="w-4 h-4" />
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </motion.div>
 
-        await db[COL_CONNECTIONS].update_one(
-            {"user_id": str(current_user.id), "email_address": email_addr},
-            {"$set": {"last_synced": datetime.now(timezone.utc).isoformat(), "sync_error": None}}
-        )
-        return acc
+        {/* ══ ACCOUNTS TAB ══ */}
+        {activeTab === "accounts" && (
+          <div className="space-y-4">
+            <motion.div variants={itemVariants}>
+              <div className="px-4 py-3.5 rounded-2xl border flex items-start gap-3"
+                style={{ backgroundColor: isDark ? "rgba(59,130,246,0.08)" : "#eff6ff", borderColor: isDark ? "#1d4ed8" : "#bfdbfe" }}>
+                <Info className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
+                <div className="text-xs" style={{ color: isDark ? "#93c5fd" : "#1e40af" }}>
+                  <span className="font-bold">Preview-first workflow. </span>
+                  After scanning, events appear in a <strong>preview panel</strong> where you choose which to save.
+                  Only <strong>future-dated</strong> events are selectable. Past-dated and already-saved items are automatically filtered.
+                  Each account's Sync button only fetches emails received <strong>after its last sync date</strong>.
 
-    completed = await asyncio.gather(*[process_account(c) for c in conns], return_exceptions=True)
-    final: List[ExtractedEventOut] = []
-    for res in completed:
-        if isinstance(res, list):
-            final.extend(res)
-        elif isinstance(res, Exception):
-            logger.error(f"process_account error: {res}")
+                </div>
+              </div>
+            </motion.div>
 
-    final.sort(key=lambda e: e.date or "0000-00-00", reverse=True)
-    return final[:limit]
+            {loading ? (
+              <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-blue-500" /></div>
+            ) : connections.length === 0 && !showAddOptions && !activeForm ? (
+              <motion.div variants={itemVariants}>
+                <SectionCard>
+                  <div className="py-14 text-center space-y-4">
+                    <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto"
+                      style={{ backgroundColor: isDark ? D.raised : "#f1f5f9" }}>
+                      <Mail className="w-8 h-8" style={{ color: isDark ? D.muted : "#94a3b8" }} />
+                    </div>
+                    <div>
+                      <p className="font-semibold" style={{ color: isDark ? D.text : "#374151" }}>No email accounts connected yet</p>
+                      <p className="text-sm mt-1" style={{ color: isDark ? D.muted : "#94a3b8" }}>Connect Gmail, Outlook, Yahoo or any IMAP email</p>
+                    </div>
+                    <button onClick={() => setShowAddOptions(true)}
+                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white active:scale-95 transition-all"
+                      style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                      <Plus className="w-4 h-4" /> Connect Your First Account
+                    </button>
+                  </div>
+                </SectionCard>
+              </motion.div>
+            ) : (
+              <AnimatePresence>
+                {connections.map(conn => (
+                  <ConnectedAccountCard key={conn.email_address} conn={conn} isDark={isDark}
+                    onDisconnect={handleDisconnect} onTest={handleTest} onToggle={handleToggle}
+                    onSync={handleSync} onSyncRetro={handleSyncRetro} onUpdateSettings={handleUpdateSettings} />
+                ))}
+              </AnimatePresence>
+            )}
 
+            {connections.length > 0 && !showAddOptions && !activeForm && (
+              <motion.div variants={itemVariants}>
+                <button onClick={() => { setShowAddOptions(true); setActiveForm(null); }}
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border-2 border-dashed text-sm font-semibold transition-all"
+                  style={{ borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.muted : "#64748b" }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = COLORS.mediumBlue; e.currentTarget.style.color = COLORS.mediumBlue; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = isDark ? D.border : "#e2e8f0"; e.currentTarget.style.color = isDark ? D.muted : "#64748b"; }}>
+                  <Plus className="w-4 h-4" /> Add Another Account
+                </button>
+              </motion.div>
+            )}
 
-# NOTE: /events/clear-all MUST be defined before /events/{event_id}
-# otherwise FastAPI matches "clear-all" as an event_id and tries ObjectId("clear-all")
-@router.delete("/events/clear-all", status_code=204)
-async def clear_all_events(current_user=Depends(check_module_permission("email_accounts", "delete"))):
-    """Clear all cached extracted events — forces fresh scan next time.
-    Does NOT delete reminders, visits, or todos already saved."""
-    await db[COL_EVENTS].delete_many({"user_id": str(current_user.id)})
+            <AnimatePresence>
+              {(showAddOptions || connections.length === 0) && !activeForm && (
+                <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+                  <SectionCard>
+                    <CardHeaderRow
+                      iconBg={isDark ? "bg-blue-900/40" : "bg-blue-50"}
+                      icon={<Mail className="w-4 h-4 text-blue-500" />}
+                      title={connections.length === 0 ? "Choose your email provider" : "Add another account"}
+                      subtitle="Select the provider that matches your email"
+                      action={showAddOptions && connections.length > 0 && (
+                        <button onClick={() => setShowAddOptions(false)}
+                          className="w-7 h-7 flex items-center justify-center rounded-xl transition-all"
+                          style={{ color: isDark ? D.muted : "#94a3b8" }}>
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    />
+                    <div className="p-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
+                      {QUICK_PROVIDERS.map(prov => (
+                        <button key={prov.id} onClick={() => { setActiveForm(prov.id); setShowAddOptions(false); }}
+                          className="flex flex-col items-center gap-2.5 p-4 rounded-xl border-2 border-transparent transition-all active:scale-95"
+                          style={{ backgroundColor: isDark ? prov.color + "15" : prov.color + "08" }}
+                          onMouseEnter={e => e.currentTarget.style.borderColor = prov.color + "60"}
+                          onMouseLeave={e => e.currentTarget.style.borderColor = "transparent"}>
+                          <div className="w-12 h-12 rounded-xl flex items-center justify-center text-lg font-black text-white"
+                            style={{ backgroundColor: prov.color }}>{prov.icon}</div>
+                          <span className="text-xs font-semibold text-center leading-tight"
+                            style={{ color: isDark ? D.text : "#374151" }}>{prov.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </SectionCard>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-@router.delete("/events/{event_id}", status_code=204)
-async def delete_event(event_id: str, current_user=Depends(check_module_permission("email_accounts", "delete"))):
-    """Delete a single cached extraction record. Does NOT cascade to reminders/visits/todos."""
-    try:
-        await db[COL_EVENTS].delete_one(
-            {"_id": ObjectId(event_id), "user_id": str(current_user.id)}
-        )
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid event id: {e}")
+            <AnimatePresence>
+              {activeForm && activeProvider && (
+                <ConnectForm key={activeForm} provider={activeProvider} isDark={isDark}
+                  onSuccess={handleConnectSuccess}
+                  onCancel={() => { setActiveForm(null); if (connections.length === 0) setShowAddOptions(true); }} />
+              )}
+            </AnimatePresence>
 
-@router.get("/importer/events", response_model=List[ExtractedEventOut])
-async def importer_events(
-    current_user=Depends(check_module_permission("email_accounts", "view")),
-    limit: int = Query(30),
-    force_refresh: bool = Query(False)
-):
-    count = await db[COL_EVENTS].count_documents({"user_id": str(current_user.id)})
-    if count == 0 or force_refresh:
-        return await extract_events(current_user, limit, force_refresh)
-    docs = await db[COL_EVENTS].find(
-        {"user_id": str(current_user.id)}, {"_id": 0}
-    ).sort("date", -1).limit(limit).to_list(limit)
-    return [_doc_to_out(d) for d in docs]
+            {/* ══ SCAN PREVIEW PANEL — shown after any Sync / Scan All ══ */}
+            <AnimatePresence>
+              {extractedEvents.length > 0 && (
+                <ScanPreviewPanel
+                  events={extractedEvents}
+                  savedKeys={savedKeys}
+                  onSaved={handleEventsSaved}
+                  onDismiss={() => setExtractedEvents([])}
+                  isDark={isDark}
+                />
+              )}
+            </AnimatePresence>
+          </div>
+        )}
 
+        {/* ══ WHITELIST TAB ══ */}
+        {activeTab === "whitelist" && (
+          <motion.div variants={itemVariants} className="space-y-4">
+            <div className="px-4 py-3.5 rounded-2xl border flex items-start gap-3"
+              style={{ backgroundColor: isDark ? "rgba(245,158,11,0.08)" : "#fffbeb", borderColor: isDark ? "#92400e" : "#fde68a" }}>
+              <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: COLORS.amber }} />
+              <div className="text-xs" style={{ color: isDark ? "#fbbf24" : "#92400e" }}>
+                <p className="font-bold mb-0.5">What is the Sender Whitelist?</p>
+                <p>By default, all emails from all senders are scanned. Once you add any sender here, <strong>ONLY emails from those approved senders</strong> will be processed.</p>
+                <p className="mt-1.5 font-semibold">Recommended for CA/CS firms: add IP India, GST Portal, Income Tax, MCA, and your client domains.</p>
+              </div>
+            </div>
+            <SenderWhitelistManager isDark={isDark} />
+          </motion.div>
+        )}
 
-# =============================================================================
-# API ROUTES — UTILITY / ADMIN
-# =============================================================================
+        {/* ══ SMART RULES TAB ══ */}
+        {activeTab === "rules" && (
+          <motion.div variants={itemVariants} className="space-y-4">
+            <div className="px-4 py-3.5 rounded-2xl border flex items-start gap-3"
+              style={{ backgroundColor: isDark ? D.raised : "#f8fafc", borderColor: isDark ? D.border : "#e2e8f0" }}>
+              <Info className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" />
+              <div className="text-xs" style={{ color: isDark ? D.muted : "#64748b" }}>
+                <p className="font-bold mb-0.5" style={{ color: isDark ? D.text : "#374151" }}>How Smart Categorization Works</p>
+                <p>When an email is scanned, Taskosphere uses AI + keyword rules to decide the category. A preview panel is shown before saving — you can override the category and select/deselect freely.</p>
+              </div>
+            </div>
+            <CategoryRulesPanel isDark={isDark} />
 
-@router.post("/scan-now", status_code=202)
-async def trigger_scan_now(current_user=Depends(check_module_permission("email_accounts", "create"))):
-    """
-    Manually trigger a full email scan + auto-save for the current user.
-    Runs in the background — returns immediately with a confirmation.
-    """
-    prefs = await db[COL_AUTO_PREFS].find_one(
-        {"user_id": str(current_user.id)}, {"_id": 0}
-    ) or {}
+          </motion.div>
+        )}
 
-    async def _bg():
-        try:
-            await _run_full_scan_for_user(str(current_user.id), prefs, limit=50)
-            logger.info(f"Manual scan complete for user {current_user.id}")
-        except Exception as e:
-            logger.error(f"Manual scan error for user {current_user.id}: {e}")
+        {/* ══ COMPOSE TAB ══ */}
+        {activeTab === "compose" && (
+          <motion.div variants={itemVariants} className="space-y-4">
+            <div className="px-4 py-3.5 rounded-2xl border flex items-start gap-3"
+              style={{ backgroundColor: isDark?"rgba(79,70,229,0.08)":"#eef2ff", borderColor: isDark?"#4338ca":"#c7d2fe" }}>
+              <Send className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
+              <div className="text-xs" style={{ color: isDark?"#a5b4fc":"#3730a3" }}>
+                <span className="font-bold">Send personalised emails directly to your clients.</span>
+                {" "}Pick a company for branding (logo, SMTP/Gmail), compose with {'{variable}'} tokens, select recipients, and send.
+                Use <strong>Compose &amp; Send</strong> tab for one-off emails, <strong>Templates</strong> tab to save reusable formats.
+              </div>
+            </div>
+            <EmailComposePanel isDark={isDark} />
+          </motion.div>
+        )}
 
-    asyncio.create_task(_bg())
-    return {"status": "scan_started", "message": "Scan running in background. Refresh in ~30 seconds."}
+        {/* ══ TEMPLATES TAB ══ */}
+        {activeTab === "templates" && (
+          <motion.div variants={itemVariants} className="space-y-4">
+            <div className="px-4 py-3.5 rounded-2xl border flex items-start gap-3"
+              style={{ backgroundColor: isDark?"rgba(16,185,129,0.08)":"#f0fdf4", borderColor: isDark?"#065f46":"#a7f3d0" }}>
+              <FileText className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+              <div className="text-xs" style={{ color: isDark?"#6ee7b7":"#064e3b" }}>
+                <span className="font-bold">Reusable email templates.</span>
+                {" "}Create templates with {'{name}'}, {'{services}'}, {'{gstin}'} and other tokens — then load any template in the Compose tab to send instantly.
+              </div>
+            </div>
+            <EmailTemplatesPanel isDark={isDark} />
+          </motion.div>
+        )}
 
+        {/* ══ SENDER TAB ══ */}
+        {activeTab === "sender" && (
+          <motion.div variants={itemVariants} className="space-y-4">
+            <div className="px-4 py-3.5 rounded-2xl border flex items-start gap-3"
+              style={{ backgroundColor: isDark ? "rgba(59,130,246,0.08)" : "#eff6ff", borderColor: isDark ? "#1d4ed8" : "#bfdbfe" }}>
+              <Send className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
+              <div className="text-xs" style={{ color: isDark ? "#93c5fd" : "#1e40af" }}>
+                <span className="font-bold">Switch your Brevo sender email on the fly.</span>
+                {" "}No redeploy needed — just click "Use This" to switch. All emails (reminders, birthday wishes, compliance alerts) will immediately send from the selected address.
+                Both emails must be verified in Brevo under Senders, domains &amp; IPs.
+              </div>
+            </div>
+            <SenderSelectorPanel isDark={isDark} />
+          </motion.div>
+        )}
 
-@router.post("/migrate-clean", status_code=200)
-async def migrate_clean_descriptions(current_user=Depends(check_module_permission("email_accounts", "create"))):
-    """
-    One-time migration: strip HTML from any existing description/raw_snippet
-    fields saved before v6 (when HTML was stored raw).
-    Safe to run multiple times. Returns counts of updated records.
-    """
-    user_id  = str(current_user.id)
-    counts   = {"events": 0, "todos": 0, "reminders": 0, "visits": 0}
-    html_sig = re.compile(r"<(?:html|head|body|div|span|p|br|table|td|tr)[^>]*>", re.IGNORECASE)
+        {/* ══ TIPS ══ */}
+        <motion.div variants={itemVariants}>
+          <SectionCard>
+            <CardHeaderRow
+              iconBg={isDark ? "bg-slate-700" : "bg-slate-100"}
+              icon={<Info className="w-4 h-4 text-slate-400" />}
+              title="Tips & Troubleshooting"
+              subtitle="Common setup issues and fixes"
+            />
+            <div className="p-4">
+              <ul className="space-y-2">
+                {[
+                  "Gmail requires: (1) IMAP enabled, (2) 2-Step Verification ON, (3) App Password generated — all 3 are mandatory",
+                  "Scan & Sync results show a preview panel first — select which events to save; nothing is written until you click 'Save Selected'",
+                  "Past-dated events are automatically greyed out and unchecked — they cannot be saved to prevent stale data",
+                  "Each account's Sync button fetches only emails received after its last sync date — prevents rescanning old emails",
+                  "Within a session, already-saved events show an 'Already Saved' badge and cannot be re-saved; duplicates are blocked",
+                  "Add @ipindia.gov.in to whitelist to auto-import all trademark hearings and notices without filtering",
+                  "Use 'Reset Cache' if you see wrong or stale results, then 'Scan All' for a completely fresh extraction",
+                  "Visit the Action Center page to see all linked email due dates and events in one place",
+                ].map((tip, i) => (
+                  <li key={i} className="flex items-start gap-2.5 text-xs" style={{ color: isDark ? D.muted : "#64748b" }}>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
+                    {tip}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </SectionCard>
+        </motion.div>
 
-    async def _clean_collection(col_name: str, fields: List[str]) -> int:
-        updated = 0
-        async for doc in db[col_name].find({"user_id": user_id}, {"_id": 1, **{f: 1 for f in fields}}):
-            needs_update = False
-            patch: Dict[str, str] = {}
-            for field in fields:
-                val = doc.get(field) or ""
-                if val and html_sig.search(val):
-                    cleaned = _clean_text(_html_to_text(val), 500)
-                    patch[field] = cleaned
-                    needs_update = True
-            if needs_update:
-                await db[col_name].update_one({"_id": doc["_id"]}, {"$set": patch})
-                updated += 1
-        return updated
-
-    counts["events"]    = await _clean_collection(COL_EVENTS,   ["description", "raw_snippet"])
-    counts["todos"]     = await _clean_collection("todos",       ["description"])
-    counts["reminders"] = await _clean_collection("reminders",   ["description"])
-    counts["visits"]    = await _clean_collection("visits",      ["notes"])
-
-    logger.info(f"migrate-clean complete for user {user_id}: {counts}")
-    return {"status": "ok", "updated": counts}
-
-
-@router.post("/migrate-fix-ids", status_code=200)
-async def migrate_fix_missing_ids(current_user=Depends(check_module_permission("email_accounts", "create"))):
-    """
-    v9 ONE-TIME MIGRATION — backfill missing string 'id' field.
-
-    Auto-saved reminders, todos, and visits created by v8 and earlier were
-    inserted WITHOUT a string 'id' field (only MongoDB ObjectId '_id' existed).
-    The frontend DELETE and PATCH routes look up by the string 'id' field,
-    so those operations returned 404.
-
-    This endpoint sets id = str(_id) on every affected document.
-    Safe to call multiple times — skips documents that already have 'id'.
-
-    Call this ONCE after deploying v9, then you can remove it in v10.
-    """
-    user_id = str(current_user.id)
-    counts  = {"reminders": 0, "todos": 0, "visits": 0}
-
-    for col_name in ("reminders", "todos", "visits"):
-        async for doc in db[col_name].find(
-            {"user_id": user_id, "id": {"$exists": False}},
-            {"_id": 1}
-        ):
-            await db[col_name].update_one(
-                {"_id": doc["_id"]},
-                {"$set": {"id": str(doc["_id"])}}
-            )
-            counts[col_name] += 1
-
-    logger.info(f"migrate-fix-ids complete for user {user_id}: {counts}")
-    return {"status": "ok", "backfilled": counts}
-
-
-@router.get("/events/by-tm/{tm_app_no}", response_model=List[ExtractedEventOut])
-async def get_events_by_tm_app_no(tm_app_no: str, current_user=Depends(check_module_permission("email_accounts", "view"))):
-    """
-    Fetch all extracted events for a specific TM application number.
-    Useful for frontend to show full history of a trademark case.
-    """
-    docs = await db[COL_EVENTS].find(
-        {"user_id": str(current_user.id), "tm_app_no": tm_app_no},
-        {"_id": 0}
-    ).sort("date", 1).to_list(50)
-    return [_doc_to_out(d) for d in docs]
-
-
-# =============================================================================
-# ATTENDANCE / HOLIDAY / VISIT CARD INTEGRATION
-# =============================================================================
-
-@router.get("/attendance/today-summary")
-async def attendance_today_summary(current_user=Depends(check_module_permission("email_accounts", "view"))):
-    try:
-        u_id = (
-            str(current_user.id) if hasattr(current_user, "id")
-            else str(current_user.get("id") or current_user.get("_id") or "")
-            if isinstance(current_user, dict) else str(current_user)
-        )
-        today      = datetime.now(IST).strftime("%Y-%m-%d")
-        week_later = (datetime.now(IST) + timedelta(days=7)).strftime("%Y-%m-%d")
-        visits = await db["visits"].find({"user_id": u_id, "visit_date": today}, {"_id": 0}).to_list(20)
-        reminders = await db["reminders"].find(
-            {"user_id": u_id, "is_dismissed": {"$ne": True},
-             "remind_at": {"$gte": today, "$lte": week_later + "T23:59:59"}},
-            {"_id": 0}
-        ).sort("remind_at", 1).to_list(20)
-        return {
-            "today": today,
-            "visits_today": [
-                {"title": v.get("title","Untitled"), "status": v.get("status","scheduled"),
-                 "notes": v.get("notes") or ""} for v in visits
-            ],
-            "upcoming_reminders": [
-                {"title": r.get("title","Untitled"), "remind_at": str(r.get("remind_at",""))}
-                for r in reminders
-            ],
-        }
-    except Exception as e:
-        return {"today": datetime.now(IST).strftime("%Y-%m-%d"),
-                "visits_today": [], "upcoming_reminders": [], "error": str(e)}
-
-@router.get("/holidays/upcoming")
-async def upcoming_holidays(current_user=Depends(check_module_permission("email_accounts", "view"))):
-    try:
-        u_id  = str(current_user.id) if hasattr(current_user, "id") else str(current_user)
-        today = datetime.now(IST).strftime("%Y-%m-%d")
-        events = await db[COL_EVENTS].find(
-            {"user_id": u_id, "date": {"$gte": today},
-             "event_type": {"$in": ["Court Hearing","Trademark Hearing","Deadline","Examination Report"]}},
-            {"_id": 0, "title": 1, "date": 1, "event_type": 1, "id": 1, "tm_app_no": 1}
-        ).sort("date", 1).limit(10).to_list(10)
-        return {"events": [
-            {"id": e.get("id",""), "title": e.get("title","Notice"),
-             "date": e.get("date"), "event_type": e.get("event_type"),
-             "tm_app_no": e.get("tm_app_no")} for e in events
-        ]}
-    except Exception as e:
-        return {"events": [], "error": str(e)}
+      </motion.div>
+    </TooltipProvider>
+  );
+}
