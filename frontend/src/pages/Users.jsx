@@ -168,6 +168,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_send_reminders: false,      // admin-granted only
       can_view_user_page: false,      // admin-granted only
       can_view_audit_logs: false,     // admin-granted only
+      can_view_interviews: false,     // admin-granted only
       can_view_selected_users_reports: true,  // Reports → VIEW (Team scope)
       can_view_todo_dashboard: true,  // To Do → VIEW (Own + Team)
       can_use_chat: false,            // admin-granted only
@@ -223,6 +224,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_send_reminders: false,      // admin-granted only
       can_view_user_page: false,      // admin-granted only
       can_view_audit_logs: false,     // admin-granted only
+      can_view_interviews: false,     // admin-granted only
       can_view_selected_users_reports: false, // admin-granted only (staff sees own reports only)
       can_view_todo_dashboard: true,  // To Do → VIEW (Own)
       can_use_chat: false,            // admin-granted only
@@ -297,6 +299,7 @@ const GLOBAL_PERMS = [
   { key: 'can_view_client_portal',          label: 'Client Portal Manager',        desc: 'Access the Client Portal Manager (admin-level module)',   icon: Building2   },
   { key: 'can_manage_whatsapp',             label: 'WhatsApp Settings',            desc: 'Access and configure WhatsApp integration settings',     icon: MessageSquare },
   { key: 'can_access_whatsapp_hub', label: 'WhatsApp Hub', desc: 'Access the WhatsApp Hub multi-account inbox', icon: MessageCircle },
+  { key: 'can_view_interviews',     label: 'Employee Interviews', desc: 'Access the Employee Interviews & candidate management page', icon: Briefcase },
 ];
 
 const OPS_PERMS = [
