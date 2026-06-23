@@ -292,6 +292,7 @@ def _heuristic_fields(text: str) -> dict:
 
 
 async def _extract_resume_text(contents: bytes, filename: str) -> str:
+    """Extract text from PDF/DOCX/TXT resume with table support."""
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
     if ext == "pdf":
@@ -299,26 +300,50 @@ async def _extract_resume_text(contents: bytes, filename: str) -> str:
         text_parts = []
         with pdfplumber.open(io.BytesIO(contents)) as pdf:
             for page in pdf.pages[:10]:
-                t = page.extract_text()
-                if t:
+                # Extract plain text
+                t = page.extract_text(x_tolerance=3, y_tolerance=3) or ""
+                # Extract tables and append as structured text
+                for table in page.extract_tables():
+                    rows = []
+                    for row in table:
+                        cells = [str(c).strip() if c else "" for c in row]
+                        if any(cells):
+                            rows.append(" | ".join(cells))
+                    if rows:
+                        t += "\n" + "\n".join(rows)
+                if t.strip():
                     text_parts.append(t)
-        text = "\n".join(text_parts).strip()
+        text = "\n\n".join(text_parts).strip()
         if text:
             return text
-        # Scanned resume (no text layer) → OCR via Groq vision, one page at a time
+        # Scanned PDF — send first page as image to Claude vision
         try:
-            from PIL import Image as PILImage
             import base64
-            from backend.ai_document_reader import _groq_vision
             with pdfplumber.open(io.BytesIO(contents)) as pdf:
-                page = pdf.pages[0]
-                pil_img = page.to_image(resolution=150).original
+                pil_img = pdf.pages[0].to_image(resolution=150).original
                 if pil_img.mode not in ("RGB", "L"):
                     pil_img = pil_img.convert("RGB")
                 buf = io.BytesIO()
                 pil_img.save(buf, format="PNG")
                 b64 = base64.b64encode(buf.getvalue()).decode()
-            return await _groq_vision(b64, "image/png", "Transcribe all text from this resume/CV image exactly as it appears.")
+            import httpx
+            resp = await httpx.AsyncClient(timeout=30).post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"content-type": "application/json"},
+                json={
+                    "model": "claude-sonnet-4-6",
+                    "max_tokens": 2000,
+                    "messages": [{
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": b64}},
+                            {"type": "text", "text": "Transcribe ALL text from this resume image exactly as it appears, preserving structure."}
+                        ]
+                    }]
+                }
+            )
+            data = resp.json()
+            return data["content"][0]["text"]
         except Exception as e:
             raise HTTPException(status_code=422, detail=f"Could not read scanned resume: {e}")
 
@@ -326,43 +351,61 @@ async def _extract_resume_text(contents: bytes, filename: str) -> str:
         try:
             import docx
             d = docx.Document(io.BytesIO(contents))
-            return "\n".join(p.text for p in d.paragraphs if p.text.strip())
+            parts = [p.text for p in d.paragraphs if p.text.strip()]
+            for table in d.tables:
+                for row in table.rows:
+                    cells = [c.text.strip() for c in row.cells if c.text.strip()]
+                    if cells:
+                        parts.append(" | ".join(cells))
+            return "\n".join(parts)
         except Exception as e:
             raise HTTPException(status_code=422, detail=f"Could not read .docx resume: {e}")
 
-    if ext in ("txt",):
+    if ext == "txt":
         return contents.decode("utf-8", errors="replace")
 
-    raise HTTPException(status_code=422, detail=f"Unsupported resume format: .{ext}. Please upload PDF, DOCX, or TXT.")
+    raise HTTPException(status_code=422, detail=f"Unsupported format: .{ext}. Upload PDF, DOCX, or TXT.")
 
 
 async def _ai_structure_resume(resume_text: str) -> dict:
-    """Ask Gemini to turn raw resume text into structured JSON fields."""
-    from backend.ai_document_reader import _get_gemini_model
+    """Use Claude API to extract structured fields from resume text."""
     import json
+    import httpx
 
-    model = _get_gemini_model()
     prompt = (
-        "Extract candidate details from this resume text and respond with ONLY a single "
-        "valid JSON object (no markdown fences, no commentary) with exactly these keys:\n"
-        '{"full_name": "", "email": "", "phone": "", "position": "", "department": "", '
-        '"experience_years": 0, "current_company": "", "skills": [], "education": ""}\n'
-        "- position: the most recent/primary job title found.\n"
-        "- department: best-guess functional department (e.g. Sales, IT, HR, Accounts, Legal, Marketing, Operations).\n"
-        "- experience_years: total professional experience as a number (estimate from work history if not stated).\n"
-        "- skills: an array of short skill keywords.\n"
-        "Leave a field as an empty string / 0 / [] if it cannot be found. Do not invent data.\n\n"
-        f"RESUME TEXT:\n{resume_text[:20000]}"
+        "Extract candidate details from this resume and respond with ONLY valid JSON "
+        "(no markdown, no explanation) with these exact keys:\n"
+        '{"full_name":"","email":"","phone":"","position":"","department":"",'
+        '"experience_years":0,"current_company":"","skills":[],"education":""}\n\n'
+        "Rules:\n"
+        "- full_name: the person's full name (usually the largest text at the top)\n"
+        "- position: most recent or primary job title\n"
+        "- department: one of Sales, IT, HR, Accounts, Legal, Marketing, Operations, GST, TDS, ROC, TM, Other\n"
+        "- experience_years: total years as a number (sum from work history dates if needed)\n"
+        "- skills: array of concise skill keywords (max 15)\n"
+        "- education: most relevant degree/qualification as a short string\n"
+        "- Leave blank/0/[] if genuinely not found. Never invent data.\n\n"
+        f"RESUME:\n{resume_text[:12000]}"
     )
-    response = await model.generate_content_async(prompt)
-    raw = (response.text or "").strip()
-    raw = re.sub(r"^```(json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={"content-type": "application/json"},
+            json={
+                "model": "claude-sonnet-4-6",
+                "max_tokens": 1000,
+                "messages": [{"role": "user", "content": prompt}]
+            }
+        )
+    data = resp.json()
+    raw = (data.get("content") or [{}])[0].get("text", "").strip()
+    raw = re.sub(r"^```(json)?|```$", "", raw, flags=re.MULTILINE).strip()
     try:
-        data = json.loads(raw)
+        return json.loads(raw)
     except Exception:
-        # Model didn't return clean JSON — fall back to regex-only extraction
-        data = {}
-    return data
+        logger.warning(f"Claude JSON parse failed, raw: {raw[:200]}")
+        return {}
 
 
 # ====================== ROUTES ======================
@@ -459,20 +502,28 @@ async def parse_resume(file: UploadFile = File(...), current_user=Depends(get_cu
     except HTTPException:
         raise
     except Exception as e:
-        logger.warning(f"AI resume structuring failed, falling back to regex only: {e}")
+        logger.warning(f"AI resume structuring failed, falling back to heuristics: {e}")
         ai_fields = {}
 
-    fallback = _regex_fields(resume_text)
+    regex_f = _regex_fields(resume_text)
+    heuristic_f = _heuristic_fields(resume_text)
+
+    def first(*vals):
+        for v in vals:
+            if v and str(v).strip():
+                return v
+        return ""
+
     fields = {
-        "full_name": ai_fields.get("full_name") or "",
-        "email": ai_fields.get("email") or fallback.get("email") or "",
-        "phone": ai_fields.get("phone") or fallback.get("phone") or "",
-        "position": ai_fields.get("position") or "",
-        "department": ai_fields.get("department") or "",
-        "experience_years": ai_fields.get("experience_years") or None,
-        "current_company": ai_fields.get("current_company") or "",
-        "skills": ai_fields.get("skills") or [],
-        "education": ai_fields.get("education") or "",
+        "full_name": first(ai_fields.get("full_name"), heuristic_f.get("full_name")),
+        "email": first(ai_fields.get("email"), regex_f.get("email"), heuristic_f.get("email")),
+        "phone": first(ai_fields.get("phone"), regex_f.get("phone"), heuristic_f.get("phone")),
+        "position": first(ai_fields.get("position"), heuristic_f.get("position")),
+        "department": first(ai_fields.get("department"), heuristic_f.get("department")),
+        "experience_years": ai_fields.get("experience_years") or heuristic_f.get("experience_years") or None,
+        "current_company": first(ai_fields.get("current_company"), heuristic_f.get("current_company")),
+        "skills": ai_fields.get("skills") or heuristic_f.get("skills") or [],
+        "education": first(ai_fields.get("education"), heuristic_f.get("education")),
     }
 
     return {
