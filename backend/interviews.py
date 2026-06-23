@@ -28,15 +28,15 @@ logger = logging.getLogger(__name__)
 # ====================== PERMISSIONS ======================
 
 def _can_manage(current_user) -> bool:
-    """Admin, or anyone with the can_manage_users flag, can manage interviews."""
+    """Admin always has access. Other roles need can_view_interviews permission."""
     if getattr(current_user, "role", None) == "admin":
         return True
-    return bool(_get_perm(current_user, "can_manage_users"))
+    return bool(_get_perm(current_user, "can_view_interviews"))
 
 
 def assert_can_manage(current_user):
     if not _can_manage(current_user):
-        raise HTTPException(status_code=403, detail="You do not have permission to manage employee interviews")
+        raise HTTPException(status_code=403, detail="You do not have permission to access Employee Interviews")
 
 
 # ====================== MODELS ======================
