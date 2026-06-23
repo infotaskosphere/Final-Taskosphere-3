@@ -8,7 +8,7 @@ import {
   PanelLeftClose, PanelLeftOpen, Target, Sun, Moon, MapPin,
   Settings, Mail, Receipt, X, KeyRound, BrainCircuit,
   CreditCard, Fingerprint, Bell, Shield, ShieldCheck, ArrowLeftRight, MessageCircle,
-  Building2, Zap,
+  Building2, Zap, Briefcase,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -94,6 +94,7 @@ const NAV_GROUPS = [
       { path: '/reports',        icon: BarChart3,  label: 'Reports', adminOnly: true },
       { path: '/task-audit',     icon: Activity,   label: 'Task Audit Log',   permission: 'can_view_audit_logs'  },
       { path: '/users',          icon: Users,      label: 'Users',            permission: 'can_view_user_page'   },
+      { path: '/interviews',     icon: Briefcase,  label: 'Employee Interviews', permission: 'can_manage_users'  },
       { path: '/staff-activity', icon: Activity,   label: 'Staff Activity',   adminOnly: true                    },
       { path: '/client-portal-manager', icon: Building2, label: 'Client Portal', permission: 'can_view_client_portal' },
       { path: '/whatsapp-hub', icon: MessageCircle, label: 'WhatsApp Hub', permission: 'can_access_whatsapp_hub' },
