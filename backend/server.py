@@ -1794,6 +1794,11 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
     default_permissions = DEFAULT_ROLE_PERMISSIONS.get(role_val, {})
     user_id = str(uuid.uuid4())
 
+    def _date_str(v):
+        if v is None:
+            return None
+        return v.isoformat() if hasattr(v, 'isoformat') else str(v)
+
     new_user = {
         "id": user_id,
         "email": user_data.email,
@@ -1802,7 +1807,7 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
         "password": hashed_password,
         "departments": user_data.departments or [],
         "phone": user_data.phone,
-        "birthday": (user_data.birthday.isoformat() if hasattr(user_data.birthday, 'isoformat') else str(user_data.birthday)) if user_data.birthday else None,
+        "birthday": _date_str(user_data.birthday),
         "telegram_id": user_data.telegram_id,
         "punch_in_time": user_data.punch_in_time or "10:30",
         "grace_time": user_data.grace_time or "00:10",
@@ -1813,7 +1818,11 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
         "approved_by": None,
         "approved_at": None,
         "permissions": user_data.permissions if user_data.permissions else default_permissions,
-        "created_at": datetime.now(timezone.utc).isoformat()
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        # ── Employment / Payroll ─────────────────────────────────────────────
+        "joining_date": _date_str(getattr(user_data, "joining_date", None)),
+        "training_period_end": _date_str(getattr(user_data, "training_period_end", None)),
+        "payroll_date": _date_str(getattr(user_data, "payroll_date", None)),
     }
 
     await db.users.insert_one(new_user)
@@ -1865,6 +1874,11 @@ async def self_register(user_data: UserCreate):
     default_permissions = DEFAULT_ROLE_PERMISSIONS.get("staff", {})
     user_id = str(uuid.uuid4())
 
+    def _date_str_sr(v):
+        if v is None:
+            return None
+        return v.isoformat() if hasattr(v, 'isoformat') else str(v)
+
     new_user = {
         "id": user_id,
         "email": user_data.email,
@@ -1873,7 +1887,7 @@ async def self_register(user_data: UserCreate):
         "password": hashed_password,
         "departments": user_data.departments or [],
         "phone": user_data.phone,
-        "birthday": (user_data.birthday.isoformat() if hasattr(user_data.birthday, 'isoformat') else str(user_data.birthday)) if user_data.birthday else None,
+        "birthday": _date_str_sr(user_data.birthday),
         "telegram_id": user_data.telegram_id,
         "punch_in_time": user_data.punch_in_time or "10:30",
         "grace_time": user_data.grace_time or "00:10",
@@ -1885,6 +1899,10 @@ async def self_register(user_data: UserCreate):
         "approved_at": None,
         "permissions": default_permissions,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        # ── Employment / Payroll ─────────────────────────────────────────────
+        "joining_date": _date_str_sr(getattr(user_data, "joining_date", None)),
+        "training_period_end": _date_str_sr(getattr(user_data, "training_period_end", None)),
+        "payroll_date": _date_str_sr(getattr(user_data, "payroll_date", None)),
     }
 
     await db.users.insert_one(new_user)
@@ -2160,7 +2178,8 @@ async def update_user(
             "full_name", "email", "role", "departments", "phone",
             "birthday", "punch_in_time", "grace_time",
             "punch_out_time", "is_active", "profile_picture", "telegram_id",
-            "status", "permissions"
+            "status", "permissions",
+            "joining_date", "training_period_end", "payroll_date",
         ]
     elif is_manager and has_edit_users and not is_own:
         # Manager editing a team staff member — can update profile + work settings, not role/permissions
@@ -2168,7 +2187,8 @@ async def update_user(
             "full_name", "email", "departments", "phone",
             "birthday", "punch_in_time", "grace_time",
             "punch_out_time", "is_active", "profile_picture", "telegram_id",
-            "status"
+            "status",
+            "joining_date", "training_period_end", "payroll_date",
         ]
     else:
         # Self-edit: own profile fields only
