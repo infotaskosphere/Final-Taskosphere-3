@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
-import api from '@/lib/api';
+import api, { BASE_URL, getToken } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 
 // ── WhatsApp exact colour palette ─────────────────────────────────────────────
@@ -1159,12 +1159,13 @@ export default function WhatsAppHub() {
     const connectSSE = useCallback(() => {
       try {
         if (eventSourceRef.current) { try { eventSourceRef.current.close(); } catch(_){} }
-        const token = document.cookie.match(/token=([^;]+)/)?.[1]
-          || localStorage.getItem('token')
+        const token = getToken()
+          || document.cookie.match(/token=([^;]+)/)?.[1]
           || sessionStorage.getItem('token');
+        const sseBase = `${BASE_URL}/whatsapp/hub/events`;
         const url = token
-          ? `/api/whatsapp/hub/events?token=${encodeURIComponent(token)}`
-          : '/api/whatsapp/hub/events';
+          ? `${sseBase}?token=${encodeURIComponent(token)}`
+          : sseBase;
         const es = new EventSource(url, { withCredentials: true });
         es.addEventListener('message', () => { loadContacts(); });
         es.addEventListener('sync',    () => { loadContacts(); });
