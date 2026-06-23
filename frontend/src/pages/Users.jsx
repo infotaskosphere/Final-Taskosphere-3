@@ -271,8 +271,7 @@ const EMPTY_PERMISSIONS = {
   can_delete_visits: false, can_delete_own_visits: true,
   can_view_client_portal: false,
   can_manage_whatsapp: false,
-  can_access_whatsapp_hub: false,
-      can_access_whatsapp_hub: false,  // ADMIN_GRANTED_ONLY
+  can_access_whatsapp_hub: false,  // ADMIN_GRANTED_ONLY
   view_password_departments: [], assigned_clients: [], view_other_tasks: [],
   view_other_attendance: [], view_other_reports: [], view_other_todos: [],
   view_other_activity: [], view_other_visits: [],
