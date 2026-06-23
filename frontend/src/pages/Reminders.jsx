@@ -802,11 +802,21 @@ export default function Reminders() {
       return;
     }
     try {
-      await api.post("/email/save-as-reminder", {
+      const payload = {
         title: formTitle.trim(),
         description: formDesc.trim() || "",
         remind_at: new Date(formDatetime).toISOString(),
-      });
+      };
+      // Include TM Hearing fields if they were filled in on the create form —
+      // previously these were entered but silently discarded on creation.
+      if (isTmHearing(formTitle)) {
+        payload.brand_name        = formBrandName.trim()   || null;
+        payload.hearing_attended  = formAttended           || null;
+        payload.hearing_decision  = formDecision           || null;
+        payload.hearing_adjourned = formAdjourned;
+        payload.hearing_notes     = formHearingNotes.trim() || null;
+      }
+      await api.post("/email/save-as-reminder", payload);
       toast.success("Reminder created");
       resetForm();
       await fetchReminders();
