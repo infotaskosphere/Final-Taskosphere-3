@@ -20,6 +20,7 @@ const Attendance        = lazy(() => import("@/pages/Attendance.jsx"));
 const Reports           = lazy(() => import("@/pages/Reports.jsx"));
 const Clients           = lazy(() => import("@/pages/Clients.jsx"));
 const Users             = lazy(() => import("@/pages/Users.jsx"));
+const Interviews        = lazy(() => import("@/pages/Interviews.jsx"));
 const LeadsPage         = lazy(() => import("@/pages/Leads.jsx"));
 const VisitsPage        = lazy(() => import("@/pages/VisitsPage.jsx"));
 const EmailSettings     = lazy(() => import("@/components/EmailSettings.jsx"));
@@ -176,6 +177,7 @@ function AppRoutes() {
       <Route path="/invoicing"  element={<Permission permission={["can_manage_invoices", "can_create_quotations"]}><PageLoader><Invoicing /></PageLoader></Permission>} />
       <Route path="/task-audit" element={<Permission permission="can_view_audit_logs"><PageLoader><TaskAudit /></PageLoader></Permission>} />
       <Route path="/users"          element={<Permission permission="can_view_user_page"><PageLoader><Users /></PageLoader></Permission>} />
+      <Route path="/interviews"     element={<Permission permission="can_manage_users"><PageLoader><Interviews /></PageLoader></Permission>} />
       <Route path="/staff-activity" element={<AdminOnly><PageLoader><StaffActivity /></PageLoader></AdminOnly>} />
 
       {/* Client Portal Manager — admin always, other users with can_view_client_portal */}
