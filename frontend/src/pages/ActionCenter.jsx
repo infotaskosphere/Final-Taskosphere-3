@@ -6,6 +6,7 @@ import {
   Clock, AlertCircle, CheckCircle2, Loader2, Inbox, ArrowUpDown,
   ChevronDown, ChevronUp, Mail, Eye, Trash2, Save, Info,
   TrendingUp, ExternalLink, LayoutList, LayoutGrid, XCircle,
+  ClipboardList, Plus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useDark } from "@/hooks/useDark";
@@ -176,7 +177,29 @@ function EventCard({ event, isDark, savedKeys, onSaved, onDismiss, viewMode }) {
   const saved   = savedKeys.has(key);
   const [saving, setSaving] = useState(null);
   const [override, setOverride] = useState(cat);
+  const [addingTask, setAddingTask] = useState(false);
+  const [taskTitle, setTaskTitle] = useState("");
+  const [taskSaving, setTaskSaving] = useState(false);
   const isList = viewMode === "list";
+
+  const handleAddTask = async () => {
+    const title = taskTitle.trim() || event.title;
+    if (!title) return;
+    setTaskSaving(true);
+    try {
+      await api.post("/tasks", {
+        title,
+        due_date: event.date || null,
+        description: event.description || "",
+        status: "pending",
+      });
+      toast.success("✓ Task added");
+      setAddingTask(false);
+      setTaskTitle("");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to add task");
+    } finally { setTaskSaving(false); }
+  };
 
   const handleSave = async () => {
     if (saving || saved) return;
@@ -283,6 +306,20 @@ function EventCard({ event, isDark, savedKeys, onSaved, onDismiss, viewMode }) {
             </div>
           )}
 
+          {/* Add Task button */}
+          <button
+            onClick={() => setAddingTask(v => !v)}
+            title="Add a task linked to this event"
+            className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold border transition-all"
+            style={{
+              borderColor: addingTask ? COLORS.amber : (isDark ? "#2A2F45" : "#e2e8f0"),
+              backgroundColor: addingTask ? (isDark ? "rgba(245,158,11,0.12)" : "#FFFBEB") : (isDark ? "#21253A" : "#f8fafc"),
+              color: addingTask ? COLORS.amber : (isDark ? "#8892B0" : "#64748b"),
+            }}>
+            <ClipboardList className="w-3 h-3" />
+            <span className="hidden sm:inline">Task</span>
+          </button>
+
           {/* Close/Dismiss button — always visible */}
           <button
             onClick={() => onDismiss(key, event)}
@@ -295,6 +332,34 @@ function EventCard({ event, isDark, savedKeys, onSaved, onDismiss, viewMode }) {
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
+
+        {/* Inline Add Task form */}
+        {addingTask && (
+          <div className="px-4 pb-3 flex items-center gap-2"
+            style={{ borderTop: `1px solid ${isDark ? "#2A2F45" : "#f1f5f9"}` }}>
+            <ClipboardList className="w-3.5 h-3.5 flex-shrink-0" style={{ color: COLORS.amber }} />
+            <input
+              autoFocus
+              value={taskTitle}
+              onChange={e => setTaskTitle(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") handleAddTask(); if (e.key === "Escape") { setAddingTask(false); setTaskTitle(""); }}}
+              placeholder={event.title || "Task title…"}
+              className="flex-1 text-xs px-2 py-1.5 rounded-lg border focus:outline-none focus:ring-2 focus:ring-amber-400"
+              style={{ backgroundColor: isDark ? "#21253A" : "#f8fafc", borderColor: isDark ? "#2A2F45" : "#e2e8f0", color: isDark ? "#E2E8F0" : "#1e293b" }}
+            />
+            <button onClick={handleAddTask} disabled={taskSaving}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold text-white transition-all active:scale-95 flex-shrink-0"
+              style={{ background: taskSaving ? "#9CA3AF" : `linear-gradient(135deg, ${COLORS.amber}, #d97706)` }}>
+              {taskSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+              <span className="hidden sm:inline">Add</span>
+            </button>
+            <button onClick={() => { setAddingTask(false); setTaskTitle(""); }}
+              className="w-6 h-6 flex items-center justify-center rounded-lg flex-shrink-0"
+              style={{ color: isDark ? "#8892B0" : "#94a3b8" }}>
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        )}
       </motion.div>
     );
   }
@@ -447,6 +512,39 @@ function EventCard({ event, isDark, savedKeys, onSaved, onDismiss, viewMode }) {
             </span>
           </div>
         )}
+
+        {/* Add Task row */}
+        <div className="mt-2 pt-2 border-t" style={{ borderColor: isDark ? D_DARK.border : "#f1f5f9" }}>
+          {!addingTask ? (
+            <button onClick={() => setAddingTask(true)}
+              className="flex items-center gap-1.5 text-xs font-semibold px-2 py-1 rounded-lg border transition-all"
+              style={{ borderColor: isDark ? "#2A2F45" : "#e2e8f0", backgroundColor: isDark ? "#21253A" : "#f8fafc", color: isDark ? "#8892B0" : "#64748b" }}>
+              <ClipboardList className="w-3 h-3" /> Add Task
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <input
+                autoFocus
+                value={taskTitle}
+                onChange={e => setTaskTitle(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") handleAddTask(); if (e.key === "Escape") { setAddingTask(false); setTaskTitle(""); }}}
+                placeholder={event.title || "Task title…"}
+                className="flex-1 text-xs px-2 py-1.5 rounded-lg border focus:outline-none focus:ring-2 focus:ring-amber-400"
+                style={{ backgroundColor: isDark ? "#21253A" : "#f8fafc", borderColor: isDark ? "#2A2F45" : "#e2e8f0", color: isDark ? "#E2E8F0" : "#1e293b" }}
+              />
+              <button onClick={handleAddTask} disabled={taskSaving}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold text-white transition-all active:scale-95 flex-shrink-0"
+                style={{ background: taskSaving ? "#9CA3AF" : `linear-gradient(135deg, ${COLORS.amber}, #d97706)` }}>
+                {taskSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />} Add
+              </button>
+              <button onClick={() => { setAddingTask(false); setTaskTitle(""); }}
+                className="w-6 h-6 flex items-center justify-center rounded-lg flex-shrink-0"
+                style={{ color: isDark ? "#8892B0" : "#94a3b8" }}>
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </motion.div>
   );
@@ -572,6 +670,10 @@ export default function ActionCenter() {
 
   const handleEventSaved = useCallback((key) => {
     setSavedKeys(prev => { const s = new Set(prev); s.add(key); return s; });
+    // Remove from Action Center after a short delay so user sees the "Saved" flash
+    setTimeout(() => {
+      setDismissedKeys(prev => { const s = new Set(prev); s.add(key); return s; });
+    }, 1200);
   }, []);
 
   const handleDismiss = useCallback(async (key, event) => {
