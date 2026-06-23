@@ -6,10 +6,12 @@ import {
   Clock, AlertCircle, CheckCircle2, Loader2, Inbox, ArrowUpDown,
   ChevronDown, ChevronUp, Mail, Eye, Trash2, Save, Info,
   TrendingUp, ExternalLink, LayoutList, LayoutGrid, XCircle,
-  ClipboardList, Plus,
+  ClipboardList, Plus, Users, Building2, SlidersHorizontal, FileText,
+  ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useDark } from "@/hooks/useDark";
+import { useAuth } from "@/contexts/AuthContext";
 import api from "@/lib/api";
 
 // ─── design tokens ───────────────────────────────────────────────────────────
@@ -92,6 +94,22 @@ const URGENCY_COLORS = {
   low:    { bg: "#F0FDF4", dark: "rgba(31,175,90,0.12)", text: COLORS.emeraldGreen, border: "#BBF7D0" },
 };
 
+const DEPARTMENTS = [
+  { value: "gst",          label: "GST" },
+  { value: "income_tax",   label: "INCOME TAX" },
+  { value: "accounts",     label: "ACCOUNTS" },
+  { value: "tds",          label: "TDS" },
+  { value: "roc",          label: "ROC" },
+  { value: "trademark",    label: "TRADEMARK" },
+  { value: "dsc",          label: "DSC" },
+  { value: "other",        label: "OTHER" },
+];
+
+const EMPTY_TASK_FORM = {
+  title: "", description: "", assigned_to: "unassigned", sub_assignees: [],
+  due_date: "", priority: "medium", status: "pending", category: "other", client_id: "",
+};
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 function resolveCategory(ev) {
   if (ev.save_category) return ev.save_category;
@@ -164,8 +182,305 @@ function StatCard({ icon: Icon, label, value, unit, color, trend, isDark }) {
   );
 }
 
-// ─── EventCard ────────────────────────────────────────────────────────────────
-function EventCard({ event, isDark, savedKeys, onSaved, onDismiss, viewMode }) {
+// ─── AddTaskModal ──────────────────────────────────────────────────────────────
+function AddTaskModal({ event, isDark, onClose, canAssignTasks, users, clients }) {
+  const D = isDark ? D_DARK : {};
+  const [form, setForm] = useState({
+    ...EMPTY_TASK_FORM,
+    title: event?.title || "",
+    due_date: event?.date || "",
+    description: event?.description || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [subOpen, setSubOpen] = useState(false);
+  const [clientOpen, setClientOpen] = useState(false);
+  const [clientSearch, setClientSearch] = useState("");
+
+  const filteredClients = clients.filter(c =>
+    c.company_name?.toLowerCase().includes(clientSearch.toLowerCase())
+  );
+
+  const toggleSub = (uid) => {
+    setForm(p => ({
+      ...p,
+      sub_assignees: p.sub_assignees.includes(uid)
+        ? p.sub_assignees.filter(id => id !== uid)
+        : [...p.sub_assignees, uid],
+    }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.title.trim()) { toast.error("Title is required"); return; }
+    setSaving(true);
+    try {
+      await api.post("/tasks", {
+        ...form,
+        assigned_to: form.assigned_to === "unassigned" ? null : form.assigned_to,
+        due_date: form.due_date || null,
+        client_id: form.client_id || null,
+        sub_assignees: form.sub_assignees || [],
+      });
+      toast.success("✓ Task created");
+      onClose();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to create task");
+    } finally { setSaving(false); }
+  };
+
+  return createPortal(
+    <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+
+      {/* Modal */}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 16 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 16 }}
+        transition={{ type: "spring", stiffness: 340, damping: 26 }}
+        className="relative w-full max-w-2xl max-h-[90vh] flex flex-col rounded-2xl shadow-2xl overflow-hidden"
+        style={{ backgroundColor: isDark ? D_DARK.bg : "#f8fafc" }}
+      >
+        {/* Header */}
+        <div className="flex-shrink-0 px-6 pt-5 pb-4"
+          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)` }}>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+              <ClipboardList className="w-4 h-4 text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h2 className="text-lg font-bold text-white">Create Task</h2>
+              <p className="text-white/60 text-xs mt-0.5">From Action Center event</p>
+            </div>
+            <button onClick={onClose}
+              className="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center transition-all flex-shrink-0">
+              <X className="w-4 h-4 text-white" />
+            </button>
+          </div>
+        </div>
+
+        {/* Scrollable body */}
+        <div className="overflow-y-auto flex-1 min-h-0">
+          <form id="ac-task-form" onSubmit={handleSubmit}>
+
+            {/* Section 1 — Task Details */}
+            <div className="mx-5 mt-4 mb-1 rounded-2xl overflow-hidden border"
+              style={{ backgroundColor: isDark ? D_DARK.card : "#ffffff", borderColor: isDark ? D_DARK.border : "#e2e8f0" }}>
+              <div className="flex items-center gap-2 px-4 py-2.5 border-b"
+                style={{ borderColor: isDark ? D_DARK.border : "#f1f5f9", backgroundColor: isDark ? D_DARK.raised : "#f8fafc" }}>
+                <FileText className="w-3.5 h-3.5" style={{ color: COLORS.mediumBlue }} />
+                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: isDark ? D_DARK.muted : "#64748b" }}>Task Details</span>
+              </div>
+              <div className="p-4 space-y-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold" style={{ color: isDark ? D_DARK.muted : "#64748b" }}>
+                    Task Title <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    value={form.title}
+                    onChange={e => setForm(p => ({ ...p, title: e.target.value }))}
+                    placeholder="e.g. Reply to Examination Report"
+                    required
+                    className="w-full px-3 py-2 text-sm rounded-xl border focus:outline-none focus:ring-2 focus:ring-blue-400 transition-colors"
+                    style={{ backgroundColor: isDark ? D_DARK.raised : "#f8fafc", borderColor: isDark ? D_DARK.border : "#e2e8f0", color: isDark ? D_DARK.text : "#1e293b" }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold" style={{ color: isDark ? D_DARK.muted : "#64748b" }}>Description</label>
+                  <textarea
+                    value={form.description}
+                    onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
+                    rows={2}
+                    placeholder="Add notes or checklist items..."
+                    className="w-full px-3 py-2 text-sm rounded-xl border focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none transition-colors"
+                    style={{ backgroundColor: isDark ? D_DARK.raised : "#f8fafc", borderColor: isDark ? D_DARK.border : "#e2e8f0", color: isDark ? D_DARK.text : "#1e293b" }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Section 2 — Assignment & Schedule */}
+            <div className="mx-5 mt-3 mb-1 rounded-2xl overflow-hidden border"
+              style={{ backgroundColor: isDark ? D_DARK.card : "#ffffff", borderColor: isDark ? D_DARK.border : "#e2e8f0" }}>
+              <div className="flex items-center gap-2 px-4 py-2.5 border-b"
+                style={{ borderColor: isDark ? D_DARK.border : "#f1f5f9", backgroundColor: isDark ? D_DARK.raised : "#f8fafc" }}>
+                <Calendar className="w-3.5 h-3.5 text-emerald-500" />
+                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: isDark ? D_DARK.muted : "#64748b" }}>Assignment &amp; Schedule</span>
+              </div>
+              <div className="p-4 space-y-3">
+                {/* Client + Due Date row */}
+                <div className="grid grid-cols-2 gap-3">
+                  {/* Client dropdown */}
+                  <div className="space-y-1 relative">
+                    <label className="text-[11px] font-semibold" style={{ color: isDark ? D_DARK.muted : "#64748b" }}>Client</label>
+                    <button type="button" onClick={() => { setClientOpen(v => !v); setSubOpen(false); }}
+                      className="w-full flex items-center gap-1.5 px-3 py-2 text-sm rounded-xl border text-left focus:outline-none focus:ring-2 focus:ring-blue-400 transition-colors"
+                      style={{ backgroundColor: isDark ? D_DARK.raised : "#f8fafc", borderColor: isDark ? D_DARK.border : "#e2e8f0", color: form.client_id ? (isDark ? D_DARK.text : "#1e293b") : (isDark ? D_DARK.dimmer : "#94a3b8") }}>
+                      <Building2 className="w-3.5 h-3.5 flex-shrink-0" style={{ color: isDark ? D_DARK.muted : "#94a3b8" }} />
+                      <span className="truncate flex-1">
+                        {form.client_id ? (clients.find(c => c.id === form.client_id)?.company_name || "Client") : "Select client…"}
+                      </span>
+                      <ChevronDown className="w-3.5 h-3.5 flex-shrink-0 opacity-50" />
+                    </button>
+                    {clientOpen && (
+                      <div className="absolute left-0 top-full mt-1 z-50 w-full rounded-xl border shadow-xl overflow-hidden"
+                        style={{ backgroundColor: isDark ? D_DARK.card : "#fff", borderColor: isDark ? D_DARK.border : "#e2e8f0" }}>
+                        <div className="p-2 border-b" style={{ borderColor: isDark ? D_DARK.border : "#f1f5f9" }}>
+                          <input autoFocus value={clientSearch} onChange={e => setClientSearch(e.target.value)}
+                            placeholder="Search clients…" className="w-full text-xs px-2 py-1.5 rounded-lg border focus:outline-none"
+                            style={{ backgroundColor: isDark ? D_DARK.raised : "#f8fafc", borderColor: isDark ? D_DARK.border : "#e2e8f0", color: isDark ? D_DARK.text : "#1e293b" }} />
+                        </div>
+                        <div className="max-h-40 overflow-y-auto py-1">
+                          <button type="button" onClick={() => { setForm(p => ({ ...p, client_id: "" })); setClientOpen(false); setClientSearch(""); }}
+                            className="w-full text-left px-3 py-2 text-xs italic transition-colors hover:bg-slate-100 dark:hover:bg-slate-700"
+                            style={{ color: isDark ? D_DARK.muted : "#94a3b8" }}>No Client</button>
+                          {filteredClients.map(c => (
+                            <button key={c.id} type="button"
+                              onClick={() => { setForm(p => ({ ...p, client_id: c.id })); setClientOpen(false); setClientSearch(""); }}
+                              className="w-full text-left px-3 py-2 text-xs flex items-center gap-2 transition-colors hover:bg-slate-100 dark:hover:bg-slate-700"
+                              style={{ color: isDark ? D_DARK.text : "#1e293b" }}>
+                              {form.client_id === c.id && <CheckCircle2 className="w-3 h-3 text-blue-500 flex-shrink-0" />}
+                              <span className="truncate">{c.company_name}</span>
+                            </button>
+                          ))}
+                          {filteredClients.length === 0 && <p className="px-3 py-2 text-xs text-center" style={{ color: isDark ? D_DARK.dimmer : "#94a3b8" }}>No clients found</p>}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  {/* Due date */}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold" style={{ color: isDark ? D_DARK.muted : "#64748b" }}>Due Date</label>
+                    <input type="date" value={form.due_date} onChange={e => setForm(p => ({ ...p, due_date: e.target.value }))}
+                      className="w-full px-3 py-2 text-sm rounded-xl border focus:outline-none focus:ring-2 focus:ring-blue-400 transition-colors"
+                      style={{ backgroundColor: isDark ? D_DARK.raised : "#f8fafc", borderColor: isDark ? D_DARK.border : "#e2e8f0", color: isDark ? D_DARK.text : "#1e293b" }} />
+                  </div>
+                </div>
+
+                {/* Assignee + Co-assignees — only shown if canAssignTasks */}
+                {canAssignTasks && (
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Primary Assignee */}
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold" style={{ color: isDark ? D_DARK.muted : "#64748b" }}>Assignee</label>
+                      <select value={form.assigned_to} onChange={e => setForm(p => ({ ...p, assigned_to: e.target.value }))}
+                        className="w-full px-3 py-2 text-sm rounded-xl border focus:outline-none focus:ring-2 focus:ring-blue-400 transition-colors"
+                        style={{ backgroundColor: isDark ? D_DARK.raised : "#f8fafc", borderColor: isDark ? D_DARK.border : "#e2e8f0", color: isDark ? D_DARK.text : "#1e293b" }}>
+                        <option value="unassigned">— Unassigned</option>
+                        {users.map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
+                      </select>
+                    </div>
+
+                    {/* Co-assignees */}
+                    <div className="space-y-1 relative">
+                      <label className="text-[11px] font-semibold" style={{ color: isDark ? D_DARK.muted : "#64748b" }}>Co-assignees</label>
+                      <button type="button" onClick={() => { setSubOpen(v => !v); setClientOpen(false); }}
+                        className="w-full flex items-center gap-1.5 px-3 py-2 text-sm rounded-xl border text-left focus:outline-none transition-colors"
+                        style={{ backgroundColor: isDark ? D_DARK.raised : "#f8fafc", borderColor: isDark ? D_DARK.border : "#e2e8f0", color: form.sub_assignees.length > 0 ? (isDark ? D_DARK.text : "#1e293b") : (isDark ? D_DARK.dimmer : "#94a3b8") }}>
+                        <Users className="w-3.5 h-3.5 flex-shrink-0" style={{ color: isDark ? D_DARK.muted : "#94a3b8" }} />
+                        <span className="truncate flex-1 text-sm">
+                          {form.sub_assignees.length > 0 ? `${form.sub_assignees.length} selected` : "None selected"}
+                        </span>
+                        <ChevronDown className="w-3.5 h-3.5 flex-shrink-0 opacity-50" />
+                      </button>
+                      {subOpen && (
+                        <div className="absolute left-0 top-full mt-1 z-50 w-full rounded-xl border shadow-xl p-2"
+                          style={{ backgroundColor: isDark ? D_DARK.card : "#fff", borderColor: isDark ? D_DARK.border : "#e2e8f0" }}>
+                          <p className="text-[10px] font-bold uppercase tracking-widest px-1 mb-2" style={{ color: isDark ? D_DARK.muted : "#94a3b8" }}>Add Co-assignees</p>
+                          <div className="space-y-0.5 max-h-40 overflow-y-auto">
+                            {users.filter(u => u.id !== form.assigned_to).map(u => (
+                              <label key={u.id} className="flex items-center gap-2.5 cursor-pointer px-2 py-1.5 rounded-lg transition-colors hover:bg-slate-50 dark:hover:bg-slate-700">
+                                <input type="checkbox" checked={form.sub_assignees.includes(u.id)} onChange={() => toggleSub(u.id)}
+                                  className="w-3.5 h-3.5 rounded" />
+                                <span className="text-xs" style={{ color: isDark ? D_DARK.text : "#374151" }}>{u.full_name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Section 3 — Classification */}
+            <div className="mx-5 mt-3 mb-4 rounded-2xl overflow-hidden border"
+              style={{ backgroundColor: isDark ? D_DARK.card : "#ffffff", borderColor: isDark ? D_DARK.border : "#e2e8f0" }}>
+              <div className="flex items-center gap-2 px-4 py-2.5 border-b"
+                style={{ borderColor: isDark ? D_DARK.border : "#f1f5f9", backgroundColor: isDark ? D_DARK.raised : "#f8fafc" }}>
+                <SlidersHorizontal className="w-3.5 h-3.5 text-violet-500" />
+                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: isDark ? D_DARK.muted : "#64748b" }}>Classification</span>
+              </div>
+              <div className="p-4 space-y-3">
+                {/* Department chips */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold" style={{ color: isDark ? D_DARK.muted : "#64748b" }}>Department</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {DEPARTMENTS.map(dept => (
+                      <button key={dept.value} type="button"
+                        onClick={() => setForm(p => ({ ...p, category: dept.value }))}
+                        className="h-7 px-3 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all border"
+                        style={form.category === dept.value
+                          ? { background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`, color: "#fff", border: "1px solid transparent", boxShadow: "0 2px 8px rgba(13,59,102,0.3)" }
+                          : { backgroundColor: isDark ? D_DARK.raised : "#fff", borderColor: isDark ? D_DARK.border : "#e2e8f0", color: isDark ? D_DARK.muted : "#64748b" }}>
+                        {dept.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* Priority + Status */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold" style={{ color: isDark ? D_DARK.muted : "#64748b" }}>Priority</label>
+                    <select value={form.priority} onChange={e => setForm(p => ({ ...p, priority: e.target.value }))}
+                      className="w-full px-3 py-2 text-sm rounded-xl border focus:outline-none focus:ring-2 focus:ring-blue-400 transition-colors"
+                      style={{ backgroundColor: isDark ? D_DARK.raised : "#f8fafc", borderColor: isDark ? D_DARK.border : "#e2e8f0", color: isDark ? D_DARK.text : "#1e293b" }}>
+                      <option value="low">🟢 Low</option>
+                      <option value="medium">🟡 Medium</option>
+                      <option value="high">🔴 High</option>
+                      <option value="critical">🚨 Critical</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold" style={{ color: isDark ? D_DARK.muted : "#64748b" }}>Status</label>
+                    <select value={form.status} onChange={e => setForm(p => ({ ...p, status: e.target.value }))}
+                      className="w-full px-3 py-2 text-sm rounded-xl border focus:outline-none focus:ring-2 focus:ring-blue-400 transition-colors"
+                      style={{ backgroundColor: isDark ? D_DARK.raised : "#f8fafc", borderColor: isDark ? D_DARK.border : "#e2e8f0", color: isDark ? D_DARK.text : "#1e293b" }}>
+                      <option value="pending">📋 To Do</option>
+                      <option value="in_progress">⚡ In Progress</option>
+                      <option value="completed">✅ Completed</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        {/* Footer */}
+        <div className="flex-shrink-0 px-5 py-3.5 border-t flex items-center justify-between"
+          style={{ backgroundColor: isDark ? D_DARK.card : "#fff", borderColor: isDark ? D_DARK.border : "#e2e8f0" }}>
+          <button type="button" onClick={onClose}
+            className="px-4 py-2 text-sm rounded-xl border font-medium transition-all"
+            style={{ borderColor: isDark ? D_DARK.border : "#e2e8f0", color: isDark ? D_DARK.muted : "#64748b", backgroundColor: isDark ? D_DARK.raised : "#f8fafc" }}>
+            Cancel
+          </button>
+          <button type="submit" form="ac-task-form" disabled={saving}
+            className="flex items-center gap-2 px-5 py-2 text-sm rounded-xl font-bold text-white transition-all active:scale-95 shadow-lg"
+            style={{ background: saving ? "#9CA3AF" : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+            {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : <><Plus className="w-4 h-4" /> Create Task</>}
+          </button>
+        </div>
+      </motion.div>
+    </div>,
+    document.body
+  );
+}
+
+
+function EventCard({ event, isDark, savedKeys, onSaved, onDismiss, onAddTask, viewMode }) {
   const D = isDark ? D_DARK : {};
   const cat     = resolveCategory(event);
   const catCfg  = CATEGORY_CONFIG[cat] || CATEGORY_CONFIG.reminder;
@@ -177,29 +492,7 @@ function EventCard({ event, isDark, savedKeys, onSaved, onDismiss, viewMode }) {
   const saved   = savedKeys.has(key);
   const [saving, setSaving] = useState(null);
   const [override, setOverride] = useState(cat);
-  const [addingTask, setAddingTask] = useState(false);
-  const [taskTitle, setTaskTitle] = useState("");
-  const [taskSaving, setTaskSaving] = useState(false);
   const isList = viewMode === "list";
-
-  const handleAddTask = async () => {
-    const title = taskTitle.trim() || event.title;
-    if (!title) return;
-    setTaskSaving(true);
-    try {
-      await api.post("/tasks", {
-        title,
-        due_date: event.date || null,
-        description: event.description || "",
-        status: "pending",
-      });
-      toast.success("✓ Task added");
-      setAddingTask(false);
-      setTaskTitle("");
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed to add task");
-    } finally { setTaskSaving(false); }
-  };
 
   const handleSave = async () => {
     if (saving || saved) return;
@@ -306,15 +599,15 @@ function EventCard({ event, isDark, savedKeys, onSaved, onDismiss, viewMode }) {
             </div>
           )}
 
-          {/* Add Task button */}
+          {/* Add Task button — opens full task modal */}
           <button
-            onClick={() => setAddingTask(v => !v)}
-            title="Add a task linked to this event"
-            className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold border transition-all"
+            onClick={() => onAddTask(event)}
+            title="Create a task from this event"
+            className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold border transition-all hover:scale-105"
             style={{
-              borderColor: addingTask ? COLORS.amber : (isDark ? "#2A2F45" : "#e2e8f0"),
-              backgroundColor: addingTask ? (isDark ? "rgba(245,158,11,0.12)" : "#FFFBEB") : (isDark ? "#21253A" : "#f8fafc"),
-              color: addingTask ? COLORS.amber : (isDark ? "#8892B0" : "#64748b"),
+              borderColor: isDark ? "#2A2F45" : "#e2e8f0",
+              backgroundColor: isDark ? "#21253A" : "#f8fafc",
+              color: isDark ? "#8892B0" : "#64748b",
             }}>
             <ClipboardList className="w-3 h-3" />
             <span className="hidden sm:inline">Task</span>
@@ -332,34 +625,6 @@ function EventCard({ event, isDark, savedKeys, onSaved, onDismiss, viewMode }) {
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
-
-        {/* Inline Add Task form */}
-        {addingTask && (
-          <div className="px-4 pb-3 flex items-center gap-2"
-            style={{ borderTop: `1px solid ${isDark ? "#2A2F45" : "#f1f5f9"}` }}>
-            <ClipboardList className="w-3.5 h-3.5 flex-shrink-0" style={{ color: COLORS.amber }} />
-            <input
-              autoFocus
-              value={taskTitle}
-              onChange={e => setTaskTitle(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") handleAddTask(); if (e.key === "Escape") { setAddingTask(false); setTaskTitle(""); }}}
-              placeholder={event.title || "Task title…"}
-              className="flex-1 text-xs px-2 py-1.5 rounded-lg border focus:outline-none focus:ring-2 focus:ring-amber-400"
-              style={{ backgroundColor: isDark ? "#21253A" : "#f8fafc", borderColor: isDark ? "#2A2F45" : "#e2e8f0", color: isDark ? "#E2E8F0" : "#1e293b" }}
-            />
-            <button onClick={handleAddTask} disabled={taskSaving}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold text-white transition-all active:scale-95 flex-shrink-0"
-              style={{ background: taskSaving ? "#9CA3AF" : `linear-gradient(135deg, ${COLORS.amber}, #d97706)` }}>
-              {taskSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
-              <span className="hidden sm:inline">Add</span>
-            </button>
-            <button onClick={() => { setAddingTask(false); setTaskTitle(""); }}
-              className="w-6 h-6 flex items-center justify-center rounded-lg flex-shrink-0"
-              style={{ color: isDark ? "#8892B0" : "#94a3b8" }}>
-              <X className="w-3 h-3" />
-            </button>
-          </div>
-        )}
       </motion.div>
     );
   }
@@ -513,37 +778,13 @@ function EventCard({ event, isDark, savedKeys, onSaved, onDismiss, viewMode }) {
           </div>
         )}
 
-        {/* Add Task row */}
+        {/* Add Task button — opens full task modal */}
         <div className="mt-2 pt-2 border-t" style={{ borderColor: isDark ? D_DARK.border : "#f1f5f9" }}>
-          {!addingTask ? (
-            <button onClick={() => setAddingTask(true)}
-              className="flex items-center gap-1.5 text-xs font-semibold px-2 py-1 rounded-lg border transition-all"
-              style={{ borderColor: isDark ? "#2A2F45" : "#e2e8f0", backgroundColor: isDark ? "#21253A" : "#f8fafc", color: isDark ? "#8892B0" : "#64748b" }}>
-              <ClipboardList className="w-3 h-3" /> Add Task
-            </button>
-          ) : (
-            <div className="flex items-center gap-2">
-              <input
-                autoFocus
-                value={taskTitle}
-                onChange={e => setTaskTitle(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter") handleAddTask(); if (e.key === "Escape") { setAddingTask(false); setTaskTitle(""); }}}
-                placeholder={event.title || "Task title…"}
-                className="flex-1 text-xs px-2 py-1.5 rounded-lg border focus:outline-none focus:ring-2 focus:ring-amber-400"
-                style={{ backgroundColor: isDark ? "#21253A" : "#f8fafc", borderColor: isDark ? "#2A2F45" : "#e2e8f0", color: isDark ? "#E2E8F0" : "#1e293b" }}
-              />
-              <button onClick={handleAddTask} disabled={taskSaving}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold text-white transition-all active:scale-95 flex-shrink-0"
-                style={{ background: taskSaving ? "#9CA3AF" : `linear-gradient(135deg, ${COLORS.amber}, #d97706)` }}>
-                {taskSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />} Add
-              </button>
-              <button onClick={() => { setAddingTask(false); setTaskTitle(""); }}
-                className="w-6 h-6 flex items-center justify-center rounded-lg flex-shrink-0"
-                style={{ color: isDark ? "#8892B0" : "#94a3b8" }}>
-                <X className="w-3 h-3" />
-              </button>
-            </div>
-          )}
+          <button onClick={() => onAddTask(event)}
+            className="flex items-center gap-1.5 text-xs font-semibold px-2 py-1 rounded-lg border transition-all hover:scale-105"
+            style={{ borderColor: isDark ? "#2A2F45" : "#e2e8f0", backgroundColor: isDark ? "#21253A" : "#f8fafc", color: isDark ? "#8892B0" : "#64748b" }}>
+            <ClipboardList className="w-3 h-3" /> Add Task
+          </button>
         </div>
       </div>
     </motion.div>
@@ -554,6 +795,10 @@ function EventCard({ event, isDark, savedKeys, onSaved, onDismiss, viewMode }) {
 export default function ActionCenter() {
   const isDark = useDark();
   const D = isDark ? D_DARK : {};
+  const { user: authUser, hasPermission } = useAuth();
+
+  const isAdmin = authUser?.role === "admin";
+  const canAssignTasks = isAdmin || hasPermission("can_assign_tasks");
 
   const [events,       setEvents]      = useState([]);
   const [loading,      setLoading]     = useState(true);
@@ -571,6 +816,12 @@ export default function ActionCenter() {
   const [dismissedKeys,setDismissedKeys]= useState(() => new Set());
   const [collapsed,    setCollapsed]   = useState({});
   const [viewMode,     setViewMode]    = useState("list"); // "list" | "board"
+
+  // Users & clients for task form
+  const [users,   setUsers]   = useState([]);
+  const [clients, setClients] = useState([]);
+  // Task modal state
+  const [taskModalEvent, setTaskModalEvent] = useState(null);
 
   // Load stored events from backend
   const loadEvents = useCallback(async (force = false) => {
@@ -596,6 +847,12 @@ export default function ActionCenter() {
   }, []);
 
   useEffect(() => { loadEvents(false); }, [loadEvents]);
+
+  // Load users & clients for the full task form
+  useEffect(() => {
+    api.get("/users").then(r => setUsers(r.data || [])).catch(() => {});
+    api.get("/clients?limit=200").then(r => setClients(r.data?.clients || r.data || [])).catch(() => {});
+  }, []);
 
   const handleScanFresh = async () => {
     setScanning(true);
@@ -1019,6 +1276,7 @@ export default function ActionCenter() {
                           savedKeys={savedKeys}
                           onSaved={handleEventSaved}
                           onDismiss={handleDismiss}
+                          onAddTask={ev => setTaskModalEvent(ev)}
                           viewMode={viewMode} />
                       </div>
                     ))}
@@ -1058,5 +1316,21 @@ export default function ActionCenter() {
       )}
 
     </motion.div>
+
+    {/* ── Full Task Creation Modal ── */}
+    <AnimatePresence>
+      {taskModalEvent && (
+        <AddTaskModal
+          event={taskModalEvent}
+          isDark={isDark}
+          onClose={() => setTaskModalEvent(null)}
+          canAssignTasks={canAssignTasks}
+          users={users}
+          clients={clients}
+        />
+      )}
+    </AnimatePresence>
   );
 }
+
+// ─── Append: modal render already inside component above
