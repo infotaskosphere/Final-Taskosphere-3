@@ -314,6 +314,10 @@ class User(BaseModel):
     approved_at: Optional[Any] = None
     company_id: Optional[str] = None
     company_name: Optional[str] = None
+    # ── Employment / Payroll fields ──────────────────────────────────────────
+    joining_date: Optional[Any] = None          # Date the employee joined
+    training_period_end: Optional[Any] = None   # End date of the training / probation period
+    payroll_date: Optional[Any] = None          # Monthly payroll processing date (day of month or full date)
 
     @field_validator("birthday", mode="before")
     @classmethod
@@ -341,6 +345,10 @@ class UserCreate(BaseModel):
     status: Optional[str] = "pending_approval"
     company_id: Optional[str] = None
     company_name: Optional[str] = None
+    # ── Employment / Payroll fields ──────────────────────────────────────────
+    joining_date: Optional[Any] = None
+    training_period_end: Optional[Any] = None
+    payroll_date: Optional[Any] = None
 
 
 class UserUpdate(BaseModel):
@@ -359,6 +367,10 @@ class UserUpdate(BaseModel):
     telegram_id: Optional[int] = None
     company_id: Optional[str] = None
     company_name: Optional[str] = None
+    # ── Employment / Payroll fields ──────────────────────────────────────────
+    joining_date: Optional[Any] = None
+    training_period_end: Optional[Any] = None
+    payroll_date: Optional[Any] = None
     model_config = ConfigDict(from_attributes=True, extra="ignore")
 
 
