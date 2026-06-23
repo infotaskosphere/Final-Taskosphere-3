@@ -459,6 +459,8 @@ export default function ActionCenter() {
   const [events,       setEvents]      = useState([]);
   const [loading,      setLoading]     = useState(true);
   const [scanning,     setScanning]    = useState(false);
+  const [retroSyncing, setRetroSyncing]= useState(false);
+  const [showRetroMenu,setShowRetroMenu]= useState(false);
   const [searchQ,      setSearchQ]     = useState("");
   const [filterCat,    setFilterCat]   = useState("all");
   const [filterUrgency,setFilterUrgency]= useState("all");
@@ -498,6 +500,48 @@ export default function ActionCenter() {
     setScanning(true);
     try { await loadEvents(true); }
     finally { setScanning(false); }
+  };
+
+  // Retrospective sync — re-scans further back than the normal rolling
+  // window across ALL connected accounts. Results are merged into the
+  // existing list (never replace it), keyed by event id, so nothing already
+  // on screen disappears and nothing already-seen gets duplicated. The
+  // backend itself also skips any email it has already imported (matched
+  // by Message-ID), so this is safe to run as many times as needed.
+  const RETRO_PRESETS = [
+    { daysBack: 30,  label: "Last 30 days" },
+    { daysBack: 90,  label: "Last 90 days" },
+    { daysBack: 365, label: "Last 1 year" },
+    { daysBack: null, label: "All time" },
+  ];
+  const handleSyncRetro = async (preset) => {
+    setShowRetroMenu(false);
+    setRetroSyncing(true);
+    try {
+      const sinceDate = preset.daysBack
+        ? new Date(Date.now() - preset.daysBack * 86400000).toISOString().slice(0, 10)
+        : "1970-01-01";
+      const res = await api.get(
+        `/email/extract-events?force_refresh=true&limit=300&since_date=${sinceDate}`,
+        { timeout: 120000 }
+      );
+      const incoming = res.data || [];
+      setEvents(prev => {
+        const existingIds = new Set(prev.map(e => e.id));
+        const newOnes = incoming.filter(e => !existingIds.has(e.id));
+        return [...prev, ...newOnes];
+      });
+      const newCount = incoming.filter(e => !events.some(ev => ev.id === e.id)).length;
+      toast.success(
+        incoming.length === 0
+          ? `No legal events found for ${preset.label.toLowerCase()}`
+          : `✓ Retrospective sync complete — ${newCount} new event${newCount !== 1 ? "s" : ""} added (duplicates auto-skipped)`
+      );
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Retrospective sync failed");
+    } finally {
+      setRetroSyncing(false);
+    }
   };
 
   const handleEventSaved = useCallback((key) => {
@@ -617,6 +661,31 @@ export default function ActionCenter() {
                   ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Scanning…</>
                   : <><RefreshCw className="w-3.5 h-3.5" /> Scan Fresh</>}
               </button>
+              <div className="relative">
+                <button onClick={() => setShowRetroMenu(v => !v)} disabled={retroSyncing}
+                  title="Re-scan older mail across all connected accounts — already-imported emails are skipped automatically"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold border transition-all active:scale-95"
+                  style={{ backgroundColor: "rgba(255,255,255,0.15)", borderColor: "rgba(255,255,255,0.25)", color: "#ffffff" }}>
+                  {retroSyncing
+                    ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Syncing…</>
+                    : <><Clock className="w-3.5 h-3.5" /> Sync Older Mail <ChevronDown className="w-3.5 h-3.5" /></>}
+                </button>
+                {showRetroMenu && (
+                  <div className="absolute right-0 top-full mt-1 z-20 w-48 rounded-xl border shadow-lg overflow-hidden"
+                    style={{ backgroundColor: isDark ? D.card : "#ffffff", borderColor: isDark ? D.border : "#e2e8f0" }}>
+                    {RETRO_PRESETS.map(preset => (
+                      <button key={preset.label} onClick={() => handleSyncRetro(preset)}
+                        className="w-full text-left px-3 py-2 text-xs font-semibold transition-colors hover:bg-slate-100 dark:hover:bg-slate-700"
+                        style={{ color: isDark ? D.text : "#1e293b" }}>
+                        {preset.label}
+                      </button>
+                    ))}
+                    <div className="px-3 py-1.5 text-[10px] border-t" style={{ color: isDark ? D.muted : "#94a3b8", borderColor: isDark ? D.border : "#f1f5f9" }}>
+                      Duplicates skipped automatically
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
