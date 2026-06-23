@@ -183,7 +183,7 @@ function StatCard({ icon: Icon, label, value, unit, color, trend, isDark }) {
 }
 
 // ─── AddTaskModal ──────────────────────────────────────────────────────────────
-function AddTaskModal({ event, isDark, onClose, canAssignTasks, users, clients }) {
+function AddTaskModal({ event, isDark, onClose, canAssignTasks, users, clients, onTaskCreated }) {
   const D = isDark ? D_DARK : {};
   const [form, setForm] = useState({
     ...EMPTY_TASK_FORM,
@@ -222,6 +222,7 @@ function AddTaskModal({ event, isDark, onClose, canAssignTasks, users, clients }
         sub_assignees: form.sub_assignees || [],
       });
       toast.success("✓ Task created");
+      onTaskCreated?.();
       onClose();
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to create task");
@@ -933,6 +934,16 @@ export default function ActionCenter() {
     }, 1200);
   }, []);
 
+  const handleTaskCreated = useCallback(() => {
+    if (!taskModalEvent) return;
+    const key = taskModalEvent.id || `${taskModalEvent.title}::${taskModalEvent.date}`;
+    setEvents(prev => prev.map(e => {
+      const k = e.id || `${e.title}::${e.date}`;
+      return k === key ? { ...e, save_category: "task" } : e;
+    }));
+    handleEventSaved(key);
+  }, [taskModalEvent, handleEventSaved]);
+
   const handleDismiss = useCallback(async (key, event) => {
     // Optimistically remove from UI
     setDismissedKeys(prev => { const s = new Set(prev); s.add(key); return s; });
@@ -1015,9 +1026,11 @@ export default function ActionCenter() {
     { val: "reminder", label: "Reminders", color: COLORS.deepBlue },
     { val: "todo",     label: "Todos",     color: COLORS.purple },
     { val: "visit",    label: "Visits",    color: COLORS.emeraldGreen },
+    { val: "task",     label: "Tasks",     color: COLORS.amber },
   ];
 
   return (
+    <>
     <motion.div className="min-h-screen p-5 md:p-6 lg:p-8 space-y-5"
       style={{ background: isDark ? D_DARK.bg : "#f8fafc" }}
       variants={containerV} initial="hidden" animate="visible">
@@ -1327,9 +1340,11 @@ export default function ActionCenter() {
           canAssignTasks={canAssignTasks}
           users={users}
           clients={clients}
+          onTaskCreated={handleTaskCreated}
         />
       )}
     </AnimatePresence>
+    </>
   );
 }
 
