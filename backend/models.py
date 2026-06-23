@@ -77,6 +77,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "view_other_todos": [],
           "view_other_activity": [],
                     "can_access_whatsapp_hub": False,     # ADMIN_GRANTED_ONLY
+          "can_view_interviews": True,          # Admin always has interview access
           "assigned_clients": [],
       },
       "manager": {
@@ -138,6 +139,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "view_other_todos": [],
           "view_other_activity": [],
                     "can_access_whatsapp_hub": False,     # ADMIN_GRANTED_ONLY
+          "can_view_interviews": False,         # ADMIN_GRANTED_ONLY
           "assigned_clients": [],
       },
       "staff": {
@@ -197,6 +199,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "view_other_todos": [],
           "view_other_activity": [],
                     "can_access_whatsapp_hub": False,     # ADMIN_GRANTED_ONLY
+          "can_view_interviews": False,         # ADMIN_GRANTED_ONLY
           "assigned_clients": [],
       },
   }
@@ -279,6 +282,10 @@ class UserPermissions(BaseModel):
     assigned_clients: List[str] = Field(default_factory=list)
     can_access_whatsapp_hub: bool = False
     governed_users: List[str] = Field(default_factory=list)   # users this person can manage (when can_manage_users=True)
+    # ── Employee Interviews ──────────────────────────────────────────────────
+    # can_view_interviews → access the Employee Interviews page
+    #   Admin always has access. Grant explicitly to HR managers/staff.
+    can_view_interviews: bool = False
 
     model_config = ConfigDict(extra="ignore")
 
