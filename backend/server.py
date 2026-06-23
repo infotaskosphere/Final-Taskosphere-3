@@ -31,6 +31,7 @@ from backend.website_tracking import router as website_tracking_router
 from backend.invoicing import router as invoicing_router
 from backend.visits import router as visits_router
 from backend.leads import router as leads_router
+from backend.interviews import router as interviews_router
 from backend.telegram import router as telegram_router
 from backend.notifications import router as notification_router, create_notification
 from backend.email_integration import router as email_router
@@ -10941,6 +10942,7 @@ api_router.include_router(website_tracking_router)
 api_router.include_router(quotation_router)
 api_router.include_router(telegram_router)
 api_router.include_router(leads_router)
+api_router.include_router(interviews_router)
 api_router.include_router(notification_router)
 api_router.include_router(email_router)
 api_router.include_router(activity_monitor_router)
