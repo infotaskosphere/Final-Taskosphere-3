@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Zap, RefreshCw, CheckSquare, Bell, Calendar, Search, Filter, X,
@@ -461,6 +462,8 @@ export default function ActionCenter() {
   const [scanning,     setScanning]    = useState(false);
   const [retroSyncing, setRetroSyncing]= useState(false);
   const [showRetroMenu,setShowRetroMenu]= useState(false);
+  const [retroMenuPos, setRetroMenuPos] = useState(null);
+  const retroBtnRef = useRef(null);
   const [searchQ,      setSearchQ]     = useState("");
   const [filterCat,    setFilterCat]   = useState("all");
   const [filterUrgency,setFilterUrgency]= useState("all");
@@ -514,6 +517,29 @@ export default function ActionCenter() {
     { daysBack: 365, label: "Last 1 year" },
     { daysBack: null, label: "All time" },
   ];
+
+  // Rendered through a portal (see header below) because this button lives
+  // inside a header div with overflow-hidden (used for the decorative corner
+  // glow), which was clipping/hiding a normally-positioned dropdown.
+  const toggleRetroMenu = () => {
+    if (!showRetroMenu && retroBtnRef.current) {
+      const r = retroBtnRef.current.getBoundingClientRect();
+      setRetroMenuPos({ top: r.bottom + 6, left: r.right - 192 }); // 192px = menu width (w-48)
+    }
+    setShowRetroMenu(v => !v);
+  };
+
+  useEffect(() => {
+    if (!showRetroMenu) return;
+    const close = () => setShowRetroMenu(false);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [showRetroMenu]);
+
   const handleSyncRetro = async (preset) => {
     setShowRetroMenu(false);
     setRetroSyncing(true);
@@ -662,7 +688,7 @@ export default function ActionCenter() {
                   : <><RefreshCw className="w-3.5 h-3.5" /> Scan Fresh</>}
               </button>
               <div className="relative">
-                <button onClick={() => setShowRetroMenu(v => !v)} disabled={retroSyncing}
+                <button ref={retroBtnRef} onClick={toggleRetroMenu} disabled={retroSyncing}
                   title="Re-scan older mail across all connected accounts — already-imported emails are skipped automatically"
                   className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold border transition-all active:scale-95"
                   style={{ backgroundColor: "rgba(255,255,255,0.15)", borderColor: "rgba(255,255,255,0.25)", color: "#ffffff" }}>
@@ -670,20 +696,24 @@ export default function ActionCenter() {
                     ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Syncing…</>
                     : <><Clock className="w-3.5 h-3.5" /> Sync Older Mail <ChevronDown className="w-3.5 h-3.5" /></>}
                 </button>
-                {showRetroMenu && (
-                  <div className="absolute right-0 top-full mt-1 z-20 w-48 rounded-xl border shadow-lg overflow-hidden"
-                    style={{ backgroundColor: isDark ? D.card : "#ffffff", borderColor: isDark ? D.border : "#e2e8f0" }}>
-                    {RETRO_PRESETS.map(preset => (
-                      <button key={preset.label} onClick={() => handleSyncRetro(preset)}
-                        className="w-full text-left px-3 py-2 text-xs font-semibold transition-colors hover:bg-slate-100 dark:hover:bg-slate-700"
-                        style={{ color: isDark ? D.text : "#1e293b" }}>
-                        {preset.label}
-                      </button>
-                    ))}
-                    <div className="px-3 py-1.5 text-[10px] border-t" style={{ color: isDark ? D.muted : "#94a3b8", borderColor: isDark ? D.border : "#f1f5f9" }}>
-                      Duplicates skipped automatically
+                {showRetroMenu && retroMenuPos && createPortal(
+                  <>
+                    <div className="fixed inset-0 z-[9998]" onClick={() => setShowRetroMenu(false)} />
+                    <div className="fixed z-[9999] w-48 rounded-xl border shadow-lg overflow-hidden"
+                      style={{ top: retroMenuPos.top, left: retroMenuPos.left, backgroundColor: isDark ? D.card : "#ffffff", borderColor: isDark ? D.border : "#e2e8f0" }}>
+                      {RETRO_PRESETS.map(preset => (
+                        <button key={preset.label} onClick={() => handleSyncRetro(preset)}
+                          className="w-full text-left px-3 py-2 text-xs font-semibold transition-colors hover:bg-slate-100 dark:hover:bg-slate-700"
+                          style={{ color: isDark ? D.text : "#1e293b" }}>
+                          {preset.label}
+                        </button>
+                      ))}
+                      <div className="px-3 py-1.5 text-[10px] border-t" style={{ color: isDark ? D.muted : "#94a3b8", borderColor: isDark ? D.border : "#f1f5f9" }}>
+                        Duplicates skipped automatically
+                      </div>
                     </div>
-                  </div>
+                  </>,
+                  document.body
                 )}
               </div>
             </div>
