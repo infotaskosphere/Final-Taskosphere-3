@@ -571,11 +571,27 @@ function ConnectForm({ provider, onSuccess, onCancel, isDark }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // CONNECTED ACCOUNT CARD
 // ─────────────────────────────────────────────────────────────────────────────
-function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, onUpdateSettings, isDark }) {
+function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, onSyncRetro, onUpdateSettings, isDark }) {
   const [editingLabel, setEditingLabel] = useState(false);
   const [labelVal,     setLabelVal]     = useState(conn.label || conn.email_address);
   const [testing,      setTesting]      = useState(false);
   const [syncing,      setSyncing]      = useState(false);
+  const [retroSyncing, setRetroSyncing] = useState(false);
+  const [showRetroMenu,setShowRetroMenu]= useState(false);
+
+  const RETRO_PRESETS = [
+    { daysBack: 30,   label: "Last 30 days" },
+    { daysBack: 90,   label: "Last 90 days" },
+    { daysBack: 365,  label: "Last 1 year" },
+    { daysBack: null, label: "All time" },
+  ];
+
+  const handleRetroSync = async (preset) => {
+    setShowRetroMenu(false);
+    setRetroSyncing(true);
+    try { await onSyncRetro(conn.email_address, preset.daysBack, preset.label); }
+    finally { setRetroSyncing(false); }
+  };
 
   const color    = PROVIDER_COLORS[conn.provider] || PROVIDER_COLORS.other;
   const icon     = PROVIDER_ICONS[conn.provider]  || PROVIDER_ICONS.other;
@@ -693,6 +709,30 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, on
               style={{ color: isDark ? D.muted : "#64748b" }}>
               {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Sync Now
             </button>
+            <div className="relative">
+              <button onClick={() => setShowRetroMenu(v => !v)} disabled={retroSyncing}
+                title="Re-scan older mail (e.g. last 90 days / 1 year / all time) — already-imported emails are skipped automatically"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 hover:bg-slate-200 dark:hover:bg-slate-700 whitespace-nowrap"
+                style={{ color: isDark ? D.muted : "#64748b" }}>
+                {retroSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Clock className="w-3.5 h-3.5" />}
+                Sync Older Mail <ChevronDown className="w-3 h-3" />
+              </button>
+              {showRetroMenu && (
+                <div className="absolute right-0 top-full mt-1 z-20 w-44 rounded-xl border shadow-lg overflow-hidden"
+                  style={{ backgroundColor: isDark ? D.card : "#ffffff", borderColor: isDark ? D.border : "#e2e8f0" }}>
+                  {RETRO_PRESETS.map(preset => (
+                    <button key={preset.label} onClick={() => handleRetroSync(preset)}
+                      className="w-full text-left px-3 py-2 text-xs font-medium transition-colors hover:bg-slate-100 dark:hover:bg-slate-700"
+                      style={{ color: isDark ? D.text : "#1e293b" }}>
+                      {preset.label}
+                    </button>
+                  ))}
+                  <div className="px-3 py-1.5 text-[10px] border-t" style={{ color: isDark ? D.dimmer : "#94a3b8", borderColor: isDark ? D.border : "#f1f5f9" }}>
+                    Duplicates skipped automatically
+                  </div>
+                </div>
+              )}
+            </div>
             <button onClick={handleTest} disabled={testing}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 hover:bg-slate-200 dark:hover:bg-slate-700 whitespace-nowrap"
               style={{ color: isDark ? D.muted : "#64748b" }}>
@@ -2170,6 +2210,41 @@ export default function EmailSettings() {
     } catch (err) { toast.error(err?.response?.data?.detail || "Sync failed"); }
   }, [savedKeys, loadConnections]);
 
+  // handleSyncRetro — retrospective sync: re-scans further back than the
+  // normal rolling window (e.g. last 90 days / 1 year / all time), ignoring
+  // last_synced entirely. Safe to run repeatedly — the backend skips any
+  // email it has already seen (matched by Message-ID) and every save action
+  // is itself deduplicated, so nothing gets added twice.
+  const handleSyncRetro = useCallback(async (emailAddress, daysBack, label) => {
+    try {
+      toast.info(`Scanning ${label || `last ${daysBack} days`} of mail for ${emailAddress}…`, { duration: 4000 });
+      const sinceDate = daysBack
+        ? new Date(Date.now() - daysBack * 86400000).toISOString().slice(0, 10)
+        : "1970-01-01"; // "All time"
+      const res = await api.get(
+        `/email/extract-events?force_refresh=true&limit=300&since_date=${sinceDate}&email=${encodeURIComponent(emailAddress)}`,
+        { timeout: 120000 }
+      );
+      const raw     = (res.data || []).filter(e => !e.email_account || e.email_account === emailAddress);
+      const deduped = raw.filter(e => !savedKeys.has(eventKey(e)));
+
+      setExtractedEvents(prev => {
+        const existingKeys = new Set(prev.map(eventKey));
+        const newOnes      = deduped.filter(e => !existingKeys.has(eventKey(e)));
+        return [...prev, ...newOnes];
+      });
+
+      toast.success(
+        raw.length === 0
+          ? `No legal events found in ${emailAddress}'s history for that range`
+          : `✓ Retrospective sync complete — ${raw.length} event${raw.length !== 1 ? "s" : ""} found (duplicates auto-skipped)`
+      );
+      loadConnections();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Retrospective sync failed");
+    }
+  }, [savedKeys, loadConnections]);
+
   // handleScanAll — scans all accounts; each account's last_synced is the
   // natural base date on the backend. Shows everything in preview panel.
   const handleScanAll = async () => {
@@ -2355,7 +2430,7 @@ export default function EmailSettings() {
                 {connections.map(conn => (
                   <ConnectedAccountCard key={conn.email_address} conn={conn} isDark={isDark}
                     onDisconnect={handleDisconnect} onTest={handleTest} onToggle={handleToggle}
-                    onSync={handleSync} onUpdateSettings={handleUpdateSettings} />
+                    onSync={handleSync} onSyncRetro={handleSyncRetro} onUpdateSettings={handleUpdateSettings} />
                 ))}
               </AnimatePresence>
             )}
