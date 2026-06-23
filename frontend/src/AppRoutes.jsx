@@ -177,7 +177,7 @@ function AppRoutes() {
       <Route path="/invoicing"  element={<Permission permission={["can_manage_invoices", "can_create_quotations"]}><PageLoader><Invoicing /></PageLoader></Permission>} />
       <Route path="/task-audit" element={<Permission permission="can_view_audit_logs"><PageLoader><TaskAudit /></PageLoader></Permission>} />
       <Route path="/users"          element={<Permission permission="can_view_user_page"><PageLoader><Users /></PageLoader></Permission>} />
-      <Route path="/interviews"     element={<Permission permission="can_manage_users"><PageLoader><Interviews /></PageLoader></Permission>} />
+      <Route path="/interviews"     element={<Permission permission="can_view_interviews"><PageLoader><Interviews /></PageLoader></Permission>} />
       <Route path="/staff-activity" element={<AdminOnly><PageLoader><StaffActivity /></PageLoader></AdminOnly>} />
 
       {/* Client Portal Manager — admin always, other users with can_view_client_portal */}
