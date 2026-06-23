@@ -16,6 +16,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import api from "@/lib/api";
@@ -578,6 +579,8 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, on
   const [syncing,      setSyncing]      = useState(false);
   const [retroSyncing, setRetroSyncing] = useState(false);
   const [showRetroMenu,setShowRetroMenu]= useState(false);
+  const [retroMenuPos, setRetroMenuPos] = useState(null);
+  const retroBtnRef = useRef(null);
 
   const RETRO_PRESETS = [
     { daysBack: 30,   label: "Last 30 days" },
@@ -592,6 +595,22 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, on
     try { await onSyncRetro(conn.email_address, preset.daysBack, preset.label); }
     finally { setRetroSyncing(false); }
   };
+
+  const toggleRetroMenu = () => {
+    if (!showRetroMenu && retroBtnRef.current) {
+      const r = retroBtnRef.current.getBoundingClientRect();
+      setRetroMenuPos({ top: r.bottom + 6, left: r.right - 176 }); // 176px = w-44
+    }
+    setShowRetroMenu(v => !v);
+  };
+
+  useEffect(() => {
+    if (!showRetroMenu) return;
+    const close = () => setShowRetroMenu(false);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => { window.removeEventListener("scroll", close, true); window.removeEventListener("resize", close); };
+  }, [showRetroMenu]);
 
   const color    = PROVIDER_COLORS[conn.provider] || PROVIDER_COLORS.other;
   const icon     = PROVIDER_ICONS[conn.provider]  || PROVIDER_ICONS.other;
@@ -710,27 +729,31 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, on
               {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Sync Now
             </button>
             <div className="relative">
-              <button onClick={() => setShowRetroMenu(v => !v)} disabled={retroSyncing}
+              <button ref={retroBtnRef} onClick={toggleRetroMenu} disabled={retroSyncing}
                 title="Re-scan older mail (e.g. last 90 days / 1 year / all time) — already-imported emails are skipped automatically"
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 hover:bg-slate-200 dark:hover:bg-slate-700 whitespace-nowrap"
                 style={{ color: isDark ? D.muted : "#64748b" }}>
                 {retroSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Clock className="w-3.5 h-3.5" />}
                 Sync Older Mail <ChevronDown className="w-3 h-3" />
               </button>
-              {showRetroMenu && (
-                <div className="absolute right-0 top-full mt-1 z-20 w-44 rounded-xl border shadow-lg overflow-hidden"
-                  style={{ backgroundColor: isDark ? D.card : "#ffffff", borderColor: isDark ? D.border : "#e2e8f0" }}>
-                  {RETRO_PRESETS.map(preset => (
-                    <button key={preset.label} onClick={() => handleRetroSync(preset)}
-                      className="w-full text-left px-3 py-2 text-xs font-medium transition-colors hover:bg-slate-100 dark:hover:bg-slate-700"
-                      style={{ color: isDark ? D.text : "#1e293b" }}>
-                      {preset.label}
-                    </button>
-                  ))}
-                  <div className="px-3 py-1.5 text-[10px] border-t" style={{ color: isDark ? D.dimmer : "#94a3b8", borderColor: isDark ? D.border : "#f1f5f9" }}>
-                    Duplicates skipped automatically
+              {showRetroMenu && retroMenuPos && createPortal(
+                <>
+                  <div className="fixed inset-0 z-[9998]" onClick={() => setShowRetroMenu(false)} />
+                  <div className="fixed z-[9999] w-44 rounded-xl border shadow-lg overflow-hidden"
+                    style={{ top: retroMenuPos.top, left: retroMenuPos.left, backgroundColor: isDark ? D.card : "#ffffff", borderColor: isDark ? D.border : "#e2e8f0" }}>
+                    {RETRO_PRESETS.map(preset => (
+                      <button key={preset.label} onClick={() => handleRetroSync(preset)}
+                        className="w-full text-left px-3 py-2 text-xs font-medium transition-colors hover:bg-slate-100 dark:hover:bg-slate-700"
+                        style={{ color: isDark ? D.text : "#1e293b" }}>
+                        {preset.label}
+                      </button>
+                    ))}
+                    <div className="px-3 py-1.5 text-[10px] border-t" style={{ color: isDark ? D.dimmer : "#94a3b8", borderColor: isDark ? D.border : "#f1f5f9" }}>
+                      Duplicates skipped automatically
+                    </div>
                   </div>
-                </div>
+                </>,
+                document.body
               )}
             </div>
             <button onClick={handleTest} disabled={testing}
