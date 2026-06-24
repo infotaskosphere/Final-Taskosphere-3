@@ -75,6 +75,43 @@ def _db():
     return db
 
 
+def _is_real_name(name: Optional[str], phone: str) -> bool:
+    """A 'real' name is non-empty and isn't just the phone number/digits."""
+    if not name:
+        return False
+    name = name.strip()
+    if not name:
+        return False
+    digits_only = name.replace("+", "").replace(" ", "")
+    if digits_only.isdigit():
+        return False
+    if phone and name == phone:
+        return False
+    return True
+
+
+def _better_name(candidate: Optional[str], existing: Optional[str], phone: str) -> Optional[str]:
+    """
+    Decide what a contact's display_name should become.
+
+    Root cause this guards against: every incoming message (and every row in
+    a bulk history sync) used to unconditionally overwrite the contact's
+    stored display_name with that single message's `contact_name`. Since
+    `contact_name` is sourced from WhatsApp's `pushName` field — which is
+    frequently empty/unreliable on synced history and, for some message
+    shapes, reflects the *connected account's own* profile name rather than
+    the actual sender — a contact's real, address-book-derived name kept
+    getting clobbered back down to a phone number (or someone else's name)
+    on the very next message. This makes the update an "upgrade only" merge:
+    a real name is never replaced by a worse one (missing, or just digits).
+    """
+    if _is_real_name(candidate, phone) and not _is_real_name(existing, phone):
+        return candidate.strip()
+    if _is_real_name(existing, phone):
+        return existing
+    return candidate if candidate else (existing or phone)
+
+
 async def _has_hub_access(user: User) -> bool:
     if user.role == "admin":
         return True
@@ -180,13 +217,17 @@ async def hub_incoming_message(request: Request):
         "assigned_to":   None,
     })
 
-    contact_name = group_subj if is_group else (payload.get("contact_name") or phone)
+    contact_name = group_subj if is_group else payload.get("contact_name")
     media_type   = payload.get("media_type")
+    existing_contact = await db["whatsapp_hub_contacts"].find_one({"jid": jid}, {"display_name": 1})
+    resolved_name = group_subj if is_group else _better_name(
+        contact_name, existing_contact.get("display_name") if existing_contact else None, phone
+    )
     await db["whatsapp_hub_contacts"].update_one(
         {"jid": jid},
         {"$set": {
             "jid": jid, "phone": phone,
-            "display_name": contact_name,
+            "display_name": resolved_name,
             "is_group": is_group,
             "last_message_at": ts,
             "session_id": session_id,
@@ -234,7 +275,7 @@ async def hub_bulk_sync(request: Request):
             continue
         is_group     = bool(c.get("is_group")) or jid.endswith("@g.us")
         phone        = c.get("phone") or jid.split("@")[0]
-        display_name = c.get("display_name") or phone
+        candidate_nm = c.get("display_name")
         last_at      = None
         ts_str       = c.get("last_message_at")
         if ts_str:
@@ -243,9 +284,16 @@ async def hub_bulk_sync(request: Request):
             except Exception:
                 pass
         last_at = last_at or datetime.now(timezone.utc)
+        existing = await db["whatsapp_hub_contacts"].find_one({"jid": jid}, {"display_name": 1})
+        if is_group:
+            display_name = candidate_nm or (existing.get("display_name") if existing else None) or "Group"
+        else:
+            display_name = _better_name(candidate_nm, existing.get("display_name") if existing else None, phone)
         # Use $set (not $setOnInsert) for display_name so contacts get their real name
         # on every sync — previously $setOnInsert meant names only wrote on first insert
-        # and re-syncs always left contacts showing only their phone number.
+        # and re-syncs always left contacts showing only their phone number. The merge
+        # above ensures this $set can only ever upgrade the name, never clobber a real
+        # one with a worse value.
         await db["whatsapp_hub_contacts"].update_one(
             {"jid": jid},
             {"$set":         {"jid": jid, "phone": phone, "is_group": is_group,
@@ -255,6 +303,12 @@ async def hub_bulk_sync(request: Request):
             upsert=True,
         )
         contacts_upserted += 1
+
+    # One real-name lookup per unique jid (not per message) — avoids the old
+    # bug where the LAST message processed in a batch (whose `contact_name`
+    # is often empty/unreliable for historical sync data) silently overwrote
+    # a perfectly good name set earlier by the contacts loop above.
+    _name_cache: Dict[str, Optional[str]] = {}
 
     for m in raw.get("messages", []):
         jid  = (m.get("jid") or "").strip()
@@ -307,11 +361,19 @@ async def hub_bulk_sync(request: Request):
             "sender_phone": m.get("sender_phone"),
             "media_type":   media_type,
         }
+        if jid not in _name_cache:
+            existing = await db["whatsapp_hub_contacts"].find_one({"jid": jid}, {"display_name": 1})
+            _name_cache[jid] = existing.get("display_name") if existing else None
+        if is_group:
+            _name_cache[jid] = contact_nm or _name_cache[jid] or "Group"
+        else:
+            _name_cache[jid] = _better_name(contact_nm, _name_cache[jid], phone)
+
         await db["whatsapp_hub_contacts"].update_one(
             {"jid": jid},
             {"$set":         {"jid": jid, "phone": phone, "session_id": m_session,
                               "is_group": is_group,
-                              "display_name": contact_nm or phone,
+                              "display_name": _name_cache[jid],
                               "latest_message": latest_msg_cache},
              "$max":         {"last_message_at": ts},
              "$setOnInsert": {"unread_count": 0}},
