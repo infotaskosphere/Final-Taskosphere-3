@@ -141,66 +141,23 @@ function fmtFileSize(bytes) {
 
 const picCache = {};
 
-// ── Avatar with profile-pic lazy load (IntersectionObserver — only loads when visible) ──
-const _picFetchQueue = [];
-let _picFetchTimer = null;
-function _schedulePicFetch(jid, cb) {
-  _picFetchQueue.push({ jid, cb });
-  if (_picFetchTimer) return;
-  _picFetchTimer = setTimeout(() => {
-    _picFetchTimer = null;
-    const batch = _picFetchQueue.splice(0, _picFetchQueue.length);
-    batch.forEach(({ jid: j, cb: fn }, i) => {
-      setTimeout(() => {
-        if (picCache[j] !== 'loading') return;
-        api.get(`/whatsapp/hub/contacts/${encodeURIComponent(j)}/profile-pic`)
-          .then(({ data }) => { picCache[j] = data.url || null; fn(data.url || null); })
-          .catch(() => { picCache[j] = null; fn(null); });
-      }, i * 60);
-    });
-  }, 80);
-}
-
+// ── Avatar — shows colored initials only (no profile-pic API calls) ────────────
+// Profile-pic fetching is disabled to prevent flooding the backend with hundreds
+// of concurrent requests on page load, which caused 503 errors for all other
+// endpoints including the inbox. Re-enable once the bridge is stable.
 function Avatar({ jid, name, size=49, isGrp=false, url=null, style:extra={} }) {
-  const [picUrl,  setPicUrl]  = useState(() => url || (picCache[jid] && picCache[jid] !== 'loading' ? picCache[jid] : null));
-  const [picErr,  setPicErr]  = useState(false);
-  const [visible, setVisible] = useState(false);
-  const ref = useRef(null);
   const bg = avatarColor(jid);
   const r  = isGrp ? '38%' : '50%';
-  const showPic = picUrl && !picErr;
-
-  useEffect(() => {
-    if (!ref.current) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting) { setVisible(true); observer.disconnect(); } },
-      { rootMargin: '120px' }
-    );
-    observer.observe(ref.current);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    if (!visible) return;
-    if (url) { setPicUrl(url); return; }
-    if (isGrp) return;
-    if (picCache[jid] === 'loading') return;
-    if (picCache[jid] !== undefined) { setPicUrl(picCache[jid]); return; }
-    picCache[jid] = 'loading';
-    _schedulePicFetch(jid, (u) => setPicUrl(u));
-  }, [jid, url, isGrp, visible]);
 
   return (
-    <div ref={ref} style={{ width:size, height:size, borderRadius:r, overflow:'hidden',
-      flexShrink:0, background:showPic?'#e0e0e0':bg,
+    <div style={{ width:size, height:size, borderRadius:r, overflow:'hidden',
+      flexShrink:0, background:bg,
       display:'flex', alignItems:'center', justifyContent:'center',
       color:'#fff', fontWeight:700, fontSize:Math.round(size*0.36),
       cursor:'pointer', userSelect:'none', ...extra }}>
-      {showPic
-        ? <img src={picUrl} alt='' onError={()=>setPicErr(true)} style={{ width:'100%', height:'100%', objectFit:'cover' }}/>
-        : isGrp
-          ? <Users size={Math.round(size*0.44)} color='#fff'/>
-          : initials(name)
+      {isGrp
+        ? <Users size={Math.round(size*0.44)} color='#fff'/>
+        : initials(name)
       }
     </div>
   );
