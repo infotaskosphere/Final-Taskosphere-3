@@ -1738,7 +1738,7 @@ export default function WhatsAppHub() {
     : `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='304' height='304'%3E%3Cpath fill='none' stroke='%23b2bec3' stroke-width='1' opacity='0.2' d='M4 4c0-2 2-4 4-4h4c2 0 4 2 4 4v4c0 2-2 4-4 4H8C6 12 4 10 4 8V4z'/%3E%3C/svg%3E")`;
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', height:'100%', minHeight:0, margin:'-16px', overflow:'hidden', fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif' }}>
+    <div style={{ display:'flex', flexDirection:'column', height:'calc(100vh - 80px)', minHeight:0, margin:'-16px', overflow:'hidden', fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif' }}>
 
       {/* ── Connection Status Bar (Unified Inbox) ──────────────────────────── */}
       <div style={{
@@ -1765,8 +1765,6 @@ export default function WhatsAppHub() {
         </div>
       </div>
 
-      <div style={{ display:'flex', flex:1, minHeight:0, overflow:'hidden' }}>
-
       {/* ── Manage Numbers Modal ─────────────────────────────────────────────── */}
       <AnimatePresence>
         {showManage && (
@@ -1784,6 +1782,8 @@ export default function WhatsAppHub() {
           onClose={()=>setForwardMsg(null)}
         />
       )}
+
+      <div style={{ display:'flex', flex:1, minHeight:0, overflow:'hidden' }}>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* LEFT SIDEBAR                                                           */}
