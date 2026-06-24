@@ -141,27 +141,57 @@ function fmtFileSize(bytes) {
 
 const picCache = {};
 
-// ── Avatar with profile-pic lazy load ────────────────────────────────────────
+// ── Avatar with profile-pic lazy load (IntersectionObserver — only loads when visible) ──
+const _picFetchQueue = [];
+let _picFetchTimer = null;
+function _schedulePicFetch(jid, cb) {
+  _picFetchQueue.push({ jid, cb });
+  if (_picFetchTimer) return;
+  _picFetchTimer = setTimeout(() => {
+    _picFetchTimer = null;
+    const batch = _picFetchQueue.splice(0, _picFetchQueue.length);
+    batch.forEach(({ jid: j, cb: fn }, i) => {
+      setTimeout(() => {
+        if (picCache[j] !== 'loading') return;
+        api.get(`/whatsapp/hub/contacts/${encodeURIComponent(j)}/profile-pic`)
+          .then(({ data }) => { picCache[j] = data.url || null; fn(data.url || null); })
+          .catch(() => { picCache[j] = null; fn(null); });
+      }, i * 60);
+    });
+  }, 80);
+}
+
 function Avatar({ jid, name, size=49, isGrp=false, url=null, style:extra={} }) {
-  const [picUrl,  setPicUrl]  = useState(() => url || picCache[jid] || null);
+  const [picUrl,  setPicUrl]  = useState(() => url || (picCache[jid] && picCache[jid] !== 'loading' ? picCache[jid] : null));
   const [picErr,  setPicErr]  = useState(false);
+  const [visible, setVisible] = useState(false);
+  const ref = useRef(null);
   const bg = avatarColor(jid);
   const r  = isGrp ? '38%' : '50%';
   const showPic = picUrl && !picErr;
 
   useEffect(() => {
+    if (!ref.current) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) { setVisible(true); observer.disconnect(); } },
+      { rootMargin: '120px' }
+    );
+    observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!visible) return;
     if (url) { setPicUrl(url); return; }
     if (isGrp) return;
     if (picCache[jid] === 'loading') return;
     if (picCache[jid] !== undefined) { setPicUrl(picCache[jid]); return; }
     picCache[jid] = 'loading';
-    api.get(`/whatsapp/hub/contacts/${encodeURIComponent(jid)}/profile-pic`)
-      .then(({data}) => { picCache[jid] = data.url||null; setPicUrl(data.url||null); })
-      .catch(() => { picCache[jid]=null; });
-  }, [jid,url,isGrp]);
+    _schedulePicFetch(jid, (u) => setPicUrl(u));
+  }, [jid, url, isGrp, visible]);
 
   return (
-    <div style={{ width:size, height:size, borderRadius:r, overflow:'hidden',
+    <div ref={ref} style={{ width:size, height:size, borderRadius:r, overflow:'hidden',
       flexShrink:0, background:showPic?'#e0e0e0':bg,
       display:'flex', alignItems:'center', justifyContent:'center',
       color:'#fff', fontWeight:700, fontSize:Math.round(size*0.36),
