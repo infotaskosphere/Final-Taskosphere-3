@@ -78,6 +78,81 @@ const sessions    = {};
 const lidMaps     = {};
 const historyCache = {};
 
+// FIX: real contact-name cache, fed by Baileys' address-book sync events
+// (messaging-history.set's `contacts` array on first login, plus the live
+// contacts.upsert/contacts.update events on every reconnect). This is the
+// same data WhatsApp Web itself uses to resolve a saved contact's name —
+// it is NOT the same thing as `pushName` on an individual message, which
+// only reflects what the sender has set as their own WhatsApp profile name
+// and is frequently missing/unreliable on synced history. Previously the
+// bridge had no persistent store for this at all (no makeInMemoryStore was
+// ever attached to the socket, so `sock.store` was always undefined), which
+// meant contact names could only ever come from the unreliable pushName.
+const contactNames = {}; // { [sessionId]: { [jid]: name } }
+
+function isRealName(name, phone) {
+  if (!name) return false;
+  const n = String(name).trim();
+  if (!n) return false;
+  if (/^\+?[\d\s]+$/.test(n)) return false; // just digits/phone, not a real name
+  if (phone && n === phone) return false;
+  return true;
+}
+
+function cacheContactNames(sessionId, list) {
+  if (!list || list.length === 0) return [];
+  if (!contactNames[sessionId]) contactNames[sessionId] = {};
+  const store = contactNames[sessionId];
+  const changed = [];
+  for (const c of list) {
+    const jid = (c.id || "").trim();
+    if (!jid || jid.endsWith("@g.us") || jid.endsWith("@lid")) continue;
+    const phone = jid.split("@")[0];
+    // tier 2 = saved address-book contact name (highest confidence, same as
+    // what WhatsApp Web shows); tier 1 = self-set profile name / pushName
+    // fallback, only used when no saved contact exists.
+    const tier      = c.name ? 2 : 1;
+    const candidate = c.name || c.notify || null;
+    const existing  = store[jid] || null;
+    if (!isRealName(candidate, phone)) continue;
+    if (existing && isRealName(existing.name, phone) && existing.tier >= tier) continue;
+    store[jid] = { name: candidate.trim(), tier };
+    changed.push({ jid, phone, name: store[jid].name });
+  }
+  return changed;
+}
+
+function getCachedContactName(sessionId, jid) {
+  if (!jid) return null;
+  return (contactNames[sessionId] || {})[jid]?.name || null;
+}
+
+// Debounced push of newly-learned contact names to the backend, so renamed
+// or newly-synced contacts show up in the hub without needing a full
+// history resync (mirrors WhatsApp Web picking up address-book changes live).
+const _pendingNameSync = {}; // { [sessionId]: Map<jid, {jid, phone, display_name}> }
+const _nameSyncTimers   = {};
+function queueContactNameSync(sessionId, sessionLabel, changedList) {
+  if (!changedList || changedList.length === 0) return;
+  if (!_pendingNameSync[sessionId]) _pendingNameSync[sessionId] = new Map();
+  const pending = _pendingNameSync[sessionId];
+  for (const c of changedList) {
+    pending.set(c.jid, { jid: c.jid, phone: c.phone, display_name: c.name });
+  }
+  if (_nameSyncTimers[sessionId]) return;
+  _nameSyncTimers[sessionId] = setTimeout(async () => {
+    const batch = Array.from(pending.values());
+    pending.clear();
+    delete _nameSyncTimers[sessionId];
+    if (batch.length === 0) return;
+    await webhookPost(
+      `${BACKEND_URL}/api/whatsapp/hub/webhook/bulk-sync`,
+      { session_id: sessionId, session_label: sessionLabel, contacts: batch, messages: [] },
+      `${sessionId}:contact-name-sync`
+    );
+  }, 4000);
+}
+
 function updateLidMap(sessionId, contacts) {
   if (!contacts || contacts.length === 0) return;
   if (!lidMaps[sessionId]) lidMaps[sessionId] = {};
@@ -332,6 +407,13 @@ async function notifyHubIncoming(sessionId, sessionLabel, msg) {
     const rawSender = msg.key?.participant || null;
     const sender    = rawSender ? resolveJid(sessionId, rawSender) : null;
 
+    // Learn pushName as a fallback "notify" name when we don't have a real
+    // saved contact for this sender yet — same precedence WhatsApp Web uses
+    // (saved contact name first, self-set profile name only as a fallback).
+    if (msg.pushName) {
+      cacheContactNames(sessionId, [{ id: sender || jid, notify: msg.pushName }]);
+    }
+
     const mediaType = extractMediaType(msg);
     let mediaInfo   = null;
     if (mediaType) {
@@ -350,7 +432,10 @@ async function notifyHubIncoming(sessionId, sessionLabel, msg) {
       sender_phone:  sender ? sender.split("@")[0] : null,
       message_id:    msg.key?.id || "",
       from:          (sender || jid).split("@")[0],
-      contact_name:  msg.pushName || null,
+      // FIX: prefer the real saved contact name (synced address book) over
+      // pushName — pushName is just the sender's self-set WhatsApp profile
+      // name and is a poor substitute for an actual saved contact.
+      contact_name:  getCachedContactName(sessionId, sender || jid) || msg.pushName || null,
       body,
       media_url:     mediaInfo?.url   || null,
       media_type:    mediaType        || null,
@@ -386,7 +471,7 @@ async function syncHubHistory(sessionId, sessionLabel, chats, messages, contacts
       const info   = (contacts || []).find(ct => resolveJid(sessionId, ct.id) === cjid);
       contactPayloads.push({
         jid: cjid, phone,
-        display_name:    info?.name || c.name || (isGrp ? c.name || "Group" : phone),
+        display_name:    getCachedContactName(sessionId, cjid) || info?.name || c.name || (isGrp ? c.name || "Group" : phone),
         is_group:        isGrp,
         last_message_at: lastAt,
       });
@@ -422,7 +507,7 @@ async function syncHubHistory(sessionId, sessionLabel, chats, messages, contacts
         sender_phone:  sender ? sender.split("@")[0] : null,
         message_id:    msg.key?.id || "",
         from:          (sender || jid).split("@")[0],
-        contact_name:  msg.pushName || null,
+        contact_name:  getCachedContactName(sessionId, sender || jid) || msg.pushName || null,
         body,
         media_type:    mType || null,
         direction:     msg.key?.fromMe ? "out" : "in",
@@ -494,15 +579,14 @@ async function fetchAndSyncLiveHistory(sessionId) {
     // Get all chats Baileys knows about
     const sock = s.socket;
 
-    // Build a contacts list from the sock store if available
+    // Build a contacts list from whatever real names we've learned so far
+    // (NOTE: a previous version read `sock.store?.contacts`, but no
+    // makeInMemoryStore was ever attached to the socket, so `sock.store`
+    // was always undefined and this list was always empty).
     const storeContacts = [];
     try {
-      if (sock.store?.contacts) {
-        const contactsObj = sock.store.contacts;
-        for (const [jid, c] of Object.entries(contactsObj || {})) {
-          storeContacts.push({ id: jid, name: c.name || c.notify || null, lid: c.lid || null });
-        }
-        updateLidMap(sessionId, storeContacts);
+      for (const [jid, entry] of Object.entries(contactNames[sessionId] || {})) {
+        storeContacts.push({ id: jid, name: entry.name, lid: null });
       }
     } catch (_) {}
 
@@ -643,12 +727,21 @@ async function startSession(sessionId, webhookOnConnect = true, pairingPhone = n
   });
 
   sock.ev.on("creds.update", saveCreds);
-  sock.ev.on("contacts.upsert", (list) => updateLidMap(sessionId, list));
-  sock.ev.on("contacts.update", (list) => updateLidMap(sessionId, list));
+  sock.ev.on("contacts.upsert", (list) => {
+    updateLidMap(sessionId, list);
+    const changed = cacheContactNames(sessionId, list);
+    queueContactNameSync(sessionId, sessions[sessionId]?.displayName || sessionId, changed);
+  });
+  sock.ev.on("contacts.update", (list) => {
+    updateLidMap(sessionId, list);
+    const changed = cacheContactNames(sessionId, list);
+    queueContactNameSync(sessionId, sessions[sessionId]?.displayName || sessionId, changed);
+  });
 
   sock.ev.on("messaging-history.set", async ({ chats, messages, contacts, isLatest }) => {
     const label = sessions[sessionId]?.displayName || sessionId;
     updateLidMap(sessionId, contacts);
+    cacheContactNames(sessionId, contacts);
 
     if (!historyCache[sessionId]) historyCache[sessionId] = { chats: [], messages: [], contacts: [] };
     const cache = historyCache[sessionId];
