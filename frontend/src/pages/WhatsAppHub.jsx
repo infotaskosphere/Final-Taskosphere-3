@@ -577,7 +577,7 @@ function ForwardModal({ msg, contacts, connectedSessions, isDark, onClose }) {
 }
 
 // ── Message bubble ────────────────────────────────────────────────────────────
-function Bubble({ msg, prev, next, isDark, sessionColorMap, isGrp, onReply, onStar, onDelete, onReact, onForward }) {
+function Bubble({ msg, prev, next, isDark, sessionColorMap, isGrp, multiSession, contactNameByPhone, onReply, onStar, onDelete, onReact, onForward }) {
   const [menu, setMenu] = useState(false);
   const [showReactBar, setShowReactBar] = useState(false);
   const menuRef = useRef(null);
@@ -646,15 +646,29 @@ function Bubble({ msg, prev, next, isDark, sessionColorMap, isGrp, onReply, onSt
             )}
           </AnimatePresence>
 
-          {/* Sender label — group: per-participant phone; DM multi-account: session label */}
+          {/* Sender label — GROUP chats only: resolves to the participant's
+              saved contact name when known (same as WhatsApp Web), falling
+              back to their phone number when the contact isn't saved.
+              NOTE: this must never render for 1:1 chats — WhatsApp Web never
+              shows a name above messages in a DM, since there's only one
+              possible sender. Previously this branch was unreachable because
+              `isGrp` was never passed down from the caller, so EVERY incoming
+              DM fell through to the block below and showed the *connected
+              account's own* session label instead of the contact's name. */}
           {!isOut && isGrp && msg.sender_phone && (
             <p style={{ margin:'0 0 2px', fontSize:12.5, fontWeight:700, color:senderCol }}>
-              +{msg.sender_phone}
+              {contactNameByPhone?.[msg.sender_phone] || `+${msg.sender_phone}`}
             </p>
           )}
-          {!isOut && !isGrp && msg.session_label && (
-            <p style={{ margin:'0 0 2px', fontSize:10, fontWeight:700, color:numCol, textTransform:'uppercase', letterSpacing:'0.04em' }}>
-              {msg.session_label}
+          {/* Multi-account disambiguation — only meaningful (and only shown)
+              when more than one WhatsApp number is connected to the hub, and
+              styled as a small dot rather than bold text so it can never be
+              mistaken for the contact's name. */}
+          {!isOut && !isGrp && multiSession && msg.session_label && (
+            <p style={{ margin:'0 0 3px', display:'flex', alignItems:'center', gap:4, fontSize:10,
+              fontWeight:500, color:numCol, opacity:0.8 }}>
+              <span style={{ width:6, height:6, borderRadius:'50%', background:numCol, flexShrink:0 }}/>
+              Received on {msg.session_label}
             </p>
           )}
 
@@ -741,7 +755,7 @@ function Bubble({ msg, prev, next, isDark, sessionColorMap, isGrp, onReply, onSt
 }
 
 // ── Chat list item ────────────────────────────────────────────────────────────
-function ChatItem({ contact, active, onClick, onArchiveToggle, sessionColorMap, isDark }) {
+function ChatItem({ contact, active, onClick, onArchiveToggle, sessionColorMap, contactNameByPhone, isDark }) {
   const [hover, setHover] = useState(false);
   const name    = getDisplayName(contact);
   const preview = contact.latest_message?.body || '';
@@ -783,7 +797,7 @@ function ChatItem({ contact, active, onClick, onArchiveToggle, sessionColorMap, 
               <p style={{ fontSize:14, color:muted, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', margin:0, flex:1, display:'flex', alignItems:'center', gap:4 }}>
                 {isOut && <CheckCheck size={14} color={muted} style={{ flexShrink:0 }}/>}
                 {isGrp && contact.latest_message?.sender_phone && !isOut && (
-                  <span style={{ flexShrink:0 }}>+{contact.latest_message.sender_phone}:</span>
+                  <span style={{ flexShrink:0 }}>{contactNameByPhone?.[contact.latest_message.sender_phone] || `+${contact.latest_message.sender_phone}`}:</span>
                 )}
                 {preview || <span style={{ fontStyle:'italic' }}>No messages yet</span>}
               </p>
@@ -1301,6 +1315,17 @@ export default function WhatsAppHub() {
   const [loadingC,   setLoadingC]   = useState(false);
   const [filterMode, setFilterMode] = useState('all');   // all | unread | groups | archived
 
+  // FIX: phone → saved name lookup, used to resolve group-participant senders
+  // to their real contact name (mirrors how WhatsApp Web shows the saved
+  // contact name instead of a raw phone number above group messages).
+  const contactNameByPhone = useMemo(() => {
+    const map = {};
+    for (const c of contacts) {
+      if (c.phone && c.display_name && c.display_name !== c.phone) map[c.phone] = c.display_name;
+    }
+    return map;
+  }, [contacts]);
+
   const splitContactsAndGroups = (all) => {
     const isGrpRow = c => c.is_group || isGroup(c.jid);
     const plain = all.filter(c => !isGrpRow(c));
@@ -1746,7 +1771,7 @@ export default function WhatsAppHub() {
 
           {/* Chat items — only show when at least one session exists */}
           {sessions.length > 0 && filteredList.map(c => (
-            <ChatItem key={c.jid} contact={c} active={activeJid===c.jid} sessionColorMap={sessionColorMap} isDark={isDark} onClick={()=>openChat(c)}/>
+            <ChatItem key={c.jid} contact={c} active={activeJid===c.jid} sessionColorMap={sessionColorMap} contactNameByPhone={contactNameByPhone} isDark={isDark} onClick={()=>openChat(c)}/>
           ))}
 
           {/* Empty state for list */}
@@ -1847,6 +1872,9 @@ export default function WhatsAppHub() {
                         <React.Fragment key={msg.id}>
                           {showDateSep && <DateSep ts={msg.timestamp} isDark={isDark}/>}
                           <Bubble msg={msg} prev={prev} next={next} isDark={isDark} sessionColorMap={sessionColorMap}
+                            isGrp={isGroup(activeJid)}
+                            multiSession={connectedSessions.length > 1}
+                            contactNameByPhone={contactNameByPhone}
                             onReply={m=>setReplyTo(m)}
                             onStar={async (msg) => {
                               const next = !msg.starred;
