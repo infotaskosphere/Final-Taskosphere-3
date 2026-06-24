@@ -112,6 +112,90 @@ def _better_name(candidate: Optional[str], existing: Optional[str], phone: str) 
     return candidate if candidate else (existing or phone)
 
 
+def _last10(phone: str) -> str:
+    digits = "".join(ch for ch in str(phone or "") if ch.isdigit())
+    return digits[-10:] if len(digits) >= 10 else digits
+
+
+_NAME_CACHE_TTL_S = 120
+_crm_name_cache: Dict[str, tuple] = {}  # phone10 -> (name_or_None, fetched_at_epoch)
+
+
+async def _lookup_crm_name(db, phone: str) -> Optional[str]:
+    """
+    Cross-reference a WhatsApp phone number against Taskosphere's own data —
+    Clients (company + each saved contact person) and Users (staff) — and
+    return the best human name on file, if any.
+
+    This exists because WhatsApp's own address-book sync (via the unofficial
+    Baileys library) is well known to be inconsistent — sometimes it never
+    arrives at all, even for numbers genuinely saved on the connected phone
+    (this is a widely reported upstream limitation, not something fixable
+    from the bridge side). For a CRM like Taskosphere, the phone numbers of
+    real contacts are usually already on file under Clients/Users, so that's
+    a far more reliable source of truth than waiting on WhatsApp's sync.
+    """
+    p10 = _last10(phone)
+    if len(p10) < 7:
+        return None
+
+    import time
+    cached = _crm_name_cache.get(p10)
+    if cached and (time.time() - cached[1]) < _NAME_CACHE_TTL_S:
+        return cached[0]
+
+    name = None
+    try:
+        client = await db["clients"].find_one(
+            {"$or": [{"phone": {"$regex": p10 + "$"}}, {"contact_persons.phone": {"$regex": p10 + "$"}}]},
+            {"company_name": 1, "contact_persons": 1, "phone": 1},
+        )
+        if client:
+            person_match = next(
+                (cp for cp in (client.get("contact_persons") or []) if _last10(cp.get("phone") or "") == p10),
+                None,
+            )
+            if person_match and person_match.get("name"):
+                company = client.get("company_name")
+                name = f"{person_match['name']} ({company})" if company else person_match["name"]
+            elif client.get("company_name"):
+                name = client["company_name"]
+        if not name:
+            user = await db["users"].find_one(
+                {"phone": {"$regex": p10 + "$"}}, {"full_name": 1, "email": 1}
+            )
+            if user:
+                name = user.get("full_name") or user.get("email")
+    except Exception as e:
+        logger.warning("CRM name lookup failed for %s: %s", p10, e)
+
+    _crm_name_cache[p10] = (name, time.time())
+    return name
+
+
+async def _resolve_contact_name(
+    db, jid: str, phone: str, candidate: Optional[str], existing_doc: Optional[dict],
+    is_group: bool, group_subject: Optional[str] = None,
+) -> str:
+    """
+    Single source of truth for what a contact's display_name should be,
+    in priority order: a manual rename always wins (never auto-overwritten);
+    then a CRM match (Clients/Users — Taskosphere's own, reliable data);
+    then whatever real name WhatsApp itself supplied; finally the phone
+    number as a last resort, exactly like WhatsApp Web does for unsaved
+    numbers.
+    """
+    if is_group:
+        return group_subject or (existing_doc or {}).get("display_name") or "Group"
+    if existing_doc and existing_doc.get("name_locked"):
+        return existing_doc.get("display_name") or phone
+    crm_name = await _lookup_crm_name(db, phone)
+    if crm_name:
+        return crm_name
+    existing_name = (existing_doc or {}).get("display_name")
+    return _better_name(candidate, existing_name, phone) or phone
+
+
 async def _has_hub_access(user: User) -> bool:
     if user.role == "admin":
         return True
