@@ -405,7 +405,64 @@ function MediaRenderer({ msg, isDark }) {
     );
   }
 
-  if (type === 'document' || type === 'sticker') {
+  if (type === 'sticker') {
+    return (
+      <div style={{ marginBottom:4 }}>
+        {url
+          ? <img src={url} alt='Sticker' style={{ width:120, height:120, objectFit:'contain', display:'block' }}/>
+          : <div style={{ width:120, height:120, background:docBg, borderRadius:8, display:'flex', alignItems:'center',
+              justifyContent:'center', fontSize:32 }}>🏷️</div>
+        }
+      </div>
+    );
+  }
+
+  if (type === 'location') {
+    const lat = msg.latitude || msg.location?.lat;
+    const lng = msg.longitude || msg.location?.lng;
+    const label = msg.location_name || msg.location?.name || 'Location';
+    const mapsUrl = lat && lng ? `https://www.google.com/maps?q=${lat},${lng}` : null;
+    return (
+      <a href={mapsUrl || '#'} target='_blank' rel='noreferrer'
+        style={{ display:'flex', alignItems:'center', gap:10, marginBottom:4, padding:'10px 14px',
+          background:docBg, borderRadius:10, textDecoration:'none', maxWidth:280,
+          border:`1px solid ${isDark?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.08)'}` }}>
+        <div style={{ width:40, height:40, background:'#ef4444', borderRadius:10, display:'flex',
+          alignItems:'center', justifyContent:'center', flexShrink:0, fontSize:20 }}>📍</div>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:13, fontWeight:600, color:txt, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{label}</div>
+          {lat && lng && <div style={{ fontSize:11, color:sub, marginTop:2 }}>{Number(lat).toFixed(5)}, {Number(lng).toFixed(5)}</div>}
+          <div style={{ fontSize:11, color:WA.green, marginTop:2 }}>Open in Maps ↗</div>
+        </div>
+      </a>
+    );
+  }
+
+  if (type === 'vcard' || type === 'contact') {
+    const vcard = msg.body || '';
+    const nameMatch = vcard.match(/FN[;:]([^\r\n]+)/i);
+    const phoneMatch = vcard.match(/TEL[;A-Za-z=:]*:([^\r\n]+)/i);
+    const cName = nameMatch ? nameMatch[1].trim() : 'Contact';
+    const cPhone = phoneMatch ? phoneMatch[1].trim() : '';
+    return (
+      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:4, padding:'10px 14px',
+        background:docBg, borderRadius:10, maxWidth:280,
+        border:`1px solid ${isDark?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.08)'}` }}>
+        <div style={{ width:44, height:44, borderRadius:'50%', background:avatarColor(cName),
+          display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0,
+          color:'#fff', fontWeight:700, fontSize:16 }}>
+          {initials(cName)}
+        </div>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:13, fontWeight:600, color:txt }}>{cName}</div>
+          {cPhone && <div style={{ fontSize:11, color:sub, marginTop:2 }}>{cPhone}</div>}
+        </div>
+        <UserPlus size={16} color={WA.green} style={{ flexShrink:0 }}/>
+      </div>
+    );
+  }
+
+  if (type === 'document') {
     const ext = filename ? filename.split('.').pop()?.toUpperCase() : 'FILE';
     return (
       <a href={url} download={filename||'document'} target='_blank' rel='noreferrer'
@@ -435,9 +492,94 @@ function MediaRenderer({ msg, isDark }) {
   );
 }
 
+// ── Quick emoji reactions ─────────────────────────────────────────────────────
+const QUICK_EMOJIS = ['❤️','👍','😂','😮','😢','🙏'];
+
+// ── Forward Modal ─────────────────────────────────────────────────────────────
+function ForwardModal({ msg, contacts, connectedSessions, isDark, onClose }) {
+  const [search, setSearch] = useState('');
+  const [sending, setSending] = useState(false);
+  const [selectedJid, setSelectedJid] = useState(null);
+  const brd  = isDark ? '#3b4a54' : '#e9edef';
+  const bg   = isDark ? '#111b21' : '#fff';
+  const txt  = isDark ? '#e9edef' : '#111b21';
+  const muted= isDark ? '#8696a0' : '#667781';
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return contacts.filter(c => {
+      const name = getDisplayName(c).toLowerCase();
+      return name.includes(q) || (c.phone||'').includes(q);
+    }).slice(0, 50);
+  }, [contacts, search]);
+
+  async function doForward() {
+    if (!selectedJid) return;
+    setSending(true);
+    try {
+      const sess = connectedSessions[0]?.sessionId;
+      const body = msg.body || (msg.media_type ? `[${msg.media_type}]` : '');
+      await api.post('/whatsapp/hub/send', { jid: selectedJid, message: body, session_id: sess });
+      toast.success('Message forwarded!');
+      onClose();
+    } catch { toast.error('Failed to forward message'); }
+    finally { setSending(false); }
+  }
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', zIndex:1000,
+      display:'flex', alignItems:'center', justifyContent:'center' }} onClick={onClose}>
+      <div style={{ background:bg, borderRadius:12, width:360, maxHeight:'80vh', display:'flex',
+        flexDirection:'column', overflow:'hidden', boxShadow:'0 8px 32px rgba(0,0,0,0.3)' }}
+        onClick={e=>e.stopPropagation()}>
+        <div style={{ padding:'16px 16px 12px', borderBottom:`1px solid ${brd}`, display:'flex', alignItems:'center', gap:10 }}>
+          <ArrowRight size={18} color={WA.green}/>
+          <span style={{ fontWeight:700, fontSize:15, color:txt }}>Forward message</span>
+          <button onClick={onClose} style={{ marginLeft:'auto', background:'none', border:'none', cursor:'pointer', color:muted }}><X size={18}/></button>
+        </div>
+        <div style={{ padding:'8px 12px', borderBottom:`1px solid ${brd}` }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8, background:isDark?'#202c33':'#f0f2f5',
+            borderRadius:8, padding:'6px 12px' }}>
+            <Search size={15} color={muted}/>
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder='Search contacts…'
+              style={{ flex:1, background:'none', border:'none', outline:'none', fontSize:14, color:txt }}/>
+          </div>
+        </div>
+        <div style={{ flex:1, overflowY:'auto' }}>
+          {filtered.map(c => (
+            <div key={c.jid} onClick={()=>setSelectedJid(c.jid===selectedJid?null:c.jid)}
+              style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 16px', cursor:'pointer',
+                background:selectedJid===c.jid?(isDark?'rgba(0,168,132,0.15)':'rgba(0,168,132,0.08)'):'transparent' }}>
+              <div style={{ width:40, height:40, borderRadius:'50%', background:avatarColor(c.jid),
+                display:'flex', alignItems:'center', justifyContent:'center', color:'#fff', fontWeight:700, fontSize:14, flexShrink:0 }}>
+                {initials(getDisplayName(c))}
+              </div>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:14, fontWeight:500, color:txt, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{getDisplayName(c)}</div>
+              </div>
+              {selectedJid===c.jid && <div style={{ width:18, height:18, borderRadius:'50%', background:WA.green,
+                display:'flex', alignItems:'center', justifyContent:'center' }}><Check size={11} color='#fff'/></div>}
+            </div>
+          ))}
+          {filtered.length===0 && <p style={{ textAlign:'center', color:muted, fontSize:13, padding:20 }}>No contacts found</p>}
+        </div>
+        <div style={{ padding:'12px 16px', borderTop:`1px solid ${brd}` }}>
+          <button onClick={doForward} disabled={!selectedJid||sending}
+            style={{ width:'100%', background:selectedJid?WA.green:'#ccc', color:'#fff', border:'none',
+              borderRadius:10, padding:'11px', fontSize:14, fontWeight:700, cursor:selectedJid?'pointer':'default',
+              display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+            {sending ? <><Loader2 size={14} style={{animation:'waSpinKf 1s linear infinite'}}/> Forwarding…</> : <><ArrowRight size={14}/> Forward</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Message bubble ────────────────────────────────────────────────────────────
-function Bubble({ msg, prev, next, isDark, sessionColorMap, isGrp, onReply, onStar, onDelete }) {
+function Bubble({ msg, prev, next, isDark, sessionColorMap, isGrp, onReply, onStar, onDelete, onReact, onForward }) {
   const [menu, setMenu] = useState(false);
+  const [showReactBar, setShowReactBar] = useState(false);
   const menuRef = useRef(null);
   const isOut   = msg.direction === 'out';
   const isMedia = msg.media_type && msg.media_type !== 'text';
@@ -474,12 +616,35 @@ function Bubble({ msg, prev, next, isDark, sessionColorMap, isGrp, onReply, onSt
       <div style={{ position:'relative', maxWidth:'100%' }}>
         {/* Bubble */}
         <div
-          onMouseEnter={()=>setMenu(true)}
-          onMouseLeave={()=>setMenu(false)}
+          onMouseEnter={()=>{ setMenu(true); setShowReactBar(true); }}
+          onMouseLeave={()=>{ setMenu(false); setShowReactBar(false); }}
           style={{ position:'relative', background:bg, padding:'6px 9px 8px 9px', borderRadius:8,
             boxShadow:'0 1px 2px rgba(11,20,26,0.12)', cursor:'default' }}>
           {/* Tail */}
           {showTail && (isOut ? tailOut : tailIn)}
+
+          {/* Quick emoji reaction bar (floats above bubble on hover) */}
+          <AnimatePresence>
+            {showReactBar && (
+              <motion.div initial={{opacity:0,y:4}} animate={{opacity:1,y:0}} exit={{opacity:0,y:4}}
+                transition={{duration:0.12}}
+                style={{ position:'absolute', top:-38, [isOut?'right':'left']:0, zIndex:60,
+                  background:isDark?'#233138':'#fff', borderRadius:20, boxShadow:'0 2px 12px rgba(0,0,0,0.22)',
+                  border:`1px solid ${isDark?'#3b4a54':'#e9edef'}`,
+                  display:'flex', alignItems:'center', padding:'4px 6px', gap:2 }}>
+                {QUICK_EMOJIS.map(em => (
+                  <button key={em} onClick={()=>{ onReact && onReact(msg, em); setShowReactBar(false); }}
+                    style={{ background:'none', border:'none', fontSize:18, cursor:'pointer', padding:'2px 4px',
+                      borderRadius:10, lineHeight:1 }}
+                    onMouseEnter={e=>e.currentTarget.style.background=isDark?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.07)'}
+                    onMouseLeave={e=>e.currentTarget.style.background='none'}
+                    title={em}>
+                    {em}
+                  </button>
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Sender label — group: per-participant phone; DM multi-account: session label */}
           {!isOut && isGrp && msg.sender_phone && (
@@ -527,6 +692,21 @@ function Bubble({ msg, prev, next, isDark, sessionColorMap, isGrp, onReply, onSt
             </span>
           </div>
 
+          {/* Reactions display */}
+          {msg.reactions && Object.keys(msg.reactions).length > 0 && (
+            <div style={{ display:'flex', flexWrap:'wrap', gap:4, marginTop:4 }}>
+              {Object.entries(msg.reactions).map(([em, count]) => (
+                <button key={em} onClick={()=>onReact && onReact(msg, em)}
+                  style={{ display:'flex', alignItems:'center', gap:3, background:isDark?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.07)',
+                    border:`1px solid ${isDark?'rgba(255,255,255,0.15)':'rgba(0,0,0,0.12)'}`,
+                    borderRadius:12, padding:'2px 7px', cursor:'pointer', fontSize:12 }}>
+                  <span style={{ fontSize:14 }}>{em}</span>
+                  {count > 1 && <span style={{ color:isDark?'#e9edef':'#111b21', fontWeight:600 }}>{count}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Context menu on hover */}
           <AnimatePresence>
             {menu && (
@@ -534,11 +714,13 @@ function Bubble({ msg, prev, next, isDark, sessionColorMap, isGrp, onReply, onSt
                 transition={{duration:0.1}}
                 style={{ position:'absolute', top:0, right:isOut?0:'auto', left:isOut?'auto':0, zIndex:50,
                   background:isDark?'#233138':'#fff', borderRadius:8, boxShadow:'0 4px 16px rgba(0,0,0,0.24)',
-                  border:`1px solid ${isDark?'#3b4a54':'#e9edef'}`, overflow:'hidden', minWidth:140 }}>
+                  border:`1px solid ${isDark?'#3b4a54':'#e9edef'}`, overflow:'hidden', minWidth:150 }}>
                 {[
-                  { label:'Reply', icon:Reply, fn:()=>{ onReply(msg); setMenu(false); } },
+                  { label:'Reply',   icon:Reply,   fn:()=>{ onReply(msg);   setMenu(false); } },
+                  { label:'Copy',    icon:Copy,     fn:()=>{ navigator.clipboard.writeText(msg.body||''); toast.success('Copied!'); setMenu(false); } },
+                  { label:'Forward', icon:ArrowRight, fn:()=>{ onForward && onForward(msg); setMenu(false); } },
                   { label: msg.starred ? 'Unstar' : 'Star', icon: msg.starred ? StarOff : Star, fn:()=>{ onStar(msg); setMenu(false); } },
-                  { label:'Delete', icon:Trash2, fn:()=>{ onDelete(msg);setMenu(false); }, danger:true },
+                  { label:'Delete',  icon:Trash2,  fn:()=>{ onDelete(msg);  setMenu(false); }, danger:true },
                 ].map(item => (
                   <button key={item.label} onClick={item.fn}
                     style={{ display:'flex', alignItems:'center', gap:10, width:'100%', padding:'9px 14px',
@@ -1207,6 +1389,7 @@ export default function WhatsAppHub() {
   const [contact,    setContact]    = useState(null);
   const [loadingT,   setLoadingT]   = useState(false);
   const [replyTo,    setReplyTo]    = useState(null);
+  const [forwardMsg, setForwardMsg] = useState(null);
   const [hasMore,    setHasMore]    = useState(false);
   const [loadingMore,setLoadingMore] = useState(false);
   const threadEndRef = useRef(null);
@@ -1460,6 +1643,17 @@ export default function WhatsAppHub() {
         )}
       </AnimatePresence>
 
+      {/* ── Forward Message Modal ─────────────────────────────────────────────── */}
+      {forwardMsg && (
+        <ForwardModal
+          msg={forwardMsg}
+          contacts={[...contacts, ...groups]}
+          connectedSessions={connectedSessions}
+          isDark={isDark}
+          onClose={()=>setForwardMsg(null)}
+        />
+      )}
+
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* LEFT SIDEBAR                                                           */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
@@ -1661,6 +1855,18 @@ export default function WhatsAppHub() {
                                 setThread(t => t.map(m => m.id === msg.id ? {...m, starred: next} : m));
                               } catch { toast.error('Failed to star message'); }
                             }}
+                            onReact={async (msg, emoji) => {
+                              try {
+                                await api.post(`/whatsapp/hub/messages/${msg.id}/react`, { emoji });
+                                setThread(t => t.map(m => {
+                                  if (m.id !== msg.id) return m;
+                                  const reactions = { ...(m.reactions||{}) };
+                                  reactions[emoji] = (reactions[emoji]||0) + 1;
+                                  return { ...m, reactions };
+                                }));
+                              } catch { toast.error('Failed to send reaction'); }
+                            }}
+                            onForward={m=>setForwardMsg(m)}
                             onDelete={deleteMsg}/>
                         </React.Fragment>
                       );
