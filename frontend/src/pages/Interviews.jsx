@@ -21,7 +21,25 @@ const STATUS_CFG = {
   hired: { label: 'Hired', color: '#1FAF5A', bg: '#F0FDF4' },
 };
 
-const DEPARTMENTS = ['GST', 'IT', 'ACC', 'TDS', 'ROC', 'TM', 'MSME', 'FEMA', 'DSC', 'HR', 'Sales', 'Marketing', 'Operations', 'Other'];
+const DEPARTMENTS = ['GST', 'IT', 'ACC', 'Legal', 'TDS', 'ROC', 'TM', 'MSME', 'FEMA', 'DSC', 'HR', 'Sales', 'Marketing', 'Operations', 'Other'];
+
+// The backend's AI/heuristic resume parser (backend/interviews.py) can return department
+// labels that don't exactly match our dropdown's canonical values (e.g. "Accounts" instead
+// of "ACC"). Normalize those here so a parsed resume always lands on a real <option>.
+const DEPARTMENT_ALIASES = {
+  accounts: 'ACC', accounting: 'ACC', finance: 'ACC',
+  legal: 'Legal', law: 'Legal',
+  hr: 'HR', 'human resources': 'HR',
+};
+
+function normalizeDepartment(value) {
+  if (!value) return '';
+  const trimmed = String(value).trim();
+  if (!trimmed) return '';
+  const exact = DEPARTMENTS.find(d => d.toLowerCase() === trimmed.toLowerCase());
+  if (exact) return exact;
+  return DEPARTMENT_ALIASES[trimmed.toLowerCase()] || trimmed;
+}
 
 const EMPTY_CANDIDATE = {
   full_name: '', email: '', phone: '', position: '', department: '',
@@ -88,6 +106,7 @@ export default function Interviews() {
       ...EMPTY_CANDIDATE, ...c,
       experience_years: c.experience_years ?? '',
       skills: c.skills || [],
+      department: normalizeDepartment(c.department),
     });
     setDialogOpen(true);
   };
@@ -109,7 +128,7 @@ export default function Interviews() {
         email: (f.email && f.email.trim()) ? f.email.trim() : prev.email,
         phone: (f.phone && f.phone.trim()) ? f.phone.trim() : prev.phone,
         position: (f.position && f.position.trim()) ? f.position.trim() : prev.position,
-        department: (f.department && f.department.trim()) ? f.department.trim() : prev.department,
+        department: (f.department && f.department.trim()) ? normalizeDepartment(f.department) : prev.department,
         experience_years: (f.experience_years != null && f.experience_years !== 0)
           ? String(f.experience_years) : prev.experience_years,
         current_company: (f.current_company && f.current_company.trim()) ? f.current_company.trim() : prev.current_company,
