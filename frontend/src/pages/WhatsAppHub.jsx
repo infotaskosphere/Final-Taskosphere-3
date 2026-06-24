@@ -117,11 +117,20 @@ function displayJid(jid) {
 
 function getDisplayName(contact) {
   if (!contact) return '';
-  if (contact.display_name && !contact.display_name.includes('@')) return contact.display_name;
-  if (contact.phone) return formatPhone(contact.phone);
+  // Priority order — mirrors how WhatsApp Web resolves names:
+  // 1. name       — contact name saved in the phone's address book (synced by Baileys contacts.update)
+  // 2. display_name — stored name in backend (usually same as name or notify)
+  // 3. notify     — the name the contact set for themselves (pushName)
+  // 4. push_name  — alternate field name used by some bridge versions
+  // 5. label      — user-set label in the hub
+  // 6. phone      — formatted phone number fallback
+  // 7. JID        — raw JID fallback
+  const pick = [contact.name, contact.display_name, contact.notify, contact.push_name, contact.label]
+    .find(v => v && typeof v === 'string' && v.trim() && !v.includes('@'));
+  if (pick) return pick.trim();
+  if (contact.phone) return formatPhone(String(contact.phone));
   const fromJid = displayJid(contact.jid);
   if (fromJid) return fromJid;
-  // @lid contacts have no readable identifier — show generic label
   if ((contact.jid||'').endsWith('@lid')) return 'WhatsApp User';
   return contact.jid || '';
 }
