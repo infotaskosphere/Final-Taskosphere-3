@@ -292,7 +292,13 @@ def _heuristic_fields(text: str) -> dict:
 
 
 async def _extract_resume_text(contents: bytes, filename: str) -> str:
-    """Extract text from PDF/DOCX/TXT resume with table support."""
+    """Extract text from PDF/DOCX/TXT resume with table support.
+
+    Text-based PDFs → Gemini (same pattern as ai_document_reader.py).
+    Scanned/image PDFs → Groq vision (up to 4 pages).
+    DOCX / TXT → parsed locally.
+    """
+    import base64
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
     if ext == "pdf":
@@ -300,9 +306,7 @@ async def _extract_resume_text(contents: bytes, filename: str) -> str:
         text_parts = []
         with pdfplumber.open(io.BytesIO(contents)) as pdf:
             for page in pdf.pages[:10]:
-                # Extract plain text
                 t = page.extract_text(x_tolerance=3, y_tolerance=3) or ""
-                # Extract tables and append as structured text
                 for table in page.extract_tables():
                     rows = []
                     for row in table:
@@ -314,36 +318,72 @@ async def _extract_resume_text(contents: bytes, filename: str) -> str:
                 if t.strip():
                     text_parts.append(t)
         text = "\n\n".join(text_parts).strip()
+
         if text:
-            return text
-        # Scanned PDF — send first page as image to Claude vision
+            # Text-based PDF — use Gemini to clean / transcribe
+            try:
+                import google.generativeai as genai
+                gemini_key = os.environ.get("GEMINI_API_KEY", "")
+                if gemini_key:
+                    genai.configure(api_key=gemini_key)
+                    model = genai.GenerativeModel("gemini-2.0-flash")
+                    prompt = (
+                        "Below is raw text extracted from a resume PDF. "
+                        "Return only the cleaned, fully transcribed resume text preserving all sections, "
+                        "names, dates, and details. Do not summarise or add anything.\n\n"
+                        f"{text[:30000]}"
+                    )
+                    resp = await model.generate_content_async(prompt)
+                    cleaned = (resp.text or "").strip()
+                    if cleaned:
+                        return cleaned
+            except Exception as e:
+                logger.warning(f"Gemini text-PDF cleaning failed, using raw extract: {e}")
+            return text  # fall back to raw pdfplumber text
+
+        # Scanned PDF (no text layer) — render pages as images → Groq vision
         try:
-            import base64
-            with pdfplumber.open(io.BytesIO(contents)) as pdf:
-                pil_img = pdf.pages[0].to_image(resolution=150).original
-                if pil_img.mode not in ("RGB", "L"):
-                    pil_img = pil_img.convert("RGB")
-                buf = io.BytesIO()
-                pil_img.save(buf, format="PNG")
-                b64 = base64.b64encode(buf.getvalue()).decode()
             import httpx
-            resp = await httpx.AsyncClient(timeout=30).post(
-                "https://api.anthropic.com/v1/messages",
-                headers={"content-type": "application/json"},
-                json={
-                    "model": "claude-sonnet-4-6",
-                    "max_tokens": 2000,
-                    "messages": [{
-                        "role": "user",
-                        "content": [
-                            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": b64}},
-                            {"type": "text", "text": "Transcribe ALL text from this resume image exactly as it appears, preserving structure."}
-                        ]
-                    }]
-                }
-            )
-            data = resp.json()
-            return data["content"][0]["text"]
+            groq_key = os.environ.get("GROQ_API_KEY", "")
+            if not groq_key:
+                raise HTTPException(status_code=500, detail="GROQ_API_KEY is not configured on the server.")
+
+            page_images_b64 = []
+            with pdfplumber.open(io.BytesIO(contents)) as pdf:
+                for page in pdf.pages[:4]:   # max 4 pages for Groq
+                    pil_img = page.to_image(resolution=150).original
+                    if pil_img.mode not in ("RGB", "L"):
+                        pil_img = pil_img.convert("RGB")
+                    buf = io.BytesIO()
+                    pil_img.save(buf, format="JPEG", quality=85)
+                    page_images_b64.append(base64.b64encode(buf.getvalue()).decode())
+
+            if not page_images_b64:
+                raise HTTPException(status_code=422, detail="No pages could be rendered from this PDF.")
+
+            content = []
+            for img_b64 in page_images_b64:
+                content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}})
+            content.append({"type": "text", "text": "Transcribe ALL text from these resume pages exactly as it appears, preserving structure, sections, and all details."})
+
+            payload = {
+                "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+                "messages": [{"role": "user", "content": content}],
+                "max_tokens": 3000,
+            }
+            async with httpx.AsyncClient(timeout=90) as client:
+                resp = await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                    json=payload,
+                )
+            if resp.status_code == 429:
+                raise HTTPException(status_code=429, detail="Groq quota exceeded. Please wait a moment and try again.")
+            if resp.status_code != 200:
+                raise HTTPException(status_code=422, detail=f"Groq API error {resp.status_code}: {resp.text[:300]}")
+            return resp.json()["choices"][0]["message"]["content"]
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=422, detail=f"Could not read scanned resume: {e}")
 
@@ -368,17 +408,32 @@ async def _extract_resume_text(contents: bytes, filename: str) -> str:
 
 
 async def _ai_structure_resume(resume_text: str) -> dict:
-    """Use Claude API to extract structured fields from resume text."""
+    """Use Gemini to extract structured candidate fields from resume text.
+
+    Falls back gracefully if GEMINI_API_KEY is absent.
+    """
     import json
-    import httpx
+
+    gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    if not gemini_key:
+        logger.warning("GEMINI_API_KEY not set — skipping AI structuring, using heuristics only.")
+        return {}
+
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=gemini_key)
+        model = genai.GenerativeModel("gemini-2.0-flash")
+    except ImportError:
+        logger.warning("google-generativeai not installed — skipping AI structuring.")
+        return {}
 
     prompt = (
         "Extract candidate details from this resume and respond with ONLY valid JSON "
-        "(no markdown, no explanation) with these exact keys:\n"
+        "(no markdown, no code fences, no explanation) with these exact keys:\n"
         '{"full_name":"","email":"","phone":"","position":"","department":"",'
         '"experience_years":0,"current_company":"","skills":[],"education":""}\n\n'
         "Rules:\n"
-        "- full_name: the person's full name (usually the largest text at the top)\n"
+        "- full_name: the person's full name (usually the largest / first text)\n"
         "- position: most recent or primary job title\n"
         "- department: one of Sales, IT, HR, Accounts, Legal, Marketing, Operations, GST, TDS, ROC, TM, Other\n"
         "- experience_years: total years as a number (sum from work history dates if needed)\n"
@@ -388,23 +443,13 @@ async def _ai_structure_resume(resume_text: str) -> dict:
         f"RESUME:\n{resume_text[:12000]}"
     )
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={"content-type": "application/json"},
-            json={
-                "model": "claude-sonnet-4-6",
-                "max_tokens": 1000,
-                "messages": [{"role": "user", "content": prompt}]
-            }
-        )
-    data = resp.json()
-    raw = (data.get("content") or [{}])[0].get("text", "").strip()
-    raw = re.sub(r"^```(json)?|```$", "", raw, flags=re.MULTILINE).strip()
     try:
+        resp = await model.generate_content_async(prompt)
+        raw = (resp.text or "").strip()
+        raw = re.sub(r"^```(json)?|```$", "", raw, flags=re.MULTILINE).strip()
         return json.loads(raw)
-    except Exception:
-        logger.warning(f"Claude JSON parse failed, raw: {raw[:200]}")
+    except Exception as e:
+        logger.warning(f"Gemini JSON parse failed: {e}")
         return {}
 
 
