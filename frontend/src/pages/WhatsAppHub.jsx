@@ -27,8 +27,23 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
+import { FixedSizeList as VList } from 'react-window';
+import AutoSizer from 'react-virtualized-auto-sizer';
 import api, { BASE_URL, getToken } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext.jsx';
+
+// ── Socket.IO lazy import for real-time updates ───────────────────────────────
+let _io = null;
+async function getSocketIO() {
+  if (_io) return _io;
+  try {
+    _io = (await import('socket.io-client')).default;
+    return _io;
+  } catch {
+    console.warn('socket.io-client not installed — real-time updates disabled. Install with: npm install socket.io-client');
+    return null;
+  }
+}
 
 // ── WhatsApp exact colour palette ─────────────────────────────────────────────
 const WA = {
@@ -755,7 +770,7 @@ function Bubble({ msg, prev, next, isDark, sessionColorMap, isGrp, multiSession,
 }
 
 // ── Chat list item ────────────────────────────────────────────────────────────
-function ChatItem({ contact, active, onClick, onArchiveToggle, sessionColorMap, contactNameByPhone, isDark }) {
+function ChatItem({ contact, active, onClick, onArchiveToggle, sessionColorMap, contactNameByPhone, sessions, isDark }) {
   const [hover, setHover] = useState(false);
   const name    = getDisplayName(contact);
   const preview = contact.latest_message?.body || '';
@@ -804,6 +819,20 @@ function ChatItem({ contact, active, onClick, onArchiveToggle, sessionColorMap, 
               {contact.unread_count > 0 && (
                 <span style={{ background:WA.green, color:'#fff', fontSize:12, fontWeight:700, minWidth:20, height:20, borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', padding:'0 5px', flexShrink:0 }}>
                   {contact.unread_count>99?'99+':contact.unread_count}
+                </span>
+              )}
+            </div>
+            {/* ── Contact number + Source number (Unified Inbox) ──────────────── */}
+            <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:2 }}>
+              {contact.phone && (
+                <span style={{ fontSize:10, color:muted, opacity:0.8 }}>
+                  {displayJid(contact.jid)}
+                </span>
+              )}
+              {contact.session_id && sessions?.length > 0 && (
+                <span style={{ fontSize:10, color:muted, opacity:0.6, display:'flex', alignItems:'center', gap:3 }}>
+                  <span style={{ width:5, height:5, borderRadius:'50%', background:numCol, flexShrink:0 }}/>
+                  via {sessions.find(s => s.sessionId === contact.session_id)?.label || formatPhone(contact.session_id)}
                 </span>
               )}
             </div>
@@ -1308,6 +1337,56 @@ export default function WhatsAppHub() {
     return m;
   }, [sessions]);
 
+  // ── WhatsApp Numbers Filter (Unified Inbox) ────────────────────────────────
+  const [numbers, setNumbers] = useState([]);
+  const [selectedNumber, setSelectedNumber] = useState(null);
+  const [socketConnected, setSocketConnected] = useState(false);
+
+  const loadNumbers = useCallback(async () => {
+    try {
+      const { data } = await api.get('/whatsapp/numbers');
+      const list = data?.numbers || data || [];
+      setNumbers(Array.isArray(list) ? list : []);
+    } catch {
+      setNumbers([]);
+    }
+  }, []);
+
+  useEffect(() => { loadNumbers(); }, [loadNumbers]);
+
+  // ── Socket.IO Connection (Unified Inbox real-time updates) ─────────────────
+  const socketRef = useRef(null);
+  useEffect(() => {
+    let socket = null;
+    const connectSocket = async () => {
+      const io = await getSocketIO();
+      if (!io) return;
+      const token = getToken();
+      if (!token) return;
+      const socketUrl = BASE_URL.replace(/\/api\/?$/, '');
+      socket = io(socketUrl, {
+        auth: { token },
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionAttempts: 10,
+      });
+      socket.on('connect', () => {
+        setSocketConnected(true);
+        socket.emit('inbox:join');
+      });
+      socket.on('disconnect', () => setSocketConnected(false));
+      // Real-time: new incoming message
+      socket.on('whatsapp:inbox:message', () => { loadContacts(); });
+      socket.on('whatsapp:inbox:unread', () => { loadContacts(); });
+      socketRef.current = socket;
+    };
+    connectSocket();
+    return () => {
+      if (socket) { socket.removeAllListeners(); socket.disconnect(); }
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Contacts / chat list ───────────────────────────────────────────────────
   const [contacts,   setContacts]   = useState([]);
   const [groups,     setGroups]     = useState([]);
@@ -1659,7 +1738,34 @@ export default function WhatsAppHub() {
     : `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='304' height='304'%3E%3Cpath fill='none' stroke='%23b2bec3' stroke-width='1' opacity='0.2' d='M4 4c0-2 2-4 4-4h4c2 0 4 2 4 4v4c0 2-2 4-4 4H8C6 12 4 10 4 8V4z'/%3E%3C/svg%3E")`;
 
   return (
-    <div style={{ display:'flex', height:'100%', minHeight:0, margin:'-16px', overflow:'hidden', fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif' }}>
+    <div style={{ display:'flex', flexDirection:'column', height:'100%', minHeight:0, margin:'-16px', overflow:'hidden', fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif' }}>
+
+      {/* ── Connection Status Bar (Unified Inbox) ──────────────────────────── */}
+      <div style={{
+        display:'flex', alignItems:'center', justifyContent:'space-between',
+        padding:'6px 16px', flexShrink:0,
+        background: isDark ? '#1e293b' : '#ffffff',
+        borderBottom: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
+      }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+          <MessageCircle size={14} color={isDark ? '#e2e8f0' : '#0D3B66'} />
+          <span style={{ fontSize:12, fontWeight:700, color:isDark ? '#e2e8f0' : '#0D3B66', letterSpacing:'-0.01em' }}>
+            Unified Inbox
+          </span>
+        </div>
+        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+          <div style={{
+            width:7, height:7, borderRadius:'50%',
+            background: socketConnected ? '#1FAF5A' : '#f59e0b',
+            boxShadow: socketConnected ? '0 0 4px rgba(31,175,90,0.4)' : 'none',
+          }} />
+          <span style={{ fontSize:11, color:muted, fontWeight:500 }}>
+            {socketConnected ? 'Live' : (socketConnected===false ? 'Polling' : 'Connecting...')}
+          </span>
+        </div>
+      </div>
+
+      <div style={{ display:'flex', flex:1, minHeight:0, overflow:'hidden' }}>
 
       {/* ── Manage Numbers Modal ─────────────────────────────────────────────── */}
       <AnimatePresence>
@@ -1708,6 +1814,48 @@ export default function WhatsAppHub() {
             )}
           </div>
         </div>
+
+        {/* ── Numbers Filter (Unified Inbox) ────────────────────────────────── */}
+        {numbers.length > 0 && (
+          <div style={{ padding:'6px 12px', background:sideBg, borderBottom:`1px solid ${brd}`, flexShrink:0 }}>
+            <div style={{ display:'flex', gap:4, overflowX:'auto', scrollbarWidth:'none', paddingBottom:2 }}>
+              <button
+                onClick={() => setSelectedNumber(null)}
+                style={{
+                  flexShrink:0, padding:'4px 12px', borderRadius:16, border:'none', cursor:'pointer',
+                  fontSize:11, fontWeight:600, transition:'all 0.15s',
+                  background: selectedNumber === null ? '#0D3B66' : (isDark ? '#202c33' : '#e9edef'),
+                  color: selectedNumber === null ? '#fff' : muted,
+                }}
+              >
+                All Numbers
+              </button>
+              {numbers.map((num, i) => {
+                const isActive = selectedNumber === (num.id || num.number);
+                const color = sc(i);
+                return (
+                  <button
+                    key={num.id || num.number}
+                    onClick={() => setSelectedNumber(num.id || num.number)}
+                    style={{
+                      flexShrink:0, padding:'4px 12px', borderRadius:16, border:'none', cursor:'pointer',
+                      fontSize:11, fontWeight:600, transition:'all 0.15s', display:'flex', alignItems:'center', gap:5,
+                      background: isActive ? color : (isDark ? '#202c33' : '#e9edef'),
+                      color: isActive ? '#fff' : muted,
+                    }}
+                  >
+                    <span style={{ width:6, height:6, borderRadius:'50%', background:color, flexShrink:0 }}/>
+                    {num.label || formatPhone(num.number)}
+                    {num.conversation_count > 0 && (
+                      <span style={{ fontSize:10, opacity:0.7 }}>({num.conversation_count})</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {inboxError && (
           <div style={{ background:isDark?'#3a1f1f':'#fdecea', borderBottom:`1px solid ${isDark?'#5c2b2b':'#f5c6c2'}`, color:isDark?'#ffb4ab':'#a13a32', fontSize:12, padding:'8px 16px', display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
             <AlertCircle size={14}/>
@@ -1771,7 +1919,7 @@ export default function WhatsAppHub() {
 
           {/* Chat items — only show when at least one session exists */}
           {sessions.length > 0 && filteredList.map(c => (
-            <ChatItem key={c.jid} contact={c} active={activeJid===c.jid} sessionColorMap={sessionColorMap} contactNameByPhone={contactNameByPhone} isDark={isDark} onClick={()=>openChat(c)}/>
+            <ChatItem key={c.jid} contact={c} active={activeJid===c.jid} sessionColorMap={sessionColorMap} contactNameByPhone={contactNameByPhone} sessions={sessions} isDark={isDark} onClick={()=>openChat(c)}/>
           ))}
 
           {/* Empty state for list */}
@@ -1834,7 +1982,13 @@ export default function WhatsAppHub() {
                 {contact?.session_id && (
                   <div style={{ fontSize:12, color:muted, display:'flex', alignItems:'center', gap:5, marginTop:1 }}>
                     <div style={{ width:7, height:7, borderRadius:'50%', background:sessionColorMap[contact.session_id]||WA.green }}/>
-                    {sessions.find(s=>s.sessionId===contact.session_id)?.label || contact.session_id}
+                    <span>{sessions.find(s=>s.sessionId===contact.session_id)?.label || contact.session_id}</span>
+                    {contact.phone && <span style={{ opacity:0.7 }}>· {displayJid(activeJid)}</span>}
+                  </div>
+                )}
+                {!contact?.session_id && contact?.phone && (
+                  <div style={{ fontSize:12, color:muted, marginTop:1 }}>
+                    {displayJid(activeJid)}
                   </div>
                 )}
               </div>
@@ -2004,6 +2158,7 @@ export default function WhatsAppHub() {
           </>
         )}
       </div>
+      </div> {/* close inner wrapper */}
     </div>
   );
 }
