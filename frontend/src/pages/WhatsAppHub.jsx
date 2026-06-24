@@ -97,10 +97,20 @@ function isSameDay(a, b) {
 
 function isGroup(jid) { return (jid||'').endsWith('@g.us'); }
 
+function formatPhone(num) {
+  // num is digits only e.g. "919898622841"
+  if (!num) return '';
+  // Indian numbers: 91 + 10 digits
+  const m = num.match(/^(91)(\d{5})(\d{5})$/);
+  if (m) return `+${m[1]} ${m[2]} ${m[3]}`;
+  // Generic: just add + prefix, space every 5 digits for readability
+  return `+${num.replace(/(\d{5})(?=\d)/g, '$1 ')}`;
+}
+
 function displayJid(jid) {
   if (!jid) return '';
-  if (jid.endsWith('@lid'))            return `+${jid.split('@')[0]}`;
-  if (jid.endsWith('@s.whatsapp.net')) return `+${jid.split('@')[0]}`;
+  if (jid.endsWith('@lid'))            return '';          // LID = internal privacy ID, not a real number
+  if (jid.endsWith('@s.whatsapp.net')) return formatPhone(jid.split('@')[0]);
   if (jid.endsWith('@g.us'))           return jid.split('@')[0];
   return jid;
 }
@@ -108,8 +118,12 @@ function displayJid(jid) {
 function getDisplayName(contact) {
   if (!contact) return '';
   if (contact.display_name && !contact.display_name.includes('@')) return contact.display_name;
-  if (contact.phone) return `+${contact.phone}`;
-  return displayJid(contact.jid) || contact.jid || '';
+  if (contact.phone) return formatPhone(contact.phone);
+  const fromJid = displayJid(contact.jid);
+  if (fromJid) return fromJid;
+  // @lid contacts have no readable identifier — show generic label
+  if ((contact.jid||'').endsWith('@lid')) return 'WhatsApp User';
+  return contact.jid || '';
 }
 
 function participantsLabel(count) {
@@ -1527,8 +1541,8 @@ export default function WhatsAppHub() {
             </div>
           )}
 
-          {/* Chat items */}
-          {filteredList.map(c => (
+          {/* Chat items — only show when at least one session exists */}
+          {sessions.length > 0 && filteredList.map(c => (
             <ChatItem key={c.jid} contact={c} active={activeJid===c.jid} sessionColorMap={sessionColorMap} isDark={isDark} onClick={()=>openChat(c)}/>
           ))}
 
