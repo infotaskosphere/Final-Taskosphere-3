@@ -2900,7 +2900,7 @@ export default function Tasks() {
                     </div>
                   </div>
 
-                  {/* Score Trend Sparkline Chart */}
+                  {/* Score Trend Sparkline Chart — flex-1 equal height */}
                   {(() => {
                     const trendPoints = (() => {
                       const base = Math.max(10, displayScore - 18);
@@ -2915,7 +2915,7 @@ export default function Tasks() {
                     const trendUp = scoreTrend >= 0;
                     return (
                       <motion.div
-                        className="rounded-lg px-2.5 pt-2 pb-1.5 border"
+                        className="rounded-lg px-2.5 pt-2 pb-1.5 border flex-1 flex flex-col justify-between"
                         style={{
                           background: isDark ? (trendUp ? 'rgba(31,175,90,0.07)' : 'rgba(239,68,68,0.07)') : (trendUp ? '#f0fdf4' : '#fff5f5'),
                           borderColor: isDark ? (trendUp ? 'rgba(31,175,90,0.25)' : 'rgba(239,68,68,0.25)') : (trendUp ? '#bbf7d0' : '#fecaca'),
@@ -2933,7 +2933,7 @@ export default function Tasks() {
                             {scoreTrend >= 0 ? `+${scoreTrend}` : scoreTrend} pts
                           </span>
                         </div>
-                        <div style={{ height: 38 }}>
+                        <div className="flex-1 min-h-0" style={{ height: 44 }}>
                           <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={trendPoints} margin={{ top: 2, right: 2, left: 2, bottom: 0 }}>
                               <defs>
@@ -2955,8 +2955,9 @@ export default function Tasks() {
                     );
                   })()}
 
-                  {/* 4-stat mini grid — tight */}
-                  <div className={`rounded-lg border px-2 py-1.5 grid grid-cols-4 gap-0 ${isDark ? 'bg-slate-700/30 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
+                  {/* 4-stat mini grid — flex-1 equal height */}
+                  <div className={`rounded-lg border px-2 py-0 flex-1 flex items-center ${isDark ? 'bg-slate-700/30 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
+                    <div className="grid grid-cols-4 gap-0 w-full">
                     {[
                       { icon: <Calendar className="h-2.5 w-2.5 text-blue-500" />, val: workingDaysLeft, label: 'Days Left', color: null },
                       { icon: <Target className="h-2.5 w-2.5 text-purple-500" />, val: myPending, label: 'Pending', color: null },
@@ -2965,7 +2966,7 @@ export default function Tasks() {
                     ].map(({ icon, val, label, small, color }, i) => (
                       <motion.div
                         key={label}
-                        className="flex flex-col items-center gap-px py-0.5"
+                        className="flex flex-col items-center gap-px py-1.5"
                         initial={{ opacity: 0, y: 4 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.52 + i * 0.06 }}
@@ -2977,31 +2978,39 @@ export default function Tasks() {
                         <span className={`text-[7px] text-center leading-tight ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{label}</span>
                       </motion.div>
                     ))}
+                    </div>
                   </div>
 
-                  {/* Keep pushing strip — below stats */}
+                  {/* Pink Keep pushing strip with View Tips — flex-1 equal height */}
                   <motion.div
-                    className="rounded-lg px-2.5 py-1.5 flex items-center gap-1.5"
-                    style={{ background: isDark ? '#0f172a' : '#1e1e3f' }}
+                    className="rounded-lg px-2.5 flex items-center justify-between flex-1"
+                    style={{ background: isDark ? 'rgba(239,68,68,0.07)' : '#fff5f5', border: '1px solid #fecaca' }}
                     initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.72 }}
                   >
-                    <motion.div
-                      animate={{ x: [0, 3, -3, 0], rotate: [0, 15, -10, 0] }}
-                      transition={{ duration: 2, repeat: Infinity, repeatDelay: 5 }}
-                      className="flex-shrink-0"
-                    >
-                      <Zap className="h-3.5 w-3.5 text-yellow-300" />
-                    </motion.div>
-                    <div className="min-w-0">
-                      <p className="text-[9px] font-bold text-white leading-tight">
-                        {displayScore >= 85 ? 'Outstanding work!' : displayScore >= 65 ? 'Small steps, big results!' : 'Keep pushing!'}
-                      </p>
-                      <p className="text-[8px] text-slate-300 leading-tight">
-                        {displayScore >= 85 ? "You're leading the team!" : 'Every completed task takes you higher.'}
-                      </p>
+                    <div className="flex items-center gap-1.5">
+                      <motion.div animate={{ x: [0, 3, -2, 0] }} transition={{ duration: 1.5, repeat: Infinity, repeatDelay: 3 }}>
+                        <Zap className="h-3.5 w-3.5 text-red-400 flex-shrink-0" />
+                      </motion.div>
+                      <div>
+                        <p className="text-[9px] font-bold text-red-500 leading-tight">
+                          {displayScore >= 85 ? 'Outstanding!' : 'Keep pushing!'}
+                        </p>
+                        <p className={`text-[9px] leading-tight ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                          Every completed task boosts your score.
+                        </p>
+                      </div>
                     </div>
+                    <motion.button
+                      className="text-[9px] font-bold px-2 py-0.5 rounded-md border flex-shrink-0 ml-2"
+                      style={{ color: '#EF4444', borderColor: '#fca5a5', background: 'white' }}
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => setShowTips(true)}
+                    >
+                      View Tips →
+                    </motion.button>
                   </motion.div>
                 </div>
 
