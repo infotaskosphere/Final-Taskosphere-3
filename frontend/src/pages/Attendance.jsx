@@ -221,7 +221,7 @@ const CardHeaderRow = memo(function CardHeaderRow({ iconBg, icon, title, subtitl
       {action && <div className="flex items-center gap-1.5 flex-shrink-0">{action}</div>}
     </div>
   );
-}
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ID HELPERS (bug-fix preserved from v8)
