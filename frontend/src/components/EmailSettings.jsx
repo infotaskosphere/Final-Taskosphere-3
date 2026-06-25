@@ -40,25 +40,24 @@ import { format, parseISO, isBefore, startOfDay } from "date-fns";
 // DESIGN TOKENS
 // ─────────────────────────────────────────────────────────────────────────────
 const COLORS = {
-  deepBlue:     "#1a3a5c",
-  mediumBlue:   "#2563eb",
-  emeraldGreen: "#059669",
-  lightGreen:   "#34d399",
-  amber:        "#f59e0b",
-  orange:       "#f97316",
-  red:          "#ef4444",
-  purple:       "#7c3aed",
-  indigo:       "#4f46e5",
+  deepBlue:     "#0D3B66",
+  mediumBlue:   "#1F6FB2",
+  emeraldGreen: "#1FAF5A",
+  lightGreen:   "#5CCB5F",
+  amber:        "#F59E0B",
+  orange:       "#F97316",
+  red:          "#EF4444",
+  purple:       "#8B5CF6",
 };
 
 const D = {
-  bg:      "#0a0f1e",
-  card:    "#111827",
-  raised:  "#1a2236",
-  border:  "#1e2d45",
-  text:    "#f0f4ff",
-  muted:   "#8b9cbf",
-  dimmer:  "#4a5568",
+  bg:      "#0f172a",
+  card:    "#1e293b",
+  raised:  "#263348",
+  border:  "#334155",
+  text:    "#f1f5f9",
+  muted:   "#94a3b8",
+  dimmer:  "#64748b",
 };
 
 const containerVariants = {
@@ -201,14 +200,7 @@ const SUGGESTED_SENDERS = [
 // ─────────────────────────────────────────────────────────────────────────────
 function SectionCard({ children, className = "", style = {} }) {
   return (
-    <div className={`overflow-hidden ${className}`}
-      style={{
-        background: "var(--section-card-bg, #ffffff)",
-        border: "1px solid var(--section-card-border, #dde3ef)",
-        borderRadius: "16px",
-        boxShadow: "var(--section-card-shadow, 0 1px 4px rgba(0,0,0,0.06))",
-        ...style
-      }}>
+    <div className={`bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm ${className}`} style={style}>
       {children}
     </div>
   );
@@ -237,7 +229,7 @@ function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
 function StatCard({ icon: Icon, label, value, unit, color, trend }) {
   return (
     <motion.div variants={itemVariants} whileHover={{ y: -3, transition: springPhysics.lift }} whileTap={{ scale: 0.985 }}>
-      <div className="rounded-2xl shadow-sm border h-full hover:shadow-md transition-all">
+      <div className="rounded-2xl shadow-sm border h-full bg-white dark:bg-slate-800 border-slate-200/80 dark:border-slate-700 hover:shadow-md transition-all">
         <div className="p-4">
           <div className="flex items-start justify-between mb-3">
             <div>
@@ -456,43 +448,28 @@ function ConnectForm({ provider, onSuccess, onCancel, isDark }) {
 
         {supportsOAuth && (
           <div className="rounded-2xl border overflow-hidden"
-            style={{ borderColor: isDark ? "#1e2d45" : "#dde3ef", background: isDark ? "rgba(37,99,235,0.06)" : "#f8faff" }}>
+            style={{ borderColor: isDark ? "#14532d" : "#bbf7d0", background: isDark ? "rgba(31,175,90,0.08)" : "#f0fdf4" }}>
             <div className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
               <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shadow-sm flex-shrink-0"
-                  style={{ border: "1px solid #e2e8f0" }}>
-                  <svg width="18" height="18" viewBox="0 0 24 24">
-                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-                    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-                  </svg>
-                </div>
+                <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center font-black text-sm shadow-sm"
+                  style={{ color: provider.color }}>G</div>
                 <div>
-                  <p className="text-sm font-bold" style={{ color: isDark ? D.text : "#1a3a5c" }}>
-                    Sign in with Google
+                  <p className="text-sm font-bold" style={{ color: isDark ? D.text : "#14532d" }}>
+                    Connect Gmail directly with Google
                   </p>
-                  <p className="text-xs mt-0.5" style={{ color: isDark ? D.muted : "#64748b" }}>
-                    One click · no app password needed · read-only Gmail access
+                  <p className="text-xs mt-0.5" style={{ color: isDark ? "#86efac" : "#166534" }}>
+                    No app password needed. You approve read-only Gmail access on Google’s secure consent screen.
                   </p>
                 </div>
               </div>
               <Button onClick={handleOAuthConnect} disabled={oauthLoading}
-                className="h-10 rounded-xl text-sm font-bold shrink-0 flex items-center gap-2"
-                style={{
-                  background: oauthLoading ? "#9CA3AF" : "linear-gradient(135deg, #2563eb, #4f46e5)",
-                  color: "#ffffff",
-                  boxShadow: oauthLoading ? "none" : "0 4px 14px rgba(37,99,235,0.35)",
-                  border: "none",
-                  padding: "0 20px",
-                }}>
-                {oauthLoading
-                  ? <><Loader2 className="w-4 h-4 animate-spin" />Connecting…</>
-                  : <><Shield className="w-4 h-4" />Connect with Google</>}
+                className="h-10 rounded-xl text-sm font-bold text-white shrink-0"
+                style={{ background: oauthLoading ? "#9CA3AF" : `linear-gradient(135deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})` }}>
+                {oauthLoading ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Opening Google…</> : <><Shield className="w-4 h-4 mr-2" />Connect with Google</>}
               </Button>
             </div>
-            <div className="px-4 pb-3 text-[11px] border-t" style={{ color: isDark ? D.dimmer : "#94a3b8", borderColor: isDark ? D.border : "#e8eef6" }}>
-              App Password is still available as a manual fallback below if Google OAuth is not configured on the server.
+            <div className="px-4 pb-3 text-[11px]" style={{ color: isDark ? D.muted : "#64748b" }}>
+              App Password is still available as a manual fallback if Google OAuth is not configured on the server.
             </div>
           </div>
         )}
@@ -794,7 +771,7 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, on
 
 
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-3 border-t border-slate-100 dark:border-slate-700"
-          style={{ backgroundColor: isDark ? D.raised : "#f4f7ff" }}>
+          style={{ backgroundColor: isDark ? D.raised : "#f8fafc" }}>
           <p className="text-xs truncate" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
             {conn.last_synced
               ? `Synced ${format(parseISO(conn.last_synced), "MMM d, h:mm a")} · only new emails since this date are fetched`
@@ -1300,6 +1277,114 @@ function SenderWhitelistManager({ isDark }) {
           </div>
         )}
       </div>
+    </SectionCard>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sender Blacklist Manager
+// ─────────────────────────────────────────────────────────────────────────────
+function SenderBlacklistManager({ isDark }) {
+  const [senders, setSenders] = useState([]);
+  const [input, setInput]     = useState("");
+  const [label, setLabel]     = useState("");
+  const [adding, setAdding]   = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get("/email/sender-blacklist")
+      .then(res => setSenders(res.data?.senders || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const addSender = async () => {
+    const addr = input.trim().toLowerCase();
+    if (!addr) return;
+    if (senders.find(s => s.email_address === addr)) { toast.error("Already in blacklist"); return; }
+    setAdding(true);
+    try {
+      const updated = [...senders, { email_address: addr, label: label.trim() || addr }];
+      await api.put("/email/sender-blacklist", { senders: updated });
+      setSenders(updated);
+      setInput(""); setLabel("");
+      toast.success(`✓ ${addr} blocked`);
+    } catch { toast.error("Failed to add sender"); } finally { setAdding(false); }
+  };
+
+  const removeSender = async (addr) => {
+    const updated = senders.filter(s => s.email_address !== addr);
+    try { await api.put("/email/sender-blacklist", { senders: updated }); setSenders(updated); toast.success(`${addr} unblocked`); }
+    catch { toast.error("Failed to remove sender"); }
+  };
+
+  return (
+    <SectionCard
+      title="Sender Blacklist"
+      subtitle="Emails from these senders are never scanned — even if they contain dates"
+      badge={senders.length}
+      isDark={isDark}
+    >
+      <div className="space-y-2 mb-3">
+        <input
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && addSender()}
+          placeholder="Email or domain to block, e.g. noreply@bank.com or @promotions.com"
+          className="w-full px-3 py-2 rounded-xl text-xs border outline-none"
+          style={{ backgroundColor: isDark ? D.base : "#f8fafc", borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.text : "#1e293b" }}
+        />
+        <div className="flex gap-2">
+          <input
+            value={label}
+            onChange={e => setLabel(e.target.value)}
+            placeholder="Label (optional, e.g. HDFC Bank Alerts)"
+            className="flex-1 px-3 py-2 rounded-xl text-xs border outline-none"
+            style={{ backgroundColor: isDark ? D.base : "#f8fafc", borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.text : "#1e293b" }}
+          />
+          <button onClick={addSender} disabled={adding || !input.trim()}
+            className="px-4 py-2 rounded-xl text-xs font-bold active:scale-95 transition-all disabled:opacity-50"
+            style={{ backgroundColor: COLORS.red, color: "#fff" }}>
+            {adding ? "…" : "+ Block"}
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <p className="text-xs text-center py-4" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>Loading…</p>
+      ) : senders.length === 0 ? (
+        <div className="text-center py-6">
+          <p className="text-xs" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+            No senders blocked — smart noise filter still applies automatically.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>Blocked Senders ({senders.length})</p>
+          {senders.map(s => (
+            <div key={s.email_address} className="flex items-center justify-between px-3 py-2 rounded-xl border"
+              style={{ backgroundColor: isDark ? "rgba(239,68,68,0.06)" : "#fff1f2", borderColor: isDark ? "rgba(239,68,68,0.2)" : "#fecaca" }}>
+              <div>
+                <p className="text-xs font-semibold" style={{ color: isDark ? "#f87171" : COLORS.red }}>{s.label}</p>
+                {s.label !== s.email_address && <p className="text-[10px]" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>{s.email_address}</p>}
+              </div>
+              <button onClick={() => removeSender(s.email_address)}
+                className="p-1.5 rounded-lg active:scale-95 transition-all"
+                style={{ color: isDark ? "#f87171" : COLORS.red }}>
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          ))}
+          <button onClick={async () => {
+            if (!window.confirm("Clear entire blacklist?")) return;
+            try { await api.put("/email/sender-blacklist", { senders: [] }); setSenders([]); toast.success("Blacklist cleared"); }
+            catch { toast.error("Failed to clear blacklist"); }
+          }} className="text-xs font-semibold flex items-center gap-1 mt-1 active:scale-95 transition-all"
+            style={{ color: isDark ? "#f87171" : COLORS.red }}>
+            <Trash2 className="w-3 h-3" /> Clear entire blacklist
+          </button>
+        </div>
+      )}
     </SectionCard>
   );
 }
@@ -2230,20 +2315,6 @@ function SenderSelectorPanel({ isDark }) {
 export default function EmailSettings() {
   const isDark = useDark();
 
-  // Inject CSS variables for SectionCard theming
-  React.useEffect(() => {
-    const root = document.documentElement;
-    if (isDark) {
-      root.style.setProperty("--section-card-bg", "#111827");
-      root.style.setProperty("--section-card-border", "#1e2d45");
-      root.style.setProperty("--section-card-shadow", "0 2px 12px rgba(0,0,0,0.4)");
-    } else {
-      root.style.setProperty("--section-card-bg", "#ffffff");
-      root.style.setProperty("--section-card-border", "#dde3ef");
-      root.style.setProperty("--section-card-shadow", "0 1px 6px rgba(0,0,0,0.06)");
-    }
-  }, [isDark]);
-
   const [connections,     setConnections]     = useState([]);
   const [loading,         setLoading]         = useState(true);
   const [activeForm,      setActiveForm]      = useState(null);
@@ -2460,95 +2531,63 @@ export default function EmailSettings() {
   return (
     <TooltipProvider>
 
-      <motion.div className="min-h-screen p-4 md:p-6 space-y-4"
-        style={{ background: isDark ? D.bg : "#f0f4fa" }}
+      <motion.div className="min-h-screen p-5 md:p-6 lg:p-8 space-y-5"
+        style={{ background: isDark ? D.bg : "#f8fafc" }}
         variants={containerVariants} initial="hidden" animate="visible">
 
         {/* ══ PAGE HEADER ══ */}
         <motion.div variants={itemVariants}>
-          <div className="relative overflow-hidden rounded-2xl px-6 py-6"
-            style={{
-              background: isDark
-                ? "linear-gradient(135deg, #0d1b35 0%, #0f2347 50%, #0d1b35 100%)"
-                : "linear-gradient(135deg, #1a3a5c 0%, #2563eb 100%)",
-              boxShadow: isDark ? "0 8px 40px rgba(0,0,0,0.5)" : "0 8px 32px rgba(26,58,92,0.30)",
-              border: isDark ? "1px solid #1e2d45" : "none",
-            }}>
-            {/* decorative orbs */}
-            <div className="absolute right-8 top-0 w-56 h-56 rounded-full opacity-[0.07]"
-              style={{ background: "radial-gradient(circle, #60a5fa 0%, transparent 70%)", transform: "translateY(-30%)" }} />
-            <div className="absolute left-1/2 bottom-0 w-40 h-40 rounded-full opacity-[0.05]"
-              style={{ background: "radial-gradient(circle, #818cf8 0%, transparent 70%)", transform: "translateY(50%)" }} />
+          <div className="relative overflow-hidden rounded-2xl px-6 py-5"
+            style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`, boxShadow: "0 8px 32px rgba(13,59,102,0.25)" }}>
+            <div className="absolute right-0 top-0 w-64 h-64 rounded-full -mr-20 -mt-20 opacity-10"
+              style={{ background: "radial-gradient(circle, white 0%, transparent 70%)" }} />
             <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest"
-                    style={{ background: "rgba(96,165,250,0.15)", color: "#93c5fd", border: "1px solid rgba(96,165,250,0.2)" }}>
-                    <Mail className="w-3 h-3" /> Integrations
-                  </div>
-                </div>
-                <h1 className="text-2xl font-bold text-white tracking-tight leading-tight">Email Hub</h1>
-                <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.5)" }}>
-                  Connect · scan · preview · save — no duplicates, no stale data
+                <p className="text-white/60 text-xs font-medium uppercase tracking-widest mb-1">Integrations</p>
+                <h1 className="text-2xl font-bold text-white tracking-tight">Email Integration</h1>
+                <p className="text-white/60 text-sm mt-1">
+                  Connect accounts · preview before saving · past dates filtered · no duplicates
                 </p>
               </div>
               <div className="flex gap-2 flex-wrap items-center">
                 {connections.length > 0 && (
                   <>
                     <button onClick={handleClearAll} disabled={clearing}
-                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95"
-                      style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.8)", backdropFilter: "blur(8px)" }}>
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold border transition-all active:scale-95"
+                      style={{ backgroundColor: "rgba(255,255,255,0.12)", borderColor: "rgba(255,255,255,0.22)", color: "#ffffff" }}>
                       {clearing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eraser className="w-3.5 h-3.5" />} Reset Cache
                     </button>
                     <button onClick={handleScanAll} disabled={scanning}
-                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
-                      style={{ background: "linear-gradient(135deg, #2563eb, #4f46e5)", border: "1px solid rgba(99,102,241,0.4)", color: "#ffffff", boxShadow: "0 4px 12px rgba(37,99,235,0.4)" }}>
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold border transition-all active:scale-95"
+                      style={{ backgroundColor: "rgba(255,255,255,0.15)", borderColor: "rgba(255,255,255,0.25)", color: "#ffffff" }}>
                       {scanning ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Scanning…</> : <><RefreshCw className="w-3.5 h-3.5" />Scan All</>}
                     </button>
                   </>
                 )}
               </div>
             </div>
-
-            {/* Inline stats strip in header */}
-            <div className="relative mt-5 pt-4 flex flex-wrap gap-5 border-t" style={{ borderColor: "rgba(255,255,255,0.1)" }}>
-              {[
-                { label: "Connected", value: connections.length, unit: "accounts", color: "#60a5fa" },
-                { label: "In Preview", value: extractedEvents.length, unit: `${futureEventCount} saveable`, color: "#a78bfa" },
-                { label: "Whitelist", value: "—", unit: "manage in tab", color: "#34d399" },
-              ].map(stat => (
-                <div key={stat.label} className="flex items-center gap-2.5">
-                  <span className="text-2xl font-black leading-none" style={{ color: stat.color }}>{stat.value}</span>
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.5)" }}>{stat.label}</p>
-                    <p className="text-[10px]" style={{ color: "rgba(255,255,255,0.35)" }}>{stat.unit}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
           </div>
+        </motion.div>
+
+        {/* ══ STAT CARDS ══ */}
+        <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-3" variants={itemVariants}>
+          <StatCard icon={Mail}     label="Connected"  value={connections.length}              unit="accounts"     color={COLORS.deepBlue}     trend={connections.length > 0 ? "IMAP active" : "Add an account"} />
+          <StatCard icon={Eye}      label="In Preview" value={extractedEvents.length}          unit="events found" color={COLORS.purple}       trend={`${futureEventCount} future · ready to save`} />
+          <StatCard icon={Filter}   label="Whitelist"  value={0}                               unit="senders"      color={COLORS.emeraldGreen} trend="Manage in Whitelist tab" />
         </motion.div>
 
         {/* ══ TAB BAR ══ */}
         <motion.div variants={itemVariants}>
-          <div className="flex items-center gap-1 p-1 rounded-2xl"
-            style={{
-              backgroundColor: isDark ? D.card : "#ffffff",
-              border: isDark ? `1px solid ${D.border}` : "1px solid #dde3ef",
-              boxShadow: isDark ? "none" : "0 1px 4px rgba(0,0,0,0.06)"
-            }}>
+          <div className="flex items-center gap-1 p-1 rounded-2xl border"
+            style={{ backgroundColor: isDark ? D.card : "#ffffff", borderColor: isDark ? D.border : "#e2e8f0" }}>
             {TAB_CONFIG.map(tab => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold transition-all"
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all"
                 style={activeTab === tab.id
-                  ? {
-                      background: isDark ? "linear-gradient(135deg, #1e2d45, #1a3252)" : "linear-gradient(135deg, #1a3a5c, #2563eb)",
-                      color: "#ffffff",
-                      boxShadow: isDark ? "0 2px 8px rgba(0,0,0,0.3)" : "0 2px 8px rgba(37,99,235,0.3)"
-                    }
+                  ? { backgroundColor: isDark ? D.raised : "#f1f5f9", color: isDark ? D.text : "#1e293b", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }
                   : { color: isDark ? D.muted : "#64748b" }}>
-                <tab.icon className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">{tab.label}</span>
+                <tab.icon className="w-4 h-4" />
+                {tab.label}
               </button>
             ))}
           </div>
@@ -2683,6 +2722,15 @@ export default function EmailSettings() {
         {/* ══ WHITELIST TAB ══ */}
         {activeTab === "whitelist" && (
           <motion.div variants={itemVariants} className="space-y-4">
+            {/* Smart filter info */}
+            <div className="px-4 py-3.5 rounded-2xl border flex items-start gap-3"
+              style={{ backgroundColor: isDark ? "rgba(16,185,129,0.08)" : "#f0fdf4", borderColor: isDark ? "#065f46" : "#bbf7d0" }}>
+              <Info className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: COLORS.emeraldGreen }} />
+              <div className="text-xs" style={{ color: isDark ? "#6ee7b7" : "#065f46" }}>
+                <p className="font-bold mb-0.5">Smart Noise Filter — Always Active</p>
+                <p>OTPs, bank alerts, payment notifications, promotional offers, order confirmations, and newsletter digests are <strong>automatically blocked</strong> before they reach the Action Centre — no setup needed.</p>
+              </div>
+            </div>
             <div className="px-4 py-3.5 rounded-2xl border flex items-start gap-3"
               style={{ backgroundColor: isDark ? "rgba(245,158,11,0.08)" : "#fffbeb", borderColor: isDark ? "#92400e" : "#fde68a" }}>
               <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: COLORS.amber }} />
@@ -2693,6 +2741,7 @@ export default function EmailSettings() {
               </div>
             </div>
             <SenderWhitelistManager isDark={isDark} />
+            <SenderBlacklistManager isDark={isDark} />
           </motion.div>
         )}
 
