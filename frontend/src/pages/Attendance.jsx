@@ -1,6 +1,6 @@
 import { useDark } from '@/hooks/useDark';
 import AttendanceReportModal from './AttendanceReportModal';
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatInTimeZone } from 'date-fns-tz';
 import { useAuth } from '@/contexts/AuthContext';
@@ -134,11 +134,11 @@ const D = {
 // ─────────────────────────────────────────────────────────────────────────────
 const containerVariants = {
   hidden:  { opacity: 0 },
-  visible: { opacity: 1, transition: { staggerChildren: 0.06, delayChildren: 0.1 } },
+  visible: { opacity: 1, transition: { staggerChildren: 0.03, delayChildren: 0.05 } },
 };
 const itemVariants = {
   hidden:  { opacity: 0, y: 24 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.23, 1, 0.32, 1] } },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.25, ease: [0.23, 1, 0.32, 1] } },
 };
 const springPhysics = {
   card: { type: 'spring', stiffness: 280, damping: 22, mass: 0.85 },
@@ -190,7 +190,7 @@ if (typeof document !== 'undefined' && !document.getElementById('att-pulse-style
 // ─────────────────────────────────────────────────────────────────────────────
 // SHARED LAYOUT PRIMITIVES (matches Dashboard)
 // ─────────────────────────────────────────────────────────────────────────────
-function SectionCard({ children, className = '', style = {} }) {
+const SectionCard = memo(function SectionCard({ children, className = '', style = {} }) {
   return (
     <div
       className={`relative bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-[0_1px_3px_0_rgba(0,0,0,0.06),0_1px_2px_-1px_rgba(0,0,0,0.06)] ${className}`}
@@ -201,7 +201,7 @@ function SectionCard({ children, className = '', style = {} }) {
   );
 }
 
-function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
+const CardHeaderRow = memo(function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
   return (
     <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700">
       <div className="flex items-center gap-2.5">
@@ -2051,8 +2051,15 @@ export default function Attendance() {
     return () => clearInterval(id);
   }, [todayAttendance, lastActivity, isOvertime, isViewingOther, isEveryoneView]); // eslint-disable-line
 
+  
+  // ── Fetch guard — prevents duplicate concurrent fetches ──────────────────
+  const _fetchingRef = useRef(false);
+
+
   // ── Data Fetch ─────────────────────────────────────────────────────────────
   const fetchData = useCallback(async (overrideUserId = undefined) => {
+    if (_fetchingRef.current) return;
+    _fetchingRef.current = true;
     setLoading(true); setDataError(null);
     // For admin: can target anyone or 'everyone'. For cross-vis users: target specific permitted user.
     const rawTargetId    = canSwitchUser ? (overrideUserId !== undefined ? overrideUserId : selectedUserId) : null;
@@ -2171,7 +2178,7 @@ export default function Attendance() {
     } catch (error) {
       const msg = error?.response?.data?.detail || error?.message || 'Network error';
       setDataError(msg);
-    } finally { setLoading(false); }
+    } finally { setLoading(false); _fetchingRef.current = false; }
   }, [selectedUserId, isAdmin, canViewRankings, user?.id, allUsers.length]); // eslint-disable-line
 
   const fetchReminders = useCallback(async (overrideUserId = undefined, signal = undefined) => {
