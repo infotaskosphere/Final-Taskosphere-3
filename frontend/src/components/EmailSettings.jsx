@@ -1284,27 +1284,75 @@ function SenderWhitelistManager({ isDark }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Sender Blacklist Manager
 // ─────────────────────────────────────────────────────────────────────────────
+// Validate "email" or "domain" entries for white/blacklist.
+// Accepts: full email (a@b.co), bare domain (@b.co or b.co), prefix (noreply@)
+function validateSenderEntry(raw) {
+  const v = (raw || "").trim().toLowerCase();
+  if (!v) return "Enter an email or domain";
+  if (v.length > 254) return "Too long (max 254 chars)";
+  if (/\s/.test(v)) return "No spaces allowed";
+  // prefix pattern: "name@"
+  if (/^[a-z0-9._%+-]+@$/.test(v)) return null;
+  // bare or @-prefixed domain
+  if (/^@?[a-z0-9.-]+\.[a-z]{2,}$/.test(v)) return null;
+  // full email
+  if (/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(v)) return null;
+  return "Use an email, @domain.com, or noreply@";
+}
+
 function SenderBlacklistManager({ isDark }) {
-  const [senders, setSenders] = useState([]);
-  const [input, setInput]     = useState("");
-  const [label, setLabel]     = useState("");
-  const [adding, setAdding]   = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [senders, setSenders]     = useState([]);
+  const [input, setInput]         = useState("");
+  const [label, setLabel]         = useState("");
+  const [inputError, setInputError] = useState("");
+  const [labelError, setLabelError] = useState("");
+  const [adding, setAdding]       = useState(false);
+  const [loading, setLoading]     = useState(true);
+  const [removingAddr, setRemovingAddr] = useState(null);
+  const [clearing, setClearing]   = useState(false);
+  const [loadError, setLoadError] = useState("");
 
   const inputStyle = { backgroundColor: isDark ? D.raised : "#ffffff", borderColor: isDark ? D.border : "#d1d5db", color: isDark ? D.text : "#1e293b" };
   const inputCls = "px-3.5 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-500 transition-all";
+  const errorBorder = { borderColor: "#ef4444" };
 
-  useEffect(() => {
+  const loadBlacklist = () => {
+    setLoading(true);
+    setLoadError("");
     api.get("/email/sender-blacklist")
       .then(res => setSenders(res.data?.senders || []))
-      .catch(() => {})
+      .catch(err => {
+        const msg = err?.response?.data?.detail || "Could not load blacklist";
+        setLoadError(msg);
+        toast.error(msg);
+      })
       .finally(() => setLoading(false));
-  }, []);
+  };
+
+  useEffect(() => { loadBlacklist(); }, []);
+
+  // live field validation
+  const onInputChange = (val) => {
+    setInput(val);
+    if (inputError) setInputError(validateSenderEntry(val) || "");
+  };
+  const onLabelChange = (val) => {
+    setLabel(val);
+    if (val.length > 60) setLabelError("Label must be 60 characters or less");
+    else setLabelError("");
+  };
 
   const addSender = async () => {
     const addr = input.trim().toLowerCase();
-    if (!addr) { toast.error("Enter an email or domain"); return; }
-    if (senders.find(s => s.email_address === addr)) { toast.error("Already in blacklist"); return; }
+    const err = validateSenderEntry(addr);
+    if (err) { setInputError(err); toast.error(err); return; }
+    if (label.length > 60) { setLabelError("Label must be 60 characters or less"); return; }
+    if (senders.find(s => s.email_address === addr)) {
+      setInputError("Already in blacklist");
+      toast.error("Already in blacklist");
+      return;
+    }
+    setInputError(""); setLabelError("");
     setAdding(true);
     try {
       const updated = [...senders, { email_address: addr, label: label.trim() || addr }];
@@ -1312,13 +1360,35 @@ function SenderBlacklistManager({ isDark }) {
       setSenders(updated);
       setInput(""); setLabel("");
       toast.success(`✓ ${addr} blocked`);
-    } catch { toast.error("Failed to add sender"); } finally { setAdding(false); }
+    } catch (e) {
+      const msg = e?.response?.data?.detail || "Failed to add sender";
+      toast.error(msg);
+    } finally { setAdding(false); }
   };
 
   const removeSender = async (addr) => {
+    setRemovingAddr(addr);
     const updated = senders.filter(s => s.email_address !== addr);
-    try { await api.put("/email/sender-blacklist", { senders: updated }); setSenders(updated); toast.success(`${addr} unblocked`); }
-    catch { toast.error("Failed to remove sender"); }
+    try {
+      await api.put("/email/sender-blacklist", { senders: updated });
+      setSenders(updated);
+      toast.success(`${addr} unblocked`);
+    } catch (e) {
+      const msg = e?.response?.data?.detail || "Failed to remove sender";
+      toast.error(msg);
+    } finally { setRemovingAddr(null); }
+  };
+
+  const clearAll = async () => {
+    if (!window.confirm("Clear entire blacklist? Previously blocked senders will be scanned again.")) return;
+    setClearing(true);
+    try {
+      await api.put("/email/sender-blacklist", { senders: [] });
+      setSenders([]);
+      toast.success("Blacklist cleared");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to clear blacklist");
+    } finally { setClearing(false); }
   };
 
   const SUGGESTED_BLOCKS = [
@@ -1329,6 +1399,8 @@ function SenderBlacklistManager({ isDark }) {
     { email_address: "marketing@",        label: "Marketing" },
   ];
 
+  const canSubmit = !adding && input.trim() && !inputError && !labelError;
+
   return (
     <SectionCard>
       <CardHeaderRow
@@ -1336,9 +1408,17 @@ function SenderBlacklistManager({ isDark }) {
         icon={<Shield className="w-4 h-4 text-red-500" />}
         title="Sender Blacklist"
         subtitle="Emails from these senders are never scanned — even if they contain dates"
-        badge={senders.length}
+        badge={loading ? "…" : senders.length}
       />
       <div className="p-4 space-y-4">
+        {loadError && !loading && (
+          <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl border text-xs"
+            style={{ backgroundColor: isDark ? "rgba(239,68,68,0.10)" : "#fef2f2", borderColor: isDark ? "rgba(239,68,68,0.30)" : "#fecaca", color: COLORS.red }}>
+            <span className="flex items-center gap-2"><AlertCircle className="w-3.5 h-3.5" />{loadError}</span>
+            <button onClick={loadBlacklist} className="font-bold underline">Retry</button>
+          </div>
+        )}
+
         <div>
           <p className="text-[10px] font-bold uppercase tracking-widest mb-2.5" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>Quick Block — Common Noise</p>
           <div className="flex flex-wrap gap-2">
@@ -1346,7 +1426,7 @@ function SenderBlacklistManager({ isDark }) {
               const exists = senders.find(x => x.email_address === s.email_address);
               return (
                 <button key={s.email_address}
-                  onClick={() => { if (exists) return; setInput(s.email_address); setLabel(s.label); }}
+                  onClick={() => { if (exists) return; setInput(s.email_address); setLabel(s.label); setInputError(""); setLabelError(""); }}
                   disabled={!!exists}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border-2 transition-all active:scale-95"
                   style={exists
@@ -1362,16 +1442,30 @@ function SenderBlacklistManager({ isDark }) {
         <div className="space-y-2">
           <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>Block Custom Sender</p>
           <div className="flex gap-2">
-            <input value={input} onChange={e => setInput(e.target.value)}
-              placeholder="@domain.com or noreply@bank.com"
-              onKeyDown={e => e.key === "Enter" && addSender()}
-              className={inputCls + " flex-1"} style={inputStyle} />
-            <input value={label} onChange={e => setLabel(e.target.value)}
-              placeholder="Label (optional)"
-              onKeyDown={e => e.key === "Enter" && addSender()}
-              className={inputCls + " w-36"} style={inputStyle} />
-            <Button onClick={addSender} disabled={adding || !input.trim()}
-              className="h-10 px-4 rounded-xl text-sm font-semibold text-white"
+            <div className="flex-1">
+              <input value={input} onChange={e => onInputChange(e.target.value)}
+                placeholder="@domain.com or noreply@bank.com"
+                onBlur={() => setInputError(validateSenderEntry(input) || "")}
+                onKeyDown={e => e.key === "Enter" && addSender()}
+                aria-invalid={!!inputError}
+                className={inputCls + " w-full"} style={{ ...inputStyle, ...(inputError ? errorBorder : {}) }} />
+              {inputError && (
+                <p className="text-[11px] mt-1 flex items-center gap-1 text-red-500"><AlertCircle className="w-3 h-3" />{inputError}</p>
+              )}
+            </div>
+            <div className="w-36">
+              <input value={label} onChange={e => onLabelChange(e.target.value)}
+                placeholder="Label (optional)"
+                onKeyDown={e => e.key === "Enter" && addSender()}
+                maxLength={80}
+                aria-invalid={!!labelError}
+                className={inputCls + " w-full"} style={{ ...inputStyle, ...(labelError ? errorBorder : {}) }} />
+              {labelError && (
+                <p className="text-[11px] mt-1 flex items-center gap-1 text-red-500"><AlertCircle className="w-3 h-3" />{labelError}</p>
+              )}
+            </div>
+            <Button onClick={addSender} disabled={!canSubmit}
+              className="h-10 px-4 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
               style={{ background: `linear-gradient(135deg, ${COLORS.red}, #b91c1c)` }}>
               {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
             </Button>
@@ -1379,7 +1473,10 @@ function SenderBlacklistManager({ isDark }) {
         </div>
 
         {loading ? (
-          <div className="flex justify-center py-4"><Loader2 className="w-5 h-5 animate-spin text-red-400" /></div>
+          <div className="flex flex-col items-center justify-center py-6 gap-2">
+            <Loader2 className="w-5 h-5 animate-spin text-red-400" />
+            <p className="text-[11px]" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>Loading blacklist…</p>
+          </div>
         ) : senders.length === 0 ? (
           <div className="py-6 text-center">
             <Shield className="w-7 h-7 mx-auto mb-2 opacity-20" />
@@ -1390,34 +1487,37 @@ function SenderBlacklistManager({ isDark }) {
         ) : (
           <div className="space-y-1.5">
             <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>Blocked Senders ({senders.length})</p>
-            {senders.map(s => (
-              <motion.div key={s.email_address} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-xl border"
-                style={{ backgroundColor: isDark ? "rgba(239,68,68,0.08)" : "#fff1f2", borderColor: isDark ? "rgba(239,68,68,0.25)" : "#fecaca" }}>
-                <div className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0"
-                  style={{ backgroundColor: isDark ? "rgba(239,68,68,0.20)" : "#fee2e2" }}>
-                  <Shield className="w-3.5 h-3.5 text-red-500" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-bold" style={{ color: isDark ? D.text : "#1e293b" }}>{s.label || s.email_address}</p>
-                  {s.label && s.label !== s.email_address && (
-                    <p className="text-[10px] font-mono" style={{ color: isDark ? D.muted : "#94a3b8" }}>{s.email_address}</p>
-                  )}
-                </div>
-                <button onClick={() => removeSender(s.email_address)}
-                  className="w-7 h-7 flex items-center justify-center rounded-lg transition-all active:scale-90"
-                  style={{ color: isDark ? "#f87171" : COLORS.red }}>
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </motion.div>
-            ))}
-            <button onClick={async () => {
-              if (!window.confirm("Clear entire blacklist? Previously blocked senders will be scanned again.")) return;
-              try { await api.put("/email/sender-blacklist", { senders: [] }); setSenders([]); toast.success("Blacklist cleared"); }
-              catch { toast.error("Failed to clear blacklist"); }
-            }} className="text-xs font-semibold flex items-center gap-1 mt-1 active:scale-95 transition-all"
+            {senders.map(s => {
+              const isRemoving = removingAddr === s.email_address;
+              return (
+                <motion.div key={s.email_address} initial={{ opacity: 0 }} animate={{ opacity: isRemoving ? 0.5 : 1 }}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-xl border"
+                  style={{ backgroundColor: isDark ? "rgba(239,68,68,0.08)" : "#fff1f2", borderColor: isDark ? "rgba(239,68,68,0.25)" : "#fecaca" }}>
+                  <div className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0"
+                    style={{ backgroundColor: isDark ? "rgba(239,68,68,0.20)" : "#fee2e2" }}>
+                    <Shield className="w-3.5 h-3.5 text-red-500" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold truncate" style={{ color: isDark ? D.text : "#1e293b" }}>{s.label || s.email_address}</p>
+                    {s.label && s.label !== s.email_address && (
+                      <p className="text-[10px] font-mono truncate" style={{ color: isDark ? D.muted : "#94a3b8" }}>{s.email_address}</p>
+                    )}
+                  </div>
+                  <button onClick={() => removeSender(s.email_address)}
+                    disabled={isRemoving || clearing}
+                    aria-label={`Remove ${s.email_address}`}
+                    className="w-7 h-7 flex items-center justify-center rounded-lg transition-all active:scale-90 disabled:opacity-50"
+                    style={{ color: isDark ? "#f87171" : COLORS.red }}>
+                    {isRemoving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                  </button>
+                </motion.div>
+              );
+            })}
+            <button onClick={clearAll} disabled={clearing}
+              className="text-xs font-semibold flex items-center gap-1 mt-1 active:scale-95 transition-all disabled:opacity-50"
               style={{ color: isDark ? "#f87171" : COLORS.red }}>
-              <Trash2 className="w-3 h-3" /> Clear entire blacklist
+              {clearing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+              {clearing ? "Clearing…" : "Clear entire blacklist"}
             </button>
           </div>
         )}
@@ -1456,39 +1556,93 @@ function loadScanSettings() {
   } catch { return { ...DEFAULT_SCAN_SETTINGS }; }
 }
 
+// Per-field validation rules for scan settings. Returns map of {field: errorMsg}.
+function validateScanSettings(s) {
+  const errors = {};
+  const intInRange = (v, min, max) => Number.isFinite(v) && Number.isInteger(v) && v >= min && v <= max;
+  if (!intInRange(s.scanWindowDays, 1, 365))         errors.scanWindowDays      = "Must be a whole number between 1 and 365";
+  if (!intInRange(s.maxEventsPerScan, 10, 1000))     errors.maxEventsPerScan    = "Must be between 10 and 1000";
+  if (!intInRange(s.syncIntervalMinutes, 5, 240))    errors.syncIntervalMinutes = "Must be between 5 and 240 minutes";
+  if (!intInRange(s.defaultReminderLead, 0, 30))     errors.defaultReminderLead = "Must be between 0 and 30 days";
+  if (!["reminder", "todo", "visit"].includes(s.defaultCategory))
+    errors.defaultCategory = "Pick a valid category";
+  return errors;
+}
+
 function EmailScanSettings({ isDark }) {
   const [settings, setSettings] = useState(loadScanSettings);
   const [saved, setSaved]       = useState(false);
+  const [saving, setSaving]     = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [errors, setErrors]     = useState({});
 
-  const update = (patch) => setSettings(prev => ({ ...prev, ...patch }));
+  const update = (patch) => {
+    setSettings(prev => {
+      const next = { ...prev, ...patch };
+      // live-clear errors for touched fields when they become valid
+      const nextErrors = validateScanSettings(next);
+      setErrors(prevErr => {
+        const out = { ...prevErr };
+        Object.keys(patch).forEach(k => {
+          if (nextErrors[k]) out[k] = nextErrors[k]; else delete out[k];
+        });
+        return out;
+      });
+      return next;
+    });
+  };
 
-  const save = () => {
+  const save = async () => {
+    const v = validateScanSettings(settings);
+    setErrors(v);
+    if (Object.keys(v).length > 0) {
+      toast.error(`Fix ${Object.keys(v).length} field${Object.keys(v).length > 1 ? "s" : ""} before saving`);
+      return;
+    }
+    setSaving(true);
     try {
+      // Save locally first so the UI is responsive even if the API is unreachable.
       localStorage.setItem(SCAN_SETTINGS_KEY, JSON.stringify(settings));
-      // best-effort sync to backend; ignore failures so the UI still works offline
-      api.put("/email/scan-settings", settings).catch(() => {});
+      try {
+        await api.put("/email/scan-settings", settings);
+        toast.success("✓ Settings saved");
+      } catch (apiErr) {
+        // Local save succeeded but remote did not — warn the user instead of silently swallowing.
+        const msg = apiErr?.response?.data?.detail
+          || (apiErr?.response?.status ? `Saved locally — server rejected (${apiErr.response.status})` : "Saved locally — server unreachable");
+        toast.warning ? toast.warning(msg) : toast(msg, { description: "Settings persist on this device." });
+      }
       setSaved(true);
-      toast.success("✓ Settings saved");
       setTimeout(() => setSaved(false), 1600);
-    } catch { toast.error("Could not save settings"); }
+    } catch (e) {
+      toast.error("Could not save settings");
+    } finally { setSaving(false); }
   };
 
-  const reset = () => {
+  const reset = async () => {
     if (!window.confirm("Restore default scan settings?")) return;
-    setSettings({ ...DEFAULT_SCAN_SETTINGS });
-    localStorage.removeItem(SCAN_SETTINGS_KEY);
-    toast.success("Defaults restored");
+    setResetting(true);
+    try {
+      setSettings({ ...DEFAULT_SCAN_SETTINGS });
+      setErrors({});
+      localStorage.removeItem(SCAN_SETTINGS_KEY);
+      try { await api.put("/email/scan-settings", DEFAULT_SCAN_SETTINGS); } catch { /* non-fatal */ }
+      toast.success("Defaults restored");
+    } catch {
+      toast.error("Could not restore defaults");
+    } finally { setResetting(false); }
   };
 
-  const Toggle = ({ label, hint, value, onChange }) => (
+  const Toggle = ({ label, hint, value, onChange, disabled }) => (
     <div className="flex items-start justify-between gap-4 py-3 border-b last:border-b-0"
       style={{ borderColor: isDark ? D.border : "#e2e8f0" }}>
       <div className="min-w-0">
         <p className="text-sm font-semibold" style={{ color: isDark ? D.text : "#1e293b" }}>{label}</p>
         {hint && <p className="text-[11px] mt-0.5" style={{ color: isDark ? D.muted : "#64748b" }}>{hint}</p>}
       </div>
-      <button onClick={() => onChange(!value)}
-        className="flex-shrink-0 transition-all active:scale-95"
+      <button onClick={() => !disabled && onChange(!value)}
+        disabled={disabled}
+        className="flex-shrink-0 transition-all active:scale-95 disabled:opacity-50"
         aria-label={label}>
         {value
           ? <ToggleRight className="w-9 h-9" style={{ color: COLORS.emeraldGreen }} />
@@ -1497,37 +1651,52 @@ function EmailScanSettings({ isDark }) {
     </div>
   );
 
-  const NumberField = ({ label, hint, value, min, max, step = 1, suffix, onChange }) => (
-    <div className="flex items-center justify-between gap-4 py-3 border-b last:border-b-0"
-      style={{ borderColor: isDark ? D.border : "#e2e8f0" }}>
-      <div className="min-w-0">
-        <p className="text-sm font-semibold" style={{ color: isDark ? D.text : "#1e293b" }}>{label}</p>
-        {hint && <p className="text-[11px] mt-0.5" style={{ color: isDark ? D.muted : "#64748b" }}>{hint}</p>}
+  const NumberField = ({ label, hint, value, min, max, step = 1, suffix, onChange, error }) => (
+    <div className="py-3 border-b last:border-b-0" style={{ borderColor: isDark ? D.border : "#e2e8f0" }}>
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold" style={{ color: isDark ? D.text : "#1e293b" }}>{label}</p>
+          {hint && <p className="text-[11px] mt-0.5" style={{ color: isDark ? D.muted : "#64748b" }}>{hint}</p>}
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <input type="number" value={value} min={min} max={max} step={step}
+            onChange={e => {
+              const raw = e.target.value;
+              onChange(raw === "" ? NaN : Number(raw));
+            }}
+            aria-invalid={!!error}
+            className="w-24 px-3 py-2 border rounded-xl text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
+            style={{ backgroundColor: isDark ? D.raised : "#fff", borderColor: error ? "#ef4444" : (isDark ? D.border : "#d1d5db"), color: isDark ? D.text : "#1e293b" }} />
+          {suffix && <span className="text-xs font-medium" style={{ color: isDark ? D.muted : "#64748b" }}>{suffix}</span>}
+        </div>
       </div>
-      <div className="flex items-center gap-2 flex-shrink-0">
-        <input type="number" value={value} min={min} max={max} step={step}
-          onChange={e => onChange(Number(e.target.value))}
-          className="w-24 px-3 py-2 border rounded-xl text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
-          style={{ backgroundColor: isDark ? D.raised : "#fff", borderColor: isDark ? D.border : "#d1d5db", color: isDark ? D.text : "#1e293b" }} />
-        {suffix && <span className="text-xs font-medium" style={{ color: isDark ? D.muted : "#64748b" }}>{suffix}</span>}
-      </div>
+      {error && (
+        <p className="text-[11px] mt-1.5 flex items-center gap-1 text-red-500"><AlertCircle className="w-3 h-3" />{error}</p>
+      )}
     </div>
   );
 
-  const SelectField = ({ label, hint, value, options, onChange }) => (
-    <div className="flex items-center justify-between gap-4 py-3 border-b last:border-b-0"
-      style={{ borderColor: isDark ? D.border : "#e2e8f0" }}>
-      <div className="min-w-0">
-        <p className="text-sm font-semibold" style={{ color: isDark ? D.text : "#1e293b" }}>{label}</p>
-        {hint && <p className="text-[11px] mt-0.5" style={{ color: isDark ? D.muted : "#64748b" }}>{hint}</p>}
+  const SelectField = ({ label, hint, value, options, onChange, error }) => (
+    <div className="py-3 border-b last:border-b-0" style={{ borderColor: isDark ? D.border : "#e2e8f0" }}>
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold" style={{ color: isDark ? D.text : "#1e293b" }}>{label}</p>
+          {hint && <p className="text-[11px] mt-0.5" style={{ color: isDark ? D.muted : "#64748b" }}>{hint}</p>}
+        </div>
+        <select value={value} onChange={e => onChange(e.target.value)}
+          aria-invalid={!!error}
+          className="px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          style={{ backgroundColor: isDark ? D.raised : "#fff", borderColor: error ? "#ef4444" : (isDark ? D.border : "#d1d5db"), color: isDark ? D.text : "#1e293b" }}>
+          {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
       </div>
-      <select value={value} onChange={e => onChange(e.target.value)}
-        className="px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        style={{ backgroundColor: isDark ? D.raised : "#fff", borderColor: isDark ? D.border : "#d1d5db", color: isDark ? D.text : "#1e293b" }}>
-        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
+      {error && (
+        <p className="text-[11px] mt-1.5 flex items-center gap-1 text-red-500"><AlertCircle className="w-3 h-3" />{error}</p>
+      )}
     </div>
   );
+
+  const errorCount = Object.keys(errors).length;
 
   return (
     <div className="space-y-4">
@@ -1542,14 +1711,17 @@ function EmailScanSettings({ isDark }) {
           <NumberField label="Scan window"
             hint="How many days of history to scan when an account has no last-sync date"
             value={settings.scanWindowDays} min={1} max={365} suffix="days"
+            error={errors.scanWindowDays}
             onChange={v => update({ scanWindowDays: v })} />
           <NumberField label="Max events per scan"
             hint="Hard cap to prevent runaway extractions"
             value={settings.maxEventsPerScan} min={10} max={1000} step={10} suffix="events"
+            error={errors.maxEventsPerScan}
             onChange={v => update({ maxEventsPerScan: v })} />
           <NumberField label="Auto-sync interval"
             hint="When auto-sync is on, fetch new emails this often"
             value={settings.syncIntervalMinutes} min={5} max={240} step={5} suffix="min"
+            error={errors.syncIntervalMinutes}
             onChange={v => update({ syncIntervalMinutes: v })} />
           <Toggle label="Enable background auto-sync"
             hint="Periodically pull new emails without clicking Sync"
@@ -1596,6 +1768,7 @@ function EmailScanSettings({ isDark }) {
           <SelectField label="Default category for new events"
             hint="Used when AI can't decide between Todo / Reminder / Visit"
             value={settings.defaultCategory}
+            error={errors.defaultCategory}
             options={[
               { value: "reminder", label: "Reminder" },
               { value: "todo",     label: "Todo" },
@@ -1605,6 +1778,7 @@ function EmailScanSettings({ isDark }) {
           <NumberField label="Default reminder lead time"
             hint="Days before due date to fire the reminder"
             value={settings.defaultReminderLead} min={0} max={30} suffix="days"
+            error={errors.defaultReminderLead}
             onChange={v => update({ defaultReminderLead: v })} />
           <Toggle label="Auto-select future events"
             hint="Future-dated events are pre-checked in the preview panel"
@@ -1639,17 +1813,26 @@ function EmailScanSettings({ isDark }) {
         </div>
       </SectionCard>
 
+      {errorCount > 0 && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl border text-xs"
+          style={{ backgroundColor: isDark ? "rgba(239,68,68,0.10)" : "#fef2f2", borderColor: isDark ? "rgba(239,68,68,0.30)" : "#fecaca", color: COLORS.red }}>
+          <AlertCircle className="w-3.5 h-3.5" />
+          <span className="font-semibold">{errorCount} field{errorCount > 1 ? "s" : ""} need attention before saving.</span>
+        </div>
+      )}
+
       <div className="flex items-center justify-end gap-2 sticky bottom-3 z-10">
-        <button onClick={reset}
-          className="px-4 py-2.5 rounded-xl text-sm font-semibold border transition-all active:scale-95"
+        <button onClick={reset} disabled={resetting || saving}
+          className="px-4 py-2.5 rounded-xl text-sm font-semibold border transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2"
           style={{ backgroundColor: isDark ? D.card : "#fff", borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.muted : "#64748b" }}>
-          Restore defaults
+          {resetting && <Loader2 className="w-4 h-4 animate-spin" />}
+          {resetting ? "Restoring…" : "Restore defaults"}
         </button>
-        <button onClick={save}
-          className="px-5 py-2.5 rounded-xl text-sm font-bold text-white flex items-center gap-2 shadow-lg transition-all active:scale-95"
+        <button onClick={save} disabled={saving || resetting || errorCount > 0}
+          className="px-5 py-2.5 rounded-xl text-sm font-bold text-white flex items-center gap-2 shadow-lg transition-all active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
           style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`, boxShadow: "0 6px 20px rgba(13,59,102,0.35)" }}>
-          {saved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-          {saved ? "Saved" : "Save Settings"}
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+          {saving ? "Saving…" : saved ? "Saved" : "Save Settings"}
         </button>
       </div>
     </div>
