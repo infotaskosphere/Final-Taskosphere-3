@@ -199,7 +199,7 @@ const SectionCard = memo(function SectionCard({ children, className = '', style 
       {children}
     </div>
   );
-}
+});
 
 const CardHeaderRow = memo(function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
   return (
