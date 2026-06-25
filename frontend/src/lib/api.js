@@ -1,5 +1,5 @@
 import axios from "axios";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 // ✅ Normalise: always ensure the base ends with /api
 let _raw =
@@ -16,8 +16,6 @@ const BASE_URL = _raw;
 export { BASE_URL };
 
 // ─── Token Helpers ───────────────────────────────────────────
-// NOTE: Must match the key used by AuthContext ("token") so that
-// clearToken() in the 401 interceptor actually removes the session.
 const TOKEN_KEY = "token";
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY);
@@ -44,6 +42,12 @@ export function useLoading() {
 
   return loading;
 }
+
+// ─── Request Deduplication Cache ──────────────────────────────
+// Prevents identical GET requests fired within 300ms from hitting the network twice.
+// Keyed by full URL string; values are in-flight Promise references.
+const _inflight = new Map();
+const DEDUP_WINDOW_MS = 300;
 
 // ─── Axios Instance ───────────────────────────────────────────
 const api = axios.create({
@@ -93,11 +97,6 @@ api.interceptors.response.use(
     }
 
     // 🚫 403 → permission denied
-    // Per-page components handle 403s with toast messages — do NOT redirect
-    // globally here. A blanket redirect was bouncing users to /dashboard
-    // whenever any secondary call (e.g. GET /users for a dropdown) returned
-    // 403, even if the primary page data loaded successfully.
-    // The custom event lets AuthContext refresh permissions silently.
     if (error.response?.status === 403) {
       window.dispatchEvent(new CustomEvent("permission-denied"));
     }
@@ -129,6 +128,39 @@ export const upload = (url, formData, config = {}) =>
     ...config,
     headers: { "Content-Type": "multipart/form-data", ...config.headers },
   });
+
+// ─── Deduplicated GET ─────────────────────────────────────────
+// Use this for any GET that might be called concurrently from multiple
+// components (e.g. /tasks, /users on Dashboard load).
+// If an identical request is already in-flight it returns the same promise
+// instead of firing a second network request.
+export const deduplicatedGet = (url, config = {}) => {
+  const key = url + (config.params ? JSON.stringify(config.params) : "");
+  if (_inflight.has(key)) return _inflight.get(key);
+  const promise = api.get(url, config).finally(() => {
+    // Remove from cache after short window so rapid re-fetches still dedup
+    setTimeout(() => _inflight.delete(key), DEDUP_WINDOW_MS);
+  });
+  _inflight.set(key, promise);
+  return promise;
+};
+
+// ─── Parallel Fetch Helper ────────────────────────────────────
+// Fires multiple GET requests in parallel with automatic deduplication.
+// Returns an object keyed by the supplied map keys.
+// Usage: parallelGet({ tasks: '/tasks', users: '/users' })
+export const parallelGet = async (urlMap, config = {}) => {
+  const keys = Object.keys(urlMap);
+  const results = await Promise.allSettled(
+    keys.map((k) => deduplicatedGet(urlMap[k], config))
+  );
+  return Object.fromEntries(
+    keys.map((k, i) => [
+      k,
+      results[i].status === "fulfilled" ? results[i].value : null,
+    ])
+  );
+};
 
 // ─── Error Formatter ─────────────────────────────────────────
 export function getErrorMessage(error) {
