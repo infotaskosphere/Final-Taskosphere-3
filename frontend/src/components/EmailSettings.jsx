@@ -1,18 +1,15 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// EmailSettings.jsx  v6  — Preview-before-save, past-date filtering, dedup
-// Changes from v5:
-//   1. ScanPreviewPanel — shows all extracted events BEFORE any data is written
-//      - Checkbox per event (checked by default if future & not already saved)
-//      - Past-dated events greyed + unchecked + "PAST — SKIPPED" badge
-//      - Already-saved events get "ALREADY SAVED" badge + disabled checkbox
-//      - Override save-type dropdown per event
-//      - "Select All Future / None" bulk controls
-//      - "Save N Selected" button — saves in one batch call
-//   2. Sync base date — each account's Sync button passes last_synced to API
-//      (?since_date=...) so only new emails since last sync are fetched
-//   3. Session-level dedup — savedKeys Set tracks event keys saved this session;
-//      a new scan deduplicates against it before merging into the panel
-//   4. Old EventRow (individual save buttons) removed — replaced by preview panel
+// EmailSettings.jsx  v7  — First-sync approval, Blacklist tab, SaaS UI refresh
+// New in v7:
+//   1. FirstSyncApprovalModal — on very first sync of an account, show preview
+//      of what WILL be scanned: which email account + which categories (todo /
+//      reminder / visit). User must approve before scan starts.
+//   2. Blacklist tab — dedicated tab for blocked senders. Emails from blacklisted
+//      addresses/domains are rejected automatically even if they pass whitelist
+//      and smart-filter checks. Moved out of Whitelist tab for clarity.
+//   3. Modernized ConnectedAccountCard — full SaaS refresh: gradient status strip,
+//      last-sync timeline, provider badge pill, action button group with hover states.
+//   4. Tab bar visual polish — pill tabs with active indicator, icon + label.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
@@ -31,6 +28,7 @@ import {
   Square, Save, CalendarOff,
   Send, FileText, Building2, Pencil, Users,
   ToggleLeft, ToggleRight, Copy, Zap, Paperclip,
+  Ban, ShieldOff, Sparkles, ArrowRight, ListX,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -832,6 +830,361 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, on
         </div>
       </SectionCard>
     </motion.div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FIRST SYNC APPROVAL MODAL
+// Shown the very first time an email account is synced (last_synced === null).
+// User selects which categories they want to sync and approves before scan.
+// ─────────────────────────────────────────────────────────────────────────────
+function FirstSyncApprovalModal({ conn, onApprove, onCancel, isDark }) {
+  const color = PROVIDER_COLORS[conn.provider] || PROVIDER_COLORS.other;
+  const icon  = PROVIDER_ICONS[conn.provider]  || PROVIDER_ICONS.other;
+
+  const [categories, setCategories] = useState({ todo: true, reminder: true, visit: true });
+  const [scanRange,  setScanRange]  = useState(30);
+
+  const toggleCat = (cat) => setCategories(prev => ({ ...prev, [cat]: !prev[cat] }));
+  const anySelected = Object.values(categories).some(Boolean);
+
+  const CAT_INFO = [
+    {
+      id: "todo",
+      icon: CheckSquare,
+      color: COLORS.purple,
+      label: "Todos",
+      desc: "Action required — examination reports, office actions, notices, reply-required emails",
+      bg: isDark ? "rgba(139,92,246,0.12)" : "#F5F3FF",
+      border: isDark ? "rgba(139,92,246,0.3)" : "#DDD6FE",
+    },
+    {
+      id: "reminder",
+      icon: Bell,
+      color: COLORS.deepBlue,
+      label: "Reminders",
+      desc: "Scheduled dates — hearings, court dates, GST/IT deadlines, ROC filings",
+      bg: isDark ? "rgba(13,59,102,0.2)" : "#EFF6FF",
+      border: isDark ? "rgba(13,59,102,0.4)" : "#BFDBFE",
+    },
+    {
+      id: "visit",
+      icon: Calendar,
+      color: COLORS.emeraldGreen,
+      label: "Visits",
+      desc: "Meetings & consultations — Zoom invites, client visits, conferences",
+      bg: isDark ? "rgba(31,175,90,0.12)" : "#F0FDF4",
+      border: isDark ? "rgba(31,175,90,0.3)" : "#BBF7D0",
+    },
+  ];
+
+  const RANGE_OPTIONS = [
+    { value: 7,   label: "Last 7 days" },
+    { value: 30,  label: "Last 30 days" },
+    { value: 90,  label: "Last 90 days" },
+    { value: 365, label: "Last 1 year" },
+  ];
+
+  return createPortal(
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+        style={{ backgroundColor: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+        onClick={(e) => e.target === e.currentTarget && onCancel()}
+      >
+        <motion.div
+          initial={{ opacity: 0, scale: 0.92, y: 16 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.94, y: 8 }}
+          transition={{ type: "spring", stiffness: 380, damping: 28 }}
+          className="w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl"
+          style={{ backgroundColor: isDark ? D.card : "#ffffff", border: `1px solid ${isDark ? D.border : "#e2e8f0"}` }}
+        >
+          {/* Header */}
+          <div className="px-6 py-5 border-b"
+            style={{
+              background: `linear-gradient(135deg, ${color}18, ${color}08)`,
+              borderColor: isDark ? D.border : "#e2e8f0",
+            }}>
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center text-base font-black text-white shadow-md flex-shrink-0"
+                style={{ backgroundColor: color }}>{icon}</div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: COLORS.emeraldGreen }}>
+                    First Sync
+                  </span>
+                </div>
+                <p className="font-bold text-sm truncate" style={{ color: isDark ? D.text : "#1e293b" }}>
+                  {conn.label || conn.email_address}
+                </p>
+                <p className="text-xs truncate" style={{ color: isDark ? D.muted : "#64748b" }}>
+                  {conn.email_address}
+                </p>
+              </div>
+              <button onClick={onCancel} className="p-2 rounded-xl transition-all"
+                style={{ color: isDark ? D.muted : "#94a3b8" }}
+                onMouseEnter={e => e.currentTarget.style.backgroundColor = isDark ? D.raised : "#f1f5f9"}
+                onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}>
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs font-medium" style={{ color: isDark ? D.muted : "#64748b" }}>
+              This is the first sync for this account. Select what you'd like to import and approve the scan to continue.
+            </p>
+          </div>
+
+          <div className="px-6 py-5 space-y-5">
+            {/* Scan range */}
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider mb-2.5" style={{ color: isDark ? D.muted : "#64748b" }}>
+                Scan Range
+              </p>
+              <div className="grid grid-cols-4 gap-2">
+                {RANGE_OPTIONS.map(opt => (
+                  <button key={opt.value} onClick={() => setScanRange(opt.value)}
+                    className="py-2 px-2 rounded-xl border text-xs font-semibold transition-all text-center"
+                    style={scanRange === opt.value
+                      ? { backgroundColor: COLORS.deepBlue, borderColor: COLORS.deepBlue, color: "#fff" }
+                      : { backgroundColor: isDark ? D.raised : "#f8fafc", borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.muted : "#64748b" }
+                    }>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Category toggles */}
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider mb-2.5" style={{ color: isDark ? D.muted : "#64748b" }}>
+                Import As — Select Categories
+              </p>
+              <div className="space-y-2.5">
+                {CAT_INFO.map(cat => (
+                  <button key={cat.id} onClick={() => toggleCat(cat.id)}
+                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-all"
+                    style={{
+                      backgroundColor: categories[cat.id] ? cat.bg : (isDark ? D.raised : "#f8fafc"),
+                      borderColor: categories[cat.id] ? cat.border : (isDark ? D.border : "#e2e8f0"),
+                    }}>
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all"
+                      style={{ backgroundColor: categories[cat.id] ? cat.color : (isDark ? "#334155" : "#e2e8f0") }}>
+                      <cat.icon className="w-4 h-4 text-white" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold" style={{ color: categories[cat.id] ? cat.color : (isDark ? D.muted : "#94a3b8") }}>
+                        {cat.label}
+                      </p>
+                      <p className="text-[11px] leading-relaxed" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+                        {cat.desc}
+                      </p>
+                    </div>
+                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all`}
+                      style={categories[cat.id]
+                        ? { backgroundColor: cat.color, borderColor: cat.color }
+                        : { borderColor: isDark ? D.border : "#d1d5db" }
+                      }>
+                      {categories[cat.id] && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {!anySelected && (
+              <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl"
+                style={{ backgroundColor: isDark ? "rgba(245,158,11,0.1)" : "#fffbeb", border: `1px solid ${isDark ? "#92400e" : "#fde68a"}` }}>
+                <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: COLORS.amber }} />
+                <p className="text-xs" style={{ color: isDark ? "#fbbf24" : "#92400e" }}>
+                  Select at least one category to proceed with the sync.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="px-6 py-4 flex items-center justify-between gap-3 border-t"
+            style={{ backgroundColor: isDark ? D.raised : "#f8fafc", borderColor: isDark ? D.border : "#e2e8f0" }}>
+            <button onClick={onCancel}
+              className="px-4 py-2.5 rounded-xl text-sm font-semibold border transition-all"
+              style={{ color: isDark ? D.muted : "#64748b", borderColor: isDark ? D.border : "#e2e8f0", backgroundColor: "transparent" }}>
+              Cancel
+            </button>
+            <button onClick={() => onApprove({ categories, scanRange })} disabled={!anySelected}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all active:scale-95 disabled:opacity-50"
+              style={{ background: anySelected ? `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` : "#9CA3AF", boxShadow: anySelected ? "0 4px 16px rgba(13,59,102,0.3)" : "none" }}>
+              <Sparkles className="w-4 h-4" />
+              Approve &amp; Start Scan
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>,
+    document.body
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SENDER BLACKLIST TAB — dedicated tab (separate from whitelist)
+// Blacklisted senders are auto-rejected even if they pass whitelist + filters.
+// ─────────────────────────────────────────────────────────────────────────────
+function SenderBlacklistTab({ isDark }) {
+  const [senders, setSenders] = useState([]);
+  const [input,   setInput]   = useState("");
+  const [label,   setLabel]   = useState("");
+  const [adding,  setAdding]  = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get("/email/sender-blacklist")
+      .then(res => setSenders(res.data?.senders || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const addSender = async () => {
+    const addr = input.trim().toLowerCase();
+    if (!addr) return;
+    if (senders.find(s => s.email_address === addr)) { toast.error("Already in blacklist"); return; }
+    setAdding(true);
+    try {
+      const updated = [...senders, { email_address: addr, label: label.trim() || addr }];
+      await api.put("/email/sender-blacklist", { senders: updated });
+      setSenders(updated); setInput(""); setLabel("");
+      toast.success(`✓ ${addr} permanently blocked`);
+    } catch { toast.error("Failed to add to blacklist"); } finally { setAdding(false); }
+  };
+
+  const removeSender = async (addr) => {
+    const updated = senders.filter(s => s.email_address !== addr);
+    try { await api.put("/email/sender-blacklist", { senders: updated }); setSenders(updated); toast.success(`${addr} removed from blacklist`); }
+    catch { toast.error("Failed to remove"); }
+  };
+
+  const inputStyle = { backgroundColor: isDark ? D.raised : "#ffffff", borderColor: isDark ? D.border : "#d1d5db", color: isDark ? D.text : "#1e293b" };
+
+  return (
+    <div className="space-y-4">
+      {/* Explainer */}
+      <div className="px-4 py-4 rounded-2xl border flex items-start gap-3"
+        style={{ backgroundColor: isDark ? "rgba(239,68,68,0.07)" : "#fff1f2", borderColor: isDark ? "rgba(239,68,68,0.25)" : "#fecaca" }}>
+        <div className="p-2 rounded-xl flex-shrink-0" style={{ backgroundColor: isDark ? "rgba(239,68,68,0.15)" : "#fee2e2" }}>
+          <ShieldOff className="w-4 h-4" style={{ color: COLORS.red }} />
+        </div>
+        <div>
+          <p className="text-sm font-bold mb-1" style={{ color: isDark ? "#f87171" : COLORS.red }}>Permanent Blacklist — Zero Tolerance</p>
+          <p className="text-xs leading-relaxed" style={{ color: isDark ? "#fca5a5" : "#9f1239" }}>
+            Emails from these addresses or domains are <strong>automatically rejected at the earliest stage</strong> of the pipeline —
+            before whitelist matching, before smart noise filtering, and before AI extraction.
+            Use this for senders you <em>never</em> want processed, regardless of content.
+          </p>
+          <div className="flex flex-wrap gap-4 mt-2.5">
+            {[
+              { icon: Ban, text: "Blocked before whitelist" },
+              { icon: ShieldOff, text: "Blocked before AI scan" },
+              { icon: ListX, text: "Never creates tasks" },
+            ].map(item => (
+              <div key={item.text} className="flex items-center gap-1.5">
+                <item.icon className="w-3 h-3" style={{ color: COLORS.red }} />
+                <span className="text-[11px] font-semibold" style={{ color: isDark ? "#fca5a5" : "#9f1239" }}>{item.text}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Add form */}
+      <SectionCard>
+        <CardHeaderRow
+          iconBg={isDark ? "bg-red-900/40" : "bg-red-50"}
+          icon={<Ban className="w-4 h-4 text-red-500" />}
+          title="Block a Sender or Domain"
+          subtitle={`${senders.length} address${senders.length !== 1 ? "es" : ""} blocked`}
+          badge={senders.length > 0 ? senders.length : undefined}
+        />
+        <div className="p-4 space-y-3">
+          <div className="space-y-2">
+            <input value={input} onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && addSender()}
+              placeholder="e.g. noreply@bank.com  or  @promotions.example.com"
+              className="w-full px-3.5 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-400 transition-all"
+              style={inputStyle} />
+            <div className="flex gap-2">
+              <input value={label} onChange={e => setLabel(e.target.value)}
+                placeholder="Friendly label (e.g. HDFC Promotions)"
+                className="flex-1 px-3.5 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-400 transition-all"
+                style={inputStyle} />
+              <button onClick={addSender} disabled={adding || !input.trim()}
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 disabled:opacity-50"
+                style={{ backgroundColor: COLORS.red, color: "#fff", boxShadow: "0 4px 12px rgba(239,68,68,0.3)" }}>
+                <Ban className="w-3.5 h-3.5" />
+                {adding ? "Blocking…" : "Block"}
+              </button>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-5 h-5 animate-spin" style={{ color: COLORS.red }} />
+            </div>
+          ) : senders.length === 0 ? (
+            <div className="text-center py-8 space-y-2">
+              <div className="w-12 h-12 rounded-2xl mx-auto flex items-center justify-center"
+                style={{ backgroundColor: isDark ? D.raised : "#f1f5f9" }}>
+                <ShieldOff className="w-6 h-6" style={{ color: isDark ? D.dimmer : "#cbd5e1" }} />
+              </div>
+              <p className="text-sm font-medium" style={{ color: isDark ? D.muted : "#64748b" }}>No senders blacklisted yet</p>
+              <p className="text-xs" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+                Smart noise filter still auto-blocks OTPs, promotions, and bank alerts.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2 pt-1">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+                  Blocked Senders ({senders.length})
+                </p>
+                <button onClick={async () => {
+                  if (!window.confirm("Remove all blocked senders?")) return;
+                  try { await api.put("/email/sender-blacklist", { senders: [] }); setSenders([]); toast.success("Blacklist cleared"); }
+                  catch { toast.error("Failed to clear"); }
+                }} className="flex items-center gap-1 text-[11px] font-semibold transition-all"
+                  style={{ color: COLORS.red }}>
+                  <Trash2 className="w-3 h-3" /> Clear all
+                </button>
+              </div>
+              {senders.map(s => (
+                <div key={s.email_address}
+                  className="flex items-center justify-between px-3.5 py-2.5 rounded-xl border group transition-all"
+                  style={{ backgroundColor: isDark ? "rgba(239,68,68,0.06)" : "#fff1f2", borderColor: isDark ? "rgba(239,68,68,0.2)" : "#fecaca" }}>
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                      style={{ backgroundColor: isDark ? "rgba(239,68,68,0.15)" : "#fee2e2" }}>
+                      <Ban className="w-3.5 h-3.5" style={{ color: COLORS.red }} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold truncate" style={{ color: isDark ? "#f87171" : COLORS.red }}>{s.label}</p>
+                      {s.label !== s.email_address && (
+                        <p className="text-[10px] font-mono truncate" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>{s.email_address}</p>
+                      )}
+                    </div>
+                  </div>
+                  <button onClick={() => removeSender(s.email_address)}
+                    className="p-1.5 rounded-lg transition-all active:scale-90 opacity-0 group-hover:opacity-100"
+                    style={{ color: isDark ? "#f87171" : COLORS.red }}
+                    onMouseEnter={e => e.currentTarget.style.backgroundColor = isDark ? "rgba(239,68,68,0.15)" : "#fee2e2"}
+                    onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}>
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </SectionCard>
+    </div>
   );
 }
 
