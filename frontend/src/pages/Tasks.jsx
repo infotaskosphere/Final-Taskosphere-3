@@ -299,7 +299,7 @@ const TeamTaskCard = memo(function TeamTaskCard({ stats, hasCrossVisibility, use
     onClick={() => {
       if (!hasCrossVisibility || usersLoading) return;
       setFilterTeamOnly(prev => !prev);
-      setFilterAssignee('all');
+      setFilterAssignee([]);
       setShowMyTasksOnly(false);
     }}
     className={`rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border
@@ -1762,7 +1762,7 @@ export default function Tasks() {
             {isAdmin && (
               <>
                 <Button variant="ghost" size="sm"
-                  onClick={() => { setFilterStatus('all'); setFilterAssignee('all'); setShowMyTasksOnly(false); setFilterTeamOnly(false); }}
+                  onClick={() => { setFilterStatus('all'); setFilterAssignee([]); setShowMyTasksOnly(false); setFilterTeamOnly(false); }}
                   className="h-8 text-xs rounded-xl gap-1.5 border font-semibold"
                   style={{ backgroundColor: 'rgba(31,175,90,0.22)', borderColor: 'rgba(31,175,90,0.55)', color: '#d1fae5' }}>
                   <Target className="h-3.5 w-3.5" /> Total: {stats.total}
@@ -3054,7 +3054,7 @@ export default function Tasks() {
               onValueChange={(v) => {
                 if (v === '__me__') {
                   setFilterAssignedByMe(true); setFilterCreatedBy('all');
-                  setShowMyTasksOnly(false); setFilterTeamOnly(false); setFilterAssignee('all');
+                  setShowMyTasksOnly(false); setFilterTeamOnly(false); setFilterAssignee([]);
                 } else {
                   setFilterAssignedByMe(false); setFilterCreatedBy(v);
                   if (v !== 'all') { setShowMyTasksOnly(false); setFilterTeamOnly(false); }
