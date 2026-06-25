@@ -1,15 +1,18 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// EmailSettings.jsx  v7  — First-sync approval, Blacklist tab, SaaS UI refresh
-// New in v7:
-//   1. FirstSyncApprovalModal — on very first sync of an account, show preview
-//      of what WILL be scanned: which email account + which categories (todo /
-//      reminder / visit). User must approve before scan starts.
-//   2. Blacklist tab — dedicated tab for blocked senders. Emails from blacklisted
-//      addresses/domains are rejected automatically even if they pass whitelist
-//      and smart-filter checks. Moved out of Whitelist tab for clarity.
-//   3. Modernized ConnectedAccountCard — full SaaS refresh: gradient status strip,
-//      last-sync timeline, provider badge pill, action button group with hover states.
-//   4. Tab bar visual polish — pill tabs with active indicator, icon + label.
+// EmailSettings.jsx  v6  — Preview-before-save, past-date filtering, dedup
+// Changes from v5:
+//   1. ScanPreviewPanel — shows all extracted events BEFORE any data is written
+//      - Checkbox per event (checked by default if future & not already saved)
+//      - Past-dated events greyed + unchecked + "PAST — SKIPPED" badge
+//      - Already-saved events get "ALREADY SAVED" badge + disabled checkbox
+//      - Override save-type dropdown per event
+//      - "Select All Future / None" bulk controls
+//      - "Save N Selected" button — saves in one batch call
+//   2. Sync base date — each account's Sync button passes last_synced to API
+//      (?since_date=...) so only new emails since last sync are fetched
+//   3. Session-level dedup — savedKeys Set tracks event keys saved this session;
+//      a new scan deduplicates against it before merging into the panel
+//   4. Old EventRow (individual save buttons) removed — replaced by preview panel
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
@@ -28,7 +31,6 @@ import {
   Square, Save, CalendarOff,
   Send, FileText, Building2, Pencil, Users,
   ToggleLeft, ToggleRight, Copy, Zap, Paperclip,
-  Ban, ShieldOff, Sparkles, ArrowRight, ListX,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -834,361 +836,6 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, on
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FIRST SYNC APPROVAL MODAL
-// Shown the very first time an email account is synced (last_synced === null).
-// User selects which categories they want to sync and approves before scan.
-// ─────────────────────────────────────────────────────────────────────────────
-function FirstSyncApprovalModal({ conn, onApprove, onCancel, isDark }) {
-  const color = PROVIDER_COLORS[conn.provider] || PROVIDER_COLORS.other;
-  const icon  = PROVIDER_ICONS[conn.provider]  || PROVIDER_ICONS.other;
-
-  const [categories, setCategories] = useState({ todo: true, reminder: true, visit: true });
-  const [scanRange,  setScanRange]  = useState(30);
-
-  const toggleCat = (cat) => setCategories(prev => ({ ...prev, [cat]: !prev[cat] }));
-  const anySelected = Object.values(categories).some(Boolean);
-
-  const CAT_INFO = [
-    {
-      id: "todo",
-      icon: CheckSquare,
-      color: COLORS.purple,
-      label: "Todos",
-      desc: "Action required — examination reports, office actions, notices, reply-required emails",
-      bg: isDark ? "rgba(139,92,246,0.12)" : "#F5F3FF",
-      border: isDark ? "rgba(139,92,246,0.3)" : "#DDD6FE",
-    },
-    {
-      id: "reminder",
-      icon: Bell,
-      color: COLORS.deepBlue,
-      label: "Reminders",
-      desc: "Scheduled dates — hearings, court dates, GST/IT deadlines, ROC filings",
-      bg: isDark ? "rgba(13,59,102,0.2)" : "#EFF6FF",
-      border: isDark ? "rgba(13,59,102,0.4)" : "#BFDBFE",
-    },
-    {
-      id: "visit",
-      icon: Calendar,
-      color: COLORS.emeraldGreen,
-      label: "Visits",
-      desc: "Meetings & consultations — Zoom invites, client visits, conferences",
-      bg: isDark ? "rgba(31,175,90,0.12)" : "#F0FDF4",
-      border: isDark ? "rgba(31,175,90,0.3)" : "#BBF7D0",
-    },
-  ];
-
-  const RANGE_OPTIONS = [
-    { value: 7,   label: "Last 7 days" },
-    { value: 30,  label: "Last 30 days" },
-    { value: 90,  label: "Last 90 days" },
-    { value: 365, label: "Last 1 year" },
-  ];
-
-  return createPortal(
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-        style={{ backgroundColor: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
-        onClick={(e) => e.target === e.currentTarget && onCancel()}
-      >
-        <motion.div
-          initial={{ opacity: 0, scale: 0.92, y: 16 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.94, y: 8 }}
-          transition={{ type: "spring", stiffness: 380, damping: 28 }}
-          className="w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl"
-          style={{ backgroundColor: isDark ? D.card : "#ffffff", border: `1px solid ${isDark ? D.border : "#e2e8f0"}` }}
-        >
-          {/* Header */}
-          <div className="px-6 py-5 border-b"
-            style={{
-              background: `linear-gradient(135deg, ${color}18, ${color}08)`,
-              borderColor: isDark ? D.border : "#e2e8f0",
-            }}>
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-11 h-11 rounded-xl flex items-center justify-center text-base font-black text-white shadow-md flex-shrink-0"
-                style={{ backgroundColor: color }}>{icon}</div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-0.5">
-                  <span className="text-xs font-bold px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: COLORS.emeraldGreen }}>
-                    First Sync
-                  </span>
-                </div>
-                <p className="font-bold text-sm truncate" style={{ color: isDark ? D.text : "#1e293b" }}>
-                  {conn.label || conn.email_address}
-                </p>
-                <p className="text-xs truncate" style={{ color: isDark ? D.muted : "#64748b" }}>
-                  {conn.email_address}
-                </p>
-              </div>
-              <button onClick={onCancel} className="p-2 rounded-xl transition-all"
-                style={{ color: isDark ? D.muted : "#94a3b8" }}
-                onMouseEnter={e => e.currentTarget.style.backgroundColor = isDark ? D.raised : "#f1f5f9"}
-                onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}>
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <p className="text-xs font-medium" style={{ color: isDark ? D.muted : "#64748b" }}>
-              This is the first sync for this account. Select what you'd like to import and approve the scan to continue.
-            </p>
-          </div>
-
-          <div className="px-6 py-5 space-y-5">
-            {/* Scan range */}
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wider mb-2.5" style={{ color: isDark ? D.muted : "#64748b" }}>
-                Scan Range
-              </p>
-              <div className="grid grid-cols-4 gap-2">
-                {RANGE_OPTIONS.map(opt => (
-                  <button key={opt.value} onClick={() => setScanRange(opt.value)}
-                    className="py-2 px-2 rounded-xl border text-xs font-semibold transition-all text-center"
-                    style={scanRange === opt.value
-                      ? { backgroundColor: COLORS.deepBlue, borderColor: COLORS.deepBlue, color: "#fff" }
-                      : { backgroundColor: isDark ? D.raised : "#f8fafc", borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.muted : "#64748b" }
-                    }>
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Category toggles */}
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wider mb-2.5" style={{ color: isDark ? D.muted : "#64748b" }}>
-                Import As — Select Categories
-              </p>
-              <div className="space-y-2.5">
-                {CAT_INFO.map(cat => (
-                  <button key={cat.id} onClick={() => toggleCat(cat.id)}
-                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-all"
-                    style={{
-                      backgroundColor: categories[cat.id] ? cat.bg : (isDark ? D.raised : "#f8fafc"),
-                      borderColor: categories[cat.id] ? cat.border : (isDark ? D.border : "#e2e8f0"),
-                    }}>
-                    <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all"
-                      style={{ backgroundColor: categories[cat.id] ? cat.color : (isDark ? "#334155" : "#e2e8f0") }}>
-                      <cat.icon className="w-4 h-4 text-white" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold" style={{ color: categories[cat.id] ? cat.color : (isDark ? D.muted : "#94a3b8") }}>
-                        {cat.label}
-                      </p>
-                      <p className="text-[11px] leading-relaxed" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
-                        {cat.desc}
-                      </p>
-                    </div>
-                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all`}
-                      style={categories[cat.id]
-                        ? { backgroundColor: cat.color, borderColor: cat.color }
-                        : { borderColor: isDark ? D.border : "#d1d5db" }
-                      }>
-                      {categories[cat.id] && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {!anySelected && (
-              <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl"
-                style={{ backgroundColor: isDark ? "rgba(245,158,11,0.1)" : "#fffbeb", border: `1px solid ${isDark ? "#92400e" : "#fde68a"}` }}>
-                <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: COLORS.amber }} />
-                <p className="text-xs" style={{ color: isDark ? "#fbbf24" : "#92400e" }}>
-                  Select at least one category to proceed with the sync.
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Footer */}
-          <div className="px-6 py-4 flex items-center justify-between gap-3 border-t"
-            style={{ backgroundColor: isDark ? D.raised : "#f8fafc", borderColor: isDark ? D.border : "#e2e8f0" }}>
-            <button onClick={onCancel}
-              className="px-4 py-2.5 rounded-xl text-sm font-semibold border transition-all"
-              style={{ color: isDark ? D.muted : "#64748b", borderColor: isDark ? D.border : "#e2e8f0", backgroundColor: "transparent" }}>
-              Cancel
-            </button>
-            <button onClick={() => onApprove({ categories, scanRange })} disabled={!anySelected}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all active:scale-95 disabled:opacity-50"
-              style={{ background: anySelected ? `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` : "#9CA3AF", boxShadow: anySelected ? "0 4px 16px rgba(13,59,102,0.3)" : "none" }}>
-              <Sparkles className="w-4 h-4" />
-              Approve &amp; Start Scan
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>,
-    document.body
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SENDER BLACKLIST TAB — dedicated tab (separate from whitelist)
-// Blacklisted senders are auto-rejected even if they pass whitelist + filters.
-// ─────────────────────────────────────────────────────────────────────────────
-function SenderBlacklistTab({ isDark }) {
-  const [senders, setSenders] = useState([]);
-  const [input,   setInput]   = useState("");
-  const [label,   setLabel]   = useState("");
-  const [adding,  setAdding]  = useState(false);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    api.get("/email/sender-blacklist")
-      .then(res => setSenders(res.data?.senders || []))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  const addSender = async () => {
-    const addr = input.trim().toLowerCase();
-    if (!addr) return;
-    if (senders.find(s => s.email_address === addr)) { toast.error("Already in blacklist"); return; }
-    setAdding(true);
-    try {
-      const updated = [...senders, { email_address: addr, label: label.trim() || addr }];
-      await api.put("/email/sender-blacklist", { senders: updated });
-      setSenders(updated); setInput(""); setLabel("");
-      toast.success(`✓ ${addr} permanently blocked`);
-    } catch { toast.error("Failed to add to blacklist"); } finally { setAdding(false); }
-  };
-
-  const removeSender = async (addr) => {
-    const updated = senders.filter(s => s.email_address !== addr);
-    try { await api.put("/email/sender-blacklist", { senders: updated }); setSenders(updated); toast.success(`${addr} removed from blacklist`); }
-    catch { toast.error("Failed to remove"); }
-  };
-
-  const inputStyle = { backgroundColor: isDark ? D.raised : "#ffffff", borderColor: isDark ? D.border : "#d1d5db", color: isDark ? D.text : "#1e293b" };
-
-  return (
-    <div className="space-y-4">
-      {/* Explainer */}
-      <div className="px-4 py-4 rounded-2xl border flex items-start gap-3"
-        style={{ backgroundColor: isDark ? "rgba(239,68,68,0.07)" : "#fff1f2", borderColor: isDark ? "rgba(239,68,68,0.25)" : "#fecaca" }}>
-        <div className="p-2 rounded-xl flex-shrink-0" style={{ backgroundColor: isDark ? "rgba(239,68,68,0.15)" : "#fee2e2" }}>
-          <ShieldOff className="w-4 h-4" style={{ color: COLORS.red }} />
-        </div>
-        <div>
-          <p className="text-sm font-bold mb-1" style={{ color: isDark ? "#f87171" : COLORS.red }}>Permanent Blacklist — Zero Tolerance</p>
-          <p className="text-xs leading-relaxed" style={{ color: isDark ? "#fca5a5" : "#9f1239" }}>
-            Emails from these addresses or domains are <strong>automatically rejected at the earliest stage</strong> of the pipeline —
-            before whitelist matching, before smart noise filtering, and before AI extraction.
-            Use this for senders you <em>never</em> want processed, regardless of content.
-          </p>
-          <div className="flex flex-wrap gap-4 mt-2.5">
-            {[
-              { icon: Ban, text: "Blocked before whitelist" },
-              { icon: ShieldOff, text: "Blocked before AI scan" },
-              { icon: ListX, text: "Never creates tasks" },
-            ].map(item => (
-              <div key={item.text} className="flex items-center gap-1.5">
-                <item.icon className="w-3 h-3" style={{ color: COLORS.red }} />
-                <span className="text-[11px] font-semibold" style={{ color: isDark ? "#fca5a5" : "#9f1239" }}>{item.text}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Add form */}
-      <SectionCard>
-        <CardHeaderRow
-          iconBg={isDark ? "bg-red-900/40" : "bg-red-50"}
-          icon={<Ban className="w-4 h-4 text-red-500" />}
-          title="Block a Sender or Domain"
-          subtitle={`${senders.length} address${senders.length !== 1 ? "es" : ""} blocked`}
-          badge={senders.length > 0 ? senders.length : undefined}
-        />
-        <div className="p-4 space-y-3">
-          <div className="space-y-2">
-            <input value={input} onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && addSender()}
-              placeholder="e.g. noreply@bank.com  or  @promotions.example.com"
-              className="w-full px-3.5 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-400 transition-all"
-              style={inputStyle} />
-            <div className="flex gap-2">
-              <input value={label} onChange={e => setLabel(e.target.value)}
-                placeholder="Friendly label (e.g. HDFC Promotions)"
-                className="flex-1 px-3.5 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-400 transition-all"
-                style={inputStyle} />
-              <button onClick={addSender} disabled={adding || !input.trim()}
-                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 disabled:opacity-50"
-                style={{ backgroundColor: COLORS.red, color: "#fff", boxShadow: "0 4px 12px rgba(239,68,68,0.3)" }}>
-                <Ban className="w-3.5 h-3.5" />
-                {adding ? "Blocking…" : "Block"}
-              </button>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-5 h-5 animate-spin" style={{ color: COLORS.red }} />
-            </div>
-          ) : senders.length === 0 ? (
-            <div className="text-center py-8 space-y-2">
-              <div className="w-12 h-12 rounded-2xl mx-auto flex items-center justify-center"
-                style={{ backgroundColor: isDark ? D.raised : "#f1f5f9" }}>
-                <ShieldOff className="w-6 h-6" style={{ color: isDark ? D.dimmer : "#cbd5e1" }} />
-              </div>
-              <p className="text-sm font-medium" style={{ color: isDark ? D.muted : "#64748b" }}>No senders blacklisted yet</p>
-              <p className="text-xs" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
-                Smart noise filter still auto-blocks OTPs, promotions, and bank alerts.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-2 pt-1">
-              <div className="flex items-center justify-between mb-1">
-                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
-                  Blocked Senders ({senders.length})
-                </p>
-                <button onClick={async () => {
-                  if (!window.confirm("Remove all blocked senders?")) return;
-                  try { await api.put("/email/sender-blacklist", { senders: [] }); setSenders([]); toast.success("Blacklist cleared"); }
-                  catch { toast.error("Failed to clear"); }
-                }} className="flex items-center gap-1 text-[11px] font-semibold transition-all"
-                  style={{ color: COLORS.red }}>
-                  <Trash2 className="w-3 h-3" /> Clear all
-                </button>
-              </div>
-              {senders.map(s => (
-                <div key={s.email_address}
-                  className="flex items-center justify-between px-3.5 py-2.5 rounded-xl border group transition-all"
-                  style={{ backgroundColor: isDark ? "rgba(239,68,68,0.06)" : "#fff1f2", borderColor: isDark ? "rgba(239,68,68,0.2)" : "#fecaca" }}>
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-                      style={{ backgroundColor: isDark ? "rgba(239,68,68,0.15)" : "#fee2e2" }}>
-                      <Ban className="w-3.5 h-3.5" style={{ color: COLORS.red }} />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold truncate" style={{ color: isDark ? "#f87171" : COLORS.red }}>{s.label}</p>
-                      {s.label !== s.email_address && (
-                        <p className="text-[10px] font-mono truncate" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>{s.email_address}</p>
-                      )}
-                    </div>
-                  </div>
-                  <button onClick={() => removeSender(s.email_address)}
-                    className="p-1.5 rounded-lg transition-all active:scale-90 opacity-0 group-hover:opacity-100"
-                    style={{ color: isDark ? "#f87171" : COLORS.red }}
-                    onMouseEnter={e => e.currentTarget.style.backgroundColor = isDark ? "rgba(239,68,68,0.15)" : "#fee2e2"}
-                    onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}>
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </SectionCard>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // SCAN PREVIEW PANEL
 // Shows all extracted events before anything is saved. User checks/unchecks.
 // Past-dated events are greyed out + unchecked. Already-saved are disabled.
@@ -1644,6 +1291,9 @@ function SenderBlacklistManager({ isDark }) {
   const [adding, setAdding]   = useState(false);
   const [loading, setLoading] = useState(true);
 
+  const inputStyle = { backgroundColor: isDark ? D.raised : "#ffffff", borderColor: isDark ? D.border : "#d1d5db", color: isDark ? D.text : "#1e293b" };
+  const inputCls = "px-3.5 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-500 transition-all";
+
   useEffect(() => {
     api.get("/email/sender-blacklist")
       .then(res => setSenders(res.data?.senders || []))
@@ -1653,7 +1303,7 @@ function SenderBlacklistManager({ isDark }) {
 
   const addSender = async () => {
     const addr = input.trim().toLowerCase();
-    if (!addr) return;
+    if (!addr) { toast.error("Enter an email or domain"); return; }
     if (senders.find(s => s.email_address === addr)) { toast.error("Already in blacklist"); return; }
     setAdding(true);
     try {
@@ -1671,74 +1321,338 @@ function SenderBlacklistManager({ isDark }) {
     catch { toast.error("Failed to remove sender"); }
   };
 
-  return (
-    <SectionCard
-      title="Sender Blacklist"
-      subtitle="Emails from these senders are never scanned — even if they contain dates"
-      badge={senders.length}
-      isDark={isDark}
-    >
-      <div className="space-y-2 mb-3">
-        <input
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && addSender()}
-          placeholder="Email or domain to block, e.g. noreply@bank.com or @promotions.com"
-          className="w-full px-3 py-2 rounded-xl text-xs border outline-none"
-          style={{ backgroundColor: isDark ? D.base : "#f8fafc", borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.text : "#1e293b" }}
-        />
-        <div className="flex gap-2">
-          <input
-            value={label}
-            onChange={e => setLabel(e.target.value)}
-            placeholder="Label (optional, e.g. HDFC Bank Alerts)"
-            className="flex-1 px-3 py-2 rounded-xl text-xs border outline-none"
-            style={{ backgroundColor: isDark ? D.base : "#f8fafc", borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.text : "#1e293b" }}
-          />
-          <button onClick={addSender} disabled={adding || !input.trim()}
-            className="px-4 py-2 rounded-xl text-xs font-bold active:scale-95 transition-all disabled:opacity-50"
-            style={{ backgroundColor: COLORS.red, color: "#fff" }}>
-            {adding ? "…" : "+ Block"}
-          </button>
-        </div>
-      </div>
+  const SUGGESTED_BLOCKS = [
+    { email_address: "@promotions.com",   label: "Promotions" },
+    { email_address: "noreply@",          label: "No-reply" },
+    { email_address: "@newsletter.com",   label: "Newsletters" },
+    { email_address: "@offers.com",       label: "Offers" },
+    { email_address: "marketing@",        label: "Marketing" },
+  ];
 
-      {loading ? (
-        <p className="text-xs text-center py-4" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>Loading…</p>
-      ) : senders.length === 0 ? (
-        <div className="text-center py-6">
-          <p className="text-xs" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
-            No senders blocked — smart noise filter still applies automatically.
-          </p>
+  return (
+    <SectionCard>
+      <CardHeaderRow
+        iconBg={isDark ? "bg-red-900/30" : "bg-red-50"}
+        icon={<Shield className="w-4 h-4 text-red-500" />}
+        title="Sender Blacklist"
+        subtitle="Emails from these senders are never scanned — even if they contain dates"
+        badge={senders.length}
+      />
+      <div className="p-4 space-y-4">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest mb-2.5" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>Quick Block — Common Noise</p>
+          <div className="flex flex-wrap gap-2">
+            {SUGGESTED_BLOCKS.map(s => {
+              const exists = senders.find(x => x.email_address === s.email_address);
+              return (
+                <button key={s.email_address}
+                  onClick={() => { if (exists) return; setInput(s.email_address); setLabel(s.label); }}
+                  disabled={!!exists}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border-2 transition-all active:scale-95"
+                  style={exists
+                    ? { borderColor: isDark ? "#7f1d1d" : "#fecaca", backgroundColor: isDark ? "rgba(239,68,68,0.12)" : "#fef2f2", color: COLORS.red, cursor: "default" }
+                    : { borderColor: isDark ? D.border : "#e2e8f0", backgroundColor: isDark ? D.raised : "#f8fafc", color: isDark ? D.muted : "#374151" }}>
+                  {exists ? <Check className="w-3 h-3" /> : <Plus className="w-3 h-3" />}{s.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
-      ) : (
-        <div className="space-y-1.5">
-          <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>Blocked Senders ({senders.length})</p>
-          {senders.map(s => (
-            <div key={s.email_address} className="flex items-center justify-between px-3 py-2 rounded-xl border"
-              style={{ backgroundColor: isDark ? "rgba(239,68,68,0.06)" : "#fff1f2", borderColor: isDark ? "rgba(239,68,68,0.2)" : "#fecaca" }}>
-              <div>
-                <p className="text-xs font-semibold" style={{ color: isDark ? "#f87171" : COLORS.red }}>{s.label}</p>
-                {s.label !== s.email_address && <p className="text-[10px]" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>{s.email_address}</p>}
-              </div>
-              <button onClick={() => removeSender(s.email_address)}
-                className="p-1.5 rounded-lg active:scale-95 transition-all"
-                style={{ color: isDark ? "#f87171" : COLORS.red }}>
-                <X className="w-3 h-3" />
-              </button>
-            </div>
-          ))}
-          <button onClick={async () => {
-            if (!window.confirm("Clear entire blacklist?")) return;
-            try { await api.put("/email/sender-blacklist", { senders: [] }); setSenders([]); toast.success("Blacklist cleared"); }
-            catch { toast.error("Failed to clear blacklist"); }
-          }} className="text-xs font-semibold flex items-center gap-1 mt-1 active:scale-95 transition-all"
-            style={{ color: isDark ? "#f87171" : COLORS.red }}>
-            <Trash2 className="w-3 h-3" /> Clear entire blacklist
-          </button>
+
+        <div className="space-y-2">
+          <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>Block Custom Sender</p>
+          <div className="flex gap-2">
+            <input value={input} onChange={e => setInput(e.target.value)}
+              placeholder="@domain.com or noreply@bank.com"
+              onKeyDown={e => e.key === "Enter" && addSender()}
+              className={inputCls + " flex-1"} style={inputStyle} />
+            <input value={label} onChange={e => setLabel(e.target.value)}
+              placeholder="Label (optional)"
+              onKeyDown={e => e.key === "Enter" && addSender()}
+              className={inputCls + " w-36"} style={inputStyle} />
+            <Button onClick={addSender} disabled={adding || !input.trim()}
+              className="h-10 px-4 rounded-xl text-sm font-semibold text-white"
+              style={{ background: `linear-gradient(135deg, ${COLORS.red}, #b91c1c)` }}>
+              {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
+            </Button>
+          </div>
         </div>
-      )}
+
+        {loading ? (
+          <div className="flex justify-center py-4"><Loader2 className="w-5 h-5 animate-spin text-red-400" /></div>
+        ) : senders.length === 0 ? (
+          <div className="py-6 text-center">
+            <Shield className="w-7 h-7 mx-auto mb-2 opacity-20" />
+            <p className="text-xs" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+              No senders blocked — smart noise filter still applies automatically.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>Blocked Senders ({senders.length})</p>
+            {senders.map(s => (
+              <motion.div key={s.email_address} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-xl border"
+                style={{ backgroundColor: isDark ? "rgba(239,68,68,0.08)" : "#fff1f2", borderColor: isDark ? "rgba(239,68,68,0.25)" : "#fecaca" }}>
+                <div className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0"
+                  style={{ backgroundColor: isDark ? "rgba(239,68,68,0.20)" : "#fee2e2" }}>
+                  <Shield className="w-3.5 h-3.5 text-red-500" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-bold" style={{ color: isDark ? D.text : "#1e293b" }}>{s.label || s.email_address}</p>
+                  {s.label && s.label !== s.email_address && (
+                    <p className="text-[10px] font-mono" style={{ color: isDark ? D.muted : "#94a3b8" }}>{s.email_address}</p>
+                  )}
+                </div>
+                <button onClick={() => removeSender(s.email_address)}
+                  className="w-7 h-7 flex items-center justify-center rounded-lg transition-all active:scale-90"
+                  style={{ color: isDark ? "#f87171" : COLORS.red }}>
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </motion.div>
+            ))}
+            <button onClick={async () => {
+              if (!window.confirm("Clear entire blacklist? Previously blocked senders will be scanned again.")) return;
+              try { await api.put("/email/sender-blacklist", { senders: [] }); setSenders([]); toast.success("Blacklist cleared"); }
+              catch { toast.error("Failed to clear blacklist"); }
+            }} className="text-xs font-semibold flex items-center gap-1 mt-1 active:scale-95 transition-all"
+              style={{ color: isDark ? "#f87171" : COLORS.red }}>
+              <Trash2 className="w-3 h-3" /> Clear entire blacklist
+            </button>
+          </div>
+        )}
+      </div>
     </SectionCard>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EMAIL SCAN SETTINGS — central panel for all customisable behaviours
+// ─────────────────────────────────────────────────────────────────────────────
+const SCAN_SETTINGS_KEY = "tsk_email_scan_settings_v1";
+const DEFAULT_SCAN_SETTINGS = {
+  scanWindowDays:        30,
+  maxEventsPerScan:      100,
+  autoSelectFuture:      true,
+  skipPastEvents:        true,
+  smartNoiseFilter:      true,
+  enforceWhitelist:      false,
+  enforceBlacklist:      true,
+  defaultCategory:       "reminder",
+  defaultReminderLead:   1,    // days before
+  syncIntervalMinutes:   15,
+  autoSyncEnabled:       false,
+  notifyOnNewEvents:     true,
+  collapsePastInPreview: true,
+  groupByAccount:        false,
+  showAttachments:       true,
+};
+
+function loadScanSettings() {
+  try {
+    const raw = localStorage.getItem(SCAN_SETTINGS_KEY);
+    if (!raw) return { ...DEFAULT_SCAN_SETTINGS };
+    return { ...DEFAULT_SCAN_SETTINGS, ...JSON.parse(raw) };
+  } catch { return { ...DEFAULT_SCAN_SETTINGS }; }
+}
+
+function EmailScanSettings({ isDark }) {
+  const [settings, setSettings] = useState(loadScanSettings);
+  const [saved, setSaved]       = useState(false);
+
+  const update = (patch) => setSettings(prev => ({ ...prev, ...patch }));
+
+  const save = () => {
+    try {
+      localStorage.setItem(SCAN_SETTINGS_KEY, JSON.stringify(settings));
+      // best-effort sync to backend; ignore failures so the UI still works offline
+      api.put("/email/scan-settings", settings).catch(() => {});
+      setSaved(true);
+      toast.success("✓ Settings saved");
+      setTimeout(() => setSaved(false), 1600);
+    } catch { toast.error("Could not save settings"); }
+  };
+
+  const reset = () => {
+    if (!window.confirm("Restore default scan settings?")) return;
+    setSettings({ ...DEFAULT_SCAN_SETTINGS });
+    localStorage.removeItem(SCAN_SETTINGS_KEY);
+    toast.success("Defaults restored");
+  };
+
+  const Toggle = ({ label, hint, value, onChange }) => (
+    <div className="flex items-start justify-between gap-4 py-3 border-b last:border-b-0"
+      style={{ borderColor: isDark ? D.border : "#e2e8f0" }}>
+      <div className="min-w-0">
+        <p className="text-sm font-semibold" style={{ color: isDark ? D.text : "#1e293b" }}>{label}</p>
+        {hint && <p className="text-[11px] mt-0.5" style={{ color: isDark ? D.muted : "#64748b" }}>{hint}</p>}
+      </div>
+      <button onClick={() => onChange(!value)}
+        className="flex-shrink-0 transition-all active:scale-95"
+        aria-label={label}>
+        {value
+          ? <ToggleRight className="w-9 h-9" style={{ color: COLORS.emeraldGreen }} />
+          : <ToggleLeft  className="w-9 h-9" style={{ color: isDark ? D.dimmer : "#94a3b8" }} />}
+      </button>
+    </div>
+  );
+
+  const NumberField = ({ label, hint, value, min, max, step = 1, suffix, onChange }) => (
+    <div className="flex items-center justify-between gap-4 py-3 border-b last:border-b-0"
+      style={{ borderColor: isDark ? D.border : "#e2e8f0" }}>
+      <div className="min-w-0">
+        <p className="text-sm font-semibold" style={{ color: isDark ? D.text : "#1e293b" }}>{label}</p>
+        {hint && <p className="text-[11px] mt-0.5" style={{ color: isDark ? D.muted : "#64748b" }}>{hint}</p>}
+      </div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <input type="number" value={value} min={min} max={max} step={step}
+          onChange={e => onChange(Number(e.target.value))}
+          className="w-24 px-3 py-2 border rounded-xl text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
+          style={{ backgroundColor: isDark ? D.raised : "#fff", borderColor: isDark ? D.border : "#d1d5db", color: isDark ? D.text : "#1e293b" }} />
+        {suffix && <span className="text-xs font-medium" style={{ color: isDark ? D.muted : "#64748b" }}>{suffix}</span>}
+      </div>
+    </div>
+  );
+
+  const SelectField = ({ label, hint, value, options, onChange }) => (
+    <div className="flex items-center justify-between gap-4 py-3 border-b last:border-b-0"
+      style={{ borderColor: isDark ? D.border : "#e2e8f0" }}>
+      <div className="min-w-0">
+        <p className="text-sm font-semibold" style={{ color: isDark ? D.text : "#1e293b" }}>{label}</p>
+        {hint && <p className="text-[11px] mt-0.5" style={{ color: isDark ? D.muted : "#64748b" }}>{hint}</p>}
+      </div>
+      <select value={value} onChange={e => onChange(e.target.value)}
+        className="px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        style={{ backgroundColor: isDark ? D.raised : "#fff", borderColor: isDark ? D.border : "#d1d5db", color: isDark ? D.text : "#1e293b" }}>
+        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <SectionCard>
+        <CardHeaderRow
+          iconBg={isDark ? "bg-blue-900/30" : "bg-blue-50"}
+          icon={<RefreshCw className="w-4 h-4 text-blue-500" />}
+          title="Scanning"
+          subtitle="Control how emails are fetched and how far back to look"
+        />
+        <div className="px-4">
+          <NumberField label="Scan window"
+            hint="How many days of history to scan when an account has no last-sync date"
+            value={settings.scanWindowDays} min={1} max={365} suffix="days"
+            onChange={v => update({ scanWindowDays: v })} />
+          <NumberField label="Max events per scan"
+            hint="Hard cap to prevent runaway extractions"
+            value={settings.maxEventsPerScan} min={10} max={1000} step={10} suffix="events"
+            onChange={v => update({ maxEventsPerScan: v })} />
+          <NumberField label="Auto-sync interval"
+            hint="When auto-sync is on, fetch new emails this often"
+            value={settings.syncIntervalMinutes} min={5} max={240} step={5} suffix="min"
+            onChange={v => update({ syncIntervalMinutes: v })} />
+          <Toggle label="Enable background auto-sync"
+            hint="Periodically pull new emails without clicking Sync"
+            value={settings.autoSyncEnabled}
+            onChange={v => update({ autoSyncEnabled: v })} />
+        </div>
+      </SectionCard>
+
+      <SectionCard>
+        <CardHeaderRow
+          iconBg={isDark ? "bg-emerald-900/30" : "bg-emerald-50"}
+          icon={<Filter className="w-4 h-4 text-emerald-500" />}
+          title="Filtering"
+          subtitle="What gets through and what gets dropped"
+        />
+        <div className="px-4">
+          <Toggle label="Smart noise filter"
+            hint="Auto-block OTPs, banking alerts, promotions, newsletters"
+            value={settings.smartNoiseFilter}
+            onChange={v => update({ smartNoiseFilter: v })} />
+          <Toggle label="Enforce sender whitelist"
+            hint="If on, only whitelisted senders are scanned (others are skipped)"
+            value={settings.enforceWhitelist}
+            onChange={v => update({ enforceWhitelist: v })} />
+          <Toggle label="Enforce sender blacklist"
+            hint="If on, blacklisted senders are dropped before extraction"
+            value={settings.enforceBlacklist}
+            onChange={v => update({ enforceBlacklist: v })} />
+          <Toggle label="Skip past-dated events"
+            hint="Past events stay greyed out and cannot be saved"
+            value={settings.skipPastEvents}
+            onChange={v => update({ skipPastEvents: v })} />
+        </div>
+      </SectionCard>
+
+      <SectionCard>
+        <CardHeaderRow
+          iconBg={isDark ? "bg-purple-900/30" : "bg-purple-50"}
+          icon={<Tag className="w-4 h-4 text-purple-500" />}
+          title="Preview & Save Defaults"
+          subtitle="What the preview panel looks like and what category new events fall into"
+        />
+        <div className="px-4">
+          <SelectField label="Default category for new events"
+            hint="Used when AI can't decide between Todo / Reminder / Visit"
+            value={settings.defaultCategory}
+            options={[
+              { value: "reminder", label: "Reminder" },
+              { value: "todo",     label: "Todo" },
+              { value: "visit",    label: "Visit" },
+            ]}
+            onChange={v => update({ defaultCategory: v })} />
+          <NumberField label="Default reminder lead time"
+            hint="Days before due date to fire the reminder"
+            value={settings.defaultReminderLead} min={0} max={30} suffix="days"
+            onChange={v => update({ defaultReminderLead: v })} />
+          <Toggle label="Auto-select future events"
+            hint="Future-dated events are pre-checked in the preview panel"
+            value={settings.autoSelectFuture}
+            onChange={v => update({ autoSelectFuture: v })} />
+          <Toggle label="Collapse past events in preview"
+            hint="Hide past-dated rows by default to reduce clutter"
+            value={settings.collapsePastInPreview}
+            onChange={v => update({ collapsePastInPreview: v })} />
+          <Toggle label="Group preview rows by account"
+            hint="Show one section per email account in the preview panel"
+            value={settings.groupByAccount}
+            onChange={v => update({ groupByAccount: v })} />
+          <Toggle label="Show attachments column"
+            hint="Display the paperclip indicator for emails with attachments"
+            value={settings.showAttachments}
+            onChange={v => update({ showAttachments: v })} />
+        </div>
+      </SectionCard>
+
+      <SectionCard>
+        <CardHeaderRow
+          iconBg={isDark ? "bg-amber-900/30" : "bg-amber-50"}
+          icon={<Bell className="w-4 h-4 text-amber-500" />}
+          title="Notifications"
+        />
+        <div className="px-4">
+          <Toggle label="Notify when new events are found"
+            hint="Show a toast after each scan with the count of new extractions"
+            value={settings.notifyOnNewEvents}
+            onChange={v => update({ notifyOnNewEvents: v })} />
+        </div>
+      </SectionCard>
+
+      <div className="flex items-center justify-end gap-2 sticky bottom-3 z-10">
+        <button onClick={reset}
+          className="px-4 py-2.5 rounded-xl text-sm font-semibold border transition-all active:scale-95"
+          style={{ backgroundColor: isDark ? D.card : "#fff", borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.muted : "#64748b" }}>
+          Restore defaults
+        </button>
+        <button onClick={save}
+          className="px-5 py-2.5 rounded-xl text-sm font-bold text-white flex items-center gap-2 shadow-lg transition-all active:scale-95"
+          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`, boxShadow: "0 6px 20px rgba(13,59,102,0.35)" }}>
+          {saved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+          {saved ? "Saved" : "Save Settings"}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -2873,12 +2787,14 @@ export default function EmailSettings() {
   const futureEventCount = extractedEvents.filter(e => !isEventPast(e) && !savedKeys.has(eventKey(e))).length;
 
   const TAB_CONFIG = [
-    { id: "accounts",  label: "Accounts",      icon: Mail      },
-    { id: "whitelist", label: "Whitelist",     icon: Filter    },
-    { id: "rules",     label: "Smart Rules",   icon: Tag       },
-    { id: "compose",   label: "Compose & Send", icon: Send    },
-    { id: "templates", label: "Templates",     icon: FileText  },
-    { id: "sender",    label: "Sender",        icon: Send      },
+    { id: "accounts",  label: "Accounts",       icon: Mail      },
+    { id: "whitelist", label: "Whitelist",      icon: Filter    },
+    { id: "blacklist", label: "Blacklist",      icon: Shield    },
+    { id: "rules",     label: "Smart Rules",    icon: Tag       },
+    { id: "compose",   label: "Compose & Send", icon: Send      },
+    { id: "templates", label: "Templates",      icon: FileText  },
+    { id: "sender",    label: "Sender",         icon: Send      },
+    { id: "settings",  label: "Settings",       icon: Settings2 },
   ];
 
   return (
@@ -2927,17 +2843,18 @@ export default function EmailSettings() {
           <StatCard icon={Mail}     label="Connected"  value={connections.length}              unit="accounts"     color={COLORS.deepBlue}     trend={connections.length > 0 ? "IMAP active" : "Add an account"} />
           <StatCard icon={Eye}      label="In Preview" value={extractedEvents.length}          unit="events found" color={COLORS.purple}       trend={`${futureEventCount} future · ready to save`} />
           <StatCard icon={Filter}   label="Whitelist"  value={0}                               unit="senders"      color={COLORS.emeraldGreen} trend="Manage in Whitelist tab" />
+          <StatCard icon={Shield}   label="Blacklist"  value={0}                               unit="blocked"      color={COLORS.red}          trend="Manage in Blacklist tab" />
         </motion.div>
 
         {/* ══ TAB BAR ══ */}
         <motion.div variants={itemVariants}>
-          <div className="flex items-center gap-1 p-1 rounded-2xl border"
+          <div className="flex items-center gap-1 p-1 rounded-2xl border overflow-x-auto scrollbar-none"
             style={{ backgroundColor: isDark ? D.card : "#ffffff", borderColor: isDark ? D.border : "#e2e8f0" }}>
             {TAB_CONFIG.map(tab => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all"
+                className="flex-1 min-w-fit whitespace-nowrap flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all"
                 style={activeTab === tab.id
-                  ? { backgroundColor: isDark ? D.raised : "#f1f5f9", color: isDark ? D.text : "#1e293b", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }
+                  ? { background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`, color: "#ffffff", boxShadow: "0 4px 14px rgba(13,59,102,0.25)" }
                   : { color: isDark ? D.muted : "#64748b" }}>
                 <tab.icon className="w-4 h-4" />
                 {tab.label}
@@ -3094,6 +3011,21 @@ export default function EmailSettings() {
               </div>
             </div>
             <SenderWhitelistManager isDark={isDark} />
+          </motion.div>
+        )}
+
+        {/* ══ BLACKLIST TAB ══ */}
+        {activeTab === "blacklist" && (
+          <motion.div variants={itemVariants} className="space-y-4">
+            <div className="px-4 py-3.5 rounded-2xl border flex items-start gap-3"
+              style={{ backgroundColor: isDark ? "rgba(239,68,68,0.08)" : "#fef2f2", borderColor: isDark ? "#7f1d1d" : "#fecaca" }}>
+              <Shield className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: COLORS.red }} />
+              <div className="text-xs" style={{ color: isDark ? "#fca5a5" : "#7f1d1d" }}>
+                <p className="font-bold mb-0.5">Block noisy senders</p>
+                <p>Emails from blacklisted addresses or domains are <strong>dropped before extraction</strong> — even if they contain dates. Use this for promotional senders, automated alerts, or specific email addresses you never want scanned.</p>
+                <p className="mt-1.5 font-semibold">Tip: prefix with <code>@</code> to block an entire domain (e.g. <code>@promotions.com</code>).</p>
+              </div>
+            </div>
             <SenderBlacklistManager isDark={isDark} />
           </motion.div>
         )}
@@ -3160,6 +3092,22 @@ export default function EmailSettings() {
             <SenderSelectorPanel isDark={isDark} />
           </motion.div>
         )}
+
+        {/* ══ SETTINGS TAB ══ */}
+        {activeTab === "settings" && (
+          <motion.div variants={itemVariants} className="space-y-4">
+            <div className="px-4 py-3.5 rounded-2xl border flex items-start gap-3"
+              style={{ backgroundColor: isDark ? "rgba(13,59,102,0.18)" : "#eff6ff", borderColor: isDark ? "#1d4ed8" : "#bfdbfe" }}>
+              <Settings2 className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: COLORS.mediumBlue }} />
+              <div className="text-xs" style={{ color: isDark ? "#93c5fd" : "#1e40af" }}>
+                <p className="font-bold mb-0.5">Customise every aspect of email scanning</p>
+                <p>Tune scan windows, sync intervals, default categories, filtering rules, preview behaviour and notifications. Settings are saved instantly and apply to all future scans.</p>
+              </div>
+            </div>
+            <EmailScanSettings isDark={isDark} />
+          </motion.div>
+        )}
+
 
         {/* ══ TIPS ══ */}
         <motion.div variants={itemVariants}>
