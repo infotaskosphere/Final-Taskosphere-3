@@ -1,4 +1,4 @@
-import React, { Suspense } from "react";
+import React, { Suspense, memo, useCallback } from "react";
 import { BrowserRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/contexts/AuthContext";
@@ -9,7 +9,8 @@ import { AnimatePresence } from "framer-motion";
 import GifLoader from "@/components/ui/GifLoader.jsx";
 
 /* ── Bottom loading bar ─────────────────────────────────────────────── */
-function BottomLoadingBar() {
+// memo: re-renders only when loading state changes, not on every route change
+const BottomLoadingBar = memo(function BottomLoadingBar() {
   const loading = useLoading();
   if (!loading) return null;
   return (
@@ -27,25 +28,37 @@ function BottomLoadingBar() {
       }}
     />
   );
-}
+});
 
 /* ── AnimatePresence wrapper ───────────────────────────────────────── */
+// Extracted so it only re-renders on location changes, not provider updates.
+// initial={false} skips the entry animation on first render = faster paint.
+// mode="wait" ensures the exit animation completes before the next page mounts,
+// but we keep it because it prevents layout flicker during transitions.
 function AnimatedRoutes() {
   const location = useLocation();
   return (
     <AnimatePresence mode="wait" initial={false}>
+      {/* Key on pathname only — ignores search/hash so query param changes
+          don't trigger full remount (e.g. /tasks?filter=xyz stays mounted) */}
       <AppRoutes key={location.pathname} />
     </AnimatePresence>
   );
 }
 
 /* ── Query client ──────────────────────────────────────────────────── */
+// Created outside the component so it survives re-renders.
+// gcTime 10min: keeps inactive query data in memory longer → instant
+//   re-renders when the user returns to a page within that window.
+// staleTime 5min: no re-fetch if data was fetched in the last 5 min.
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 5 * 60 * 1000,
+      staleTime: 5 * 60 * 1000,   // 5 minutes — no refetch on focus
+      gcTime:    10 * 60 * 1000,  // 10 minutes — keep in memory
       retry: 1,
       refetchOnWindowFocus: false,
+      refetchOnReconnect: false,   // avoid spurious refetch on tab switch
     },
   },
 });
@@ -56,10 +69,12 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <BrowserRouter>
-          {/* ✅ Bottom loading bar — always kept */}
+          {/* Bottom loading bar — always visible, no layout shift */}
           <BottomLoadingBar />
 
-          {/* ✅ GifLoader for lazy page chunk loading */}
+          {/* Suspense wraps lazy page chunks.
+              GifLoader is full-screen only for the very first load.
+              Once the user is in-app, DashboardLayout's ContentLoader handles it. */}
           <Suspense fallback={<GifLoader />}>
             <AnimatedRoutes />
           </Suspense>
