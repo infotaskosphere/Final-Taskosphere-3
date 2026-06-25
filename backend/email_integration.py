@@ -1,1290 +1,925 @@
 """
-Employee Interviews module.
+email_integration.py — Email account connections, OAuth, scanning and import cache.
 
-Lets HR/admin staff log every candidate interviewed, the pay scale offered,
-conditions, training period, department & experience — then, once a
-candidate is hired, convert them straight into a system User without
-re-typing anything (all fields pre-filled from the interview record but
-fully editable before the account is created).
+Fixes the /api/email/* 404s used by:
+  • frontend/src/components/EmailSettings.jsx
+  • frontend/src/pages/ActionCenter.jsx
+
+The module supports:
+  • IMAP app-password connections for Gmail/Outlook/Yahoo/custom mailboxes
+  • Gmail "Connect with Google" OAuth, similar to sign-in flows
+  • Cached extracted email events for Action Center
+  • Save-as-todo and save-as-visit endpoints used by the preview panels
 """
 
-import io
+import base64
+import email
+import hashlib
+import hmac
+import imaplib
+import json
+import logging
 import os
 import re
 import uuid
-import logging
-from datetime import datetime, timezone
-from typing import List, Optional, Literal
+from datetime import datetime, date, timezone, timedelta
+from email.header import decode_header, make_header
+from email.utils import parsedate_to_datetime
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
-from pydantic import BaseModel, Field, ConfigDict, EmailStr, field_validator
 from bson import ObjectId
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import RedirectResponse
+from pydantic import BaseModel, ConfigDict
 
-from backend.dependencies import db, get_current_user, create_audit_log, _get_perm
+from backend.dependencies import db, get_current_user
+from backend.models import User
 
-router = APIRouter(prefix="/interviews", tags=["Employee Interviews"])
 logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/email", tags=["email"])
+
+# server.py imports this symbol defensively for legacy AI extraction hooks.
+_gemini = None
+
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://final-taskosphere-frontend.onrender.com").rstrip("/")
+BACKEND_URL = os.getenv("BACKEND_URL", "https://final-taskosphere-backend.onrender.com").rstrip("/")
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+GOOGLE_EMAIL_REDIRECT_URI = (
+    os.getenv("GOOGLE_EMAIL_REDIRECT_URI")
+    or f"{BACKEND_URL}/api/email/oauth/google/callback"
+)
+STATE_SECRET = os.getenv("JWT_SECRET") or GOOGLE_CLIENT_SECRET or "taskosphere-email-oauth"
+
+GMAIL_SCOPES = [
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/gmail.readonly",
+]
 
 
-# ====================== PERMISSIONS ======================
+# ═══════════════════════════════════════════════════════════════════════════════
+# Models
+# ═══════════════════════════════════════════════════════════════════════════════
 
-
-def _can_manage(current_user) -> bool:
-    """Admin always has access. Other roles need can_view_interviews permission."""
-    if getattr(current_user, "role", None) == "admin":
-        return True
-    return bool(_get_perm(current_user, "can_view_interviews"))
-
-
-def assert_can_manage(current_user):
-    if not _can_manage(current_user):
-        raise HTTPException(
-            status_code=403,
-            detail="You do not have permission to access Employee Interviews",
-        )
-
-
-# ====================== MODELS ======================
-
-
-class CandidateBase(BaseModel):
+class EmailConnectionCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    full_name: str = Field(..., description="Candidate's full name")
-    email: Optional[EmailStr] = None
-    phone: Optional[str] = None
+    email_address: str
+    app_password: str
+    imap_host: Optional[str] = None
+    imap_port: int = 993
+    label: Optional[str] = None
+    linked_page: str = "all"
+    auto_sync: bool = False
 
-    position: Optional[str] = Field(
-        None, description="Role applied for / interviewed for"
-    )
-    department: Optional[str] = None
-    experience_years: Optional[float] = None
-    current_company: Optional[str] = None
-    skills: List[str] = Field(default_factory=list)
-    education: Optional[str] = None
 
-    interview_date: Optional[str] = None  # ISO date (YYYY-MM-DD)
-    interview_time: Optional[str] = None  # HH:MM (24h)
-    interviewer: Optional[str] = None
+class EmailConnectionUpdate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
 
-    attendance: Literal["pending", "attended", "not_attended"] = "pending"
-    interview_feedback: Optional[str] = None
+    label: Optional[str] = None
+    linked_page: Optional[str] = None
+    auto_sync: Optional[bool] = None
+    is_active: Optional[bool] = None
+    imap_host: Optional[str] = None
+    imap_port: Optional[int] = None
 
-    pay_scale_offered: Optional[str] = None
-    conditions: Optional[str] = None
-    training_period: Optional[str] = None
 
-    status: Literal[
-        "scheduled", "in_review", "selected", "on_hold", "rejected", "hired"
-    ] = "scheduled"
+class SaveTodoRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
 
+    event_id: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    remind_at: Optional[str] = None
+    due_date: Optional[str] = None
+    email_account: Optional[str] = None
+
+
+class SaveVisitRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    event_id: Optional[str] = None
+    title: str
+    visit_date: Optional[str] = None
+    visit_time: Optional[str] = None
+    description: Optional[str] = None
     notes: Optional[str] = None
-    resume_filename: Optional[str] = None
-    resume_text: Optional[str] = None
-
-    @field_validator(
-        "email",
-        "phone",
-        "position",
-        "department",
-        "current_company",
-        "education",
-        "interview_date",
-        "interview_time",
-        "interviewer",
-        "interview_feedback",
-        "pay_scale_offered",
-        "conditions",
-        "training_period",
-        "notes",
-        mode="before",
-    )
-    @classmethod
-    def empty_to_none(cls, v):
-        return None if v == "" else v
-
-    @field_validator("experience_years", mode="before")
-    @classmethod
-    def exp_to_float(cls, v):
-        if v in ("", None):
-            return None
-        try:
-            return float(v)
-        except (TypeError, ValueError):
-            return None
-
-    @field_validator("skills", mode="before")
-    @classmethod
-    def skills_to_list(cls, v):
-        if isinstance(v, str):
-            return [s.strip() for s in v.split(",") if s.strip()]
-        return v or []
+    email_account: Optional[str] = None
+    client_id: Optional[str] = None
+    client_name: Optional[str] = None
 
 
-class CandidateCreate(CandidateBase):
-    pass
+# ═══════════════════════════════════════════════════════════════════════════════
+# Helpers
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _uid(user: User) -> str:
+    return str(getattr(user, "id", ""))
 
 
-class CandidateUpdate(BaseModel):
-    full_name: Optional[str] = None
-    email: Optional[EmailStr] = None
-    phone: Optional[str] = None
-    position: Optional[str] = None
-    department: Optional[str] = None
-    experience_years: Optional[float] = None
-    current_company: Optional[str] = None
-    skills: Optional[List[str]] = None
-    education: Optional[str] = None
-    interview_date: Optional[str] = None
-    interview_time: Optional[str] = None
-    interviewer: Optional[str] = None
-    attendance: Optional[Literal["pending", "attended", "not_attended"]] = None
-    interview_feedback: Optional[str] = None
-    pay_scale_offered: Optional[str] = None
-    conditions: Optional[str] = None
-    training_period: Optional[str] = None
-    status: Optional[
-        Literal["scheduled", "in_review", "selected", "on_hold", "rejected", "hired"]
-    ] = None
-    notes: Optional[str] = None
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
-class PraiseResumeRequest(BaseModel):
-    resume_text: str
-    position: Optional[str] = ""
+def _normalise_email(value: str) -> str:
+    value = (value or "").strip().lower()
+    if not value or "@" not in value:
+        raise HTTPException(status_code=400, detail="Enter a valid email address")
+    return value
 
 
-class ConvertToUserRequest(BaseModel):
-    """Sent by the frontend conversion dialog — every field is editable there
-    before submission, even though it's pre-filled from the candidate record."""
-
-    full_name: str
-    email: EmailStr
-    password: str
-    role: str = "staff"
-    departments: List[str] = Field(default_factory=list)
-    phone: Optional[str] = None
-    punch_in_time: Optional[str] = "10:30"
-    grace_time: Optional[str] = "00:10"
-    punch_out_time: Optional[str] = "19:00"
+def _infer_provider(address: str) -> str:
+    domain = address.split("@")[-1].lower()
+    if domain in {"gmail.com", "googlemail.com"}:
+        return "gmail"
+    if domain in {"outlook.com", "hotmail.com", "live.com", "msn.com"}:
+        return "outlook"
+    if domain in {"yahoo.com", "ymail.com", "rocketmail.com"}:
+        return "yahoo"
+    if domain in {"icloud.com", "me.com", "mac.com"}:
+        return "icloud"
+    return "other"
 
 
-# ====================== HELPERS ======================
+def _default_imap_host(address: str) -> str:
+    provider = _infer_provider(address)
+    return {
+        "gmail": "imap.gmail.com",
+        "outlook": "outlook.office365.com",
+        "yahoo": "imap.mail.yahoo.com",
+        "icloud": "imap.mail.me.com",
+    }.get(provider, f"imap.{address.split('@')[-1]}")
 
 
-def normalize_doc(doc: dict) -> dict:
-    if not doc:
-        return doc
-    if "_id" in doc:
-        doc["id"] = str(doc.pop("_id"))
+def _clean_connection(doc: Dict[str, Any]) -> Dict[str, Any]:
+    doc = dict(doc or {})
+    doc.pop("_id", None)
+    doc.pop("app_password", None)
+    doc.pop("access_token", None)
+    doc.pop("refresh_token", None)
+    doc["oauth_connected"] = doc.get("provider_type") == "google_oauth"
     return doc
 
 
-def validate_obj_id(id_str: str) -> ObjectId:
-    if not ObjectId.is_valid(id_str):
-        raise HTTPException(status_code=400, detail="Invalid candidate ID")
-    return ObjectId(id_str)
+def _decode_mime(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    try:
+        return str(make_header(decode_header(value)))
+    except Exception:
+        return value
 
 
-# Lightweight resume field extraction (regex) used as a fallback / supplement
-# to whatever the AI model returns, so basic contact details are never missed.
-_EMAIL_RE = re.compile(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+")
-_PHONE_RE = re.compile(
-    r"(?:\+?\d{1,3}[\s\-()])?(?:\(?\d{2,5}\)?[\s\-]?)?\d{3,5}[\s\-]?\d{3,5}"
-)
-_LINKEDIN_RE = re.compile(r"linkedin\.com/in/([^\s,]+)", re.I)
+def _message_body(msg: email.message.Message) -> str:
+    parts: List[str] = []
+    if msg.is_multipart():
+        for part in msg.walk():
+            ctype = part.get_content_type()
+            disp = str(part.get("Content-Disposition", "")).lower()
+            if "attachment" in disp or ctype not in {"text/plain", "text/html"}:
+                continue
+            payload = part.get_payload(decode=True)
+            if not payload:
+                continue
+            charset = part.get_content_charset() or "utf-8"
+            text = payload.decode(charset, errors="replace")
+            if ctype == "text/html":
+                text = re.sub(r"<br\s*/?>", "\n", text, flags=re.I)
+                text = re.sub(r"<[^>]+>", " ", text)
+            parts.append(text)
+    else:
+        payload = msg.get_payload(decode=True)
+        if payload:
+            charset = msg.get_content_charset() or "utf-8"
+            parts.append(payload.decode(charset, errors="replace"))
+    text = "\n".join(parts)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:12000]
 
 
-def _regex_fields(text: str) -> dict:
-    out = {}
-    m = _EMAIL_RE.search(text)
-    if m:
-        out["email"] = m.group(0)
-    # Try multiple phone patterns
-    for pat in [
-        r"\+?\d{1,3}[\s\-]?\d{10}",  # +91 8238441686
-        r"\(\d{3}\)\s?\d{3}[\s\-]?\d{4}",  # (123) 456-7890
-        r"\d{10}",  # 8238441686
-    ]:
-        m = re.search(pat, text)
-        if m:
-            out["phone"] = m.group(0).strip()
-            break
-    m = _LINKEDIN_RE.search(text)
-    if m:
-        out["linkedin"] = m.group(0)
-    return out
+def _parse_email_date(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    try:
+        dt = parsedate_to_datetime(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).isoformat()
+    except Exception:
+        return None
 
 
-def _heuristic_fields(text: str) -> dict:
-    """Section-aware heuristic extraction that works with NO external AI call.
-    Used to fill any gaps the AI model leaves (or as the sole source if the
-    AI call fails / no API key is configured), so parsing stays useful for
-    any resume layout — not just ones the model happens to handle well."""
-    import calendar
-    from datetime import date as ddate
+def _parse_date_candidate(raw: str) -> Optional[str]:
+    raw = (raw or "").strip()
+    today = date.today()
+    if raw.lower() == "today":
+        return today.isoformat()
+    if raw.lower() == "tomorrow":
+        return (today + timedelta(days=1)).isoformat()
 
-    out = {}
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
-    if not lines:
-        return out
+    for fmt in (
+        "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y",
+        "%Y-%m-%d", "%d %b %Y", "%d %B %Y",
+        "%b %d %Y", "%B %d %Y", "%d %b, %Y", "%d %B, %Y",
+        "%b %d, %Y", "%B %d, %Y",
+    ):
+        try:
+            return datetime.strptime(raw, fmt).date().isoformat()
+        except Exception:
+            pass
+    return None
 
-    # ── Name: first short, mostly-alphabetic line near the top ──────────────
-    # Handles ALL CAPS names like "PUJA ADAK" as well as mixed case
-    for l in lines[:8]:
-        # Skip lines with email, phone numbers, URLs, or special chars
-        if "@" in l or any(ch.isdigit() for ch in l):
-            continue
-        if re.search(r"http|www\.|\.com|\.in|linkedin|phone|email|address", l, re.I):
-            continue
-        # Remove bullet points and special prefixes
-        clean = re.sub(r"^[•\-\*\|]\s*", "", l).strip()
-        if not clean:
-            continue
-        words = clean.split()
-        # Accept 1-6 word names, all alphabetic (with dots/hyphens/apostrophes)
-        if 1 <= len(words) <= 6 and all(re.match(r"^[A-Za-z.\-']+$", w) for w in words):
-            # Title-case if ALL CAPS, otherwise keep as-is
-            out["full_name"] = clean.title() if clean.isupper() else clean
-            break
 
-    # ── Split into sections by common resume headings ────────────────────────
-    # Expanded to handle more section names found in real resumes
-    # More flexible pattern that handles variations like "CS ARTICLESHIP EXPERIENCE"
-    section_pat = re.compile(
-        r"^(.*\b)?"  # Optional prefix (e.g., "CS ", "TECHNICAL AND ")
-        r"(SUMMARY|OBJECTIVE|PROFILE|CAREER\s*OBJECTIVE|"
-        r"WORK\s*EXPERIENCE|EXPERIENCE|EMPLOYMENT(\s*HISTORY)?|"
-        r"INTERNSHIP|ARTICLESHIP|TRAINING(\s*EXPERIENCE)?|"
-        r"EDUCATION|ACADEMIC(\s*(BACKGROUND|QUALIFICATION|DETAILS))?|"
-        r"PROFESSIONAL\s*QUALIFICATION|QUALIFICATION|CERTIFICATION|CERTIFICATIONS|"
-        r"KEY\s*SKILLS|SKILLS|TECHNICAL(\s*AND\s*\w+)?\s*SKILLS|CORE\s*COMPETENCIES|COMPETENCIES|"
-        r"PROJECTS|ACADEMIC\s*PROJECTS|"
-        r"PERSONAL\s*DETAILS|PERSONAL\s*PROFILE|"
-        r"ACHIEVEMENTS|AWARDS|EXTRA[\-\s]?CURRICULAR|LANGUAGES)"
-        r"(\b.*)?$",  # Optional suffix
-        re.I,
-    )
-    sections, current, buf = {}, "header", []
-    for l in lines:
-        m = section_pat.match(l)
-        if m:
-            # Extract the main section keyword (group 2)
-            section_name = m.group(2).lower().strip()
-            sections[current] = buf
-            current = re.sub(r"\s+", " ", section_name)
-            buf = []
-        else:
-            buf.append(l)
-    sections[current] = buf
-
-    def _get_section(*names):
-        for n in names:
-            for key in sections:
-                if n in key:
-                    return sections[key]
+def _extract_dates(text: str) -> List[str]:
+    if not text:
         return []
 
-    # ── Position / Role ──────────────────────────────────────────────────────
-    # Try experience/internship sections first
-    exp_lines = _get_section(
-        "work experience",
-        "experience",
-        "employment",
-        "internship",
-        "articleship",
-        "training",
-    )
-    if exp_lines:
-        first = exp_lines[0]
-        # Try "Position at Company" pattern
-        m = re.search(r"(.+?)\bat\b\s*(.+)", first, re.I)
-        if m:
-            out["position"] = m.group(1).strip(" ,")
-            out["current_company"] = re.split(r"\s{2,}", m.group(2))[0].strip(" .")
-        # Try "Trainer: X" or "Company: X" pattern
-        elif re.search(r"trainer|company|organization|employer", first, re.I):
-            m2 = re.search(
-                r"(?:trainer|company|organization|employer)[:\s]+(.+)", first, re.I
-            )
-            if m2:
-                out["current_company"] = m2.group(1).strip()
-            # Look for role in subsequent lines
-            for el in exp_lines[1:4]:
-                if re.search(r"assist|help|work|manage|handle|draft|file", el, re.I):
-                    # Extract first action as position hint
-                    out.setdefault("position", "Trainee")
-                    break
-        else:
-            out["position"] = first.split(",")[0].strip()
+    month = r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
+    patterns = [
+        r"\b\d{1,2}[/-]\d{1,2}[/-]\d{4}\b",
+        r"\b\d{4}-\d{1,2}-\d{1,2}\b",
+        rf"\b\d{{1,2}}\s+{month},?\s+\d{{4}}\b",
+        rf"\b{month}\s+\d{{1,2}},?\s+\d{{4}}\b",
+        r"\b(?:today|tomorrow)\b",
+    ]
 
-        # Try to extract duration for experience calculation
-        duration_re = re.compile(
-            r"(?:duration|period)[:\s]*(\d+)\s*(month|year|week)", re.I
-        )
-        for el in exp_lines[:5]:
-            dm = duration_re.search(el)
-            if dm:
-                num = int(dm.group(1))
-                unit = dm.group(2).lower()
-                if "year" in unit:
-                    out["experience_years"] = float(num)
-                elif "month" in unit:
-                    out["experience_years"] = round(num / 12, 1)
-                elif "week" in unit:
-                    out["experience_years"] = round(num / 52, 1)
-                break
+    found: List[str] = []
+    seen = set()
+    for pat in patterns:
+        for match in re.finditer(pat, text, flags=re.I):
+            parsed = _parse_date_candidate(match.group(0))
+            if parsed and parsed not in seen:
+                seen.add(parsed)
+                found.append(parsed)
+    return found[:6]
 
-        # Estimate total experience by summing every "Mon YYYY - Mon YYYY" style range
-        if "experience_years" not in out:
-            date_re = re.compile(
-                r"([A-Za-z]{3,9})\s+(\d{4})\s*[-–to]+\s*([A-Za-z]{3,9}|present)\s*(\d{4})?",
-                re.I,
-            )
 
-            def month_num(name):
-                name = name[:3].title()
-                try:
-                    return list(calendar.month_abbr).index(name)
-                except ValueError:
-                    return None
+def _extract_time(text: str) -> Optional[str]:
+    m = re.search(r"\b([01]?\d|2[0-3])(?::([0-5]\d))?\s*(am|pm)?\b", text, flags=re.I)
+    if not m:
+        return None
+    hour = int(m.group(1))
+    minute = int(m.group(2) or "00")
+    suffix = (m.group(3) or "").lower()
+    if suffix == "pm" and hour < 12:
+        hour += 12
+    if suffix == "am" and hour == 12:
+        hour = 0
+    return f"{hour:02d}:{minute:02d}"
 
-            months_total = 0
-            for l in exp_lines:
-                m2 = date_re.search(l)
-                if not m2:
-                    continue
-                m1n, y1 = month_num(m2.group(1)), int(m2.group(2))
-                if m1n is None:
-                    continue
-                if m2.group(3).lower() == "present":
-                    end = ddate.today()
-                else:
-                    m2n = month_num(m2.group(3))
-                    if m2n is None:
-                        continue
-                    end = ddate(int(m2.group(4) or y1), m2n, 1)
-                start = ddate(y1, m1n, 1)
-                months = (end.year - start.year) * 12 + (end.month - start.month)
-                if months > 0:
-                    months_total += months
-            if months_total:
-                out["experience_years"] = round(months_total / 12, 1)
 
-    # ── Position from summary/objective if not found in experience ───────────
-    if "position" not in out:
-        summary_lines = _get_section(
-            "summary", "objective", "profile", "career objective"
-        )
-        if summary_lines:
-            first_summary = summary_lines[0]
-            # Look for "seeking to apply... in [field]" or "looking for [role]"
-            m = re.search(
-                r"(?:seeking|looking\s*for|aspiring|as\s+a)\s+(?:a\s+)?(.+?)(?:\s+to|\s+in|\s+at|,|\.)",
-                first_summary,
-                re.I,
-            )
-            if m:
-                role = m.group(1).strip()
-                # Clean up common prefixes
-                role = re.sub(
-                    r"^(position|role|job)\s+(?:of|as|in)\s+", "", role, flags=re.I
-                )
-                if len(role) < 50:
-                    out["position"] = role
-
-    # ── Education ────────────────────────────────────────────────────────────
-    edu_lines = _get_section(
-        "education", "academic background", "academic qualification", "academic details"
-    )
-    if edu_lines:
-        out["education"] = "; ".join(edu_lines[:4])
+def _classify_event(subject: str, body: str) -> Dict[str, str]:
+    text = f"{subject} {body}".lower()
+    if any(k in text for k in ["meeting", "appointment", "visit", "conference", "interview"]):
+        event_type = "Meeting"
+        save_category = "visit"
+    elif any(k in text for k in ["submit", "reply", "file ", "filing", "payment", "action required"]):
+        event_type = "Action Required"
+        save_category = "todo"
+    elif any(k in text for k in ["hearing", "deadline", "due date", "notice", "renewal"]):
+        event_type = "Deadline"
+        save_category = "reminder"
     else:
-        # Look for degree patterns anywhere in text
-        degree_re = re.compile(
-            r"(Bachelor|Master|B\.|M\.|Ph\.?D|MBA|BBA|BCA|MCA|B\.Com|M\.Com|B\.Sc|M\.Sc|B\.Tech|M\.Tech|B\.A|M\.A)",
-            re.I,
-        )
-        for l in lines[:20]:
-            if degree_re.search(l):
-                out["education"] = l.strip()
-                break
+        event_type = "Reminder"
+        save_category = "reminder"
 
-    skill_lines = _get_section(
-        "key skills", "skills", "technical skills", "core competencies", "competencies"
-    )
-    if skill_lines:
-        skills = []
-        for l in skill_lines:
-            # Split by comma, bullet, semicolon, dash, or pipe
-            parts = re.split(r",|•|;|\||\-\s", l)
-            for p in parts:
-                clean = p.strip().lstrip("-•*").strip()
-                # Skip lines that look like sentences (too long) or are empty
-                if clean and len(clean) < 60:
-                    skills.append(clean)
-        if skills:
-            out["skills"] = skills[:15]
-
-    # ── Department mapping ───────────────────────────────────────────────────
-    # Expanded to cover corporate law, compliance, company secretary, etc.
-    dep_map = [
-        ("trademark", "TM"),
-        ("legal", "Legal"),
-        ("law", "Legal"),
-        ("corporate law", "Legal"),
-        ("company secretary", "Legal"),
-        ("cs ", "Legal"),  # CS = Company Secretary
-        ("secretarial", "Legal"),
-        ("compliance", "ROC"),
-        ("roc", "ROC"),
-        ("companies act", "ROC"),
-        ("sebi", "ROC"),
-        ("mca", "ROC"),
-        ("account", "ACC"),
-        ("finance", "ACC"),
-        ("tax", "TDS"),
-        ("gst", "GST"),
-        ("software", "IT"),
-        ("developer", "IT"),
-        ("information technology", "IT"),
-        ("human resource", "HR"),
-        (" hr ", "HR"),
-        ("marketing", "Marketing"),
-        ("sales", "Sales"),
-        ("operations", "Operations"),
-    ]
-    # Build haystack from all available context
-    haystack_parts = [
-        out.get("position", ""),
-        " ".join(out.get("skills", [])),
-        out.get("education", ""),
-    ]
-    # Also scan the first 15 lines of the resume for keywords
-    haystack_parts.extend(lines[:15])
-    haystack = f" {' '.join(haystack_parts)} ".lower()
-    for kw, dep in dep_map:
-        if kw in haystack:
-            out["department"] = dep
-            break
-
-    return out
+    urgency = "high" if any(k in text for k in ["urgent", "hearing", "deadline", "last date", "today", "tomorrow"]) else "medium"
+    return {"event_type": event_type, "save_category": save_category, "urgency": urgency}
 
 
-async def _groq_vision_structured_resume(page_images_b64: list, filename: str) -> dict:
-    """Use Groq vision to directly extract structured candidate fields from
-    scanned PDF page images. Returns a dict of extracted fields.
+def _event_from_message(
+    *,
+    user_id: str,
+    email_account: str,
+    message_id: str,
+    subject: str,
+    sender: str,
+    sent_at: Optional[str],
+    body: str,
+) -> List[Dict[str, Any]]:
+    text = f"{subject}\n{body}"
+    dates = _extract_dates(text)
+    if not dates:
+        return []
 
-    This is more reliable than transcribing text first then parsing with
-    heuristics, because the vision model can understand layout and context."""
-    import httpx
-    import json
+    meta = _classify_event(subject, body)
+    time_value = _extract_time(text)
+    events: List[Dict[str, Any]] = []
 
-    groq_key = os.environ.get("GROQ_API_KEY", "")
-    if not groq_key:
-        logger.warning(
-            "GROQ_API_KEY not set — cannot extract structured data from scanned PDF."
-        )
-        return {}
-
-    content = []
-    for img_b64 in page_images_b64:
-        content.append(
-            {
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
-            }
-        )
-    content.append(
-        {
-            "type": "text",
-            "text": (
-                "You are an expert HR assistant. Analyze this resume image and extract candidate details.\n"
-                "Respond with ONLY valid JSON (no markdown, no code fences, no explanation) using these exact keys:\n"
-                '{"full_name":"","email":"","phone":"","position":"","department":"",'
-                '"experience_years":0,"current_company":"","skills":[],"education":""}\n\n'
-                "Rules:\n"
-                "- full_name: the person's full name (usually the largest text at top)\n"
-                "- email: email address\n"
-                "- phone: phone number with country code if present\n"
-                "- position: most recent or primary job title / role sought\n"
-                "- department: one of Sales, IT, HR, Accounts, Legal, Marketing, Operations, GST, TDS, ROC, TM, Other\n"
-                "- experience_years: total years as a number (0 if fresher)\n"
-                "- current_company: most recent or primary company name\n"
-                "- skills: array of skill keywords (max 15)\n"
-                "- education: highest or most relevant degree\n"
-                "- Leave blank/0/[] if genuinely not found. Never invent data.\n"
-            ),
-        }
-    )
-
-    payload = {
-        "model": "meta-llama/llama-4-scout-17b-16e-instruct",
-        "messages": [{"role": "user", "content": content}],
-        "max_tokens": 2000,
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=90) as client:
-            resp = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {groq_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
-        if resp.status_code == 429:
-            logger.warning("Groq quota exceeded during structured resume extraction.")
-            return {}
-        if resp.status_code != 200:
-            logger.warning(
-                f"Groq API error {resp.status_code} during structured resume extraction."
-            )
-            return {}
-
-        raw = resp.json()["choices"][0]["message"]["content"]
-        # Clean markdown code fences if present
-        raw = re.sub(r"^```(json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
-        return json.loads(raw)
-    except Exception as e:
-        logger.warning(f"Groq vision structured extraction failed: {e}")
-        return {}
+    for idx, event_date in enumerate(dates):
+        raw_key = f"{user_id}|{email_account}|{message_id}|{event_date}|{idx}|{subject}"
+        event_id = hashlib.sha1(raw_key.encode("utf-8")).hexdigest()
+        events.append({
+            "id": event_id,
+            "event_id": event_id,
+            "user_id": user_id,
+            "email_account": email_account,
+            "message_id": message_id,
+            "title": subject[:180] or meta["event_type"],
+            "description": body[:700],
+            "date": event_date,
+            "time": time_value,
+            "event_type": meta["event_type"],
+            "save_category": meta["save_category"],
+            "urgency": meta["urgency"],
+            "source": "email",
+            "source_subject": subject,
+            "source_from": sender,
+            "source_sent_at": sent_at,
+            "created_at": _now_iso(),
+            "updated_at": _now_iso(),
+        })
+    return events
 
 
-async def _extract_resume_text(contents: bytes, filename: str) -> str:
-    """Extract text from PDF/DOCX/TXT resume with table support.
+def _serialise_event(doc: Dict[str, Any]) -> Dict[str, Any]:
+    doc = dict(doc or {})
+    doc.pop("_id", None)
+    return doc
 
-    Text-based PDFs → Gemini (same pattern as ai_document_reader.py).
-    Scanned/image PDFs → Groq vision (up to 4 pages).
-    DOCX / TXT → parsed locally.
-    """
-    import base64
 
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-
-    if ext == "pdf":
-        import pdfplumber
-
-        text_parts = []
-        with pdfplumber.open(io.BytesIO(contents)) as pdf:
-            for page in pdf.pages[:10]:
-                t = page.extract_text(x_tolerance=3, y_tolerance=3) or ""
-                for table in page.extract_tables():
-                    rows = []
-                    for row in table:
-                        cells = [str(c).strip() if c else "" for c in row]
-                        if any(cells):
-                            rows.append(" | ".join(cells))
-                    if rows:
-                        t += "\n" + "\n".join(rows)
-                if t.strip():
-                    text_parts.append(t)
-        text = "\n\n".join(text_parts).strip()
-
-        if text:
-            # Text-based PDF — use Gemini to clean / transcribe
+def _imap_search_since(since_date: Optional[str]) -> str:
+    if since_date:
+        try:
+            dt = datetime.fromisoformat(str(since_date).replace("Z", "+00:00"))
+        except Exception:
             try:
-                import google.generativeai as genai
-
-                gemini_key = os.environ.get("GEMINI_API_KEY", "")
-                if gemini_key:
-                    genai.configure(api_key=gemini_key)
-                    model = genai.GenerativeModel("gemini-2.0-flash")
-                    prompt = (
-                        "Below is raw text extracted from a resume PDF. "
-                        "Return only the cleaned, fully transcribed resume text preserving all sections, "
-                        "names, dates, and details. Do not summarise or add anything.\n\n"
-                        f"{text[:30000]}"
-                    )
-                    resp = await model.generate_content_async(prompt)
-                    cleaned = (resp.text or "").strip()
-                    if cleaned:
-                        return cleaned
-            except Exception as e:
-                logger.warning(
-                    f"Gemini text-PDF cleaning failed, using raw extract: {e}"
-                )
-            return text  # fall back to raw pdfplumber text
-
-        # Scanned PDF (no text layer) — render pages as images → Groq vision
-        try:
-            import httpx
-
-            groq_key = os.environ.get("GROQ_API_KEY", "")
-            if not groq_key:
-                raise HTTPException(
-                    status_code=500,
-                    detail="GROQ_API_KEY is not configured on the server.",
-                )
-
-            page_images_b64 = []
-            with pdfplumber.open(io.BytesIO(contents)) as pdf:
-                for page in pdf.pages[:4]:  # max 4 pages for Groq
-                    pil_img = page.to_image(resolution=150).original
-                    if pil_img.mode not in ("RGB", "L"):
-                        pil_img = pil_img.convert("RGB")
-                    buf = io.BytesIO()
-                    pil_img.save(buf, format="JPEG", quality=85)
-                    page_images_b64.append(base64.b64encode(buf.getvalue()).decode())
-
-            if not page_images_b64:
-                raise HTTPException(
-                    status_code=422, detail="No pages could be rendered from this PDF."
-                )
-
-            content = []
-            for img_b64 in page_images_b64:
-                content.append(
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
-                    }
-                )
-            content.append(
-                {
-                    "type": "text",
-                    "text": "Transcribe ALL text from these resume pages exactly as it appears, preserving structure, sections, and all details.",
-                }
-            )
-
-            payload = {
-                "model": "meta-llama/llama-4-scout-17b-16e-instruct",
-                "messages": [{"role": "user", "content": content}],
-                "max_tokens": 3000,
-            }
-            async with httpx.AsyncClient(timeout=90) as client:
-                resp = await client.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {groq_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=payload,
-                )
-            if resp.status_code == 429:
-                raise HTTPException(
-                    status_code=429,
-                    detail="Groq quota exceeded. Please wait a moment and try again.",
-                )
-            if resp.status_code != 200:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"Groq API error {resp.status_code}: {resp.text[:300]}",
-                )
-            return resp.json()["choices"][0]["message"]["content"]
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(
-                status_code=422, detail=f"Could not read scanned resume: {e}"
-            )
-
-    if ext == "docx":
-        try:
-            import docx
-
-            d = docx.Document(io.BytesIO(contents))
-            parts = [p.text for p in d.paragraphs if p.text.strip()]
-            for table in d.tables:
-                for row in table.rows:
-                    cells = [c.text.strip() for c in row.cells if c.text.strip()]
-                    if cells:
-                        parts.append(" | ".join(cells))
-            return "\n".join(parts)
-        except Exception as e:
-            raise HTTPException(
-                status_code=422, detail=f"Could not read .docx resume: {e}"
-            )
-
-    if ext == "txt":
-        return contents.decode("utf-8", errors="replace")
-
-    raise HTTPException(
-        status_code=422, detail=f"Unsupported format: .{ext}. Upload PDF, DOCX, or TXT."
-    )
+                dt = datetime.strptime(str(since_date)[:10], "%Y-%m-%d")
+            except Exception:
+                dt = datetime.now(timezone.utc) - timedelta(days=30)
+    else:
+        dt = datetime.now(timezone.utc) - timedelta(days=30)
+    return dt.strftime("%d-%b-%Y")
 
 
-async def _ai_structure_resume(resume_text: str) -> dict:
-    """Use Gemini to extract structured candidate fields from resume text.
-
-    Falls back gracefully if GEMINI_API_KEY is absent.
-    """
-    import json
-
-    gemini_key = os.environ.get("GEMINI_API_KEY", "")
-    if not gemini_key:
-        logger.warning(
-            "GEMINI_API_KEY not set — skipping AI structuring, using heuristics only."
-        )
-        return {}
-
+def _test_imap_connection(address: str, password: str, host: str, port: int) -> None:
     try:
-        import google.generativeai as genai
-
-        genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
-    except ImportError:
-        logger.warning("google-generativeai not installed — skipping AI structuring.")
-        return {}
-
-    prompt = (
-        "Extract candidate details from this resume and respond with ONLY valid JSON "
-        "(no markdown, no code fences, no explanation) with these exact keys:\n"
-        '{"full_name":"","email":"","phone":"","position":"","department":"",'
-        '"experience_years":0,"current_company":"","skills":[],"education":""}\n\n'
-        "Rules:\n"
-        "- full_name: the person's full name (usually the largest / first text)\n"
-        "- position: most recent or primary job title\n"
-        "- department: one of Sales, IT, HR, Accounts, Legal, Marketing, Operations, GST, TDS, ROC, TM, Other\n"
-        "- experience_years: total years as a number (sum from work history dates if needed)\n"
-        "- skills: array of concise skill keywords (max 15)\n"
-        "- education: most relevant degree/qualification as a short string\n"
-        "- Leave blank/0/[] if genuinely not found. Never invent data.\n\n"
-        f"RESUME:\n{resume_text[:12000]}"
-    )
-
-    try:
-        resp = await model.generate_content_async(prompt)
-        raw = (resp.text or "").strip()
-        raw = re.sub(r"^```(json)?|```$", "", raw, flags=re.MULTILINE).strip()
-        return json.loads(raw)
-    except Exception as e:
-        logger.warning(f"Gemini JSON parse failed: {e}")
-        return {}
-
-
-# ====================== ROUTES ======================
-
-
-@router.get("")
-async def list_candidates(
-    status_filter: Optional[str] = None,
-    department: Optional[str] = None,
-    search: Optional[str] = None,
-    current_user=Depends(get_current_user),
-):
-    assert_can_manage(current_user)
-    query = {}
-    if status_filter:
-        query["status"] = status_filter
-    if department:
-        query["department"] = department
-    if search:
-        rx = {"$regex": re.escape(search), "$options": "i"}
-        query["$or"] = [
-            {"full_name": rx},
-            {"email": rx},
-            {"phone": rx},
-            {"position": rx},
-        ]
-
-    docs = (
-        await db.interview_candidates.find(query).sort("created_at", -1).to_list(1000)
-    )
-    return [normalize_doc(d) for d in docs]
-
-
-@router.get("/{candidate_id}")
-async def get_candidate(candidate_id: str, current_user=Depends(get_current_user)):
-    assert_can_manage(current_user)
-    doc = await db.interview_candidates.find_one({"_id": validate_obj_id(candidate_id)})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Candidate not found")
-    return normalize_doc(doc)
-
-
-@router.post("")
-async def create_candidate(
-    payload: CandidateCreate, current_user=Depends(get_current_user)
-):
-    assert_can_manage(current_user)
-    doc = payload.model_dump()
-    doc.update(
-        {
-            "created_by": current_user.id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-            "converted_user_id": None,
-        }
-    )
-    result = await db.interview_candidates.insert_one(doc)
-    new_doc = await db.interview_candidates.find_one({"_id": result.inserted_id})
-    await create_audit_log(
-        current_user,
-        "create",
-        "interview_candidate",
-        str(result.inserted_id),
-        new_data=doc,
-    )
-    return normalize_doc(new_doc)
-
-
-@router.put("/{candidate_id}")
-async def update_candidate(
-    candidate_id: str, payload: CandidateUpdate, current_user=Depends(get_current_user)
-):
-    assert_can_manage(current_user)
-    oid = validate_obj_id(candidate_id)
-    existing = await db.interview_candidates.find_one({"_id": oid})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Candidate not found")
-
-    update_data = {k: v for k, v in payload.model_dump(exclude_unset=True).items()}
-    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await db.interview_candidates.update_one({"_id": oid}, {"$set": update_data})
-
-    updated = await db.interview_candidates.find_one({"_id": oid})
-    await create_audit_log(
-        current_user,
-        "update",
-        "interview_candidate",
-        candidate_id,
-        old_data=existing,
-        new_data=update_data,
-    )
-    return normalize_doc(updated)
-
-
-@router.delete("/{candidate_id}")
-async def delete_candidate(candidate_id: str, current_user=Depends(get_current_user)):
-    assert_can_manage(current_user)
-    oid = validate_obj_id(candidate_id)
-    existing = await db.interview_candidates.find_one({"_id": oid})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Candidate not found")
-    await db.interview_candidates.delete_one({"_id": oid})
-    await create_audit_log(
-        current_user, "delete", "interview_candidate", candidate_id, old_data=existing
-    )
-    return {"message": "Candidate deleted"}
-
-
-@router.post("/parse-resume")
-async def parse_resume(
-    file: UploadFile = File(...), current_user=Depends(get_current_user)
-):
-    """Extracts text from an uploaded resume and returns structured candidate
-    fields the frontend can drop straight into the Add Candidate form.
-
-    For scanned PDFs (no text layer), uses Groq vision to directly extract
-    structured fields from page images, bypassing unreliable text extraction."""
-    assert_can_manage(current_user)
-    contents = await file.read()
-    filename = file.filename or "resume"
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-
-    # Track if this is a scanned PDF for special handling
-    is_scanned_pdf = False
-    scanned_fields = {}
-    resume_text = ""
-
-    # ── Special handling for scanned PDFs ────────────────────────────────────
-    if ext == "pdf":
-        import pdfplumber
-        import base64
-
-        # First check if PDF has any extractable text
-        has_text = False
-        with pdfplumber.open(io.BytesIO(contents)) as pdf:
-            for page in pdf.pages[:3]:
-                t = page.extract_text(x_tolerance=3, y_tolerance=3) or ""
-                if t.strip():
-                    has_text = True
-                    break
-
-        if not has_text:
-            # Scanned PDF — use Groq vision to directly extract structured fields
-            is_scanned_pdf = True
-            logger.info(
-                "Scanned PDF detected — using Groq vision for structured extraction"
-            )
-
-            try:
-                groq_key = os.environ.get("GROQ_API_KEY", "")
-                if groq_key:
-                    page_images_b64 = []
-                    with pdfplumber.open(io.BytesIO(contents)) as pdf:
-                        for page in pdf.pages[:4]:  # max 4 pages
-                            pil_img = page.to_image(resolution=150).original
-                            if pil_img.mode not in ("RGB", "L"):
-                                pil_img = pil_img.convert("RGB")
-                            buf = io.BytesIO()
-                            pil_img.save(buf, format="JPEG", quality=85)
-                            page_images_b64.append(
-                                base64.b64encode(buf.getvalue()).decode()
-                            )
-
-                    if page_images_b64:
-                        # Get structured fields directly from vision
-                        scanned_fields = await _groq_vision_structured_resume(
-                            page_images_b64, filename
-                        )
-                        logger.info(
-                            f"Groq vision extracted fields: {list(scanned_fields.keys())}"
-                        )
-
-                        # Also get raw text transcription for AI assessment
-                        import httpx
-
-                        content = []
-                        for img_b64 in page_images_b64:
-                            content.append(
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/jpeg;base64,{img_b64}"
-                                    },
-                                }
-                            )
-                        content.append(
-                            {
-                                "type": "text",
-                                "text": "Transcribe ALL text from these resume pages exactly as it appears.",
-                            }
-                        )
-
-                        payload = {
-                            "model": "meta-llama/llama-4-scout-17b-16e-instruct",
-                            "messages": [{"role": "user", "content": content}],
-                            "max_tokens": 3000,
-                        }
-                        async with httpx.AsyncClient(timeout=90) as client:
-                            resp = await client.post(
-                                "https://api.groq.com/openai/v1/chat/completions",
-                                headers={
-                                    "Authorization": f"Bearer {groq_key}",
-                                    "Content-Type": "application/json",
-                                },
-                                json=payload,
-                            )
-                        if resp.status_code == 200:
-                            resume_text = resp.json()["choices"][0]["message"][
-                                "content"
-                            ]
-                        else:
-                            logger.warning(
-                                f"Groq text transcription failed: {resp.status_code}"
-                            )
-                else:
-                    logger.warning("GROQ_API_KEY not set — cannot process scanned PDF")
-                    raise HTTPException(
-                        status_code=500,
-                        detail="GROQ_API_KEY is not configured on the server.",
-                    )
-            except HTTPException:
-                raise
-            except Exception as e:
-                logger.error(f"Scanned PDF processing failed: {e}")
-                raise HTTPException(
-                    status_code=422, detail=f"Could not read scanned resume: {e}"
-                )
-
-    # ── Normal text extraction for non-scanned files ─────────────────────────
-    if not is_scanned_pdf:
-        resume_text = await _extract_resume_text(contents, filename)
-        if not resume_text.strip():
-            raise HTTPException(
-                status_code=422, detail="Could not extract any text from this resume"
-            )
-
-    # ── AI structuring (Gemini for text, skip if already have scanned fields) ─
-    ai_fields = {}
-    if not is_scanned_pdf or not scanned_fields:
-        try:
-            ai_fields = await _ai_structure_resume(resume_text)
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.warning(f"AI resume structuring failed: {e}")
-            ai_fields = {}
-
-    # ── Regex and heuristic extraction ───────────────────────────────────────
-    regex_f = _regex_fields(resume_text)
-    heuristic_f = _heuristic_fields(resume_text)
-
-    def first(*vals):
-        """Return first non-empty value from the list."""
-        for v in vals:
-            if v and str(v).strip():
-                return v
-        return ""
-
-    # ── Combine all sources with priority: scanned > ai > heuristic > regex ──
-    fields = {
-        "full_name": first(
-            scanned_fields.get("full_name"),
-            ai_fields.get("full_name"),
-            heuristic_f.get("full_name"),
-        ),
-        "email": first(
-            scanned_fields.get("email"),
-            ai_fields.get("email"),
-            regex_f.get("email"),
-            heuristic_f.get("email"),
-        ),
-        "phone": first(
-            scanned_fields.get("phone"),
-            ai_fields.get("phone"),
-            regex_f.get("phone"),
-            heuristic_f.get("phone"),
-        ),
-        "position": first(
-            scanned_fields.get("position"),
-            ai_fields.get("position"),
-            heuristic_f.get("position"),
-        ),
-        "department": first(
-            scanned_fields.get("department"),
-            ai_fields.get("department"),
-            heuristic_f.get("department"),
-        ),
-        "experience_years": (
-            scanned_fields.get("experience_years")
-            or ai_fields.get("experience_years")
-            or heuristic_f.get("experience_years")
-            or None
-        ),
-        "current_company": first(
-            scanned_fields.get("current_company"),
-            ai_fields.get("current_company"),
-            heuristic_f.get("current_company"),
-        ),
-        "skills": (
-            scanned_fields.get("skills")
-            or ai_fields.get("skills")
-            or heuristic_f.get("skills")
-            or []
-        ),
-        "education": first(
-            scanned_fields.get("education"),
-            ai_fields.get("education"),
-            heuristic_f.get("education"),
-        ),
-    }
-
-    # Log what was extracted
-    filled_count = sum(
-        1
-        for v in fields.values()
-        if v and (isinstance(v, list) and len(v) > 0 or str(v).strip())
-    )
-    logger.info(
-        f"Resume parsing complete: {filled_count}/9 fields filled (scanned={is_scanned_pdf})"
-    )
-
-    return {
-        "filename": filename,
-        "resume_text": resume_text[:20000],
-        "fields": fields,
-    }
-
-
-async def _ai_assess_resume(resume_text: str, position: str) -> dict:
-    """Use Gemini to produce a structured candidate assessment (verdict, score,
-    strengths, concerns, standout skills, experience quality, and suggested
-    interview questions).  Falls back to a sensible default dict if the AI
-    call fails or no API key is configured."""
-    import json
-
-    gemini_key = os.environ.get("GEMINI_API_KEY", "")
-    if not gemini_key:
-        logger.warning("GEMINI_API_KEY not set — skipping AI resume assessment.")
-        return _default_assessment()
-
-    try:
-        import google.generativeai as genai
-
-        genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
-    except ImportError:
-        logger.warning(
-            "google-generativeai not installed — skipping AI resume assessment."
-        )
-        return _default_assessment()
-
-    position_hint = (
-        f"The candidate applied for: {position}."
-        if position
-        else "No specific position was mentioned."
-    )
-
-    prompt = (
-        "You are an expert HR recruiter evaluating a candidate's resume.\n"
-        f"{position_hint}\n\n"
-        "Analyse the resume below and respond with ONLY valid JSON "
-        "(no markdown, no code fences, no explanation) using these exact keys:\n"
-        "{\n"
-        '  "verdict": "Strong Hire" | "Hire" | "Maybe" | "Pass",\n'
-        '  "fit_score": <integer 0-100>,\n'
-        '  "summary": "<one concise sentence summarising the candidate>",\n'
-        '  "standout_skills": ["<skill>", ...],\n'
-        '  "strengths": ["<strength>", ...],\n'
-        '  "concerns": ["<concern>", ...],\n'
-        '  "experience_quality": "Excellent" | "Good" | "Average" | "Poor",\n'
-        '  "recommended_questions": ["<question>", ...]\n'
-        "}\n\n"
-        "Rules:\n"
-        "- verdict: Strong Hire (80+), Hire (60-79), Maybe (40-59), Pass (<40) based on fit_score.\n"
-        "- fit_score: 0-100 integer reflecting overall suitability.\n"
-        "- standout_skills: max 5 key skills that stand out.\n"
-        "- strengths: max 5 bullet points.\n"
-        "- concerns: max 5 bullet points (can be empty array if none).\n"
-        "- experience_quality: rate the depth and relevance of work experience.\n"
-        "- recommended_questions: 3-5 interview questions to ask this candidate.\n"
-        "- Never invent data not supported by the resume.\n\n"
-        f"RESUME:\n{resume_text[:12000]}"
-    )
-
-    try:
-        resp = await model.generate_content_async(prompt)
-        raw = (resp.text or "").strip()
-        raw = re.sub(r"^```(json)?|```$", "", raw, flags=re.MULTILINE).strip()
-        data = json.loads(raw)
-
-        # Validate / normalise
-        valid_verdicts = {"Strong Hire", "Hire", "Maybe", "Pass"}
-        if data.get("verdict") not in valid_verdicts:
-            score = int(data.get("fit_score", 50))
-            if score >= 80:
-                data["verdict"] = "Strong Hire"
-            elif score >= 60:
-                data["verdict"] = "Hire"
-            elif score >= 40:
-                data["verdict"] = "Maybe"
-            else:
-                data["verdict"] = "Pass"
-
-        data.setdefault("fit_score", 50)
-        data.setdefault("summary", "Candidate profile assessed.")
-        data.setdefault("standout_skills", [])
-        data.setdefault("strengths", [])
-        data.setdefault("concerns", [])
-        data.setdefault("recommended_questions", [])
-
-        valid_exp = {"Excellent", "Good", "Average", "Poor"}
-        if data.get("experience_quality") not in valid_exp:
-            data["experience_quality"] = "Average"
-
-        return data
-    except Exception as e:
-        logger.warning(f"Gemini resume assessment failed: {e}")
-        return _default_assessment()
-
-
-def _default_assessment() -> dict:
-    """Fallback assessment when AI is unavailable."""
-    return {
-        "verdict": "Maybe",
-        "fit_score": 50,
-        "summary": "AI assessment unavailable — please review manually.",
-        "standout_skills": [],
-        "strengths": [],
-        "concerns": [],
-        "experience_quality": "Average",
-        "recommended_questions": [],
-    }
-
-
-@router.post("/praise-resume-json")
-async def praise_resume_json(
-    payload: PraiseResumeRequest, current_user=Depends(get_current_user)
-):
-    """AI-powered resume assessment: returns verdict, fit score, strengths,
-    concerns, standout skills, experience quality, and suggested interview
-    questions for the uploaded resume."""
-    assert_can_manage(current_user)
-
-    if not payload.resume_text or not payload.resume_text.strip():
-        raise HTTPException(status_code=422, detail="No resume text provided")
-
-    assessment = await _ai_assess_resume(payload.resume_text, payload.position or "")
-    return assessment
-
-
-@router.post("/{candidate_id}/convert-to-user")
-async def convert_to_user(
-    candidate_id: str,
-    payload: ConvertToUserRequest,
-    current_user=Depends(get_current_user),
-):
-    """Creates a real system User account from a hired candidate.
-    All fields arrive from the (editable) conversion form on the frontend —
-    nothing here is silently reused from the interview record."""
-    assert_can_manage(current_user)
-    oid = validate_obj_id(candidate_id)
-    candidate = await db.interview_candidates.find_one({"_id": oid})
-    if not candidate:
-        raise HTTPException(status_code=404, detail="Candidate not found")
-    if candidate.get("converted_user_id"):
+        mail = imaplib.IMAP4_SSL(host, int(port), timeout=20)
+        mail.login(address, password)
+        mail.select("INBOX")
+        mail.logout()
+    except imaplib.IMAP4.error as exc:
         raise HTTPException(
             status_code=400,
-            detail="This candidate has already been converted to a user",
-        )
+            detail="Authentication failed. Use an app password and make sure IMAP is enabled.",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not connect to IMAP server: {exc}") from exc
 
-    existing_user = await db.users.find_one({"email": payload.email}, {"_id": 0})
-    if existing_user:
+
+def _fetch_imap_events(conn: Dict[str, Any], user_id: str, limit: int, since_date: Optional[str]) -> List[Dict[str, Any]]:
+    address = conn["email_address"]
+    host = conn.get("imap_host") or _default_imap_host(address)
+    port = int(conn.get("imap_port") or 993)
+    password = conn.get("app_password") or ""
+    if not password:
+        raise HTTPException(status_code=400, detail=f"No app password saved for {address}")
+
+    try:
+        mail = imaplib.IMAP4_SSL(host, port, timeout=30)
+        mail.login(address, password)
+        mail.select("INBOX")
+        status, data = mail.search(None, "SINCE", _imap_search_since(since_date))
+        if status != "OK":
+            return []
+        ids = (data[0] or b"").split()
+        ids = ids[-max(limit * 3, limit):]
+
+        events: List[Dict[str, Any]] = []
+        for msg_id in reversed(ids):
+            if len(events) >= limit:
+                break
+            status, fetched = mail.fetch(msg_id, "(RFC822)")
+            if status != "OK" or not fetched:
+                continue
+            raw = None
+            for item in fetched:
+                if isinstance(item, tuple):
+                    raw = item[1]
+                    break
+            if not raw:
+                continue
+            msg = email.message_from_bytes(raw)
+            subject = _decode_mime(msg.get("Subject")) or "(No subject)"
+            sender = _decode_mime(msg.get("From"))
+            message_id = (msg.get("Message-ID") or f"{address}-{msg_id.decode()}").strip()
+            sent_at = _parse_email_date(msg.get("Date"))
+            body = _message_body(msg)
+            events.extend(_event_from_message(
+                user_id=user_id,
+                email_account=address,
+                message_id=message_id,
+                subject=subject,
+                sender=sender,
+                sent_at=sent_at,
+                body=body,
+            ))
+        mail.logout()
+        return events[:limit]
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Email scan failed for {address}: {exc}") from exc
+
+
+def _build_state(payload: Dict[str, Any]) -> str:
+    body = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode()
+    sig = hmac.new(STATE_SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()
+    return f"{body}.{sig}"
+
+
+def _read_state(state: str) -> Dict[str, Any]:
+    try:
+        body, sig = state.rsplit(".", 1)
+        expected = hmac.new(STATE_SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected):
+            raise ValueError("bad signature")
+        return json.loads(base64.urlsafe_b64decode(body.encode()).decode())
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state") from exc
+
+
+def _oauth_flow(state: Optional[str] = None):
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
         raise HTTPException(
-            status_code=400, detail="A user with this email already exists"
+            status_code=501,
+            detail="Google email OAuth is not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_EMAIL_REDIRECT_URI.",
         )
+    from google_auth_oauthlib.flow import Flow
 
-    # Late imports avoid a circular import with backend.server at module load time
-    from backend.server import get_password_hash, DEFAULT_ROLE_PERMISSIONS
-
-    if (
-        payload.role in ("admin", "manager", "superadmin")
-        and current_user.role != "admin"
-    ):
-        raise HTTPException(
-            status_code=403, detail="Only an admin can assign that role"
-        )
-
-    user_id = str(uuid.uuid4())
-    default_permissions = DEFAULT_ROLE_PERMISSIONS.get(payload.role, {})
-
-    new_user = {
-        "id": user_id,
-        "email": payload.email,
-        "full_name": payload.full_name,
-        "role": payload.role,
-        "password": get_password_hash(payload.password),
-        "departments": payload.departments or [],
-        "phone": payload.phone,
-        "punch_in_time": payload.punch_in_time or "10:30",
-        "grace_time": payload.grace_time or "00:10",
-        "punch_out_time": payload.punch_out_time or "19:00",
-        "is_active": False,
-        "status": "pending_approval",
-        "approved_by": None,
-        "approved_at": None,
-        "permissions": default_permissions,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "source_candidate_id": str(oid),
-    }
-    await db.users.insert_one(new_user)
-
-    await db.interview_candidates.update_one(
-        {"_id": oid},
+    flow = Flow.from_client_config(
         {
-            "$set": {
-                "status": "hired",
-                "converted_user_id": user_id,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+            "web": {
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
             }
         },
+        scopes=GMAIL_SCOPES,
+        state=state,
+        redirect_uri=GOOGLE_EMAIL_REDIRECT_URI,
     )
+    return flow
 
-    await create_audit_log(
-        current_user,
-        "convert_to_user",
-        "interview_candidate",
-        candidate_id,
-        new_data={"user_id": user_id},
+
+def _fetch_gmail_events(conn: Dict[str, Any], user_id: str, limit: int, since_date: Optional[str]) -> List[Dict[str, Any]]:
+    try:
+        from google.oauth2.credentials import Credentials
+        from google.auth.transport.requests import Request as GoogleRequest
+        from googleapiclient.discovery import build
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Google API packages are not installed") from exc
+
+    refresh_token = conn.get("refresh_token")
+    if not refresh_token:
+        raise HTTPException(status_code=400, detail=f"Google refresh token missing for {conn.get('email_address')}")
+
+    creds = Credentials(
+        token=conn.get("access_token"),
+        refresh_token=refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+        scopes=GMAIL_SCOPES,
     )
+    if not creds.valid and creds.refresh_token:
+        creds.refresh(GoogleRequest())
 
-    new_user.pop("password", None)
-    new_user.pop("_id", None)
-    return {
-        "message": "Candidate converted to user — pending admin approval",
-        "user": new_user,
+    service = build("gmail", "v1", credentials=creds, cache_discovery=False)
+    if since_date:
+        after = str(since_date)[:10].replace("-", "/")
+        query = f"after:{after}"
+    else:
+        query = "newer_than:30d"
+
+    listed = service.users().messages().list(userId="me", q=query, maxResults=limit).execute()
+    messages = listed.get("messages", []) or []
+    events: List[Dict[str, Any]] = []
+
+    for item in messages:
+        if len(events) >= limit:
+            break
+        msg = service.users().messages().get(userId="me", id=item["id"], format="full").execute()
+        headers = {h["name"].lower(): h.get("value", "") for h in msg.get("payload", {}).get("headers", [])}
+        subject = _decode_mime(headers.get("subject")) or "(No subject)"
+        sender = _decode_mime(headers.get("from"))
+        sent_at = _parse_email_date(headers.get("date"))
+        message_id = headers.get("message-id") or item["id"]
+        body = _gmail_payload_text(msg.get("payload", {})) or msg.get("snippet", "")
+        events.extend(_event_from_message(
+            user_id=user_id,
+            email_account=conn["email_address"],
+            message_id=message_id,
+            subject=subject,
+            sender=sender,
+            sent_at=sent_at,
+            body=body,
+        ))
+
+    return events[:limit]
+
+
+def _gmail_payload_text(payload: Dict[str, Any]) -> str:
+    chunks: List[str] = []
+
+    def walk(part: Dict[str, Any]):
+        mime = part.get("mimeType")
+        body = part.get("body", {}) or {}
+        data = body.get("data")
+        if data and mime in {"text/plain", "text/html"}:
+            try:
+                raw = base64.urlsafe_b64decode(data.encode())
+                text = raw.decode("utf-8", errors="replace")
+                if mime == "text/html":
+                    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.I)
+                    text = re.sub(r"<[^>]+>", " ", text)
+                chunks.append(text)
+            except Exception:
+                pass
+        for child in part.get("parts", []) or []:
+            walk(child)
+
+    walk(payload)
+    return re.sub(r"\s+", " ", "\n".join(chunks)).strip()[:12000]
+
+
+async def _cache_events(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    cached: List[Dict[str, Any]] = []
+    for ev in events:
+        insert_doc = dict(ev)
+        insert_doc.pop("updated_at", None)
+        await db.email_imported_events.update_one(
+            {"user_id": ev["user_id"], "id": ev["id"]},
+            {"$setOnInsert": insert_doc, "$set": {"updated_at": _now_iso()}},
+            upsert=True,
+        )
+        doc = await db.email_imported_events.find_one({"user_id": ev["user_id"], "id": ev["id"]})
+        cached.append(_serialise_event(doc or ev))
+    return cached
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Connection routes
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/connections")
+async def list_connections(current_user: User = Depends(get_current_user)):
+    cursor = db.email_connections.find({"user_id": _uid(current_user)}).sort("created_at", -1)
+    docs = [_clean_connection(doc) async for doc in cursor]
+    return {"connections": docs}
+
+
+@router.post("/connections")
+async def create_connection(body: EmailConnectionCreate, current_user: User = Depends(get_current_user)):
+    address = _normalise_email(body.email_address)
+    host = body.imap_host or _default_imap_host(address)
+    port = int(body.imap_port or 993)
+    password = (body.app_password or "").strip()
+    if not password:
+        raise HTTPException(status_code=400, detail="App Password is required")
+
+    _test_imap_connection(address, password, host, port)
+
+    now = _now_iso()
+    doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": _uid(current_user),
+        "email_address": address,
+        "provider": _infer_provider(address),
+        "provider_type": "imap",
+        "imap_host": host,
+        "imap_port": port,
+        "app_password": password,
+        "label": body.label or address,
+        "linked_page": body.linked_page or "all",
+        "auto_sync": bool(body.auto_sync),
+        "is_active": True,
+        "status": "connected",
+        "last_error": None,
+        "last_synced": None,
+        "created_at": now,
+        "updated_at": now,
     }
+    await db.email_connections.update_one(
+        {"user_id": _uid(current_user), "email_address": address},
+        {"$set": doc},
+        upsert=True,
+    )
+    return {"ok": True, "connection": _clean_connection(doc)}
+
+
+@router.patch("/connections/{email_address}")
+async def update_connection(
+    email_address: str,
+    body: EmailConnectionUpdate,
+    current_user: User = Depends(get_current_user),
+):
+    address = _normalise_email(email_address)
+    updates = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
+    if not updates:
+        return {"ok": True}
+    updates["updated_at"] = _now_iso()
+    result = await db.email_connections.update_one(
+        {"user_id": _uid(current_user), "email_address": address},
+        {"$set": updates},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Email connection not found")
+    return {"ok": True}
+
+
+@router.delete("/connections/{email_address}")
+async def delete_connection(email_address: str, current_user: User = Depends(get_current_user)):
+    address = _normalise_email(email_address)
+    await db.email_connections.delete_one({"user_id": _uid(current_user), "email_address": address})
+    return {"ok": True}
+
+
+@router.post("/connections/{email_address}/test")
+async def test_connection(email_address: str, current_user: User = Depends(get_current_user)):
+    address = _normalise_email(email_address)
+    conn = await db.email_connections.find_one({"user_id": _uid(current_user), "email_address": address})
+    if not conn:
+        raise HTTPException(status_code=404, detail="Email connection not found")
+
+    if conn.get("provider_type") == "google_oauth":
+        _fetch_gmail_events(conn, _uid(current_user), limit=1, since_date=date.today().isoformat())
+    else:
+        _test_imap_connection(address, conn.get("app_password") or "", conn.get("imap_host") or _default_imap_host(address), int(conn.get("imap_port") or 993))
+
+    await db.email_connections.update_one(
+        {"_id": conn["_id"]},
+        {"$set": {"status": "connected", "last_error": None, "updated_at": _now_iso()}},
+    )
+    return {"ok": True}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Gmail OAuth routes
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/oauth/google/start")
+async def google_oauth_start(
+    linked_page: str = "all",
+    auto_sync: bool = False,
+    label: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+):
+    payload = {
+        "user_id": _uid(current_user),
+        "linked_page": linked_page or "all",
+        "auto_sync": bool(auto_sync),
+        "label": label or "",
+        "ts": int(datetime.now(timezone.utc).timestamp()),
+    }
+    state = _build_state(payload)
+    flow = _oauth_flow(state)
+    auth_url, _ = flow.authorization_url(
+        access_type="offline",
+        prompt="consent",
+        include_granted_scopes="true",
+    )
+    return {"auth_url": auth_url}
+
+
+@router.get("/oauth/google/callback")
+async def google_oauth_callback(request: Request):
+    error = request.query_params.get("error")
+    if error:
+        return RedirectResponse(f"{FRONTEND_URL}/settings/email?email=denied")
+
+    code = request.query_params.get("code")
+    state = request.query_params.get("state")
+    if not code or not state:
+        return RedirectResponse(f"{FRONTEND_URL}/settings/email?email=error")
+
+    try:
+        state_data = _read_state(state)
+        flow = _oauth_flow(state)
+        flow.fetch_token(code=code)
+        creds = flow.credentials
+
+        if not creds.refresh_token:
+            return RedirectResponse(f"{FRONTEND_URL}/settings/email?email=error&reason=no_refresh_token")
+
+        import requests
+
+        profile = requests.get(
+            "https://www.googleapis.com/oauth2/v2/userinfo",
+            headers={"Authorization": f"Bearer {creds.token}"},
+            timeout=20,
+        ).json()
+        address = _normalise_email(profile.get("email") or "")
+        now = _now_iso()
+        doc = {
+            "id": str(uuid.uuid4()),
+            "user_id": state_data["user_id"],
+            "email_address": address,
+            "provider": "gmail",
+            "provider_type": "google_oauth",
+            "label": state_data.get("label") or f"Gmail — {address}",
+            "linked_page": state_data.get("linked_page") or "all",
+            "auto_sync": bool(state_data.get("auto_sync")),
+            "is_active": True,
+            "status": "connected",
+            "last_error": None,
+            "access_token": creds.token,
+            "refresh_token": creds.refresh_token,
+            "last_synced": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+        await db.email_connections.update_one(
+            {"user_id": state_data["user_id"], "email_address": address},
+            {"$set": doc},
+            upsert=True,
+        )
+        return RedirectResponse(f"{FRONTEND_URL}/settings/email?email=connected")
+    except Exception as exc:
+        logger.exception("Gmail OAuth callback failed")
+        return RedirectResponse(f"{FRONTEND_URL}/settings/email?email=error&reason={str(exc)[:80]}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Event scanning/cache routes
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/importer/events")
+async def list_imported_events(
+    limit: int = Query(200, ge=1, le=500),
+    current_user: User = Depends(get_current_user),
+):
+    cursor = (
+        db.email_imported_events
+        .find({"user_id": _uid(current_user)})
+        .sort([("date", 1), ("created_at", -1)])
+        .limit(limit)
+    )
+    return [_serialise_event(doc) async for doc in cursor]
+
+
+@router.get("/extract-events")
+async def extract_events(
+    force_refresh: bool = False,
+    limit: int = Query(100, ge=1, le=500),
+    since_date: Optional[str] = None,
+    email: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+):
+    user_id = _uid(current_user)
+
+    if not force_refresh:
+        cursor = (
+            db.email_imported_events
+            .find({"user_id": user_id})
+            .sort([("date", 1), ("created_at", -1)])
+            .limit(limit)
+        )
+        return [_serialise_event(doc) async for doc in cursor]
+
+    query: Dict[str, Any] = {"user_id": user_id, "is_active": {"$ne": False}}
+    if email:
+        query["email_address"] = _normalise_email(email)
+
+    connections = await db.email_connections.find(query).to_list(length=50)
+    if not connections:
+        return []
+
+    all_events: List[Dict[str, Any]] = []
+    per_account_limit = max(1, min(limit, 300))
+
+    for conn in connections:
+        address = conn.get("email_address")
+        try:
+            if conn.get("provider_type") == "google_oauth":
+                events = _fetch_gmail_events(conn, user_id, per_account_limit, since_date)
+            else:
+                events = _fetch_imap_events(conn, user_id, per_account_limit, since_date)
+            all_events.extend(events)
+            await db.email_connections.update_one(
+                {"_id": conn["_id"]},
+                {"$set": {"last_synced": _now_iso(), "status": "connected", "last_error": None, "updated_at": _now_iso()}},
+            )
+        except HTTPException as exc:
+            await db.email_connections.update_one(
+                {"_id": conn["_id"]},
+                {"$set": {"status": "error", "last_error": exc.detail, "updated_at": _now_iso()}},
+            )
+            if email:
+                raise
+            logger.warning("Email scan failed for %s: %s", address, exc.detail)
+
+    cached = await _cache_events(all_events[:limit])
+    return cached
+
+
+@router.delete("/events/clear-all")
+async def clear_email_events(current_user: User = Depends(get_current_user)):
+    result = await db.email_imported_events.delete_many({"user_id": _uid(current_user)})
+    return {"ok": True, "deleted": result.deleted_count}
+
+
+@router.delete("/events/{event_id}")
+async def delete_email_event(event_id: str, current_user: User = Depends(get_current_user)):
+    result = await db.email_imported_events.delete_one({"user_id": _uid(current_user), "id": event_id})
+    if result.deleted_count == 0 and ObjectId.is_valid(event_id):
+        await db.email_imported_events.delete_one({"user_id": _uid(current_user), "_id": ObjectId(event_id)})
+    return {"ok": True}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Save actions
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/save-as-todo")
+async def save_as_todo(body: SaveTodoRequest, current_user: User = Depends(get_current_user)):
+    now = _now_iso()
+    due = body.due_date or body.remind_at
+    if due and "T" in due:
+        due = due[:10]
+
+    doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": _uid(current_user),
+        "title": body.title,
+        "description": body.description or "",
+        "is_completed": False,
+        "status": "pending",
+        "due_date": due,
+        "source": "email_sync",
+        "auto_imported": True,
+        "event_id": body.event_id,
+        "email_account": body.email_account,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.todos.insert_one(doc)
+    if body.event_id:
+        await db.email_imported_events.update_one(
+            {"user_id": _uid(current_user), "id": body.event_id},
+            {"$set": {"saved_to": "todo", "saved_at": now}},
+        )
+    return {k: v for k, v in doc.items() if k != "_id"}
+
+
+@router.post("/save-as-visit")
+async def save_as_visit(body: SaveVisitRequest, current_user: User = Depends(get_current_user)):
+    now = _now_iso()
+    visit_date = body.visit_date or date.today().isoformat()
+    doc = {
+        "id": str(uuid.uuid4()),
+        "client_id": body.client_id or "",
+        "client_name": body.client_name or "",
+        "assigned_to": _uid(current_user),
+        "created_by": _uid(current_user),
+        "visit_date": visit_date[:10],
+        "visit_time": body.visit_time,
+        "purpose": body.title[:200],
+        "services": [],
+        "priority": "medium",
+        "status": "scheduled",
+        "notes": body.notes or body.description or "",
+        "location": None,
+        "recurrence": "none",
+        "recurrence_end_date": None,
+        "recurrence_weekday": None,
+        "recurrence_week_number": None,
+        "parent_visit_id": None,
+        "outcome": None,
+        "follow_up_date": None,
+        "comments": [],
+        "source": "email_manual",
+        "event_id": body.event_id,
+        "email_account": body.email_account,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.visits.insert_one(doc)
+    if body.event_id:
+        await db.email_imported_events.update_one(
+            {"user_id": _uid(current_user), "id": body.event_id},
+            {"$set": {"saved_to": "visit", "saved_at": now}},
+        )
+    return {k: v for k, v in doc.items() if k != "_id"}
+
+
+# Sender whitelist used by EmailSettings.
+@router.get("/sender-whitelist")
+async def get_sender_whitelist(current_user: User = Depends(get_current_user)):
+    doc = await db.email_sender_whitelists.find_one({"user_id": _uid(current_user)})
+    return {"senders": (doc or {}).get("senders", [])}
+
+
+@router.put("/sender-whitelist")
+async def put_sender_whitelist(payload: Dict[str, Any], current_user: User = Depends(get_current_user)):
+    senders = payload.get("senders") if isinstance(payload, dict) else []
+    if not isinstance(senders, list):
+        raise HTTPException(status_code=400, detail="senders must be a list")
+    await db.email_sender_whitelists.update_one(
+        {"user_id": _uid(current_user)},
+        {"$set": {"senders": senders, "updated_at": _now_iso()}},
+        upsert=True,
+    )
+    return {"ok": True, "senders": senders}
