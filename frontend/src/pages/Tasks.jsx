@@ -2913,40 +2913,39 @@ export default function Tasks() {
                       ];
                     })();
                     const trendUp = scoreTrend >= 0;
+                    const trendColor = trendUp ? '#6366f1' : '#EF4444';
                     return (
                       <motion.div
-                        className="rounded-lg px-2.5 pt-2 pb-1.5 border flex-1 flex flex-col justify-between"
-                        style={{
-                          background: isDark ? (trendUp ? 'rgba(31,175,90,0.07)' : 'rgba(239,68,68,0.07)') : (trendUp ? '#f0fdf4' : '#fff5f5'),
-                          borderColor: isDark ? (trendUp ? 'rgba(31,175,90,0.25)' : 'rgba(239,68,68,0.25)') : (trendUp ? '#bbf7d0' : '#fecaca'),
-                        }}
+                        className={`rounded-lg border flex-1 flex flex-col overflow-hidden ${isDark ? 'bg-slate-700/20 border-slate-700' : 'bg-slate-50 border-slate-200'}`}
                         initial={{ opacity: 0, y: 5 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.48 }}
                       >
-                        <div className="flex items-center justify-between mb-1">
+                        {/* Header row */}
+                        <div className={`flex items-center justify-between px-2.5 pt-2 pb-1 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
                           <div className="flex items-center gap-1">
-                            <TrendingUp className="h-3 w-3" style={{ color: trendUp ? '#1FAF5A' : '#EF4444' }} />
-                            <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: trendUp ? '#1FAF5A' : '#EF4444' }}>Score Trend</span>
+                            <TrendingUp className="h-2.5 w-2.5" style={{ color: trendColor }} />
+                            <span className={`text-[9px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Score Trend</span>
                           </div>
-                          <span className="text-[10px] font-black" style={{ color: trendUp ? '#1FAF5A' : '#EF4444' }}>
+                          <span className="text-[10px] font-bold tabular-nums" style={{ color: trendColor }}>
                             {scoreTrend >= 0 ? `+${scoreTrend}` : scoreTrend} pts
                           </span>
                         </div>
-                        <div className="flex-1 min-h-0" style={{ height: 44 }}>
+                        {/* Chart area */}
+                        <div className="flex-1 px-1 py-1" style={{ minHeight: 40 }}>
                           <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={trendPoints} margin={{ top: 2, right: 2, left: 2, bottom: 0 }}>
+                            <AreaChart data={trendPoints} margin={{ top: 2, right: 4, left: 4, bottom: 0 }}>
                               <defs>
                                 <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor={trendUp ? '#1FAF5A' : '#EF4444'} stopOpacity={0.3} />
-                                  <stop offset="95%" stopColor={trendUp ? '#1FAF5A' : '#EF4444'} stopOpacity={0} />
+                                  <stop offset="10%" stopColor={trendColor} stopOpacity={0.18} />
+                                  <stop offset="100%" stopColor={trendColor} stopOpacity={0} />
                                 </linearGradient>
                               </defs>
-                              <Area type="monotone" dataKey="score" stroke={trendUp ? '#1FAF5A' : '#EF4444'} strokeWidth={1.5} fill="url(#trendGrad)" dot={false} />
+                              <Area type="monotone" dataKey="score" stroke={trendColor} strokeWidth={1.5} fill="url(#trendGrad)" dot={false} />
                               <ReTooltip
-                                contentStyle={{ fontSize: 9, padding: '2px 6px', borderRadius: 6, border: 'none', background: isDark ? '#1e293b' : '#fff', color: isDark ? '#e2e8f0' : '#1e293b', boxShadow: '0 2px 8px rgba(0,0,0,0.12)' }}
-                                itemStyle={{ fontSize: 9 }}
-                                labelStyle={{ fontSize: 9, fontWeight: 700 }}
+                                contentStyle={{ fontSize: 9, padding: '2px 7px', borderRadius: 5, border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`, background: isDark ? '#1e293b' : '#fff', color: isDark ? '#e2e8f0' : '#334155', boxShadow: '0 2px 8px rgba(0,0,0,0.10)' }}
+                                itemStyle={{ fontSize: 9, color: trendColor }}
+                                labelStyle={{ fontSize: 9, fontWeight: 600, color: isDark ? '#94a3b8' : '#64748b' }}
                               />
                             </AreaChart>
                           </ResponsiveContainer>
@@ -2956,56 +2955,52 @@ export default function Tasks() {
                   })()}
 
                   {/* 4-stat mini grid — flex-1 equal height */}
-                  <div className={`rounded-lg border px-2 py-0 flex-1 flex items-center ${isDark ? 'bg-slate-700/30 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
-                    <div className="grid grid-cols-4 gap-0 w-full">
+                  <div className={`rounded-lg border flex-1 flex items-stretch overflow-hidden ${isDark ? 'bg-slate-700/20 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
                     {[
-                      { icon: <Calendar className="h-2.5 w-2.5 text-blue-500" />, val: workingDaysLeft, label: 'Days Left', color: null },
-                      { icon: <Target className="h-2.5 w-2.5 text-purple-500" />, val: myPending, label: 'Pending', color: null },
-                      { icon: <TrendingUp className="h-2.5 w-2.5 text-cyan-500" />, val: `~${dailyTarget}/d`, label: 'To Finish', small: true, color: null },
-                      { icon: <Zap className="h-2.5 w-2.5" style={{ color: scoreTrend >= 0 ? '#1FAF5A' : '#FF6B6B' }} />, val: scoreTrend >= 0 ? `+${scoreTrend}` : scoreTrend, label: 'Trend', color: scoreTrend >= 0 ? '#1FAF5A' : '#FF6B6B' },
-                    ].map(({ icon, val, label, small, color }, i) => (
+                      { icon: <Calendar className="h-2.5 w-2.5 text-indigo-400" />, val: workingDaysLeft, label: 'Days Left', color: null },
+                      { icon: <Target className="h-2.5 w-2.5 text-violet-400" />, val: myPending, label: 'Pending', color: null },
+                      { icon: <TrendingUp className="h-2.5 w-2.5 text-indigo-400" />, val: `~${dailyTarget}/d`, label: 'To Finish', small: true, color: null },
+                      { icon: <Zap className="h-2.5 w-2.5" style={{ color: scoreTrend >= 0 ? '#6366f1' : '#EF4444' }} />, val: scoreTrend >= 0 ? `+${scoreTrend}` : `${scoreTrend}`, label: 'Trend', color: scoreTrend >= 0 ? '#6366f1' : '#EF4444' },
+                    ].map(({ icon, val, label, small, color }, i, arr) => (
                       <motion.div
                         key={label}
-                        className="flex flex-col items-center gap-px py-1.5"
+                        className={`flex flex-col items-center justify-center gap-0.5 flex-1 py-2 ${i < arr.length - 1 ? (isDark ? 'border-r border-slate-700' : 'border-r border-slate-200') : ''}`}
                         initial={{ opacity: 0, y: 4 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.52 + i * 0.06 }}
                       >
                         {icon}
-                        <span className={`font-black leading-tight ${small ? 'text-[8px]' : 'text-[11px]'}`} style={{ color: color || (isDark ? '#e2e8f0' : '#1e293b') }}>
+                        <span className={`font-bold leading-tight tabular-nums ${small ? 'text-[9px]' : 'text-[11px]'}`} style={{ color: color || (isDark ? '#e2e8f0' : '#1e293b') }}>
                           {val}
                         </span>
-                        <span className={`text-[7px] text-center leading-tight ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{label}</span>
+                        <span className={`text-[7px] font-medium text-center leading-tight ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{label}</span>
                       </motion.div>
                     ))}
-                    </div>
                   </div>
 
-                  {/* Pink Keep pushing strip with View Tips — flex-1 equal height */}
+                  {/* Action strip — flex-1 equal height, indigo-tinted business style */}
                   <motion.div
-                    className="rounded-lg px-2.5 flex items-center justify-between flex-1"
-                    style={{ background: isDark ? 'rgba(239,68,68,0.07)' : '#fff5f5', border: '1px solid #fecaca' }}
+                    className={`rounded-lg border flex-1 flex items-center justify-between px-2.5 overflow-hidden ${isDark ? 'bg-indigo-950/30 border-indigo-900/50' : 'bg-indigo-50 border-indigo-100'}`}
                     initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.72 }}
                   >
-                    <div className="flex items-center gap-1.5">
-                      <motion.div animate={{ x: [0, 3, -2, 0] }} transition={{ duration: 1.5, repeat: Infinity, repeatDelay: 3 }}>
-                        <Zap className="h-3.5 w-3.5 text-red-400 flex-shrink-0" />
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <motion.div animate={{ x: [0, 2, -2, 0] }} transition={{ duration: 1.8, repeat: Infinity, repeatDelay: 4 }} className="flex-shrink-0">
+                        <Zap className={`h-3 w-3 ${isDark ? 'text-indigo-400' : 'text-indigo-500'}`} />
                       </motion.div>
-                      <div>
-                        <p className="text-[9px] font-bold text-red-500 leading-tight">
+                      <div className="min-w-0">
+                        <p className={`text-[9px] font-semibold leading-tight truncate ${isDark ? 'text-indigo-300' : 'text-indigo-700'}`}>
                           {displayScore >= 85 ? 'Outstanding!' : 'Keep pushing!'}
                         </p>
-                        <p className={`text-[9px] leading-tight ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                          Every completed task boosts your score.
+                        <p className={`text-[8px] leading-tight truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                          Each task completed boosts score.
                         </p>
                       </div>
                     </div>
                     <motion.button
-                      className="text-[9px] font-bold px-2 py-0.5 rounded-md border flex-shrink-0 ml-2"
-                      style={{ color: '#EF4444', borderColor: '#fca5a5', background: 'white' }}
-                      whileHover={{ scale: 1.05 }}
+                      className={`text-[8px] font-semibold px-2 py-0.5 rounded border flex-shrink-0 ml-2 whitespace-nowrap ${isDark ? 'bg-indigo-900/60 border-indigo-700 text-indigo-300' : 'bg-white border-indigo-200 text-indigo-600'}`}
+                      whileHover={{ scale: 1.04 }}
                       whileTap={{ scale: 0.97 }}
                       onClick={() => setShowTips(true)}
                     >
@@ -3071,101 +3066,88 @@ export default function Tasks() {
                     <p className={`text-[9px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>This Month</p>
                   </div>
 
-                  {/* Working days card — flex-1 for equal height */}
+                  {/* Working days card — flex-1 equal height */}
                   <motion.div
-                    className="rounded-lg p-2 border flex-1 flex flex-col justify-center"
-                    style={{ background: isDark ? 'rgba(59,130,246,0.08)' : '#eff6ff', borderColor: isDark ? 'rgba(30,64,175,0.3)' : '#bfdbfe' }}
+                    className={`rounded-lg border flex-1 flex flex-col justify-center overflow-hidden ${isDark ? 'bg-slate-700/20 border-slate-700' : 'bg-slate-50 border-slate-200'}`}
                     initial={{ opacity: 0, x: 10 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: 0.38 }}
                   >
-                    <div className="flex items-center gap-1.5 mb-0.5">
-                      <motion.div animate={{ scale: [1, 1.2, 1] }} transition={{ duration: 1.5, repeat: Infinity, repeatDelay: 4 }} className="flex-shrink-0">
-                        <Calendar className="h-3.5 w-3.5 text-blue-500" />
-                      </motion.div>
-                      <p className="text-[9px] font-black uppercase tracking-wide text-blue-600 dark:text-blue-300 leading-tight">
+                    <div className={`flex items-center gap-1.5 px-2.5 py-1.5 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                      <Calendar className="h-3 w-3 text-indigo-500 flex-shrink-0" />
+                      <p className={`text-[9px] font-semibold uppercase tracking-wide leading-tight truncate ${isDark ? 'text-indigo-400' : 'text-indigo-600'}`}>
                         {workingDaysLeft} Days Remaining
                       </p>
                     </div>
-                    <p className={`text-[9px] font-medium leading-snug ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>
+                    <p className={`text-[9px] font-medium leading-snug px-2.5 py-1.5 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
                       {myPending > 0 ? (
-                        <>You have <strong>{myPending}</strong> pending tasks. Complete ~<strong>{dailyTarget}</strong>/day to finish this month.</>
+                        <>You have <span className="font-semibold">{myPending}</span> pending tasks. ~<span className="font-semibold">{dailyTarget}</span>/day to finish.</>
                       ) : (
-                        <>All tasks cleared! Great work this month. 🎉</>
+                        <>All tasks cleared. Great work! 🎉</>
                       )}
                     </p>
                   </motion.div>
 
                   {/* Rank insight card — flex-1 equal height */}
                   <motion.div
-                    className="rounded-lg p-2 border flex-1 flex flex-col justify-center"
-                    style={
-                      apiRank === 1
-                        ? { background: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb', borderColor: isDark ? 'rgba(146,64,14,0.3)' : '#fde68a' }
-                        : tasksForNextApiRank !== null && apiRank !== null && apiRank > 1
-                        ? { background: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb', borderColor: isDark ? 'rgba(146,64,14,0.3)' : '#fde68a' }
-                        : myPending > 0
-                        ? { background: isDark ? 'rgba(99,102,241,0.08)' : '#f5f3ff', borderColor: isDark ? 'rgba(67,56,202,0.3)' : '#c4b5fd' }
-                        : { background: isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4', borderColor: isDark ? 'rgba(20,83,45,0.3)' : '#bbf7d0' }
-                    }
+                    className={`rounded-lg border flex-1 flex flex-col justify-center overflow-hidden ${isDark ? 'bg-slate-700/20 border-slate-700' : 'bg-slate-50 border-slate-200'}`}
                     initial={{ opacity: 0, x: 10 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: 0.5 }}
                   >
                     {apiRank === 1 ? (
                       <>
-                        <div className="flex items-center gap-1.5 mb-0.5">
-                          <motion.div animate={{ rotate: [0, 12, -8, 0] }} transition={{ duration: 2, repeat: Infinity, repeatDelay: 4 }} className="flex-shrink-0">
-                            <Trophy className="h-3.5 w-3.5 text-amber-500" />
-                          </motion.div>
-                          <p className="text-[9px] font-black text-amber-600 dark:text-amber-400 leading-tight">You&apos;re #1!</p>
+                        <div className={`flex items-center gap-1.5 px-2.5 py-1.5 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                          <Trophy className="h-3 w-3 text-amber-500 flex-shrink-0" />
+                          <p className={`text-[9px] font-semibold uppercase tracking-wide leading-tight ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>You&apos;re #1!</p>
                         </div>
-                        <p className={`text-[9px] font-medium leading-snug ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>
+                        <p className={`text-[9px] font-medium leading-snug px-2.5 py-1.5 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
                           Keep completing tasks on time to hold your crown.
                         </p>
                       </>
                     ) : tasksForNextApiRank !== null && apiRank !== null && apiRank > 1 ? (
                       <>
-                        <div className="flex items-center gap-1.5 mb-0.5">
-                          <motion.div animate={{ x: [0, 3, 0] }} transition={{ duration: 1.2, repeat: Infinity, repeatDelay: 2 }} className="flex-shrink-0">
-                            <Zap className="h-3.5 w-3.5 text-amber-500" />
-                          </motion.div>
-                          <p className="text-[9px] font-black text-amber-600 dark:text-amber-400 leading-tight">
-                            🚀 Climb to Rank #{apiRank - 1}
+                        <div className={`flex items-center gap-1.5 px-2.5 py-1.5 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                          <Zap className="h-3 w-3 text-amber-500 flex-shrink-0" />
+                          <p className={`text-[9px] font-semibold uppercase tracking-wide leading-tight truncate ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
+                            Climb to Rank #{apiRank - 1}
                           </p>
                         </div>
-                        <p className={`text-[9px] font-medium leading-snug ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>
-                          Complete <strong>{tasksForNextApiRank}</strong> more to overtake{' '}
-                          <strong>{prevRankUser?.user_name?.split(' ')[0] || 'next person'}</strong>.
+                        <p className={`text-[9px] font-medium leading-snug px-2.5 py-1.5 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                          <span className="font-semibold">{tasksForNextApiRank}</span> tasks to overtake <span className="font-semibold">{prevRankUser?.user_name?.split(' ')[0] || 'next person'}</span>.
                         </p>
                       </>
                     ) : myPending > 0 ? (
                       <>
-                        <div className="flex items-center gap-1.5 mb-0.5">
-                          <motion.div animate={{ scale: [1, 1.2, 1] }} transition={{ duration: 1.5, repeat: Infinity, repeatDelay: 3 }} className="flex-shrink-0">
-                            <Star className="h-3.5 w-3.5 text-indigo-500" />
-                          </motion.div>
-                          <p className="text-[9px] font-black text-indigo-600 dark:text-indigo-400 leading-tight">Boost your score</p>
+                        <div className={`flex items-center gap-1.5 px-2.5 py-1.5 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                          <Star className="h-3 w-3 text-indigo-500 flex-shrink-0" />
+                          <p className={`text-[9px] font-semibold uppercase tracking-wide leading-tight ${isDark ? 'text-indigo-400' : 'text-indigo-600'}`}>Boost Your Score</p>
                         </div>
-                        <p className={`text-[9px] font-medium leading-snug ${isDark ? 'text-indigo-300' : 'text-indigo-700'}`}>
-                          Complete <strong>{Math.min(tasksForTier, myPending)}</strong> more to reach <strong>{nextTierName}</strong>.
+                        <p className={`text-[9px] font-medium leading-snug px-2.5 py-1.5 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                          <span className="font-semibold">{Math.min(tasksForTier, myPending)}</span> tasks to reach <span className="font-semibold">{nextTierName}</span>.
                         </p>
                       </>
                     ) : (
-                      <p className={`text-[9px] font-semibold leading-snug ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>
-                        🎉 All tasks complete! You&apos;re on fire this month!
-                      </p>
+                      <>
+                        <div className={`flex items-center gap-1.5 px-2.5 py-1.5 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                          <Star className="h-3 w-3 text-indigo-500 flex-shrink-0" />
+                          <p className={`text-[9px] font-semibold uppercase tracking-wide leading-tight ${isDark ? 'text-indigo-400' : 'text-indigo-600'}`}>All Clear</p>
+                        </div>
+                        <p className={`text-[9px] font-medium leading-snug px-2.5 py-1.5 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                          All tasks complete. You&apos;re on fire this month!
+                        </p>
+                      </>
                     )}
                   </motion.div>
 
                   {/* Next Milestone card — flex-1 equal height */}
                   {(() => {
                     const milestones = [
-                      { score: 25, label: 'Starter', color: '#94a3b8', bg: 'rgba(148,163,184,0.1)', border: 'rgba(148,163,184,0.3)', icon: <Star className="h-3.5 w-3.5" style={{ color: '#94a3b8' }} /> },
-                      { score: 50, label: 'Rising Star', color: '#6366f1', bg: isDark ? 'rgba(99,102,241,0.1)' : '#f5f3ff', border: isDark ? 'rgba(99,102,241,0.3)' : '#c4b5fd', icon: <Star className="h-3.5 w-3.5 text-indigo-500" /> },
-                      { score: 65, label: 'Top Performer', color: '#3b82f6', bg: isDark ? 'rgba(59,130,246,0.1)' : '#eff6ff', border: isDark ? 'rgba(59,130,246,0.3)' : '#bfdbfe', icon: <Trophy className="h-3.5 w-3.5 text-blue-500" /> },
-                      { score: 85, label: 'Star Performer', color: '#F59E0B', bg: isDark ? 'rgba(245,158,11,0.1)' : '#fffbeb', border: isDark ? 'rgba(146,64,14,0.3)' : '#fde68a', icon: <Crown className="h-3.5 w-3.5 text-amber-500" /> },
-                      { score: 100, label: 'Perfect Score', color: '#1FAF5A', bg: isDark ? 'rgba(31,175,90,0.1)' : '#f0fdf4', border: isDark ? 'rgba(20,83,45,0.3)' : '#bbf7d0', icon: <Zap className="h-3.5 w-3.5 text-emerald-500" /> },
+                      { score: 25,  label: 'Starter',        color: '#6366f1', icon: <Star className="h-3 w-3 text-indigo-500" /> },
+                      { score: 50,  label: 'Rising Star',    color: '#6366f1', icon: <Star className="h-3 w-3 text-indigo-500" /> },
+                      { score: 65,  label: 'Top Performer',  color: '#6366f1', icon: <Trophy className="h-3 w-3 text-indigo-500" /> },
+                      { score: 85,  label: 'Star Performer', color: '#F59E0B', icon: <Crown className="h-3 w-3 text-amber-500" /> },
+                      { score: 100, label: 'Perfect Score',  color: '#1FAF5A', icon: <Zap className="h-3 w-3 text-emerald-500" /> },
                     ];
                     const nextMilestone = milestones.find(m => m.score > Math.round(displayScore)) || milestones[milestones.length - 1];
                     const ptsNeeded = Math.max(0, nextMilestone.score - Math.round(displayScore));
@@ -3175,34 +3157,33 @@ export default function Tasks() {
                     const achieved = ptsNeeded === 0;
                     return (
                       <motion.div
-                        className="rounded-lg p-2 border flex-1 flex flex-col justify-center"
-                        style={{ background: nextMilestone.bg, borderColor: nextMilestone.border }}
+                        className={`rounded-lg border flex-1 flex flex-col justify-center overflow-hidden ${isDark ? 'bg-slate-700/20 border-slate-700' : 'bg-slate-50 border-slate-200'}`}
                         initial={{ opacity: 0, x: 10 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: 0.62 }}
                       >
-                        <div className="flex items-center justify-between mb-0.5">
-                          <div className="flex items-center gap-1.5">
-                            <motion.div animate={{ scale: [1, 1.15, 1] }} transition={{ duration: 2, repeat: Infinity, repeatDelay: 3 }} className="flex-shrink-0">
-                              {nextMilestone.icon}
-                            </motion.div>
-                            <p className="text-[9px] font-black leading-tight" style={{ color: nextMilestone.color }}>
-                              {achieved ? 'Max Score!' : 'Next Milestone'}
+                        <div className={`flex items-center justify-between px-2.5 py-1.5 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <div className="flex-shrink-0">{nextMilestone.icon}</div>
+                            <p className={`text-[9px] font-semibold uppercase tracking-wide leading-tight truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                              {achieved ? 'Max Achieved' : 'Next Milestone'}
                             </p>
                           </div>
-                          <span className="text-[9px] font-black" style={{ color: nextMilestone.color }}>{nextMilestone.score}</span>
+                          <span className="text-[9px] font-bold tabular-nums flex-shrink-0 ml-1" style={{ color: nextMilestone.color }}>{nextMilestone.score}</span>
                         </div>
-                        <p className="text-[9px] font-semibold leading-tight mb-1" style={{ color: nextMilestone.color }}>
-                          {achieved ? '🏆 All milestones reached!' : <><strong>{nextMilestone.label}</strong> — {ptsNeeded} pts away</>}
-                        </p>
-                        <div className={`h-1 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-white/60'}`}>
-                          <motion.div
-                            className="h-full rounded-full"
-                            style={{ background: nextMilestone.color }}
-                            initial={{ width: 0 }}
-                            animate={{ width: `${progress}%` }}
-                            transition={{ duration: 0.9, ease: 'easeOut', delay: 0.7 }}
-                          />
+                        <div className="px-2.5 py-1.5">
+                          <p className={`text-[9px] font-medium leading-tight mb-1.5 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                            {achieved ? 'All milestones reached!' : <><span className="font-semibold" style={{ color: nextMilestone.color }}>{nextMilestone.label}</span> — {ptsNeeded} pts away</>}
+                          </p>
+                          <div className={`h-1 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
+                            <motion.div
+                              className="h-full rounded-full"
+                              style={{ background: nextMilestone.color }}
+                              initial={{ width: 0 }}
+                              animate={{ width: `${progress}%` }}
+                              transition={{ duration: 0.9, ease: 'easeOut', delay: 0.7 }}
+                            />
+                          </div>
                         </div>
                       </motion.div>
                     );
