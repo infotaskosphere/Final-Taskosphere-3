@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
 import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
@@ -131,11 +131,11 @@ const springPhysics = {
 
 const containerVariants = {
   hidden:  { opacity: 0 },
-  visible: { opacity: 1, transition: { staggerChildren: 0.06, delayChildren: 0.1 } },
+  visible: { opacity: 1, transition: { staggerChildren: 0.03, delayChildren: 0.05 } },
 };
 const itemVariants = {
   hidden:  { opacity: 0, y: 24 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.23, 1, 0.32, 1] } },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.25, ease: [0.23, 1, 0.32, 1] } },
   exit:    { opacity: 0, y: 12, transition: { duration: 0.3 } },
 };
 
@@ -180,7 +180,7 @@ const deadlineUrgency = (daysLeft) => {
 
 const cn = (...classes) => classes.filter(Boolean).join(' ');
 
-function LiveClock({ compact = false }) {
+const LiveClock = memo(function LiveClock({ compact = false }) {
   const [time, setTime] = useState(new Date());
   useEffect(() => {
     const id = setInterval(() => setTime(new Date()), 1000);
@@ -222,9 +222,9 @@ function LiveClock({ compact = false }) {
       <p className="text-blue-200/80 text-sm font-medium mt-1">{dateStr} · IST</p>
     </div>
   );
-}
+});
 
-function DetailModal({ onClose, headerGradient, headerIcon, headerEyebrow, headerTitle, children, footer, isDark }) {
+const DetailModal = memo(function DetailModal({ onClose, headerGradient, headerIcon, headerEyebrow, headerTitle, children, footer, isDark }) {
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', handler);
@@ -281,18 +281,18 @@ function DetailModal({ onClose, headerGradient, headerIcon, headerEyebrow, heade
       </motion.div>
     </motion.div>
   );
-}
+});
 
-function Chip({ label, color }) {
+const Chip = memo(function Chip({ label, color }) {
   return (
     <span className="inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full"
       style={{ background: `${color}18`, color }}>
       {label}
     </span>
   );
-}
+});
 
-function MetaRow({ iconBg, iconColor, icon: Icon, label, value, valueColor, isDark }) {
+const MetaRow = memo(function MetaRow({ iconBg, iconColor, icon: Icon, label, value, valueColor, isDark }) {
   return (
     <div className="flex items-center gap-3">
       <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: iconBg }}>
@@ -304,9 +304,9 @@ function MetaRow({ iconBg, iconColor, icon: Icon, label, value, valueColor, isDa
       </div>
     </div>
   );
-}
+});
 
-function NoteBlock({ label = 'Notes', text, isDark }) {
+const NoteBlock = memo(function NoteBlock({ label = 'Notes', text, isDark }) {
   if (!text) return null;
   return (
     <div className="rounded-xl p-3.5"
@@ -315,9 +315,9 @@ function NoteBlock({ label = 'Notes', text, isDark }) {
       <p className="text-sm leading-relaxed" style={{ color: isDark ? '#cbd5e1' : '#475569' }}>{text}</p>
     </div>
   );
-}
+});
 
-function FooterBtn({ onClick, color, icon: Icon, label, muted, isDark }) {
+const FooterBtn = memo(function FooterBtn({ onClick, color, icon: Icon, label, muted, isDark }) {
   if (muted) return (
     <button onClick={onClick}
       className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl active:scale-95 transition-all ml-auto"
@@ -332,9 +332,9 @@ function FooterBtn({ onClick, color, icon: Icon, label, muted, isDark }) {
       {Icon && <Icon size={12} />}{label}
     </button>
   );
-}
+});
 
-function TaskDetailModal({ task, onClose, onUpdateStatus, navigate, isDark }) {
+const TaskDetailModal = memo(function TaskDetailModal({ task, onClose, onUpdateStatus, navigate, isDark }) {
   if (!task) return null;
   const isCompleted  = task.status === 'completed';
   const isInProgress = task.status === 'in_progress';
@@ -396,9 +396,9 @@ function TaskDetailModal({ task, onClose, onUpdateStatus, navigate, isDark }) {
       </div>
     </DetailModal>
   );
-}
+});
 
-function DeadlineDetailModal({ due, onClose, navigate, isDark }) {
+const DeadlineDetailModal = memo(function DeadlineDetailModal({ due, onClose, navigate, isDark }) {
   if (!due) return null;
   const daysLeft = due.days_remaining ?? 0;
   const headerGradient =
@@ -447,9 +447,9 @@ function DeadlineDetailModal({ due, onClose, navigate, isDark }) {
       </div>
     </DetailModal>
   );
-}
+});
 
-function VisitDetailModal({ visit, onClose, navigate, isDark }) {
+const VisitDetailModal = memo(function VisitDetailModal({ visit, onClose, navigate, isDark }) {
   if (!visit) return null;
   const sc  = VISIT_STATUS_COLORS[visit.status] || VISIT_STATUS_COLORS.scheduled;
   const isT = visit.visit_date && isToday(parseISO(visit.visit_date));
@@ -506,9 +506,9 @@ function VisitDetailModal({ visit, onClose, navigate, isDark }) {
       </div>
     </DetailModal>
   );
-}
+});
 
-function TodoDetailModal({ todo, onClose, onToggle, onDelete, isDark }) {
+const TodoDetailModal = memo(function TodoDetailModal({ todo, onClose, onToggle, onDelete, isDark }) {
   if (!todo) return null;
   const isCompleted = todo.completed || todo.is_completed === true || todo.status === 'completed';
   const isOD        = todo.due_date && new Date(todo.due_date) < new Date() && !isCompleted;
@@ -556,9 +556,9 @@ function TodoDetailModal({ todo, onClose, onToggle, onDelete, isDark }) {
       </div>
     </DetailModal>
   );
-}
+});
 
-function PerformerDetailModal({ member, index, period, onClose, isDark }) {
+const PerformerDetailModal = memo(function PerformerDetailModal({ member, index, period, onClose, isDark }) {
   if (!member) return null;
   const isGold   = index === 0;
   const isSilver = index === 1;
@@ -612,9 +612,9 @@ function PerformerDetailModal({ member, index, period, onClose, isDark }) {
       </div>
     </DetailModal>
   );
-}
+});
 
-function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate, onSelect }) {
+const TaskStrip = memo(function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate, onSelect }) {
   const status       = task.status || 'pending';
   const isCompleted  = status === 'completed';
   const isInProgress = status === 'in_progress';
@@ -689,17 +689,17 @@ function TaskStrip({ task, isToMe, assignedName, onUpdateStatus, navigate, onSel
       </div>
     </motion.div>
   );
-}
+});
 
-function SectionCard({ children, className = '' }) {
+const SectionCard = memo(function SectionCard({ children, className = '' }) {
   return (
     <div className={`bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm min-w-0 w-full ${className}`}>
       {children}
     </div>
   );
-}
+});
 
-function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
+const CardHeaderRow = memo(function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
   return (
     <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700 min-w-0 gap-2">
       <div className="flex items-center gap-2.5">
@@ -719,9 +719,9 @@ function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
       {action}
     </div>
   );
-}
+});
 
-function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit, visits = [], isLoading = false, isError = false }) {
+const VisitsCard = memo(function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit, visits = [], isLoading = false, isError = false }) {
   const sorted = useMemo(() => {
     const filtered = visits.filter(v => v.assigned_to === currentUserId);
     return [...filtered].sort((a, b) => {
@@ -855,7 +855,7 @@ function VisitsCard({ isDark, navigate, currentUserId, onSelectVisit, visits = [
       )}
     </SectionCard>
   );
-}
+});
 
 export default function Dashboard() {
   const isDark = useDark();
@@ -1141,7 +1141,7 @@ export default function Dashboard() {
   );
 
   // ── Todo Actions ──────────────────────────────────────────────────────────
-  const addTodo = async () => {
+  const addTodo = useCallback(async () => {
     if (!newTodo.trim()) return;
     try {
       const res = await fetch(`${API_BASE}/todos`, {
@@ -1167,9 +1167,9 @@ export default function Dashboard() {
     } catch {
       toast.error('Network error');
     }
-  };
+  }, [newTodo, selectedDueDate, API_BASE, getAuthHeader, apiFetch]);
 
-  const handleToggleTodo = async (id) => {
+  const handleToggleTodo = useCallback(async (id) => {
     const todo = todosRaw.find(t => (t._id || t.id) === id);
     if (!todo) return;
     const nowCompleted = !(todo.is_completed || todo.status === 'completed');
@@ -1199,9 +1199,9 @@ export default function Dashboard() {
         )
       );
     }
-  };
+  }, [todosRaw, API_BASE, getAuthHeader]);
 
-  const handleDeleteTodo = async (id) => {
+  const handleDeleteTodo = useCallback(async (id) => {
     setTodosRaw(prev => prev.filter(t => (t._id || t.id) !== id));
     try {
       await fetch(`${API_BASE}/todos/${id}`, {
@@ -1214,10 +1214,10 @@ export default function Dashboard() {
       const data = await apiFetch('/todos');
       if (Array.isArray(data)) setTodosRaw(data);
     }
-  };
+  }, [apiFetch, API_BASE, getAuthHeader]);
 
   // ── Task Status Update ────────────────────────────────────────────────────
-  const updateAssignedTaskStatus = async (taskId, newStatus) => {
+  const updateAssignedTaskStatus = useCallback(async (taskId, newStatus) => {
     setTasks(prev =>
       prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t)
     );
@@ -1237,10 +1237,10 @@ export default function Dashboard() {
     } catch {
       toast.error('Network error');
     }
-  };
+  }, [apiFetch, API_BASE, getAuthHeader]);
 
   // ── Punch In / Out ────────────────────────────────────────────────────────
-  const handlePunchAction = async (action) => {
+  const handlePunchAction = useCallback(async (action) => {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/attendance`, {
@@ -1268,10 +1268,10 @@ export default function Dashboard() {
       toast.error('Network error');
     }
     setLoading(false);
-  };
+  }, [apiFetch, API_BASE, getAuthHeader]);
 
   // ── Duration Helper ───────────────────────────────────────────────────────
-  const getTodayDuration = () => {
+  const getTodayDuration = useCallback(() => {
     if (!todayAttendance?.punch_in) return '0h 0m';
     if (todayAttendance.punch_out) {
       const mins = todayAttendance.duration_minutes || 0;
@@ -1283,7 +1283,7 @@ export default function Dashboard() {
     );
     const diffMs = Date.now() - punchInDate.getTime();
     return `${Math.floor(diffMs / 3600000)}h ${Math.floor((diffMs % 3600000) / 60000)}m`;
-  };
+  }, [todayAttendance]);
 
   const myCompletedTasks = useMemo(
     () => myTasks.filter(t => t.status === 'completed').length,
@@ -1292,9 +1292,11 @@ export default function Dashboard() {
   const completionRate =
     myTaskCount > 0 ? Math.round((myCompletedTasks / myTaskCount) * 100) : 0;
 
+  const isOverdueDate = useCallback((dueDate) => dueDate && new Date(dueDate) < new Date(), []);
+
   const showTaskSection =
     isAdmin || tasksAssignedToMe.length > 0 || tasksAssignedByMe.length > 0;
-  const isOverdue = (dueDate) => dueDate && new Date(dueDate) < new Date();
+  // isOverdue replaced by memoized isOverdueDate above
 
   const upcomingReminders = useMemo(() =>
     (Array.isArray(reminders) ? reminders : [])
@@ -1304,7 +1306,7 @@ export default function Dashboard() {
     [reminders]
   );
 
-  const getStatusStyle = (status) => {
+  const getStatusStyle = useCallback((status) => {
     const styles = {
       completed:   {
         bg:   'bg-emerald-100 dark:bg-emerald-900/40',
@@ -1323,9 +1325,9 @@ export default function Dashboard() {
       },
     };
     return styles[status] || styles.pending;
-  };
+  }, []);
 
-  const getPriorityStyle = (priority) => {
+  const getPriorityStyle = useCallback((priority) => {
     const styles = {
       high: {
         bg:     'bg-red-50 dark:bg-red-900/20',
@@ -1344,29 +1346,29 @@ export default function Dashboard() {
       },
     };
     return styles[priority?.toLowerCase()] || styles.medium;
-  };
+  }, []);
 
-  const formatToLocalTime = (dateString) => {
+  const formatToLocalTime = useCallback((dateString) => {
     if (!dateString) return '--:--';
     const d = new Date(
       dateString.endsWith('Z') ? dateString : dateString + 'Z'
     );
     return format(d, 'hh:mm a');
-  };
+  }, []);
 
-  const getGreeting = () => {
+  const getGreeting = useCallback(() => {
     const h = new Date().getHours();
     if (h < 12) return 'Good Morning';
     if (h < 17) return 'Good Afternoon';
     if (h < 21) return 'Good Evening';
     return 'Working Late';
-  };
+  }, []);
 
-  const getGreetingIcon = () => {
+  const getGreetingIcon = useCallback(() => {
     const h = new Date().getHours();
     if (h < 21) return Sun;
     return Moon;
-  };
+  }, []);
 
   const RankingItem = React.memo(({ member, index, period }) => {
     const isGold   = index === 0;
@@ -2239,7 +2241,7 @@ export default function Dashboard() {
                             className={`flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border transition-all cursor-pointer ${
                               todo.completed
                                 ? isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'
-                                : !todo.completed && isOverdue(todo.due_date)
+                                : !todo.completed && isOverdueDate(todo.due_date)
                                   ? isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50/70 border-red-200'
                                 : isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'
                             }`}>
@@ -2251,12 +2253,12 @@ export default function Dashboard() {
                               <div className="flex-1 min-w-0">
                                 <span className={`block text-sm truncate ${todo.completed ? 'line-through text-slate-400 dark:text-slate-600' : isDark ? 'text-slate-100' : 'text-slate-800'}`}>
                                   {todo.title}
-                                  {!todo.completed && isOverdue(todo.due_date) && (
+                                  {!todo.completed && isOverdueDate(todo.due_date) && (
                                     <span className="ml-1.5 px-1.5 py-0.5 text-[10px] font-semibold bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400 rounded">Overdue</span>
                                   )}
                                 </span>
                                 {todo.due_date && (
-                                  <p className={`text-[10px] mt-0.5 ${isOverdue(todo.due_date) ? 'text-red-500 font-medium' : isDark ? 'text-amber-400' : 'text-amber-500'}`}>
+                                  <p className={`text-[10px] mt-0.5 ${isOverdueDate(todo.due_date) ? 'text-red-500 font-medium' : isDark ? 'text-amber-400' : 'text-amber-500'}`}>
                                     Due: {format(new Date(todo.due_date), 'MMM d, yyyy')}
                                   </p>
                                 )}
