@@ -1052,6 +1052,11 @@ export default function ActionCenter() {
               </p>
             </div>
             <div className="flex gap-2 flex-wrap items-center">
+              <button onClick={() => { window.location.href = "/settings/email"; }}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold border transition-all active:scale-95"
+                style={{ backgroundColor: "rgba(255,255,255,0.10)", borderColor: "rgba(255,255,255,0.22)", color: "#ffffff" }}>
+                <Mail className="w-3.5 h-3.5" /> Email Settings
+              </button>
               <button onClick={handleScanFresh} disabled={scanning || loading}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold border transition-all active:scale-95"
                 style={{ backgroundColor: "rgba(255,255,255,0.15)", borderColor: "rgba(255,255,255,0.25)", color: "#ffffff" }}>
@@ -1228,12 +1233,20 @@ export default function ActionCenter() {
                 Connect an email account and run a scan to extract due dates, hearings, and meetings.
               </p>
             </div>
-            <button onClick={handleScanFresh} disabled={scanning}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white active:scale-95 transition-all"
-              style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-              {scanning ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-              Scan Email Accounts
-            </button>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <button onClick={() => { window.location.href = "/settings/email"; }}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold border active:scale-95 transition-all"
+                style={{ color: COLORS.mediumBlue, borderColor: COLORS.mediumBlue + "40", backgroundColor: isDark ? COLORS.mediumBlue + "15" : COLORS.mediumBlue + "08" }}>
+                <Mail className="w-4 h-4" />
+                Connect Email
+              </button>
+              <button onClick={handleScanFresh} disabled={scanning}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white active:scale-95 transition-all"
+                style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                {scanning ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                Scan Email Accounts
+              </button>
+            </div>
           </div>
         </motion.div>
       ) : processed.length === 0 ? (
