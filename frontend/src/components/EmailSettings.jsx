@@ -356,10 +356,12 @@ function ConnectForm({ provider, onSuccess, onCancel, isDark }) {
   const [linkedPage,  setLinkedPage]  = useState("all");
   const [autoSync,    setAutoSync]    = useState(false);
   const [showPass,    setShowPass]    = useState(false);
-  const [showSteps,   setShowSteps]   = useState(true);
+  const [showSteps,   setShowSteps]   = useState(provider.id !== "gmail");
   const [loading,     setLoading]     = useState(false);
+  const [oauthLoading,setOauthLoading]= useState(false);
   const [authError,   setAuthError]   = useState(false);
   const emailRef = useRef(null);
+  const supportsOAuth = provider.id === "gmail";
 
   const LINKED_PAGE_OPTIONS = [
     { value: "all",      label: "All Pages",    icon: "🌐" },
@@ -396,6 +398,27 @@ function ConnectForm({ provider, onSuccess, onCancel, isDark }) {
     } finally { setLoading(false); }
   };
 
+  const handleOAuthConnect = async () => {
+    setOauthLoading(true);
+    try {
+      const res = await api.get("/email/oauth/google/start", {
+        params: {
+          linked_page: linkedPage,
+          auto_sync: autoSync,
+          label: label || undefined,
+        },
+      });
+      if (!res.data?.auth_url) throw new Error("Google OAuth URL was not returned");
+      window.location.href = res.data.auth_url;
+    } catch (err) {
+      const msg = err?.response?.data?.detail || "Google one-click connection is not configured yet. Use App Password fallback.";
+      toast.error(msg);
+      setShowSteps(true);
+    } finally {
+      setOauthLoading(false);
+    }
+  };
+
   return (
     <SectionCard>
       <div className="px-5 py-4 flex items-center gap-3 border-b border-slate-100 dark:border-slate-700"
@@ -404,7 +427,9 @@ function ConnectForm({ provider, onSuccess, onCancel, isDark }) {
           style={{ backgroundColor: provider.color }}>{provider.icon}</div>
         <div className="flex-1">
           <p className="font-bold text-sm" style={{ color: isDark ? D.text : "#1e293b" }}>Connect {provider.label}</p>
-          <p className="text-xs" style={{ color: isDark ? D.muted : "#64748b" }}>IMAP · App Password · No OAuth needed</p>
+          <p className="text-xs" style={{ color: isDark ? D.muted : "#64748b" }}>
+            {supportsOAuth ? "Recommended: Google sign-in · App Password fallback" : "IMAP · App Password"}
+          </p>
         </div>
         {provider.app_password_url && (
           <a href={provider.app_password_url} target="_blank" rel="noopener noreferrer"
@@ -420,6 +445,35 @@ function ConnectForm({ provider, onSuccess, onCancel, isDark }) {
             <GmailChecklistBanner onDismiss={() => setAuthError(false)} isDark={isDark} />
           )}
         </AnimatePresence>
+
+        {supportsOAuth && (
+          <div className="rounded-2xl border overflow-hidden"
+            style={{ borderColor: isDark ? "#14532d" : "#bbf7d0", background: isDark ? "rgba(31,175,90,0.08)" : "#f0fdf4" }}>
+            <div className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center font-black text-sm shadow-sm"
+                  style={{ color: provider.color }}>G</div>
+                <div>
+                  <p className="text-sm font-bold" style={{ color: isDark ? D.text : "#14532d" }}>
+                    Connect Gmail directly with Google
+                  </p>
+                  <p className="text-xs mt-0.5" style={{ color: isDark ? "#86efac" : "#166534" }}>
+                    No app password needed. You approve read-only Gmail access on Google’s secure consent screen.
+                  </p>
+                </div>
+              </div>
+              <Button onClick={handleOAuthConnect} disabled={oauthLoading}
+                className="h-10 rounded-xl text-sm font-bold text-white shrink-0"
+                style={{ background: oauthLoading ? "#9CA3AF" : `linear-gradient(135deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})` }}>
+                {oauthLoading ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Opening Google…</> : <><Shield className="w-4 h-4 mr-2" />Connect with Google</>}
+              </Button>
+            </div>
+            <div className="px-4 pb-3 text-[11px]" style={{ color: isDark ? D.muted : "#64748b" }}>
+              App Password is still available as a manual fallback if Google OAuth is not configured on the server.
+            </div>
+          </div>
+        )}
+
         {provider.steps.length > 0 && (
           <div className="rounded-xl overflow-hidden border" style={{ borderColor: isDark ? D.border : "#e2e8f0" }}>
             <button onClick={() => setShowSteps(s => !s)}
@@ -468,7 +522,7 @@ function ConnectForm({ provider, onSuccess, onCancel, isDark }) {
           </div>
           <div>
             <label className="block text-xs font-semibold mb-1.5" style={{ color: isDark ? D.muted : "#374151" }}>
-              App Password <span className="font-normal text-slate-400">(not your login password)</span>
+              {supportsOAuth ? "Manual App Password Fallback" : "App Password"} <span className="font-normal text-slate-400">(not your login password)</span>
             </label>
             <div className="relative">
               <input type={showPass ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)}
@@ -561,7 +615,9 @@ function ConnectForm({ provider, onSuccess, onCancel, isDark }) {
           style={{ backgroundColor: isDark ? "rgba(31,175,90,0.08)" : "#f0fdf4", borderColor: isDark ? "#14532d" : "#bbf7d0" }}>
           <Shield className="w-4 h-4 text-emerald-500 flex-shrink-0" />
           <p className="text-xs text-emerald-600 dark:text-emerald-400">
-            Password is stored securely. We only read email subjects &amp; bodies for event extraction — we never send or modify anything.
+            {supportsOAuth
+              ? "Google OAuth uses read-only Gmail access. Manual app passwords are used only for IMAP scanning."
+              : "Password is stored securely. We only read email subjects & bodies for event extraction — we never send or modify anything."}
           </p>
         </div>
       </div>
@@ -2172,6 +2228,26 @@ export default function EmailSettings() {
 
   useEffect(() => { loadConnections(); }, [loadConnections]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const emailStatus = params.get("email");
+    if (!emailStatus) return;
+
+    if (emailStatus === "connected") {
+      toast.success("Gmail connected successfully");
+      loadConnections();
+    } else if (emailStatus === "denied") {
+      toast.error("Google connection was cancelled");
+    } else if (emailStatus === "error") {
+      toast.error("Google email connection failed. Check OAuth redirect URI and scopes.");
+    }
+
+    params.delete("email");
+    params.delete("reason");
+    const clean = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}`;
+    window.history.replaceState({}, "", clean);
+  }, [loadConnections]);
+
   const handleDisconnect = async (emailAddress) => {
     if (!window.confirm(`Disconnect ${emailAddress}? Events already imported will remain.`)) return;
     try {
@@ -2490,10 +2566,16 @@ export default function EmailSettings() {
                     <div className="p-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
                       {QUICK_PROVIDERS.map(prov => (
                         <button key={prov.id} onClick={() => { setActiveForm(prov.id); setShowAddOptions(false); }}
-                          className="flex flex-col items-center gap-2.5 p-4 rounded-xl border-2 border-transparent transition-all active:scale-95"
+                          className="relative flex flex-col items-center gap-2.5 p-4 rounded-xl border-2 border-transparent transition-all active:scale-95"
                           style={{ backgroundColor: isDark ? prov.color + "15" : prov.color + "08" }}
                           onMouseEnter={e => e.currentTarget.style.borderColor = prov.color + "60"}
                           onMouseLeave={e => e.currentTarget.style.borderColor = "transparent"}>
+                          {prov.id === "gmail" && (
+                            <span className="absolute top-2 right-2 text-[9px] font-black px-1.5 py-0.5 rounded-full"
+                              style={{ backgroundColor: isDark ? "rgba(31,175,90,0.18)" : "#dcfce7", color: COLORS.emeraldGreen }}>
+                              OAuth
+                            </span>
+                          )}
                           <div className="w-12 h-12 rounded-xl flex items-center justify-center text-lg font-black text-white"
                             style={{ backgroundColor: prov.color }}>{prov.icon}</div>
                           <span className="text-xs font-semibold text-center leading-tight"
