@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import useDark from '../hooks/useDark';
 import { useAuth } from '../contexts/AuthContext';
@@ -34,6 +34,23 @@ import {
   Loader2, Mail, Send, Trophy, Medal, Star, Zap, Crown, ChevronsUpDown,
 } from 'lucide-react';
 import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
+
+
+// ── Tasks session cache (2-minute TTL) ───────────────────────────────────────
+const TASKS_CACHE_TTL = 2 * 60 * 1000;
+const TASKS_CACHE_KEY = 'tasks_cache_v1';
+const getTasksCache = () => {
+  try {
+    const raw = sessionStorage.getItem(TASKS_CACHE_KEY);
+    if (!raw) return null;
+    const { data, ts } = JSON.parse(raw);
+    if (Date.now() - ts > TASKS_CACHE_TTL) { sessionStorage.removeItem(TASKS_CACHE_KEY); return null; }
+    return data;
+  } catch { return null; }
+};
+const setTasksCache = (data) => {
+  try { sessionStorage.setItem(TASKS_CACHE_KEY, JSON.stringify({ data, ts: Date.now() })); } catch {}
+};
 
 // ─── API Helpers ─────────────────────────────────────────────────────────────
 const API_BASE = api.defaults.baseURL;
@@ -219,7 +236,8 @@ const EMPTY_FORM = {
 // ═══════════════════════════════════════════════════════════════════════════════
 // MetricCard — matches Dashboard card design exactly
 // ═══════════════════════════════════════════════════════════════════════════════
-const MetricCard = ({ label, value, sub, accent, icon: Icon, active, onClick, progress, isDark }) => (
+const MetricCard = memo(function MetricCard({ label, value, sub, accent, icon: Icon, active, onClick, progress, isDark }) {
+  return (
   <motion.div
     whileHover={{ y: -3, transition: springPhysics.card }}
     whileTap={{ scale: 0.985 }}
@@ -267,12 +285,14 @@ const MetricCard = ({ label, value, sub, accent, icon: Icon, active, onClick, pr
       )}
     </div>
   </motion.div>
-);
+  );
+});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TeamTaskCard — matches other MetricCards exactly, proper alignment
 // ═══════════════════════════════════════════════════════════════════════════════
-const TeamTaskCard = ({ stats, hasCrossVisibility, usersLoading, filterTeamOnly, setFilterTeamOnly, setFilterAssignee, setShowMyTasksOnly, teamTaskBreakdown, isDark }) => (
+const TeamTaskCard = memo(function TeamTaskCard({ stats, hasCrossVisibility, usersLoading, filterTeamOnly, setFilterTeamOnly, setFilterAssignee, setShowMyTasksOnly, teamTaskBreakdown, isDark }) {
+  return (
   <motion.div
     whileHover={{ y: -3, transition: springPhysics.card }}
     whileTap={{ scale: 0.985 }}
@@ -355,12 +375,13 @@ const TeamTaskCard = ({ stats, hasCrossVisibility, usersLoading, filterTeamOnly,
       </div>
     </div>
   </motion.div>
-);
+  );
+});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TaskRow — unchanged logic, same compact list row
 // ═══════════════════════════════════════════════════════════════════════════════
-const TaskRow = ({
+const TaskRow = memo(function TaskRow({
   task, index, isOverdue, statusStyle, priorityStyle, stripeColor,
   getUserName, getClientName, getRelativeDueDate, getChecklistProgress,
   parseChecklist, taskChecklists, toggleChecklistItem,
@@ -591,12 +612,12 @@ const TaskRow = ({
       </div>
     </motion.div>
   );
-};
+});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // BoardCard — unchanged
 // ═══════════════════════════════════════════════════════════════════════════════
-const BoardCard = ({
+const BoardCard = memo(function BoardCard({
   task, index, isOverdue, stripeColor, statusStyle, priorityStyle,
   getUserName, getClientName, getRelativeDueDate, getChecklistProgress,
   parseChecklist, taskChecklists, toggleChecklistItem,
@@ -729,7 +750,7 @@ const BoardCard = ({
       </div>
     </motion.div>
   );
-};
+});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Main Tasks Component
@@ -886,6 +907,18 @@ export default function Tasks() {
     };
 
     const loadAll = async () => {
+      // Serve from cache first (instant revisit) then background-refresh
+      const cached = getTasksCache();
+      if (cached) {
+        if (Array.isArray(cached.tasks)) setTasks(cached.tasks);
+        if (Array.isArray(cached.users)) { setUsers(cached.users); setUsersLoading(false); }
+        if (Array.isArray(cached.clients)) setClients(cached.clients);
+        if (cached.ranking) { setMyRanking(cached.ranking); setRankingsLoaded(true); }
+        setDataLoading(false);
+        // Silently background-refresh so data stays fresh
+        setTimeout(() => loadAll(), 150);
+        return;
+      }
       setDataLoading(true);
       // ── All 4 API calls fire simultaneously — no sequential waterfalls ──
       const [tasksResult, usersResult, clientsResult, rankResult] = await Promise.allSettled([
@@ -923,8 +956,16 @@ export default function Tasks() {
         const rankData = rankResult.value;
         if (Array.isArray(rankData) && rankData.length > 0) {
           const mine = rankData.find(r => r.user_id === user?.id) || rankData[0];
-          setMyRanking({ ...mine, totalUsers: rankData.length, rankings: rankData });
+          const ranking = { ...mine, totalUsers: rankData.length, rankings: rankData };
+          setMyRanking(ranking);
           setRankingsLoaded(true);
+          // Cache everything for fast revisit
+          setTasksCache({
+            tasks: tasksResult.status === 'fulfilled' && Array.isArray(tasksResult.value) ? tasksResult.value : [],
+            users: usersResult.status === 'fulfilled' && Array.isArray(usersResult.value) ? usersResult.value : [],
+            clients: clientsResult.status === 'fulfilled' && Array.isArray(clientsResult.value) ? clientsResult.value : [],
+            ranking,
+          });
         }
       } else {
         console.error('Tasks ranking fetch error:', rankResult.reason);
@@ -2540,38 +2581,78 @@ export default function Tasks() {
 
         return (
           <motion.div variants={itemVariants}>
-            <div className={`rounded-2xl border overflow-hidden ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-200'}`}
-              style={{ boxShadow: `0 2px 16px ${scoreColor}18` }}>
+            <div
+              className={`rounded-2xl border overflow-hidden ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-200'}`}
+              style={{ boxShadow: `0 4px 24px ${scoreColor}22` }}
+            >
+              {/* ── Animated top accent bar ── */}
+              <motion.div
+                className="h-1 w-full rounded-t-2xl"
+                style={{ background: `linear-gradient(90deg, ${scoreColor}, ${badgeColor}, ${COLORS.mediumBlue})` }}
+                initial={{ scaleX: 0, originX: 0 }}
+                animate={{ scaleX: 1 }}
+                transition={{ duration: 0.8, ease: 'easeOut', delay: 0.1 }}
+              />
+
               <div className="p-4 flex flex-col lg:flex-row gap-5">
 
                 {/* ── Left: Score badge + rank ── */}
                 <div className="flex items-center gap-4 lg:w-56 flex-shrink-0">
+                  {/* Animated score ring */}
                   <div className="relative flex-shrink-0">
-                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
-                      style={{ background: `${scoreColor}18`, border: `2px solid ${scoreColor}44` }}>
-                      {apiRank === 1 ? <Crown className="h-7 w-7" style={{ color: scoreColor }} />
-                        : apiRank !== null && apiRank <= 3 ? <Medal className="h-7 w-7" style={{ color: scoreColor }} />
-                        : <Trophy className="h-7 w-7" style={{ color: scoreColor }} />}
-                    </div>
+                    <motion.div
+                      className="w-16 h-16 rounded-2xl flex items-center justify-center"
+                      style={{ background: `${scoreColor}18`, border: `2px solid ${scoreColor}44` }}
+                      initial={{ scale: 0.5, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ type: 'spring', stiffness: 260, damping: 18, delay: 0.15 }}
+                    >
+                      <motion.div
+                        animate={{ rotate: [0, -8, 8, -4, 4, 0] }}
+                        transition={{ duration: 1.2, ease: 'easeInOut', delay: 0.5 }}
+                      >
+                        {apiRank === 1 ? <Crown className="h-8 w-8" style={{ color: scoreColor }} />
+                          : apiRank !== null && apiRank <= 3 ? <Medal className="h-8 w-8" style={{ color: scoreColor }} />
+                          : <Trophy className="h-8 w-8" style={{ color: scoreColor }} />}
+                      </motion.div>
+                    </motion.div>
                     {apiRank !== null && (
-                      <span className="absolute -top-1.5 -right-1.5 text-[10px] font-black px-1.5 py-0.5 rounded-full"
-                        style={{ background: rankColor, color: '#fff' }}>
+                      <motion.span
+                        className="absolute -top-1.5 -right-1.5 text-[10px] font-black px-1.5 py-0.5 rounded-full"
+                        style={{ background: rankColor, color: '#fff' }}
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                        transition={{ type: 'spring', stiffness: 400, damping: 15, delay: 0.4 }}
+                      >
                         #{apiRank}
-                      </span>
+                      </motion.span>
                     )}
                   </div>
+
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Performance</p>
-                    <p className="text-xl font-black leading-tight" style={{ color: scoreColor }}>
+                    {/* Animated score count-up */}
+                    <motion.p
+                      className="text-2xl font-black leading-tight"
+                      style={{ color: scoreColor }}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.4, delay: 0.2 }}
+                    >
                       {Math.round(displayScore)}<span className="text-sm font-semibold text-slate-400">/100</span>
-                    </p>
+                    </motion.p>
                     {apiRank !== null && totalUsers !== null && (
                       <p className="text-[10px] font-semibold text-slate-400 mb-0.5">Rank {apiRank}/{totalUsers}</p>
                     )}
-                    <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full"
-                      style={{ background: `${badgeColor}18`, color: badgeColor }}>
+                    <motion.span
+                      className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full"
+                      style={{ background: `${badgeColor}18`, color: badgeColor }}
+                      initial={{ opacity: 0, x: -8 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ duration: 0.35, delay: 0.35 }}
+                    >
                       <Star className="h-2.5 w-2.5" /> {displayBadge}
-                    </span>
+                    </motion.span>
                   </div>
                 </div>
 
@@ -2582,37 +2663,86 @@ export default function Tasks() {
                 <div className="flex-1 min-w-0">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2.5">Score Breakdown</p>
                   <div className="flex items-center gap-3 mb-3">
-                    <div className="relative w-10 h-10 flex-shrink-0">
-                      <svg viewBox="0 0 44 44" className="w-10 h-10 -rotate-90">
+                    {/* SVG donut with animated stroke */}
+                    <div className="relative w-12 h-12 flex-shrink-0">
+                      <svg viewBox="0 0 44 44" className="w-12 h-12 -rotate-90">
                         <circle cx="22" cy="22" r="17" strokeWidth="4" fill="none"
                           stroke={isDark ? '#334155' : '#e2e8f0'} />
-                        <circle cx="22" cy="22" r="17" strokeWidth="4" fill="none"
-                          strokeDasharray={`${(displayScore / 100) * 106.8} 106.8`}
-                          strokeLinecap="round" stroke={scoreColor} />
+                        <motion.circle
+                          cx="22" cy="22" r="17" strokeWidth="4" fill="none"
+                          strokeLinecap="round" stroke={scoreColor}
+                          initial={{ strokeDasharray: '0 106.8' }}
+                          animate={{ strokeDasharray: `${(displayScore / 100) * 106.8} 106.8` }}
+                          transition={{ duration: 1.1, ease: 'easeOut', delay: 0.3 }}
+                        />
                       </svg>
-                      <span className="absolute inset-0 flex items-center justify-center text-[9px] font-black"
-                        style={{ color: scoreColor }}>{Math.round(displayScore)}</span>
+                      <motion.span
+                        className="absolute inset-0 flex items-center justify-center text-[10px] font-black"
+                        style={{ color: scoreColor }}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: 0.6 }}
+                      >
+                        {Math.round(displayScore)}
+                      </motion.span>
                     </div>
-                    <div className="flex-1 space-y-1.5">
+
+                    <div className="flex-1 space-y-2">
                       {[
                         { label: 'Task Completion', val: apiScore !== null ? (myRanking.task_completion_percent ?? completionPct) : completionPct, color: COLORS.mediumBlue },
-                        { label: 'Task Health', val: apiAttendance !== null ? apiAttendance : healthPct, color: COLORS.emeraldGreen },
-                        { label: 'On-Time Rate', val: apiScore !== null ? (myRanking.todo_ontime_percent ?? onTimeRate) : onTimeRate, color: COLORS.amber },
-                      ].map(({ label, val, color }) => (
+                        { label: 'Task Health',     val: apiAttendance !== null ? apiAttendance : healthPct, color: COLORS.emeraldGreen },
+                        { label: 'On-Time Rate',    val: apiScore !== null ? (myRanking.todo_ontime_percent ?? onTimeRate) : onTimeRate, color: COLORS.amber },
+                      ].map(({ label, val, color }, i) => (
                         <div key={label} className="flex items-center gap-2">
                           <span className="text-[9px] w-24 flex-shrink-0 font-medium text-slate-400">{label}</span>
-                          <div className={`flex-1 h-1 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-                            <motion.div className="h-full rounded-full"
+                          <div className={`flex-1 h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                            <motion.div
+                              className="h-full rounded-full"
                               style={{ background: color }}
                               initial={{ width: 0 }}
                               animate={{ width: `${Math.min(val ?? 0, 100)}%` }}
-                              transition={{ duration: 0.6, ease: 'easeOut' }} />
+                              transition={{ duration: 0.8, ease: 'easeOut', delay: 0.3 + i * 0.12 }}
+                            />
                           </div>
-                          <span className="text-[9px] font-bold w-7 text-right" style={{ color }}>{Math.round(val ?? 0)}%</span>
+                          <motion.span
+                            className="text-[9px] font-bold w-7 text-right"
+                            style={{ color }}
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            transition={{ delay: 0.6 + i * 0.1 }}
+                          >
+                            {Math.round(val ?? 0)}%
+                          </motion.span>
                         </div>
                       ))}
                     </div>
                   </div>
+
+                  {/* Motivational message below bars */}
+                  <motion.div
+                    className={`mt-1 rounded-xl px-3 py-2 text-[10px] font-semibold flex items-center gap-2 ${
+                      displayScore >= 85
+                        ? isDark ? 'bg-emerald-900/20 text-emerald-300' : 'bg-emerald-50 text-emerald-700'
+                        : displayScore >= 65
+                        ? isDark ? 'bg-amber-900/20 text-amber-300' : 'bg-amber-50 text-amber-700'
+                        : isDark ? 'bg-red-900/20 text-red-300' : 'bg-red-50 text-red-700'
+                    }`}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.8 }}
+                  >
+                    <motion.span
+                      animate={{ scale: [1, 1.3, 1] }}
+                      transition={{ duration: 1.5, repeat: Infinity, repeatDelay: 3 }}
+                    >
+                      {displayScore >= 85 ? '🔥' : displayScore >= 65 ? '⚡' : '💪'}
+                    </motion.span>
+                    {displayScore >= 85
+                      ? 'Outstanding work! You're leading the team.'
+                      : displayScore >= 65
+                      ? 'Good progress! A few more completions and you hit Star Performer.'
+                      : 'Keep pushing — every completed task boosts your score!'}
+                  </motion.div>
                 </div>
 
                 {/* Divider */}
@@ -2625,7 +2755,12 @@ export default function Tasks() {
                   </p>
 
                   {/* Working days card */}
-                  <div className={`rounded-xl p-3 border ${isDark ? 'bg-blue-900/20 border-blue-800/40' : 'bg-blue-50 border-blue-100'}`}>
+                  <motion.div
+                    className={`rounded-xl p-3 border ${isDark ? 'bg-blue-900/20 border-blue-800/40' : 'bg-blue-50 border-blue-100'}`}
+                    initial={{ opacity: 0, x: 12 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.4 }}
+                  >
                     <div className="flex items-center gap-1.5 mb-1">
                       <Calendar className="h-3 w-3 text-blue-500 flex-shrink-0" />
                       <p className="text-[10px] font-bold text-blue-600 dark:text-blue-300 uppercase tracking-wide">
@@ -2639,13 +2774,23 @@ export default function Tasks() {
                         <>All tasks cleared! Great work this month. 🎉</>
                       )}
                     </p>
-                  </div>
+                  </motion.div>
 
                   {/* Rank-climb hint when API data available */}
                   {tasksForNextApiRank !== null && apiRank !== null && apiRank > 1 ? (
-                    <div className={`rounded-xl p-3 border ${isDark ? 'bg-amber-900/20 border-amber-800/40' : 'bg-amber-50 border-amber-100'}`}>
+                    <motion.div
+                      className={`rounded-xl p-3 border ${isDark ? 'bg-amber-900/20 border-amber-800/40' : 'bg-amber-50 border-amber-100'}`}
+                      initial={{ opacity: 0, x: 12 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.55 }}
+                    >
                       <div className="flex items-center gap-1.5 mb-1">
-                        <Zap className="h-3 w-3 text-amber-500 flex-shrink-0" />
+                        <motion.div
+                          animate={{ x: [0, 3, 0] }}
+                          transition={{ duration: 1.2, repeat: Infinity, repeatDelay: 2 }}
+                        >
+                          <Zap className="h-3 w-3 text-amber-500 flex-shrink-0" />
+                        </motion.div>
                         <p className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wide">
                           🚀 Climb to Rank #{apiRank - 1}
                         </p>
@@ -2654,19 +2799,38 @@ export default function Tasks() {
                         Complete <strong>{tasksForNextApiRank}</strong> more task{tasksForNextApiRank !== 1 ? 's' : ''} to overtake{' '}
                         <strong>{prevRankUser?.user_name?.split(' ')[0] || 'the next person'}</strong> and reach Rank #{apiRank - 1}.
                       </p>
-                    </div>
+                    </motion.div>
                   ) : apiRank === 1 ? (
-                    <div className={`rounded-xl p-3 border ${isDark ? 'bg-amber-900/20 border-amber-800/40' : 'bg-amber-50 border-amber-100'}`}>
-                      <p className="text-[11px] font-semibold leading-relaxed" style={{ color: isDark ? '#fde68a' : '#92400e' }}>
+                    <motion.div
+                      className={`rounded-xl p-3 border ${isDark ? 'bg-amber-900/20 border-amber-800/40' : 'bg-amber-50 border-amber-100'}`}
+                      initial={{ opacity: 0, x: 12 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.55 }}
+                    >
+                      <motion.p
+                        className="text-[11px] font-semibold leading-relaxed"
+                        style={{ color: isDark ? '#fde68a' : '#92400e' }}
+                        animate={{ scale: [1, 1.02, 1] }}
+                        transition={{ duration: 2, repeat: Infinity, repeatDelay: 3 }}
+                      >
                         🏆 You're #1! Keep completing tasks on time to hold your crown.
-                      </p>
-                    </div>
+                      </motion.p>
+                    </motion.div>
                   ) : (
-                    /* Score-tier improvement hint (local) */
                     myPending > 0 && localScore < 100 && (
-                      <div className={`rounded-xl p-3 border ${isDark ? 'bg-emerald-900/20 border-emerald-800/40' : 'bg-emerald-50 border-emerald-100'}`}>
+                      <motion.div
+                        className={`rounded-xl p-3 border ${isDark ? 'bg-emerald-900/20 border-emerald-800/40' : 'bg-emerald-50 border-emerald-100'}`}
+                        initial={{ opacity: 0, x: 12 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.55 }}
+                      >
                         <div className="flex items-center gap-1.5 mb-1">
-                          <Zap className="h-3 w-3 text-emerald-500 flex-shrink-0" />
+                          <motion.div
+                            animate={{ rotate: [0, 15, -15, 0] }}
+                            transition={{ duration: 1.5, repeat: Infinity, repeatDelay: 3 }}
+                          >
+                            <Zap className="h-3 w-3 text-emerald-500 flex-shrink-0" />
+                          </motion.div>
                           <p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">
                             Boost your score
                           </p>
@@ -2674,7 +2838,7 @@ export default function Tasks() {
                         <p className="text-[11px] font-medium leading-relaxed" style={{ color: isDark ? '#6ee7b7' : '#065f46' }}>
                           Complete <strong>{Math.min(tasksForTier, myPending)}</strong> more task{Math.min(tasksForTier, myPending) !== 1 ? 's' : ''} to reach <strong>{nextTierName}</strong> status.
                         </p>
-                      </div>
+                      </motion.div>
                     )
                   )}
                 </div>
