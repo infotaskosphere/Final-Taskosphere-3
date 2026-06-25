@@ -269,22 +269,141 @@ def _extract_time(text: str) -> Optional[str]:
     return f"{hour:02d}:{minute:02d}"
 
 
+# ─── Smart Email Filter ───────────────────────────────────────────────────────
+# Emails that should NEVER appear in Action Center — transactional/noise emails.
+# These are system-generated notifications with no actionable follow-up needed.
+_NOISE_SUBJECT_PATTERNS: List[str] = [
+    # OTP / verification codes
+    r"\botp\b", r"\bone.time.pass", r"\bverification code\b", r"\bauth.*code\b",
+    r"\bsecurity code\b", r"\bconfirmation code\b", r"\benter.*\d{4,8}\b",
+    # Banking / payment confirmations (already done — no action needed)
+    r"\bdebit(?:ed)?\b.*\brs\.?\s*\d", r"\bcredit(?:ed)?\b.*\brs\.?\s*\d",
+    r"\bamount.*deducted\b", r"\bamount.*debited\b", r"\bpayment.*successful\b",
+    r"\bpayment.*processed\b", r"\btransaction.*successful\b", r"\btransfer.*successful\b",
+    r"\bpurchase.*successful\b", r"\brefund.*processed\b", r"\brefund.*credited\b",
+    r"\bemi.*deducted\b", r"\bsip.*successful\b", r"\bsip.*auto.*payment\b",
+    r"\bnach.*deducted\b", r"\bnach.*processed\b",
+    r"\bneft.*credited\b", r"\brtgs.*credited\b", r"\bimps.*credited\b",
+    # Promotional / marketing
+    r"\bexclusive offer\b", r"\blimited.*offer\b", r"\bspecial.*discount\b",
+    r"\bsale.*\d+%\s*off\b", r"\bflash sale\b", r"\bblack friday\b",
+    r"\bsubscribe.*newsletter\b", r"\bunsubscribe\b",
+    r"\bpromo.*code\b", r"\bcoupon.*code\b",
+    # Newsletters / digests that are informational, not actionable
+    r"\bdaily digest\b", r"\bweekly digest\b", r"\bmonthly digest\b",
+    r"\bnewsletter\b", r"\bmarket.*update\b", r"\bportfolio.*summary\b",
+    r"\bstatement.*generated\b", r"\be-statement\b",
+    # Order / shipment tracking (completed events)
+    r"\border.*confirmed\b", r"\border.*placed\b", r"\bshipment.*dispatched\b",
+    r"\bdelivery.*out.*for\b", r"\bpackage.*delivered\b", r"\btracking.*id\b",
+    # Automated notifications with no follow-up
+    r"\bpassword.*changed\b", r"\bpassword.*reset.*successful\b",
+    r"\blogin.*from\b.*\bdevice\b", r"\bnew.*login.*detected\b",
+    r"\baccount.*created\b", r"\bwelcome to\b",
+    r"\bdo not reply\b", r"\bnoreply\b", r"\bno.reply\b",
+]
+
+# Compiled once at import time for performance
+_NOISE_SUBJECT_RE = re.compile("|".join(_NOISE_SUBJECT_PATTERNS), flags=re.I)
+
+# Sender domains that are almost always transactional/noise
+_NOISE_SENDER_DOMAINS: set = {
+    "noreply", "no-reply", "donotreply", "do-not-reply",
+    "alerts", "notifications", "mailer", "auto", "bounce",
+    "info@paytm.com", "noreply@phonepe.com", "alerts@hdfcbank.com",
+    "alerts@icicibank.com", "alerts@axisbank.com", "noreply@sbi.co.in",
+    "support@zerodha.com", "postmaster", "mailer-daemon",
+}
+
+# Keywords that POSITIVELY signal an actionable email (whitelist signal)
+# If any of these appear in subject, we keep the email regardless of noise patterns
+_ACTIONABLE_SUBJECT_SIGNALS: List[str] = [
+    "hearing", "notice", "summons", "order", "judgment", "ruling",
+    "compliance", "filing", "due date", "last date", "deadline",
+    "renewal", "expire", "expiry", "expiring",
+    "meeting", "appointment", "visit", "conference", "interview",
+    "reminder", "follow up", "follow-up", "action required", "action needed",
+    "gst", "income tax", "itr", "tds", "roc", "mca", "rera",
+    "trademark", "ip india", "patent", "copyright",
+    "client", "lead", "proposal", "quotation", "invoice due", "payment due",
+    "outstanding", "overdue",
+    "court", "tribunal", "authority", "commissioner", "notice u/s",
+    "reply required", "respond by", "submit by", "response required",
+]
+
+_ACTIONABLE_RE = re.compile("|".join(re.escape(s) for s in _ACTIONABLE_SUBJECT_SIGNALS), flags=re.I)
+
+
+def _is_noise_email(subject: str, sender: str, body: str) -> bool:
+    """
+    Returns True if the email is transactional/noise and should be excluded
+    from the Action Center.
+
+    Logic (in order):
+    1. If subject contains a strong actionable signal → keep (return False)
+    2. If subject matches a noise pattern → discard (return True)
+    3. If sender local-part or display name is a known noise label → discard
+    4. Otherwise → keep
+    """
+    subj_lower = (subject or "").lower()
+    sender_lower = (sender or "").lower()
+
+    # Step 1: Strong actionable signal overrides everything
+    if _ACTIONABLE_RE.search(subject or ""):
+        return False
+
+    # Step 2: Noise subject pattern
+    if _NOISE_SUBJECT_RE.search(subject or ""):
+        return True
+
+    # Step 3: Noise sender heuristic
+    # Extract local-part and domain from sender string like "Name <email@domain.com>"
+    sender_email_match = re.search(r"<([^>]+)>", sender_lower)
+    sender_email = sender_email_match.group(1) if sender_email_match else sender_lower
+    local_part = sender_email.split("@")[0] if "@" in sender_email else sender_email
+    for noise_label in _NOISE_SENDER_DOMAINS:
+        if noise_label in local_part or noise_label in sender_email:
+            return True
+
+    # Step 4: Body heuristic — if body is very short and contains only transaction detail
+    # (e.g. "Your OTP is 123456") with no actionable language, discard
+    body_snippet = (body or "")[:500].lower()
+    if len(body_snippet) < 200:
+        otp_body = re.search(r"\botp\b|\bone.time\b|\bverif.*code\b|\bpin\b.*\b\d{4,8}\b", body_snippet)
+        if otp_body and not _ACTIONABLE_RE.search(subject or ""):
+            return True
+
+    return False
+
+
 def _classify_event(subject: str, body: str) -> Dict[str, str]:
     text = f"{subject} {body}".lower()
     if any(k in text for k in ["meeting", "appointment", "visit", "conference", "interview"]):
         event_type = "Meeting"
         save_category = "visit"
-    elif any(k in text for k in ["submit", "reply", "file ", "filing", "payment", "action required"]):
+    elif any(k in text for k in [
+        "submit", "reply", "file ", "filing", "action required", "action needed",
+        "respond by", "submit by", "response required",
+    ]):
         event_type = "Action Required"
         save_category = "todo"
-    elif any(k in text for k in ["hearing", "deadline", "due date", "notice", "renewal"]):
+    elif any(k in text for k in [
+        "hearing", "deadline", "due date", "last date", "notice", "renewal",
+        "expiry", "expire", "summons", "court",
+    ]):
         event_type = "Deadline"
         save_category = "reminder"
+    elif any(k in text for k in ["lead", "prospect", "proposal", "quotation", "client follow"]):
+        event_type = "Lead Follow-up"
+        save_category = "todo"
     else:
         event_type = "Reminder"
         save_category = "reminder"
 
-    urgency = "high" if any(k in text for k in ["urgent", "hearing", "deadline", "last date", "today", "tomorrow"]) else "medium"
+    urgency = "high" if any(k in text for k in [
+        "urgent", "hearing", "deadline", "last date", "today", "tomorrow",
+        "immediate", "asap", "critical",
+    ]) else "medium"
     return {"event_type": event_type, "save_category": save_category, "urgency": urgency}
 
 
@@ -297,7 +416,23 @@ def _event_from_message(
     sender: str,
     sent_at: Optional[str],
     body: str,
+    blacklisted_senders: Optional[set] = None,
 ) -> List[Dict[str, Any]]:
+    # ── Smart filter: skip noise/transactional emails ──
+    if _is_noise_email(subject, sender, body):
+        return []
+
+    # ── Blacklist filter: skip emails from blocked senders ──
+    if blacklisted_senders:
+        sender_lower = (sender or "").lower()
+        sender_email_match = re.search(r"<([^>]+)>", sender_lower)
+        sender_email = sender_email_match.group(1).strip() if sender_email_match else sender_lower.strip()
+        if sender_email in blacklisted_senders or sender_lower in blacklisted_senders:
+            return []
+        for bl in blacklisted_senders:
+            if bl.startswith("@") and sender_email.endswith(bl):
+                return []
+
     text = f"{subject}\n{body}"
     dates = _extract_dates(text)
     if not dates:
