@@ -189,7 +189,10 @@ def validate_obj_id(id_str: str) -> ObjectId:
 # Lightweight resume field extraction (regex) used as a fallback / supplement
 # to whatever the AI model returns, so basic contact details are never missed.
 _EMAIL_RE = re.compile(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+")
-_PHONE_RE = re.compile(r"(?:\+?\d{1,3}[\s-]?)?\d{10}")
+_PHONE_RE = re.compile(
+    r"(?:\+?\d{1,3}[\s\-()])?(?:\(?\d{2,5}\)?[\s\-]?)?\d{3,5}[\s\-]?\d{3,5}"
+)
+_LINKEDIN_RE = re.compile(r"linkedin\.com/in/([^\s,]+)", re.I)
 
 
 def _regex_fields(text: str) -> dict:
@@ -197,9 +200,19 @@ def _regex_fields(text: str) -> dict:
     m = _EMAIL_RE.search(text)
     if m:
         out["email"] = m.group(0)
-    m = _PHONE_RE.search(text)
+    # Try multiple phone patterns
+    for pat in [
+        r"\+?\d{1,3}[\s\-]?\d{10}",  # +91 8238441686
+        r"\(\d{3}\)\s?\d{3}[\s\-]?\d{4}",  # (123) 456-7890
+        r"\d{10}",  # 8238441686
+    ]:
+        m = re.search(pat, text)
+        if m:
+            out["phone"] = m.group(0).strip()
+            break
+    m = _LINKEDIN_RE.search(text)
     if m:
-        out["phone"] = m.group(0)
+        out["linkedin"] = m.group(0)
     return out
 
 
@@ -217,25 +230,49 @@ def _heuristic_fields(text: str) -> dict:
         return out
 
     # ── Name: first short, mostly-alphabetic line near the top ──────────────
-    for l in lines[:6]:
+    # Handles ALL CAPS names like "PUJA ADAK" as well as mixed case
+    for l in lines[:8]:
+        # Skip lines with email, phone numbers, URLs, or special chars
         if "@" in l or any(ch.isdigit() for ch in l):
             continue
-        words = l.split()
-        if 1 <= len(words) <= 5 and all(re.match(r"^[A-Za-z.\-']+$", w) for w in words):
-            out["full_name"] = l.title() if l.isupper() else l
+        if re.search(r"http|www\.|\.com|\.in|linkedin|phone|email|address", l, re.I):
+            continue
+        # Remove bullet points and special prefixes
+        clean = re.sub(r"^[•\-\*\|]\s*", "", l).strip()
+        if not clean:
+            continue
+        words = clean.split()
+        # Accept 1-6 word names, all alphabetic (with dots/hyphens/apostrophes)
+        if 1 <= len(words) <= 6 and all(re.match(r"^[A-Za-z.\-']+$", w) for w in words):
+            # Title-case if ALL CAPS, otherwise keep as-is
+            out["full_name"] = clean.title() if clean.isupper() else clean
             break
 
     # ── Split into sections by common resume headings ────────────────────────
+    # Expanded to handle more section names found in real resumes
+    # More flexible pattern that handles variations like "CS ARTICLESHIP EXPERIENCE"
     section_pat = re.compile(
-        r"^(SUMMARY|OBJECTIVE|PROFILE|WORK EXPERIENCE|EXPERIENCE|EMPLOYMENT( HISTORY)?|"
-        r"EDUCATION|KEY SKILLS|SKILLS|TECHNICAL SKILLS|PROJECTS|CERTIFICATIONS)\s*$",
+        r"^(.*\b)?"  # Optional prefix (e.g., "CS ", "TECHNICAL AND ")
+        r"(SUMMARY|OBJECTIVE|PROFILE|CAREER\s*OBJECTIVE|"
+        r"WORK\s*EXPERIENCE|EXPERIENCE|EMPLOYMENT(\s*HISTORY)?|"
+        r"INTERNSHIP|ARTICLESHIP|TRAINING(\s*EXPERIENCE)?|"
+        r"EDUCATION|ACADEMIC(\s*(BACKGROUND|QUALIFICATION|DETAILS))?|"
+        r"PROFESSIONAL\s*QUALIFICATION|QUALIFICATION|CERTIFICATION|CERTIFICATIONS|"
+        r"KEY\s*SKILLS|SKILLS|TECHNICAL(\s*AND\s*\w+)?\s*SKILLS|CORE\s*COMPETENCIES|COMPETENCIES|"
+        r"PROJECTS|ACADEMIC\s*PROJECTS|"
+        r"PERSONAL\s*DETAILS|PERSONAL\s*PROFILE|"
+        r"ACHIEVEMENTS|AWARDS|EXTRA[\-\s]?CURRICULAR|LANGUAGES)"
+        r"(\b.*)?$",  # Optional suffix
         re.I,
     )
     sections, current, buf = {}, "header", []
     for l in lines:
-        if section_pat.match(l):
+        m = section_pat.match(l)
+        if m:
+            # Extract the main section keyword (group 2)
+            section_name = m.group(2).lower().strip()
             sections[current] = buf
-            current = l.lower().strip()
+            current = re.sub(r"\s+", " ", section_name)
             buf = []
         else:
             buf.append(l)
@@ -243,79 +280,171 @@ def _heuristic_fields(text: str) -> dict:
 
     def _get_section(*names):
         for n in names:
-            if n in sections:
-                return sections[n]
+            for key in sections:
+                if n in key:
+                    return sections[key]
         return []
 
+    # ── Position / Role ──────────────────────────────────────────────────────
+    # Try experience/internship sections first
     exp_lines = _get_section(
-        "work experience", "experience", "employment", "employment history"
+        "work experience",
+        "experience",
+        "employment",
+        "internship",
+        "articleship",
+        "training",
     )
     if exp_lines:
         first = exp_lines[0]
+        # Try "Position at Company" pattern
         m = re.search(r"(.+?)\bat\b\s*(.+)", first, re.I)
         if m:
             out["position"] = m.group(1).strip(" ,")
             out["current_company"] = re.split(r"\s{2,}", m.group(2))[0].strip(" .")
+        # Try "Trainer: X" or "Company: X" pattern
+        elif re.search(r"trainer|company|organization|employer", first, re.I):
+            m2 = re.search(
+                r"(?:trainer|company|organization|employer)[:\s]+(.+)", first, re.I
+            )
+            if m2:
+                out["current_company"] = m2.group(1).strip()
+            # Look for role in subsequent lines
+            for el in exp_lines[1:4]:
+                if re.search(r"assist|help|work|manage|handle|draft|file", el, re.I):
+                    # Extract first action as position hint
+                    out.setdefault("position", "Trainee")
+                    break
         else:
             out["position"] = first.split(",")[0].strip()
 
-        # Estimate total experience by summing every "Mon YYYY - Mon YYYY" style range
-        date_re = re.compile(
-            r"([A-Za-z]{3,9})\s+(\d{4})\s*[-–to]+\s*([A-Za-z]{3,9}|present)\s*(\d{4})?",
-            re.I,
+        # Try to extract duration for experience calculation
+        duration_re = re.compile(
+            r"(?:duration|period)[:\s]*(\d+)\s*(month|year|week)", re.I
         )
+        for el in exp_lines[:5]:
+            dm = duration_re.search(el)
+            if dm:
+                num = int(dm.group(1))
+                unit = dm.group(2).lower()
+                if "year" in unit:
+                    out["experience_years"] = float(num)
+                elif "month" in unit:
+                    out["experience_years"] = round(num / 12, 1)
+                elif "week" in unit:
+                    out["experience_years"] = round(num / 52, 1)
+                break
 
-        def month_num(name):
-            name = name[:3].title()
-            try:
-                return list(calendar.month_abbr).index(name)
-            except ValueError:
-                return None
+        # Estimate total experience by summing every "Mon YYYY - Mon YYYY" style range
+        if "experience_years" not in out:
+            date_re = re.compile(
+                r"([A-Za-z]{3,9})\s+(\d{4})\s*[-–to]+\s*([A-Za-z]{3,9}|present)\s*(\d{4})?",
+                re.I,
+            )
 
-        months_total = 0
-        for l in exp_lines:
-            m2 = date_re.search(l)
-            if not m2:
-                continue
-            m1n, y1 = month_num(m2.group(1)), int(m2.group(2))
-            if m1n is None:
-                continue
-            if m2.group(3).lower() == "present":
-                end = ddate.today()
-            else:
-                m2n = month_num(m2.group(3))
-                if m2n is None:
+            def month_num(name):
+                name = name[:3].title()
+                try:
+                    return list(calendar.month_abbr).index(name)
+                except ValueError:
+                    return None
+
+            months_total = 0
+            for l in exp_lines:
+                m2 = date_re.search(l)
+                if not m2:
                     continue
-                end = ddate(int(m2.group(4) or y1), m2n, 1)
-            start = ddate(y1, m1n, 1)
-            months = (end.year - start.year) * 12 + (end.month - start.month)
-            if months > 0:
-                months_total += months
-        if months_total:
-            out["experience_years"] = round(months_total / 12, 1)
+                m1n, y1 = month_num(m2.group(1)), int(m2.group(2))
+                if m1n is None:
+                    continue
+                if m2.group(3).lower() == "present":
+                    end = ddate.today()
+                else:
+                    m2n = month_num(m2.group(3))
+                    if m2n is None:
+                        continue
+                    end = ddate(int(m2.group(4) or y1), m2n, 1)
+                start = ddate(y1, m1n, 1)
+                months = (end.year - start.year) * 12 + (end.month - start.month)
+                if months > 0:
+                    months_total += months
+            if months_total:
+                out["experience_years"] = round(months_total / 12, 1)
 
-    edu_lines = _get_section("education")
+    # ── Position from summary/objective if not found in experience ───────────
+    if "position" not in out:
+        summary_lines = _get_section(
+            "summary", "objective", "profile", "career objective"
+        )
+        if summary_lines:
+            first_summary = summary_lines[0]
+            # Look for "seeking to apply... in [field]" or "looking for [role]"
+            m = re.search(
+                r"(?:seeking|looking\s*for|aspiring|as\s+a)\s+(?:a\s+)?(.+?)(?:\s+to|\s+in|\s+at|,|\.)",
+                first_summary,
+                re.I,
+            )
+            if m:
+                role = m.group(1).strip()
+                # Clean up common prefixes
+                role = re.sub(
+                    r"^(position|role|job)\s+(?:of|as|in)\s+", "", role, flags=re.I
+                )
+                if len(role) < 50:
+                    out["position"] = role
+
+    # ── Education ────────────────────────────────────────────────────────────
+    edu_lines = _get_section(
+        "education", "academic background", "academic qualification", "academic details"
+    )
     if edu_lines:
         out["education"] = "; ".join(edu_lines[:4])
+    else:
+        # Look for degree patterns anywhere in text
+        degree_re = re.compile(
+            r"(Bachelor|Master|B\.|M\.|Ph\.?D|MBA|BBA|BCA|MCA|B\.Com|M\.Com|B\.Sc|M\.Sc|B\.Tech|M\.Tech|B\.A|M\.A)",
+            re.I,
+        )
+        for l in lines[:20]:
+            if degree_re.search(l):
+                out["education"] = l.strip()
+                break
 
-    skill_lines = _get_section("key skills", "skills", "technical skills")
+    skill_lines = _get_section(
+        "key skills", "skills", "technical skills", "core competencies", "competencies"
+    )
     if skill_lines:
         skills = []
         for l in skill_lines:
-            skills.extend([p.strip() for p in re.split(r",|•|;", l) if p.strip()])
+            # Split by comma, bullet, semicolon, dash, or pipe
+            parts = re.split(r",|•|;|\||\-\s", l)
+            for p in parts:
+                clean = p.strip().lstrip("-•*").strip()
+                # Skip lines that look like sentences (too long) or are empty
+                if clean and len(clean) < 60:
+                    skills.append(clean)
         if skills:
             out["skills"] = skills[:15]
 
+    # ── Department mapping ───────────────────────────────────────────────────
+    # Expanded to cover corporate law, compliance, company secretary, etc.
     dep_map = [
         ("trademark", "TM"),
         ("legal", "Legal"),
         ("law", "Legal"),
+        ("corporate law", "Legal"),
+        ("company secretary", "Legal"),
+        ("cs ", "Legal"),  # CS = Company Secretary
+        ("secretarial", "Legal"),
+        ("compliance", "ROC"),
+        ("roc", "ROC"),
+        ("companies act", "ROC"),
+        ("sebi", "ROC"),
+        ("mca", "ROC"),
         ("account", "ACC"),
         ("finance", "ACC"),
         ("tax", "TDS"),
         ("gst", "GST"),
-        ("roc", "ROC"),
-        ("compliance", "ROC"),
         ("software", "IT"),
         ("developer", "IT"),
         ("information technology", "IT"),
@@ -325,13 +454,102 @@ def _heuristic_fields(text: str) -> dict:
         ("sales", "Sales"),
         ("operations", "Operations"),
     ]
-    haystack = f" {out.get('position', '')} {' '.join(out.get('skills', []))} ".lower()
+    # Build haystack from all available context
+    haystack_parts = [
+        out.get("position", ""),
+        " ".join(out.get("skills", [])),
+        out.get("education", ""),
+    ]
+    # Also scan the first 15 lines of the resume for keywords
+    haystack_parts.extend(lines[:15])
+    haystack = f" {' '.join(haystack_parts)} ".lower()
     for kw, dep in dep_map:
         if kw in haystack:
             out["department"] = dep
             break
 
     return out
+
+
+async def _groq_vision_structured_resume(page_images_b64: list, filename: str) -> dict:
+    """Use Groq vision to directly extract structured candidate fields from
+    scanned PDF page images. Returns a dict of extracted fields.
+
+    This is more reliable than transcribing text first then parsing with
+    heuristics, because the vision model can understand layout and context."""
+    import httpx
+    import json
+
+    groq_key = os.environ.get("GROQ_API_KEY", "")
+    if not groq_key:
+        logger.warning(
+            "GROQ_API_KEY not set — cannot extract structured data from scanned PDF."
+        )
+        return {}
+
+    content = []
+    for img_b64 in page_images_b64:
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
+            }
+        )
+    content.append(
+        {
+            "type": "text",
+            "text": (
+                "You are an expert HR assistant. Analyze this resume image and extract candidate details.\n"
+                "Respond with ONLY valid JSON (no markdown, no code fences, no explanation) using these exact keys:\n"
+                '{"full_name":"","email":"","phone":"","position":"","department":"",'
+                '"experience_years":0,"current_company":"","skills":[],"education":""}\n\n'
+                "Rules:\n"
+                "- full_name: the person's full name (usually the largest text at top)\n"
+                "- email: email address\n"
+                "- phone: phone number with country code if present\n"
+                "- position: most recent or primary job title / role sought\n"
+                "- department: one of Sales, IT, HR, Accounts, Legal, Marketing, Operations, GST, TDS, ROC, TM, Other\n"
+                "- experience_years: total years as a number (0 if fresher)\n"
+                "- current_company: most recent or primary company name\n"
+                "- skills: array of skill keywords (max 15)\n"
+                "- education: highest or most relevant degree\n"
+                "- Leave blank/0/[] if genuinely not found. Never invent data.\n"
+            ),
+        }
+    )
+
+    payload = {
+        "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+        "messages": [{"role": "user", "content": content}],
+        "max_tokens": 2000,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=90) as client:
+            resp = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {groq_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+        if resp.status_code == 429:
+            logger.warning("Groq quota exceeded during structured resume extraction.")
+            return {}
+        if resp.status_code != 200:
+            logger.warning(
+                f"Groq API error {resp.status_code} during structured resume extraction."
+            )
+            return {}
+
+        raw = resp.json()["choices"][0]["message"]["content"]
+        # Clean markdown code fences if present
+        raw = re.sub(r"^```(json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
+        return json.loads(raw)
+    except Exception as e:
+        logger.warning(f"Groq vision structured extraction failed: {e}")
+        return {}
 
 
 async def _extract_resume_text(contents: bytes, filename: str) -> str:
@@ -647,53 +865,213 @@ async def parse_resume(
     file: UploadFile = File(...), current_user=Depends(get_current_user)
 ):
     """Extracts text from an uploaded resume and returns structured candidate
-    fields the frontend can drop straight into the Add Candidate form."""
+    fields the frontend can drop straight into the Add Candidate form.
+
+    For scanned PDFs (no text layer), uses Groq vision to directly extract
+    structured fields from page images, bypassing unreliable text extraction."""
     assert_can_manage(current_user)
     contents = await file.read()
     filename = file.filename or "resume"
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
-    resume_text = await _extract_resume_text(contents, filename)
-    if not resume_text.strip():
-        raise HTTPException(
-            status_code=422, detail="Could not extract any text from this resume"
-        )
+    # Track if this is a scanned PDF for special handling
+    is_scanned_pdf = False
+    scanned_fields = {}
+    resume_text = ""
 
-    try:
-        ai_fields = await _ai_structure_resume(resume_text)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.warning(f"AI resume structuring failed, falling back to heuristics: {e}")
-        ai_fields = {}
+    # ── Special handling for scanned PDFs ────────────────────────────────────
+    if ext == "pdf":
+        import pdfplumber
+        import base64
 
+        # First check if PDF has any extractable text
+        has_text = False
+        with pdfplumber.open(io.BytesIO(contents)) as pdf:
+            for page in pdf.pages[:3]:
+                t = page.extract_text(x_tolerance=3, y_tolerance=3) or ""
+                if t.strip():
+                    has_text = True
+                    break
+
+        if not has_text:
+            # Scanned PDF — use Groq vision to directly extract structured fields
+            is_scanned_pdf = True
+            logger.info(
+                "Scanned PDF detected — using Groq vision for structured extraction"
+            )
+
+            try:
+                groq_key = os.environ.get("GROQ_API_KEY", "")
+                if groq_key:
+                    page_images_b64 = []
+                    with pdfplumber.open(io.BytesIO(contents)) as pdf:
+                        for page in pdf.pages[:4]:  # max 4 pages
+                            pil_img = page.to_image(resolution=150).original
+                            if pil_img.mode not in ("RGB", "L"):
+                                pil_img = pil_img.convert("RGB")
+                            buf = io.BytesIO()
+                            pil_img.save(buf, format="JPEG", quality=85)
+                            page_images_b64.append(
+                                base64.b64encode(buf.getvalue()).decode()
+                            )
+
+                    if page_images_b64:
+                        # Get structured fields directly from vision
+                        scanned_fields = await _groq_vision_structured_resume(
+                            page_images_b64, filename
+                        )
+                        logger.info(
+                            f"Groq vision extracted fields: {list(scanned_fields.keys())}"
+                        )
+
+                        # Also get raw text transcription for AI assessment
+                        import httpx
+
+                        content = []
+                        for img_b64 in page_images_b64:
+                            content.append(
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{img_b64}"
+                                    },
+                                }
+                            )
+                        content.append(
+                            {
+                                "type": "text",
+                                "text": "Transcribe ALL text from these resume pages exactly as it appears.",
+                            }
+                        )
+
+                        payload = {
+                            "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+                            "messages": [{"role": "user", "content": content}],
+                            "max_tokens": 3000,
+                        }
+                        async with httpx.AsyncClient(timeout=90) as client:
+                            resp = await client.post(
+                                "https://api.groq.com/openai/v1/chat/completions",
+                                headers={
+                                    "Authorization": f"Bearer {groq_key}",
+                                    "Content-Type": "application/json",
+                                },
+                                json=payload,
+                            )
+                        if resp.status_code == 200:
+                            resume_text = resp.json()["choices"][0]["message"][
+                                "content"
+                            ]
+                        else:
+                            logger.warning(
+                                f"Groq text transcription failed: {resp.status_code}"
+                            )
+                else:
+                    logger.warning("GROQ_API_KEY not set — cannot process scanned PDF")
+                    raise HTTPException(
+                        status_code=500,
+                        detail="GROQ_API_KEY is not configured on the server.",
+                    )
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Scanned PDF processing failed: {e}")
+                raise HTTPException(
+                    status_code=422, detail=f"Could not read scanned resume: {e}"
+                )
+
+    # ── Normal text extraction for non-scanned files ─────────────────────────
+    if not is_scanned_pdf:
+        resume_text = await _extract_resume_text(contents, filename)
+        if not resume_text.strip():
+            raise HTTPException(
+                status_code=422, detail="Could not extract any text from this resume"
+            )
+
+    # ── AI structuring (Gemini for text, skip if already have scanned fields) ─
+    ai_fields = {}
+    if not is_scanned_pdf or not scanned_fields:
+        try:
+            ai_fields = await _ai_structure_resume(resume_text)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"AI resume structuring failed: {e}")
+            ai_fields = {}
+
+    # ── Regex and heuristic extraction ───────────────────────────────────────
     regex_f = _regex_fields(resume_text)
     heuristic_f = _heuristic_fields(resume_text)
 
     def first(*vals):
+        """Return first non-empty value from the list."""
         for v in vals:
             if v and str(v).strip():
                 return v
         return ""
 
+    # ── Combine all sources with priority: scanned > ai > heuristic > regex ──
     fields = {
-        "full_name": first(ai_fields.get("full_name"), heuristic_f.get("full_name")),
+        "full_name": first(
+            scanned_fields.get("full_name"),
+            ai_fields.get("full_name"),
+            heuristic_f.get("full_name"),
+        ),
         "email": first(
-            ai_fields.get("email"), regex_f.get("email"), heuristic_f.get("email")
+            scanned_fields.get("email"),
+            ai_fields.get("email"),
+            regex_f.get("email"),
+            heuristic_f.get("email"),
         ),
         "phone": first(
-            ai_fields.get("phone"), regex_f.get("phone"), heuristic_f.get("phone")
+            scanned_fields.get("phone"),
+            ai_fields.get("phone"),
+            regex_f.get("phone"),
+            heuristic_f.get("phone"),
         ),
-        "position": first(ai_fields.get("position"), heuristic_f.get("position")),
-        "department": first(ai_fields.get("department"), heuristic_f.get("department")),
-        "experience_years": ai_fields.get("experience_years")
-        or heuristic_f.get("experience_years")
-        or None,
+        "position": first(
+            scanned_fields.get("position"),
+            ai_fields.get("position"),
+            heuristic_f.get("position"),
+        ),
+        "department": first(
+            scanned_fields.get("department"),
+            ai_fields.get("department"),
+            heuristic_f.get("department"),
+        ),
+        "experience_years": (
+            scanned_fields.get("experience_years")
+            or ai_fields.get("experience_years")
+            or heuristic_f.get("experience_years")
+            or None
+        ),
         "current_company": first(
-            ai_fields.get("current_company"), heuristic_f.get("current_company")
+            scanned_fields.get("current_company"),
+            ai_fields.get("current_company"),
+            heuristic_f.get("current_company"),
         ),
-        "skills": ai_fields.get("skills") or heuristic_f.get("skills") or [],
-        "education": first(ai_fields.get("education"), heuristic_f.get("education")),
+        "skills": (
+            scanned_fields.get("skills")
+            or ai_fields.get("skills")
+            or heuristic_f.get("skills")
+            or []
+        ),
+        "education": first(
+            scanned_fields.get("education"),
+            ai_fields.get("education"),
+            heuristic_f.get("education"),
+        ),
     }
+
+    # Log what was extracted
+    filled_count = sum(
+        1
+        for v in fields.values()
+        if v and (isinstance(v, list) and len(v) > 0 or str(v).strip())
+    )
+    logger.info(
+        f"Resume parsing complete: {filled_count}/9 fields filled (scanned={is_scanned_pdf})"
+    )
 
     return {
         "filename": filename,
