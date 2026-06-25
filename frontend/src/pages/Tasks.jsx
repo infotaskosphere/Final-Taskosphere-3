@@ -2738,7 +2738,7 @@ export default function Tasks() {
                       {displayScore >= 85 ? '🔥' : displayScore >= 65 ? '⚡' : '💪'}
                     </motion.span>
                     {displayScore >= 85
-                      ? 'Outstanding work! You're leading the team.'
+                      ? "Outstanding work! You're leading the team."
                       : displayScore >= 65
                       ? 'Good progress! A few more completions and you hit Star Performer.'
                       : 'Keep pushing — every completed task boosts your score!'}
