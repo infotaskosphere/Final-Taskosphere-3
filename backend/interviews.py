@@ -7,6 +7,7 @@ candidate is hired, convert them straight into a system User without
 re-typing anything (all fields pre-filled from the interview record but
 fully editable before the account is created).
 """
+
 import io
 import os
 import re
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 # ====================== PERMISSIONS ======================
 
+
 def _can_manage(current_user) -> bool:
     """Admin always has access. Other roles need can_view_interviews permission."""
     if getattr(current_user, "role", None) == "admin":
@@ -36,10 +38,14 @@ def _can_manage(current_user) -> bool:
 
 def assert_can_manage(current_user):
     if not _can_manage(current_user):
-        raise HTTPException(status_code=403, detail="You do not have permission to access Employee Interviews")
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to access Employee Interviews",
+        )
 
 
 # ====================== MODELS ======================
+
 
 class CandidateBase(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -48,7 +54,9 @@ class CandidateBase(BaseModel):
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
 
-    position: Optional[str] = Field(None, description="Role applied for / interviewed for")
+    position: Optional[str] = Field(
+        None, description="Role applied for / interviewed for"
+    )
     department: Optional[str] = None
     experience_years: Optional[float] = None
     current_company: Optional[str] = None
@@ -74,10 +82,23 @@ class CandidateBase(BaseModel):
     resume_filename: Optional[str] = None
     resume_text: Optional[str] = None
 
-    @field_validator("email", "phone", "position", "department", "current_company",
-                      "education", "interview_date", "interview_time", "interviewer",
-                      "interview_feedback", "pay_scale_offered",
-                      "conditions", "training_period", "notes", mode="before")
+    @field_validator(
+        "email",
+        "phone",
+        "position",
+        "department",
+        "current_company",
+        "education",
+        "interview_date",
+        "interview_time",
+        "interviewer",
+        "interview_feedback",
+        "pay_scale_offered",
+        "conditions",
+        "training_period",
+        "notes",
+        mode="before",
+    )
     @classmethod
     def empty_to_none(cls, v):
         return None if v == "" else v
@@ -122,15 +143,21 @@ class CandidateUpdate(BaseModel):
     pay_scale_offered: Optional[str] = None
     conditions: Optional[str] = None
     training_period: Optional[str] = None
-    status: Optional[Literal[
-        "scheduled", "in_review", "selected", "on_hold", "rejected", "hired"
-    ]] = None
+    status: Optional[
+        Literal["scheduled", "in_review", "selected", "on_hold", "rejected", "hired"]
+    ] = None
     notes: Optional[str] = None
+
+
+class PraiseResumeRequest(BaseModel):
+    resume_text: str
+    position: Optional[str] = ""
 
 
 class ConvertToUserRequest(BaseModel):
     """Sent by the frontend conversion dialog — every field is editable there
     before submission, even though it's pre-filled from the candidate record."""
+
     full_name: str
     email: EmailStr
     password: str
@@ -143,6 +170,7 @@ class ConvertToUserRequest(BaseModel):
 
 
 # ====================== HELPERS ======================
+
 
 def normalize_doc(doc: dict) -> dict:
     if not doc:
@@ -219,7 +247,9 @@ def _heuristic_fields(text: str) -> dict:
                 return sections[n]
         return []
 
-    exp_lines = _get_section("work experience", "experience", "employment", "employment history")
+    exp_lines = _get_section(
+        "work experience", "experience", "employment", "employment history"
+    )
     if exp_lines:
         first = exp_lines[0]
         m = re.search(r"(.+?)\bat\b\s*(.+)", first, re.I)
@@ -231,7 +261,8 @@ def _heuristic_fields(text: str) -> dict:
 
         # Estimate total experience by summing every "Mon YYYY - Mon YYYY" style range
         date_re = re.compile(
-            r"([A-Za-z]{3,9})\s+(\d{4})\s*[-–to]+\s*([A-Za-z]{3,9}|present)\s*(\d{4})?", re.I
+            r"([A-Za-z]{3,9})\s+(\d{4})\s*[-–to]+\s*([A-Za-z]{3,9}|present)\s*(\d{4})?",
+            re.I,
         )
 
         def month_num(name):
@@ -276,11 +307,23 @@ def _heuristic_fields(text: str) -> dict:
             out["skills"] = skills[:15]
 
     dep_map = [
-        ("trademark", "TM"), ("legal", "Legal"), ("law", "Legal"),
-        ("account", "ACC"), ("finance", "ACC"), ("tax", "TDS"), ("gst", "GST"),
-        ("roc", "ROC"), ("compliance", "ROC"), ("software", "IT"), ("developer", "IT"),
-        ("information technology", "IT"), ("human resource", "HR"), (" hr ", "HR"),
-        ("marketing", "Marketing"), ("sales", "Sales"), ("operations", "Operations"),
+        ("trademark", "TM"),
+        ("legal", "Legal"),
+        ("law", "Legal"),
+        ("account", "ACC"),
+        ("finance", "ACC"),
+        ("tax", "TDS"),
+        ("gst", "GST"),
+        ("roc", "ROC"),
+        ("compliance", "ROC"),
+        ("software", "IT"),
+        ("developer", "IT"),
+        ("information technology", "IT"),
+        ("human resource", "HR"),
+        (" hr ", "HR"),
+        ("marketing", "Marketing"),
+        ("sales", "Sales"),
+        ("operations", "Operations"),
     ]
     haystack = f" {out.get('position', '')} {' '.join(out.get('skills', []))} ".lower()
     for kw, dep in dep_map:
@@ -299,10 +342,12 @@ async def _extract_resume_text(contents: bytes, filename: str) -> str:
     DOCX / TXT → parsed locally.
     """
     import base64
+
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
     if ext == "pdf":
         import pdfplumber
+
         text_parts = []
         with pdfplumber.open(io.BytesIO(contents)) as pdf:
             for page in pdf.pages[:10]:
@@ -323,6 +368,7 @@ async def _extract_resume_text(contents: bytes, filename: str) -> str:
             # Text-based PDF — use Gemini to clean / transcribe
             try:
                 import google.generativeai as genai
+
                 gemini_key = os.environ.get("GEMINI_API_KEY", "")
                 if gemini_key:
                     genai.configure(api_key=gemini_key)
@@ -338,19 +384,25 @@ async def _extract_resume_text(contents: bytes, filename: str) -> str:
                     if cleaned:
                         return cleaned
             except Exception as e:
-                logger.warning(f"Gemini text-PDF cleaning failed, using raw extract: {e}")
+                logger.warning(
+                    f"Gemini text-PDF cleaning failed, using raw extract: {e}"
+                )
             return text  # fall back to raw pdfplumber text
 
         # Scanned PDF (no text layer) — render pages as images → Groq vision
         try:
             import httpx
+
             groq_key = os.environ.get("GROQ_API_KEY", "")
             if not groq_key:
-                raise HTTPException(status_code=500, detail="GROQ_API_KEY is not configured on the server.")
+                raise HTTPException(
+                    status_code=500,
+                    detail="GROQ_API_KEY is not configured on the server.",
+                )
 
             page_images_b64 = []
             with pdfplumber.open(io.BytesIO(contents)) as pdf:
-                for page in pdf.pages[:4]:   # max 4 pages for Groq
+                for page in pdf.pages[:4]:  # max 4 pages for Groq
                     pil_img = page.to_image(resolution=150).original
                     if pil_img.mode not in ("RGB", "L"):
                         pil_img = pil_img.convert("RGB")
@@ -359,12 +411,24 @@ async def _extract_resume_text(contents: bytes, filename: str) -> str:
                     page_images_b64.append(base64.b64encode(buf.getvalue()).decode())
 
             if not page_images_b64:
-                raise HTTPException(status_code=422, detail="No pages could be rendered from this PDF.")
+                raise HTTPException(
+                    status_code=422, detail="No pages could be rendered from this PDF."
+                )
 
             content = []
             for img_b64 in page_images_b64:
-                content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}})
-            content.append({"type": "text", "text": "Transcribe ALL text from these resume pages exactly as it appears, preserving structure, sections, and all details."})
+                content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
+                    }
+                )
+            content.append(
+                {
+                    "type": "text",
+                    "text": "Transcribe ALL text from these resume pages exactly as it appears, preserving structure, sections, and all details.",
+                }
+            )
 
             payload = {
                 "model": "meta-llama/llama-4-scout-17b-16e-instruct",
@@ -374,22 +438,34 @@ async def _extract_resume_text(contents: bytes, filename: str) -> str:
             async with httpx.AsyncClient(timeout=90) as client:
                 resp = await client.post(
                     "https://api.groq.com/openai/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                    headers={
+                        "Authorization": f"Bearer {groq_key}",
+                        "Content-Type": "application/json",
+                    },
                     json=payload,
                 )
             if resp.status_code == 429:
-                raise HTTPException(status_code=429, detail="Groq quota exceeded. Please wait a moment and try again.")
+                raise HTTPException(
+                    status_code=429,
+                    detail="Groq quota exceeded. Please wait a moment and try again.",
+                )
             if resp.status_code != 200:
-                raise HTTPException(status_code=422, detail=f"Groq API error {resp.status_code}: {resp.text[:300]}")
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Groq API error {resp.status_code}: {resp.text[:300]}",
+                )
             return resp.json()["choices"][0]["message"]["content"]
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(status_code=422, detail=f"Could not read scanned resume: {e}")
+            raise HTTPException(
+                status_code=422, detail=f"Could not read scanned resume: {e}"
+            )
 
     if ext == "docx":
         try:
             import docx
+
             d = docx.Document(io.BytesIO(contents))
             parts = [p.text for p in d.paragraphs if p.text.strip()]
             for table in d.tables:
@@ -399,12 +475,16 @@ async def _extract_resume_text(contents: bytes, filename: str) -> str:
                         parts.append(" | ".join(cells))
             return "\n".join(parts)
         except Exception as e:
-            raise HTTPException(status_code=422, detail=f"Could not read .docx resume: {e}")
+            raise HTTPException(
+                status_code=422, detail=f"Could not read .docx resume: {e}"
+            )
 
     if ext == "txt":
         return contents.decode("utf-8", errors="replace")
 
-    raise HTTPException(status_code=422, detail=f"Unsupported format: .{ext}. Upload PDF, DOCX, or TXT.")
+    raise HTTPException(
+        status_code=422, detail=f"Unsupported format: .{ext}. Upload PDF, DOCX, or TXT."
+    )
 
 
 async def _ai_structure_resume(resume_text: str) -> dict:
@@ -416,11 +496,14 @@ async def _ai_structure_resume(resume_text: str) -> dict:
 
     gemini_key = os.environ.get("GEMINI_API_KEY", "")
     if not gemini_key:
-        logger.warning("GEMINI_API_KEY not set — skipping AI structuring, using heuristics only.")
+        logger.warning(
+            "GEMINI_API_KEY not set — skipping AI structuring, using heuristics only."
+        )
         return {}
 
     try:
         import google.generativeai as genai
+
         genai.configure(api_key=gemini_key)
         model = genai.GenerativeModel("gemini-2.0-flash")
     except ImportError:
@@ -455,6 +538,7 @@ async def _ai_structure_resume(resume_text: str) -> dict:
 
 # ====================== ROUTES ======================
 
+
 @router.get("")
 async def list_candidates(
     status_filter: Optional[str] = None,
@@ -470,9 +554,16 @@ async def list_candidates(
         query["department"] = department
     if search:
         rx = {"$regex": re.escape(search), "$options": "i"}
-        query["$or"] = [{"full_name": rx}, {"email": rx}, {"phone": rx}, {"position": rx}]
+        query["$or"] = [
+            {"full_name": rx},
+            {"email": rx},
+            {"phone": rx},
+            {"position": rx},
+        ]
 
-    docs = await db.interview_candidates.find(query).sort("created_at", -1).to_list(1000)
+    docs = (
+        await db.interview_candidates.find(query).sort("created_at", -1).to_list(1000)
+    )
     return [normalize_doc(d) for d in docs]
 
 
@@ -486,23 +577,35 @@ async def get_candidate(candidate_id: str, current_user=Depends(get_current_user
 
 
 @router.post("")
-async def create_candidate(payload: CandidateCreate, current_user=Depends(get_current_user)):
+async def create_candidate(
+    payload: CandidateCreate, current_user=Depends(get_current_user)
+):
     assert_can_manage(current_user)
     doc = payload.model_dump()
-    doc.update({
-        "created_by": current_user.id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-        "converted_user_id": None,
-    })
+    doc.update(
+        {
+            "created_by": current_user.id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "converted_user_id": None,
+        }
+    )
     result = await db.interview_candidates.insert_one(doc)
     new_doc = await db.interview_candidates.find_one({"_id": result.inserted_id})
-    await create_audit_log(current_user, "create", "interview_candidate", str(result.inserted_id), new_data=doc)
+    await create_audit_log(
+        current_user,
+        "create",
+        "interview_candidate",
+        str(result.inserted_id),
+        new_data=doc,
+    )
     return normalize_doc(new_doc)
 
 
 @router.put("/{candidate_id}")
-async def update_candidate(candidate_id: str, payload: CandidateUpdate, current_user=Depends(get_current_user)):
+async def update_candidate(
+    candidate_id: str, payload: CandidateUpdate, current_user=Depends(get_current_user)
+):
     assert_can_manage(current_user)
     oid = validate_obj_id(candidate_id)
     existing = await db.interview_candidates.find_one({"_id": oid})
@@ -514,7 +617,14 @@ async def update_candidate(candidate_id: str, payload: CandidateUpdate, current_
     await db.interview_candidates.update_one({"_id": oid}, {"$set": update_data})
 
     updated = await db.interview_candidates.find_one({"_id": oid})
-    await create_audit_log(current_user, "update", "interview_candidate", candidate_id, old_data=existing, new_data=update_data)
+    await create_audit_log(
+        current_user,
+        "update",
+        "interview_candidate",
+        candidate_id,
+        old_data=existing,
+        new_data=update_data,
+    )
     return normalize_doc(updated)
 
 
@@ -526,12 +636,16 @@ async def delete_candidate(candidate_id: str, current_user=Depends(get_current_u
     if not existing:
         raise HTTPException(status_code=404, detail="Candidate not found")
     await db.interview_candidates.delete_one({"_id": oid})
-    await create_audit_log(current_user, "delete", "interview_candidate", candidate_id, old_data=existing)
+    await create_audit_log(
+        current_user, "delete", "interview_candidate", candidate_id, old_data=existing
+    )
     return {"message": "Candidate deleted"}
 
 
 @router.post("/parse-resume")
-async def parse_resume(file: UploadFile = File(...), current_user=Depends(get_current_user)):
+async def parse_resume(
+    file: UploadFile = File(...), current_user=Depends(get_current_user)
+):
     """Extracts text from an uploaded resume and returns structured candidate
     fields the frontend can drop straight into the Add Candidate form."""
     assert_can_manage(current_user)
@@ -540,7 +654,9 @@ async def parse_resume(file: UploadFile = File(...), current_user=Depends(get_cu
 
     resume_text = await _extract_resume_text(contents, filename)
     if not resume_text.strip():
-        raise HTTPException(status_code=422, detail="Could not extract any text from this resume")
+        raise HTTPException(
+            status_code=422, detail="Could not extract any text from this resume"
+        )
 
     try:
         ai_fields = await _ai_structure_resume(resume_text)
@@ -561,12 +677,20 @@ async def parse_resume(file: UploadFile = File(...), current_user=Depends(get_cu
 
     fields = {
         "full_name": first(ai_fields.get("full_name"), heuristic_f.get("full_name")),
-        "email": first(ai_fields.get("email"), regex_f.get("email"), heuristic_f.get("email")),
-        "phone": first(ai_fields.get("phone"), regex_f.get("phone"), heuristic_f.get("phone")),
+        "email": first(
+            ai_fields.get("email"), regex_f.get("email"), heuristic_f.get("email")
+        ),
+        "phone": first(
+            ai_fields.get("phone"), regex_f.get("phone"), heuristic_f.get("phone")
+        ),
         "position": first(ai_fields.get("position"), heuristic_f.get("position")),
         "department": first(ai_fields.get("department"), heuristic_f.get("department")),
-        "experience_years": ai_fields.get("experience_years") or heuristic_f.get("experience_years") or None,
-        "current_company": first(ai_fields.get("current_company"), heuristic_f.get("current_company")),
+        "experience_years": ai_fields.get("experience_years")
+        or heuristic_f.get("experience_years")
+        or None,
+        "current_company": first(
+            ai_fields.get("current_company"), heuristic_f.get("current_company")
+        ),
         "skills": ai_fields.get("skills") or heuristic_f.get("skills") or [],
         "education": first(ai_fields.get("education"), heuristic_f.get("education")),
     }
@@ -578,8 +702,134 @@ async def parse_resume(file: UploadFile = File(...), current_user=Depends(get_cu
     }
 
 
+async def _ai_assess_resume(resume_text: str, position: str) -> dict:
+    """Use Gemini to produce a structured candidate assessment (verdict, score,
+    strengths, concerns, standout skills, experience quality, and suggested
+    interview questions).  Falls back to a sensible default dict if the AI
+    call fails or no API key is configured."""
+    import json
+
+    gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    if not gemini_key:
+        logger.warning("GEMINI_API_KEY not set — skipping AI resume assessment.")
+        return _default_assessment()
+
+    try:
+        import google.generativeai as genai
+
+        genai.configure(api_key=gemini_key)
+        model = genai.GenerativeModel("gemini-2.0-flash")
+    except ImportError:
+        logger.warning(
+            "google-generativeai not installed — skipping AI resume assessment."
+        )
+        return _default_assessment()
+
+    position_hint = (
+        f"The candidate applied for: {position}."
+        if position
+        else "No specific position was mentioned."
+    )
+
+    prompt = (
+        "You are an expert HR recruiter evaluating a candidate's resume.\n"
+        f"{position_hint}\n\n"
+        "Analyse the resume below and respond with ONLY valid JSON "
+        "(no markdown, no code fences, no explanation) using these exact keys:\n"
+        "{\n"
+        '  "verdict": "Strong Hire" | "Hire" | "Maybe" | "Pass",\n'
+        '  "fit_score": <integer 0-100>,\n'
+        '  "summary": "<one concise sentence summarising the candidate>",\n'
+        '  "standout_skills": ["<skill>", ...],\n'
+        '  "strengths": ["<strength>", ...],\n'
+        '  "concerns": ["<concern>", ...],\n'
+        '  "experience_quality": "Excellent" | "Good" | "Average" | "Poor",\n'
+        '  "recommended_questions": ["<question>", ...]\n'
+        "}\n\n"
+        "Rules:\n"
+        "- verdict: Strong Hire (80+), Hire (60-79), Maybe (40-59), Pass (<40) based on fit_score.\n"
+        "- fit_score: 0-100 integer reflecting overall suitability.\n"
+        "- standout_skills: max 5 key skills that stand out.\n"
+        "- strengths: max 5 bullet points.\n"
+        "- concerns: max 5 bullet points (can be empty array if none).\n"
+        "- experience_quality: rate the depth and relevance of work experience.\n"
+        "- recommended_questions: 3-5 interview questions to ask this candidate.\n"
+        "- Never invent data not supported by the resume.\n\n"
+        f"RESUME:\n{resume_text[:12000]}"
+    )
+
+    try:
+        resp = await model.generate_content_async(prompt)
+        raw = (resp.text or "").strip()
+        raw = re.sub(r"^```(json)?|```$", "", raw, flags=re.MULTILINE).strip()
+        data = json.loads(raw)
+
+        # Validate / normalise
+        valid_verdicts = {"Strong Hire", "Hire", "Maybe", "Pass"}
+        if data.get("verdict") not in valid_verdicts:
+            score = int(data.get("fit_score", 50))
+            if score >= 80:
+                data["verdict"] = "Strong Hire"
+            elif score >= 60:
+                data["verdict"] = "Hire"
+            elif score >= 40:
+                data["verdict"] = "Maybe"
+            else:
+                data["verdict"] = "Pass"
+
+        data.setdefault("fit_score", 50)
+        data.setdefault("summary", "Candidate profile assessed.")
+        data.setdefault("standout_skills", [])
+        data.setdefault("strengths", [])
+        data.setdefault("concerns", [])
+        data.setdefault("recommended_questions", [])
+
+        valid_exp = {"Excellent", "Good", "Average", "Poor"}
+        if data.get("experience_quality") not in valid_exp:
+            data["experience_quality"] = "Average"
+
+        return data
+    except Exception as e:
+        logger.warning(f"Gemini resume assessment failed: {e}")
+        return _default_assessment()
+
+
+def _default_assessment() -> dict:
+    """Fallback assessment when AI is unavailable."""
+    return {
+        "verdict": "Maybe",
+        "fit_score": 50,
+        "summary": "AI assessment unavailable — please review manually.",
+        "standout_skills": [],
+        "strengths": [],
+        "concerns": [],
+        "experience_quality": "Average",
+        "recommended_questions": [],
+    }
+
+
+@router.post("/praise-resume-json")
+async def praise_resume_json(
+    payload: PraiseResumeRequest, current_user=Depends(get_current_user)
+):
+    """AI-powered resume assessment: returns verdict, fit score, strengths,
+    concerns, standout skills, experience quality, and suggested interview
+    questions for the uploaded resume."""
+    assert_can_manage(current_user)
+
+    if not payload.resume_text or not payload.resume_text.strip():
+        raise HTTPException(status_code=422, detail="No resume text provided")
+
+    assessment = await _ai_assess_resume(payload.resume_text, payload.position or "")
+    return assessment
+
+
 @router.post("/{candidate_id}/convert-to-user")
-async def convert_to_user(candidate_id: str, payload: ConvertToUserRequest, current_user=Depends(get_current_user)):
+async def convert_to_user(
+    candidate_id: str,
+    payload: ConvertToUserRequest,
+    current_user=Depends(get_current_user),
+):
     """Creates a real system User account from a hired candidate.
     All fields arrive from the (editable) conversion form on the frontend —
     nothing here is silently reused from the interview record."""
@@ -589,17 +839,27 @@ async def convert_to_user(candidate_id: str, payload: ConvertToUserRequest, curr
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
     if candidate.get("converted_user_id"):
-        raise HTTPException(status_code=400, detail="This candidate has already been converted to a user")
+        raise HTTPException(
+            status_code=400,
+            detail="This candidate has already been converted to a user",
+        )
 
     existing_user = await db.users.find_one({"email": payload.email}, {"_id": 0})
     if existing_user:
-        raise HTTPException(status_code=400, detail="A user with this email already exists")
+        raise HTTPException(
+            status_code=400, detail="A user with this email already exists"
+        )
 
     # Late imports avoid a circular import with backend.server at module load time
     from backend.server import get_password_hash, DEFAULT_ROLE_PERMISSIONS
 
-    if payload.role in ("admin", "manager", "superadmin") and current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Only an admin can assign that role")
+    if (
+        payload.role in ("admin", "manager", "superadmin")
+        and current_user.role != "admin"
+    ):
+        raise HTTPException(
+            status_code=403, detail="Only an admin can assign that role"
+        )
 
     user_id = str(uuid.uuid4())
     default_permissions = DEFAULT_ROLE_PERMISSIONS.get(payload.role, {})
@@ -627,15 +887,26 @@ async def convert_to_user(candidate_id: str, payload: ConvertToUserRequest, curr
 
     await db.interview_candidates.update_one(
         {"_id": oid},
-        {"$set": {
-            "status": "hired",
-            "converted_user_id": user_id,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }},
+        {
+            "$set": {
+                "status": "hired",
+                "converted_user_id": user_id,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        },
     )
 
-    await create_audit_log(current_user, "convert_to_user", "interview_candidate", candidate_id, new_data={"user_id": user_id})
+    await create_audit_log(
+        current_user,
+        "convert_to_user",
+        "interview_candidate",
+        candidate_id,
+        new_data={"user_id": user_id},
+    )
 
     new_user.pop("password", None)
     new_user.pop("_id", None)
-    return {"message": "Candidate converted to user — pending admin approval", "user": new_user}
+    return {
+        "message": "Candidate converted to user — pending admin approval",
+        "user": new_user,
+    }
