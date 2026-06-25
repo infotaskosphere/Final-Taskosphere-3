@@ -2593,7 +2593,7 @@ export default function Tasks() {
 
         const motivationalQuotes = [
           'Small steps, big results! Every completed task takes you higher.',
-          'You're on a roll! Keep the momentum going.',
+          "You're on a roll! Keep the momentum going.",
           'Excellence is a habit. Keep crushing it!',
           'Every task done is a step toward the top!',
         ];
