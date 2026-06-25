@@ -65,6 +65,8 @@ export default function Interviews() {
   const [form, setForm] = useState(EMPTY_CANDIDATE);
   const [saving, setSaving] = useState(false);
   const [parsing, setParsing] = useState(false);
+  const [praise, setPraise] = useState(null);   // AI assessment result
+  const [praising, setPraising] = useState(false); // loading AI assessment
 
   const [convertOpen, setConvertOpen] = useState(false);
   const [convertTarget, setConvertTarget] = useState(null);
@@ -98,10 +100,11 @@ export default function Interviews() {
     return arr;
   }, [candidates, search, statusFilter]);
 
-  const openAdd = () => { setSelected(null); setForm(EMPTY_CANDIDATE); setDialogOpen(true); };
+  const openAdd = () => { setSelected(null); setForm(EMPTY_CANDIDATE); setPraise(null); setDialogOpen(true); };
 
   const openEdit = (c) => {
     setSelected(c);
+    setPraise(null);
     setForm({
       ...EMPTY_CANDIDATE, ...c,
       experience_years: c.experience_years ?? '',
@@ -114,6 +117,7 @@ export default function Interviews() {
   const handleResumeUpload = async (file) => {
     if (!file) return;
     setParsing(true);
+    setPraise(null);
     const fd = new FormData();
     fd.append('file', file);
     try {
@@ -121,25 +125,42 @@ export default function Interviews() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       const f = res.data.fields || {};
+      const resumeText = res.data.resume_text || '';
       // Merge parsed fields — always overwrite with parsed value if non-empty
-      setForm(prev => ({
-        ...prev,
-        full_name: (f.full_name && f.full_name.trim()) ? f.full_name.trim() : prev.full_name,
-        email: (f.email && f.email.trim()) ? f.email.trim() : prev.email,
-        phone: (f.phone && f.phone.trim()) ? f.phone.trim() : prev.phone,
-        position: (f.position && f.position.trim()) ? f.position.trim() : prev.position,
-        department: (f.department && f.department.trim()) ? normalizeDepartment(f.department) : prev.department,
-        experience_years: (f.experience_years != null && f.experience_years !== 0)
-          ? String(f.experience_years) : prev.experience_years,
-        current_company: (f.current_company && f.current_company.trim()) ? f.current_company.trim() : prev.current_company,
-        skills: (Array.isArray(f.skills) && f.skills.length > 0) ? f.skills : prev.skills,
-        education: (f.education && f.education.trim()) ? f.education.trim() : prev.education,
-        resume_text: res.data.resume_text || prev.resume_text,
-      }));
+      setForm(prev => {
+        const next = {
+          ...prev,
+          full_name: (f.full_name && f.full_name.trim()) ? f.full_name.trim() : prev.full_name,
+          email: (f.email && f.email.trim()) ? f.email.trim() : prev.email,
+          phone: (f.phone && f.phone.trim()) ? f.phone.trim() : prev.phone,
+          position: (f.position && f.position.trim()) ? f.position.trim() : prev.position,
+          department: (f.department && f.department.trim()) ? normalizeDepartment(f.department) : prev.department,
+          experience_years: (f.experience_years != null && f.experience_years !== 0)
+            ? String(f.experience_years) : prev.experience_years,
+          current_company: (f.current_company && f.current_company.trim()) ? f.current_company.trim() : prev.current_company,
+          skills: (Array.isArray(f.skills) && f.skills.length > 0) ? f.skills : prev.skills,
+          education: (f.education && f.education.trim()) ? f.education.trim() : prev.education,
+          resume_text: resumeText,
+        };
+        return next;
+      });
       const filled = Object.entries(f).filter(([k, v]) =>
         v && (Array.isArray(v) ? v.length > 0 : String(v).trim())
       ).length;
       toast.success(`✓ Resume parsed — ${filled} fields auto-filled`);
+
+      // Trigger AI praise in background
+      if (resumeText) {
+        setPraising(true);
+        api.post('/interviews/praise-resume-json', {
+          resume_text: resumeText,
+          position: f.position || '',
+        }).then(r => {
+          setPraise(r.data);
+        }).catch(() => {
+          // Praise is non-critical — silently skip if it fails
+        }).finally(() => setPraising(false));
+      }
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Could not parse resume');
     } finally { setParsing(false); }
@@ -333,6 +354,130 @@ export default function Interviews() {
                   <span className="flex items-center justify-center gap-2 text-sm text-slate-500"><Upload className="w-4 h-4" /> Upload resume (PDF / DOCX / TXT) to auto-fill the form below</span>
                 )}
               </label>
+
+              {/* AI Resume Assessment Panel */}
+              {(praising || praise) && (() => {
+                const VERDICT_CFG = {
+                  'Strong Hire': { color: '#1FAF5A', bg: '#F0FDF4', border: '#bbf7d0', label: 'Strong Hire' },
+                  'Hire':        { color: '#1F6FB2', bg: '#EFF6FF', border: '#bfdbfe', label: 'Hire' },
+                  'Maybe':       { color: '#F59E0B', bg: '#FFFBEB', border: '#fde68a', label: 'Consider' },
+                  'Pass':        { color: '#EF4444', bg: '#FEF2F2', border: '#fecaca', label: 'Pass' },
+                };
+                const vcfg = praise ? (VERDICT_CFG[praise.verdict] || VERDICT_CFG['Maybe']) : null;
+                const score = praise?.fit_score ?? 0;
+                const scoreColor = score >= 75 ? '#1FAF5A' : score >= 50 ? '#1F6FB2' : score >= 35 ? '#F59E0B' : '#EF4444';
+
+                return (
+                  <div className="rounded-xl border overflow-hidden" style={{ borderColor: '#e2e8f0' }}>
+                    {/* Header */}
+                    <div className="px-4 py-2.5 flex items-center justify-between" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                      <div className="flex items-center gap-2">
+                        <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        <span className="text-white text-sm font-semibold">AI Resume Assessment</span>
+                      </div>
+                      {praising && <span className="flex items-center gap-1.5 text-white/70 text-xs"><Loader2 className="w-3 h-3 animate-spin" />Analysing…</span>}
+                      {praise && !praising && (
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: vcfg.bg, color: vcfg.color, border: `1px solid ${vcfg.border}` }}>
+                          {vcfg.label}
+                        </span>
+                      )}
+                    </div>
+
+                    {praising && !praise && (
+                      <div className="px-4 py-6 flex flex-col items-center gap-2 bg-slate-50">
+                        <Loader2 className="w-6 h-6 animate-spin text-indigo-400" />
+                        <p className="text-xs text-slate-500">Evaluating candidate profile…</p>
+                      </div>
+                    )}
+
+                    {praise && (
+                      <div className="bg-white px-4 py-3 space-y-3">
+                        {/* Score row */}
+                        <div className="flex items-center gap-3">
+                          {/* Circular score */}
+                          <div className="relative flex-shrink-0 w-14 h-14">
+                            <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
+                              <circle cx="18" cy="18" r="15.9" fill="none" stroke="#f1f5f9" strokeWidth="3" />
+                              <circle cx="18" cy="18" r="15.9" fill="none" stroke={scoreColor} strokeWidth="3"
+                                strokeDasharray={`${score} ${100 - score}`} strokeLinecap="round" />
+                            </svg>
+                            <div className="absolute inset-0 flex flex-col items-center justify-center">
+                              <span className="text-[13px] font-black leading-none" style={{ color: scoreColor }}>{score}</span>
+                              <span className="text-[7px] text-slate-400 font-medium leading-none">/100</span>
+                            </div>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-slate-700 leading-snug">{praise.summary}</p>
+                            <div className="flex flex-wrap gap-1 mt-1.5">
+                              {(praise.standout_skills || []).map(s => (
+                                <span key={s} className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ background: '#EFF6FF', color: '#1F6FB2', border: '1px solid #bfdbfe' }}>{s}</span>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="flex-shrink-0 text-center">
+                            <div className="text-[10px] text-slate-500 mb-0.5">Experience</div>
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{
+                              background: praise.experience_quality === 'Excellent' ? '#F0FDF4' : praise.experience_quality === 'Good' ? '#EFF6FF' : praise.experience_quality === 'Average' ? '#FFFBEB' : '#FEF2F2',
+                              color: praise.experience_quality === 'Excellent' ? '#1FAF5A' : praise.experience_quality === 'Good' ? '#1F6FB2' : praise.experience_quality === 'Average' ? '#F59E0B' : '#EF4444',
+                            }}>{praise.experience_quality}</span>
+                          </div>
+                        </div>
+
+                        {/* Strengths & Concerns side by side */}
+                        <div className="grid grid-cols-2 gap-2">
+                          {/* Strengths */}
+                          {(praise.strengths || []).length > 0 && (
+                            <div className="rounded-lg p-2.5" style={{ background: '#F0FDF4', border: '1px solid #bbf7d0' }}>
+                              <p className="text-[9px] font-bold uppercase tracking-wider text-emerald-700 mb-1.5">✓ Strengths</p>
+                              <ul className="space-y-1">
+                                {praise.strengths.map((s, i) => (
+                                  <li key={i} className="text-[10px] text-slate-700 leading-snug flex gap-1.5">
+                                    <span className="text-emerald-500 flex-shrink-0 mt-px">•</span>
+                                    <span>{s}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          {/* Concerns */}
+                          <div className="rounded-lg p-2.5" style={{ background: (praise.concerns || []).length > 0 ? '#FEF2F2' : '#F8FAFC', border: `1px solid ${(praise.concerns || []).length > 0 ? '#fecaca' : '#e2e8f0'}` }}>
+                            <p className="text-[9px] font-bold uppercase tracking-wider mb-1.5" style={{ color: (praise.concerns || []).length > 0 ? '#EF4444' : '#94a3b8' }}>
+                              {(praise.concerns || []).length > 0 ? '⚠ Concerns' : '✓ No Concerns'}
+                            </p>
+                            {(praise.concerns || []).length > 0 ? (
+                              <ul className="space-y-1">
+                                {praise.concerns.map((c, i) => (
+                                  <li key={i} className="text-[10px] text-slate-700 leading-snug flex gap-1.5">
+                                    <span className="text-red-400 flex-shrink-0 mt-px">•</span>
+                                    <span>{c}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="text-[10px] text-slate-400">Candidate looks good across all areas.</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Recommended Interview Questions */}
+                        {(praise.recommended_questions || []).length > 0 && (
+                          <div className="rounded-lg p-2.5" style={{ background: '#F5F3FF', border: '1px solid #ddd6fe' }}>
+                            <p className="text-[9px] font-bold uppercase tracking-wider text-violet-700 mb-1.5">💬 Suggested Interview Questions</p>
+                            <ol className="space-y-1">
+                              {praise.recommended_questions.map((q, i) => (
+                                <li key={i} className="text-[10px] text-slate-700 leading-snug flex gap-1.5">
+                                  <span className="font-bold text-violet-400 flex-shrink-0">{i + 1}.</span>
+                                  <span>{q}</span>
+                                </li>
+                              ))}
+                            </ol>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Full Name *" value={form.full_name} onChange={v => setForm(p => ({ ...p, full_name: v }))} />
