@@ -391,7 +391,7 @@ const TaskRow = memo(function TaskRow({
   fetchComments, comments, newComment, setNewComment,
   selectedTask, setSelectedTask, handleAddComment,
   user, isDark,
-}) => {
+}) {
   const [expanded, setExpanded] = useState(false);
   const checklistItems = parseChecklist(task.description);
   const checkedItems   = taskChecklists[task.id] || [];
@@ -627,7 +627,7 @@ const BoardCard = memo(function BoardCard({
   fetchComments, comments, newComment, setNewComment,
   selectedTask, setSelectedTask, handleAddComment,
   isDark,
-}) => {
+}) {
   const checklistItems = parseChecklist(task.description);
   const checkedItems   = taskChecklists[task.id] || [];
   const progress       = getChecklistProgress(task);
