@@ -2603,49 +2603,48 @@ export default function Tasks() {
 
         return (
           <motion.div variants={itemVariants}>
-            {/* Outer card — same height/width constraints as before */}
             <div
               className={`rounded-2xl border overflow-hidden ${isDark ? 'bg-slate-800/90 border-slate-700' : 'bg-white border-slate-200'}`}
-              style={{ boxShadow: '0 4px 32px rgba(99,102,241,0.10), 0 1px 4px rgba(0,0,0,0.06)' }}
+              style={{ boxShadow: '0 4px 24px rgba(99,102,241,0.09), 0 1px 3px rgba(0,0,0,0.05)' }}
             >
-              {/* Top gradient accent bar */}
+              {/* Animated top accent bar */}
               <motion.div
-                className="h-1.5 w-full"
+                className="h-1 w-full"
                 style={{ background: 'linear-gradient(90deg,#6366f1,#7C3AED,#1FAF5A,#F59E0B)' }}
                 initial={{ scaleX: 0, originX: 0 }}
                 animate={{ scaleX: 1 }}
                 transition={{ duration: 0.9, ease: 'easeOut' }}
               />
 
-              <div className="p-4 flex flex-col lg:flex-row gap-0">
+              <div className="flex flex-col lg:flex-row" style={{ minHeight: 0 }}>
 
-                {/* ══════ PANEL 1: PERFORMANCE SCORE ══════ */}
-                <div className="flex flex-col gap-3 lg:w-[260px] flex-shrink-0 pr-4 lg:border-r border-slate-100 dark:border-slate-700">
-                  {/* Top row: rank badge + score */}
-                  <div className="flex items-start gap-3">
-                    {/* Rank badge (pentagon-style) */}
+                {/* ══ PANEL 1: PERFORMANCE SCORE ══ */}
+                <div className={`flex-shrink-0 lg:w-56 px-4 py-3 flex flex-col justify-between gap-2 ${isDark ? 'border-b lg:border-b-0 lg:border-r border-slate-700' : 'border-b lg:border-b-0 lg:border-r border-slate-100'}`}>
+
+                  {/* Badge + Score row */}
+                  <div className="flex items-center gap-3">
                     <div className="relative flex-shrink-0">
                       <motion.div
-                        className="w-14 h-14 rounded-2xl flex items-center justify-center"
+                        className="w-12 h-12 rounded-xl flex items-center justify-center"
                         style={{ background: rankBgColor }}
-                        initial={{ scale: 0.4, opacity: 0, rotate: -15 }}
+                        initial={{ scale: 0.5, opacity: 0, rotate: -15 }}
                         animate={{ scale: 1, opacity: 1, rotate: 0 }}
                         transition={{ type: 'spring', stiffness: 260, damping: 18, delay: 0.1 }}
                       >
                         <motion.div
                           animate={{ rotate: [0, -8, 8, -4, 4, 0] }}
-                          transition={{ duration: 1.4, ease: 'easeInOut', delay: 0.6 }}
+                          transition={{ duration: 1.4, ease: 'easeInOut', delay: 0.7, repeat: Infinity, repeatDelay: 6 }}
                         >
                           {apiRank === 1
-                            ? <Crown className="h-7 w-7 text-white" />
+                            ? <Crown className="h-6 w-6 text-white" />
                             : apiRank !== null && apiRank <= 3
-                            ? <Medal className="h-7 w-7 text-white" />
-                            : <Trophy className="h-7 w-7 text-white" />}
+                            ? <Medal className="h-6 w-6 text-white" />
+                            : <Trophy className="h-6 w-6 text-white" />}
                         </motion.div>
                       </motion.div>
                       {apiRank !== null && (
                         <motion.span
-                          className="absolute -top-1.5 -right-1.5 text-[10px] font-black px-1.5 py-0.5 rounded-full text-white"
+                          className="absolute -top-1 -right-1 text-[9px] font-black px-1 py-px rounded-full text-white leading-none"
                           style={{ background: apiRank === 1 ? '#F59E0B' : '#6366f1' }}
                           initial={{ scale: 0 }}
                           animate={{ scale: 1 }}
@@ -2656,168 +2655,163 @@ export default function Tasks() {
                       )}
                     </div>
 
-                    {/* Score + rank label */}
-                    <div className="flex flex-col">
-                      <p className={`text-[10px] font-bold uppercase tracking-widest mb-0.5 ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>Performance Score</p>
-                      <div className="flex items-baseline gap-1">
+                    <div className="flex flex-col min-w-0">
+                      <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 leading-none mb-0.5">Performance Score</p>
+                      <div className="flex items-baseline gap-0.5">
                         <motion.span
-                          className="text-3xl font-black leading-none"
+                          className="text-2xl font-black leading-none"
                           style={{ color: '#6366f1' }}
-                          initial={{ opacity: 0, y: 10 }}
+                          initial={{ opacity: 0, y: 8 }}
                           animate={{ opacity: 1, y: 0 }}
-                          transition={{ duration: 0.45, delay: 0.2 }}
+                          transition={{ duration: 0.4, delay: 0.2 }}
                         >
                           {Math.round(displayScore)}
                         </motion.span>
-                        <span className={`text-base font-semibold ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>/100</span>
+                        <span className="text-sm font-semibold text-slate-400">/100</span>
                       </div>
                       {apiRank !== null && (
-                        <p className={`text-[11px] font-bold mt-0.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                        <p className={`text-[10px] font-bold leading-tight ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
                           Rank #{apiRank}{totalUsers ? `/${totalUsers}` : ''}
                         </p>
                       )}
                       <motion.span
-                        className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border"
-                        style={{ color: badgeColor, borderColor: `${badgeColor}40`, background: `${badgeColor}10` }}
-                        initial={{ opacity: 0, x: -8 }}
+                        className="mt-1 self-start inline-flex items-center gap-1 text-[9px] font-semibold px-1.5 py-px rounded-full border"
+                        style={{ color: badgeColor, borderColor: `${badgeColor}50`, background: `${badgeColor}12` }}
+                        initial={{ opacity: 0, x: -6 }}
                         animate={{ opacity: 1, x: 0 }}
-                        transition={{ duration: 0.35, delay: 0.35 }}
+                        transition={{ duration: 0.3, delay: 0.35 }}
                       >
-                        <Star className="h-2.5 w-2.5" /> {displayBadge}
+                        <Star className="h-2 w-2" /> {displayBadge}
                       </motion.span>
                     </div>
                   </div>
 
-                  {/* Motivational dark card */}
+                  {/* Dark motivational strip */}
                   <motion.div
-                    className="rounded-xl px-3 py-2.5 flex items-center gap-2.5"
-                    style={{ background: isDark ? '#1e293b' : '#1e1e3f' }}
-                    initial={{ opacity: 0, y: 8 }}
+                    className="rounded-lg px-2.5 py-2 flex items-center gap-2"
+                    style={{ background: isDark ? '#0f172a' : '#1e1e3f' }}
+                    initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.5 }}
                   >
                     <motion.div
                       animate={{ x: [0, 3, -3, 0], rotate: [0, 15, -10, 0] }}
-                      transition={{ duration: 2, repeat: Infinity, repeatDelay: 4 }}
+                      transition={{ duration: 2, repeat: Infinity, repeatDelay: 5 }}
+                      className="flex-shrink-0"
                     >
-                      <Zap className="h-6 w-6 text-white flex-shrink-0" />
+                      <Zap className="h-4 w-4 text-yellow-300" />
                     </motion.div>
-                    <div>
-                      <p className="text-[11px] font-bold text-white leading-tight">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold text-white leading-tight truncate">
                         {displayScore >= 85 ? 'Outstanding work!' : displayScore >= 65 ? 'Small steps, big results!' : 'Keep pushing!'}
                       </p>
-                      <p className="text-[10px] text-slate-300 leading-snug mt-0.5">
-                        {displayScore >= 85
-                          ? "You're leading the team. Keep it up!"
-                          : displayScore >= 65
-                          ? 'Every completed task takes you higher.'
-                          : 'Every completed task boosts your score.'}
+                      <p className="text-[9px] text-slate-300 leading-tight">
+                        {displayScore >= 85 ? "You're leading the team!" : 'Every completed task takes you higher.'}
                       </p>
                     </div>
                   </motion.div>
 
-                  {/* Stats row: 4 mini metrics */}
-                  <div className={`rounded-xl border px-3 py-2 grid grid-cols-4 gap-1 ${isDark ? 'bg-slate-700/40 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
+                  {/* 4-stat mini grid */}
+                  <div className={`rounded-lg border px-2 py-1.5 grid grid-cols-4 gap-0 ${isDark ? 'bg-slate-700/30 border-slate-700' : 'bg-slate-50 border-slate-100'}`}>
                     {[
-                      { icon: <Calendar className="h-3 w-3 text-blue-500" />, val: workingDaysLeft, label: 'Days Left' },
-                      { icon: <Target className="h-3 w-3 text-purple-500" />, val: myPending, label: 'Pending Tasks' },
-                      { icon: <TrendingUp className="h-3 w-3 text-cyan-500" />, val: `~${dailyTarget}/day`, label: 'To Finish', small: true },
-                      { icon: <Zap className="h-3 w-3 text-emerald-500" />, val: scoreTrend >= 0 ? `+${scoreTrend}` : scoreTrend, label: 'Score Trend', color: scoreTrend >= 0 ? '#1FAF5A' : '#FF6B6B' },
+                      { icon: <Calendar className="h-2.5 w-2.5 text-blue-500" />, val: workingDaysLeft, label: 'Days Left', color: null },
+                      { icon: <Target className="h-2.5 w-2.5 text-purple-500" />, val: myPending, label: 'Pending', color: null },
+                      { icon: <TrendingUp className="h-2.5 w-2.5 text-cyan-500" />, val: `~${dailyTarget}/d`, label: 'To Finish', small: true, color: null },
+                      { icon: <Zap className="h-2.5 w-2.5" style={{ color: scoreTrend >= 0 ? '#1FAF5A' : '#FF6B6B' }} />, val: scoreTrend >= 0 ? `+${scoreTrend}` : scoreTrend, label: 'Trend', color: scoreTrend >= 0 ? '#1FAF5A' : '#FF6B6B' },
                     ].map(({ icon, val, label, small, color }, i) => (
                       <motion.div
                         key={label}
-                        className="flex flex-col items-center gap-0.5"
-                        initial={{ opacity: 0, y: 6 }}
+                        className="flex flex-col items-center gap-px py-0.5"
+                        initial={{ opacity: 0, y: 4 }}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.55 + i * 0.07 }}
+                        transition={{ delay: 0.55 + i * 0.06 }}
                       >
                         {icon}
-                        <span className={`font-black leading-tight ${small ? 'text-[9px]' : 'text-sm'}`} style={{ color: color || (isDark ? '#e2e8f0' : '#1e293b') }}>
+                        <span className={`font-black leading-tight ${small ? 'text-[8px]' : 'text-[11px]'}`} style={{ color: color || (isDark ? '#e2e8f0' : '#1e293b') }}>
                           {val}
                         </span>
-                        <span className={`text-[8px] text-center leading-tight ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{label}</span>
+                        <span className={`text-[7px] text-center leading-tight ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{label}</span>
                       </motion.div>
                     ))}
                   </div>
                 </div>
 
-                {/* ══════ PANEL 2: SCORE BREAKDOWN ══════ */}
-                <div className="flex-1 min-w-0 px-4 py-0 flex flex-col gap-2 lg:border-r border-slate-100 dark:border-slate-700">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <Activity className={`h-3.5 w-3.5 ${isDark ? 'text-indigo-400' : 'text-indigo-500'}`} />
-                    <p className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Score Breakdown</p>
+                {/* ══ PANEL 2: SCORE BREAKDOWN ══ */}
+                <div className={`flex-1 min-w-0 px-4 py-3 flex flex-col gap-1.5 ${isDark ? 'border-b lg:border-b-0 lg:border-r border-slate-700' : 'border-b lg:border-b-0 lg:border-r border-slate-100'}`}>
+                  <div className="flex items-center gap-1.5">
+                    <Activity className={`h-3 w-3 ${isDark ? 'text-indigo-400' : 'text-indigo-500'}`} />
+                    <p className={`text-[9px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Score Breakdown</p>
                   </div>
 
-                  <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-1.5 flex-1">
                     {scoreBreakdown.map(({ label, val, color, nums, icon }, i) => (
                       <motion.div
                         key={label}
-                        className={`rounded-xl border p-3 ${isDark ? 'bg-slate-700/30 border-slate-700' : 'bg-slate-50 border-slate-100'}`}
-                        initial={{ opacity: 0, x: -12 }}
+                        className={`rounded-lg border px-3 py-2 ${isDark ? 'bg-slate-700/20 border-slate-700/60' : 'bg-slate-50/80 border-slate-100'}`}
+                        initial={{ opacity: 0, x: -10 }}
                         animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.3 + i * 0.12 }}
+                        transition={{ delay: 0.28 + i * 0.1 }}
                       >
-                        <div className="flex items-center justify-between mb-1.5">
-                          <div className="flex items-center gap-2">
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-1.5">
                             <div
-                              className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
-                              style={{ background: `${color}15`, border: `1.5px solid ${color}30` }}
+                              className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0"
+                              style={{ background: `${color}15`, border: `1px solid ${color}30` }}
                             >
-                              {icon}
+                              {React.cloneElement(icon, { className: 'h-3.5 w-3.5' })}
                             </div>
-                            <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{label}</span>
+                            <span className={`text-[10px] font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{label}</span>
                           </div>
                           <motion.span
-                            className="text-sm font-black"
+                            className="text-[11px] font-black"
                             style={{ color }}
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
-                            transition={{ delay: 0.5 + i * 0.1 }}
+                            transition={{ delay: 0.45 + i * 0.1 }}
                           >
                             {Math.round(val ?? 0)}%
                           </motion.span>
                         </div>
-                        {/* Progress bar */}
-                        <div className={`h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
+                        <div className={`h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
                           <motion.div
                             className="h-full rounded-full"
-                            style={{ background: `linear-gradient(90deg, ${color}99, ${color})` }}
+                            style={{ background: `linear-gradient(90deg, ${color}80, ${color})` }}
                             initial={{ width: 0 }}
                             animate={{ width: `${Math.min(val ?? 0, 100)}%` }}
-                            transition={{ duration: 1.0, ease: 'easeOut', delay: 0.35 + i * 0.12 }}
+                            transition={{ duration: 0.9, ease: 'easeOut', delay: 0.32 + i * 0.1 }}
                           />
                         </div>
-                        <p className={`text-[10px] mt-1 font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{nums}</p>
+                        <p className={`text-[9px] mt-0.5 font-medium ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{nums}</p>
                       </motion.div>
                     ))}
                   </div>
 
-                  {/* Motivational CTA banner */}
+                  {/* Keep pushing banner */}
                   <motion.div
-                    className="mt-auto rounded-xl px-3 py-2 flex items-center justify-between"
-                    style={{ background: isDark ? 'rgba(239,68,68,0.08)' : '#fff5f5', border: '1px solid #fecaca' }}
-                    initial={{ opacity: 0, y: 6 }}
+                    className="rounded-lg px-2.5 py-1.5 flex items-center justify-between"
+                    style={{ background: isDark ? 'rgba(239,68,68,0.07)' : '#fff5f5', border: '1px solid #fecaca' }}
+                    initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.9 }}
+                    transition={{ delay: 0.85 }}
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
                       <motion.div
-                        animate={{ x: [0, 4, -2, 0] }}
+                        animate={{ x: [0, 3, -2, 0] }}
                         transition={{ duration: 1.5, repeat: Infinity, repeatDelay: 3 }}
                       >
-                        <Zap className="h-4 w-4 text-red-400 flex-shrink-0" />
+                        <Zap className="h-3.5 w-3.5 text-red-400 flex-shrink-0" />
                       </motion.div>
                       <div>
-                        <p className="text-[10px] font-bold text-red-500">
+                        <p className="text-[9px] font-bold text-red-500 leading-tight">
                           {displayScore >= 85 ? 'Outstanding!' : 'Keep pushing!'}
                         </p>
-                        <p className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                        <p className={`text-[9px] leading-tight ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                           Every completed task boosts your score.
                         </p>
                       </div>
                     </div>
                     <motion.button
-                      className="text-[10px] font-bold px-2.5 py-1 rounded-lg border flex-shrink-0"
+                      className="text-[9px] font-bold px-2 py-0.5 rounded-md border flex-shrink-0 ml-2"
                       style={{ color: '#EF4444', borderColor: '#fca5a5', background: 'white' }}
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.97 }}
@@ -2828,33 +2822,34 @@ export default function Tasks() {
                   </motion.div>
                 </div>
 
-                {/* ══════ PANEL 3: THIS MONTH ══════ */}
-                <div className="lg:w-[220px] flex-shrink-0 pl-4 flex flex-col gap-2.5">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <Calendar className={`h-3.5 w-3.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`} />
-                    <p className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>This Month</p>
+                {/* ══ PANEL 3: THIS MONTH ══ */}
+                <div className="lg:w-52 flex-shrink-0 px-4 py-3 flex flex-col gap-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <Calendar className={`h-3 w-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`} />
+                    <p className={`text-[9px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>This Month</p>
                   </div>
 
                   {/* Working days card */}
                   <motion.div
-                    className="rounded-xl p-3 border"
-                    style={{ background: isDark ? 'rgba(59,130,246,0.08)' : '#eff6ff', borderColor: isDark ? '#1e40af40' : '#bfdbfe' }}
-                    initial={{ opacity: 0, x: 12 }}
+                    className="rounded-lg p-2.5 border flex-1"
+                    style={{ background: isDark ? 'rgba(59,130,246,0.08)' : '#eff6ff', borderColor: isDark ? 'rgba(30,64,175,0.3)' : '#bfdbfe' }}
+                    initial={{ opacity: 0, x: 10 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: 0.4 }}
                   >
                     <div className="flex items-center gap-1.5 mb-1">
                       <motion.div
-                        animate={{ scale: [1, 1.15, 1] }}
-                        transition={{ duration: 1.5, repeat: Infinity, repeatDelay: 3 }}
+                        animate={{ scale: [1, 1.2, 1] }}
+                        transition={{ duration: 1.5, repeat: Infinity, repeatDelay: 4 }}
+                        className="flex-shrink-0"
                       >
-                        <Calendar className="h-4 w-4 text-blue-500 flex-shrink-0" />
+                        <Calendar className="h-3.5 w-3.5 text-blue-500" />
                       </motion.div>
-                      <p className="text-[10px] font-black uppercase tracking-wide text-blue-600 dark:text-blue-300">
+                      <p className="text-[9px] font-black uppercase tracking-wide text-blue-600 dark:text-blue-300 leading-tight">
                         {workingDaysLeft} Days Remaining
                       </p>
                     </div>
-                    <p className={`text-[11px] font-medium leading-relaxed ${isDark ? 'text-blue-300' : 'text-blue-800'}`}>
+                    <p className={`text-[10px] font-medium leading-snug ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>
                       {myPending > 0 ? (
                         <>You have <strong>{myPending}</strong> pending task{myPending !== 1 ? 's' : ''}. Complete ~<strong>{dailyTarget}</strong>/day to finish this month.</>
                       ) : (
@@ -2863,86 +2858,79 @@ export default function Tasks() {
                     </p>
                   </motion.div>
 
-                  {/* Rank status card */}
-                  {apiRank === 1 ? (
-                    <motion.div
-                      className="rounded-xl p-3 border"
-                      style={{ background: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb', borderColor: isDark ? '#92400e40' : '#fde68a' }}
-                      initial={{ opacity: 0, x: 12 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: 0.55 }}
-                    >
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <motion.div
-                          animate={{ rotate: [0, 12, -8, 0] }}
-                          transition={{ duration: 2, repeat: Infinity, repeatDelay: 3 }}
-                        >
-                          <Trophy className="h-4 w-4 text-amber-500" />
-                        </motion.div>
-                        <p className="text-[10px] font-black text-amber-600 dark:text-amber-400">You&apos;re #1!</p>
-                      </div>
-                      <p className={`text-[11px] font-medium leading-relaxed ${isDark ? 'text-amber-300' : 'text-amber-800'}`}>
-                        Keep completing tasks on time to hold your crown.
-                      </p>
-                    </motion.div>
-                  ) : tasksForNextApiRank !== null && apiRank !== null && apiRank > 1 ? (
-                    <motion.div
-                      className="rounded-xl p-3 border"
-                      style={{ background: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb', borderColor: isDark ? '#92400e40' : '#fde68a' }}
-                      initial={{ opacity: 0, x: 12 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: 0.55 }}
-                    >
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <motion.div
-                          animate={{ x: [0, 3, 0] }}
-                          transition={{ duration: 1.2, repeat: Infinity, repeatDelay: 2 }}
-                        >
-                          <Zap className="h-4 w-4 text-amber-500" />
-                        </motion.div>
-                        <p className="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-wide">
-                          🚀 Climb to Rank #{apiRank - 1}
+                  {/* Rank insight card */}
+                  <motion.div
+                    className="rounded-lg p-2.5 border flex-1"
+                    style={
+                      apiRank === 1
+                        ? { background: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb', borderColor: isDark ? 'rgba(146,64,14,0.3)' : '#fde68a' }
+                        : tasksForNextApiRank !== null && apiRank !== null && apiRank > 1
+                        ? { background: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb', borderColor: isDark ? 'rgba(146,64,14,0.3)' : '#fde68a' }
+                        : myPending > 0
+                        ? { background: isDark ? 'rgba(99,102,241,0.08)' : '#f5f3ff', borderColor: isDark ? 'rgba(67,56,202,0.3)' : '#c4b5fd' }
+                        : { background: isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4', borderColor: isDark ? 'rgba(20,83,45,0.3)' : '#bbf7d0' }
+                    }
+                    initial={{ opacity: 0, x: 10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.52 }}
+                  >
+                    {apiRank === 1 ? (
+                      <>
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <motion.div
+                            animate={{ rotate: [0, 12, -8, 0] }}
+                            transition={{ duration: 2, repeat: Infinity, repeatDelay: 4 }}
+                            className="flex-shrink-0"
+                          >
+                            <Trophy className="h-3.5 w-3.5 text-amber-500" />
+                          </motion.div>
+                          <p className="text-[9px] font-black text-amber-600 dark:text-amber-400 leading-tight">You&apos;re #1!</p>
+                        </div>
+                        <p className={`text-[10px] font-medium leading-snug ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>
+                          Keep completing tasks on time to hold your crown.
                         </p>
-                      </div>
-                      <p className={`text-[11px] font-medium leading-relaxed ${isDark ? 'text-amber-300' : 'text-amber-800'}`}>
-                        Complete <strong>{tasksForNextApiRank}</strong> more task{tasksForNextApiRank !== 1 ? 's' : ''} to overtake{' '}
-                        <strong>{prevRankUser?.user_name?.split(' ')[0] || 'the next person'}</strong>.
-                      </p>
-                    </motion.div>
-                  ) : myPending > 0 ? (
-                    <motion.div
-                      className="rounded-xl p-3 border"
-                      style={{ background: isDark ? 'rgba(99,102,241,0.08)' : '#f5f3ff', borderColor: isDark ? '#4338ca40' : '#c4b5fd' }}
-                      initial={{ opacity: 0, x: 12 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: 0.55 }}
-                    >
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <motion.div
-                          animate={{ scale: [1, 1.2, 1] }}
-                          transition={{ duration: 1.5, repeat: Infinity, repeatDelay: 3 }}
-                        >
-                          <Star className="h-4 w-4 text-indigo-500" />
-                        </motion.div>
-                        <p className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-wide">Boost your score</p>
-                      </div>
-                      <p className={`text-[11px] font-medium leading-relaxed ${isDark ? 'text-indigo-300' : 'text-indigo-800'}`}>
-                        Complete <strong>{Math.min(tasksForTier, myPending)}</strong> more task{Math.min(tasksForTier, myPending) !== 1 ? 's' : ''} to reach <strong>{nextTierName}</strong> status.
-                      </p>
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                      className="rounded-xl p-3 border"
-                      style={{ background: isDark ? 'rgba(31,175,90,0.08)' : '#f0fdf4', borderColor: isDark ? '#14532d40' : '#bbf7d0' }}
-                      initial={{ opacity: 0, x: 12 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: 0.55 }}
-                    >
-                      <p className={`text-[11px] font-semibold ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>
+                      </>
+                    ) : tasksForNextApiRank !== null && apiRank !== null && apiRank > 1 ? (
+                      <>
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <motion.div
+                            animate={{ x: [0, 3, 0] }}
+                            transition={{ duration: 1.2, repeat: Infinity, repeatDelay: 2 }}
+                            className="flex-shrink-0"
+                          >
+                            <Zap className="h-3.5 w-3.5 text-amber-500" />
+                          </motion.div>
+                          <p className="text-[9px] font-black text-amber-600 dark:text-amber-400 leading-tight">
+                            🚀 Climb to Rank #{apiRank - 1}
+                          </p>
+                        </div>
+                        <p className={`text-[10px] font-medium leading-snug ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>
+                          Complete <strong>{tasksForNextApiRank}</strong> more to overtake{' '}
+                          <strong>{prevRankUser?.user_name?.split(' ')[0] || 'next person'}</strong>.
+                        </p>
+                      </>
+                    ) : myPending > 0 ? (
+                      <>
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <motion.div
+                            animate={{ scale: [1, 1.2, 1] }}
+                            transition={{ duration: 1.5, repeat: Infinity, repeatDelay: 3 }}
+                            className="flex-shrink-0"
+                          >
+                            <Star className="h-3.5 w-3.5 text-indigo-500" />
+                          </motion.div>
+                          <p className="text-[9px] font-black text-indigo-600 dark:text-indigo-400 leading-tight">Boost your score</p>
+                        </div>
+                        <p className={`text-[10px] font-medium leading-snug ${isDark ? 'text-indigo-300' : 'text-indigo-700'}`}>
+                          Complete <strong>{Math.min(tasksForTier, myPending)}</strong> more to reach <strong>{nextTierName}</strong>.
+                        </p>
+                      </>
+                    ) : (
+                      <p className={`text-[10px] font-semibold leading-snug ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>
                         🎉 All tasks complete! You&apos;re on fire this month!
                       </p>
-                    </motion.div>
-                  )}
+                    )}
+                  </motion.div>
                 </div>
 
               </div>
