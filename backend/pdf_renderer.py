@@ -302,7 +302,7 @@ def _build_header_band(logo_url: str, tagline: str, st: dict) -> List:
     return items
 
 
-def _build_client_table(client_name: str, client_mobile: str, report_date: str, st: dict):
+def _build_client_table(client_name: str, client_mobile: str, report_date: str, st: dict, prepared_by: str = ""):
     ci_rows = []
     if client_name:
         ci_rows.append([Paragraph("CLIENT", st["small_bold"]), Paragraph(client_name, st["body_bold"])])
@@ -310,6 +310,8 @@ def _build_client_table(client_name: str, client_mobile: str, report_date: str, 
         ci_rows.append([Paragraph("MOBILE", st["small_bold"]), Paragraph(client_mobile, st["body"])])
     if report_date:
         ci_rows.append([Paragraph("REPORT DATE", st["small_bold"]), Paragraph(report_date, st["body"])])
+    if prepared_by:
+        ci_rows.append([Paragraph("PREPARED BY", st["small_bold"]), Paragraph(prepared_by, st["body_bold"])])
     if not ci_rows:
         return None
     ci_tbl = Table(ci_rows, colWidths=[28 * mm, CONTENT_W - 28 * mm])
@@ -357,6 +359,7 @@ def _render_trademark_dossier(story: List, report: dict, branding: dict, st: dic
     client_name   = branding.get("client_name", "") or ""
     client_mobile = branding.get("client_mobile", "") or ""
     report_date   = branding.get("report_date", "") or ""
+    prepared_by   = branding.get("prepared_by", "") or report.get("prepared_by", "") or ""
 
     vp = VERDICT_PALETTE.get(overall, VERDICT_PALETTE["CAUTION"])
     reg_prob = _reg_probability(risk, overall)
@@ -375,7 +378,7 @@ def _render_trademark_dossier(story: List, report: dict, branding: dict, st: dic
     story.append(_section_rule())
 
     # ── CLIENT INFORMATION ───────────────────────────────────────────────────
-    ci_tbl = _build_client_table(client_name, client_mobile, report_date, st)
+    ci_tbl = _build_client_table(client_name, client_mobile, report_date, st, prepared_by)
     if ci_tbl:
         story.append(ci_tbl)
         story.append(Spacer(1, 10))
@@ -778,6 +781,7 @@ def build_combined_report_pdf(items: list, branding: dict) -> bytes:
     client_name   = branding.get("client_name",   "") or ""
     client_mobile = branding.get("client_mobile", "") or ""
     report_date   = branding.get("report_date",   "") or ""
+    prepared_by   = branding.get("prepared_by",   "") or ""
 
     created = datetime.utcnow().strftime("%Y-%m-%d %H:%M") + " UTC"
     total     = len(items)
@@ -809,6 +813,7 @@ def build_combined_report_pdf(items: list, branding: dict) -> bytes:
         "client_name":   client_name,
         "client_mobile": client_mobile,
         "report_date":   report_date,
+        "prepared_by":   prepared_by,
     }
 
     # ════════════════════════════════
@@ -824,7 +829,7 @@ def build_combined_report_pdf(items: list, branding: dict) -> bytes:
     story.append(_section_rule())
 
     # Client info
-    ci_tbl = _build_client_table(client_name, client_mobile, report_date, st)
+    ci_tbl = _build_client_table(client_name, client_mobile, report_date, st, prepared_by)
     if ci_tbl:
         story.append(ci_tbl)
         story.append(Spacer(1, 10))
