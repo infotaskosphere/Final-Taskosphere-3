@@ -156,7 +156,11 @@ app = FastAPI(title="Taskosphere Backend", redirect_slashes=False)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "https://taskosphere.com",
+        "https://www.taskosphere.com",
+
         "https://final-taskosphere-frontend.onrender.com",
+
         "http://localhost:3000",
         "http://localhost:5173",
         "http://localhost:5174",
@@ -164,6 +168,13 @@ app.add_middleware(
         "http://127.0.0.1:5174",
         "http://127.0.0.1:3000",
     ],
+    allow_origin_regex=r"https://.*\.onrender\.com",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,
+)
     allow_origin_regex=r"https://.*\.onrender\.com",  # covers all Render preview URLs
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
