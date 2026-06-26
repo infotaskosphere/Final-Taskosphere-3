@@ -1898,16 +1898,6 @@ function EmailScanSettings({ isDark }) {
       </button>
     </div>
   );
-      <button onClick={() => !disabled && onChange(!value)}
-        disabled={disabled}
-        className="flex-shrink-0 transition-all active:scale-95 disabled:opacity-50"
-        aria-label={label}>
-        {value
-          ? <ToggleRight className="w-9 h-9" style={{ color: COLORS.emeraldGreen }} />
-          : <ToggleLeft  className="w-9 h-9" style={{ color: isDark ? D.dimmer : "#94a3b8" }} />}
-      </button>
-    </div>
-  );
 
   const NumberField = ({ label, hint, value, min, max, step = 1, suffix, onChange, error }) => (
     <div className="py-3.5 border-b last:border-b-0" style={{ borderColor: isDark ? D.border : "#f1f5f9" }}>
