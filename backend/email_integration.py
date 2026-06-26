@@ -98,6 +98,9 @@ class ConnectionUpdateRequest(BaseModel):
     keyword_match_mode: Optional[str] = None          # "or" | "and"
     keyword_case_sensitive: Optional[bool] = None
     keyword_auto_save: Optional[bool] = None
+    # ── Admin overrides (only writable by admin) ───────────────────────────
+    admin_paused: Optional[bool] = None
+    admin_disabled: Optional[bool] = None
 
 class ConnectionOut(BaseModel):
     email_address: str
@@ -115,6 +118,13 @@ class ConnectionOut(BaseModel):
     keyword_match_mode: Optional[str] = "or"
     keyword_case_sensitive: Optional[bool] = False
     keyword_auto_save: Optional[bool] = True
+    # ── Admin overrides ────────────────────────────────────────────────────
+    admin_paused: Optional[bool] = False
+    admin_disabled: Optional[bool] = False
+    # ── Owner identity (populated for admin/manager listings) ─────────────
+    owner_user_id: Optional[str] = None
+    owner_name: Optional[str] = None
+    owner_email: Optional[str] = None
 
 class ExtractedEventOut(BaseModel):
     id: Optional[str] = None
@@ -178,9 +188,13 @@ class ManualSaveVisitRequest(BaseModel):
 class SenderWhitelistEntry(BaseModel):
     email_address: str
     label: Optional[str] = None
+    # Per-sender subject keyword filter (optional). Empty list = accept all subjects from this sender.
+    keywords: Optional[List[str]] = None
+    keyword_match_mode: Optional[str] = "or"          # "or" | "and"
+    keyword_case_sensitive: Optional[bool] = False
 
 class SenderWhitelistOut(BaseModel):
-    senders: List[Dict[str, str]]
+    senders: List[Dict[str, Any]]
 
 
 # =============================================================================
@@ -1093,6 +1107,11 @@ def _conn_doc_to_out(doc: Dict) -> ConnectionOut:
         keyword_match_mode=doc.get("keyword_match_mode", "or"),
         keyword_case_sensitive=doc.get("keyword_case_sensitive", False),
         keyword_auto_save=doc.get("keyword_auto_save", True),
+        admin_paused=doc.get("admin_paused", False),
+        admin_disabled=doc.get("admin_disabled", False),
+        owner_user_id=str(doc["user_id"]) if doc.get("user_id") else None,
+        owner_name=doc.get("owner_name"),
+        owner_email=doc.get("owner_email"),
     )
 
 # =============================================================================
@@ -1430,7 +1449,9 @@ async def _scheduled_scan_loop():
 
 async def _run_full_scan_for_user(user_id: str, prefs: Dict, limit: int = 50):
     conns = await db[COL_CONNECTIONS].find(
-        {"user_id": user_id, "is_active": True}, {"_id": 0}
+        {"user_id": user_id, "is_active": True,
+         "admin_disabled": {"$ne": True}, "admin_paused": {"$ne": True}},
+        {"_id": 0}
     ).to_list(50)
     if not conns:
         return
@@ -1553,6 +1574,32 @@ async def list_connections(current_user=Depends(check_module_permission("email_a
         docs = await db[COL_CONNECTIONS].find(
             {"user_id": str(current_user.id)}, {"app_password_enc": 0, "_id": 0}
         ).to_list(100)
+
+    # Attach owner identity so admins/managers can label other users' accounts in the UI.
+    if current_user.role in ("admin", "manager") and docs:
+        try:
+            from bson import ObjectId  # local import — avoids hard dep if collection lacks ObjectId ids
+            owner_ids = list({d.get("user_id") for d in docs if d.get("user_id")})
+            obj_ids = []
+            for oid in owner_ids:
+                try: obj_ids.append(ObjectId(oid))
+                except Exception: pass
+            users_by_id = {}
+            if obj_ids:
+                async for u in db["users"].find({"_id": {"$in": obj_ids}}, {"name": 1, "full_name": 1, "email": 1, "username": 1}):
+                    uid = str(u["_id"])
+                    users_by_id[uid] = u
+            # Also try string user_ids (in case docs store user_id as plain string)
+            async for u in db["users"].find({"_id": {"$in": [oid for oid in owner_ids if oid]}}, {"name": 1, "full_name": 1, "email": 1, "username": 1}):
+                users_by_id[str(u["_id"])] = u
+            for d in docs:
+                uid = str(d.get("user_id") or "")
+                u = users_by_id.get(uid)
+                if u:
+                    d["owner_name"]  = u.get("full_name") or u.get("name") or u.get("username") or u.get("email")
+                    d["owner_email"] = u.get("email")
+        except Exception:
+            pass
     return {"connections": [_conn_doc_to_out(d) for d in docs]}
 
 @router.post("/connections", status_code=201)
@@ -1595,7 +1642,7 @@ async def add_connection(body: ConnectionCreateRequest, current_user=Depends(che
 async def update_connection(
     email_address: str, body: ConnectionUpdateRequest, current_user=Depends(check_module_permission("email_accounts", "edit"))
 ):
-    # Issue #1: visibility — only own account or manager can touch team accounts
+    # Visibility — only own account, or manager for team accounts, or admin for anyone.
     query_filter = {"email_address": email_address}
     if current_user.role != "admin":
         if current_user.role == "manager":
@@ -1608,6 +1655,10 @@ async def update_connection(
     if not existing:
         raise HTTPException(status_code=404, detail="Connection not found")
     updates = {k: v for k, v in body.dict().items() if v is not None or isinstance(v, bool)}
+    # Admin-only fields: strip if caller is not admin
+    if current_user.role != "admin":
+        for f in ("admin_paused", "admin_disabled"):
+            updates.pop(f, None)
     if updates.get("is_active"):
         updates["sync_error"] = None
     if "keywords" in updates and updates["keywords"] is not None:
@@ -1615,11 +1666,13 @@ async def update_connection(
     if "keyword_match_mode" in updates and updates["keyword_match_mode"]:
         mode = updates["keyword_match_mode"].lower()
         updates["keyword_match_mode"] = mode if mode in ("or", "and") else "or"
+    # Use the actual owner of the document so admin edits land on the right row.
+    owner_id = existing.get("user_id") or str(current_user.id)
     await db[COL_CONNECTIONS].update_one(
-        {"user_id": str(current_user.id), "email_address": email_address}, {"$set": updates}
+        {"user_id": owner_id, "email_address": email_address}, {"$set": updates}
     )
     doc = await db[COL_CONNECTIONS].find_one(
-        {"user_id": str(current_user.id), "email_address": email_address},
+        {"user_id": owner_id, "email_address": email_address},
         {"_id": 0, "app_password_enc": 0}
     )
     return _conn_doc_to_out(doc)
@@ -1700,12 +1753,24 @@ async def remove_sender_from_whitelist(email_address: str, current_user=Depends(
 
 @router.put("/sender-whitelist")
 async def replace_sender_whitelist(body: SenderWhitelistOut, current_user=Depends(check_module_permission("email_accounts", "create"))):
-    senders = [
-        {"email_address": s.get("email_address","").strip().lower(),
-         "label": s.get("label", s.get("email_address","")),
-         "added_at": datetime.now(timezone.utc).isoformat()}
-        for s in body.senders if s.get("email_address","").strip()
-    ]
+    senders = []
+    for s in body.senders:
+        addr = (s.get("email_address") or "").strip().lower()
+        if not addr:
+            continue
+        raw_kw = s.get("keywords") or []
+        kws = [str(k).strip() for k in raw_kw if str(k).strip()] if isinstance(raw_kw, list) else []
+        mode = (s.get("keyword_match_mode") or "or").lower()
+        if mode not in ("or", "and"):
+            mode = "or"
+        senders.append({
+            "email_address": addr,
+            "label": s.get("label") or addr,
+            "added_at": datetime.now(timezone.utc).isoformat(),
+            "keywords": kws,
+            "keyword_match_mode": mode,
+            "keyword_case_sensitive": bool(s.get("keyword_case_sensitive")),
+        })
     await db[COL_SENDER_WHITELIST].update_one(
         {"user_id": str(current_user.id)},
         {"$set": {"senders": senders, "user_id": str(current_user.id)}}, upsert=True
@@ -1985,7 +2050,7 @@ async def extract_events(
     ),
 ):
     conns = await db[COL_CONNECTIONS].find(
-        {"user_id": str(current_user.id), "is_active": True}, {"_id": 0}
+        {"user_id": str(current_user.id), "is_active": True, "admin_disabled": {"$ne": True}, "admin_paused": {"$ne": True}}, {"_id": 0}
     ).to_list(50)
     if email:
         conns = [c for c in conns if c["email_address"] == email]
