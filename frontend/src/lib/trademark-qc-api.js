@@ -50,6 +50,7 @@ export async function generateReport(name, opts = {}) {
     client_name = "",
     client_mobile = "",
     report_date = "",
+    prepared_by = "",
   } = opts;
 
   // Derive class_filters from class_filter if not explicitly provided
@@ -73,6 +74,7 @@ export async function generateReport(name, opts = {}) {
     client_name,
     client_mobile,
     report_date,
+    prepared_by,
   }, { timeout: 90000 });  // Increased timeout for multi-class scraping
   return data;
 }
