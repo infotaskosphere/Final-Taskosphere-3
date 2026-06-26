@@ -116,72 +116,72 @@ def _styles():
     return {
         "report_title": ParagraphStyle(
             "report_title", parent=base["Normal"],
-            fontName=_SERIF_BOLD, fontSize=18, leading=22, textColor=DARK_BLUE,
+            fontName=_SERIF_BOLD, fontSize=20, leading=24, textColor=DARK_BLUE,
             alignment=TA_CENTER, spaceAfter=4,
         ),
         "firm_name": ParagraphStyle(
             "firm_name", parent=base["Normal"],
-            fontName=_SERIF_BOLD, fontSize=13, leading=16, textColor=DARK_BLUE,
+            fontName=_SERIF_BOLD, fontSize=15, leading=18, textColor=DARK_BLUE,
             alignment=TA_CENTER, spaceAfter=2,
         ),
         "firm_sub": ParagraphStyle(
             "firm_sub", parent=base["Normal"],
-            fontName=_SERIF, fontSize=9, leading=12, textColor=TEXT_MUTED,
+            fontName=_SERIF, fontSize=11, leading=14, textColor=TEXT_MUTED,
             alignment=TA_CENTER,
         ),
         "section_title": ParagraphStyle(
             "section_title", parent=base["Normal"],
-            fontName=_SERIF_BOLD, fontSize=11, leading=14, textColor=WHITE,
+            fontName=_SERIF_BOLD, fontSize=12, leading=15, textColor=WHITE,
             spaceBefore=0, spaceAfter=0, leftIndent=0,
         ),
         "h2": ParagraphStyle(
             "h2", parent=base["Heading2"],
-            fontName=_SERIF_BOLD, fontSize=11, leading=14, textColor=MED_BLUE,
+            fontName=_SERIF_BOLD, fontSize=12, leading=15, textColor=MED_BLUE,
             spaceBefore=10, spaceAfter=4,
         ),
         "h3": ParagraphStyle(
             "h3", parent=base["Heading3"],
-            fontName=_SERIF_BOLD, fontSize=10, leading=13, textColor=DARK_BLUE,
+            fontName=_SERIF_BOLD, fontSize=11, leading=14, textColor=DARK_BLUE,
             spaceBefore=6, spaceAfter=3,
         ),
         "body": ParagraphStyle(
             "body", parent=base["BodyText"],
-            fontName=_SERIF, fontSize=9.5, leading=13, textColor=TEXT_DARK,
+            fontName=_SERIF, fontSize=11, leading=14, textColor=TEXT_DARK,
         ),
         "body_j": ParagraphStyle(
             "body_j", parent=base["BodyText"],
-            fontName=_SERIF, fontSize=9.5, leading=13, textColor=TEXT_DARK,
+            fontName=_SERIF, fontSize=11, leading=14, textColor=TEXT_DARK,
             alignment=TA_JUSTIFY,
         ),
         "small": ParagraphStyle(
             "small", parent=base["BodyText"],
-            fontName=_SERIF, fontSize=8, leading=11, textColor=TEXT_MUTED,
+            fontName=_SERIF, fontSize=9.5, leading=12, textColor=TEXT_MUTED,
         ),
         "label": ParagraphStyle(
             "label", parent=base["Normal"],
-            fontName=_SERIF_BOLD, fontSize=8.5, leading=11, textColor=TEXT_MUTED,
+            fontName=_SERIF_BOLD, fontSize=10, leading=12, textColor=TEXT_MUTED,
         ),
         "cell": ParagraphStyle(
             "cell", parent=base["Normal"],
-            fontName=_SERIF, fontSize=9, leading=12, textColor=TEXT_DARK,
+            fontName=_SERIF, fontSize=11, leading=13, textColor=TEXT_DARK,
         ),
         "cell_bold": ParagraphStyle(
             "cell_bold", parent=base["Normal"],
-            fontName=_SERIF_BOLD, fontSize=9, leading=12, textColor=TEXT_DARK,
+            fontName=_SERIF_BOLD, fontSize=11, leading=13, textColor=TEXT_DARK,
         ),
         "cell_center": ParagraphStyle(
             "cell_center", parent=base["Normal"],
-            fontName=_SERIF, fontSize=9, leading=12, textColor=TEXT_DARK,
+            fontName=_SERIF, fontSize=11, leading=13, textColor=TEXT_DARK,
             alignment=TA_CENTER,
         ),
         "disclaimer": ParagraphStyle(
             "disclaimer", parent=base["BodyText"],
-            fontName=_SERIF, fontSize=8, leading=11, textColor=TEXT_MUTED,
+            fontName=_SERIF, fontSize=9.5, leading=12, textColor=TEXT_MUTED,
             alignment=TA_JUSTIFY,
         ),
         "numbered": ParagraphStyle(
             "numbered", parent=base["Normal"],
-            fontName=_SERIF, fontSize=9.5, leading=14, textColor=TEXT_DARK,
+            fontName=_SERIF, fontSize=11, leading=15, textColor=TEXT_DARK,
             leftIndent=14, spaceAfter=3,
         ),
     }
@@ -353,6 +353,7 @@ def build_report_pdf(doc_record: dict) -> bytes:
     client_mobile   = report.get("client_mobile") or ""
     report_date_raw = report.get("report_date") or created_at[:10]
     mark_type       = report.get("mark_type") or "Word / Device / Composite"
+    prepared_by     = report.get("prepared_by") or ""
 
     # Format report date
     try:
@@ -419,14 +420,17 @@ def build_report_pdf(doc_record: dict) -> bytes:
     # ── CLIENT DETAILS ──────────────────────────────────────────────────────
     story += _section_header("CLIENT DETAILS", st)
     class_label = f"Class {class_filter}" if class_filter not in ("All", None, "") else "All Classes"
-    story.append(_kv_table([
+    client_details_rows = [
         ("Client Name",         client_name or "\u2014"),
         ("Proposed Mark",       query),
         ("Type of Mark",        mark_type),
         ("Applied Class",       class_label),
         ("Date of Search",      report_date_str),
         ("Search Conducted By", firm_name),
-    ], st=st))
+    ]
+    if prepared_by:
+        client_details_rows.append(("Prepared By", prepared_by))
+    story.append(_kv_table(client_details_rows, st=st))
     story.append(Spacer(1, 14))
 
     # ── EXECUTIVE SUMMARY ───────────────────────────────────────────────────
