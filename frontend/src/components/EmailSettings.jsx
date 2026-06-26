@@ -32,6 +32,7 @@ import {
   Square, Save, CalendarOff,
   Send, FileText, Building2, Pencil, Users,
   ToggleLeft, ToggleRight, Copy, Zap, Paperclip,
+  UserPlus, UserMinus, Key,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -629,7 +630,7 @@ function ConnectForm({ provider, onSuccess, onCancel, isDark }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // CONNECTED ACCOUNT CARD
 // ─────────────────────────────────────────────────────────────────────────────
-function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, onSyncRetro, onUpdateSettings, isDark }) {
+function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, onSyncRetro, onUpdateSettings, isDark, currentUser }) {
   const { user: currentUser } = useAuth();
   const isAdmin = currentUser?.role === 'admin';
   const ownerId = conn.owner_user_id || conn.user_id || null;
@@ -882,6 +883,14 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, on
             )}
           </div>
         )}
+        {/* ── Linked Users Panel ── */}
+        <LinkedUsersPanel
+          conn={conn}
+          isDark={isDark}
+          isAdmin={isAdmin}
+          currentUserId={currentUser?.id ? String(currentUser.id) : ""}
+        />
+
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-3 border-t border-slate-100 dark:border-slate-700"
           style={{ backgroundColor: isDark ? D.raised : "#f8fafc" }}>
           <p className="text-xs truncate" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
@@ -3044,8 +3053,289 @@ function SenderSelectorPanel({ isDark }) {
   );
 }
 
+
+// =============================================================================
+// LinkedUsersPanel — Admin assigns users to an email connection.
+// Each linked user sees this email's scraped events in their Action Center.
+// Users can also set their own keywords for that connection.
+// =============================================================================
+function LinkedUsersPanel({ conn, isDark, isAdmin, currentUserId }) {
+  const [open,        setOpen]       = useState(false);
+  const [allUsers,    setAllUsers]   = useState([]);
+  const [linkedUsers, setLinkedUsers]= useState(conn.linked_users || []);
+  const [linkedIds,   setLinkedIds]  = useState((conn.linked_user_ids || []));
+  const [loadingUsers,setLoadingUsers]=useState(false);
+  const [saving,      setSaving]     = useState(false);
+  const [search,      setSearch]     = useState("");
+
+  // Per-linked-user keywords state (for current user if they are linked)
+  const [myKwDraft,   setMyKwDraft]  = useState("");
+  const [myKeywords,  setMyKeywords] = useState([]);
+  const [savingKw,    setSavingKw]   = useState(false);
+
+  const isLinkedToMe = linkedIds.includes(currentUserId) && conn.owner_user_id !== currentUserId;
+
+  // Load my keywords from linked_users list
+  useEffect(() => {
+    const me = (conn.linked_users || []).find(u => u.id === currentUserId);
+    setMyKeywords(me?.keywords || []);
+  }, [conn.linked_users, currentUserId]);
+
+  const fetchAllUsers = async () => {
+    if (allUsers.length > 0) return;
+    setLoadingUsers(true);
+    try {
+      const res = await api.get("/users");
+      const users = Array.isArray(res.data) ? res.data : (res.data?.users || []);
+      setAllUsers(users);
+    } catch { toast.error("Failed to load users"); }
+    finally { setLoadingUsers(false); }
+  };
+
+  const handleToggleOpen = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && isAdmin) fetchAllUsers();
+  };
+
+  const handleToggleUser = async (userId, userName) => {
+    if (!isAdmin) return;
+    const isLinked = linkedIds.includes(userId);
+    const nextIds = isLinked
+      ? linkedIds.filter(id => id !== userId)
+      : [...linkedIds, userId];
+    setSaving(true);
+    try {
+      await api.put(`/email/connections/${encodeURIComponent(conn.email_address)}/linked-users`, {
+        user_ids: nextIds,
+      });
+      setLinkedIds(nextIds);
+      if (isLinked) {
+        setLinkedUsers(prev => prev.filter(u => u.id !== userId));
+        toast.success(`Unlinked ${userName}`);
+      } else {
+        const userObj = allUsers.find(u => String(u.id) === String(userId));
+        setLinkedUsers(prev => [...prev, {
+          id: userId,
+          name: userObj?.full_name || userObj?.name || userName,
+          email: userObj?.email || "",
+          keywords: [],
+        }]);
+        toast.success(`${userName} will now see this email's events in their Action Center`);
+      }
+    } catch { toast.error("Failed to update linked users"); }
+    finally { setSaving(false); }
+  };
+
+  const handleAddMyKeyword = async () => {
+    const kw = myKwDraft.trim();
+    if (!kw) return;
+    if (myKeywords.includes(kw)) { setMyKwDraft(""); return; }
+    const next = [...myKeywords, kw];
+    setMyKeywords(next);
+    setMyKwDraft("");
+    setSavingKw(true);
+    try {
+      await api.patch(`/email/connections/${encodeURIComponent(conn.email_address)}/my-keywords`, { keywords: next });
+      toast.success("Keyword saved");
+    } catch { toast.error("Failed to save keyword"); }
+    finally { setSavingKw(false); }
+  };
+
+  const handleRemoveMyKeyword = async (kw) => {
+    const next = myKeywords.filter(k => k !== kw);
+    setMyKeywords(next);
+    setSavingKw(true);
+    try {
+      await api.patch(`/email/connections/${encodeURIComponent(conn.email_address)}/my-keywords`, { keywords: next });
+    } catch { toast.error("Failed to remove keyword"); }
+    finally { setSavingKw(false); }
+  };
+
+  const filteredUsers = allUsers.filter(u => {
+    const q = search.toLowerCase();
+    return !q || (u.full_name || u.name || "").toLowerCase().includes(q) || (u.email || "").toLowerCase().includes(q);
+  });
+
+  const inputCls = "px-3 py-1.5 border rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all";
+  const inputStyle = { backgroundColor: isDark ? D.raised : "#ffffff", borderColor: isDark ? D.border : "#d1d5db", color: isDark ? D.text : "#1e293b" };
+
+  return (
+    <div className="mx-4 mb-3">
+      {/* Trigger button */}
+      <button
+        onClick={handleToggleOpen}
+        className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl border transition-all"
+        style={{
+          borderColor: open ? COLORS.mediumBlue + "60" : (isDark ? D.border : "#e2e8f0"),
+          backgroundColor: open ? (isDark ? "rgba(31,111,178,0.10)" : "#eff6ff") : (isDark ? D.raised : "#f8fafc"),
+        }}
+      >
+        <div className="flex items-center gap-2">
+          <Users className="w-3.5 h-3.5" style={{ color: open ? COLORS.mediumBlue : (isDark ? D.muted : "#94a3b8") }} />
+          <span className="text-xs font-semibold" style={{ color: open ? COLORS.mediumBlue : (isDark ? D.muted : "#64748b") }}>
+            {isAdmin ? "Linked Users" : "My Keywords for this Email"}
+            {linkedIds.length > 0 && isAdmin && (
+              <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold text-white" style={{ backgroundColor: COLORS.mediumBlue }}>
+                {linkedIds.length}
+              </span>
+            )}
+          </span>
+          {!isAdmin && isLinkedToMe && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{ backgroundColor: isDark ? "rgba(31,175,90,0.15)" : "#dcfce7", color: COLORS.emeraldGreen }}>
+              Linked to you
+            </span>
+          )}
+        </div>
+        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? "rotate-180" : ""}`} style={{ color: isDark ? D.muted : "#94a3b8" }} />
+      </button>
+
+      {open && (
+        <div className="mt-2 rounded-xl border overflow-hidden" style={{ borderColor: isDark ? D.border : "#e2e8f0", backgroundColor: isDark ? D.card : "#ffffff" }}>
+
+          {/* ── ADMIN SECTION: assign users ── */}
+          {isAdmin && (
+            <div className="p-3 space-y-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+                Assign users — they will see scraped events from this email in their Action Center
+              </p>
+
+              {/* Currently linked */}
+              {linkedUsers.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-[10px] font-semibold" style={{ color: isDark ? D.muted : "#64748b" }}>Currently linked ({linkedUsers.length})</p>
+                  {linkedUsers.map(lu => (
+                    <div key={lu.id} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg border"
+                      style={{ borderColor: isDark ? "rgba(31,175,90,0.25)" : "#bbf7d0", backgroundColor: isDark ? "rgba(31,175,90,0.07)" : "#f0fdf4" }}>
+                      <div className="w-7 h-7 rounded-lg flex items-center justify-center text-[11px] font-black text-white flex-shrink-0"
+                        style={{ backgroundColor: COLORS.emeraldGreen }}>
+                        {(lu.name || lu.email || "?")[0].toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold truncate" style={{ color: isDark ? D.text : "#1e293b" }}>{lu.name}</p>
+                        <p className="text-[10px] truncate" style={{ color: isDark ? D.muted : "#94a3b8" }}>{lu.email}</p>
+                        {lu.keywords?.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-0.5">
+                            {lu.keywords.map(kw => (
+                              <span key={kw} className="text-[9px] px-1.5 py-0.5 rounded font-mono"
+                                style={{ backgroundColor: isDark ? "rgba(99,102,241,0.15)" : "#eef2ff", color: isDark ? "#a5b4fc" : "#4338ca" }}>
+                                {kw}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        disabled={saving}
+                        onClick={() => handleToggleUser(lu.id, lu.name)}
+                        className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold transition-all active:scale-95 disabled:opacity-50"
+                        style={{ color: COLORS.red, backgroundColor: isDark ? "rgba(239,68,68,0.10)" : "#fef2f2", border: `1px solid ${COLORS.red}30` }}>
+                        <UserMinus className="w-3 h-3" /> Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add users from full list */}
+              <div className="space-y-2">
+                <p className="text-[10px] font-semibold" style={{ color: isDark ? D.muted : "#64748b" }}>Add a user</p>
+                <input
+                  value={search} onChange={e => setSearch(e.target.value)}
+                  placeholder="Search by name or email..."
+                  className={inputCls + " w-full"}
+                  style={inputStyle}
+                />
+                {loadingUsers ? (
+                  <div className="flex justify-center py-3"><Loader2 className="w-4 h-4 animate-spin text-blue-400" /></div>
+                ) : (
+                  <div className="max-h-48 overflow-y-auto space-y-1 border rounded-lg" style={{ borderColor: isDark ? D.border : "#f1f5f9" }}>
+                    {filteredUsers.filter(u => !linkedIds.includes(String(u.id))).slice(0, 20).map(u => (
+                      <button key={u.id}
+                        disabled={saving}
+                        onClick={() => handleToggleUser(String(u.id), u.full_name || u.name || u.email)}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors disabled:opacity-50"
+                      >
+                        <div className="w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-black text-white flex-shrink-0"
+                          style={{ backgroundColor: COLORS.mediumBlue }}>
+                          {((u.full_name || u.name || u.email || "?")[0]).toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold truncate" style={{ color: isDark ? D.text : "#1e293b" }}>{u.full_name || u.name || u.email}</p>
+                          <p className="text-[10px] truncate" style={{ color: isDark ? D.muted : "#94a3b8" }}>{u.email} · {u.role}</p>
+                        </div>
+                        <UserPlus className="w-3.5 h-3.5 flex-shrink-0" style={{ color: COLORS.emeraldGreen }} />
+                      </button>
+                    ))}
+                    {filteredUsers.filter(u => !linkedIds.includes(String(u.id))).length === 0 && (
+                      <p className="text-xs text-center py-4" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>No more users to add</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── NON-ADMIN SECTION: keyword editing for linked users ── */}
+          {!isAdmin && isLinkedToMe && (
+            <div className="p-3 space-y-3">
+              <div className="flex items-start gap-2 p-2.5 rounded-lg border"
+                style={{ backgroundColor: isDark ? "rgba(59,130,246,0.08)" : "#eff6ff", borderColor: isDark ? "#1d4ed8" : "#bfdbfe" }}>
+                <Key className="w-3.5 h-3.5 text-blue-500 flex-shrink-0 mt-0.5" />
+                <p className="text-[11px]" style={{ color: isDark ? "#93c5fd" : "#1e40af" }}>
+                  This email has been linked to your account by an admin. Add keywords below — only emails whose subject matches these keywords will appear in <strong>your</strong> Action Center from this email.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+                  My keywords for {conn.email_address}
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {myKeywords.map(kw => (
+                    <span key={kw} className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border"
+                      style={{ backgroundColor: isDark ? "rgba(99,102,241,0.12)" : "#eef2ff", borderColor: isDark ? "rgba(99,102,241,0.30)" : "#c7d2fe", color: isDark ? "#a5b4fc" : "#4338ca" }}>
+                      {kw}
+                      <button onClick={() => handleRemoveMyKeyword(kw)} className="opacity-70 hover:opacity-100"><X className="w-3 h-3" /></button>
+                    </span>
+                  ))}
+                  {myKeywords.length === 0 && (
+                    <span className="text-[11px] italic" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>No keywords — all scraped emails from this account will appear</span>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    value={myKwDraft}
+                    onChange={e => setMyKwDraft(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); handleAddMyKeyword(); } }}
+                    placeholder="Add a keyword (press Enter)"
+                    className={inputCls + " flex-1"}
+                    style={inputStyle}
+                  />
+                  <button
+                    onClick={handleAddMyKeyword}
+                    disabled={savingKw || !myKwDraft.trim()}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold text-white disabled:opacity-50 transition-all active:scale-95"
+                    style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                    {savingKw ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Add"}
+                  </button>
+                </div>
+                {myKeywords.length > 0 && (
+                  <p className="text-[10px]" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+                    ✓ Only emails matching these keywords will show in your Action Center. Leave empty to see all.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function EmailSettings() {
   const isDark = useDark();
+  const { user } = useAuth();
 
   const [connections,     setConnections]     = useState([]);
   const [loading,         setLoading]         = useState(true);
@@ -3372,7 +3662,8 @@ export default function EmailSettings() {
                 {connections.map(conn => (
                   <ConnectedAccountCard key={conn.email_address} conn={conn} isDark={isDark}
                     onDisconnect={handleDisconnect} onTest={handleTest} onToggle={handleToggle}
-                    onSync={handleSync} onSyncRetro={handleSyncRetro} onUpdateSettings={handleUpdateSettings} />
+                    onSync={handleSync} onSyncRetro={handleSyncRetro} onUpdateSettings={handleUpdateSettings}
+                    currentUser={user} />
                 ))}
               </AnimatePresence>
             )}
