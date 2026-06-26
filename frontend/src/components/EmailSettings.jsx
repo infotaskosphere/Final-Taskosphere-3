@@ -1766,7 +1766,7 @@ const DEFAULT_SCAN_SETTINGS = {
   enforceWhitelist:      false,
   enforceBlacklist:      true,
   defaultCategory:       "reminder",
-  defaultReminderLead:   1,    // days before
+  defaultReminderLead:   1,
   syncIntervalMinutes:   15,
   autoSyncEnabled:       false,
   notifyOnNewEvents:     true,
@@ -1775,38 +1775,50 @@ const DEFAULT_SCAN_SETTINGS = {
   showAttachments:       true,
 };
 
-function loadScanSettings() {
+function loadScanSettingsLocal() {
   try {
     const raw = localStorage.getItem(SCAN_SETTINGS_KEY);
-    if (!raw) return { ...DEFAULT_SCAN_SETTINGS };
+    if (!raw) return null;
     return { ...DEFAULT_SCAN_SETTINGS, ...JSON.parse(raw) };
-  } catch { return { ...DEFAULT_SCAN_SETTINGS }; }
+  } catch { return null; }
 }
 
 // Per-field validation rules for scan settings. Returns map of {field: errorMsg}.
 function validateScanSettings(s) {
   const errors = {};
   const intInRange = (v, min, max) => Number.isFinite(v) && Number.isInteger(v) && v >= min && v <= max;
-  if (!intInRange(s.scanWindowDays, 1, 365))         errors.scanWindowDays      = "Must be a whole number between 1 and 365";
-  if (!intInRange(s.maxEventsPerScan, 10, 1000))     errors.maxEventsPerScan    = "Must be between 10 and 1000";
-  if (!intInRange(s.syncIntervalMinutes, 5, 240))    errors.syncIntervalMinutes = "Must be between 5 and 240 minutes";
-  if (!intInRange(s.defaultReminderLead, 0, 30))     errors.defaultReminderLead = "Must be between 0 and 30 days";
+  if (!intInRange(s.scanWindowDays, 1, 365))         errors.scanWindowDays      = "Must be 1–365";
+  if (!intInRange(s.maxEventsPerScan, 10, 1000))     errors.maxEventsPerScan    = "Must be 10–1000";
+  if (!intInRange(s.syncIntervalMinutes, 5, 240))    errors.syncIntervalMinutes = "Must be 5–240 min";
+  if (!intInRange(s.defaultReminderLead, 0, 30))     errors.defaultReminderLead = "Must be 0–30 days";
   if (!["reminder", "todo", "visit"].includes(s.defaultCategory))
     errors.defaultCategory = "Pick a valid category";
   return errors;
 }
 
 function EmailScanSettings({ isDark }) {
-  const [settings, setSettings] = useState(loadScanSettings);
+  const [settings, setSettings] = useState(() => loadScanSettingsLocal() || { ...DEFAULT_SCAN_SETTINGS });
+  const [loadingRemote, setLoadingRemote] = useState(true);
   const [saved, setSaved]       = useState(false);
   const [saving, setSaving]     = useState(false);
   const [resetting, setResetting] = useState(false);
   const [errors, setErrors]     = useState({});
 
+  // On mount, load settings from server (server is source of truth; localStorage is optimistic cache)
+  useEffect(() => {
+    api.get("/email/scan-settings")
+      .then(res => {
+        const remote = { ...DEFAULT_SCAN_SETTINGS, ...(res.data || {}) };
+        setSettings(remote);
+        localStorage.setItem(SCAN_SETTINGS_KEY, JSON.stringify(remote));
+      })
+      .catch(() => { /* use local/default silently */ })
+      .finally(() => setLoadingRemote(false));
+  }, []);
+
   const update = (patch) => {
     setSettings(prev => {
       const next = { ...prev, ...patch };
-      // live-clear errors for touched fields when they become valid
       const nextErrors = validateScanSettings(next);
       setErrors(prevErr => {
         const out = { ...prevErr };
@@ -1828,21 +1840,24 @@ function EmailScanSettings({ isDark }) {
     }
     setSaving(true);
     try {
-      // Save locally first so the UI is responsive even if the API is unreachable.
       localStorage.setItem(SCAN_SETTINGS_KEY, JSON.stringify(settings));
-      try {
-        await api.put("/email/scan-settings", settings);
-        toast.success("✓ Settings saved");
-      } catch (apiErr) {
-        // Local save succeeded but remote did not — warn the user instead of silently swallowing.
-        const msg = apiErr?.response?.data?.detail
-          || (apiErr?.response?.status ? `Saved locally — server rejected (${apiErr.response.status})` : "Saved locally — server unreachable");
-        toast.warning ? toast.warning(msg) : toast(msg, { description: "Settings persist on this device." });
-      }
+      await api.put("/email/scan-settings", settings);
+      toast.success("✓ Settings saved");
       setSaved(true);
       setTimeout(() => setSaved(false), 1600);
-    } catch (e) {
-      toast.error("Could not save settings");
+    } catch (apiErr) {
+      const status  = apiErr?.response?.status;
+      const detail  = apiErr?.response?.data?.detail;
+      if (status === 422 && detail && typeof detail === "object") {
+        // Server-side field validation errors
+        setErrors(detail);
+        toast.error("Fix field errors and try again");
+      } else {
+        const msg = detail || (status ? `Server error (${status})` : "Server unreachable — saved locally");
+        toast.warning(msg);
+        setSaved(true);
+        setTimeout(() => setSaved(false), 1600);
+      }
     } finally { setSaving(false); }
   };
 
@@ -1860,13 +1875,29 @@ function EmailScanSettings({ isDark }) {
     } finally { setResetting(false); }
   };
 
-  const Toggle = ({ label, hint, value, onChange, disabled }) => (
-    <div className="flex items-start justify-between gap-4 py-3 border-b last:border-b-0"
-      style={{ borderColor: isDark ? D.border : "#e2e8f0" }}>
-      <div className="min-w-0">
-        <p className="text-sm font-semibold" style={{ color: isDark ? D.text : "#1e293b" }}>{label}</p>
-        {hint && <p className="text-[11px] mt-0.5" style={{ color: isDark ? D.muted : "#64748b" }}>{hint}</p>}
+  const Toggle = ({ label, hint, value, onChange, disabled, badge }) => (
+    <div className="flex items-start justify-between gap-4 py-3.5 border-b last:border-b-0"
+      style={{ borderColor: isDark ? D.border : "#f1f5f9" }}>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-semibold" style={{ color: isDark ? D.text : "#1e293b" }}>{label}</p>
+          {badge && (
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold"
+              style={{ background: isDark ? "rgba(16,185,129,0.15)" : "#dcfce7", color: "#059669" }}>{badge}</span>
+          )}
+        </div>
+        {hint && <p className="text-[11px] mt-0.5 leading-relaxed" style={{ color: isDark ? D.muted : "#64748b" }}>{hint}</p>}
       </div>
+      <button onClick={() => !disabled && onChange(!value)}
+        disabled={disabled}
+        className="flex-shrink-0 transition-all active:scale-95 disabled:opacity-50 mt-0.5"
+        aria-label={label}>
+        {value
+          ? <ToggleRight className="w-9 h-9" style={{ color: COLORS.emeraldGreen }} />
+          : <ToggleLeft  className="w-9 h-9" style={{ color: isDark ? D.dimmer : "#94a3b8" }} />}
+      </button>
+    </div>
+  );
       <button onClick={() => !disabled && onChange(!value)}
         disabled={disabled}
         className="flex-shrink-0 transition-all active:scale-95 disabled:opacity-50"
@@ -1879,22 +1910,29 @@ function EmailScanSettings({ isDark }) {
   );
 
   const NumberField = ({ label, hint, value, min, max, step = 1, suffix, onChange, error }) => (
-    <div className="py-3 border-b last:border-b-0" style={{ borderColor: isDark ? D.border : "#e2e8f0" }}>
+    <div className="py-3.5 border-b last:border-b-0" style={{ borderColor: isDark ? D.border : "#f1f5f9" }}>
       <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold" style={{ color: isDark ? D.text : "#1e293b" }}>{label}</p>
-          {hint && <p className="text-[11px] mt-0.5" style={{ color: isDark ? D.muted : "#64748b" }}>{hint}</p>}
+          {hint && <p className="text-[11px] mt-0.5 leading-relaxed" style={{ color: isDark ? D.muted : "#64748b" }}>{hint}</p>}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
+          <button onClick={() => onChange(Math.max(min, (value || 0) - step))}
+            className="w-7 h-7 flex items-center justify-center rounded-lg border text-base font-bold transition-all active:scale-95"
+            style={{ backgroundColor: isDark ? D.raised : "#f8fafc", borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.muted : "#64748b" }}>
+            −
+          </button>
           <input type="number" value={value} min={min} max={max} step={step}
-            onChange={e => {
-              const raw = e.target.value;
-              onChange(raw === "" ? NaN : Number(raw));
-            }}
+            onChange={e => { const raw = e.target.value; onChange(raw === "" ? NaN : Number(raw)); }}
             aria-invalid={!!error}
-            className="w-24 px-3 py-2 border rounded-xl text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-20 px-2 py-1.5 border rounded-lg text-sm text-center font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
             style={{ backgroundColor: isDark ? D.raised : "#fff", borderColor: error ? "#ef4444" : (isDark ? D.border : "#d1d5db"), color: isDark ? D.text : "#1e293b" }} />
-          {suffix && <span className="text-xs font-medium" style={{ color: isDark ? D.muted : "#64748b" }}>{suffix}</span>}
+          <button onClick={() => onChange(Math.min(max, (value || 0) + step))}
+            className="w-7 h-7 flex items-center justify-center rounded-lg border text-base font-bold transition-all active:scale-95"
+            style={{ backgroundColor: isDark ? D.raised : "#f8fafc", borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.muted : "#64748b" }}>
+            +
+          </button>
+          {suffix && <span className="text-xs font-semibold w-10" style={{ color: isDark ? D.muted : "#64748b" }}>{suffix}</span>}
         </div>
       </div>
       {error && (
@@ -1904,15 +1942,15 @@ function EmailScanSettings({ isDark }) {
   );
 
   const SelectField = ({ label, hint, value, options, onChange, error }) => (
-    <div className="py-3 border-b last:border-b-0" style={{ borderColor: isDark ? D.border : "#e2e8f0" }}>
+    <div className="py-3.5 border-b last:border-b-0" style={{ borderColor: isDark ? D.border : "#f1f5f9" }}>
       <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold" style={{ color: isDark ? D.text : "#1e293b" }}>{label}</p>
-          {hint && <p className="text-[11px] mt-0.5" style={{ color: isDark ? D.muted : "#64748b" }}>{hint}</p>}
+          {hint && <p className="text-[11px] mt-0.5 leading-relaxed" style={{ color: isDark ? D.muted : "#64748b" }}>{hint}</p>}
         </div>
         <select value={value} onChange={e => onChange(e.target.value)}
           aria-invalid={!!error}
-          className="px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="px-3 py-2 border rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 flex-shrink-0"
           style={{ backgroundColor: isDark ? D.raised : "#fff", borderColor: error ? "#ef4444" : (isDark ? D.border : "#d1d5db"), color: isDark ? D.text : "#1e293b" }}>
           {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
@@ -1925,8 +1963,18 @@ function EmailScanSettings({ isDark }) {
 
   const errorCount = Object.keys(errors).length;
 
+  if (loadingRemote) {
+    return (
+      <div className="flex items-center justify-center py-12 gap-3" style={{ color: isDark ? D.muted : "#94a3b8" }}>
+        <Loader2 className="w-5 h-5 animate-spin" />
+        <span className="text-sm">Loading settings…</span>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
+      {/* ── Scanning ── */}
       <SectionCard>
         <CardHeaderRow
           iconBg={isDark ? "bg-blue-900/30" : "bg-blue-50"}
@@ -1936,12 +1984,12 @@ function EmailScanSettings({ isDark }) {
         />
         <div className="px-4">
           <NumberField label="Scan window"
-            hint="How many days of history to scan when an account has no last-sync date"
+            hint="Days of email history to scan when an account has no last-sync date"
             value={settings.scanWindowDays} min={1} max={365} suffix="days"
             error={errors.scanWindowDays}
             onChange={v => update({ scanWindowDays: v })} />
           <NumberField label="Max events per scan"
-            hint="Hard cap to prevent runaway extractions"
+            hint="Hard cap to prevent runaway extractions on busy mailboxes"
             value={settings.maxEventsPerScan} min={10} max={1000} step={10} suffix="events"
             error={errors.maxEventsPerScan}
             onChange={v => update({ maxEventsPerScan: v })} />
@@ -1970,45 +2018,46 @@ function EmailScanSettings({ isDark }) {
             value={settings.smartNoiseFilter}
             onChange={v => update({ smartNoiseFilter: v })} />
           <Toggle label="Enforce sender whitelist"
-            hint="If on, only whitelisted senders are scanned (others are skipped)"
+            hint="Only emails from whitelisted senders are scanned — others are skipped"
             value={settings.enforceWhitelist}
             onChange={v => update({ enforceWhitelist: v })} />
           <Toggle label="Enforce sender blacklist"
-            hint="If on, blacklisted senders are dropped before extraction"
+            hint="Blacklisted senders are dropped before extraction runs"
             value={settings.enforceBlacklist}
             onChange={v => update({ enforceBlacklist: v })} />
           <Toggle label="Skip past-dated events"
-            hint="Past events stay greyed out and cannot be saved"
+            hint="Past events stay greyed out in preview and cannot be saved"
             value={settings.skipPastEvents}
             onChange={v => update({ skipPastEvents: v })} />
         </div>
       </SectionCard>
 
+      {/* ── Preview & Save Defaults — two column grid on wide screens ── */}
       <SectionCard>
         <CardHeaderRow
           iconBg={isDark ? "bg-purple-900/30" : "bg-purple-50"}
           icon={<Tag className="w-4 h-4 text-purple-500" />}
           title="Preview & Save Defaults"
-          subtitle="What the preview panel looks like and what category new events fall into"
+          subtitle="Default category, reminder lead time, and preview panel behaviour"
         />
         <div className="px-4">
           <SelectField label="Default category for new events"
-            hint="Used when AI can't decide between Todo / Reminder / Visit"
+            hint="Used when AI cannot decide between Todo / Reminder / Visit"
             value={settings.defaultCategory}
             error={errors.defaultCategory}
             options={[
-              { value: "reminder", label: "Reminder" },
-              { value: "todo",     label: "Todo" },
-              { value: "visit",    label: "Visit" },
+              { value: "reminder", label: "🔔 Reminder" },
+              { value: "todo",     label: "✅ Todo" },
+              { value: "visit",    label: "📍 Visit" },
             ]}
             onChange={v => update({ defaultCategory: v })} />
           <NumberField label="Default reminder lead time"
-            hint="Days before due date to fire the reminder"
+            hint="How many days before the due date to fire the reminder"
             value={settings.defaultReminderLead} min={0} max={30} suffix="days"
             error={errors.defaultReminderLead}
             onChange={v => update({ defaultReminderLead: v })} />
           <Toggle label="Auto-select future events"
-            hint="Future-dated events are pre-checked in the preview panel"
+            hint="Future-dated events are pre-checked when the preview panel opens"
             value={settings.autoSelectFuture}
             onChange={v => update({ autoSelectFuture: v })} />
           <Toggle label="Collapse past events in preview"
@@ -2026,41 +2075,57 @@ function EmailScanSettings({ isDark }) {
         </div>
       </SectionCard>
 
+      {/* ── Notifications ── */}
       <SectionCard>
         <CardHeaderRow
           iconBg={isDark ? "bg-amber-900/30" : "bg-amber-50"}
           icon={<Bell className="w-4 h-4 text-amber-500" />}
           title="Notifications"
+          subtitle="Toasts and alerts triggered by scan activity"
         />
         <div className="px-4">
           <Toggle label="Notify when new events are found"
             hint="Show a toast after each scan with the count of new extractions"
             value={settings.notifyOnNewEvents}
+            badge="Recommended"
             onChange={v => update({ notifyOnNewEvents: v })} />
         </div>
       </SectionCard>
 
+      {/* ── Error banner ── */}
       {errorCount > 0 && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-xl border text-xs"
+        <div className="flex items-center gap-2 px-4 py-3 rounded-xl border text-xs"
           style={{ backgroundColor: isDark ? "rgba(239,68,68,0.10)" : "#fef2f2", borderColor: isDark ? "rgba(239,68,68,0.30)" : "#fecaca", color: COLORS.red }}>
-          <AlertCircle className="w-3.5 h-3.5" />
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
           <span className="font-semibold">{errorCount} field{errorCount > 1 ? "s" : ""} need attention before saving.</span>
         </div>
       )}
 
-      <div className="flex items-center justify-end gap-2 sticky bottom-3 z-10">
-        <button onClick={reset} disabled={resetting || saving}
-          className="px-4 py-2.5 rounded-xl text-sm font-semibold border transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2"
-          style={{ backgroundColor: isDark ? D.card : "#fff", borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.muted : "#64748b" }}>
-          {resetting && <Loader2 className="w-4 h-4 animate-spin" />}
-          {resetting ? "Restoring…" : "Restore defaults"}
-        </button>
-        <button onClick={save} disabled={saving || resetting || errorCount > 0}
-          className="px-5 py-2.5 rounded-xl text-sm font-bold text-white flex items-center gap-2 shadow-lg transition-all active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
-          style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`, boxShadow: "0 6px 20px rgba(13,59,102,0.35)" }}>
-          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-          {saving ? "Saving…" : saved ? "Saved" : "Save Settings"}
-        </button>
+      {/* ── Sticky footer actions ── */}
+      <div className="flex items-center justify-between gap-3 sticky bottom-3 z-10 px-4 py-3 rounded-2xl border"
+        style={{ backgroundColor: isDark ? D.card : "#ffffff", borderColor: isDark ? D.border : "#e2e8f0", boxShadow: "0 4px 20px rgba(0,0,0,0.08)" }}>
+        <p className="text-[11px]" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
+          Settings synced to server &amp; device
+        </p>
+        <div className="flex items-center gap-2">
+          <button onClick={reset} disabled={resetting || saving}
+            className="px-4 py-2 rounded-xl text-sm font-semibold border transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2"
+            style={{ backgroundColor: isDark ? D.raised : "#f8fafc", borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.muted : "#64748b" }}>
+            {resetting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            {resetting ? "Restoring…" : "Restore defaults"}
+          </button>
+          <button onClick={save} disabled={saving || resetting || errorCount > 0}
+            className="px-5 py-2 rounded-xl text-sm font-bold text-white flex items-center gap-2 transition-all active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
+            style={{
+              background: saved
+                ? `linear-gradient(135deg, ${COLORS.emeraldGreen}, #16a34a)`
+                : `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`,
+              boxShadow: "0 4px 14px rgba(13,59,102,0.30)",
+            }}>
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+            {saving ? "Saving…" : saved ? "Saved!" : "Save Settings"}
+          </button>
+        </div>
       </div>
     </div>
   );
