@@ -21,6 +21,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { useDark } from "@/hooks/useDark";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   Mail, Plus, Trash2, CheckCircle2, AlertCircle,
   Loader2, Eye, EyeOff, ExternalLink, ChevronDown, ChevronUp,
@@ -629,6 +630,22 @@ function ConnectForm({ provider, onSuccess, onCancel, isDark }) {
 // CONNECTED ACCOUNT CARD
 // ─────────────────────────────────────────────────────────────────────────────
 function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, onSyncRetro, onUpdateSettings, isDark }) {
+  const { user: currentUser } = useAuth();
+  const isAdmin = currentUser?.role === 'admin';
+  const ownerId = conn.owner_user_id || conn.user_id || null;
+  const isOtherUser = !!(isAdmin && ownerId && currentUser?.id && String(ownerId) !== String(currentUser.id));
+  const [adminPaused,   setAdminPaused]   = useState(!!conn.admin_paused);
+  const [adminDisabled, setAdminDisabled] = useState(!!conn.admin_disabled);
+  useEffect(() => { setAdminPaused(!!conn.admin_paused); }, [conn.admin_paused]);
+  useEffect(() => { setAdminDisabled(!!conn.admin_disabled); }, [conn.admin_disabled]);
+  const toggleAdminFlag = async (field, next) => {
+    if (field === 'admin_paused') setAdminPaused(next); else setAdminDisabled(next);
+    try {
+      await api.patch(`/email/connections/${encodeURIComponent(conn.email_address)}`, { [field]: next });
+      onUpdateSettings && onUpdateSettings(conn.email_address, { [field]: next });
+      toast.success(next ? `Admin ${field === 'admin_paused' ? 'paused' : 'disabled'} ${conn.email_address}` : `Admin ${field === 'admin_paused' ? 'resumed' : 'enabled'} ${conn.email_address}`);
+    } catch { toast.error('Admin action failed'); }
+  };
   const [editingLabel, setEditingLabel] = useState(false);
   const [labelVal,     setLabelVal]     = useState(conn.label || conn.email_address);
   const [testing,      setTesting]      = useState(false);
@@ -773,6 +790,11 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, on
               </div>
             )}
             <p className="text-xs truncate" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>{conn.email_address}</p>
+            {isOtherUser && (
+              <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-md text-[10px] font-bold border" style={{ backgroundColor: isDark ? "rgba(139,92,246,0.12)" : "#f5f3ff", borderColor: isDark ? "rgba(139,92,246,0.35)" : "#ddd6fe", color: isDark ? "#c4b5fd" : "#6d28d9" }}>
+                <Users className="w-3 h-3" /> {conn.owner_name || conn.owner_email || "Other user"}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             {/* Linked page badge */}
@@ -827,131 +849,39 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, on
         </div>
 
 
-        {/* ── Keyword sync panel (per account) ──────────────────────────── */}
-        <div className="px-4 pb-3">
-          <button onClick={() => setShowKwPanel(v => !v)}
-            className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors"
-            style={{
-              backgroundColor: keywords.length
-                ? (isDark ? "rgba(245,158,11,0.10)" : "#fffbeb")
-                : (isDark ? D.raised : "#f8fafc"),
-              borderColor: keywords.length
-                ? (isDark ? "rgba(245,158,11,0.35)" : "#fde68a")
-                : (isDark ? D.border : "#e2e8f0"),
-              color: keywords.length
-                ? (isDark ? "#fcd34d" : "#b45309")
-                : (isDark ? D.muted : "#475569"),
-            }}>
-            <span className="flex items-center gap-2">
-              🔎 Subject keyword filter
-              {keywords.length > 0 && (
-                <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold"
-                  style={{ backgroundColor: isDark ? "rgba(245,158,11,0.20)" : "#fde68a", color: isDark ? "#fcd34d" : "#92400e" }}>
-                  {keywords.length} active · {matchMode.toUpperCase()} · {autoSaveKw ? "auto-save" : "confirm"}
-                </span>
-              )}
-            </span>
-            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showKwPanel ? "rotate-180" : ""}`} />
-          </button>
-
-          {showKwPanel && (
-            <div className="mt-2 p-3 rounded-xl border space-y-3"
-              style={{ backgroundColor: isDark ? D.card : "#ffffff", borderColor: isDark ? D.border : "#e2e8f0" }}>
-              <p className="text-[11px] leading-relaxed" style={{ color: isDark ? D.dimmer : "#64748b" }}>
-                Only emails whose <b>Subject</b> matches these keywords are pulled during sync.
-                Example: <code>notice</code>, <code>section</code>, <code>hearing</code>. Leave empty to sync everything.
-              </p>
-
-              {/* Chips */}
-              <div className="flex flex-wrap gap-1.5">
-                {keywords.map(kw => (
-                  <span key={kw} className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border"
-                    style={{
-                      backgroundColor: isDark ? "rgba(99,102,241,0.12)" : "#eef2ff",
-                      borderColor: isDark ? "rgba(99,102,241,0.30)" : "#c7d2fe",
-                      color: isDark ? "#a5b4fc" : "#4338ca",
-                    }}>
-                    {kw}
-                    <button onClick={() => removeKeyword(kw)} className="opacity-70 hover:opacity-100">
-                      <X className="w-3 h-3" />
-                    </button>
-                  </span>
-                ))}
-                {keywords.length === 0 && (
-                  <span className="text-[11px] italic" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
-                    No keywords — full mailbox sync
-                  </span>
-                )}
-              </div>
-
-              {/* Add keyword input */}
-              <div className="flex gap-2">
-                <input value={kwDraft} onChange={e => setKwDraft(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addKeyword(); } }}
-                  placeholder="Add a keyword (press Enter)"
-                  className="flex-1 px-2.5 py-1.5 text-xs rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-400"
-                  style={{ backgroundColor: isDark ? D.raised : "#ffffff", borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.text : "#1e293b" }} />
-                <button onClick={addKeyword}
-                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
-                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-                  Add
-                </button>
-              </div>
-
-              {/* Match mode (OR / AND) */}
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-[11px] font-semibold" style={{ color: isDark ? D.text : "#1e293b" }}>Match mode</p>
-                  <p className="text-[10px]" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
-                    {matchMode === "or" ? "Match if ANY keyword is in the subject" : "Match only if ALL keywords are in the subject"}
-                  </p>
-                </div>
-                <div className="inline-flex rounded-lg border overflow-hidden text-[11px] font-semibold"
-                  style={{ borderColor: isDark ? D.border : "#e2e8f0" }}>
-                  {["or", "and"].map(m => (
-                    <button key={m} onClick={() => changeMode(m)}
-                      className="px-3 py-1.5 transition-colors"
-                      style={{
-                        backgroundColor: matchMode === m
-                          ? (isDark ? "rgba(99,102,241,0.20)" : "#eef2ff")
-                          : "transparent",
-                        color: matchMode === m
-                          ? (isDark ? "#a5b4fc" : "#4338ca")
-                          : (isDark ? D.muted : "#64748b"),
-                      }}>
-                      {m.toUpperCase()}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Case sensitivity */}
-              <label className="flex items-center justify-between gap-3 cursor-pointer">
-                <div>
-                  <p className="text-[11px] font-semibold" style={{ color: isDark ? D.text : "#1e293b" }}>Case-sensitive match</p>
-                  <p className="text-[10px]" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
-                    Off = "Notice" also matches "notice" / "NOTICE"
-                  </p>
-                </div>
-                <input type="checkbox" checked={caseSensitive} onChange={toggleCase}
-                  className="w-4 h-4 rounded accent-indigo-500" />
-              </label>
-
-              {/* Auto-save vs confirm */}
-              <label className="flex items-center justify-between gap-3 cursor-pointer">
-                <div>
-                  <p className="text-[11px] font-semibold" style={{ color: isDark ? D.text : "#1e293b" }}>Auto-save keyword matches</p>
-                  <p className="text-[10px]" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
-                    Off = matched emails wait in the preview panel for you to confirm before saving
-                  </p>
-                </div>
-                <input type="checkbox" checked={autoSaveKw} onChange={toggleAutoSave}
-                  className="w-4 h-4 rounded accent-emerald-500" />
-              </label>
+        {isAdmin && isOtherUser && (
+          <div className="mx-4 mb-3 p-3 rounded-xl border space-y-2"
+            style={{ backgroundColor: isDark ? "rgba(139,92,246,0.06)" : "#faf5ff", borderColor: isDark ? "rgba(139,92,246,0.30)" : "#e9d5ff" }}>
+            <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest"
+              style={{ color: isDark ? "#c4b5fd" : "#7c3aed" }}>
+              <Shield className="w-3.5 h-3.5" /> Admin controls
             </div>
-          )}
-        </div>
-
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[12px] font-semibold" style={{ color: isDark ? D.text : "#1e293b" }}>Pause sync</p>
+                <p className="text-[10px]" style={{ color: isDark ? D.dimmer : "#64748b" }}>Account stays connected; new mail will not be fetched until resumed.</p>
+              </div>
+              <button onClick={() => toggleAdminFlag("admin_paused", !adminPaused)} className="flex-shrink-0 active:scale-95 transition-all">
+                {adminPaused ? <ToggleRight className="w-9 h-9" style={{ color: COLORS.amber }} /> : <ToggleLeft className="w-9 h-9" style={{ color: isDark ? D.dimmer : "#94a3b8" }} />}
+              </button>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[12px] font-semibold" style={{ color: isDark ? D.text : "#1e293b" }}>Disable integration</p>
+                <p className="text-[10px]" style={{ color: isDark ? D.dimmer : "#64748b" }}>Hides the account from the owning user and blocks all scans until re-enabled.</p>
+              </div>
+              <button onClick={() => toggleAdminFlag("admin_disabled", !adminDisabled)} className="flex-shrink-0 active:scale-95 transition-all">
+                {adminDisabled ? <ToggleRight className="w-9 h-9" style={{ color: COLORS.red }} /> : <ToggleLeft className="w-9 h-9" style={{ color: isDark ? D.dimmer : "#94a3b8" }} />}
+              </button>
+            </div>
+            {(adminPaused || adminDisabled) && (
+              <div className="flex items-center gap-1.5 text-[10px] font-semibold px-2 py-1 rounded-md"
+                style={{ backgroundColor: isDark ? "rgba(245,158,11,0.10)" : "#fffbeb", color: isDark ? "#fcd34d" : "#92400e" }}>
+                <AlertTriangle className="w-3 h-3" /> {adminDisabled ? "Integration disabled by admin" : "Sync paused by admin"}
+              </div>
+            )}
+          </div>
+        )}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-3 border-t border-slate-100 dark:border-slate-700"
           style={{ backgroundColor: isDark ? D.raised : "#f8fafc" }}>
           <p className="text-xs truncate" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>
@@ -1338,6 +1268,8 @@ function ScanPreviewPanel({ events, savedKeys, onSaved, onDismiss, isDark }) {
 // ─────────────────────────────────────────────────────────────────────────────
 function SenderWhitelistManager({ isDark }) {
   const [senders,  setSenders]  = useState([]);
+  const [expandedKw, setExpandedKw] = useState({}); // {email_address: bool}
+  const [kwDrafts,   setKwDrafts]   = useState({}); // {email_address: "current draft"}
   const [loading,  setLoading]  = useState(true);
   const [newEmail, setNewEmail] = useState("");
   const [newLabel, setNewLabel] = useState("");
@@ -1347,7 +1279,16 @@ function SenderWhitelistManager({ isDark }) {
   const inputCls = "px-3.5 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all";
 
   const fetchSenders = useCallback(async () => {
-    try { const res = await api.get("/email/sender-whitelist"); setSenders(res.data?.senders || []); }
+    try {
+      const res = await api.get("/email/sender-whitelist");
+      const list = (res.data?.senders || []).map(s => ({
+        ...s,
+        keywords: Array.isArray(s.keywords) ? s.keywords : [],
+        keyword_match_mode: s.keyword_match_mode === "and" ? "and" : "or",
+        keyword_case_sensitive: !!s.keyword_case_sensitive,
+      }));
+      setSenders(list);
+    }
     catch { setSenders([]); } finally { setLoading(false); }
   }, []);
   useEffect(() => { fetchSenders(); }, [fetchSenders]);
@@ -1370,6 +1311,37 @@ function SenderWhitelistManager({ isDark }) {
     const updated = senders.filter(s => s.email_address !== addr);
     try { await api.put("/email/sender-whitelist", { senders: updated }); setSenders(updated); toast.success(`${addr} removed`); }
     catch { toast.error("Failed to remove sender"); }
+  };
+
+  const persistSenders = async (next) => {
+    setSenders(next);
+    try { await api.put("/email/sender-whitelist", { senders: next }); }
+    catch { toast.error("Failed to save keyword filter"); }
+  };
+  const addKeywordToSender = (addr) => {
+    const draft = (kwDrafts[addr] || "").trim();
+    if (!draft) return;
+    const next = senders.map(s => {
+      if (s.email_address !== addr) return s;
+      const kws = Array.isArray(s.keywords) ? s.keywords : [];
+      if (kws.some(k => k.toLowerCase() === draft.toLowerCase())) return s;
+      return { ...s, keywords: [...kws, draft] };
+    });
+    setKwDrafts(d => ({ ...d, [addr]: "" }));
+    persistSenders(next);
+  };
+  const removeKeywordFromSender = (addr, kw) => {
+    const next = senders.map(s => s.email_address === addr
+      ? { ...s, keywords: (s.keywords || []).filter(k => k !== kw) } : s);
+    persistSenders(next);
+  };
+  const setSenderMode = (addr, mode) => {
+    const next = senders.map(s => s.email_address === addr ? { ...s, keyword_match_mode: mode } : s);
+    persistSenders(next);
+  };
+  const toggleSenderCase = (addr) => {
+    const next = senders.map(s => s.email_address === addr ? { ...s, keyword_case_sensitive: !s.keyword_case_sensitive } : s);
+    persistSenders(next);
   };
 
   return (
@@ -1426,28 +1398,101 @@ function SenderWhitelistManager({ isDark }) {
         ) : (
           <div className="space-y-1.5">
             <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>Active Whitelist ({senders.length})</p>
-            {senders.map(s => (
+            {senders.map(s => {
+              const kws = Array.isArray(s.keywords) ? s.keywords : [];
+              const isOpen = !!expandedKw[s.email_address];
+              const mode = s.keyword_match_mode === "and" ? "and" : "or";
+              return (
               <motion.div key={s.email_address} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-xl border"
-                style={{ backgroundColor: isDark ? "rgba(31,175,90,0.08)" : "#f0fdf4", borderColor: isDark ? "#14532d" : "#bbf7d0" }}>
-                <div className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0"
-                  style={{ backgroundColor: isDark ? "rgba(31,175,90,0.20)" : "#dcfce7" }}>
-                  <Check className="w-3.5 h-3.5 text-emerald-500" />
+                className="rounded-xl border overflow-hidden"
+                style={{ backgroundColor: isDark ? "rgba(31,175,90,0.06)" : "#f0fdf4", borderColor: isDark ? "#14532d" : "#bbf7d0" }}>
+                <div className="flex items-center gap-3 px-3 py-2.5">
+                  <div className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0"
+                    style={{ backgroundColor: isDark ? "rgba(31,175,90,0.20)" : "#dcfce7" }}>
+                    <Check className="w-3.5 h-3.5 text-emerald-500" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold" style={{ color: isDark ? D.text : "#1e293b" }}>{s.label || s.email_address}</p>
+                    {s.label && s.label !== s.email_address && (
+                      <p className="text-[10px] font-mono" style={{ color: isDark ? D.muted : "#94a3b8" }}>{s.email_address}</p>
+                    )}
+                  </div>
+                  <button onClick={() => setExpandedKw(e => ({ ...e, [s.email_address]: !e[s.email_address] }))}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold border transition-colors"
+                    style={{
+                      borderColor: kws.length ? (isDark ? "rgba(245,158,11,0.40)" : "#fde68a") : (isDark ? D.border : "#e2e8f0"),
+                      backgroundColor: kws.length ? (isDark ? "rgba(245,158,11,0.12)" : "#fffbeb") : "transparent",
+                      color: kws.length ? (isDark ? "#fcd34d" : "#b45309") : (isDark ? D.muted : "#475569"),
+                    }}>
+                    🔎 {kws.length ? `${kws.length} kw · ${mode.toUpperCase()}` : "Keywords"}
+                    <ChevronDown className={`w-3 h-3 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  <button onClick={() => handleRemove(s.email_address)} className="w-7 h-7 flex items-center justify-center rounded-lg transition-all active:scale-90"
+                    style={{ color: isDark ? D.muted : "#94a3b8" }}
+                    onMouseEnter={e => { e.currentTarget.style.color = COLORS.red; e.currentTarget.style.backgroundColor = isDark ? "rgba(239,68,68,0.12)" : "#fef2f2"; }}
+                    onMouseLeave={e => { e.currentTarget.style.color = isDark ? D.muted : "#94a3b8"; e.currentTarget.style.backgroundColor = "transparent"; }}>
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-bold" style={{ color: isDark ? D.text : "#1e293b" }}>{s.label || s.email_address}</p>
-                  {s.label && s.label !== s.email_address && (
-                    <p className="text-[10px] font-mono" style={{ color: isDark ? D.muted : "#94a3b8" }}>{s.email_address}</p>
-                  )}
-                </div>
-                <button onClick={() => handleRemove(s.email_address)} className="w-7 h-7 flex items-center justify-center rounded-lg transition-all active:scale-90"
-                  style={{ color: isDark ? D.muted : "#94a3b8" }}
-                  onMouseEnter={e => { e.currentTarget.style.color = COLORS.red; e.currentTarget.style.backgroundColor = isDark ? "rgba(239,68,68,0.12)" : "#fef2f2"; }}
-                  onMouseLeave={e => { e.currentTarget.style.color = isDark ? D.muted : "#94a3b8"; e.currentTarget.style.backgroundColor = "transparent"; }}>
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                {isOpen && (
+                  <div className="px-3 pb-3 pt-1 border-t space-y-2.5"
+                    style={{ borderColor: isDark ? "rgba(31,175,90,0.20)" : "#bbf7d0", backgroundColor: isDark ? "rgba(15,23,42,0.30)" : "#ffffff" }}>
+                    <p className="text-[10px] leading-relaxed" style={{ color: isDark ? D.dimmer : "#64748b" }}>
+                      Only emails from <b>{s.email_address}</b> whose <b>Subject</b> matches these keywords are pulled. Leave empty to accept every email from this sender.
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {kws.map(kw => (
+                        <span key={kw} className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border"
+                          style={{ backgroundColor: isDark ? "rgba(99,102,241,0.12)" : "#eef2ff", borderColor: isDark ? "rgba(99,102,241,0.30)" : "#c7d2fe", color: isDark ? "#a5b4fc" : "#4338ca" }}>
+                          {kw}
+                          <button onClick={() => removeKeywordFromSender(s.email_address, kw)} className="opacity-70 hover:opacity-100">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                      {kws.length === 0 && (
+                        <span className="text-[11px] italic" style={{ color: isDark ? D.dimmer : "#94a3b8" }}>No keywords — all subjects accepted</span>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <input value={kwDrafts[s.email_address] || ""}
+                        onChange={e => setKwDrafts(d => ({ ...d, [s.email_address]: e.target.value }))}
+                        onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addKeywordToSender(s.email_address); } }}
+                        placeholder="Add a keyword (press Enter)"
+                        className="flex-1 px-2.5 py-1.5 text-xs rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        style={{ backgroundColor: isDark ? D.raised : "#ffffff", borderColor: isDark ? D.border : "#e2e8f0", color: isDark ? D.text : "#1e293b" }} />
+                      <button onClick={() => addKeywordToSender(s.email_address)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                        style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                        Add
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="inline-flex rounded-lg border overflow-hidden text-[11px] font-semibold"
+                        style={{ borderColor: isDark ? D.border : "#e2e8f0" }}>
+                        {["or", "and"].map(m => (
+                          <button key={m} onClick={() => setSenderMode(s.email_address, m)}
+                            className="px-3 py-1.5 transition-colors"
+                            style={{
+                              backgroundColor: mode === m ? (isDark ? "rgba(99,102,241,0.20)" : "#eef2ff") : "transparent",
+                              color: mode === m ? (isDark ? "#a5b4fc" : "#4338ca") : (isDark ? D.muted : "#64748b"),
+                            }}>
+                            {m.toUpperCase()}
+                          </button>
+                        ))}
+                      </div>
+                      <label className="flex items-center gap-2 text-[11px] font-semibold cursor-pointer"
+                        style={{ color: isDark ? D.muted : "#475569" }}>
+                        <input type="checkbox" checked={!!s.keyword_case_sensitive} onChange={() => toggleSenderCase(s.email_address)}
+                          className="w-3.5 h-3.5 rounded accent-indigo-500" />
+                        Case-sensitive
+                      </label>
+                    </div>
+                  </div>
+                )}
               </motion.div>
-            ))}
+              );
+            })}
             <button onClick={async () => {
               if (!window.confirm("Clear entire whitelist? Emails from ALL senders will be scanned again.")) return;
               try { await api.put("/email/sender-whitelist", { senders: [] }); setSenders([]); toast.success("Whitelist cleared"); }
