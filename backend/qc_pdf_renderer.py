@@ -26,9 +26,9 @@ try:
 except ImportError:
     RLImage = None
 
-# ── Cambria font registration (falls back to Times if unavailable) ────────────
-def _register_cambria() -> bool:
-    """Try to register Microsoft Cambria TTF fonts; return True on success."""
+# ── Calibri font registration (falls back to Helvetica if unavailable) ─────────
+def _register_calibri() -> bool:
+    """Try to register Microsoft Calibri TTF fonts; return True on success."""
     search_dirs = [
         "/usr/share/fonts/truetype/msttcorefonts",
         "/usr/share/fonts/truetype/microsoft",
@@ -37,10 +37,10 @@ def _register_cambria() -> bool:
         "/Library/Fonts",
         os.path.expanduser("~/Library/Fonts"),
         "C:/Windows/Fonts",
-        os.path.dirname(__file__),  # same dir as this script
+        os.path.dirname(__file__),
     ]
-    regular_names = ["Cambria.ttf", "cambria.ttf", "CAMBRIA.TTF"]
-    bold_names    = ["Cambriab.ttf", "cambriab.ttf", "CambriaBold.ttf", "cambria-bold.ttf"]
+    regular_names = ["Calibri.ttf", "calibri.ttf", "CALIBRI.TTF"]
+    bold_names    = ["Calibrib.ttf", "calibrib.ttf", "CalibriBold.ttf", "calibri-bold.ttf"]
 
     reg_path  = None
     bold_path = None
@@ -64,20 +64,19 @@ def _register_cambria() -> bool:
         return False
 
     try:
-        pdfmetrics.registerFont(TTFont("Cambria", reg_path))
+        pdfmetrics.registerFont(TTFont("Calibri", reg_path))
         if bold_path:
-            pdfmetrics.registerFont(TTFont("Cambria-Bold", bold_path))
+            pdfmetrics.registerFont(TTFont("Calibri-Bold", bold_path))
         else:
-            # alias Bold to regular if only one weight is available
-            pdfmetrics.registerFont(TTFont("Cambria-Bold", reg_path))
+            pdfmetrics.registerFont(TTFont("Calibri-Bold", reg_path))
         return True
     except Exception:
         return False
 
 
-_CAMBRIA_OK = _register_cambria()
-_SERIF      = "Cambria"      if _CAMBRIA_OK else "Times-Roman"
-_SERIF_BOLD = "Cambria-Bold" if _CAMBRIA_OK else "Times-Bold"
+_CALIBRI_OK = _register_calibri()
+_SERIF      = "Calibri"      if _CALIBRI_OK else "Helvetica"
+_SERIF_BOLD = "Calibri-Bold" if _CALIBRI_OK else "Helvetica-Bold"
 
 # ── Colour palette ──────────────────────────────────────────────────────────
 DARK_BLUE  = colors.HexColor("#0D3B66")
