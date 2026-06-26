@@ -186,12 +186,12 @@ export function generateQuotationHTML(qtn, options) {
   const brandLight = lighten(brandColor, 0.92);
   const brandRgb   = hexToRgb(brandColor);
 
-  // ── Delegate non-classic templates to the invoice template engine so each
-  //    template/theme produces a visibly different layout. We map quotation
-  //    fields → invoice fields and append quotation-only extras (scope,
-  //    terms, checklist) before </body>. The built-in classic_quotation
-  //    layout below is used when the user picks "classic" in settings.
-  if (requestedTemplate && requestedTemplate !== 'classic_quotation') {
+  // ── Always delegate to the invoice template engine so the quotation layout
+  //    is pixel-identical to the invoice layout. Only the heading changes from
+  //    "Tax Invoice" to "QUOTATION", and quotation-specific extras (scope of
+  //    work, terms, checklist) are appended before </body>.
+  //    The built-in classic layout below is kept as a fallback only.
+  {
     try {
       const today = qtn.date || new Date().toISOString().slice(0,10);
       const validDays = parseInt(qtn.validity_days || 30, 10) || 30;
@@ -228,9 +228,13 @@ export function generateQuotationHTML(qtn, options) {
         notes:         qtn.subject ? ('Subject: ' + qtn.subject) : '',
         terms_conditions: qtn.payment_terms || '',
       };
+      // Use 'classic' as the base invoice template for the classic quotation
+      const invoiceTemplateId = (requestedTemplate === 'classic_quotation' || !requestedTemplate)
+        ? 'classic'
+        : requestedTemplate;
       var html = generateInvoiceHTML(invShape, {
         company: company,
-        template: requestedTemplate,
+        template: invoiceTemplateId,
         theme: options.theme,
         customColor: brandColor,
       });
