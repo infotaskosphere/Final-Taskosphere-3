@@ -31,6 +31,8 @@ import { Switch } from '@/components/ui/switch';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { generateQuotationHTML } from './QuotationTemplates';
 import QuotationSettings, { getQtnSettings } from './QuotationSettings';
+import WhatsAppSendDialog from '@/components/ui/WhatsAppSendDialog';
+import { getWASettings } from '@/hooks/useWhatsApp';
 
 // ─── Brand Colors ─────────────────────────────────────────────────────────────
 const COLORS = {
