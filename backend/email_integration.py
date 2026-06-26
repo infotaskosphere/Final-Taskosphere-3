@@ -63,6 +63,7 @@ COL_EVENTS           = "email_extracted_events"
 COL_AUTO_PREFS       = "email_auto_save_prefs"
 COL_SCAN_SCHEDULE    = "email_scan_schedule"
 COL_SENDER_WHITELIST = "email_sender_whitelist"
+COL_SCAN_SETTINGS    = "email_scan_settings"
 
 # =============================================================================
 # PYDANTIC SCHEMAS
@@ -2200,6 +2201,91 @@ async def importer_events(
         {"user_id": str(current_user.id)}, {"_id": 0}
     ).sort("date", -1).limit(limit).to_list(limit)
     return [_doc_to_out(d) for d in docs]
+
+
+# =============================================================================
+# API ROUTES — SCAN SETTINGS (per-user, persisted to MongoDB)
+# =============================================================================
+
+DEFAULT_SCAN_SETTINGS = {
+    "scanWindowDays":        30,
+    "maxEventsPerScan":      100,
+    "autoSelectFuture":      True,
+    "skipPastEvents":        True,
+    "smartNoiseFilter":      True,
+    "enforceWhitelist":      False,
+    "enforceBlacklist":      True,
+    "defaultCategory":       "reminder",
+    "defaultReminderLead":   1,
+    "syncIntervalMinutes":   15,
+    "autoSyncEnabled":       False,
+    "notifyOnNewEvents":     True,
+    "collapsePastInPreview": True,
+    "groupByAccount":        False,
+    "showAttachments":       True,
+}
+
+class ScanSettingsIn(BaseModel):
+    scanWindowDays:        Optional[int]  = None
+    maxEventsPerScan:      Optional[int]  = None
+    autoSelectFuture:      Optional[bool] = None
+    skipPastEvents:        Optional[bool] = None
+    smartNoiseFilter:      Optional[bool] = None
+    enforceWhitelist:      Optional[bool] = None
+    enforceBlacklist:      Optional[bool] = None
+    defaultCategory:       Optional[str]  = None
+    defaultReminderLead:   Optional[int]  = None
+    syncIntervalMinutes:   Optional[int]  = None
+    autoSyncEnabled:       Optional[bool] = None
+    notifyOnNewEvents:     Optional[bool] = None
+    collapsePastInPreview: Optional[bool] = None
+    groupByAccount:        Optional[bool] = None
+    showAttachments:       Optional[bool] = None
+
+
+@router.get("/scan-settings")
+async def get_scan_settings(current_user=Depends(check_module_permission("email_accounts", "view"))):
+    """Return the current user's email scan settings, falling back to defaults."""
+    doc = await db[COL_SCAN_SETTINGS].find_one(
+        {"user_id": str(current_user.id)}, {"_id": 0, "user_id": 0}
+    )
+    merged = {**DEFAULT_SCAN_SETTINGS, **(doc or {})}
+    return merged
+
+
+@router.put("/scan-settings")
+async def upsert_scan_settings(
+    body: ScanSettingsIn,
+    current_user=Depends(check_module_permission("email_accounts", "create")),
+):
+    """Persist the user's email scan settings to MongoDB (upsert)."""
+    patch = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not patch:
+        raise HTTPException(status_code=422, detail="No settings provided")
+
+    # Validate numeric ranges server-side so the DB is never in a bad state.
+    errors: Dict[str, str] = {}
+    if "scanWindowDays" in patch and not (1 <= patch["scanWindowDays"] <= 365):
+        errors["scanWindowDays"] = "Must be 1–365"
+    if "maxEventsPerScan" in patch and not (10 <= patch["maxEventsPerScan"] <= 1000):
+        errors["maxEventsPerScan"] = "Must be 10–1000"
+    if "syncIntervalMinutes" in patch and not (5 <= patch["syncIntervalMinutes"] <= 240):
+        errors["syncIntervalMinutes"] = "Must be 5–240"
+    if "defaultReminderLead" in patch and not (0 <= patch["defaultReminderLead"] <= 30):
+        errors["defaultReminderLead"] = "Must be 0–30"
+    if "defaultCategory" in patch and patch["defaultCategory"] not in ("reminder", "todo", "visit"):
+        errors["defaultCategory"] = "Must be reminder, todo, or visit"
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
+
+    await db[COL_SCAN_SETTINGS].update_one(
+        {"user_id": str(current_user.id)},
+        {"$set": {**patch, "user_id": str(current_user.id), "updated_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    merged = {**DEFAULT_SCAN_SETTINGS, **patch}
+    logger.info(f"Scan settings updated for user {current_user.id}: {list(patch.keys())}")
+    return {"status": "ok", "settings": merged}
 
 
 # =============================================================================
