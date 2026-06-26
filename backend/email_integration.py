@@ -76,12 +76,28 @@ class ConnectionCreateRequest(BaseModel):
     label: Optional[str] = None
     linked_page: Optional[str] = "all"
     auto_sync: Optional[bool] = False
+    # Keyword filtering — only emails whose Subject matches these are pulled
+    # from the mailbox during a sync. Empty/None disables keyword filtering
+    # (normal "all recent mail" behaviour).
+    keywords: Optional[List[str]] = None
+    # "or"  → any keyword in subject is a match (default)
+    # "and" → every keyword must appear in subject
+    keyword_match_mode: Optional[str] = "or"
+    # When False (default) keyword matching is case-insensitive.
+    keyword_case_sensitive: Optional[bool] = False
+    # When True (default) keyword-matched emails are auto-saved to reminders.
+    # When False, they still appear in the preview panel for manual confirmation.
+    keyword_auto_save: Optional[bool] = True
 
 class ConnectionUpdateRequest(BaseModel):
     label: Optional[str] = None
     is_active: Optional[bool] = None
     linked_page: Optional[str] = None
     auto_sync: Optional[bool] = None
+    keywords: Optional[List[str]] = None
+    keyword_match_mode: Optional[str] = None          # "or" | "and"
+    keyword_case_sensitive: Optional[bool] = None
+    keyword_auto_save: Optional[bool] = None
 
 class ConnectionOut(BaseModel):
     email_address: str
@@ -95,6 +111,10 @@ class ConnectionOut(BaseModel):
     sync_error: Optional[str] = None
     linked_page: Optional[str] = "all"
     auto_sync: Optional[bool] = False
+    keywords: Optional[List[str]] = None
+    keyword_match_mode: Optional[str] = "or"
+    keyword_case_sensitive: Optional[bool] = False
+    keyword_auto_save: Optional[bool] = True
 
 class ExtractedEventOut(BaseModel):
     id: Optional[str] = None
@@ -113,6 +133,11 @@ class ExtractedEventOut(BaseModel):
     email_account: Optional[str] = None
     save_category: Optional[str] = None   # "todo" | "reminder" | "visit"
     tm_app_no: Optional[str] = None       # TM Application Number
+    # Keyword sync metadata — populated when the email was pulled because its
+    # Subject matched one of the connection's `keywords`.
+    matched_keywords: Optional[List[str]] = None
+    auto_saved: Optional[bool] = False           # True = silently saved to reminders
+    requires_confirmation: Optional[bool] = False # True = waiting in preview panel
 
 class AutoSavePrefRequest(BaseModel):
     auto_save_reminders: bool
@@ -720,6 +745,9 @@ def _scan_mailbox_sync(
     host: str, port: int, email_addr: str, password: str,
     max_msgs: int = 50, sender_whitelist: Optional[List[str]] = None,
     since_date: Optional[str] = None,
+    keywords: Optional[List[str]] = None,
+    keyword_match_mode: str = "or",
+    keyword_case_sensitive: bool = False,
 ) -> List[Dict]:
     """
     since_date: IMAP-format date string "dd-Mon-yyyy" (e.g. "01-Jan-2025").
@@ -728,15 +756,48 @@ def _scan_mailbox_sync(
     max_msgs: caps how many matched messages are fetched. Pass 0 to fetch
     everything matched by the search (used for retrospective scans, capped
     upstream instead).
+
+    keywords: when given, the mailbox is searched by SUBJECT for these terms
+    (in addition to any since_date). `keyword_match_mode` controls whether
+    matches require ANY ("or") or ALL ("and") keywords. IMAP's SUBSTRING
+    SEARCH is case-insensitive by spec; if `keyword_case_sensitive` is True
+    a second client-side filter is applied to enforce exact case.
+
+    Returned dicts include a `matched_keywords` list — the exact keywords
+    that hit each subject (empty when no keyword filter is active).
     """
     results = []
+    cleaned_keywords = [k.strip() for k in (keywords or []) if k and k.strip()]
+    mode = (keyword_match_mode or "or").lower()
+    if mode not in ("or", "and"):
+        mode = "or"
     try:
         password = _clean_password(password)
         conn = imaplib.IMAP4_SSL(host, int(port))
         conn.login(email_addr, password)
         conn.select("INBOX", readonly=True)
+
+        # Build the IMAP search criteria. SINCE and SUBJECT clauses can be
+        # combined; AND is implicit in IMAP (space-separated criteria), OR
+        # is an explicit binary operator that must be chained for >2 terms.
+        def _build_subject_criteria(terms: List[str], join: str) -> str:
+            quoted = [f'SUBJECT "{t}"' for t in terms]
+            if join == "and" or len(quoted) == 1:
+                return " ".join(quoted)
+            # OR is binary in IMAP — nest right-associatively:  OR a (OR b c)
+            expr = quoted[-1]
+            for q in reversed(quoted[:-1]):
+                expr = f"OR {q} ({expr})"
+            return expr
+
+        criteria_parts = []
         if since_date:
-            _, data = conn.search(None, f'(SINCE "{since_date}")')
+            criteria_parts.append(f'SINCE "{since_date}"')
+        if cleaned_keywords:
+            criteria_parts.append(_build_subject_criteria(cleaned_keywords, mode))
+        if criteria_parts:
+            criteria = "(" + " ".join(criteria_parts) + ")"
+            _, data = conn.search(None, criteria)
         else:
             _, data = conn.search(None, "ALL")
         if not data or not data[0]:
@@ -756,13 +817,29 @@ def _scan_mailbox_sync(
                 if sender_whitelist:
                     if not _sender_matches_whitelist(sender_clean, sender_whitelist):
                         continue
+                subject_clean = _clean_text(_decode_header_str(msg.get("Subject", "")), 200)
+                matched = []
+                if cleaned_keywords:
+                    hay = subject_clean if keyword_case_sensitive else subject_clean.lower()
+                    for kw in cleaned_keywords:
+                        needle = kw if keyword_case_sensitive else kw.lower()
+                        if needle and needle in hay:
+                            matched.append(kw)
+                    # Enforce mode client-side too — IMAP's SUBJECT search is
+                    # always case-insensitive, so AND / case-sensitive filters
+                    # may legitimately drop results the server returned.
+                    if mode == "and" and len(matched) != len(cleaned_keywords):
+                        continue
+                    if mode == "or" and not matched:
+                        continue
                 results.append({
-                    "subject":      _clean_text(_decode_header_str(msg.get("Subject", "")), 200),
-                    "from_addr":    from_raw,
-                    "sender_email": sender_clean,
-                    "msg_date":     msg.get("Date", ""),
-                    "body":         _get_plain_body(msg, max_chars=4000),
-                    "message_id":   (msg.get("Message-ID") or "").strip(),
+                    "subject":          subject_clean,
+                    "from_addr":        from_raw,
+                    "sender_email":     sender_clean,
+                    "msg_date":         msg.get("Date", ""),
+                    "body":             _get_plain_body(msg, max_chars=4000),
+                    "message_id":       (msg.get("Message-ID") or "").strip(),
+                    "matched_keywords": matched,
                 })
             except Exception:
                 continue
@@ -994,6 +1071,9 @@ def _doc_to_out(doc: Dict) -> ExtractedEventOut:
         email_account=doc.get("email_account"),
         save_category=doc.get("save_category"),
         tm_app_no=doc.get("tm_app_no"),
+        matched_keywords=doc.get("matched_keywords") or [],
+        auto_saved=doc.get("auto_saved", False),
+        requires_confirmation=doc.get("requires_confirmation", False),
     )
 
 def _conn_doc_to_out(doc: Dict) -> ConnectionOut:
@@ -1009,6 +1089,10 @@ def _conn_doc_to_out(doc: Dict) -> ConnectionOut:
         sync_error=doc.get("sync_error"),
         linked_page=doc.get("linked_page", "all"),
         auto_sync=doc.get("auto_sync", False),
+        keywords=doc.get("keywords") or [],
+        keyword_match_mode=doc.get("keyword_match_mode", "or"),
+        keyword_case_sensitive=doc.get("keyword_case_sensitive", False),
+        keyword_auto_save=doc.get("keyword_auto_save", True),
     )
 
 # =============================================================================
@@ -1492,6 +1576,10 @@ async def add_connection(body: ConnectionCreateRequest, current_user=Depends(che
             "connected_at": datetime.now(timezone.utc).isoformat(),
             "linked_page": body.linked_page or "all",
             "auto_sync": body.auto_sync or False,
+            "keywords": [k.strip() for k in (body.keywords or []) if k and k.strip()],
+            "keyword_match_mode": (body.keyword_match_mode or "or").lower(),
+            "keyword_case_sensitive": bool(body.keyword_case_sensitive),
+            "keyword_auto_save": True if body.keyword_auto_save is None else bool(body.keyword_auto_save),
         }
         await db[COL_CONNECTIONS].update_one(
             {"user_id": str(current_user.id), "email_address": clean_email},
@@ -1522,6 +1610,11 @@ async def update_connection(
     updates = {k: v for k, v in body.dict().items() if v is not None or isinstance(v, bool)}
     if updates.get("is_active"):
         updates["sync_error"] = None
+    if "keywords" in updates and updates["keywords"] is not None:
+        updates["keywords"] = [k.strip() for k in updates["keywords"] if k and k.strip()]
+    if "keyword_match_mode" in updates and updates["keyword_match_mode"]:
+        mode = updates["keyword_match_mode"].lower()
+        updates["keyword_match_mode"] = mode if mode in ("or", "and") else "or"
     await db[COL_CONNECTIONS].update_one(
         {"user_id": str(current_user.id), "email_address": email_address}, {"$set": updates}
     )
@@ -1921,8 +2014,9 @@ async def extract_events(
         email_addr = conn["email_address"]
 
         # The 30-minute result cache only applies to the normal rolling-window
-        # scan. A retrospective sync (since_date) always hits the mailbox.
-        if not force_refresh and not imap_since and conn.get("last_synced"):
+        # scan. A retrospective sync (since_date) or keyword-filtered sync
+        # always hits the mailbox.
+        if not force_refresh and not imap_since and not (conn.get("keywords") or []) and conn.get("last_synced"):
             try:
                 last = datetime.fromisoformat(conn["last_synced"])
                 if (datetime.now(timezone.utc) - last).total_seconds() < 1800:
@@ -1935,14 +2029,18 @@ async def extract_events(
                 pass
 
         loop       = asyncio.get_event_loop()
-        # No 50-message cap for a date-bounded retrospective scan — the SINCE
-        # filter already bounds the result set. Otherwise keep the normal cap.
-        fetch_cap  = 0 if imap_since else 50
+        kw_list    = conn.get("keywords") or []
+        kw_mode    = conn.get("keyword_match_mode", "or")
+        kw_case    = bool(conn.get("keyword_case_sensitive", False))
+        kw_autosave= bool(conn.get("keyword_auto_save", True))
+        # No 50-message cap for a date-bounded retrospective scan or for a
+        # keyword-scoped scan — both narrow the result set on their own.
+        fetch_cap  = 0 if (imap_since or kw_list) else 50
         raw_emails = await loop.run_in_executor(
             None, _scan_mailbox_sync,
             conn["imap_host"], conn["imap_port"], email_addr,
             _decrypt(conn["app_password_enc"]), fetch_cap, sender_whitelist or None,
-            imap_since,
+            imap_since, kw_list or None, kw_mode, kw_case,
         )
         acc = []
         for raw in raw_emails:
@@ -1950,14 +2048,23 @@ async def extract_events(
             exists = await db[COL_EVENTS].find_one(
                 {"user_id": str(current_user.id), "message_id": mid}, {"_id": 0}
             )
+            matched_kw = raw.get("matched_keywords") or []
+            # When keyword filter is active but auto-save is OFF, this email
+            # must surface in the preview panel for the user to confirm.
+            needs_confirm = bool(matched_kw) and not kw_autosave
+            may_autosave  = (not matched_kw) or kw_autosave
+
             if exists:
                 ev_out = _doc_to_out(exists)
+                ev_out.matched_keywords     = matched_kw or exists.get("matched_keywords") or []
+                ev_out.requires_confirmation= needs_confirm
                 ev_out._is_adjournment = exists.get("is_adjournment", False)
                 ev_out._reminder_seq   = exists.get("reminder_seq", 0)
                 ev_out._message_id     = mid
                 acc.append(ev_out)
-                if prefs_doc:
+                if prefs_doc and may_autosave:
                     await _auto_save_event(str(current_user.id), ev_out, prefs_doc)
+                    ev_out.auto_saved = True
                 continue
 
             extracted = await _extract_events_from_email(
@@ -1966,13 +2073,18 @@ async def extract_events(
             )
             for ev in extracted:
                 doc = _build_event_doc(str(current_user.id), email_addr, raw, ev)
+                if matched_kw:
+                    doc["matched_keywords"] = matched_kw
                 res = await db[COL_EVENTS].insert_one(doc)
                 doc["id"] = str(res.inserted_id)
                 ev_out = _doc_to_out(doc)
+                ev_out.matched_keywords      = matched_kw
+                ev_out.requires_confirmation = needs_confirm
                 _attach_extra_attrs(ev_out, ev, mid)
                 acc.append(ev_out)
-                if prefs_doc:
+                if prefs_doc and may_autosave:
                     await _auto_save_event(str(current_user.id), ev_out, prefs_doc)
+                    ev_out.auto_saved = True
 
         await db[COL_CONNECTIONS].update_one(
             {"user_id": str(current_user.id), "email_address": email_addr},
