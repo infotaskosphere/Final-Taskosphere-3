@@ -1316,25 +1316,27 @@ async def qc_delete_search(report_id: str, user: User = Depends(get_current_user
 async def get_trademark_users(
     user: User = Depends(get_current_user),
 ):
-    """Return users assigned to the Trademark department (for 'Prepared By' dropdown)."""
+    """Return users who have access to Trademark Sphere (for 'Prepared By' dropdown)."""
     all_users = await db.users.find(
         {"is_active": True},
-        {"_id": 0, "id": 1, "full_name": 1, "departments": 1}
+        {"_id": 0, "id": 1, "full_name": 1, "role": 1, "departments": 1, "permissions": 1}
     ).to_list(1000)
 
-    trademark_users = [
-        {"id": u["id"], "full_name": u.get("full_name", "Unknown")}
-        for u in all_users
-        if any(d.lower() in ("trademark", "trademarks", "trademark sphere", "ip")
-               for d in u.get("departments", []))
-    ]
+    trademark_users = []
+    for u in all_users:
+        role = u.get("role", "")
+        perms = u.get("permissions", {}) or {}
 
-    # Fallback: return all active users if no trademark-specific users found
-    if not trademark_users:
-        trademark_users = [
-            {"id": u["id"], "full_name": u.get("full_name", "Unknown")}
-            for u in all_users
-        ]
+        # Include admins (always have trademark access) OR users with explicit permission
+        if role == "admin":
+            trademark_users.append({"id": u["id"], "full_name": u.get("full_name", "Unknown")})
+        elif perms.get("can_view_trademark_sphere", False):
+            trademark_users.append({"id": u["id"], "full_name": u.get("full_name", "Unknown")})
+        else:
+            # Also include users in trademark-named departments as fallback
+            depts = [d.lower() for d in u.get("departments", [])]
+            if any(d in ("trademark", "trademarks", "trademark sphere", "ip") for d in depts):
+                trademark_users.append({"id": u["id"], "full_name": u.get("full_name", "Unknown")})
 
     return trademark_users
 
