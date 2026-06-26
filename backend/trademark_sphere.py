@@ -1504,6 +1504,7 @@ class CombinedPdfRequest(BaseModel):
     client_name:      Optional[str] = ""
     client_mobile:    Optional[str] = ""
     report_date:      Optional[str] = ""
+    prepared_by:      Optional[str] = ""
 
 @router.post("/combined-pdf")
 async def generate_combined_pdf(
@@ -1520,6 +1521,7 @@ async def generate_combined_pdf(
         "client_name":      body.client_name or "",
         "client_mobile":    body.client_mobile or "",
         "report_date":      body.report_date or "",
+        "prepared_by":      body.prepared_by or "",
     }
     pdf_bytes = build_combined_report_pdf(items_data, branding)
     return Response(
