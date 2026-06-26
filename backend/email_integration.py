@@ -102,6 +102,8 @@ class ConnectionUpdateRequest(BaseModel):
     # ── Admin overrides (only writable by admin) ───────────────────────────
     admin_paused: Optional[bool] = None
     admin_disabled: Optional[bool] = None
+    # ── Admin-only: assign users to see this connection in Action Center ──
+    linked_user_ids: Optional[List[str]] = None
 
 class ConnectionOut(BaseModel):
     email_address: str
@@ -126,6 +128,9 @@ class ConnectionOut(BaseModel):
     owner_user_id: Optional[str] = None
     owner_name: Optional[str] = None
     owner_email: Optional[str] = None
+    # Linked users: non-owner users assigned by admin to see this email scraping
+    linked_user_ids: Optional[List[str]] = None
+    linked_users: Optional[List[Dict[str, Any]]] = None
 
 class ExtractedEventOut(BaseModel):
     id: Optional[str] = None
@@ -1113,6 +1118,8 @@ def _conn_doc_to_out(doc: Dict) -> ConnectionOut:
         owner_user_id=str(doc["user_id"]) if doc.get("user_id") else None,
         owner_name=doc.get("owner_name"),
         owner_email=doc.get("owner_email"),
+        linked_user_ids=doc.get("linked_user_ids") or [],
+        linked_users=doc.get("linked_users") or [],
     )
 
 # =============================================================================
@@ -1571,10 +1578,16 @@ async def list_connections(current_user=Depends(check_module_permission("email_a
             {"user_id": {"$in": visible_ids}}, {"app_password_enc": 0, "_id": 0}
         ).to_list(200)
     else:
-        # Staff: own only (Issue #3)
-        docs = await db[COL_CONNECTIONS].find(
+        # Staff: own connections + any connection where they are a linked user
+        own_docs = await db[COL_CONNECTIONS].find(
             {"user_id": str(current_user.id)}, {"app_password_enc": 0, "_id": 0}
         ).to_list(100)
+        linked_docs = await db[COL_CONNECTIONS].find(
+            {"linked_user_ids": str(current_user.id)}, {"app_password_enc": 0, "_id": 0}
+        ).to_list(100)
+        # Merge, avoiding duplicates
+        seen_emails = {d["email_address"] for d in own_docs}
+        docs = own_docs + [d for d in linked_docs if d["email_address"] not in seen_emails]
 
     # Attach owner identity so admins/managers can label other users' accounts in the UI.
     if current_user.role in ("admin", "manager") and docs:
@@ -1599,6 +1612,29 @@ async def list_connections(current_user=Depends(check_module_permission("email_a
                 if u:
                     d["owner_name"]  = u.get("full_name") or u.get("name") or u.get("username") or u.get("email")
                     d["owner_email"] = u.get("email")
+        except Exception:
+            pass
+    # Attach linked_users details (name/email) to all docs that have linked_user_ids
+    if docs:
+        try:
+            from bson import ObjectId as _ObjId
+            all_linked_ids = []
+            for d in docs:
+                for uid in (d.get("linked_user_ids") or []):
+                    all_linked_ids.append(uid)
+            if all_linked_ids:
+                linked_user_map = {}
+                # Try ObjectId lookup
+                obj_ids2 = []
+                for uid in set(all_linked_ids):
+                    try: obj_ids2.append(_ObjId(uid))
+                    except Exception: pass
+                if obj_ids2:
+                    async for u in db["users"].find({"_id": {"$in": obj_ids2}}, {"name": 1, "full_name": 1, "email": 1, "username": 1}):
+                        linked_user_map[str(u["_id"])] = {"id": str(u["_id"]), "name": u.get("full_name") or u.get("name") or u.get("username") or u.get("email"), "email": u.get("email", "")}
+                for d in docs:
+                    lu_ids = d.get("linked_user_ids") or []
+                    d["linked_users"] = [linked_user_map[uid] for uid in lu_ids if uid in linked_user_map]
         except Exception:
             pass
     return {"connections": [_conn_doc_to_out(d) for d in docs]}
@@ -1658,7 +1694,7 @@ async def update_connection(
     updates = {k: v for k, v in body.dict().items() if v is not None or isinstance(v, bool)}
     # Admin-only fields: strip if caller is not admin
     if current_user.role != "admin":
-        for f in ("admin_paused", "admin_disabled"):
+        for f in ("admin_paused", "admin_disabled", "linked_user_ids"):
             updates.pop(f, None)
     if updates.get("is_active"):
         updates["sync_error"] = None
@@ -1690,6 +1726,97 @@ async def delete_connection(email_address: str, current_user=Depends(check_modul
         )
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="Connection not found or not owned by you")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LINKED USERS — admin assigns which users see an email's scraping results
+# in their Action Center, and each linked user can set their own keywords.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/connections/{email_address}/linked-users")
+async def get_linked_users(email_address: str, current_user=Depends(check_module_permission("email_accounts", "view"))):
+    """Return linked_user_ids with user details for a given connection (admin only for full list)."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    doc = await db[COL_CONNECTIONS].find_one({"email_address": email_address}, {"_id": 0, "app_password_enc": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    linked_ids = doc.get("linked_user_ids") or []
+    linked_keywords = doc.get("linked_user_keywords") or {}  # {user_id: [kw, ...]}
+    users_out = []
+    if linked_ids:
+        from bson import ObjectId as _ObjId
+        obj_ids = []
+        for uid in linked_ids:
+            try: obj_ids.append(_ObjId(uid))
+            except Exception: pass
+        if obj_ids:
+            async for u in db["users"].find({"_id": {"$in": obj_ids}}, {"name": 1, "full_name": 1, "email": 1, "username": 1, "role": 1}):
+                uid_str = str(u["_id"])
+                users_out.append({
+                    "id": uid_str,
+                    "name": u.get("full_name") or u.get("name") or u.get("username") or u.get("email"),
+                    "email": u.get("email", ""),
+                    "role": u.get("role", ""),
+                    "keywords": linked_keywords.get(uid_str) or [],
+                })
+    return {"linked_users": users_out, "linked_user_ids": linked_ids}
+
+@router.put("/connections/{email_address}/linked-users")
+async def set_linked_users(
+    email_address: str,
+    body: Dict[str, Any],
+    current_user=Depends(check_module_permission("email_accounts", "edit"))
+):
+    """Admin: assign/replace the list of users linked to this email connection."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    doc = await db[COL_CONNECTIONS].find_one({"email_address": email_address}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    user_ids = [str(uid) for uid in (body.get("user_ids") or []) if uid]
+    await db[COL_CONNECTIONS].update_one(
+        {"email_address": email_address},
+        {"$set": {"linked_user_ids": user_ids}}
+    )
+    return {"linked_user_ids": user_ids, "message": f"Linked {len(user_ids)} user(s) to {email_address}"}
+
+@router.patch("/connections/{email_address}/my-keywords")
+async def update_my_keywords(
+    email_address: str,
+    body: Dict[str, Any],
+    current_user=Depends(check_module_permission("email_accounts", "view"))
+):
+    """Any linked user can update their own keywords for a connection they are linked to."""
+    uid = str(current_user.id)
+    doc = await db[COL_CONNECTIONS].find_one({"email_address": email_address}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    # Must be owner or a linked user
+    is_owner = doc.get("user_id") == uid
+    is_linked = uid in (doc.get("linked_user_ids") or [])
+    if not is_owner and not is_linked and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Not authorised")
+    keywords = [k.strip() for k in (body.get("keywords") or []) if k and k.strip()]
+    field = f"linked_user_keywords.{uid}"
+    await db[COL_CONNECTIONS].update_one(
+        {"email_address": email_address},
+        {"$set": {field: keywords}}
+    )
+    return {"keywords": keywords, "email_address": email_address}
+
+@router.get("/my-linked-connections")
+async def get_my_linked_connections(current_user=Depends(check_module_permission("email_accounts", "view"))):
+    """Return connections where current user is in linked_user_ids (not the owner)."""
+    uid = str(current_user.id)
+    docs = await db[COL_CONNECTIONS].find(
+        {"linked_user_ids": uid, "user_id": {"$ne": uid}},
+        {"app_password_enc": 0, "_id": 0}
+    ).to_list(100)
+    # Attach per-user keywords
+    for d in docs:
+        linked_kw = d.get("linked_user_keywords") or {}
+        d["my_keywords"] = linked_kw.get(uid) or []
+    return {"connections": [_conn_doc_to_out(d) for d in docs]}
 
 @router.post("/connections/{email_address}/test")
 async def test_connection(email_address: str, current_user=Depends(check_module_permission("email_accounts", "view"))):
