@@ -856,6 +856,7 @@ class ReportRequest(BaseModel):
     client_name: str = ""
     client_mobile: str = ""
     report_date: str = ""
+    prepared_by: str = ""
 
 class BulkReportRequest(BaseModel):
     names: List[str]
@@ -1056,6 +1057,7 @@ async def qc_generate_report(body: ReportRequest, user: User = Depends(get_curre
     report["client_name"]     = body.client_name
     report["client_mobile"]   = body.client_mobile
     report["report_date"]     = body.report_date
+    report["prepared_by"]     = body.prepared_by
     report["class_filter"]    = body.class_filter
     user_id = str(getattr(user, "id", None) or user.get("_id", ""))
     doc = {
@@ -1090,6 +1092,7 @@ async def qc_bulk_reports(body: BulkReportRequest, user: User = Depends(get_curr
             report["client_name"]      = body.client_name
             report["client_mobile"]    = body.client_mobile
             report["report_date"]      = body.report_date
+            report["prepared_by"]      = body.prepared_by
             report["class_filter"]     = body.class_filter
             doc = {
                 "_id":        str(uuid.uuid4()),
@@ -1273,7 +1276,7 @@ async def qc_download_pdf_post(
     rep = dict(doc.get("report", {}))
     for field in (
         "logo_data_url", "footer", "tagline", "watermark", "custom_watermark",
-        "client_name", "client_mobile", "report_date",
+        "client_name", "client_mobile", "report_date", "prepared_by",
     ):
         if body.get(field) is not None:
             rep[field] = body[field]
@@ -1307,6 +1310,33 @@ async def qc_delete_search(report_id: str, user: User = Depends(get_current_user
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Report not found")
     return {"ok": True}
+
+
+@router.get("/trademark-users")
+async def get_trademark_users(
+    user: User = Depends(get_current_user),
+):
+    """Return users assigned to the Trademark department (for 'Prepared By' dropdown)."""
+    all_users = await db.users.find(
+        {"is_active": True},
+        {"_id": 0, "id": 1, "full_name": 1, "departments": 1}
+    ).to_list(1000)
+
+    trademark_users = [
+        {"id": u["id"], "full_name": u.get("full_name", "Unknown")}
+        for u in all_users
+        if any(d.lower() in ("trademark", "trademarks", "trademark sphere", "ip")
+               for d in u.get("departments", []))
+    ]
+
+    # Fallback: return all active users if no trademark-specific users found
+    if not trademark_users:
+        trademark_users = [
+            {"id": u["id"], "full_name": u.get("full_name", "Unknown")}
+            for u in all_users
+        ]
+
+    return trademark_users
 
 
 @router.get("/check")
@@ -1797,6 +1827,7 @@ class CombinedPdfRequest(BaseModel):
     client_name:      Optional[str] = ""
     client_mobile:    Optional[str] = ""
     report_date:      Optional[str] = ""
+    prepared_by:      Optional[str] = ""
 
 @router.post("/combined-pdf")
 async def generate_combined_pdf(
@@ -1813,6 +1844,7 @@ async def generate_combined_pdf(
         "client_name":      body.client_name or "",
         "client_mobile":    body.client_mobile or "",
         "report_date":      body.report_date or "",
+        "prepared_by":      body.prepared_by or "",
     }
     pdf_bytes = build_combined_report_pdf(items_data, branding)
     return Response(
