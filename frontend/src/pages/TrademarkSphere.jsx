@@ -120,6 +120,7 @@ async function downloadBrandedPdfWithLogo(reportId, branding, clientInfo = {}, b
     client_name:      clientInfo.client_name   || "",
     client_mobile:    clientInfo.client_mobile || "",
     report_date:      clientInfo.report_date   || "",
+    prepared_by:      clientInfo.prepared_by   || "",
   };
   // Use the axios instance so the JWT Authorization header is sent automatically
   const res = await api.post(
@@ -1466,6 +1467,7 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
         client_name:      clientInfo?.client_name   || "",
         client_mobile:    clientInfo?.client_mobile || "",
         report_date:      clientInfo?.report_date   || "",
+        prepared_by:      clientInfo?.prepared_by   || "",
       }, fmt);
       toast.success(`Combined ${fmt.toUpperCase()} report downloaded`);
     } catch (e) {
@@ -1811,6 +1813,8 @@ export default function TrademarkSphere() {
   const [selectedClient, setSelectedClient] = useState(null);
   const [reportDate, setReportDate]     = useState(() => new Date().toISOString().slice(0, 10));
   const [companies, setCompanies]       = useState([]);
+  const [trademarkUsers, setTrademarkUsers] = useState([]);
+  const [preparedBy, setPreparedBy]     = useState("");
 
   // Branding — load saved on mount
   const [branding, setBranding] = useState(loadSavedBranding);
@@ -1836,6 +1840,11 @@ export default function TrademarkSphere() {
           }));
         }
       }
+    }).catch(() => {});
+
+    // Load trademark department users for "Prepared By" dropdown
+    api.get("/trademark-qc/trademark-users").then(res => {
+      setTrademarkUsers(Array.isArray(res.data) ? res.data : []);
     }).catch(() => {});
   }, []);
 
@@ -1873,6 +1882,7 @@ export default function TrademarkSphere() {
         client_name:      selectedClient?.company_name || "",
         client_mobile:    selectedClient?.phone || "",
         report_date:      reportDate || "",
+        prepared_by:      preparedBy || "",
       });
       setReport(data.report);
       setActiveId(data.id);
@@ -1985,6 +1995,35 @@ export default function TrademarkSphere() {
                   style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 10, color: T.text, padding: "9px 14px", fontSize: 13, outline: "none", width: "100%", fontFamily: "inherit", cursor: "pointer" }}
                 />
               </div>
+              {/* Prepared By */}
+              <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${T.border}` }}>
+                <div style={{ fontSize: 11, color: T.dimmer, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
+                  Prepared By
+                </div>
+                <select
+                  value={preparedBy}
+                  onChange={e => setPreparedBy(e.target.value)}
+                  style={{
+                    background: T.raised,
+                    border: `1px solid ${T.border}`,
+                    borderRadius: 10,
+                    color: preparedBy ? T.text : T.dimmer,
+                    padding: "9px 14px",
+                    fontSize: 13,
+                    outline: "none",
+                    width: "100%",
+                    fontFamily: "inherit",
+                    cursor: "pointer",
+                    appearance: "none",
+                    WebkitAppearance: "none",
+                  }}
+                >
+                  <option value="">Select person (optional)</option>
+                  {trademarkUsers.map(u => (
+                    <option key={u.id} value={u.full_name}>{u.full_name}</option>
+                  ))}
+                </select>
+              </div>
             </Card>
 
             {/* Branding panel — always expanded, no collapsible */}
@@ -2013,6 +2052,7 @@ export default function TrademarkSphere() {
               client_name:   selectedClient?.company_name || "",
               client_mobile: selectedClient?.phone || "",
               report_date:   reportDate || "",
+              prepared_by:   preparedBy || "",
             }} onPickReport={async (id) => {
               const item = history.find(h => h.id === id);
               if (item) handleHistorySelect(item);
@@ -2065,6 +2105,7 @@ export default function TrademarkSphere() {
                         client_name:   selectedClient?.company_name || "",
                         client_mobile: selectedClient?.phone || "",
                         report_date:   reportDate || "",
+                        prepared_by:   preparedBy || "",
                       }} />
 
                     {/* ── 3-col row: Recommendations + Alternative Names + Recent Reports ── */}
