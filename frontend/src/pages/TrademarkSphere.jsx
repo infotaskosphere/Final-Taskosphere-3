@@ -306,7 +306,7 @@ const Skeleton = ({ h = 20, w = "100%", r = 8, mb = 0, T }) => (
 );
 
 // ─── Report Branding Panel — v3 with Save as Default ─────────────────────────
-function BrandingPanel({ branding, onChange, companies, T }) {
+function BrandingPanel({ branding, onChange, companies, T, preparedBy, onPreparedByChange, trademarkUsers }) {
   const fileRef = useRef();
   const [selectedCompanyId, setSelectedCompanyId] = useState(branding.defaultCompanyId || "");
   const [saving, setSaving] = useState(false);
@@ -458,6 +458,21 @@ function BrandingPanel({ branding, onChange, companies, T }) {
         {branding.watermark === "CUSTOM" && (
           <Input T={T} placeholder="Enter custom watermark text…" value={branding.customWatermark || ""} onChange={e => onChange({ ...branding, customWatermark: e.target.value })} style={{ marginTop: 8 }} />
         )}
+      </div>
+
+      {/* Prepared By */}
+      <div>
+        <div style={{ fontSize: 11, color: T.dimmer, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Prepared By</div>
+        <select
+          value={preparedBy || ""}
+          onChange={e => onPreparedByChange && onPreparedByChange(e.target.value)}
+          style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 10, color: (preparedBy || "") ? T.text : T.dimmer, padding: "10px 14px", fontSize: 13, width: "100%", outline: "none", fontFamily: "inherit" }}
+        >
+          <option value="">Select person (optional)</option>
+          {(trademarkUsers || []).map(u => (
+            <option key={u.id} value={u.full_name}>{u.full_name}</option>
+          ))}
+        </select>
       </div>
 
       {/* Footer text */}
@@ -1995,35 +2010,6 @@ export default function TrademarkSphere() {
                   style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 10, color: T.text, padding: "9px 14px", fontSize: 13, outline: "none", width: "100%", fontFamily: "inherit", cursor: "pointer" }}
                 />
               </div>
-              {/* Prepared By */}
-              <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${T.border}` }}>
-                <div style={{ fontSize: 11, color: T.dimmer, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
-                  Prepared By
-                </div>
-                <select
-                  value={preparedBy}
-                  onChange={e => setPreparedBy(e.target.value)}
-                  style={{
-                    background: T.raised,
-                    border: `1px solid ${T.border}`,
-                    borderRadius: 10,
-                    color: preparedBy ? T.text : T.dimmer,
-                    padding: "9px 14px",
-                    fontSize: 13,
-                    outline: "none",
-                    width: "100%",
-                    fontFamily: "inherit",
-                    cursor: "pointer",
-                    appearance: "none",
-                    WebkitAppearance: "none",
-                  }}
-                >
-                  <option value="">Select person (optional)</option>
-                  {trademarkUsers.map(u => (
-                    <option key={u.id} value={u.full_name}>{u.full_name}</option>
-                  ))}
-                </select>
-              </div>
             </Card>
 
             {/* Branding panel — always expanded, no collapsible */}
@@ -2037,7 +2023,7 @@ export default function TrademarkSphere() {
                   <div style={{ fontSize: 11, color: T.dimmer }}>Logo · watermark · footer — applied to every generated PDF</div>
                 </div>
               </div>
-              <BrandingPanel T={T} branding={branding} onChange={handleBrandingChange} companies={companies} />
+              <BrandingPanel T={T} branding={branding} onChange={handleBrandingChange} companies={companies} preparedBy={preparedBy} onPreparedByChange={setPreparedBy} trademarkUsers={trademarkUsers} />
             </Card>
           </div>
 
