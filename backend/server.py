@@ -175,14 +175,6 @@ app.add_middleware(
     expose_headers=["*"],
     max_age=3600,
 )
-    allow_origin_regex=r"https://.*\.onrender\.com",  # covers all Render preview URLs
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With",
-                   "Cache-Control", "X-CSRF-Token"],
-    expose_headers=["*"],
-    max_age=3600,
-)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
