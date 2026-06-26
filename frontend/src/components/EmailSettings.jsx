@@ -631,7 +631,6 @@ function ConnectForm({ provider, onSuccess, onCancel, isDark }) {
 // CONNECTED ACCOUNT CARD
 // ─────────────────────────────────────────────────────────────────────────────
 function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, onSyncRetro, onUpdateSettings, isDark, currentUser }) {
-  const { user: currentUser } = useAuth();
   const isAdmin = currentUser?.role === 'admin';
   const ownerId = conn.owner_user_id || conn.user_id || null;
   const isOtherUser = !!(isAdmin && ownerId && currentUser?.id && String(ownerId) !== String(currentUser.id));
