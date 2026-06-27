@@ -310,9 +310,10 @@ async def _queue_user_cmd(sn: str, identix_uid: int, name: str, user_id: str):
       DATA USER UID=1\tUserID=emp001\tName=John Doe\tPri=0\tPasswd=\tCard=0\tGrp=1\tTZ=0000000000000000\tVerify=0\tViceCard=0
     """
     safe_name = (name or "")[:24].replace("\t", " ").replace("\n", " ")
+    # UserID must be SHORT numeric string — Identix firmware rejects UUIDs
     cmd_str = (
         f"DATA USER UID={identix_uid}\t"
-        f"UserID={user_id or identix_uid}\t"
+        f"UserID={identix_uid}\t"
         f"Name={safe_name}\t"
         f"Pri=0\tPasswd=\tCard=0\tGrp=1\t"
         f"TZ=0000000000000000\tVerify=0\tViceCard=0"
