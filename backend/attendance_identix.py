@@ -290,7 +290,67 @@ async def _do_lan_scan(
 # BACKGROUND TASK — sync new user to all active devices
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─── ADMS COMMAND QUEUE HELPERS ──────────────────────────────────────────────
+
+async def _next_seq_id(sn: str) -> int:
+    """Monotonically increasing sequence ID per device for ADMS command IDs."""
+    counter = await db.counters.find_one_and_update(
+        {"_id": f"adms_seq_{sn}"},
+        {"$inc": {"seq": 1}},
+        upsert=True,
+        return_document=True,
+    )
+    return counter.get("seq", 1)
+
+
+async def _queue_user_cmd(sn: str, identix_uid: int, name: str, user_id: str):
+    """
+    Insert a DATA USER command into the pending queue for a specific device SN.
+    Format accepted by ZKTeco/Identix ADMS firmware:
+      DATA USER UID=1\tUserID=emp001\tName=John Doe\tPri=0\tPasswd=\tCard=0\tGrp=1\tTZ=0000000000000000\tVerify=0\tViceCard=0
+    """
+    safe_name = (name or "")[:24].replace("\t", " ").replace("\n", " ")
+    cmd_str = (
+        f"DATA USER UID={identix_uid}\t"
+        f"UserID={user_id or identix_uid}\t"
+        f"Name={safe_name}\t"
+        f"Pri=0\tPasswd=\tCard=0\tGrp=1\t"
+        f"TZ=0000000000000000\tVerify=0\tViceCard=0"
+    )
+    seq = await _next_seq_id(sn)
+    await db.identix_cmd_queue.insert_one({
+        "cmd_id":        str(uuid.uuid4()),
+        "seq_id":        seq,
+        "device_serial": sn,
+        "cmd_str":       cmd_str,
+        "status":        "pending",
+        "created_at":    datetime.now(timezone.utc).isoformat(),
+        "sent_at":       None,
+    })
+    logger.info(f"📥 Queued user cmd for SN={sn} uid={identix_uid} name={safe_name}")
+
+
+async def _queue_user_to_all_devices(user_doc: dict) -> int:
+    """Queue a user-add command for every active device. Returns count of queued devices."""
+    devices = await db.identix_devices.find({"is_active": True}).to_list(50)
+    identix_uid = user_doc.get("identix_uid")
+    if not identix_uid:
+        return 0
+    queued = 0
+    for device in devices:
+        sn = device.get("serial_number", "")
+        if not sn:
+            continue
+        try:
+            await _queue_user_cmd(sn, identix_uid, user_doc.get("full_name", ""), user_doc.get("id", ""))
+            queued += 1
+        except Exception as e:
+            logger.error(f"Failed to queue user for device {device.get('name')}: {e}")
+    return queued
+
+
 async def sync_user_to_identix_devices(user_doc: dict):
+    """Background task: assign identix_uid and queue ADMS user-add command."""
     try:
         devices = await db.identix_devices.find({"is_active": True}).to_list(50)
         if not devices:
@@ -314,19 +374,17 @@ async def sync_user_to_identix_devices(user_doc: dict):
                     "thumb_enrolled":   False,
                 }},
             )
+            user_doc["identix_uid"] = identix_uid
 
-        for device in devices:
-            try:
-                await asyncio.get_event_loop().run_in_executor(
-                    None, _sync_single_user_to_device, device, identix_uid, user_doc,
-                )
-                await db.users.update_one(
-                    {"id": user_doc["id"]},
-                    {"$set": {"identix_enrolled": True}},
-                )
-                logger.info(f"User {user_doc.get('full_name')} synced to {device.get('name')}")
-            except Exception as e:
-                logger.error(f"Failed to sync user to device {device.get('name')}: {e}")
+        queued = await _queue_user_to_all_devices(user_doc)
+        if queued:
+            await db.users.update_one(
+                {"id": user_doc["id"]},
+                {"$set": {"identix_enrolled": True}},
+            )
+            logger.info(f"✅ User {user_doc.get('full_name')} queued for {queued} device(s)")
+        else:
+            logger.warning(f"No devices with serial numbers found to queue user {user_doc.get('full_name')}")
 
     except Exception as e:
         logger.error(
@@ -340,10 +398,10 @@ async def sync_user_to_identix_devices(user_doc: dict):
 
 class DeviceCreate(BaseModel):
     name:           str
-    ip_address:     str
+    serial_number:  str                   # Required for ADMS domain mode
+    ip_address:     str = "adms-domain"   # Not used in domain mode
     port:           int = 4370
     comm_password:  str = "0"
-    serial_number:  Optional[str] = None
     location:       Optional[str] = None
 
 
@@ -510,28 +568,22 @@ async def sync_users_to_device(
             "message": "No users with Identix UIDs",
         }
 
-    try:
-        synced, failed = await asyncio.get_event_loop().run_in_executor(
-            None, _sync_users_batch_to_device, device, users
-        )
-        for u in users:
-            await db.users.update_one(
-                {"id": u["id"]},
-                {"$set": {"identix_enrolled": True}},
-            )
-        return {
-            "success": failed == 0,
-            "synced":  synced,
-            "failed":  failed,
-            "message": f"Synced {synced} users ({failed} failed)",
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "synced":  0,
-            "failed":  len(users),
-            "message": str(e),
-        }
+    # Queue commands for this device via ADMS (machine polls /iclock/devicecmd)
+    sn = device.get("serial_number", "")
+    queued = 0
+    for u in users:
+        try:
+            await _queue_user_cmd(sn, u["identix_uid"], u.get("full_name", ""), u.get("id", ""))
+            await db.users.update_one({"id": u["id"]}, {"$set": {"identix_enrolled": True}})
+            queued += 1
+        except Exception as eq:
+            logger.warning(f"Failed to queue user {u.get('full_name')}: {eq}")
+    return {
+        "success": True,
+        "synced":  queued,
+        "failed":  len(users) - queued,
+        "message": f"Queued {queued} user(s) for ADMS push to {device.get('name')}. Machine will receive commands on next poll (up to 1 min).",
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -970,10 +1022,15 @@ async def sync_single_user_to_devices(
     user_id:      str,
     current_user: User = Depends(require_admin()),
 ):
+    """
+    Queue a DATA USER command for all active devices.
+    The machine picks it up next time it polls /iclock/devicecmd.
+    """
     user = await db.users.find_one({"id": user_id}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # Assign identix_uid if not set
     if not user.get("identix_uid"):
         counter = await db.counters.find_one_and_update(
             {"_id": "identix_uid"},
@@ -988,9 +1045,14 @@ async def sync_single_user_to_devices(
         )
         user["identix_uid"] = identix_uid
 
-    asyncio.create_task(sync_user_to_identix_devices(user))
+    queued = await _queue_user_to_all_devices(user)
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {"identix_enrolled": True}},
+    )
     return {
-        "message": f"Syncing {user['full_name']} to all active devices in background"
+        "message": f"{user.get('full_name')} queued for push to {queued} device(s). Machine will receive the command on next poll.",
+        "queued_devices": queued,
     }
 # 🔹 Device handshake (VERY IMPORTANT)
 async def _mark_device_online(sn: str):
@@ -1199,6 +1261,28 @@ async def iclock_cdata(request: Request):
         logger.error(f"❌ iclock/cdata error: {e}\n{traceback.format_exc()}")
         return "OK\n"   # Always return OK so device doesn't retry indefinitely
 
+@identix_router.get("/cmd-queue")
+async def get_cmd_queue(
+    status: Optional[str] = None,
+    current_user: User = Depends(require_admin()),
+):
+    """View pending/sent ADMS commands queued for devices."""
+    query = {}
+    if status:
+        query["status"] = status
+    cmds = await db.identix_cmd_queue.find(query, {"_id": 0}).sort("created_at", -1).limit(100).to_list(100)
+    return {"commands": cmds, "total": len(cmds)}
+
+
+@identix_router.delete("/cmd-queue")
+async def clear_cmd_queue(
+    current_user: User = Depends(require_admin()),
+):
+    """Clear all sent/failed commands from the queue (keep pending)."""
+    result = await db.identix_cmd_queue.delete_many({"status": {"$in": ["sent", "failed"]}})
+    return {"deleted": result.deleted_count, "message": f"Cleared {result.deleted_count} completed commands"}
+
+
 @identix_router.get("/")
 async def root_test():
     return {"status": "API LIVE"}
@@ -1208,11 +1292,40 @@ async def root_test():
 @identix_router.api_route("/iclock/devicecmd", methods=["GET", "POST"])
 async def iclock_devicecmd(request: Request):
     """
-    Some Identix/ZKTeco firmware versions poll /iclock/devicecmd for pending commands.
-    Return empty OK so the device stays happy and doesn't retry indefinitely.
+    Machine polls this endpoint for pending commands (user add/delete).
+    ADMS command format understood by Identix/ZKTeco:
+      C:ID:DATA USER UID=1\tUserID=1\tName=John\tPri=0\tPasswd=\tCard=0\tGrp=1\tTZ=0000000000000000\tVerify=0\tViceCard=0
     """
     params = dict(request.query_params)
     sn = params.get("SN") or params.get("sn", "")
-    logger.info(f"📡 DEVICECMD from SN={sn}")
+    logger.info(f"📡 DEVICECMD poll from SN={sn}")
     await _mark_device_online(sn)
-    return "OK\n"
+
+    if not sn:
+        return "OK\n"
+
+    # Find the device
+    device = await db.identix_devices.find_one({"serial_number": sn}, {"_id": 0})
+    if not device:
+        return "OK\n"
+
+    # Fetch the oldest pending command for this device
+    pending = await db.identix_cmd_queue.find_one(
+        {"device_serial": sn, "status": "pending"},
+        sort=[("created_at", 1)],
+    )
+    if not pending:
+        return "OK\n"
+
+    cmd_id  = pending.get("cmd_id") or pending.get("_id")
+    cmd_str = pending.get("cmd_str", "")
+
+    # Mark as sent
+    await db.identix_cmd_queue.update_one(
+        {"_id": pending["_id"]},
+        {"$set": {"status": "sent", "sent_at": datetime.now(timezone.utc).isoformat()}},
+    )
+
+    logger.info(f"📤 Sending command to SN={sn}: {cmd_str[:80]}")
+    # Response format: C:<cmd_id>:<command>
+    return f"C:{pending.get('seq_id', 1)}:{cmd_str}\n"
