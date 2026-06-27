@@ -1278,9 +1278,9 @@ async def get_cmd_queue(
 async def clear_cmd_queue(
     current_user: User = Depends(require_admin()),
 ):
-    """Clear all sent/failed commands from the queue (keep pending)."""
-    result = await db.identix_cmd_queue.delete_many({"status": {"$in": ["sent", "failed"]}})
-    return {"deleted": result.deleted_count, "message": f"Cleared {result.deleted_count} completed commands"}
+    """Clear all commands from the queue (sent, failed, and pending)."""
+    result = await db.identix_cmd_queue.delete_many({})
+    return {"deleted": result.deleted_count, "message": f"Cleared {result.deleted_count} commands from queue"}
 
 
 @identix_router.get("/")
