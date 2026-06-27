@@ -1878,6 +1878,16 @@ export default function Attendance() {
     return todayAttendance;
   }, [isViewingOther, attendanceHistory, todayAttendance, todayDateStr]);
 
+  // ── Machine-sync detection ─────────────────────────────────────────────────
+  // True when the biometric Identix/ZKTeco machine already recorded today's punch.
+  // The backend iclock/cdata endpoint writes source="machine_push" into the
+  // attendance document, so we can detect it here and suppress the manual
+  // punch-in modal / buttons.
+  const isMachineSynced = useMemo(() => {
+    const src = displayTodayAttendance?.source;
+    return src === 'machine_push' || src === 'machine';
+  }, [displayTodayAttendance]);
+
   const displayLiveDuration = useMemo(() => {
     if (isViewingOther) return calculateTodayLiveDuration(displayTodayAttendance);
     return liveDuration;
@@ -2050,6 +2060,50 @@ export default function Attendance() {
     const id = setInterval(check, 60000);
     return () => clearInterval(id);
   }, [todayAttendance, lastActivity, isOvertime, isViewingOther, isEveryoneView]); // eslint-disable-line
+
+  // ── Auto-poll for biometric machine punches (every 30 seconds) ────────────
+  // When a user punches the physical Identix machine, the backend receives
+  // the push via /iclock/cdata and mirrors it into the attendance collection.
+  // This poller detects the change within ~30s and refreshes the UI so the
+  // user never has to manually punch in/out in the app.
+  const _prevMachineSyncRef = useRef(false);
+  useEffect(() => {
+    if (isViewingOther || isEveryoneView) return;
+    const poll = async () => {
+      try {
+        const res = await api.get('/attendance/today');
+        const fresh = res.data;
+        if (!fresh) return;
+
+        const freshSrc = fresh.source;
+        const freshIsMachine = freshSrc === 'machine_push' || freshSrc === 'machine';
+        const wasMachine = _prevMachineSyncRef.current;
+
+        // Detect transition: machine just synced a new punch
+        if (freshIsMachine && !wasMachine) {
+          const punchLabel = fresh.punch_in && !fresh.punch_out ? 'Punch In' : fresh.punch_out ? 'Punch Out' : 'attendance';
+          toast.success(`Biometric machine synced ${punchLabel} automatically`, { duration: 5000, id: 'machine-sync' });
+          // Full data refresh so all UI sections update
+          fetchData();
+        } else if (fresh.punch_in !== todayAttendance?.punch_in || fresh.punch_out !== todayAttendance?.punch_out) {
+          // Even non-machine changes (admin edits, etc.) should be reflected
+          if (fresh.punch_in || fresh.punch_out) {
+            fetchData();
+          }
+        }
+
+        _prevMachineSyncRef.current = freshIsMachine;
+        // Also update todayAttendance state if backend returned new data
+        if (fresh.punch_in !== todayAttendance?.punch_in || fresh.punch_out !== todayAttendance?.punch_out) {
+          setTodayAttendance(fresh);
+        }
+      } catch {
+        // Silent fail — polling should never show errors
+      }
+    };
+    const id = setInterval(poll, 30000); // poll every 30s
+    return () => clearInterval(id);
+  }, [isViewingOther, isEveryoneView, fetchData, todayAttendance]); // eslint-disable-line
 
   
   // ── Fetch guard — prevents duplicate concurrent fetches ──────────────────
@@ -2242,6 +2296,11 @@ export default function Attendance() {
   }, [haversineMetres]);
 
   const handlePunchAction = useCallback(async (action) => {
+    // Guard: if machine already synced, prevent duplicate manual punch
+    if (isMachineSynced) {
+      toast.info('Attendance already recorded by biometric machine', { duration: 4000, id: 'machine-guard' });
+      return;
+    }
     setLoading(true); setGeoError(null);
     try {
       // Always attempt GPS location for both punch-in and punch-out
@@ -2275,7 +2334,7 @@ export default function Attendance() {
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to record attendance');
     } finally { setLoading(false); }
-  }, [fetchData, checkGeofence]);
+  }, [fetchData, checkGeofence, isMachineSynced]);
 
   // ── Leave ──────────────────────────────────────────────────────────────────
   const handleApplyLeave = useCallback(async () => {
@@ -3437,9 +3496,17 @@ export default function Attendance() {
                             <LogIn className="h-4 w-4 text-emerald-500" />
                             <span className="font-medium" style={{ color: isDark ? D.muted : '#475569' }}>Punch In</span>
                           </div>
-                          <span className="font-bold text-sm" style={{ color: isDark ? D.text : '#1e293b' }}>
-                            {formatAttendanceTime(displayTodayAttendance.punch_in)}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            {isMachineSynced && (
+                              <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
+                                style={{ backgroundColor: isDark ? 'rgba(59,130,246,0.15)' : '#eff6ff', color: isDark ? '#60a5fa' : COLORS.mediumBlue }}>
+                                Machine
+                              </span>
+                            )}
+                            <span className="font-bold text-sm" style={{ color: isDark ? D.text : '#1e293b' }}>
+                              {formatAttendanceTime(displayTodayAttendance.punch_in)}
+                            </span>
+                          </div>
                         </div>
                         {displayTodayAttendance.punch_out && (
                           <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl border"
@@ -3448,9 +3515,27 @@ export default function Attendance() {
                               <LogOut className="h-4 w-4 text-red-500" />
                               <span className="font-medium" style={{ color: isDark ? D.muted : '#475569' }}>Punch Out</span>
                             </div>
-                            <span className="font-bold text-sm" style={{ color: isDark ? D.text : '#1e293b' }}>
-                              {formatAttendanceTime(displayTodayAttendance.punch_out)}
-                            </span>
+                            <div className="flex items-center gap-2">
+                              {isMachineSynced && (
+                                <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
+                                  style={{ backgroundColor: isDark ? 'rgba(59,130,246,0.15)' : '#eff6ff', color: isDark ? '#60a5fa' : COLORS.mediumBlue }}>
+                                  Machine
+                                </span>
+                              )}
+                              <span className="font-bold text-sm" style={{ color: isDark ? D.text : '#1e293b' }}>
+                                {formatAttendanceTime(displayTodayAttendance.punch_out)}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                        {/* Machine sync status banner */}
+                        {isMachineSynced && (
+                          <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl border"
+                            style={{ backgroundColor: isDark ? 'rgba(59,130,246,0.08)' : '#f0f9ff', borderColor: isDark ? 'rgba(59,130,246,0.25)' : '#bfdbfe' }}>
+                            <Activity className="w-3.5 h-3.5 flex-shrink-0" style={{ color: COLORS.mediumBlue }} />
+                            <p className="text-xs font-semibold" style={{ color: isDark ? '#60a5fa' : COLORS.mediumBlue }}>
+                              Synced from biometric machine — no app punch needed
+                            </p>
                           </div>
                         )}
                         {displayTodayAttendance.is_late && (
@@ -3464,7 +3549,20 @@ export default function Attendance() {
 
                     {!isViewingOther && (
                       <div className="flex flex-col gap-2 pt-1">
-                        {!displayTodayAttendance?.punch_in && displayTodayAttendance?.status !== 'absent' ? (
+                        {isMachineSynced ? (
+                          /* Machine already synced — show status instead of punch buttons */
+                          !displayTodayAttendance?.punch_out ? (
+                            <div className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border"
+                              style={{ backgroundColor: isDark ? 'rgba(59,130,246,0.08)' : '#eff6ff', borderColor: isDark ? 'rgba(59,130,246,0.25)' : '#bfdbfe', color: isDark ? '#60a5fa' : COLORS.mediumBlue }}>
+                              <Activity className="w-4 h-4" /> Waiting for machine punch-out
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border"
+                              style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.10)' : '#f0fdf4', borderColor: isDark ? '#14532d' : '#bbf7d0', color: COLORS.emeraldGreen }}>
+                              <CheckCircle2 className="w-4 h-4" /> {formatDuration(displayTodayAttendance.duration_minutes)} — Day complete (machine synced)
+                            </div>
+                          )
+                        ) : !displayTodayAttendance?.punch_in && displayTodayAttendance?.status !== 'absent' ? (
                           isTodaySelected && (
                             <motion.button
                               whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
