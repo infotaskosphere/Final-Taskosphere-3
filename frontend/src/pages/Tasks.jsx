@@ -976,6 +976,22 @@ export default function Tasks() {
     loadAll();
   }, [apiFetch]);
 
+  // ── Auto-open task detail / edit from URL param (?taskId=X&edit=1) ─────────────────
+  useEffect(() => {
+    const taskId = searchParams.get('taskId');
+    if (!taskId || tasks.length === 0) return;
+    const found = tasks.find(t => String(t.id) === String(taskId));
+    if (!found) return;
+    const shouldEdit = searchParams.get('edit') === '1';
+    setSearchParams({}, { replace: true });
+    if (shouldEdit) {
+      handleEdit(found);
+    } else {
+      setSelectedDetailTask(found);
+      setTaskDetailOpen(true);
+    }
+  }, [searchParams, tasks]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Auto-open new task dialog from URL param (?newTask=1) ─────────────
   useEffect(() => {
     if (searchParams.get('newTask') === '1') {
