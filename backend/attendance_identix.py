@@ -1091,12 +1091,9 @@ async def iclock_getrequest(request: Request):
     if pending_count > 0:
         logger.info(f"📬 {pending_count} pending command(s) for {sn} — signaling machine")
         # Signal machine there are commands waiting — it will call /iclock/devicecmd
-        body = "OK
-C:1:DATA
-"
+        body = "OK\nC:1:DATA\n"
     else:
-        body = "OK
-"
+        body = "OK\n"
 
     return PlainTextResponse(body, headers={
         "Pragma": "no-cache",
