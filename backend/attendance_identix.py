@@ -1090,16 +1090,15 @@ async def iclock_getrequest(request: Request):
     # Returning command lines triggers machine to call /iclock/devicecmd
     if pending_count > 0:
         logger.info(f"📬 {pending_count} pending command(s) for {sn} — signaling machine")
-        # Signal machine there are commands waiting — it will call /iclock/devicecmd
-        body = "OK\nC:1:DATA\n"
-    else:
-        body = "OK\n"
 
-    return PlainTextResponse(body, headers={
+    # Always return OK — machine will call /iclock/devicecmd on its own schedule
+    # The GetRequest response tells machine timing via headers
+    return PlainTextResponse("OK\n", headers={
         "Pragma": "no-cache",
         "Cache-Control": "no-store",
         "X-Heartbeat-Interval": "10",
-        "X-Ping-Interval": "10",
+        "X-Ping-Interval":      "10",
+        "X-Push-Content":       "attlog",
     })
 
 
