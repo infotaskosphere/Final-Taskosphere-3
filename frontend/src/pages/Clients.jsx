@@ -296,6 +296,12 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
   const [scheduleTime, setScheduleTime] = useState('09:00');
   const [scheduledJobs, setScheduledJobs] = useState([]);
   const [loadingJobs, setLoadingJobs] = useState(false);
+  // Pause/delay between bulk sends
+  const [pauseEnabled, setPauseEnabled] = useState(false);
+  const [pauseAfterCount, setPauseAfterCount] = useState(5);   // pause every N messages
+  const [pauseDurationSec, setPauseDurationSec] = useState(60); // pause for N seconds
+  const [pauseCountdown, setPauseCountdown] = useState(null);   // null | number (remaining secs)
+  const pauseRef = React.useRef(false); // abort flag
   // Media attachment state
   const [mediaFile, setMediaFile] = useState(null);      // { file, name, mimeType, base64, previewUrl }
   const mediaInputRef = React.useRef(null);
@@ -489,9 +495,12 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
     const toSend = selectedClients.filter(c => c.phone);
     if (toSend.length === 0) { toast.error('No selected clients have a phone number'); return; }
     setSendingBulk(true);
+    setPauseCountdown(null);
+    pauseRef.current = false;
     setSendProgress({ done: 0, total: toSend.length, results: [] });
     const results = [];
     for (let i = 0; i < toSend.length; i++) {
+      if (pauseRef.current) break; // aborted by user
       const client = toSend[i];
       const personalMsg = personalizeMessage(message, client);
       const digits = client.phone.replace(/\D/g, '');
@@ -519,12 +528,29 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
         results.push({ id: client.id, name: client.company_name, status: 'failed', error: err?.response?.data?.detail || 'Failed' });
       }
       setSendProgress({ done: i + 1, total: toSend.length, results: [...results] });
+
+      // ── Pause logic ─────────────────────────────────────────────────────
+      const isLast = i === toSend.length - 1;
+      if (pauseEnabled && !isLast && (i + 1) % pauseAfterCount === 0) {
+        let remaining = pauseDurationSec;
+        setPauseCountdown(remaining);
+        await new Promise(resolve => {
+          const tick = setInterval(() => {
+            if (pauseRef.current) { clearInterval(tick); resolve(); return; }
+            remaining -= 1;
+            if (remaining <= 0) { clearInterval(tick); setPauseCountdown(null); resolve(); }
+            else { setPauseCountdown(remaining); }
+          }, 1000);
+        });
+      }
     }
+    setPauseCountdown(null);
     setSendingBulk(false);
+    pauseRef.current = false;
     const sentCount = results.filter(r => r.status === 'sent').length;
     const failCount = results.filter(r => r.status === 'failed').length;
     toast.success(`Sent ${sentCount} messages${failCount > 0 ? `, ${failCount} failed` : ''}`);
-  }, [message, mediaFile, selectedClients, personalizeMessage, waSelectedSession]);
+  }, [message, mediaFile, selectedClients, personalizeMessage, waSelectedSession, pauseEnabled, pauseAfterCount, pauseDurationSec]);
 
   // Schedule bulk send
   const handleScheduleSend = useCallback(async () => {
@@ -1088,6 +1114,53 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
                     <div className="rounded-xl border p-4 space-y-3" style={{ background: isDark ? '#0a1628' : '#f0fdf4', borderColor: isDark ? '#1a3a1a' : '#bbf7d0' }}>
                       <p className="text-xs font-bold" style={{ color: isDark ? '#4ade80' : '#166534' }}>⚡ Direct Send — {phoneCount} clients with phone</p>
                       <p className="text-xs" style={{ color: isDark ? '#6ee7b7' : '#15803d' }}>Messages are sent individually with personalized content. Each client receives their own message with their name and details.</p>
+
+                      {/* ── Pause / Delay settings ───────────────────────── */}
+                      <div className="rounded-lg border p-3 space-y-2.5" style={{ background: isDark ? '#0f1f2e' : '#fff', borderColor: isDark ? '#1e3a5f' : '#bae6fd' }}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold" style={{ color: isDark ? '#7dd3fc' : '#0369a1' }}>⏸ Auto-Pause Between Messages</span>
+                          <button
+                            type="button"
+                            onClick={() => setPauseEnabled(v => !v)}
+                            className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
+                            style={{ background: pauseEnabled ? '#25D366' : (isDark ? '#334155' : '#e2e8f0') }}>
+                            <span className="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform"
+                              style={{ transform: pauseEnabled ? 'translateX(18px)' : 'translateX(2px)' }} />
+                          </button>
+                        </div>
+                        {pauseEnabled && (
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-[10px] font-semibold block mb-1" style={{ color: isDark ? '#7dd3fc' : '#0369a1' }}>Pause after every</label>
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="number" min={1} max={500} value={pauseAfterCount}
+                                  onChange={e => setPauseAfterCount(Math.max(1, parseInt(e.target.value) || 1))}
+                                  className="w-full h-8 px-2 rounded-lg border text-sm text-center font-bold"
+                                  style={{ background: isDark ? '#1e293b' : '#f0f9ff', borderColor: isDark ? '#334155' : '#bae6fd', color: isDark ? '#e2e8f0' : '#0f172a' }} />
+                                <span className="text-[10px] font-semibold whitespace-nowrap" style={{ color: isDark ? '#64748b' : '#64748b' }}>msgs</span>
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-semibold block mb-1" style={{ color: isDark ? '#7dd3fc' : '#0369a1' }}>Pause duration</label>
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="number" min={5} max={3600} value={pauseDurationSec}
+                                  onChange={e => setPauseDurationSec(Math.max(5, parseInt(e.target.value) || 60))}
+                                  className="w-full h-8 px-2 rounded-lg border text-sm text-center font-bold"
+                                  style={{ background: isDark ? '#1e293b' : '#f0f9ff', borderColor: isDark ? '#334155' : '#bae6fd', color: isDark ? '#e2e8f0' : '#0f172a' }} />
+                                <span className="text-[10px] font-semibold whitespace-nowrap" style={{ color: isDark ? '#64748b' : '#64748b' }}>sec</span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {pauseEnabled && (
+                          <p className="text-[10px]" style={{ color: isDark ? '#60a5fa' : '#2563eb' }}>
+                            Will pause for {pauseDurationSec}s after every {pauseAfterCount} message{pauseAfterCount !== 1 ? 's' : ''} to avoid WA rate limits.
+                          </p>
+                        )}
+                      </div>
+
                       {sendProgress && (
                         <div className="space-y-2">
                           <div className="flex items-center justify-between text-xs font-semibold" style={{ color: isDark ? '#4ade80' : '#166534' }}>
@@ -1097,6 +1170,22 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
                           <div className="h-2 rounded-full overflow-hidden" style={{ background: isDark ? '#1e3a1e' : '#dcfce7' }}>
                             <div className="h-full rounded-full transition-all" style={{ width: `${sendProgress.done / sendProgress.total * 100}%`, background: WA_GREEN }} />
                           </div>
+                          {/* Pause countdown overlay */}
+                          {pauseCountdown !== null && (
+                            <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: isDark ? '#1a2a3a' : '#eff6ff', border: `1px solid ${isDark ? '#1e3a5f' : '#bfdbfe'}` }}>
+                              <Clock className="h-3.5 w-3.5 animate-pulse" style={{ color: isDark ? '#60a5fa' : '#2563eb' }} />
+                              <span className="text-xs font-bold" style={{ color: isDark ? '#93c5fd' : '#1d4ed8' }}>
+                                Pausing… resuming in {pauseCountdown}s
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => { pauseRef.current = true; setPauseCountdown(null); }}
+                                className="ml-auto text-[10px] font-bold px-2 py-0.5 rounded-md"
+                                style={{ background: '#ef444420', color: '#ef4444', border: '1px solid #ef444440' }}>
+                                Stop
+                              </button>
+                            </div>
+                          )}
                           {sendProgress.results.length > 0 && (
                             <div className="max-h-20 overflow-y-auto space-y-0.5">
                               {sendProgress.results.slice(-5).map((r, i) => (
