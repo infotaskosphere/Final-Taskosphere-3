@@ -1883,6 +1883,7 @@ export default function Attendance() {
   // The backend iclock/cdata endpoint writes source="machine_push" into the
   // attendance document, so we can detect it here and suppress the manual
   // punch-in modal / buttons.
+  const _prevMachineSyncRef = useRef(false);
   const isMachineSynced = useMemo(() => {
     const src = displayTodayAttendance?.source;
     return src === 'machine_push' || src === 'machine';
@@ -2061,49 +2062,6 @@ export default function Attendance() {
     return () => clearInterval(id);
   }, [todayAttendance, lastActivity, isOvertime, isViewingOther, isEveryoneView]); // eslint-disable-line
 
-  // ── Auto-poll for biometric machine punches (every 30 seconds) ────────────
-  // When a user punches the physical Identix machine, the backend receives
-  // the push via /iclock/cdata and mirrors it into the attendance collection.
-  // This poller detects the change within ~30s and refreshes the UI so the
-  // user never has to manually punch in/out in the app.
-  const _prevMachineSyncRef = useRef(false);
-  useEffect(() => {
-    if (isViewingOther || isEveryoneView) return;
-    const poll = async () => {
-      try {
-        const res = await api.get('/attendance/today');
-        const fresh = res.data;
-        if (!fresh) return;
-
-        const freshSrc = fresh.source;
-        const freshIsMachine = freshSrc === 'machine_push' || freshSrc === 'machine';
-        const wasMachine = _prevMachineSyncRef.current;
-
-        // Detect transition: machine just synced a new punch
-        if (freshIsMachine && !wasMachine) {
-          const punchLabel = fresh.punch_in && !fresh.punch_out ? 'Punch In' : fresh.punch_out ? 'Punch Out' : 'attendance';
-          toast.success(`Biometric machine synced ${punchLabel} automatically`, { duration: 5000, id: 'machine-sync' });
-          // Full data refresh so all UI sections update
-          fetchData();
-        } else if (fresh.punch_in !== todayAttendance?.punch_in || fresh.punch_out !== todayAttendance?.punch_out) {
-          // Even non-machine changes (admin edits, etc.) should be reflected
-          if (fresh.punch_in || fresh.punch_out) {
-            fetchData();
-          }
-        }
-
-        _prevMachineSyncRef.current = freshIsMachine;
-        // Also update todayAttendance state if backend returned new data
-        if (fresh.punch_in !== todayAttendance?.punch_in || fresh.punch_out !== todayAttendance?.punch_out) {
-          setTodayAttendance(fresh);
-        }
-      } catch {
-        // Silent fail — polling should never show errors
-      }
-    };
-    const id = setInterval(poll, 30000); // poll every 30s
-    return () => clearInterval(id);
-  }, [isViewingOther, isEveryoneView, fetchData, todayAttendance]); // eslint-disable-line
 
   
   // ── Fetch guard — prevents duplicate concurrent fetches ──────────────────
@@ -2248,6 +2206,49 @@ export default function Attendance() {
       console.error('fetchReminders error:', err);
     }
   }, [isViewingOther, selectedUserId]);
+
+  // ── Auto-poll for biometric machine punches (every 30 seconds) ────────────
+  // When a user punches the physical Identix machine, the backend receives
+  // the push via /iclock/cdata and mirrors it into the attendance collection.
+  // This poller detects the change within ~30s and refreshes the UI so the
+  // user never has to manually punch in/out in the app.
+  useEffect(() => {
+    if (isViewingOther || isEveryoneView) return;
+    const poll = async () => {
+      try {
+        const res = await api.get('/attendance/today');
+        const fresh = res.data;
+        if (!fresh) return;
+
+        const freshSrc = fresh.source;
+        const freshIsMachine = freshSrc === 'machine_push' || freshSrc === 'machine';
+        const wasMachine = _prevMachineSyncRef.current;
+
+        // Detect transition: machine just synced a new punch
+        if (freshIsMachine && !wasMachine) {
+          const punchLabel = fresh.punch_in && !fresh.punch_out ? 'Punch In' : fresh.punch_out ? 'Punch Out' : 'attendance';
+          toast.success(`Biometric machine synced ${punchLabel} automatically`, { duration: 5000, id: 'machine-sync' });
+          // Full data refresh so all UI sections update
+          fetchData();
+        } else if (fresh.punch_in !== todayAttendance?.punch_in || fresh.punch_out !== todayAttendance?.punch_out) {
+          // Even non-machine changes (admin edits, etc.) should be reflected
+          if (fresh.punch_in || fresh.punch_out) {
+            fetchData();
+          }
+        }
+
+        _prevMachineSyncRef.current = freshIsMachine;
+        // Also update todayAttendance state if backend returned new data
+        if (fresh.punch_in !== todayAttendance?.punch_in || fresh.punch_out !== todayAttendance?.punch_out) {
+          setTodayAttendance(fresh);
+        }
+      } catch {
+        // Silent fail — polling should never show errors
+      }
+    };
+    const id = setInterval(poll, 30000); // poll every 30s
+    return () => clearInterval(id);
+  }, [isViewingOther, isEveryoneView, fetchData, todayAttendance]); // eslint-disable-line
 
   // ── Punch Action ───────────────────────────────────────────────────────────
   // ── HAVERSINE DISTANCE (metres) ──────────────────────────────────────────
