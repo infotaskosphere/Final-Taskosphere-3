@@ -927,7 +927,11 @@ function IdentixDevicesTab() {
             <button onClick={loadCmdQueue} style={{ fontSize: 12, fontWeight: 600, color: '#3b82f6', background: 'none', border: '1px solid #bae6fd', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>↻ Refresh</button>
             <button onClick={() => setShowCmdQueue(q => !q)} style={{ fontSize: 12, fontWeight: 600, color: '#64748b', background: 'none', border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>{showCmdQueue ? 'Hide' : 'Show'} Log</button>
             {cmdQueue.some(c => c.status === 'sent') && (
-              <button onClick={clearQueue} style={{ fontSize: 12, fontWeight: 600, color: COLORS.red, background: 'none', border: `1px solid ${COLORS.red}`, borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>Clear Sent</button>
+              <button onClick={clearQueue} style={{ fontSize: 12, fontWeight: 600, color: COLORS.red, background: 'none', border: `1px solid ${COLORS.red}`, borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>🗑 Clear Sent</button>
+            )}
+            {cmdQueue.length > 0 && (
+              <button onClick={async () => { if (!window.confirm('Delete ALL commands including pending? This cannot be undone.')) return; try { await api.delete('/identix/cmd-queue'); toast.success('Queue cleared'); loadCmdQueue(); } catch { toast.error('Failed'); } }}
+                style={{ fontSize: 12, fontWeight: 600, color: '#fff', background: COLORS.red, border: `1px solid ${COLORS.red}`, borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>🗑 Delete All</button>
             )}
           </div>
         </div>
@@ -1150,9 +1154,10 @@ function IdentixAttendanceTab() {
 // IDENTIX — ENROLLMENT TAB
 // ════════════════════════════════════════════════════════════════════════════════
 function IdentixEnrollmentTab() {
-  const [users,    setUsers]    = useState([]);
-  const [loading,  setLoading]  = useState(true);
-  const [search,   setSearch]   = useState('');
+  const [users,     setUsers]     = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [search,    setSearch]    = useState('');
+  const [filter,    setFilter]    = useState('all'); // 'all' | 'not_enrolled' | 'enrolled'
   const [syncingId, setSyncingId] = useState(null);
   const [thumbId,   setThumbId]   = useState(null);
 
@@ -1186,19 +1191,49 @@ function IdentixEnrollmentTab() {
     finally { setSyncingId(null); }
   };
 
-  const filtered = users.filter(u => !search || u.full_name?.toLowerCase().includes(search.toLowerCase()) || u.email?.toLowerCase().includes(search.toLowerCase()));
+  const filtered = users.filter(u => {
+    const matchSearch = !search || u.full_name?.toLowerCase().includes(search.toLowerCase()) || u.email?.toLowerCase().includes(search.toLowerCase());
+    const matchFilter = filter === 'all' ? true : filter === 'not_enrolled' ? !u.thumb_enrolled : u.thumb_enrolled;
+    return matchSearch && matchFilter;
+  });
+
+  const notEnrolledCount = users.filter(u => !u.thumb_enrolled).length;
+  const enrolledCount    = users.filter(u => u.thumb_enrolled).length;
 
   const pill = (bg, color, text) => <span style={{ padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: bg, color }}>{text}</span>;
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, gap: 12, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, gap: 12, flexWrap: 'wrap' }}>
         <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#0f172a' }}>Biometric Enrollment</h3>
-        <div style={{ position: 'relative' }}>
-          <Search size={14} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search employees…" style={{ ...inputStyleIdentix, paddingLeft: 30, width: 210 }} />
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Filter buttons */}
+          {[
+            { key: 'all',          label: `All (${users.length})` },
+            { key: 'not_enrolled', label: `❌ Not Enrolled (${notEnrolledCount})` },
+            { key: 'enrolled',     label: `✅ Enrolled (${enrolledCount})` },
+          ].map(f => (
+            <button key={f.key} onClick={() => setFilter(f.key)}
+              style={{ padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1.5px solid',
+                background: filter === f.key ? '#0f172a' : 'transparent',
+                color:      filter === f.key ? '#fff'    : '#374151',
+                borderColor: filter === f.key ? '#0f172a' : '#e2e8f0',
+              }}>{f.label}</button>
+          ))}
+          {/* Search */}
+          <div style={{ position: 'relative' }}>
+            <Search size={14} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search employees…" style={{ ...inputStyleIdentix, paddingLeft: 30, width: 190 }} />
+          </div>
         </div>
       </div>
+
+      {/* Summary bar */}
+      {notEnrolledCount > 0 && (
+        <div style={{ marginBottom: 12, padding: '8px 14px', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, fontSize: 12, color: '#9a3412', display: 'flex', alignItems: 'center', gap: 8 }}>
+          ⚠️ <strong>{notEnrolledCount} employee{notEnrolledCount > 1 ? 's' : ''}</strong> not yet enrolled — push them to the device and have them scan their fingerprint on the machine.
+        </div>
+      )}
 
       <div style={{ background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: 12, overflow: 'hidden', overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -1215,9 +1250,12 @@ function IdentixEnrollmentTab() {
             ) : !filtered.length ? (
               <tr><td colSpan={6} style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>No users found</td></tr>
             ) : filtered.map(u => (
-              <tr key={u.id} style={{ borderBottom: '1px solid #f8fafc' }}>
+              <tr key={u.id} style={{ borderBottom: '1px solid #f8fafc', background: !u.thumb_enrolled ? '#fffbeb' : '#fff' }}>
                 <td style={{ padding: '10px 14px' }}>
-                  <div style={{ fontWeight: 600 }}>{u.full_name}</div>
+                  <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {!u.thumb_enrolled && <span style={{ fontSize: 10, background: '#fee2e2', color: '#991b1b', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>NOT ENROLLED</span>}
+                    {u.full_name}
+                  </div>
                   <div style={{ fontSize: 11, color: COLORS.slate }}>{u.email}</div>
                 </td>
                 <td style={{ padding: '10px 14px' }}>
@@ -1231,7 +1269,9 @@ function IdentixEnrollmentTab() {
                   {pill(u.identix_enrolled ? '#d1fae5' : '#fee2e2', u.identix_enrolled ? '#065f46' : '#991b1b', u.identix_enrolled ? 'Synced' : 'Not Synced')}
                 </td>
                 <td style={{ padding: '10px 14px' }}>
-                  {pill(u.thumb_enrolled ? '#dbeafe' : '#fef9c3', u.thumb_enrolled ? '#1e40af' : '#92400e', u.thumb_enrolled ? '✓ Enrolled' : '⚠ Pending')}
+                  {u.thumb_enrolled
+                    ? pill('#dbeafe', '#1e40af', '✓ Enrolled')
+                    : pill('#fee2e2', '#991b1b', '✗ Not Enrolled')}
                 </td>
                 <td style={{ padding: '10px 14px' }}>
                   <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
