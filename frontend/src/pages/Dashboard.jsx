@@ -55,6 +55,7 @@ import {
   Settings2,
   Bell,
   BellRing,
+  Pencil,
 } from 'lucide-react';
 
 const API_BASE = api.defaults.baseURL;
@@ -361,6 +362,8 @@ const TaskDetailModal = memo(function TaskDetailModal({ task, onClose, onUpdateS
                 onClick={() => { onUpdateStatus?.(task.id, 'completed'); onClose(); }} />
             </>
           )}
+          <FooterBtn isDark={isDark} color={COLORS.amber} icon={Pencil} label="Edit"
+            onClick={() => { onClose(); navigate(`/tasks?taskId=${task.id}&edit=1`); }} />
           <FooterBtn isDark={isDark} muted icon={ArrowUpRight} label="View Full"
             onClick={() => { onClose(); navigate(`/tasks?taskId=${task.id}`); }} />
         </>
