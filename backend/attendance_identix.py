@@ -1076,7 +1076,14 @@ async def iclock_getrequest(request: Request):
     sn = params.get("SN") or params.get("sn", "")
     logger.info(f"📡 GETREQUEST from SN={sn}")
     await _mark_device_online(sn)
-    return "OK\n"
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse("OK
+", headers={
+        "Pragma": "no-cache",
+        "Cache-Control": "no-store",
+        "X-Heartbeat-Interval": "10",
+        "X-Ping-Interval": "10",
+    })
 
 
 # 🔹 Main attendance data endpoint — ADMS cloud push (machine → Render)
