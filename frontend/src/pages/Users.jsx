@@ -694,7 +694,7 @@ function LanScanner({ onAddDevice }) {
 // ════════════════════════════════════════════════════════════════════════════════
 // IDENTIX — DEVICES TAB
 // ════════════════════════════════════════════════════════════════════════════════
-const emptyDevice = { name: '', ip_address: '', port: 4370, comm_password: '0', serial_number: '', location: '' };
+const emptyDevice = { name: '', ip_address: 'adms-domain', port: 4370, comm_password: '0', serial_number: '', location: '' };
 
 function IdentixDevicesTab() {
   const [devices,     setDevices]     = useState([]);
@@ -729,7 +729,7 @@ function IdentixDevicesTab() {
   };
 
   const save = async () => {
-    if (!form.name?.trim() || !form.ip_address?.trim()) { toast.error('Device Name and IP Address are required'); return; }
+    if (!form.name?.trim() || !form.serial_number?.trim()) { toast.error('Device Name and Serial Number are required'); return; }
     setSaving(true);
     try {
       if (editing) { await api.put(`/identix/devices/${editing.id}`, form); toast.success('Device updated'); }
@@ -760,9 +760,31 @@ function IdentixDevicesTab() {
 
   const syncUsers = async (d) => {
     setSyncingId(d.id);
-    try { const { data } = await api.post(`/identix/devices/${d.id}/sync-users`); toast.success(data.message); }
+    try {
+      const { data } = await api.post(`/identix/devices/${d.id}/sync-users`);
+      toast.success(data.message || 'Users queued for push');
+      setCmdQueueCount(q => q + (data.synced || 0));
+    }
     catch (e) { toast.error(e?.response?.data?.detail || 'Sync failed'); }
     finally { setSyncingId(null); }
+  };
+
+  const [cmdQueueCount, setCmdQueueCount] = useState(0);
+  const [cmdQueue, setCmdQueue] = useState([]);
+  const [showCmdQueue, setShowCmdQueue] = useState(false);
+
+  const loadCmdQueue = async () => {
+    try {
+      const { data } = await api.get('/identix/cmd-queue');
+      setCmdQueue(data.commands || []);
+      setCmdQueueCount((data.commands || []).filter(c => c.status === 'pending').length);
+    } catch { /* ignore */ }
+  };
+  useEffect(() => { loadCmdQueue(); const t = setInterval(loadCmdQueue, 10000); return () => clearInterval(t); }, []);
+
+  const clearQueue = async () => {
+    try { await api.delete('/identix/cmd-queue'); toast.success('Queue cleared'); loadCmdQueue(); }
+    catch { toast.error('Clear failed'); }
   };
 
   const setField = (field, val) => setForm(f => ({ ...f, [field]: val }));
@@ -776,7 +798,7 @@ function IdentixDevicesTab() {
         </button>
       </div>
 
-      <LanScanner onAddDevice={handleDiscoveredDevice} />
+      {/* LAN Scanner hidden — ADMS domain mode only */}
 
       {/* ADMS Setup Guide */}
       <div style={{ background: '#f0f9ff', border: '1.5px solid #bae6fd', borderRadius: 12, padding: '14px 18px', marginBottom: 16 }}>
@@ -817,9 +839,9 @@ function IdentixDevicesTab() {
               ))}
             </div>
             <div style={{ marginTop: 12, padding: '8px 12px', background: '#fef9c3', border: '1px solid #fde047', borderRadius: 8, fontSize: 12, color: '#713f12', lineHeight: 1.6 }}>
-              <b>⚠️ Server Path:</b> Leave it <b>blank</b> on the machine — it is not needed and cannot be entered on most Identix models.<br/>
-              The machine will automatically push to <b>api.taskosphere.com/iclock/cdata</b> which is already registered on the server.<br/><br/>
-              After saving on the machine, wait <b>1–2 minutes</b> then click <b>Check ADMS</b> — status will turn <b>🟢 Online</b> once connected.
+              <b>⚠️ Important:</b> Use <b>api.taskosphere.com</b> (not www.taskosphere.com) as the Server Address. The machine pushes attendance to <b>api.taskosphere.com/iclock/cdata</b> automatically.<br/><br/>
+              <b>Server Path:</b> Leave it <b>blank</b> — it is not needed on most Identix models.<br/><br/>
+              After saving, wait <b>1–2 minutes</b> then click <b>Check ADMS</b> — status turns <b>🟢 Online</b> once connected. Users pushed from software will appear on the machine within ~1 minute.
             </div>
           </div>
         )}
@@ -833,7 +855,7 @@ function IdentixDevicesTab() {
         <div style={{ background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: 48, textAlign: 'center', color: '#94a3b8' }}>
           <Monitor size={36} color="#cbd5e1" style={{ marginBottom: 10 }} />
           <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>No devices registered</div>
-          <div style={{ fontSize: 13 }}>Use the LAN scanner above or add a device manually.</div>
+          <div style={{ fontSize: 13 }}>Click "Add Device" and enter your machine's serial number.</div>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -852,9 +874,9 @@ function IdentixDevicesTab() {
                     }
                   </div>
                   <div style={{ fontSize: 12, color: COLORS.slate, display: 'flex', flexWrap: 'wrap', gap: '3px 16px' }}>
-                    <span>IP: <b>{d.ip_address}:{d.port}</b></span>
+                    <span>🌐 ADMS (Domain)</span>
+                    {d.serial_number && <span>S/N: <b>{d.serial_number}</b></span>}
                     {d.location && <span>📍 {d.location}</span>}
-                    {d.serial_number && <span>S/N: {d.serial_number}</span>}
                     {d.last_heartbeat_at && <span>Last seen: {fmtTime(d.last_heartbeat_at)}</span>}
                     {d.last_sync_at && <span>Last sync: {fmtTime(d.last_sync_at)}</span>}
                   </div>
@@ -887,6 +909,66 @@ function IdentixDevicesTab() {
         </div>
       )}
 
+      {/* ADMS Command Queue */}
+      <div style={{ marginTop: 18 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontWeight: 700, fontSize: 14, color: '#0f172a' }}>📤 Command Queue</span>
+            {cmdQueueCount > 0 && (
+              <span style={{ background: '#fef3c7', color: '#92400e', borderRadius: 20, fontSize: 11, fontWeight: 700, padding: '2px 10px' }}>
+                {cmdQueueCount} pending
+              </span>
+            )}
+            {cmdQueueCount === 0 && (
+              <span style={{ background: '#d1fae5', color: '#065f46', borderRadius: 20, fontSize: 11, fontWeight: 700, padding: '2px 10px' }}>All sent</span>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={loadCmdQueue} style={{ fontSize: 12, fontWeight: 600, color: '#3b82f6', background: 'none', border: '1px solid #bae6fd', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>↻ Refresh</button>
+            <button onClick={() => setShowCmdQueue(q => !q)} style={{ fontSize: 12, fontWeight: 600, color: '#64748b', background: 'none', border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>{showCmdQueue ? 'Hide' : 'Show'} Log</button>
+            {cmdQueue.some(c => c.status === 'sent') && (
+              <button onClick={clearQueue} style={{ fontSize: 12, fontWeight: 600, color: COLORS.red, background: 'none', border: `1px solid ${COLORS.red}`, borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>Clear Sent</button>
+            )}
+          </div>
+        </div>
+        {showCmdQueue && (
+          <div style={{ background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: 10, overflow: 'hidden', overflowX: 'auto' }}>
+            {!cmdQueue.length ? (
+              <div style={{ padding: 24, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>No commands in queue</div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc', borderBottom: `1px solid ${COLORS.border}` }}>
+                    {['Device SN', 'Command', 'Status', 'Queued At', 'Sent At'].map(h => (
+                      <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: COLORS.slate, fontWeight: 600 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {cmdQueue.map((c, i) => (
+                    <tr key={i} style={{ borderBottom: `1px solid #f8fafc` }}>
+                      <td style={{ padding: '7px 12px', fontFamily: 'monospace', fontSize: 11 }}>{c.device_serial}</td>
+                      <td style={{ padding: '7px 12px', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.cmd_str}</td>
+                      <td style={{ padding: '7px 12px' }}>
+                        <span style={{ padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600,
+                          background: c.status === 'pending' ? '#fef3c7' : c.status === 'sent' ? '#d1fae5' : '#fee2e2',
+                          color: c.status === 'pending' ? '#92400e' : c.status === 'sent' ? '#065f46' : '#991b1b',
+                        }}>{c.status}</span>
+                      </td>
+                      <td style={{ padding: '7px 12px', color: COLORS.slate }}>{c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
+                      <td style={{ padding: '7px 12px', color: COLORS.slate }}>{c.sent_at ? new Date(c.sent_at).toLocaleString() : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+        <div style={{ marginTop: 8, fontSize: 12, color: '#0369a1', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: '8px 12px' }}>
+          💡 When you click "Push to Device" or "Sync Users", a command is queued here. The machine picks it up within ~1 minute when it polls the server. After the user appears on the machine, they can enroll their fingerprint.
+        </div>
+      </div>
+
       {/* Device Modal */}
       {showModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9900, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', overflowY: 'auto', padding: '40px 16px' }}
@@ -897,27 +979,24 @@ function IdentixDevicesTab() {
               <button onClick={() => setShowModal(false)} style={{ background: '#f1f5f9', border: 'none', cursor: 'pointer', width: 30, height: 30, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={15} color={COLORS.slate} /></button>
             </div>
             <div style={{ padding: '18px 22px 22px' }}>
+              {/* ADMS Domain badge */}
+              <div style={{ marginBottom: 14, padding: '10px 14px', background: '#f0f9ff', border: '1.5px solid #bae6fd', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 20 }}>🌐</span>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: '#0c4a6e' }}>ADMS Domain Connection</div>
+                  <div style={{ fontSize: 12, color: '#0369a1', marginTop: 2 }}>Machine connects to server via domain — no IP needed. Just enter the serial number and the machine handles the rest.</div>
+                </div>
+              </div>
               {[
-                { label: 'Device Name *', key: 'name',          type: 'text',   placeholder: 'e.g. Main Entrance' },
-                { label: 'IP Address *',  key: 'ip_address',    type: 'text',   placeholder: 'e.g. 192.168.1.201' },
-                { label: 'Location',      key: 'location',      type: 'text',   placeholder: 'e.g. Ground Floor' },
-                { label: 'Serial Number', key: 'serial_number', type: 'text',   placeholder: 'Optional' },
+                { label: 'Device Name *',   key: 'name',          type: 'text', placeholder: 'e.g. Main Entrance' },
+                { label: 'Serial Number *', key: 'serial_number', type: 'text', placeholder: 'e.g. CGKK212461298  (from machine back label)' },
+                { label: 'Location',        key: 'location',      type: 'text', placeholder: 'e.g. Ground Floor' },
               ].map(f => (
                 <div key={f.key} style={{ marginBottom: 14 }}>
                   <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4 }}>{f.label}</label>
                   <input type={f.type} placeholder={f.placeholder} value={form[f.key]} onChange={e => setField(f.key, e.target.value)} style={inputStyleIdentix} />
                 </div>
               ))}
-              <div style={{ display: 'flex', gap: 12 }}>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4 }}>Port</label>
-                  <input type="number" value={form.port} onChange={e => setField('port', Number(e.target.value))} style={inputStyleIdentix} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4 }}>Comm Password</label>
-                  <input type="text" placeholder="0" value={form.comm_password} onChange={e => setField('comm_password', e.target.value)} style={inputStyleIdentix} />
-                </div>
-              </div>
               {editing && (
                 <div style={{ marginTop: 14 }}>
                   <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Status</label>
@@ -1098,7 +1177,11 @@ function IdentixEnrollmentTab() {
 
   const syncToDevice = async (userId, name) => {
     setSyncingId(userId);
-    try { await api.post(`/identix/users/${userId}/sync-to-device`); toast.success(`${name} pushed to device`); load(); }
+    try {
+      const { data } = await api.post(`/identix/users/${userId}/sync-to-device`);
+      toast.success(data.message || `${name} queued — machine will receive on next poll (~1 min)`);
+      load();
+    }
     catch (e) { toast.error(e?.response?.data?.detail || 'Sync failed'); }
     finally { setSyncingId(null); }
   };
