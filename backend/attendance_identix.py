@@ -1072,13 +1072,33 @@ async def _mark_device_online(sn: str):
 
 @identix_router.api_route("/iclock/getrequest", methods=["GET", "POST"])
 async def iclock_getrequest(request: Request):
+    from fastapi.responses import PlainTextResponse
     params = dict(request.query_params)
     sn = params.get("SN") or params.get("sn", "")
     logger.info(f"📡 GETREQUEST from SN={sn}")
     await _mark_device_online(sn)
-    from fastapi.responses import PlainTextResponse
-    return PlainTextResponse("OK
-", headers={
+
+    # Check if there are pending commands for this device
+    pending_count = 0
+    if sn:
+        pending_count = await db.identix_cmd_queue.count_documents({
+            "device_serial": sn, "status": "pending"
+        })
+
+    # ZKTeco/Identix ADMS protocol:
+    # Returning "OK" = no commands
+    # Returning command lines triggers machine to call /iclock/devicecmd
+    if pending_count > 0:
+        logger.info(f"📬 {pending_count} pending command(s) for {sn} — signaling machine")
+        # Signal machine there are commands waiting — it will call /iclock/devicecmd
+        body = "OK
+C:1:DATA
+"
+    else:
+        body = "OK
+"
+
+    return PlainTextResponse(body, headers={
         "Pragma": "no-cache",
         "Cache-Control": "no-store",
         "X-Heartbeat-Interval": "10",
@@ -1324,7 +1344,6 @@ async def iclock_devicecmd(request: Request):
     if not pending:
         return "OK\n"
 
-    cmd_id  = pending.get("cmd_id") or pending.get("_id")
     cmd_str = pending.get("cmd_str", "")
 
     # Mark as sent
@@ -1334,5 +1353,6 @@ async def iclock_devicecmd(request: Request):
     )
 
     logger.info(f"📤 Sending command to SN={sn}: {cmd_str[:80]}")
-    # Response format: C:<cmd_id>:<command>
-    return f"C:{pending.get('seq_id', 1)}:{cmd_str}\n"
+    from fastapi.responses import PlainTextResponse
+    response_body = f"C:{pending.get('seq_id', 1)}:{cmd_str}\n"
+    return PlainTextResponse(response_body, headers={"Pragma": "no-cache", "Cache-Control": "no-store"})
