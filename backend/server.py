@@ -605,6 +605,32 @@ async def startup_event():
 
     asyncio.create_task(_boot_holiday_sync())
 
+    # ── KEEP-ALIVE SELF-PING (prevents Render basic plan spin-down) ───────────
+    # Pings our own /health endpoint every 10 minutes so Render never marks
+    # the service as idle and spins it down. This is critical for the Identix
+    # machine — it expects the server to be awake 24/7 to receive punches.
+    async def _keep_alive_ping():
+        await asyncio.sleep(60)   # wait 1 min after boot before starting
+        import os as _os
+        _self_url = _os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
+        if not _self_url:
+            # fallback: derive from RENDER_SERVICE_NAME or use localhost
+            svc = _os.environ.get("RENDER_SERVICE_NAME", "")
+            _self_url = f"https://{svc}.onrender.com" if svc else "http://localhost:8000"
+        ping_url = f"{_self_url}/health"
+        logger.info(f"Keep-alive ping started → {ping_url} every 10 min")
+        while True:
+            try:
+                import httpx as _httpx
+                async with _httpx.AsyncClient(timeout=10) as _http:
+                    r = await _http.get(ping_url)
+                logger.debug(f"Keep-alive ping OK ({r.status_code})")
+            except Exception as _pe:
+                logger.warning(f"Keep-alive ping failed (non-fatal): {_pe}")
+            await asyncio.sleep(600)   # 10 minutes
+
+    asyncio.create_task(_keep_alive_ping())
+
         # 🔥 AUTO MIGRATION: Add consent_given for old users
     try:
         result = await db.users.update_many(
