@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import api from "../lib/api";
+import { autoAuthenticateAgent, resetAgentAuth } from "../lib/agentAutoAuth";
 
 const AuthContext = createContext(null);
 
@@ -159,6 +160,9 @@ export const AuthProvider = ({ children }) => {
 
         setUser(freshUser);
 
+        // ── Auto-authenticate desktop agent (non-blocking) ──
+        autoAuthenticateAgent(token, freshUser.id).catch(() => {});
+
       } catch (error) {
         if (error.message === "Network Error") {
           console.warn("Backend unreachable, keeping stored session.");
@@ -197,6 +201,9 @@ export const AuthProvider = ({ children }) => {
     persistAuth(token, userData, rememberMe);
     setUser(userData);
 
+    // ── Auto-authenticate desktop agent (non-blocking) ──
+    autoAuthenticateAgent(token, userData.id).catch(() => {});
+
     return true;
   };
 
@@ -214,11 +221,12 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     try {
       window.__STOP_ACTIVITY__ = true;
+      resetAgentAuth();
       clearStorage();
       setUser(null);
     } catch (e) {
       console.error("Logout error", e);
-      // Ensure storage is always cleared even if something above throws
+      resetAgentAuth();
       clearStorage();
       setUser(null);
     }
