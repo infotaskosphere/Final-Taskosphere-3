@@ -1,18 +1,68 @@
 {
   "name": "taskosphere-agent",
-  "version": "2.0.0",
-  "description": "Taskosphere local agent — DSC token auto-detection + activity tracking on Windows",
-  "main": "index.js",
+  "version": "4.0.0",
+  "description": "Taskosphere Enterprise Desktop Agent — DSC detection, activity tracking, browser monitoring, USB detection, productivity engine, offline sync, auto-update",
+  "main": "agent.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "node index.js"
+    "start": "node agent.js",
+    "dev": "node agent.js",
+    "legacy": "node index.js",
+    "build": "npx electron-builder --win",
+    "build:nsis": "npx electron-builder --win nsis",
+    "service:install": "node service.js install",
+    "service:remove": "node service.js remove",
+    "service:start": "node service.js start",
+    "service:stop": "node service.js stop"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.18.2",
-    "pcsclite": "^1.0.1"
+    "pcsclite": "^1.0.1",
+    "node-windows": "^1.0.0-beta.8"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^11.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "build": {
+    "appId": "com.taskosphere.agent",
+    "productName": "Taskosphere Agent",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/tray-icon.ico",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "installerIcon": "assets/installer-icon.ico",
+      "uninstallerIcon": "assets/installer-icon.ico",
+      "installerHeaderIcon": "assets/tray-icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Taskosphere Agent",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "files": [
+      "**/*",
+      "!node_modules/better-sqlite3/**",
+      "!build/**",
+      "!*.md"
+    ],
+    "extraResources": [
+      {
+        "from": "assets/",
+        "to": "assets/"
+      }
+    ]
   }
 }
