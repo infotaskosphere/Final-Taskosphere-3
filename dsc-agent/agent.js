@@ -35,6 +35,35 @@ const os              = require('os');
 const path            = require('path');
 const crypto          = require('crypto');
 
+// ── Command-line flag handling (for NSIS installer) ──────────────────────────
+const args = process.argv.slice(2);
+
+if (args.includes('--install-service')) {
+  console.log('[agent] Installing Windows service...');
+  const { execSync } = require('child_process');
+  try {
+    execSync('node service.js install', { stdio: 'inherit', cwd: __dirname });
+    console.log('[agent] Service installed successfully');
+    process.exit(0);
+  } catch (err) {
+    console.error('[agent] Failed to install service:', err.message);
+    process.exit(1);
+  }
+}
+
+if (args.includes('--uninstall-service')) {
+  console.log('[agent] Uninstalling Windows service...');
+  const { execSync } = require('child_process');
+  try {
+    execSync('node service.js remove', { stdio: 'inherit', cwd: __dirname });
+    console.log('[agent] Service uninstalled successfully');
+    process.exit(0);
+  } catch (err) {
+    console.error('[agent] Failed to uninstall service:', err.message);
+    process.exit(1);
+  }
+}
+
 // ── Existing modules (reused, not replaced) ──────────────────────────────────
 const { readCertFromPcSc } = require('./pcscReader');
 const dscWatcher           = require('./dscWatcher');
@@ -247,6 +276,57 @@ app.get('/read-dsc', async (req, res) => {
   }
 });
 
+// ── Auto-auth endpoint (called by web app automatically) ─────────────────────
+app.post('/api/auth', (req, res) => {
+  const { token, user_id } = req.body || {};
+  if (!token || !user_id) return res.status(400).json({ success: false, error: 'token and user_id required' });
+
+  console.log(`[agent] Auto-auth received for user: ${user_id}`);
+
+  authToken  = token;
+  authUserId = user_id;
+
+  // Propagate to all modules
+  activityTracker.setAuth(token, user_id);
+  notificationReceiver.setAuth(token, user_id);
+  autoUpdater.setAuth(token);
+
+  // Start health monitor (with userId for backend linking)
+  try {
+    healthMonitor.start(AGENT_ID, os.hostname(), AGENT_VERSION, getToken, () => authUserId, 30000);
+  } catch (e) {
+    console.warn('[agent] Health monitor could not start:', e.message);
+  }
+
+  // Start notification receiver
+  try {
+    notificationReceiver.start(60000);
+  } catch (e) {
+    console.warn('[agent] Notification receiver could not start:', e.message);
+  }
+
+  // Start auto updater
+  try {
+    autoUpdater.start(3600000); // check every hour
+  } catch (e) {
+    console.warn('[agent] Auto updater could not start:', e.message);
+  }
+
+  // Push system info immediately
+  try {
+    const sysInfo = systemInfo.getSystemInfo(AGENT_VERSION);
+    apiClient.post('/api/desktop/system', {
+      agent_id: AGENT_ID,
+      ...sysInfo,
+    }, authToken).catch(() => {});
+  } catch {}
+
+  console.log('[agent] ✓ All modules started — monitoring active');
+
+  res.json({ success: true, message: 'Agent authenticated and monitoring', agent_id: AGENT_ID });
+});
+
+// ── Legacy auth endpoint (backward compatibility) ───────────────────────────
 app.post('/activity/auth', (req, res) => {
   const { token, user_id } = req.body || {};
   if (!token || !user_id) return res.status(400).json({ success: false, error: 'token and user_id required' });
