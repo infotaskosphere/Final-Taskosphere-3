@@ -3,210 +3,227 @@
 /**
  * service.js
  * ─────────────────────────────────────────────────────────────────────────────
- * Windows Service wrapper for Taskosphere Agent.
+ * Windows Service/Scheduled Task management for Taskosphere Agent.
  *
- * Uses node-windows to register the agent as a Windows service.
- * The service automatically starts with Windows and restarts the agent
- * if it crashes.
+ * Uses PowerShell Scheduled Tasks (works with bundled .exe, no native deps).
+ * The task automatically starts with Windows and restarts the agent if it crashes.
  *
  * Usage:
- *   node service.js install   — Install the service
- *   node service.js remove    — Remove the service
- *   node service.js start     — Start the service
- *   node service.js stop      — Stop the service
- *   node service.js status    — Check service status
+ *   TaskosphereAgent.exe --install-service   — Install auto-start
+ *   TaskosphereAgent.exe --uninstall-service — Remove auto-start
+ *   TaskosphereAgent.exe --service-status    — Check status
+ *
+ * Or standalone:
+ *   node service.js install
+ *   node service.js remove
+ *   node service.js start
+ *   node service.js stop
+ *   node service.js status
  */
 
+const { execSync } = require('child_process');
 const path = require('path');
-const fs   = require('fs');
+const os   = require('os');
 
-// ── Check if node-windows is available ───────────────────────────────────────
+// ── Configuration ────────────────────────────────────────────────────────────
 
-let Service, ServiceEvent;
-try {
-  const nw = require('node-windows');
-  Service      = nw.Service;
-  ServiceEvent = nw.ServiceEvent;
-} catch (e) {
-  console.log('node-windows not installed. Run: npm install node-windows');
-  console.log('Falling back to PowerShell service management...');
+const TASK_NAME = 'TaskosphereAgent';
+const TASK_DESC = 'Taskosphere Enterprise Desktop Agent — monitors activity, DSC tokens, USB devices, and syncs with the Taskosphere backend.';
 
-  // Fallback: Use PowerShell to create a scheduled task instead
-  handlePowerShellFallback();
-  process.exit(0);
+// Determine the executable path
+// When bundled with pkg, process.execPath is the .exe itself
+// When running with node, we use the full path to agent.js
+const exePath = process.execPath;
+const isBundled = process.pkg !== undefined;
+
+function getExePath() {
+  if (isBundled) {
+    return exePath;
+  }
+  // Running via node — point to agent.js
+  return `"${process.execPath}" "${path.join(__dirname, 'agent.js')}"`;
 }
 
-// ── Service configuration ────────────────────────────────────────────────────
+function getWorkDir() {
+  return __dirname;
+}
 
-const svc = new Service({
-  name: 'Taskosphere Agent',
-  description: 'Taskosphere Enterprise Desktop Agent — monitors activity, DSC tokens, USB devices, and syncs with the Taskosphere backend.',
-  script: path.join(__dirname, 'agent.js'),
-  nodeOptions: ['--harmony', '--max_old_space_size=256'],
-  workingDirectory: __dirname,
-  allowServiceLogon: true,
-  scheduled: true,
-  restartOnFailure: true,
-  maxRetries: 10,
-  maxRestarts: 10,
-  wait: 2,   // seconds between restarts
-  grow: 0.25, // grow wait time by 25% each retry
-});
+// ── PowerShell Scheduled Task Commands ───────────────────────────────────────
 
-// ── Event handlers ───────────────────────────────────────────────────────────
+function installService() {
+  const exe = getExePath();
+  const workDir = getWorkDir();
 
-svc.on('install', () => {
-  console.log('[service] Taskosphere Agent service installed successfully');
-  console.log('[service] Starting service...');
-  svc.start();
-});
+  console.log('[service] Installing Taskosphere Agent auto-start...');
+  console.log(`[service] Executable: ${exe}`);
+  console.log(`[service] Working dir: ${workDir}`);
 
-svc.on('uninstall', () => {
-  console.log('[service] Taskosphere Agent service uninstalled');
-});
+  const ps = `
+$taskName = '${TASK_NAME}'
+$exePath = '${exe.replace(/'/g, "''")}'
+$workDir = '${workDir.replace(/'/g, "''")}'
 
-svc.on('start', () => {
-  console.log('[service] Taskosphere Agent service started');
-});
+# Remove existing task if any
+Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 
-svc.on('stop', () => {
-  console.log('[service] Taskosphere Agent service stopped');
-});
+# Create action — run the agent executable
+$action = New-ScheduledTaskAction -Execute $exePath -WorkingDirectory $workDir
 
-svc.on('error', (err) => {
-  console.error('[service] Error:', err);
-});
+# Trigger — at user logon
+$trigger = New-ScheduledTaskTrigger -AtLogOn
 
-svc.on(ServiceEvent.ERROR, (err) => {
-  console.error('[service] Service error:', err);
-});
+# Settings — restart on failure, no time limit
+$settings = New-ScheduledTaskSettingsSet \`
+  -AllowStartIfOnBatteries \`
+  -DontStopIfGoingOnBatteries \`
+  -StartWhenAvailable \`
+  -RestartCount 10 \`
+  -RestartInterval (New-TimeSpan -Minutes 1) \`
+  -ExecutionTimeLimit 0 \`
+  -MultipleInstances IgnoreNew
 
-svc.on(ServiceEvent.ALREADY_INSTALLED, () => {
-  console.log('[service] Service already installed');
-});
+# Principal — run as current user, hidden
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Limited -LogonType Interactive
+
+# Register
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description '${TASK_DESC}' -Force
+
+# Start immediately
+Start-ScheduledTask -TaskName $taskName
+
+Write-Output 'OK'
+`;
+
+  try {
+    const result = execSync(
+      `powershell -NoProfile -NonInteractive -Command "${ps.replace(/"/g, '\\"').replace(/\n/g, '; ')}"`,
+      { timeout: 30000, windowsHide: true }
+    ).toString().trim();
+
+    if (result.includes('OK')) {
+      console.log('[service] ✓ Auto-start installed successfully');
+      console.log('[service] Agent will start automatically with Windows');
+      return true;
+    } else {
+      console.log('[service] Result:', result);
+      return false;
+    }
+  } catch (e) {
+    console.error('[service] Install failed:', e.message);
+    console.log('[service] Try running as Administrator');
+    return false;
+  }
+}
+
+function removeService() {
+  console.log('[service] Removing Taskosphere Agent auto-start...');
+
+  const ps = `
+Stop-ScheduledTask -TaskName '${TASK_NAME}' -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName '${TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue
+Write-Output 'OK'
+`;
+
+  try {
+    execSync(
+      `powershell -NoProfile -NonInteractive -Command "${ps.replace(/"/g, '\\"').replace(/\n/g, '; ')}"`,
+      { timeout: 15000, windowsHide: true }
+    );
+    console.log('[service] ✓ Auto-start removed');
+    return true;
+  } catch (e) {
+    console.error('[service] Remove failed:', e.message);
+    return false;
+  }
+}
+
+function startService() {
+  console.log('[service] Starting Taskosphere Agent...');
+
+  try {
+    execSync(
+      `powershell -NoProfile -Command "Start-ScheduledTask -TaskName '${TASK_NAME}'"`,
+      { timeout: 10000, windowsHide: true }
+    );
+    console.log('[service] ✓ Agent started');
+    return true;
+  } catch (e) {
+    console.error('[service] Start failed:', e.message);
+    return false;
+  }
+}
+
+function stopService() {
+  console.log('[service] Stopping Taskosphere Agent...');
+
+  try {
+    execSync(
+      `powershell -NoProfile -Command "Stop-ScheduledTask -TaskName '${TASK_NAME}'"`,
+      { timeout: 10000, windowsHide: true }
+    );
+    // Also kill any running agent process
+    try {
+      execSync('taskkill /f /im TaskosphereAgent.exe', { stdio: 'ignore' });
+    } catch {}
+    console.log('[service] ✓ Agent stopped');
+    return true;
+  } catch (e) {
+    console.error('[service] Stop failed:', e.message);
+    return false;
+  }
+}
+
+function statusService() {
+  try {
+    const out = execSync(
+      `powershell -NoProfile -Command "Get-ScheduledTask -TaskName '${TASK_NAME}' | Select-Object TaskName, State | Format-Table -AutoSize"`,
+      { timeout: 10000, windowsHide: true }
+    ).toString().trim();
+    console.log(out || 'Task not found');
+    return out;
+  } catch {
+    console.log('[service] Task not installed');
+    return null;
+  }
+}
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
-const command = process.argv[2];
+function main() {
+  const args = process.argv.slice(2);
+  const cmd  = (args[0] || '').toLowerCase();
 
-switch (command) {
-  case 'install':
-    if (svc.exists) {
-      console.log('[service] Service already exists. Removing first...');
-      svc.on('uninstall', () => svc.install());
-      svc.uninstall();
-    } else {
-      svc.install();
-    }
-    break;
-
-  case 'remove':
-  case 'uninstall':
-    svc.stop();
-    setTimeout(() => svc.uninstall(), 2000);
-    break;
-
-  case 'start':
-    svc.start();
-    break;
-
-  case 'stop':
-    svc.stop();
-    break;
-
-  case 'restart':
-    svc.restart();
-    break;
-
-  case 'status':
-    console.log('[service] Running:', svc.exists ? 'installed' : 'not installed');
-    break;
-
-  default:
-    console.log('Usage: node service.js [install|remove|start|stop|restart|status]');
-    break;
-}
-
-// ── PowerShell Fallback (when node-windows unavailable) ──────────────────────
-
-function handlePowerShellFallback() {
-  const { execSync } = require('child_process');
-  const command = process.argv[2];
-
-  const taskName = 'TaskosphereAgent';
-  const agentScript = path.join(__dirname, 'agent.js');
-  const nodeExe = process.execPath;
-
-  switch (command) {
-    case 'install': {
-      // Create a scheduled task that runs at logon
-      const ps = `
-$action = New-ScheduledTaskAction -Execute '${nodeExe}' -Argument '"${agentScript}"' -WorkingDirectory '${__dirname}'
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 10 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit 0
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Limited
-Register-ScheduledTask -TaskName '${taskName}' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description 'Taskosphere Enterprise Desktop Agent' -Force
-Write-Output 'Service installed as scheduled task: ${taskName}'
-`;
-      try {
-        execSync(`powershell -NoProfile -Command "${ps.replace(/"/g, '\\"').replace(/\n/g, '; ')}"`, {
-          windowsHide: true,
-        });
-        console.log('[service] Task scheduled: starts at logon, restarts on failure');
-      } catch (e) {
-        console.error('[service] Failed to create scheduled task:', e.message);
-        console.log('[service] Run as Administrator for best results');
-      }
-      break;
-    }
-
-    case 'remove': {
-      const ps = `Unregister-ScheduledTask -TaskName '${taskName}' -Confirm:$false`;
-      try {
-        execSync(`powershell -NoProfile -Command "${ps}"`, { windowsHide: true });
-        console.log('[service] Scheduled task removed');
-      } catch (e) {
-        console.error('[service] Failed to remove:', e.message);
-      }
-      break;
-    }
-
-    case 'start': {
-      const ps = `Start-ScheduledTask -TaskName '${taskName}'`;
-      try {
-        execSync(`powershell -NoProfile -Command "${ps}"`, { windowsHide: true });
-        console.log('[service] Task started');
-      } catch (e) {
-        console.error('[service] Failed to start:', e.message);
-      }
-      break;
-    }
-
-    case 'stop': {
-      const ps = `Stop-ScheduledTask -TaskName '${taskName}'`;
-      try {
-        execSync(`powershell -NoProfile -Command "${ps}"`, { windowsHide: true });
-        console.log('[service] Task stopped');
-      } catch (e) {
-        console.error('[service] Failed to stop:', e.message);
-      }
-      break;
-    }
-
-    case 'status': {
-      const ps = `Get-ScheduledTask -TaskName '${taskName}' -ErrorAction SilentlyContinue | Select-Object TaskName, State | Format-Table -AutoSize`;
-      try {
-        const out = execSync(`powershell -NoProfile -Command "${ps}"`, { windowsHide: true }).toString();
-        console.log(out || 'Task not found');
-      } catch {
-        console.log('[service] Task not found');
-      }
-      break;
-    }
-
-    default:
-      console.log('Usage: node service.js [install|remove|start|stop|status]');
-      console.log('Note: Run as Administrator for service management');
-      break;
+  // Support both --flag and positional syntax
+  if (cmd === 'install' || cmd === '--install-service') {
+    installService();
+  } else if (cmd === 'remove' || cmd === 'uninstall' || cmd === '--uninstall-service') {
+    removeService();
+  } else if (cmd === 'start') {
+    startService();
+  } else if (cmd === 'stop') {
+    stopService();
+  } else if (cmd === 'status' || cmd === '--service-status') {
+    statusService();
+  } else if (cmd === 'restart') {
+    stopService();
+    setTimeout(() => startService(), 2000);
+  } else {
+    console.log('Taskosphere Agent — Service Manager');
+    console.log('');
+    console.log('Usage:');
+    console.log('  TaskosphereAgent.exe --install-service    Install auto-start');
+    console.log('  TaskosphereAgent.exe --uninstall-service  Remove auto-start');
+    console.log('  TaskosphereAgent.exe --service-status     Check status');
+    console.log('');
+    console.log('Or:');
+    console.log('  node service.js install');
+    console.log('  node service.js remove');
+    console.log('  node service.js start');
+    console.log('  node service.js stop');
+    console.log('  node service.js status');
   }
 }
+
+main();
+
+module.exports = { installService, removeService, startService, stopService, statusService };
