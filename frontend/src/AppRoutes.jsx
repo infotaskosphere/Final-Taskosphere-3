@@ -41,7 +41,6 @@ const ActionCenter      = lazy(() => import("@/pages/ActionCenter.jsx"));
 const ClientPortalLogin        = lazy(() => import("@/pages/ClientPortalLogin.jsx"));
 const ClientPortalDashboard    = lazy(() => import("@/pages/ClientPortalDashboard.jsx"));
 const ClientPortalManagerPage  = lazy(() => import("@/pages/ClientPortalManagerPage.jsx"));
-const DesktopAgentDashboard    = lazy(() => import("@/pages/DesktopAgentDashboard.jsx"));
 
 /* ── Route Guards ───────────────────────────────────────────────────────── */
 
@@ -176,7 +175,6 @@ function AppRoutes() {
       <Route path="/users"          element={<Permission permission="can_view_user_page"><PageLoader><Users /></PageLoader></Permission>} />
       <Route path="/interviews"     element={<Permission permission="can_view_interviews"><PageLoader><Interviews /></PageLoader></Permission>} />
       <Route path="/staff-activity" element={<AdminOnly><PageLoader><StaffActivity /></PageLoader></AdminOnly>} />
-      <Route path="/desktop-agents" element={<AdminOnly><PageLoader><DesktopAgentDashboard /></PageLoader></AdminOnly>} />
 
       {/* Client Portal Manager */}
       <Route path="/client-portal-manager"   element={<Permission permission="can_view_client_portal"><PageLoader><ClientPortalManagerPage /></PageLoader></Permission>} />
