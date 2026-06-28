@@ -12,6 +12,7 @@ import {
   Eye, FileText, Trash2, Upload, Cloud, MousePointer2,
   Activity, BarChart2, TrendingUp, AlertCircle, Search,
   Calendar, Filter, X, ChevronRight, Zap, ShieldAlert,
+  Server, Cpu, HardDrive, MemoryStick, Heart, BatteryCharging,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -234,6 +235,15 @@ export default function StaffActivity() {
   const [activeTab,   setActiveTab]   = useState('session');
   const [refreshing,  setRefreshing]  = useState(false);
 
+  // ── Desktop Agent state ─────────────────────────────────────────────────
+  const [desktopAgent,  setDesktopAgent]  = useState(null);
+  const [desktopAct,    setDesktopAct]    = useState(null);    // activity report
+  const [desktopProd,   setDesktopProd]   = useState(null);    // productivity report
+  const [desktopDsc,    setDesktopDsc]    = useState([]);      // DSC events
+  const [desktopUsb,    setDesktopUsb]    = useState([]);      // USB events
+  const [desktopHealth, setDesktopHealth] = useState([]);      // health history
+  const [loadingAgent,  setLoadingAgent]  = useState(false);
+
   const fetchStaff = useCallback(async () => {
     try {
       const res = await api.get('/users');
@@ -263,6 +273,44 @@ export default function StaffActivity() {
     finally { setLoadingUser(false); }
   }, []);
 
+  // ── Desktop Agent data fetch (for the selected staff member) ───────────────
+  const fetchDesktopAgent = useCallback(async (uid) => {
+    if (!uid) return;
+    setLoadingAgent(true);
+    try {
+      // 1. Get all agents and find the one matching this user_id
+      const agentsRes = await api.get('/desktop/agents', { params: { user_id: uid } });
+      const agents = agentsRes.data?.agents || [];
+      const agent = agents[0] || null;
+      setDesktopAgent(agent);
+
+      if (agent) {
+        const agentId = agent.agent_id;
+        // 2. Fetch activity, productivity, DSC, USB, health in parallel
+        const [actRes, prodRes, dscRes, usbRes, healthRes] = await Promise.allSettled([
+          api.get('/desktop/activity', { params: { agent_id: agentId, limit: 7 } }),
+          api.get('/desktop/productivity', { params: { agent_id: agentId, limit: 7 } }),
+          api.get('/desktop/dsc', { params: { agent_id: agentId, limit: 10 } }),
+          api.get('/desktop/usb', { params: { agent_id: agentId, limit: 20 } }),
+          api.get('/desktop/agent/' + agentId + '/health', { params: { hours: 24 } }),
+        ]);
+        if (actRes.status === 'fulfilled')    setDesktopAct(actRes.value.data?.reports?.[0] || null);
+        if (prodRes.status === 'fulfilled')   setDesktopProd(prodRes.value.data?.reports?.[0] || null);
+        if (dscRes.status === 'fulfilled')    setDesktopDsc(dscRes.value.data?.events || []);
+        if (usbRes.status === 'fulfilled')    setDesktopUsb(usbRes.value.data?.events || []);
+        if (healthRes.status === 'fulfilled') setDesktopHealth(healthRes.value.data?.health || []);
+      } else {
+        setDesktopAct(null); setDesktopProd(null);
+        setDesktopDsc([]); setDesktopUsb([]); setDesktopHealth([]);
+      }
+    } catch {
+      setDesktopAgent(null); setDesktopAct(null); setDesktopProd(null);
+      setDesktopDsc([]); setDesktopUsb([]); setDesktopHealth([]);
+    } finally {
+      setLoadingAgent(false);
+    }
+  }, []);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -273,6 +321,7 @@ export default function StaffActivity() {
   }, [selDate]);
 
   useEffect(() => { if (selectedId) fetchUserActivity(selectedId); }, [selectedId]);
+  useEffect(() => { if (selectedId) fetchDesktopAgent(selectedId); }, [selectedId]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -404,6 +453,7 @@ export default function StaffActivity() {
     { id: 'input',    label: 'Input',    icon: Keyboard,   color: C.purple },
     { id: 'files',    label: 'Files',    icon: FolderOpen, color: C.amber  },
     { id: 'security', label: 'Security', icon: Shield,     color: C.red    },
+    { id: 'agent',    label: 'Desktop Agent', icon: Server, color: '#0EA5E9' },
   ];
 
   const exportPDF = async () => {
@@ -1004,6 +1054,196 @@ export default function StaffActivity() {
                         })}
                     </div>
                   </Card>
+                )}
+              </motion.div>
+            )}
+
+            {/* ── DESKTOP AGENT ── */}
+            {activeTab === 'agent' && (
+              <motion.div key="agent" variants={cV} initial="hidden" animate="visible" exit={{ opacity: 0 }} className="space-y-4">
+
+                {loadingAgent ? (
+                  <Card dark={dark}><div className="py-12 text-center"><RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2" style={{ color: t.textMute }} /><p className="text-xs" style={{ color: t.textMute }}>Loading agent data…</p></div></Card>
+                ) : !desktopAgent ? (
+                  <Card dark={dark}>
+                    <div className="py-12 text-center">
+                      <Server className="w-10 h-10 mx-auto mb-3" style={{ color: t.textMute }} />
+                      <p className="text-sm font-bold" style={{ color: t.text }}>No Desktop Agent Found</p>
+                      <p className="text-xs mt-1" style={{ color: t.textMute }}>
+                        This staff member has not installed the Taskosphere Agent yet.<br />
+                        Install the agent on their machine to see live activity, DSC status, and USB events here.
+                      </p>
+                    </div>
+                  </Card>
+                ) : (
+                  <>
+                    {/* Agent status cards */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                      {[
+                        { label: 'Status',     value: desktopAgent.status || 'unknown',     icon: Heart,         color: (desktopAgent.status === 'online') ? C.green : C.red },
+                        { label: 'Version',    value: desktopAgent.agent_version || '—',    icon: Zap,           color: C.mid   },
+                        { label: 'CPU',        value: desktopAgent.cpu_usage ? Math.round(desktopAgent.cpu_usage) + '%' : '—', icon: Cpu,    color: C.purple },
+                        { label: 'Memory',     value: desktopAgent.mem_usage_mb ? Math.round(desktopAgent.mem_usage_mb) + ' MB' : '—', icon: MemoryStick, color: C.amber },
+                        { label: 'DSC Token',  value: desktopAgent.dsc_plugged ? 'Connected' : 'None', icon: Shield, color: desktopAgent.dsc_plugged ? C.green : t.textMute },
+                        { label: 'Last Ping',  value: desktopAgent.last_heartbeat ? new Date(desktopAgent.last_heartbeat).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—', icon: Clock, color: C.cyan },
+                      ].map((s, i) => (
+                        <Card key={i} dark={dark}>
+                          <div className="w-8 h-8 rounded-xl flex items-center justify-center mb-2"
+                            style={{ background: s.color + '18' }}>
+                            <s.icon className="w-4 h-4" style={{ color: s.color }} />
+                          </div>
+                          <p className="text-lg font-black" style={{ color: s.color }}>{s.value}</p>
+                          <p className="text-[10px] font-bold uppercase tracking-wider mt-0.5" style={{ color: t.textMute }}>{s.label}</p>
+                        </Card>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+                      {/* System info + activity */}
+                      <Card dark={dark} accentColor="#0EA5E9">
+                        <SectionHeader icon={Server} label="Machine & Activity" color="#0EA5E9" dark={dark} />
+                        <StatRow label="Machine Name"    value={desktopAgent.machine_name || '—'}          color={C.mid}    dark={dark} />
+                        <StatRow label="Hostname"        value={desktopAgent.hostname || '—'}                                    dark={dark} />
+                        <StatRow label="OS"              value={desktopAgent.os_version || '—'}                                  dark={dark} />
+                        <StatRow label="CPU"             value={desktopAgent.cpu || '—'}                  color={C.purple} dark={dark} />
+                        <StatRow label="RAM"             value={desktopAgent.ram_total_mb ? Math.round(desktopAgent.ram_total_mb / 1024) + ' GB' : '—'} color={C.amber} dark={dark} />
+                        <StatRow label="Disk Free"       value={desktopAgent.disk_free_gb ? desktopAgent.disk_free_gb + ' GB' : '—'} dark={dark} />
+                        <StatRow label="IP Address"      value={desktopAgent.ip_address || '—'}           color={C.cyan}   dark={dark} />
+                        <StatRow label="Uptime"          value={desktopAgent.uptime_seconds ? (() => { const s = desktopAgent.uptime_seconds; const h = Math.floor(s/3600); const m = Math.floor((s%3600)/60); return h > 24 ? Math.floor(h/24)+'d '+h%24+'h' : h > 0 ? h+'h '+m+'m' : m+'m'; })() : '—'} dark={dark} />
+                        {desktopAct && (
+                          <>
+                            <div className="my-3" style={{ borderTop: '1px dashed ' + t.border }} />
+                            <p className="text-[10px] font-bold uppercase tracking-wider mb-2" style={{ color: t.textMute }}>Today's Activity (from agent)</p>
+                            <StatRow label="Active Time"   value={fmtSec(desktopAct.activeSeconds)}   color={C.green}  dark={dark} />
+                            <StatRow label="Idle Time"     value={fmtSec(desktopAct.idleSeconds)}     color={C.amber}  dark={dark} />
+                            <StatRow label="Focus Time"    value={fmtSec(desktopAct.focusSeconds)}    color={C.mid}    dark={dark} />
+                            {desktopAct.topApps?.slice(0, 4).map((app, i) => (
+                              <StatRow key={i} label={'  ' + app.name} value={fmtSec(app.seconds)} dark={dark} />
+                            ))}
+                          </>
+                        )}
+                      </Card>
+
+                      {/* Productivity */}
+                      <Card dark={dark} accentColor={C.green}>
+                        <SectionHeader icon={TrendingUp} label="Productivity (from agent)" color={C.green} dark={dark} />
+                        {desktopProd ? (
+                          <>
+                            <div className="flex justify-center my-3">
+                              <ScoreRing value={desktopProd.score || 0} label="Productivity Score" size={100}
+                                color={(desktopProd.score || 0) >= 70 ? C.green : (desktopProd.score || 0) >= 40 ? C.amber : C.red}
+                                dark={dark} />
+                            </div>
+                            <StatRow label="Productive Time"   value={fmtSec(desktopProd.productiveTime)}   color={C.green}  dark={dark} />
+                            <StatRow label="Unproductive Time" value={fmtSec(desktopProd.unproductiveTime)} color={C.red}    dark={dark} />
+                            <StatRow label="Neutral Time"      value={fmtSec(desktopProd.neutralTime)}      color={t.textSub} dark={dark} />
+                            {desktopProd.appBreakdown?.slice(0, 5).map((app, i) => {
+                              const col = app.category === 'productive' ? C.green : app.category === 'unproductive' ? C.red : t.textSub;
+                              return <StatRow key={i} label={'  ' + app.name + ' (' + app.category + ')'} value={fmtSec(app.seconds)} color={col} dark={dark} />;
+                            })}
+                            {desktopProd.domainBreakdown?.slice(0, 3).map((d, i) => {
+                              const col = d.category === 'productive' ? C.green : d.category === 'unproductive' ? C.red : t.textSub;
+                              return <StatRow key={i} label={'  🌐 ' + d.domain} value={fmtSec(d.seconds)} color={col} dark={dark} />;
+                            })}
+                          </>
+                        ) : (
+                          <p className="text-xs text-center py-8" style={{ color: t.textMute }}>No productivity data yet</p>
+                        )}
+                      </Card>
+                    </div>
+
+                    {/* DSC + USB */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+                      {/* DSC */}
+                      <Card dark={dark} accentColor={C.purple}>
+                        <SectionHeader icon={Shield} label="DSC Token Events" color={C.purple} count={desktopDsc.length} dark={dark} />
+                        {desktopDsc.length > 0 ? (
+                          <div className="space-y-2 max-h-52 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+                            {desktopDsc.slice(0, 6).map((evt, i) => (
+                              <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl text-xs"
+                                style={{ background: evt.plugged ? C.green + '10' : t.card2, border: '1px solid ' + (evt.plugged ? C.green + '30' : t.border) }}>
+                                <Shield className="w-3.5 h-3.5 flex-shrink-0" style={{ color: evt.plugged ? C.green : t.textMute }} />
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-semibold truncate" style={{ color: t.text }}>
+                                    {evt.cert?.holder_name || 'Unknown cert'}
+                                  </p>
+                                  <p className="text-[10px]" style={{ color: t.textMute }}>
+                                    {evt.cert?.issuer || '—'} · Exp: {evt.cert?.expiry_date || '—'}
+                                  </p>
+                                </div>
+                                <span className="text-[10px] tabular-nums flex-shrink-0" style={{ color: t.textMute }}>
+                                  {evt.updated_at ? new Date(evt.updated_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-center py-8" style={{ color: t.textMute }}>No DSC events recorded</p>
+                        )}
+                      </Card>
+
+                      {/* USB */}
+                      <Card dark={dark} accentColor={C.amber}>
+                        <SectionHeader icon={Usb} label="USB Device Events" color={C.amber} count={desktopUsb.length} dark={dark} />
+                        {desktopUsb.length > 0 ? (
+                          <div className="space-y-2 max-h-52 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+                            {desktopUsb.slice(0, 6).map((evt, i) => (
+                              <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl text-xs"
+                                style={{ background: evt.event === 'connected' ? C.green + '08' : C.red + '08', border: '1px solid ' + (evt.event === 'connected' ? C.green + '25' : C.red + '25') }}>
+                                <Usb className="w-3.5 h-3.5 flex-shrink-0" style={{ color: evt.event === 'connected' ? C.green : C.red }} />
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-semibold truncate" style={{ color: t.text }}>{evt.device_name || 'USB Device'}</p>
+                                  <p className="text-[10px]" style={{ color: t.textMute }}>
+                                    {evt.device_type} {evt.vendor_id ? '· VID ' + evt.vendor_id : ''}
+                                  </p>
+                                </div>
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0"
+                                  style={{ background: (evt.event === 'connected' ? C.green : C.red) + '18', color: evt.event === 'connected' ? C.green : C.red }}>
+                                  {evt.event}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-center py-8" style={{ color: t.textMute }}>No USB events recorded</p>
+                        )}
+                      </Card>
+                    </div>
+
+                    {/* Health chart */}
+                    {desktopHealth.length > 0 && (
+                      <Card dark={dark} accentColor={C.mid}>
+                        <SectionHeader icon={Heart} label="Agent Health (last 24h)" color={C.mid} dark={dark} />
+                        <ResponsiveContainer width="100%" height={180}>
+                          <AreaChart data={desktopHealth.map(h => ({
+                            time: new Date(h.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+                            cpu: Math.round(h.cpu_usage || 0),
+                            mem: Math.round((h.mem_usage_mb || 0) / 10),
+                            online: h.internet_connected ? 1 : 0,
+                          }))}>
+                            <defs>
+                              <linearGradient id="gCpu" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor={C.purple} stopOpacity={0.3} />
+                                <stop offset="100%" stopColor={C.purple} stopOpacity={0.02} />
+                              </linearGradient>
+                              <linearGradient id="gMem" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor={C.amber} stopOpacity={0.3} />
+                                <stop offset="100%" stopColor={C.amber} stopOpacity={0.02} />
+                              </linearGradient>
+                            </defs>
+                            <XAxis dataKey="time" tick={{ fontSize: 9, fill: t.textMute }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                            <YAxis tick={{ fontSize: 9, fill: t.textMute }} axisLine={false} tickLine={false} unit="%" />
+                            <Tooltip content={<ChartTip dark={dark} />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+                            <Legend wrapperStyle={{ fontSize: 10, color: t.textSub }} />
+                            <Area type="monotone" dataKey="cpu" stroke={C.purple} strokeWidth={1.5} fill="url(#gCpu)" name="CPU %" />
+                            <Area type="monotone" dataKey="mem" stroke={C.amber} strokeWidth={1.5} fill="url(#gMem)" name="Mem (×10 MB)" />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </Card>
+                    )}
+                  </>
                 )}
               </motion.div>
             )}
