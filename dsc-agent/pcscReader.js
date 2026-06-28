@@ -8,7 +8,15 @@
  * The OS CCID driver claims the USB interface; we talk to it via PC/SC.
  */
 
-const pcsclite = require('pcsclite');
+let pcsclite;
+try {
+  pcsclite = require('pcsclite');
+} catch (e) {
+  // pcsclite is a native addon — not available in all builds
+  // The agent falls back to PowerShell-based DSC detection in dscWatcher.js
+  console.warn('[pcscReader] pcsclite not available — using PowerShell fallback for DSC detection');
+  pcsclite = null;
+}
 
 // ─── ASN.1 / DER helpers (same as browser version) ───────────────────────────
 function readLength(der, pos) {
@@ -228,6 +236,10 @@ async function readBinaryPcsc(card, protocol) {
 // ─── Main: read cert from first available PC/SC reader ───────────────────────
 exports.readCertFromPcSc = function (pin) {
   return new Promise((resolve, reject) => {
+    if (!pcsclite) {
+      return reject(new Error('PC/SC native module not available — DSC detection uses PowerShell fallback'));
+    }
+
     const pcsc = pcsclite();
 
     let settled = false;
