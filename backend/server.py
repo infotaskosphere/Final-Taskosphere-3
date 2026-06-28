@@ -47,8 +47,13 @@ from backend.passwords import router as passwords_router
 from backend.auth_password_reset import router as auth_password_reset_router
 from backend.client_portal import router as client_portal_router
 from backend.activity_monitor import router as activity_monitor_router
+from backend.desktop_agent import router as desktop_agent_router, create_desktop_indexes
 from backend.whatsapp_integration import router as whatsapp_router
-from backend.whatsapp_scheduler import wa_birthday_job, wa_dsc_expiry_job, wa_compliance_job
+from backend.whatsapp_scheduler import (
+    wa_birthday_job,
+    wa_dsc_expiry_job,
+    wa_compliance_job,
+)
 from backend.whatsapp_integration import wa_scheduled_bulk_job, wa_bridge_keepalive_job
 
 from zoneinfo import ZoneInfo
@@ -63,7 +68,20 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 # FastAPI
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Form, Query, Request, Body
+from fastapi import (
+    FastAPI,
+    APIRouter,
+    Depends,
+    HTTPException,
+    status,
+    BackgroundTasks,
+    UploadFile,
+    File,
+    Form,
+    Query,
+    Request,
+    Body,
+)
 from fastapi.security import HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -71,25 +89,55 @@ from starlette.middleware.gzip import GZipMiddleware
 from passlib.context import CryptContext
 
 # Validation
-from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator, ValidationError
+from pydantic import (
+    BaseModel,
+    EmailStr,
+    Field,
+    ConfigDict,
+    field_validator,
+    ValidationError,
+)
 from bson import ObjectId
 from dotenv import load_dotenv
 
 # --- BACKEND MODULE IMPORTS ---
 import backend.models as models
 from backend.models import (
-    Token, User, UserCreate, UserLogin, UserPermissions,
-    Todo, TodoCreate, Task, TaskCreate, BulkTaskCreate,
-    Client, ClientCreate, MasterClientForm,
-    Attendance, StaffActivityLog, StaffActivityCreate, PerformanceMetric,
-    DueDate, DueDateCreate,
-    DSC, DSCCreate, DSCListResponse, DSCMovementRequest, MovementUpdateRequest,
-    Document, DocumentCreate, DocumentMovementRequest,
-    DashboardStats, AuditLog,
-    HolidayResponse, HolidayCreate,
+    Token,
+    User,
+    UserCreate,
+    UserLogin,
+    UserPermissions,
+    Todo,
+    TodoCreate,
+    Task,
+    TaskCreate,
+    BulkTaskCreate,
+    Client,
+    ClientCreate,
+    MasterClientForm,
+    Attendance,
+    StaffActivityLog,
+    StaffActivityCreate,
+    PerformanceMetric,
+    DueDate,
+    DueDateCreate,
+    DSC,
+    DSCCreate,
+    DSCListResponse,
+    DSCMovementRequest,
+    MovementUpdateRequest,
+    Document,
+    DocumentCreate,
+    DocumentMovementRequest,
+    DashboardStats,
+    AuditLog,
+    HolidayResponse,
+    HolidayCreate,
     DEFAULT_ROLE_PERMISSIONS,
-    Reminder, ReminderCreate,
-    OffboardRequest
+    Reminder,
+    ReminderCreate,
+    OffboardRequest,
 )
 from backend.dependencies import (
     db,
@@ -115,14 +163,14 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 # ====================== CONFIG ======================
 # Single IST definition
-IST = pytz.timezone('Asia/Kolkata')
+IST = pytz.timezone("Asia/Kolkata")
 india_tz = ZoneInfo("Asia/Kolkata")
 
 ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+load_dotenv(ROOT_DIR / ".env")
 
 # ── MCA Portal API config ─────────────────────────────────────────────────────
-MCA_API_KEY      = os.getenv("MCA_API_KEY", "")
+MCA_API_KEY = os.getenv("MCA_API_KEY", "")
 MCA_API_BASE_URL = os.getenv("MCA_API_BASE_URL", "https://api.mca.gov.in/MCA21/api/v1")
 
 # ── Main event loop reference (set at startup, used by APScheduler sync jobs) ─
@@ -158,9 +206,7 @@ app.add_middleware(
     allow_origins=[
         "https://taskosphere.com",
         "https://www.taskosphere.com",
-
         "https://final-taskosphere-frontend.onrender.com",
-
         "http://localhost:3000",
         "http://localhost:5173",
         "http://localhost:5174",
@@ -192,23 +238,35 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 #   - If a record exists but has an unexpected status update to absent
 # =============================================================
 
+
 async def _mark_absent_for_date(target_date_str: str) -> dict:
     """Core absent-marking logic. Returns a summary dict."""
     # Skip confirmed holidays
     # FIX: {"_id": 0} projection — ObjectId causes issues if doc is returned
-    holiday = await db.holidays.find_one({"date": target_date_str, "status": "confirmed"}, {"_id": 0})
+    holiday = await db.holidays.find_one(
+        {"date": target_date_str, "status": "confirmed"}, {"_id": 0}
+    )
     if holiday:
-        return {"skipped": True, "reason": f"Holiday: {holiday.get('name')}", "marked": 0, "date": target_date_str}
+        return {
+            "skipped": True,
+            "reason": f"Holiday: {holiday.get('name')}",
+            "marked": 0,
+            "date": target_date_str,
+        }
 
     # Skip weekends
     target_date_obj = date.fromisoformat(target_date_str)
     if target_date_obj.weekday() >= 5:
-        return {"skipped": True, "reason": "Weekend", "marked": 0, "date": target_date_str}
+        return {
+            "skipped": True,
+            "reason": "Weekend",
+            "marked": 0,
+            "date": target_date_str,
+        }
 
     # Fetch all active users
     active_users = await db.users.find(
-        {"is_active": True, "status": "active"},
-        {"_id": 0, "id": 1, "full_name": 1}
+        {"is_active": True, "status": "active"}, {"_id": 0, "id": 1, "full_name": 1}
     ).to_list(1000)
 
     marked_count = 0
@@ -216,7 +274,9 @@ async def _mark_absent_for_date(target_date_str: str) -> dict:
 
     for u in active_users:
         uid = u["id"]
-        existing = await db.attendance.find_one({"user_id": uid, "date": target_date_str}, {"_id": 0})
+        existing = await db.attendance.find_one(
+            {"user_id": uid, "date": target_date_str}, {"_id": 0}
+        )
 
         if existing:
             if existing.get("status") in ("present", "leave", "absent"):
@@ -225,31 +285,37 @@ async def _mark_absent_for_date(target_date_str: str) -> dict:
             # Record exists but status is unexpected → update to absent
             await db.attendance.update_one(
                 {"user_id": uid, "date": target_date_str},
-                {"$set": {
-                    "status": "absent",
-                    "auto_marked": True,
-                    "auto_marked_at": datetime.now(timezone.utc).isoformat(),
-                }}
+                {
+                    "$set": {
+                        "status": "absent",
+                        "auto_marked": True,
+                        "auto_marked_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                },
             )
             marked_count += 1
         else:
             # No record at all → insert absent
-            await db.attendance.insert_one({
-                "user_id": uid,
-                "date": target_date_str,
-                "status": "absent",
-                "punch_in": None,
-                "punch_out": None,
-                "duration_minutes": 0,
-                "is_late": False,
-                "punched_out_early": False,
-                "leave_reason": None,
-                "auto_marked": True,
-                "auto_marked_at": datetime.now(timezone.utc).isoformat(),
-            })
+            await db.attendance.insert_one(
+                {
+                    "user_id": uid,
+                    "date": target_date_str,
+                    "status": "absent",
+                    "punch_in": None,
+                    "punch_out": None,
+                    "duration_minutes": 0,
+                    "is_late": False,
+                    "punched_out_early": False,
+                    "leave_reason": None,
+                    "auto_marked": True,
+                    "auto_marked_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
             marked_count += 1
 
-    logger.info(f"Absent marking for {target_date_str}: marked={marked_count}, skipped={already_recorded}")
+    logger.info(
+        f"Absent marking for {target_date_str}: marked={marked_count}, skipped={already_recorded}"
+    )
     return {
         "skipped": False,
         "date": target_date_str,
@@ -266,12 +332,17 @@ def mark_absent_users_task():
     """
     try:
         import backend.server as _self
+
         loop = _self.app_event_loop
         if loop is None or loop.is_closed():
-            logger.warning("mark_absent_users_task: main event loop not ready, skipping.")
+            logger.warning(
+                "mark_absent_users_task: main event loop not ready, skipping."
+            )
             return
         today_str = datetime.now(IST).date().isoformat()
-        future = asyncio.run_coroutine_threadsafe(_mark_absent_for_date(today_str), loop)
+        future = asyncio.run_coroutine_threadsafe(
+            _mark_absent_for_date(today_str), loop
+        )
         result = future.result(timeout=120)
         logger.info(f"Scheduled absent job result: {result}")
     except Exception as e:
@@ -290,18 +361,18 @@ async def _force_punch_out_at_7pm(today_str: str) -> dict:
     Each user's punch_out is set to THEIR OWN punch_out_time from their
     user profile (defaults to 19:00 IST if not configured).
     """
-    IST_tz     = ZoneInfo("Asia/Kolkata")
+    IST_tz = ZoneInfo("Asia/Kolkata")
     today_date = datetime.fromisoformat(today_str).date()
 
     # Find records: punched in, no punch_out, status present
     records = await db.attendance.find(
         {
-            "date":      today_str,
-            "punch_in":  {"$ne": None},
+            "date": today_str,
+            "punch_in": {"$ne": None},
             "punch_out": None,
-            "status":    "present",
+            "status": "present",
         },
-        {"_id": 0, "user_id": 1, "punch_in": 1}
+        {"_id": 0, "user_id": 1, "punch_in": 1},
     ).to_list(1000)
 
     if not records:
@@ -309,12 +380,11 @@ async def _force_punch_out_at_7pm(today_str: str) -> dict:
         return {"patched": 0, "date": today_str}
 
     # Bulk-fetch all relevant user docs to get per-user punch_out_time
-    user_ids  = [r["user_id"] for r in records]
+    user_ids = [r["user_id"] for r in records]
     user_docs = await db.users.find(
-        {"id": {"$in": user_ids}},
-        {"_id": 0, "id": 1, "punch_out_time": 1}
+        {"id": {"$in": user_ids}}, {"_id": 0, "id": 1, "punch_out_time": 1}
     ).to_list(len(user_ids))
-    user_map  = {u["id"]: u for u in user_docs}
+    user_map = {u["id"]: u for u in user_docs}
 
     patched = 0
     for rec in records:
@@ -329,8 +399,13 @@ async def _force_punch_out_at_7pm(today_str: str) -> dict:
 
         # Build aware UTC datetime for that user's shift end today
         shift_end_ist = datetime(
-            today_date.year, today_date.month, today_date.day,
-            pot.hour, pot.minute, 0, tzinfo=IST_tz
+            today_date.year,
+            today_date.month,
+            today_date.day,
+            pot.hour,
+            pot.minute,
+            0,
+            tzinfo=IST_tz,
         )
         shift_end_utc = shift_end_ist.astimezone(timezone.utc)
 
@@ -344,20 +419,26 @@ async def _force_punch_out_at_7pm(today_str: str) -> dict:
         if punch_in_dt and punch_in_dt.tzinfo is None:
             punch_in_dt = punch_in_dt.replace(tzinfo=timezone.utc)
 
-        duration_minutes = max(0, int(
-            (shift_end_utc - punch_in_dt.astimezone(timezone.utc)).total_seconds() / 60
-        ))
+        duration_minutes = max(
+            0,
+            int(
+                (shift_end_utc - punch_in_dt.astimezone(timezone.utc)).total_seconds()
+                / 60
+            ),
+        )
 
         await db.attendance.update_one(
             {"user_id": rec["user_id"], "date": today_str},
-            {"$set": {
-                "punch_out":         shift_end_utc,
-                "duration_minutes":  duration_minutes,
-                "punched_out_early": False,
-                "overtime_minutes":  0,
-                "auto_punch_out":    True,
-                "auto_punch_reason": "force_11pm_scheduler",
-            }}
+            {
+                "$set": {
+                    "punch_out": shift_end_utc,
+                    "duration_minutes": duration_minutes,
+                    "punched_out_early": False,
+                    "overtime_minutes": 0,
+                    "auto_punch_out": True,
+                    "auto_punch_reason": "force_11pm_scheduler",
+                }
+            },
         )
         patched += 1
 
@@ -372,12 +453,17 @@ def force_punch_out_11pm_task():
     """
     try:
         import backend.server as _self
+
         loop = _self.app_event_loop
         if loop is None or loop.is_closed():
-            logger.warning("force_punch_out_11pm_task: main event loop not ready, skipping.")
+            logger.warning(
+                "force_punch_out_11pm_task: main event loop not ready, skipping."
+            )
             return
         today_str = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
-        future = asyncio.run_coroutine_threadsafe(_force_punch_out_at_7pm(today_str), loop)
+        future = asyncio.run_coroutine_threadsafe(
+            _force_punch_out_at_7pm(today_str), loop
+        )
         result = future.result(timeout=120)
         logger.info(f"force_punch_out_11pm job result: {result}")
     except Exception as e:
@@ -387,6 +473,7 @@ def force_punch_out_11pm_task():
 @app.on_event("startup")
 async def startup_event():
     import backend.server as _self
+
     _self.app_event_loop = asyncio.get_event_loop()
     try:
         await db.tasks.create_index("assigned_to")
@@ -399,6 +486,7 @@ async def startup_event():
         await db.staff_activity.create_index("timestamp")
         await db.staff_activity.create_index([("user_id", 1), ("timestamp", -1)])
         await db.due_dates.create_index("department")
+        await create_desktop_indexes()
         await db.tasks.create_index([("assigned_to", 1), ("status", 1)])
         await db.tasks.create_index("created_at")
         await db.referrers.create_index("name")
@@ -430,30 +518,24 @@ async def startup_event():
         await db.staff_activity.create_index([("user_id", 1), ("type", 1)])
         await db.trademark_sphere.create_index("application_number", unique=True)
 
-    # ── FIXED: EMAIL CONNECTIONS INDEX ──────────────────────────────────
+        # ── FIXED: EMAIL CONNECTIONS INDEX ──────────────────────────────────
         try:
             # Drop old rule (Unique User + Provider)
             await db.email_connections.drop_index("user_id_1_provider_1")
         except Exception:
-            pass 
+            pass
 
         # Create new rule (Unique User + Email Address)
         await db.email_connections.create_index(
-            [("user_id", 1), ("email_address", 1)],
-            unique=True,
-            background=True
+            [("user_id", 1), ("email_address", 1)], unique=True, background=True
         )
-        
+
         # Unique indexes — use background=True so they don't block startup if they already exist
         await db.attendance.create_index(
-            [("user_id", 1), ("date", 1)],
-            unique=True,
-            background=True
+            [("user_id", 1), ("date", 1)], unique=True, background=True
         )
         await db.clients.create_index(
-            [("created_by", 1), ("company_name", 1)],
-            unique=True,
-            background=True
+            [("created_by", 1), ("company_name", 1)], unique=True, background=True
         )
         await db.holidays.create_index("date", unique=True, background=True)
 
@@ -462,18 +544,15 @@ async def startup_event():
         # Without this index, bulk-sync with 1000+ messages does a full collection scan
         # per message → extremely slow, times out, and appears to store nothing.
         await db.whatsapp_hub_messages.create_index(
-            [("message_id", 1), ("session_id", 1)],
-            background=True, sparse=True
+            [("message_id", 1), ("session_id", 1)], background=True, sparse=True
         )
         await db.whatsapp_hub_messages.create_index(
-            [("jid", 1), ("timestamp", -1)],
-            background=True
+            [("jid", 1), ("timestamp", -1)], background=True
         )
         await db.whatsapp_hub_messages.create_index("timestamp", background=True)
         await db.whatsapp_hub_contacts.create_index("jid", unique=True, background=True)
         await db.whatsapp_hub_contacts.create_index(
-            [("last_message_at", -1)],
-            background=True
+            [("last_message_at", -1)], background=True
         )
         await db.whatsapp_hub_contacts.create_index("session_id", background=True)
         await db.whatsapp_hub_groups.create_index("jid", unique=True, background=True)
@@ -487,10 +566,7 @@ async def startup_event():
         for v in visits:
             raw_id = v.get("_id")
             new_id = str(raw_id)
-            await db.visits.update_one(
-                {"_id": raw_id},
-                {"$set": {"id": new_id}}
-            )
+            await db.visits.update_one({"_id": raw_id}, {"$set": {"id": new_id}})
             repaired += 1
         logger.info(f"✅ Visit ID repair: {repaired} documents patched")
     except Exception as e:
@@ -498,14 +574,17 @@ async def startup_event():
 
     # Scheduled jobs=====================================================================
     try:
-        scheduler.add_job(fetch_indian_holidays_task, 'cron', day=1, hour=0, minute=5)
+        scheduler.add_job(fetch_indian_holidays_task, "cron", day=1, hour=0, minute=5)
         # Also run immediately on startup so holidays are available from day 1
-        scheduler.add_job(fetch_indian_holidays_task, 'date',
-                          run_date=datetime.now(pytz.timezone("Asia/Kolkata")))
+        scheduler.add_job(
+            fetch_indian_holidays_task,
+            "date",
+            run_date=datetime.now(pytz.timezone("Asia/Kolkata")),
+        )
         # Absent marking job — fires every working day at 19:00 IST
         scheduler.add_job(
             mark_absent_users_task,
-            'cron',
+            "cron",
             hour=19,
             minute=0,
             timezone=pytz.timezone("Asia/Kolkata"),
@@ -516,7 +595,7 @@ async def startup_event():
         # any user who punched in today but never manually punched out.
         scheduler.add_job(
             force_punch_out_11pm_task,
-            'cron',
+            "cron",
             hour=23,
             minute=0,
             timezone=pytz.timezone("Asia/Kolkata"),
@@ -527,34 +606,47 @@ async def startup_event():
         # ── WhatsApp notification jobs ────────────────────────────────────
         scheduler.add_job(
             wa_birthday_job,
-            'cron', hour=9, minute=0,
+            "cron",
+            hour=9,
+            minute=0,
             timezone=pytz.timezone("Asia/Kolkata"),
-            id="wa_birthday_wishes", replace_existing=True,
+            id="wa_birthday_wishes",
+            replace_existing=True,
         )
         scheduler.add_job(
             wa_dsc_expiry_job,
-            'cron', hour=9, minute=30,
+            "cron",
+            hour=9,
+            minute=30,
             timezone=pytz.timezone("Asia/Kolkata"),
-            id="wa_dsc_expiry_alerts", replace_existing=True,
+            id="wa_dsc_expiry_alerts",
+            replace_existing=True,
         )
         scheduler.add_job(
             wa_compliance_job,
-            'cron', hour=10, minute=0,
+            "cron",
+            hour=10,
+            minute=0,
             timezone=pytz.timezone("Asia/Kolkata"),
-            id="wa_compliance_reminders", replace_existing=True,
+            id="wa_compliance_reminders",
+            replace_existing=True,
         )
         # Scheduled bulk send runner — checks every minute for due jobs
         scheduler.add_job(
             wa_scheduled_bulk_job,
-            'interval', minutes=1,
-            id="wa_scheduled_bulk", replace_existing=True,
+            "interval",
+            minutes=1,
+            id="wa_scheduled_bulk",
+            replace_existing=True,
         )
         # Keep wa-bridge warm so Render's free instance never spins down —
         # fixes the 429/CORS/502 cascade caused by cold-start request bursts.
         scheduler.add_job(
             wa_bridge_keepalive_job,
-            'interval', minutes=5,
-            id="wa_bridge_keepalive", replace_existing=True,
+            "interval",
+            minutes=5,
+            id="wa_bridge_keepalive",
+            replace_existing=True,
         )
 
         scheduler.start()
@@ -569,6 +661,7 @@ async def startup_event():
     async def _boot_holiday_sync():
         try:
             import httpx as _httpx
+
             now_ist = datetime.now(pytz.timezone("Asia/Kolkata"))
             total_added = 0
             for year in [now_ist.year, now_ist.year + 1]:
@@ -581,21 +674,24 @@ async def startup_event():
                         continue
                     for h in resp.json():
                         date_str = h["date"]
-                        name     = h.get("localName") or h.get("name", "Holiday")
-                        existing = await db.holidays.find_one({"date": date_str}, {"_id": 0})
+                        name = h.get("localName") or h.get("name", "Holiday")
+                        existing = await db.holidays.find_one(
+                            {"date": date_str}, {"_id": 0}
+                        )
                         if not existing:
-                            await db.holidays.insert_one({
-                                "date":       date_str,
-                                "name":       name,
-                                "status":     "confirmed",
-                                "type":       "public",
-                                "created_at": now_ist.isoformat(),
-                            })
+                            await db.holidays.insert_one(
+                                {
+                                    "date": date_str,
+                                    "name": name,
+                                    "status": "confirmed",
+                                    "type": "public",
+                                    "created_at": now_ist.isoformat(),
+                                }
+                            )
                             total_added += 1
                         elif existing.get("status") not in ("confirmed", "rejected"):
                             await db.holidays.update_one(
-                                {"date": date_str},
-                                {"$set": {"status": "confirmed"}}
+                                {"date": date_str}, {"$set": {"status": "confirmed"}}
                             )
                 except Exception as year_err:
                     logger.warning(f"Holiday sync for {year} failed: {year_err}")
@@ -610,50 +706,58 @@ async def startup_event():
     # the service as idle and spins it down. This is critical for the Identix
     # machine — it expects the server to be awake 24/7 to receive punches.
     async def _keep_alive_ping():
-        await asyncio.sleep(60)   # wait 1 min after boot before starting
+        await asyncio.sleep(60)  # wait 1 min after boot before starting
         import os as _os
+
         _self_url = _os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
         if not _self_url:
             # fallback: derive from RENDER_SERVICE_NAME or use localhost
             svc = _os.environ.get("RENDER_SERVICE_NAME", "")
-            _self_url = f"https://{svc}.onrender.com" if svc else "http://localhost:8000"
+            _self_url = (
+                f"https://{svc}.onrender.com" if svc else "http://localhost:8000"
+            )
         ping_url = f"{_self_url}/health"
         logger.info(f"Keep-alive ping started → {ping_url} every 10 min")
         while True:
             try:
                 import httpx as _httpx
+
                 async with _httpx.AsyncClient(timeout=10) as _http:
                     r = await _http.get(ping_url)
                 logger.debug(f"Keep-alive ping OK ({r.status_code})")
             except Exception as _pe:
                 logger.warning(f"Keep-alive ping failed (non-fatal): {_pe}")
-            await asyncio.sleep(600)   # 10 minutes
+            await asyncio.sleep(600)  # 10 minutes
 
     asyncio.create_task(_keep_alive_ping())
 
-        # 🔥 AUTO MIGRATION: Add consent_given for old users
+    # 🔥 AUTO MIGRATION: Add consent_given for old users
     try:
         result = await db.users.update_many(
             {},  # all users
-            {"$set": {"consent_given": True}}
+            {"$set": {"consent_given": True}},
         )
         logger.info(f"Consent cleanup: Updated {result.modified_count} users")
     except Exception as e:
         logger.error(f"Consent cleanup failed: {e}")
+
 
 # ====================== HEALTH ======================
 @app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
     return JSONResponse({"status": "ok", "cors": "configured correctly"})
 
+
 @app.get("/")
 async def root():
     return {"message": "Server is running"}
+
 
 # ====================== SECURITY & DB ======================
 rankings_cache = {}
 # Store cache times as timezone-aware UTC datetimes for consistent comparison
 rankings_cache_time: Dict[str, datetime] = {}
+
 
 # ===================== HELPER FUNCTIONS =====================
 def safe_dt(value):
@@ -669,6 +773,7 @@ def safe_dt(value):
     except Exception:
         return None
 
+
 def sanitize_user_data(users, current_user=None):
     is_single = False
     if not isinstance(users, list):
@@ -681,9 +786,12 @@ def sanitize_user_data(users, current_user=None):
             sanitized.append(safe_user)
         else:
             user_dict = user.model_dump() if hasattr(user, "model_dump") else vars(user)
-            safe_user = {k: v for k, v in user_dict.items() if k not in ["password", "_id"]}
+            safe_user = {
+                k: v for k, v in user_dict.items() if k not in ["password", "_id"]
+            }
             sanitized.append(safe_user)
     return sanitized[0] if is_single else sanitized
+
 
 def convert_objectids(data):
     """Recursively convert MongoDB ObjectId / date / datetime fields to JSON-safe types.
@@ -717,12 +825,14 @@ def convert_objectids(data):
         return data.isoformat()
     return data
 
+
 def get_user_permissions(current_user: User) -> dict:
     if isinstance(current_user.permissions, dict):
         return current_user.permissions
     if current_user.permissions:
         return current_user.permissions.model_dump()
     return {}
+
 
 def is_own_record(current_user: User, record: dict) -> bool:
     uid = current_user.id
@@ -733,7 +843,15 @@ def is_own_record(current_user: User, record: dict) -> bool:
         or uid in record.get("sub_assignees", [])
     )
 
-async def create_audit_log(current_user: User, action: str, module: str, record_id: str, old_data: dict = None, new_data: dict = None):
+
+async def create_audit_log(
+    current_user: User,
+    action: str,
+    module: str,
+    record_id: str,
+    old_data: dict = None,
+    new_data: dict = None,
+):
     log_entry = AuditLog(
         user_id=current_user.id,
         user_name=current_user.full_name,
@@ -742,11 +860,17 @@ async def create_audit_log(current_user: User, action: str, module: str, record_
         record_id=record_id,
         old_data=convert_objectids(old_data) if old_data else None,
         new_data=convert_objectids(new_data) if new_data else None,
-        timestamp=datetime.now(timezone.utc)
+        timestamp=datetime.now(timezone.utc),
     )
     await db.audit_logs.insert_one(log_entry.model_dump())
 
-async def calculate_expected_hours(start_date_str: str, end_date_str: str, shift_start: str = "10:30", shift_end: str = "19:00"):
+
+async def calculate_expected_hours(
+    start_date_str: str,
+    end_date_str: str,
+    shift_start: str = "10:30",
+    shift_end: str = "19:00",
+):
     try:
         start = date.fromisoformat(start_date_str)
         end = date.fromisoformat(end_date_str)
@@ -770,11 +894,13 @@ async def calculate_expected_hours(start_date_str: str, end_date_str: str, shift
         current_date += timedelta(days=1)
     return round(total_hours, 2)
 
+
 def fetch_indian_holidays_task():
     """
     Scheduled job (sync wrapper for BackgroundScheduler) to fetch holidays.
     Uses run_coroutine_threadsafe so Motor futures stay on the main event loop.
     """
+
     async def _async_fetch():
         try:
             now = datetime.now(IST)
@@ -786,22 +912,23 @@ def fetch_indian_holidays_task():
                 external_holidays = response.json()
                 count = 0
                 for h in external_holidays:
-                    date_str = h['date']
-                    existing = await db.holidays.find_one({"date": date_str}, {"_id": 0})
+                    date_str = h["date"]
+                    existing = await db.holidays.find_one(
+                        {"date": date_str}, {"_id": 0}
+                    )
                     if not existing:
                         new_holiday = {
                             "date": date_str,
-                            "name": h.get('localName') or h.get('name', 'Holiday'),
+                            "name": h.get("localName") or h.get("name", "Holiday"),
                             "status": "confirmed",
                             "type": "public",
-                            "created_at": datetime.now(IST).isoformat()
+                            "created_at": datetime.now(IST).isoformat(),
                         }
                         await db.holidays.insert_one(new_holiday)
                         count += 1
                     elif existing.get("status") not in ("confirmed", "rejected"):
                         await db.holidays.update_one(
-                            {"date": date_str},
-                            {"$set": {"status": "confirmed"}}
+                            {"date": date_str}, {"$set": {"status": "confirmed"}}
                         )
                 logger.info(f"Auto-synced holidays for {year}: {count} new")
         except Exception as e:
@@ -809,9 +936,12 @@ def fetch_indian_holidays_task():
 
     try:
         import backend.server as _self
+
         loop = _self.app_event_loop
         if loop is None or loop.is_closed():
-            logger.warning("fetch_indian_holidays_task: main event loop not ready, skipping.")
+            logger.warning(
+                "fetch_indian_holidays_task: main event loop not ready, skipping."
+            )
             return
         future = asyncio.run_coroutine_threadsafe(_async_fetch(), loop)
         future.result(timeout=120)
@@ -822,9 +952,15 @@ def fetch_indian_holidays_task():
 # ROUTER
 api_router = APIRouter(prefix="/api")
 
+
 # HELPERS - Email Service Functions
-async def _brevo_send(to_email: str, subject: str, body_plain: str, body_html: str = None,
-                      attachments: list = None):
+async def _brevo_send(
+    to_email: str,
+    subject: str,
+    body_plain: str,
+    body_html: str = None,
+    attachments: list = None,
+):
     """Core Brevo HTTP API sender — async, non-blocking.
     Sender email/name: DB active_sender setting → env vars fallback.
     `attachments` is an optional list of {"name": str, "content": base64str}.
@@ -832,16 +968,18 @@ async def _brevo_send(to_email: str, subject: str, body_plain: str, body_html: s
     api_key = (os.getenv("BREVO_API_KEY") or "").strip()
     # Try DB active sender first, fall back to env vars
     try:
-        _sender_doc = await db.email_sender_settings.find_one({"type": "active_sender"}, {"_id": 0})
+        _sender_doc = await db.email_sender_settings.find_one(
+            {"type": "active_sender"}, {"_id": 0}
+        )
         if _sender_doc and _sender_doc.get("email"):
             sender_email = _sender_doc["email"].strip()
-            sender_name  = (_sender_doc.get("name") or "TaskoSphere").strip()
+            sender_name = (_sender_doc.get("name") or "TaskoSphere").strip()
         else:
             sender_email = (os.getenv("SENDER_EMAIL") or "").strip()
-            sender_name  = (os.getenv("SENDER_NAME") or "TaskoSphere").strip()
+            sender_name = (os.getenv("SENDER_NAME") or "TaskoSphere").strip()
     except Exception:
         sender_email = (os.getenv("SENDER_EMAIL") or "").strip()
-        sender_name  = (os.getenv("SENDER_NAME") or "TaskoSphere").strip()
+        sender_name = (os.getenv("SENDER_NAME") or "TaskoSphere").strip()
 
     if not api_key or not sender_email:
         raise Exception(
@@ -860,7 +998,8 @@ async def _brevo_send(to_email: str, subject: str, body_plain: str, body_html: s
     if attachments:
         clean = [
             {"name": a.get("name") or "attachment", "content": a.get("content")}
-            for a in attachments if a and a.get("content")
+            for a in attachments
+            if a and a.get("content")
         ]
         if clean:
             payload["attachment"] = clean
@@ -927,6 +1066,7 @@ async def send_birthday_email(recipient_email: str, client_name: str):
         logger.error(f"Failed to send birthday email: {str(e)}")
         return False
 
+
 # ─── ACTIVE SENDER HELPER ─────────────────────────────────────────────────────
 async def _get_active_sender():
     """
@@ -934,12 +1074,16 @@ async def _get_active_sender():
     Priority: DB setting → env vars fallback.
     """
     try:
-        doc = await db.email_sender_settings.find_one({"type": "active_sender"}, {"_id": 0})
+        doc = await db.email_sender_settings.find_one(
+            {"type": "active_sender"}, {"_id": 0}
+        )
         if doc and doc.get("email"):
             return doc["email"].strip(), (doc.get("name") or "TaskoSphere").strip()
     except Exception:
         pass
-    return (os.getenv("SENDER_EMAIL") or "").strip(), (os.getenv("SENDER_NAME") or "TaskoSphere").strip()
+    return (os.getenv("SENDER_EMAIL") or "").strip(), (
+        os.getenv("SENDER_NAME") or "TaskoSphere"
+    ).strip()
 
 
 # ─── SENDER MANAGEMENT ENDPOINTS ──────────────────────────────────────────────
@@ -949,15 +1093,15 @@ async def get_active_sender(current_user: User = Depends(get_current_user)):
     email, name = await _get_active_sender()
     # Also return env fallback info
     env_email = (os.getenv("SENDER_EMAIL") or "").strip()
-    env_name  = (os.getenv("SENDER_NAME") or "TaskoSphere").strip()
+    env_name = (os.getenv("SENDER_NAME") or "TaskoSphere").strip()
     doc = await db.email_sender_settings.find_one({"type": "active_sender"}, {"_id": 0})
     return {
-        "active_email":  email,
-        "active_name":   name,
-        "source":        "db" if (doc and doc.get("email")) else "env",
-        "env_email":     env_email,
-        "env_name":      env_name,
-        "db_senders":    doc.get("all_senders", []) if doc else [],
+        "active_email": email,
+        "active_name": name,
+        "source": "db" if (doc and doc.get("email")) else "env",
+        "env_email": env_email,
+        "env_name": env_name,
+        "db_senders": doc.get("all_senders", []) if doc else [],
     }
 
 
@@ -967,7 +1111,7 @@ async def list_saved_senders(current_user: User = Depends(get_current_user)):
     doc = await db.email_sender_settings.find_one({"type": "active_sender"}, {"_id": 0})
     senders = doc.get("all_senders", []) if doc else []
     env_email = (os.getenv("SENDER_EMAIL") or "").strip()
-    env_name  = (os.getenv("SENDER_NAME") or "TaskoSphere").strip()
+    env_name = (os.getenv("SENDER_NAME") or "TaskoSphere").strip()
     # Always include env sender if present and not already in list
     if env_email and not any(s["email"] == env_email for s in senders):
         senders = [{"email": env_email, "name": env_name, "source": "env"}] + senders
@@ -980,25 +1124,37 @@ async def set_active_sender(body: dict, current_user: User = Depends(get_current
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
     email = (body.get("email") or "").strip()
-    name  = (body.get("name") or "TaskoSphere").strip()
+    name = (body.get("name") or "TaskoSphere").strip()
     if not email or "@" not in email:
         raise HTTPException(status_code=422, detail="Valid email required")
     # Load existing doc to preserve all_senders list
-    doc = await db.email_sender_settings.find_one({"type": "active_sender"}, {"_id": 0}) or {}
+    doc = (
+        await db.email_sender_settings.find_one({"type": "active_sender"}, {"_id": 0})
+        or {}
+    )
     all_senders = doc.get("all_senders", [])
     # Add to list if not already there
     if not any(s["email"] == email for s in all_senders):
-        all_senders.append({"email": email, "name": name, "source": "brevo", "added_at": __import__("datetime").datetime.utcnow().isoformat()})
+        all_senders.append(
+            {
+                "email": email,
+                "name": name,
+                "source": "brevo",
+                "added_at": __import__("datetime").datetime.utcnow().isoformat(),
+            }
+        )
     await db.email_sender_settings.update_one(
         {"type": "active_sender"},
-        {"$set": {
-            "type":        "active_sender",
-            "email":       email,
-            "name":        name,
-            "all_senders": all_senders,
-            "updated_at":  __import__("datetime").datetime.utcnow().isoformat(),
-            "updated_by":  str(current_user.id),
-        }},
+        {
+            "$set": {
+                "type": "active_sender",
+                "email": email,
+                "name": name,
+                "all_senders": all_senders,
+                "updated_at": __import__("datetime").datetime.utcnow().isoformat(),
+                "updated_by": str(current_user.id),
+            }
+        },
         upsert=True,
     )
     return {"status": "ok", "active_email": email, "active_name": name}
@@ -1010,14 +1166,24 @@ async def add_sender_option(body: dict, current_user: User = Depends(get_current
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
     email = (body.get("email") or "").strip()
-    name  = (body.get("name") or email).strip()
+    name = (body.get("name") or email).strip()
     if not email or "@" not in email:
         raise HTTPException(status_code=422, detail="Valid email required")
-    doc = await db.email_sender_settings.find_one({"type": "active_sender"}, {"_id": 0}) or {}
+    doc = (
+        await db.email_sender_settings.find_one({"type": "active_sender"}, {"_id": 0})
+        or {}
+    )
     all_senders = doc.get("all_senders", [])
     if any(s["email"] == email for s in all_senders):
         return {"status": "already_exists", "senders": all_senders}
-    all_senders.append({"email": email, "name": name, "source": "brevo", "added_at": __import__("datetime").datetime.utcnow().isoformat()})
+    all_senders.append(
+        {
+            "email": email,
+            "name": name,
+            "source": "brevo",
+            "added_at": __import__("datetime").datetime.utcnow().isoformat(),
+        }
+    )
     await db.email_sender_settings.update_one(
         {"type": "active_sender"},
         {"$set": {"all_senders": all_senders}},
@@ -1027,18 +1193,25 @@ async def add_sender_option(body: dict, current_user: User = Depends(get_current
 
 
 @api_router.delete("/email/senders/{sender_email}")
-async def remove_sender_option(sender_email: str, current_user: User = Depends(get_current_user)):
+async def remove_sender_option(
+    sender_email: str, current_user: User = Depends(get_current_user)
+):
     """Remove a sender from the saved list."""
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
-    doc = await db.email_sender_settings.find_one({"type": "active_sender"}, {"_id": 0}) or {}
+    doc = (
+        await db.email_sender_settings.find_one({"type": "active_sender"}, {"_id": 0})
+        or {}
+    )
     all_senders = [s for s in doc.get("all_senders", []) if s["email"] != sender_email]
     # If active sender was removed, reset to env
     updates = {"all_senders": all_senders}
     if doc.get("email") == sender_email:
         updates["email"] = (os.getenv("SENDER_EMAIL") or "").strip()
-        updates["name"]  = (os.getenv("SENDER_NAME") or "TaskoSphere").strip()
-    await db.email_sender_settings.update_one({"type": "active_sender"}, {"$set": updates}, upsert=True)
+        updates["name"] = (os.getenv("SENDER_NAME") or "TaskoSphere").strip()
+    await db.email_sender_settings.update_one(
+        {"type": "active_sender"}, {"$set": updates}, upsert=True
+    )
     return {"status": "removed", "senders": all_senders}
 
 
@@ -1049,19 +1222,25 @@ async def test_email_service(current_user: User = Depends(get_current_user)):
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
 
-    missing = [k for k, v in {
-        "BREVO_API_KEY": os.getenv("BREVO_API_KEY"),
-        "SENDER_EMAIL":  os.getenv("SENDER_EMAIL"),
-    }.items() if not v]
+    missing = [
+        k
+        for k, v in {
+            "BREVO_API_KEY": os.getenv("BREVO_API_KEY"),
+            "SENDER_EMAIL": os.getenv("SENDER_EMAIL"),
+        }.items()
+        if not v
+    ]
 
     if missing:
-        raise HTTPException(status_code=500, detail=f"Missing env vars: {', '.join(missing)}")
+        raise HTTPException(
+            status_code=500, detail=f"Missing env vars: {', '.join(missing)}"
+        )
 
     try:
         await _brevo_send(
-            to_email   = current_user.email,
-            subject    = "✅ TaskoSphere — Mail Service Test",
-            body_plain = (
+            to_email=current_user.email,
+            subject="✅ TaskoSphere — Mail Service Test",
+            body_plain=(
                 f"Hello {current_user.full_name},\n\n"
                 f"This is a test email from TaskoSphere.\n"
                 f"If you received this, your mail service is working correctly.\n\n"
@@ -1070,23 +1249,26 @@ async def test_email_service(current_user: User = Depends(get_current_user)):
                 f"Regards,\nTaskoSphere"
             ),
         )
-        return {"status": "success", "message": f"Test email sent to {current_user.email}"}
+        return {
+            "status": "success",
+            "message": f"Test email sent to {current_user.email}",
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Mail error: {str(e)}")
+
 
 # Task Analytics
 @api_router.get("/tasks/analytics")
 async def get_task_analytics(
-    month: str,
-    current_user: User = Depends(check_module_permission("tasks", "view"))
+    month: str, current_user: User = Depends(check_module_permission("tasks", "view"))
 ):
-    """ Get task analytics for a specific month (YYYY-MM) """
+    """Get task analytics for a specific month (YYYY-MM)"""
     query = {}
     if current_user.role != "admin":
         query["$or"] = [
             {"assigned_to": current_user.id},
             {"sub_assignees": current_user.id},
-            {"created_by": current_user.id}
+            {"created_by": current_user.id},
         ]
     tasks = await db.tasks.find(query, {"_id": 0}).to_list(1000)
     total = 0
@@ -1112,18 +1294,16 @@ async def get_task_analytics(
         "month": month,
         "total_tasks": total,
         "completed_tasks": completed,
-        "pending_tasks": pending
+        "pending_tasks": pending,
     }
 
 
 # ── AI: Detect Duplicate Tasks ─────────────────────────────────────────────────
 @api_router.post("/tasks/detect-duplicates")
-async def detect_duplicate_tasks(
-    current_user: User = Depends(get_current_user)
-):
+async def detect_duplicate_tasks(current_user: User = Depends(get_current_user)):
     """
     Use Gemini AI (gemini-2.0-flash) to find duplicate tasks.
-    
+
     """
     import json as _json, re as _re
 
@@ -1131,18 +1311,17 @@ async def detect_duplicate_tasks(
     gemini_key = os.environ.get("GEMINI_API_KEY", "")
     if not gemini_key:
         raise HTTPException(
-            status_code=503,
-            detail="GEMINI_API_KEY is not set on the server."
+            status_code=503, detail="GEMINI_API_KEY is not set on the server."
         )
 
     try:
         import google.generativeai as _genai
+
         _genai.configure(api_key=gemini_key)
         _model = _genai.GenerativeModel("gemini-2.0-flash")
     except ImportError:
         raise HTTPException(
-            status_code=503,
-            detail="google-generativeai package not installed."
+            status_code=503, detail="google-generativeai package not installed."
         )
 
     # ── 2. Scope query same as GET /tasks ──────────────────────────────────
@@ -1171,11 +1350,11 @@ async def detect_duplicate_tasks(
     # ── 3. Build minimal payload ───────────────────────────────────────────
     task_summaries = [
         {
-            "id":    str(t.get("id", "")),
+            "id": str(t.get("id", "")),
             "title": (t.get("title") or "")[:100],
-            "desc":  (t.get("description") or "")[:80],
-            "cat":   t.get("category") or "",
-            "cid":   t.get("client_id") or "",
+            "desc": (t.get("description") or "")[:80],
+            "cat": t.get("category") or "",
+            "cid": t.get("client_id") or "",
         }
         for t in tasks
     ]
@@ -1190,8 +1369,8 @@ async def detect_duplicate_tasks(
 
     # ── 4. Call Gemini ─────────────────────────────────────────────────────
     try:
-        resp   = await _model.generate_content_async(prompt)
-        raw    = _re.sub(r"```[a-zA-Z]*", "", resp.text.strip()).replace("```", "").strip()
+        resp = await _model.generate_content_async(prompt)
+        raw = _re.sub(r"```[a-zA-Z]*", "", resp.text.strip()).replace("```", "").strip()
         groups = _json.loads(raw)
         if not isinstance(groups, list):
             groups = []
@@ -1203,7 +1382,7 @@ async def detect_duplicate_tasks(
                 detail=(
                     "Gemini API quota exceeded. "
                     "Upgrade at https://ai.google.dev/pricing or wait and retry."
-                )
+                ),
             )
         logger.warning(f"Gemini duplicate detection failed: {e}")
         raise HTTPException(status_code=500, detail=f"AI error: {err_str[:200]}")
@@ -1214,8 +1393,7 @@ async def detect_duplicate_tasks(
 # ── AI: Detect Duplicate Tasks via Groq (Llama) ────────────────────────────────
 @api_router.post("/tasks/detect-duplicates-grok")
 async def detect_duplicate_tasks_grok(
-    payload: dict,
-    current_user: User = Depends(get_current_user)
+    payload: dict, current_user: User = Depends(get_current_user)
 ):
     """
     Use Groq API (llama-3.3-70b-versatile) to find duplicate tasks.
@@ -1229,7 +1407,7 @@ async def detect_duplicate_tasks_grok(
     if not groq_key:
         raise HTTPException(
             status_code=503,
-            detail="GROQ_API_KEY is not set on the server. Add your Groq API key to enable Grok duplicate detection."
+            detail="GROQ_API_KEY is not set on the server. Add your Groq API key to enable Grok duplicate detection.",
         )
 
     # ── 2. Get tasks — from payload or DB ────────────────────────────────
@@ -1265,11 +1443,11 @@ async def detect_duplicate_tasks_grok(
     # ── 3. Build minimal task summaries ──────────────────────────────────
     task_summaries = [
         {
-            "id":    str(t.get("id", "")),
+            "id": str(t.get("id", "")),
             "title": (t.get("title") or "")[:100],
-            "desc":  (t.get("description") or "")[:80],
-            "cat":   t.get("category") or "",
-            "cid":   str(t.get("client_id") or ""),
+            "desc": (t.get("description") or "")[:80],
+            "cat": t.get("category") or "",
+            "cid": str(t.get("client_id") or ""),
         }
         for t in tasks
     ]
@@ -1296,32 +1474,29 @@ async def detect_duplicate_tasks_grok(
                     "messages": [
                         {
                             "role": "system",
-                            "content": "You are a task deduplication assistant. Always respond with valid JSON only — no markdown, no code fences, no explanation."
+                            "content": "You are a task deduplication assistant. Always respond with valid JSON only — no markdown, no code fences, no explanation.",
                         },
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
+                        {"role": "user", "content": prompt},
                     ],
                     "temperature": 0.1,
                     "max_tokens": 1024,
-                }
+                },
             )
 
         if response.status_code == 429:
             raise HTTPException(
                 status_code=429,
-                detail="Groq API rate limit exceeded. Please wait a moment and try again."
+                detail="Groq API rate limit exceeded. Please wait a moment and try again.",
             )
         if response.status_code == 401:
             raise HTTPException(
                 status_code=503,
-                detail="Invalid GROQ_API_KEY. Please check your Groq API key on Render."
+                detail="Invalid GROQ_API_KEY. Please check your Groq API key on Render.",
             )
         if not response.is_success:
             raise HTTPException(
                 status_code=502,
-                detail=f"Groq API error: {response.status_code} — {response.text[:200]}"
+                detail=f"Groq API error: {response.status_code} — {response.text[:200]}",
             )
 
         data = response.json()
@@ -1336,9 +1511,13 @@ async def detect_duplicate_tasks_grok(
         raise
     except _json.JSONDecodeError as e:
         logger.warning(f"Groq returned non-JSON response: {e}")
-        raise HTTPException(status_code=500, detail="Groq returned an unparseable response. Try again.")
+        raise HTTPException(
+            status_code=500, detail="Groq returned an unparseable response. Try again."
+        )
     except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="Groq API timed out. Please try again.")
+        raise HTTPException(
+            status_code=504, detail="Groq API timed out. Please try again."
+        )
     except Exception as e:
         err_str = str(e)
         logger.warning(f"Groq duplicate detection failed: {e}")
@@ -1351,8 +1530,10 @@ async def detect_duplicate_tasks_grok(
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
+
 def get_password_hash(password):
     return pwd_context.hash(password)
+
 
 async def send_email(to_email: str, subject: str, body: str):
     """Send plain text email via Brevo API (async)."""
@@ -1363,22 +1544,16 @@ async def send_email(to_email: str, subject: str, body: str):
         raise Exception(f"Brevo API error: {str(e)}")
 
 
-#===========================================================
-#Website activity
-#===========================================================
+# ===========================================================
+# Website activity
+# ===========================================================
+
 
 @api_router.get("/activity/websites")
-async def get_website_activity(
-    current_user: User = Depends(get_current_user)
-):
+async def get_website_activity(current_user: User = Depends(get_current_user)):
     try:
         pipeline = [
-            {
-                "$match": {
-                    "user_id": current_user.id,
-                    "type": "website"
-                }
-            },
+            {"$match": {"user_id": current_user.id, "type": "website"}},
             {
                 "$group": {
                     "_id": "$user_id",
@@ -1388,18 +1563,12 @@ async def get_website_activity(
                             "domain": "$domain",
                             "title": "$title",
                             "duration": "$duration",
-                            "timestamp": "$timestamp"
+                            "timestamp": "$timestamp",
                         }
-                    }
+                    },
                 }
             },
-            {
-                "$project": {
-                    "_id": 0,
-                    "user_id": "$_id",
-                    "websites": 1
-                }
-            }
+            {"$project": {"_id": 0, "user_id": "$_id", "websites": 1}},
         ]
 
         data = await db.staff_activity.aggregate(pipeline).to_list(100)
@@ -1412,10 +1581,7 @@ async def get_website_activity(
 
 
 @api_router.post("/activity/track-website")
-async def track_website(
-    data: dict,
-    current_user: User = Depends(get_current_user)
-):
+async def track_website(data: dict, current_user: User = Depends(get_current_user)):
     try:
         url = data.get("url")
         domain = data.get("domain")
@@ -1431,7 +1597,7 @@ async def track_website(
             "domain": domain,
             "title": data.get("title", ""),
             "timestamp": datetime.now(timezone.utc),
-            "duration": int(data.get("duration", 0))
+            "duration": int(data.get("duration", 0)),
         }
 
         await db.staff_activity.insert_one(activity)
@@ -1444,22 +1610,24 @@ async def track_website(
         logger.error(f"Website tracking error: {str(e)}")
         raise HTTPException(status_code=500, detail="Tracking failed")
 
-#===========================================================
+
+# ===========================================================
 # AUTH ROUTES
-#============================================================
+# ============================================================
 @api_router.get("/system/time")
 async def get_system_time():
     now = datetime.now(IST)
     return {
         "server_time": now.isoformat(),
         "display_time": now.strftime("%I:%M:%S %p"),
-        "date": now.strftime("%Y-%m-%d")
+        "date": now.strftime("%Y-%m-%d"),
     }
 
 
 # =========================
 # REFERRERS ROUTES
 # =========================
+
 
 @api_router.get("/referrers")
 async def get_referrers(current_user: User = Depends(get_current_user)):
@@ -1474,7 +1642,9 @@ async def create_referrer(data: dict, current_user: User = Depends(get_current_u
     if not name:
         raise HTTPException(status_code=400, detail="Referrer name required")
 
-    existing = await db.referrers.find_one({"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}}, {"_id": 0})
+    existing = await db.referrers.find_one(
+        {"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}}, {"_id": 0}
+    )
 
     if existing:
         return existing
@@ -1483,7 +1653,7 @@ async def create_referrer(data: dict, current_user: User = Depends(get_current_u
         "id": str(uuid.uuid4()),
         "name": name,
         "created_by": current_user.id,
-        "created_at": datetime.now(timezone.utc).isoformat()
+        "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
     await db.referrers.insert_one(referrer)
@@ -1499,24 +1669,31 @@ async def create_referrer(data: dict, current_user: User = Depends(get_current_u
 # REFERRERS EDIT / DELETE
 # =========================
 
+
 @api_router.put("/referrers")
 async def update_referrer(data: dict, current_user: User = Depends(get_current_user)):
     old_name = (data.get("old_name") or "").strip()
     new_name = (data.get("new_name") or "").strip()
     if not old_name or not new_name:
-        raise HTTPException(status_code=400, detail="old_name and new_name are required")
+        raise HTTPException(
+            status_code=400, detail="old_name and new_name are required"
+        )
     conflict = await db.referrers.find_one(
         {"name": {"$regex": f"^{re.escape(new_name)}$", "$options": "i"}}, {"_id": 0}
     )
     if conflict and conflict.get("name", "").lower() != old_name.lower():
-        raise HTTPException(status_code=400, detail=f'"{new_name}" already exists in the referrer list')
+        raise HTTPException(
+            status_code=400, detail=f'"{new_name}" already exists in the referrer list'
+        )
     result = await db.referrers.update_one(
         {"name": {"$regex": f"^{re.escape(old_name)}$", "$options": "i"}},
-        {"$set": {"name": new_name}}
+        {"$set": {"name": new_name}},
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail=f'Referrer "{old_name}" not found')
-    await db.clients.update_many({"referred_by": old_name}, {"$set": {"referred_by": new_name}})
+    await db.clients.update_many(
+        {"referred_by": old_name}, {"$set": {"referred_by": new_name}}
+    )
     return {"ok": True, "name": new_name}
 
 
@@ -1535,6 +1712,7 @@ async def delete_referrer(name: str, current_user: User = Depends(get_current_us
 # =========================
 # AUDITORS ROUTES
 # =========================
+
 
 @api_router.get("/auditors")
 async def get_auditors(current_user: User = Depends(get_current_user)):
@@ -1556,7 +1734,7 @@ async def create_auditor(data: dict, current_user: User = Depends(get_current_us
         "id": str(uuid.uuid4()),
         "name": name,
         "created_by": current_user.id,
-        "created_at": datetime.now(timezone.utc).isoformat()
+        "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.auditors.insert_one(auditor)
     auditor.pop("_id", None)
@@ -1568,15 +1746,19 @@ async def update_auditor(data: dict, current_user: User = Depends(get_current_us
     old_name = (data.get("old_name") or "").strip()
     new_name = (data.get("new_name") or "").strip()
     if not old_name or not new_name:
-        raise HTTPException(status_code=400, detail="old_name and new_name are required")
+        raise HTTPException(
+            status_code=400, detail="old_name and new_name are required"
+        )
     conflict = await db.auditors.find_one(
         {"name": {"$regex": f"^{re.escape(new_name)}$", "$options": "i"}}, {"_id": 0}
     )
     if conflict and conflict.get("name", "").lower() != old_name.lower():
-        raise HTTPException(status_code=400, detail=f'"{new_name}" already exists in the auditor list')
+        raise HTTPException(
+            status_code=400, detail=f'"{new_name}" already exists in the auditor list'
+        )
     result = await db.auditors.update_one(
         {"name": {"$regex": f"^{re.escape(old_name)}$", "$options": "i"}},
-        {"$set": {"name": new_name}}
+        {"$set": {"name": new_name}},
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail=f'Auditor "{old_name}" not found')
@@ -1601,20 +1783,16 @@ async def delete_auditor(name: str, current_user: User = Depends(get_current_use
 # ==========================================================
 @api_router.post("/todos", response_model=Todo)
 async def create_todo(
-    todo_data: TodoCreate,
-    current_user: User = Depends(get_current_user)
+    todo_data: TodoCreate, current_user: User = Depends(get_current_user)
 ):
     now = datetime.now(timezone.utc)
-    todo = Todo(
-        user_id=current_user.id,
-        **todo_data.model_dump()
-    )
+    todo = Todo(user_id=current_user.id, **todo_data.model_dump())
     doc = todo.model_dump()
 
     # Safe conversion with fallback
     doc["created_at"] = (doc.get("created_at") or now).isoformat()
     doc["updated_at"] = (doc.get("updated_at") or now).isoformat()
-    
+
     if doc.get("due_date"):
         if isinstance(doc["due_date"], (datetime, date)):
             doc["due_date"] = doc["due_date"].isoformat()
@@ -1624,10 +1802,10 @@ async def create_todo(
     doc.pop("_id", None)
     return doc
 
+
 @api_router.get("/todos")
 async def get_todos(
-    user_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+    user_id: Optional[str] = None, current_user: User = Depends(get_current_user)
 ):
     if current_user.role == "admin":
         if user_id == "all":
@@ -1638,7 +1816,11 @@ async def get_todos(
             query = {"user_id": current_user.id}
 
     else:
-        permissions = current_user.permissions.model_dump() if hasattr(current_user.permissions, "model_dump") else (current_user.permissions or {})
+        permissions = (
+            current_user.permissions.model_dump()
+            if hasattr(current_user.permissions, "model_dump")
+            else (current_user.permissions or {})
+        )
         if not isinstance(permissions, dict):
             permissions = {}
         allowed_others = permissions.get("view_other_todos", []) or []
@@ -1659,6 +1841,8 @@ async def get_todos(
         t["id"] = str(t["_id"])
         del t["_id"]
     return todos
+
+
 @api_router.get("/dashboard/todo-overview")
 async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
     is_admin = current_user.role == "admin"
@@ -1666,7 +1850,9 @@ async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
         todos = await db.todos.find().to_list(2000)
         # Replaced N+1 user queries with a single batch lookup
         user_ids = list({t["user_id"] for t in todos if t.get("user_id")})
-        users_raw = await db.users.find({"id": {"$in": user_ids}}, {"_id": 0}).to_list(1000)
+        users_raw = await db.users.find({"id": {"$in": user_ids}}, {"_id": 0}).to_list(
+            1000
+        )
         user_name_map = {u["id"]: u.get("full_name", "Unknown User") for u in users_raw}
 
         grouped_todos = {}
@@ -1681,7 +1867,7 @@ async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
         return {
             "role": "admin",
             "todos": all_todos_flat,
-            "grouped_todos": grouped_todos
+            "grouped_todos": grouped_todos,
         }
     else:
         permissions = get_user_permissions(current_user)
@@ -1696,13 +1882,15 @@ async def get_todo_dashboard(current_user: User = Depends(get_current_user)):
         todos = await db.todos.find({"user_id": {"$in": query_ids}}).to_list(2000)
         for todo in todos:
             todo["_id"] = str(todo["_id"])
-        return {
-            "role": current_user.role,
-            "todos": todos
-        }
+        return {"role": current_user.role, "todos": todos}
+
 
 @api_router.post("/todos/{todo_id}/promote-to-task")
-async def promote_todo(todo_id: str, task_data: dict = Body(default={}), current_user: User = Depends(get_current_user)):
+async def promote_todo(
+    todo_id: str,
+    task_data: dict = Body(default={}),
+    current_user: User = Depends(get_current_user),
+):
     try:
         todo = await db.todos.find_one({"_id": ObjectId(todo_id)})
     except Exception:
@@ -1710,7 +1898,9 @@ async def promote_todo(todo_id: str, task_data: dict = Body(default={}), current
     if not todo:
         raise HTTPException(status_code=404, detail="Todo not found")
     if current_user.role != "admin" and todo["user_id"] != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to promote this todo")
+        raise HTTPException(
+            status_code=403, detail="Not authorized to promote this todo"
+        )
     now = datetime.now(IST)
 
     # Use edited form data from request body; fall back to todo values if not provided
@@ -1726,7 +1916,9 @@ async def promote_todo(todo_id: str, task_data: dict = Body(default={}), current
     new_task = {
         "id": str(uuid.uuid4()),
         "title": task_data.get("title") or todo["title"],
-        "description": task_data.get("description") if "description" in task_data else todo.get("description"),
+        "description": task_data.get("description")
+        if "description" in task_data
+        else todo.get("description"),
         "assigned_to": assigned_to,
         "sub_assignees": task_data.get("sub_assignees") or [],
         "priority": task_data.get("priority") or "medium",
@@ -1735,25 +1927,29 @@ async def promote_todo(todo_id: str, task_data: dict = Body(default={}), current
         "client_id": task_data.get("client_id") or None,
         "due_date": due_date,
         "is_recurring": task_data.get("is_recurring", False),
-        "recurrence_pattern": task_data.get("recurrence_pattern") if task_data.get("is_recurring") else None,
-        "recurrence_interval": task_data.get("recurrence_interval") if task_data.get("is_recurring") else None,
+        "recurrence_pattern": task_data.get("recurrence_pattern")
+        if task_data.get("is_recurring")
+        else None,
+        "recurrence_interval": task_data.get("recurrence_interval")
+        if task_data.get("is_recurring")
+        else None,
         "type": "task",
         "created_by": current_user.id,
         "created_at": now,
-        "updated_at": now
+        "updated_at": now,
     }
     async with await client.start_session() as session:
+
         async def cb(session):
             await db.tasks.insert_one(new_task, session=session)
             await db.todos.delete_one({"_id": ObjectId(todo_id)}, session=session)
+
         await session.with_transaction(cb)
     return {"message": "Todo promoted to task successfully"}
 
+
 @api_router.delete("/todos/{todo_id}")
-async def delete_todo(
-    todo_id: str,
-    current_user: User = Depends(get_current_user)
-):
+async def delete_todo(todo_id: str, current_user: User = Depends(get_current_user)):
     try:
         obj_id = ObjectId(todo_id)
     except Exception:
@@ -1766,11 +1962,10 @@ async def delete_todo(
     await db.todos.delete_one({"_id": obj_id})
     return {"message": "Todo deleted successfully"}
 
+
 @api_router.patch("/todos/{todo_id}")
 async def update_todo(
-    todo_id: str,
-    updates: dict,
-    current_user: User = Depends(get_current_user)
+    todo_id: str, updates: dict, current_user: User = Depends(get_current_user)
 ):
     try:
         todo = await db.todos.find_one({"_id": ObjectId(todo_id)})
@@ -1784,15 +1979,15 @@ async def update_todo(
     if updates.get("is_completed") is True:
         updates["completed_at"] = now
     updates["updated_at"] = now
-    await db.todos.update_one(
-        {"_id": ObjectId(todo_id)},
-        {"$set": updates}
-    )
+    await db.todos.update_one({"_id": ObjectId(todo_id)}, {"$set": updates})
     return {"message": "Todo updated successfully"}
+
 
 # REGISTER Endpoint
 @api_router.post("/auth/register", response_model=Token)
-async def register(user_data: UserCreate, current_user: User = Depends(get_current_user)):
+async def register(
+    user_data: UserCreate, current_user: User = Depends(get_current_user)
+):
     # PERMISSION MATRIX (updated):
     # Admin   → can register users with any role
     # Manager → can register staff users only (if can_manage_users is True)
@@ -1802,7 +1997,9 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
     can_manage = perms.get("can_manage_users", False)
 
     if not is_admin and not can_manage:
-        raise HTTPException(status_code=403, detail="You do not have permission to register users")
+        raise HTTPException(
+            status_code=403, detail="You do not have permission to register users"
+        )
 
     existing = await db.users.find_one({"email": user_data.email}, {"_id": 0})
     if existing:
@@ -1810,13 +2007,15 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
 
     hashed_password = get_password_hash(user_data.password)
 
-    requested_role = user_data.role.value if hasattr(user_data.role, "value") else user_data.role
+    requested_role = (
+        user_data.role.value if hasattr(user_data.role, "value") else user_data.role
+    )
 
     if requested_role in ["admin", "manager", "superadmin"]:
         if current_user.role != "admin":
             raise HTTPException(
                 status_code=400,
-                detail="Only staff role can be assigned during registration by non-admin users"
+                detail="Only staff role can be assigned during registration by non-admin users",
             )
 
     role_val = requested_role
@@ -1826,7 +2025,7 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
     def _date_str(v):
         if v is None:
             return None
-        return v.isoformat() if hasattr(v, 'isoformat') else str(v)
+        return v.isoformat() if hasattr(v, "isoformat") else str(v)
 
     new_user = {
         "id": user_id,
@@ -1846,24 +2045,27 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
         "status": "pending_approval",
         "approved_by": None,
         "approved_at": None,
-        "permissions": user_data.permissions if user_data.permissions else default_permissions,
+        "permissions": user_data.permissions
+        if user_data.permissions
+        else default_permissions,
         "created_at": datetime.now(timezone.utc).isoformat(),
         # ── Employment / Payroll ─────────────────────────────────────────────
         "joining_date": _date_str(getattr(user_data, "joining_date", None)),
-        "training_period_end": _date_str(getattr(user_data, "training_period_end", None)),
+        "training_period_end": _date_str(
+            getattr(user_data, "training_period_end", None)
+        ),
         "payroll_date": _date_str(getattr(user_data, "payroll_date", None)),
     }
 
     await db.users.insert_one(new_user)
 
     # Background sync (NON-BLOCKING)
-   # Safe background runner (kept for future use if needed)
+    # Safe background runner (kept for future use if needed)
     async def run_safe_background(coro, name="task"):
         try:
             await coro
         except Exception as e:
             logger.error(f"{name} failed: {e}", exc_info=True)
-
 
     # ─────────────────────────────────────────────
     # AUTH RESPONSE LOGIC (CLEANED)
@@ -1881,11 +2083,8 @@ async def register(user_data: UserCreate, current_user: User = Depends(get_curre
     #     "identix_sync"
     # ))
 
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": new_user
-    }
+    return {"access_token": access_token, "token_type": "bearer", "user": new_user}
+
 
 @api_router.post("/auth/self-register", response_model=Token)
 async def self_register(user_data: UserCreate):
@@ -1906,13 +2105,13 @@ async def self_register(user_data: UserCreate):
     def _date_str_sr(v):
         if v is None:
             return None
-        return v.isoformat() if hasattr(v, 'isoformat') else str(v)
+        return v.isoformat() if hasattr(v, "isoformat") else str(v)
 
     new_user = {
         "id": user_id,
         "email": user_data.email,
         "full_name": user_data.full_name,
-        "role": "staff",           # always staff for self-registration
+        "role": "staff",  # always staff for self-registration
         "password": hashed_password,
         "departments": user_data.departments or [],
         "phone": user_data.phone,
@@ -1923,14 +2122,16 @@ async def self_register(user_data: UserCreate):
         "punch_out_time": user_data.punch_out_time or "19:00",
         "profile_picture": user_data.profile_picture,
         "is_active": False,
-        "status": "pending_approval",   # always pending for self-registration
+        "status": "pending_approval",  # always pending for self-registration
         "approved_by": None,
         "approved_at": None,
         "permissions": default_permissions,
         "created_at": datetime.now(timezone.utc).isoformat(),
         # ── Employment / Payroll ─────────────────────────────────────────────
         "joining_date": _date_str_sr(getattr(user_data, "joining_date", None)),
-        "training_period_end": _date_str_sr(getattr(user_data, "training_period_end", None)),
+        "training_period_end": _date_str_sr(
+            getattr(user_data, "training_period_end", None)
+        ),
         "payroll_date": _date_str_sr(getattr(user_data, "payroll_date", None)),
     }
 
@@ -1957,7 +2158,7 @@ async def login(credentials: UserLogin):
     if user_status is not None and user_status != "active":
         raise HTTPException(
             status_code=403,
-            detail=f"Your account is {user_status}. Awaiting admin approval."
+            detail=f"Your account is {user_status}. Awaiting admin approval.",
         )
 
     user["permissions"] = user.get("permissions", UserPermissions().model_dump())
@@ -1972,13 +2173,14 @@ async def login(credentials: UserLogin):
         "access_token": access_token,
         "token_type": "bearer",
         "user": user_obj,
-        "consent_given": True
+        "consent_given": True,
     }
 
 
 @api_router.get("/auth/me", response_model=User)
 async def get_me(current_user: User = Depends(get_current_user)):
     return current_user
+
 
 # ── Permission Sync ───────────────────────────────────────────────────────────
 @api_router.post("/auth/sync-permissions")
@@ -1995,11 +2197,17 @@ async def sync_my_permissions(current_user: User = Depends(get_current_user)):
       - For each key in the template that is MISSING from the stored permissions,
         set it to the template default.  Existing DB values are never overwritten.
     """
-    role = current_user.role if isinstance(current_user.role, str) else current_user.role.value
+    role = (
+        current_user.role
+        if isinstance(current_user.role, str)
+        else current_user.role.value
+    )
     template = DEFAULT_ROLE_PERMISSIONS.get(role, {})
 
     # Get the raw permissions dict from DB
-    user_doc = await db.users.find_one({"id": current_user.id}, {"_id": 0, "password": 0})
+    user_doc = await db.users.find_one(
+        {"id": current_user.id}, {"_id": 0, "password": 0}
+    )
     if not user_doc:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -2015,12 +2223,11 @@ async def sync_my_permissions(current_user: User = Depends(get_current_user)):
     if missing_keys:
         merged = {**stored_perms, **missing_keys}
         await db.users.update_one(
-            {"id": current_user.id},
-            {"$set": {"permissions": merged}}
+            {"id": current_user.id}, {"$set": {"permissions": merged}}
         )
         # Return the fully merged user
         user_doc["permissions"] = merged
-    
+
     user_doc.pop("_id", None)
     user_doc.pop("password", None)
     return user_doc
@@ -2034,7 +2241,9 @@ async def approve_user(user_id: str, current_user: User = Depends(get_current_us
     # PERMISSION MATRIX (updated): Admin or users with can_manage_users can approve
     perms = get_user_permissions(current_user)
     if current_user.role != "admin" and not perms.get("can_manage_users", False):
-        raise HTTPException(status_code=403, detail="You do not have permission to approve users")
+        raise HTTPException(
+            status_code=403, detail="You do not have permission to approve users"
+        )
 
     existing = await db.users.find_one({"id": user_id}, {"_id": 0})
 
@@ -2044,25 +2253,20 @@ async def approve_user(user_id: str, current_user: User = Depends(get_current_us
     if existing.get("status") != "pending_approval":
         raise HTTPException(
             status_code=400,
-            detail=f"User status is {existing.get('status')}, not pending approval"
+            detail=f"User status is {existing.get('status')}, not pending approval",
         )
 
     update_data = {
         "status": "active",
         "is_active": True,
         "approved_by": current_user.id,
-        "approved_at": datetime.now(timezone.utc).isoformat()
+        "approved_at": datetime.now(timezone.utc).isoformat(),
     }
 
     await db.users.update_one({"id": user_id}, {"$set": update_data})
 
     await create_audit_log(
-        current_user,
-        "APPROVE_USER",
-        "user",
-        user_id,
-        existing,
-        update_data
+        current_user, "APPROVE_USER", "user", user_id, existing, update_data
     )
 
     return {"message": "User approved successfully"}
@@ -2073,50 +2277,49 @@ async def reject_user(user_id: str, current_user: User = Depends(get_current_use
     # PERMISSION MATRIX (updated): Admin or users with can_manage_users can reject
     perms = get_user_permissions(current_user)
     if current_user.role != "admin" and not perms.get("can_manage_users", False):
-        raise HTTPException(status_code=403, detail="You do not have permission to reject users")
+        raise HTTPException(
+            status_code=403, detail="You do not have permission to reject users"
+        )
 
     existing = await db.users.find_one({"id": user_id}, {"_id": 0})
 
     if not existing:
         raise HTTPException(status_code=404, detail="User not found")
 
-    update_data = {
-        "status": "rejected",
-        "is_active": False
-    }
+    update_data = {"status": "rejected", "is_active": False}
 
     await db.users.update_one({"id": user_id}, {"$set": update_data})
 
     await create_audit_log(
-        current_user,
-        "REJECT_USER",
-        "user",
-        user_id,
-        existing,
-        update_data
+        current_user, "REJECT_USER", "user", user_id, existing, update_data
     )
 
     return {"message": "User rejected"}
-#============================================================
+
+
+# ============================================================
 # USER MANAGEMENT
-#=============================================================
+# =============================================================
 @api_router.get("/users")
 async def get_users(
-    user_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+    user_id: Optional[str] = None, current_user: User = Depends(get_current_user)
 ):
     if current_user.role == "admin":
         query = {}
         users_raw = await db.users.find(query, {"_id": 0, "password": 0}).to_list(1000)
     elif current_user.role == "manager":
         if user_id:
-            target_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
+            target_user = await db.users.find_one(
+                {"id": user_id}, {"_id": 0, "password": 0}
+            )
             if not target_user:
                 raise HTTPException(status_code=404, detail="User not found")
             target_depts = target_user.get("departments", [])
             manager_depts = current_user.departments
             if not any(d in manager_depts for d in target_depts):
-                raise HTTPException(status_code=403, detail="User not in your departments")
+                raise HTTPException(
+                    status_code=403, detail="User not in your departments"
+                )
             users_raw = [target_user]
         else:
             # Manager: self + everyone in their cross-visibility union.
@@ -2124,7 +2327,9 @@ async def get_users(
             cross_ids = await get_cross_visibility_union(current_user.id)
             visible_ids = list(set(cross_ids + [current_user.id]))
             query = {"id": {"$in": visible_ids}}
-            users_raw = await db.users.find(query, {"_id": 0, "password": 0}).to_list(1000)
+            users_raw = await db.users.find(query, {"_id": 0, "password": 0}).to_list(
+                1000
+            )
     else:
         # Staff scope: own data always; with can_view_user_page can view the full directory.
         # Without can_view_user_page, staff still see self + their cross-visibility union.
@@ -2155,7 +2360,11 @@ async def get_users(
             # This is needed for task assignment dropdowns, cross-visibility, etc.
             users_raw = await db.users.find(
                 {"is_active": True},
-                {"_id": 0, "password": 0, "permissions": 0}   # strip permissions for privacy
+                {
+                    "_id": 0,
+                    "password": 0,
+                    "permissions": 0,
+                },  # strip permissions for privacy
             ).to_list(1000)
         else:
             # No directory access — return self + cross-visibility union
@@ -2174,16 +2383,17 @@ async def get_users(
             u["created_at"] = datetime.now(timezone.utc)
     return users_raw
 
+
 @api_router.put("/users/{user_id}", response_model=User)
 async def update_user(
     user_id: str,
     user_data: dict,
-    current_user: User = Depends(check_module_permission("users", "edit"))
+    current_user: User = Depends(check_module_permission("users", "edit")),
 ):
-    is_own     = user_id == current_user.id
-    is_admin   = current_user.role.lower() == "admin"
+    is_own = user_id == current_user.id
+    is_admin = current_user.role.lower() == "admin"
     is_manager = current_user.role.lower() == "manager"
-    perms      = get_user_permissions(current_user)
+    perms = get_user_permissions(current_user)
     has_edit_users = perms.get("can_edit_users", False)
 
     # Manager scope check: manager with can_edit_users can edit their team staff only
@@ -2193,9 +2403,13 @@ async def update_user(
             raise HTTPException(status_code=403, detail="User is not in your team")
         target_user = await db.users.find_one({"id": user_id}, {"_id": 0})
         if target_user and target_user.get("role") in ("admin", "manager"):
-            raise HTTPException(status_code=403, detail="Managers can only edit staff members")
+            raise HTTPException(
+                status_code=403, detail="Managers can only edit staff members"
+            )
     elif not is_admin and not is_own and not has_edit_users:
-        raise HTTPException(status_code=403, detail="You can only update your own profile.")
+        raise HTTPException(
+            status_code=403, detail="You can only update your own profile."
+        )
 
     existing = await db.users.find_one({"id": user_id}, {"_id": 0})
     if not existing:
@@ -2204,26 +2418,53 @@ async def update_user(
     if is_admin:
         # Admin can update all fields including role, permissions, status
         allowed_fields = [
-            "full_name", "email", "role", "departments", "phone",
-            "birthday", "punch_in_time", "grace_time",
-            "punch_out_time", "is_active", "profile_picture", "telegram_id",
-            "status", "permissions",
-            "joining_date", "training_period_end", "payroll_date",
+            "full_name",
+            "email",
+            "role",
+            "departments",
+            "phone",
+            "birthday",
+            "punch_in_time",
+            "grace_time",
+            "punch_out_time",
+            "is_active",
+            "profile_picture",
+            "telegram_id",
+            "status",
+            "permissions",
+            "joining_date",
+            "training_period_end",
+            "payroll_date",
         ]
     elif is_manager and has_edit_users and not is_own:
         # Manager editing a team staff member — can update profile + work settings, not role/permissions
         allowed_fields = [
-            "full_name", "email", "departments", "phone",
-            "birthday", "punch_in_time", "grace_time",
-            "punch_out_time", "is_active", "profile_picture", "telegram_id",
+            "full_name",
+            "email",
+            "departments",
+            "phone",
+            "birthday",
+            "punch_in_time",
+            "grace_time",
+            "punch_out_time",
+            "is_active",
+            "profile_picture",
+            "telegram_id",
             "status",
-            "joining_date", "training_period_end", "payroll_date",
+            "joining_date",
+            "training_period_end",
+            "payroll_date",
         ]
     else:
         # Self-edit: own profile fields only
         allowed_fields = [
-            "full_name", "phone", "birthday",
-            "punch_in_time", "punch_out_time", "profile_picture", "telegram_id"
+            "full_name",
+            "phone",
+            "birthday",
+            "punch_in_time",
+            "punch_out_time",
+            "profile_picture",
+            "telegram_id",
         ]
 
     update_payload = {}
@@ -2236,19 +2477,27 @@ async def update_user(
         update_payload["password"] = get_password_hash(new_password)
     if update_payload:
         await db.users.update_one({"id": user_id}, {"$set": update_payload})
-    await create_audit_log(current_user, "UPDATE_USER", "user", user_id, existing, update_payload)
+    await create_audit_log(
+        current_user, "UPDATE_USER", "user", user_id, existing, update_payload
+    )
     updated_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
     return updated_user
 
+
 @api_router.delete("/users/{user_id}")
-async def delete_user(user_id: str, current_user: User = Depends(check_module_permission("users", "delete"))):
+async def delete_user(
+    user_id: str,
+    current_user: User = Depends(check_module_permission("users", "delete")),
+):
     # Issue #8: fully permission-based (can_manage_users flag), admin always passes via check_module_permission
     if user_id == current_user.id:
         raise HTTPException(status_code=400, detail="Cannot delete yourself")
     existing = await db.users.find_one({"id": user_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="User not found")
-    await create_audit_log(current_user, "DELETE_USER", "user", record_id=user_id, old_data=existing)
+    await create_audit_log(
+        current_user, "DELETE_USER", "user", record_id=user_id, old_data=existing
+    )
     await db.users.delete_one({"id": user_id})
     return {"message": "User deleted successfully"}
 
@@ -2256,6 +2505,7 @@ async def delete_user(user_id: str, current_user: User = Depends(check_module_pe
 # ════════════════════════════════════════════════════════════════════════════════
 # EMPLOYEE OFFBOARDING / REPLACEMENT
 # ════════════════════════════════════════════════════════════════════════════════
+
 
 @api_router.get("/users/{user_id}/offboard-preview")
 async def offboard_preview(
@@ -2306,7 +2556,9 @@ async def offboard_user(
     if user_id == current_user.id:
         raise HTTPException(status_code=400, detail="Cannot offboard yourself")
     if user_id == body.replacement_user_id:
-        raise HTTPException(status_code=400, detail="Old and replacement user cannot be the same")
+        raise HTTPException(
+            status_code=400, detail="Old and replacement user cannot be the same"
+        )
 
     old_user = await db.users.find_one({"id": user_id}, {"_id": 0})
     if not old_user:
@@ -2320,55 +2572,77 @@ async def offboard_user(
 
     # 1. Tasks
     if body.transfer_tasks:
-        r1 = await db.tasks.update_many({"assigned_to": user_id}, {"$set": {"assigned_to": body.replacement_user_id}})
-        r2 = await db.tasks.update_many({"created_by": user_id}, {"$set": {"created_by": body.replacement_user_id}})
+        r1 = await db.tasks.update_many(
+            {"assigned_to": user_id},
+            {"$set": {"assigned_to": body.replacement_user_id}},
+        )
+        r2 = await db.tasks.update_many(
+            {"created_by": user_id}, {"$set": {"created_by": body.replacement_user_id}}
+        )
         transfer_summary["tasks_assigned"] = r1.modified_count
         transfer_summary["tasks_created"] = r2.modified_count
 
     # 2. Clients
     if body.transfer_clients:
-        r = await db.clients.update_many({"assigned_to": user_id}, {"$set": {"assigned_to": body.replacement_user_id}})
+        r = await db.clients.update_many(
+            {"assigned_to": user_id},
+            {"$set": {"assigned_to": body.replacement_user_id}},
+        )
         transfer_summary["clients_reassigned"] = r.modified_count
 
     # 3. DSC
     if body.transfer_dsc:
-        r = await db.dsc_register.update_many({"assigned_to": user_id}, {"$set": {"assigned_to": body.replacement_user_id}})
+        r = await db.dsc_register.update_many(
+            {"assigned_to": user_id},
+            {"$set": {"assigned_to": body.replacement_user_id}},
+        )
         transfer_summary["dsc_transferred"] = r.modified_count
 
     # 4. Documents
     if body.transfer_documents:
         r = await db.documents.update_many(
             {"$or": [{"assigned_to": user_id}, {"created_by": user_id}]},
-            {"$set": {"assigned_to": body.replacement_user_id}}
+            {"$set": {"assigned_to": body.replacement_user_id}},
         )
         transfer_summary["documents_transferred"] = r.modified_count
 
     # 5. Todos
     if body.transfer_todos:
-        r = await db.todos.update_many({"user_id": user_id}, {"$set": {"user_id": body.replacement_user_id}})
+        r = await db.todos.update_many(
+            {"user_id": user_id}, {"$set": {"user_id": body.replacement_user_id}}
+        )
         transfer_summary["todos_transferred"] = r.modified_count
 
     # 6. Visits
     if body.transfer_visits:
-        r = await db.visits.update_many({"assigned_to": user_id}, {"$set": {"assigned_to": body.replacement_user_id}})
+        r = await db.visits.update_many(
+            {"assigned_to": user_id},
+            {"$set": {"assigned_to": body.replacement_user_id}},
+        )
         transfer_summary["visits_transferred"] = r.modified_count
 
     # 7. Leads
     if body.transfer_leads:
-        r = await db.leads.update_many({"assigned_to": user_id}, {"$set": {"assigned_to": body.replacement_user_id}})
+        r = await db.leads.update_many(
+            {"assigned_to": user_id},
+            {"$set": {"assigned_to": body.replacement_user_id}},
+        )
         transfer_summary["leads_transferred"] = r.modified_count
 
     # 8. Update cross-user permission references in all other users
     for field in [
-        "permissions.view_other_tasks", "permissions.view_other_attendance",
-        "permissions.view_other_reports", "permissions.view_other_todos",
-        "permissions.view_other_activity", "permissions.view_other_visits",
+        "permissions.view_other_tasks",
+        "permissions.view_other_attendance",
+        "permissions.view_other_reports",
+        "permissions.view_other_todos",
+        "permissions.view_other_activity",
+        "permissions.view_other_visits",
         "permissions.assigned_clients",
     ]:
         await db.users.update_many(
             {field: user_id},
             {"$set": {f"{field}.$[elem]": body.replacement_user_id}},
-            array_filters=[{"elem": user_id}]
+            array_filters=[{"elem": user_id}],
         )
     transfer_summary["permission_references_updated"] = True
 
@@ -2376,23 +2650,39 @@ async def offboard_user(
     if body.update_email and body.update_email.strip():
         new_email = body.update_email.strip().lower()
         email_exists = await db.users.find_one(
-            {"email": new_email, "id": {"$ne": body.replacement_user_id}}, {"_id": 0, "id": 1}
+            {"email": new_email, "id": {"$ne": body.replacement_user_id}},
+            {"_id": 0, "id": 1},
         )
         if email_exists:
-            raise HTTPException(status_code=400, detail=f"Email {new_email} is already in use")
-        await db.users.update_one({"id": body.replacement_user_id}, {"$set": {"email": new_email}})
+            raise HTTPException(
+                status_code=400, detail=f"Email {new_email} is already in use"
+            )
+        await db.users.update_one(
+            {"id": body.replacement_user_id}, {"$set": {"email": new_email}}
+        )
         transfer_summary["email_updated"] = new_email
 
     # 10. Audit Log
     await create_audit_log(
-        current_user, "OFFBOARD_USER", "user", record_id=user_id,
+        current_user,
+        "OFFBOARD_USER",
+        "user",
+        record_id=user_id,
         old_data={
-            "offboarded_user": {"id": old_user.get("id"), "full_name": old_user.get("full_name"),
-                                "email": old_user.get("email"), "role": old_user.get("role"),
-                                "departments": old_user.get("departments", [])},
-            "replacement_user": {"id": new_user.get("id"), "full_name": new_user.get("full_name"),
-                                 "email": new_user.get("email")},
-            "transfer_summary": transfer_summary, "notes": body.notes,
+            "offboarded_user": {
+                "id": old_user.get("id"),
+                "full_name": old_user.get("full_name"),
+                "email": old_user.get("email"),
+                "role": old_user.get("role"),
+                "departments": old_user.get("departments", []),
+            },
+            "replacement_user": {
+                "id": new_user.get("id"),
+                "full_name": new_user.get("full_name"),
+                "email": new_user.get("email"),
+            },
+            "transfer_summary": transfer_summary,
+            "notes": body.notes,
         },
     )
 
@@ -2401,7 +2691,9 @@ async def offboard_user(
         await db.users.delete_one({"id": user_id})
         transfer_summary["old_user_deleted"] = True
     else:
-        await db.users.update_one({"id": user_id}, {"$set": {"is_active": False, "status": "inactive"}})
+        await db.users.update_one(
+            {"id": user_id}, {"$set": {"is_active": False, "status": "inactive"}}
+        )
         transfer_summary["old_user_deactivated"] = True
 
     return {
@@ -2438,21 +2730,25 @@ async def get_permissions(user_id: str, current_user: User = Depends(get_current
         team_ids = await get_team_user_ids(current_user.id)
         if user_id not in team_ids:
             raise HTTPException(status_code=403, detail="User is not in your team")
-        target_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
+        target_user = await db.users.find_one(
+            {"id": user_id}, {"_id": 0, "password": 0}
+        )
         if not target_user:
             raise HTTPException(status_code=404, detail="User not found")
         # Manager cannot view admin/manager permissions — only staff
         if target_user.get("role") in ("admin", "manager"):
-            raise HTTPException(status_code=403, detail="Managers can only view permissions of staff members")
+            raise HTTPException(
+                status_code=403,
+                detail="Managers can only view permissions of staff members",
+            )
         return target_user.get("permissions", {})
 
     raise HTTPException(status_code=403, detail="Not allowed")
 
+
 @api_router.put("/users/{user_id}/permissions")
 async def update_user_permissions(
-    user_id: str,
-    permissions: dict,
-    current_user: User = Depends(get_current_user)
+    user_id: str, permissions: dict, current_user: User = Depends(get_current_user)
 ):
     """
     Update permissions for a user.
@@ -2467,10 +2763,16 @@ async def update_user_permissions(
         if not existing:
             raise HTTPException(status_code=404, detail="User not found")
         old_permissions = existing.get("permissions", {})
-        await db.users.update_one({"id": user_id}, {"$set": {"permissions": permissions}})
+        await db.users.update_one(
+            {"id": user_id}, {"$set": {"permissions": permissions}}
+        )
         await create_audit_log(
-            current_user, "UPDATE_PERMISSIONS", "user",
-            record_id=user_id, old_data=old_permissions, new_data=permissions
+            current_user,
+            "UPDATE_PERMISSIONS",
+            "user",
+            record_id=user_id,
+            old_data=old_permissions,
+            new_data=permissions,
         )
         return {"message": "Permissions updated successfully"}
 
@@ -2484,30 +2786,58 @@ async def update_user_permissions(
         if not existing:
             raise HTTPException(status_code=404, detail="User not found")
         if existing.get("role") in ("admin", "manager"):
-            raise HTTPException(status_code=403, detail="Managers can only update permissions of staff members")
+            raise HTTPException(
+                status_code=403,
+                detail="Managers can only update permissions of staff members",
+            )
 
         # Managers CANNOT grant permissions they do not themselves possess
         # Strip any elevated permission flags that the manager doesn't have
         manager_perms = get_user_permissions(current_user)
         safe_permissions = {}
         BOOLEAN_PERM_KEYS = [
-            "can_view_all_tasks", "can_view_all_clients", "can_view_all_dsc",
-            "can_view_documents", "can_view_all_duedates", "can_view_reports",
-            "can_view_attendance", "can_view_all_leads", "can_edit_tasks",
-            "can_edit_clients", "can_edit_dsc", "can_edit_documents",
-            "can_edit_due_dates", "can_edit_users", "can_download_reports",
-            "can_manage_users", "can_manage_settings", "can_assign_tasks",
-            "can_assign_clients", "can_view_staff_activity", "can_view_user_page",
-            "can_view_audit_logs", "can_view_selected_users_reports",
-            "can_view_todo_dashboard", "can_use_chat", "can_view_staff_rankings",
-            "can_connect_email", "can_view_own_data", "can_create_quotations",
-            "can_manage_invoices", "can_view_passwords", "can_edit_passwords",
-            "can_view_compliance", "can_manage_compliance",
-            "can_view_all_visits", "can_edit_visits",
+            "can_view_all_tasks",
+            "can_view_all_clients",
+            "can_view_all_dsc",
+            "can_view_documents",
+            "can_view_all_duedates",
+            "can_view_reports",
+            "can_view_attendance",
+            "can_view_all_leads",
+            "can_edit_tasks",
+            "can_edit_clients",
+            "can_edit_dsc",
+            "can_edit_documents",
+            "can_edit_due_dates",
+            "can_edit_users",
+            "can_download_reports",
+            "can_manage_users",
+            "can_manage_settings",
+            "can_assign_tasks",
+            "can_assign_clients",
+            "can_view_staff_activity",
+            "can_view_user_page",
+            "can_view_audit_logs",
+            "can_view_selected_users_reports",
+            "can_view_todo_dashboard",
+            "can_use_chat",
+            "can_view_staff_rankings",
+            "can_connect_email",
+            "can_view_own_data",
+            "can_create_quotations",
+            "can_manage_invoices",
+            "can_view_passwords",
+            "can_edit_passwords",
+            "can_view_compliance",
+            "can_manage_compliance",
+            "can_view_all_visits",
+            "can_edit_visits",
         ]
         # Flags only admin can grant — managers cannot escalate these
         ADMIN_ONLY_GRANTS = {
-            "can_delete_data", "can_delete_tasks", "can_delete_visits",
+            "can_delete_data",
+            "can_delete_tasks",
+            "can_delete_visits",
             "can_send_reminders",
         }
         for key, val in permissions.items():
@@ -2525,18 +2855,25 @@ async def update_user_permissions(
                 safe_permissions[key] = val
 
         old_permissions = existing.get("permissions", {})
-        await db.users.update_one({"id": user_id}, {"$set": {"permissions": safe_permissions}})
+        await db.users.update_one(
+            {"id": user_id}, {"$set": {"permissions": safe_permissions}}
+        )
         await create_audit_log(
-            current_user, "UPDATE_PERMISSIONS", "user",
-            record_id=user_id, old_data=old_permissions, new_data=safe_permissions
+            current_user,
+            "UPDATE_PERMISSIONS",
+            "user",
+            record_id=user_id,
+            old_data=old_permissions,
+            new_data=safe_permissions,
         )
         return {"message": "Permissions updated successfully"}
 
     raise HTTPException(status_code=403, detail="Admin access required")
 
-#====================================================================================
+
+# ====================================================================================
 # ATTENDANCE ROUTES
-#=====================================================================================
+# =====================================================================================
 def get_real_client_ip(request: Request):
     x_forwarded_for = request.headers.get("x-forwarded-for")
     if x_forwarded_for:
@@ -2544,6 +2881,7 @@ def get_real_client_ip(request: Request):
     if request.client:
         return request.client.host
     return None
+
 
 def check_is_late(user: dict, punch_in_ist: datetime) -> bool:
     try:
@@ -2561,6 +2899,7 @@ def check_is_late(user: dict, punch_in_ist: datetime) -> bool:
     except Exception:
         return False
 
+
 def check_punched_out_early(user: dict, punch_out_ist: datetime) -> bool:
     try:
         pot = datetime.strptime(user.get("punch_out_time", "19:00"), "%H:%M")
@@ -2571,11 +2910,9 @@ def check_punched_out_early(user: dict, punch_out_ist: datetime) -> bool:
     except Exception:
         return False
 
+
 @api_router.post("/attendance")
-async def handle_attendance(
-    data: dict,
-    current_user: User = Depends(get_current_user)
-):
+async def handle_attendance(data: dict, current_user: User = Depends(get_current_user)):
     today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
     today_str = today.isoformat()
     # Note: We do NOT block punch-in on holidays.
@@ -2585,8 +2922,7 @@ async def handle_attendance(
     if action not in ["punch_in", "punch_out"]:
         raise HTTPException(status_code=400, detail="Invalid action")
     attendance = await db.attendance.find_one(
-        {"user_id": current_user.id, "date": today_str},
-        {"_id": 0}
+        {"user_id": current_user.id, "date": today_str}, {"_id": 0}
     )
     if action == "punch_in":
         if attendance and attendance.get("punch_in"):
@@ -2612,6 +2948,7 @@ async def handle_attendance(
             lng = location_data.get("longitude")
             if lat is not None and lng is not None:
                 import math
+
                 OFFICE_LAT = 21.18796
                 OFFICE_LNG = 72.81375
                 GEOFENCE_RADIUS_M = 200
@@ -2620,18 +2957,27 @@ async def handle_attendance(
                 phi2 = math.radians(lat)
                 dphi = math.radians(lat - OFFICE_LAT)
                 dlambda = math.radians(lng - OFFICE_LNG)
-                a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+                a = (
+                    math.sin(dphi / 2) ** 2
+                    + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+                )
                 distance_m = R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
                 if distance_m > GEOFENCE_RADIUS_M:
                     location_verified = False
-                    logger.info(f"Geofence: user {current_user.id} punched in from {distance_m:.0f}m away — flagged as remote.")
+                    logger.info(
+                        f"Geofence: user {current_user.id} punched in from {distance_m:.0f}m away — flagged as remote."
+                    )
         update_fields["location_verified"] = location_verified
         await db.attendance.update_one(
             {"user_id": current_user.id, "date": today_str},
             {"$set": update_fields},
-            upsert=True
+            upsert=True,
         )
-        return {"message": "Punched in successfully", "is_late": is_late, "location_verified": location_verified}
+        return {
+            "message": "Punched in successfully",
+            "is_late": is_late,
+            "location_verified": location_verified,
+        }
 
     # PUNCH_OUT_BLOCK
     if action == "punch_out":
@@ -2668,7 +3014,7 @@ async def handle_attendance(
         update_fields = {
             "punch_out": punch_out_utc,
             "punched_out_early": punched_out_early,
-            "duration_minutes": max(0, duration_minutes)
+            "duration_minutes": max(0, duration_minutes),
         }
 
         if data.get("location"):
@@ -2680,7 +3026,9 @@ async def handle_attendance(
             _pot = datetime.strptime(_pot_str, "%H:%M")
         except ValueError:
             _pot = datetime.strptime("19:00", "%H:%M")
-        shift_end_ist = punch_out_ist.replace(hour=_pot.hour, minute=_pot.minute, second=0, microsecond=0)
+        shift_end_ist = punch_out_ist.replace(
+            hour=_pot.hour, minute=_pot.minute, second=0, microsecond=0
+        )
         if punch_out_ist > shift_end_ist:
             update_fields["overtime_minutes"] = max(
                 0, int((punch_out_ist - shift_end_ist).total_seconds() / 60)
@@ -2690,15 +3038,15 @@ async def handle_attendance(
         # ─────────────────────────────────────────────────────────────────────
 
         await db.attendance.update_one(
-            {"user_id": current_user.id, "date": today_str},
-            {"$set": update_fields}
+            {"user_id": current_user.id, "date": today_str}, {"$set": update_fields}
         )
 
         return {
             "message": "Punched out successfully",
             "duration": duration_minutes,
-            "punched_out_early": punched_out_early
+            "punched_out_early": punched_out_early,
         }
+
 
 @api_router.post("/attendance/mark-leave-today")
 async def mark_leave_today(current_user: User = Depends(get_current_user)):
@@ -2711,12 +3059,13 @@ async def mark_leave_today(current_user: User = Depends(get_current_user)):
                 "status": "leave",
                 "punch_in": None,
                 "punch_out": None,
-                "leave_reason": "Marked on leave today"
+                "leave_reason": "Marked on leave today",
             }
         },
-        upsert=True
+        upsert=True,
     )
     return {"message": "Marked on leave today"}
+
 
 @api_router.get("/attendance/today")
 async def get_today_attendance(current_user: User = Depends(get_current_user)):
@@ -2731,40 +3080,47 @@ async def get_today_attendance(current_user: User = Depends(get_current_user)):
             "holiday": holiday,
             "punch_in": None,
             "punch_out": None,
-            "leave_reason": None
+            "leave_reason": None,
         }
     attendance = await db.attendance.find_one(
-        {"user_id": current_user.id, "date": today_str},
-        {"_id": 0}
+        {"user_id": current_user.id, "date": today_str}, {"_id": 0}
     )
     if not attendance:
         return {
             "status": "absent",
             "punch_in": None,
             "punch_out": None,
-            "leave_reason": None
+            "leave_reason": None,
         }
     if "status" not in attendance:
-        attendance["status"] = (
-            "present" if attendance.get("punch_in") else "absent"
-        )
+        attendance["status"] = "present" if attendance.get("punch_in") else "absent"
     return attendance
 
+
 @api_router.post("/attendance/apply-leave")
-async def apply_leave(
-    data: dict,
-    current_user: User = Depends(get_current_user)
-):
+async def apply_leave(data: dict, current_user: User = Depends(get_current_user)):
     try:
         from_date = datetime.fromisoformat(data["from_date"]).date()
         to_date = datetime.fromisoformat(data.get("to_date", data["from_date"])).date()
         reason = data.get("reason", "Leave Applied")
-        leave_type = data.get("leave_type", "full_day")  # full_day | half_day_morning | half_day_afternoon | early_leave
-        early_leave_time = data.get("early_leave_time")  # "HH:MM" string for early leave
+        leave_type = data.get(
+            "leave_type", "full_day"
+        )  # full_day | half_day_morning | half_day_afternoon | early_leave
+        early_leave_time = data.get(
+            "early_leave_time"
+        )  # "HH:MM" string for early leave
 
-        VALID_LEAVE_TYPES = ("full_day", "half_day_morning", "half_day_afternoon", "early_leave")
+        VALID_LEAVE_TYPES = (
+            "full_day",
+            "half_day_morning",
+            "half_day_afternoon",
+            "early_leave",
+        )
         if leave_type not in VALID_LEAVE_TYPES:
-            raise HTTPException(status_code=400, detail=f"Invalid leave_type. Must be one of: {VALID_LEAVE_TYPES}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid leave_type. Must be one of: {VALID_LEAVE_TYPES}",
+            )
 
         if to_date < from_date:
             raise HTTPException(status_code=400, detail="Invalid date range")
@@ -2774,7 +3130,7 @@ async def apply_leave(
             if to_date != from_date:
                 raise HTTPException(
                     status_code=400,
-                    detail="Half-day and early leave can only be applied for a single day"
+                    detail="Half-day and early leave can only be applied for a single day",
                 )
 
         current = from_date
@@ -2817,13 +3173,19 @@ async def apply_leave(
                     "is_half_day": True,
                 }
                 # Set a nominal punch-out at 13:30 IST if not already punched out
-                if existing and existing.get("punch_in") and not existing.get("punch_out"):
+                if (
+                    existing
+                    and existing.get("punch_in")
+                    and not existing.get("punch_out")
+                ):
                     punch_in_dt = existing["punch_in"]
                     if isinstance(punch_in_dt, str):
                         punch_in_dt = datetime.fromisoformat(punch_in_dt)
                     if punch_in_dt.tzinfo is None:
                         punch_in_dt = punch_in_dt.replace(tzinfo=timezone.utc)
-                    half_day_out = datetime.now(timezone.utc).replace(hour=8, minute=0, second=0, microsecond=0)  # 13:30 IST = 08:00 UTC
+                    half_day_out = datetime.now(timezone.utc).replace(
+                        hour=8, minute=0, second=0, microsecond=0
+                    )  # 13:30 IST = 08:00 UTC
                     delta = half_day_out - punch_in_dt
                     dur = max(0, int(delta.total_seconds() / 60))
                     update_fields["punch_out"] = half_day_out
@@ -2840,7 +3202,12 @@ async def apply_leave(
                     "early_leave_time": early_leave_time,
                 }
                 # If a departure time given and user is punched in without punch-out, record it
-                if early_leave_time and existing and existing.get("punch_in") and not existing.get("punch_out"):
+                if (
+                    early_leave_time
+                    and existing
+                    and existing.get("punch_in")
+                    and not existing.get("punch_out")
+                ):
                     try:
                         punch_in_dt = existing["punch_in"]
                         if isinstance(punch_in_dt, str):
@@ -2864,7 +3231,7 @@ async def apply_leave(
             await db.attendance.update_one(
                 {"user_id": current_user.id, "date": current_str},
                 {"$set": update_fields},
-                upsert=True
+                upsert=True,
             )
             current += timedelta(days=1)
 
@@ -2874,10 +3241,10 @@ async def apply_leave(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @api_router.get("/attendance/history", response_model=List[Attendance])
 async def get_attendance_history(
-    user_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+    user_id: Optional[str] = None, current_user: User = Depends(get_current_user)
 ):
     query = {}
     if current_user.role == "admin":
@@ -2888,9 +3255,9 @@ async def get_attendance_history(
         permissions_mgr = get_user_permissions(current_user)
         # Manager: Own + Team (same department) + explicit cross-visibility list
         team_ids = await get_team_user_ids(current_user.id)
-        allowed_users = list(set(
-            (permissions_mgr.get("view_other_attendance", []) or []) + team_ids
-        ))
+        allowed_users = list(
+            set((permissions_mgr.get("view_other_attendance", []) or []) + team_ids)
+        )
         if user_id:
             if user_id == current_user.id:
                 query["user_id"] = user_id
@@ -2898,12 +3265,11 @@ async def get_attendance_history(
                 if not permissions_mgr.get("can_view_attendance", False):
                     raise HTTPException(
                         status_code=403,
-                        detail="You do not have permission to view other users' attendance"
+                        detail="You do not have permission to view other users' attendance",
                     )
                 if user_id not in allowed_users:
                     raise HTTPException(
-                        status_code=403,
-                        detail="This user is outside your team scope"
+                        status_code=403, detail="This user is outside your team scope"
                     )
                 query["user_id"] = user_id
         else:
@@ -2918,39 +3284,36 @@ async def get_attendance_history(
             if user_id not in allowed_users:
                 raise HTTPException(
                     status_code=403,
-                    detail="Not authorized to view other users' attendance"
+                    detail="Not authorized to view other users' attendance",
                 )
         query["user_id"] = user_id if user_id else current_user.id
-    attendance_list = await db.attendance.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
+    attendance_list = (
+        await db.attendance.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
+    )
     for attendance in attendance_list:
         attendance["punch_in"] = safe_dt(attendance.get("punch_in"))
         attendance["punch_out"] = safe_dt(attendance.get("punch_out"))
         if "status" not in attendance:
-            attendance["status"] = (
-                "present" if attendance.get("punch_in") else "absent"
-            )
+            attendance["status"] = "present" if attendance.get("punch_in") else "absent"
     return attendance_list
 
+
 @api_router.get("/attendance/my-summary")
-async def get_my_attendance_summary(
-    current_user: User = Depends(get_current_user)
-):
+async def get_my_attendance_summary(current_user: User = Depends(get_current_user)):
     now = datetime.now(IST)
     current_month = now.strftime("%Y-%m")
-    attendance_list = await db.attendance.find(
-        {"user_id": current_user.id},
-        {"_id": 0}
-    ).sort("date", -1).to_list(1000)
+    attendance_list = (
+        await db.attendance.find({"user_id": current_user.id}, {"_id": 0})
+        .sort("date", -1)
+        .to_list(1000)
+    )
     monthly_data = {}
     total_minutes_all = 0
     total_days = 0
     for attendance in attendance_list:
         month = attendance["date"][:7]
         if month not in monthly_data:
-            monthly_data[month] = {
-                "total_minutes": 0,
-                "days_present": 0
-            }
+            monthly_data[month] = {"total_minutes": 0, "days_present": 0}
         duration = attendance.get("duration_minutes")
         if isinstance(duration, (int, float)):
             monthly_data[month]["total_minutes"] += duration
@@ -2962,25 +3325,28 @@ async def get_my_attendance_summary(
         minutes = data["total_minutes"]
         hours = minutes // 60
         mins = minutes % 60
-        formatted_data.append({
-            "month": month,
-            "total_minutes": minutes,
-            "total_hours": f"{hours}h {mins}m",
-            "days_present": data["days_present"]
-        })
+        formatted_data.append(
+            {
+                "month": month,
+                "total_minutes": minutes,
+                "total_hours": f"{hours}h {mins}m",
+                "days_present": data["days_present"],
+            }
+        )
     return {
         "current_month": current_month,
         "total_days": total_days,
         "total_minutes": total_minutes_all,
-        "monthly_summary": formatted_data
+        "monthly_summary": formatted_data,
     }
+
 
 @api_router.get("/attendance/staff-report")
 async def get_staff_attendance_report(
     month: Optional[str] = None,
     # FIX: was check_module_permission("attendance","view") → can_view_attendance.
     # Any authenticated user can hit this endpoint; data scope is enforced below.
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     now = datetime.now(IST)
     target_month = month or now.strftime("%Y-%m")
@@ -2999,10 +3365,9 @@ async def get_staff_attendance_report(
         visible_ids = list(set(allowed_others + [current_user.id]))
         attendance_query["user_id"] = {"$in": visible_ids}
 
-    attendance_list = await db.attendance.find(
-        attendance_query,
-        {"_id": 0}
-    ).to_list(5000)
+    attendance_list = await db.attendance.find(attendance_query, {"_id": 0}).to_list(
+        5000
+    )
     staff_report = {}
     for attendance in attendance_list:
         uid = attendance["user_id"]
@@ -3017,7 +3382,7 @@ async def get_staff_attendance_report(
                 "days_absent": 0,
                 "late_days": 0,
                 "early_out_days": 0,
-                "records": []
+                "records": [],
             }
         # count absent days separately
         if attendance.get("status") == "absent":
@@ -3030,15 +3395,17 @@ async def get_staff_attendance_report(
             staff_report[uid]["late_days"] += 1
         if attendance.get("punched_out_early"):
             staff_report[uid]["early_out_days"] += 1
-        staff_report[uid]["records"].append({
-            "date": attendance["date"],
-            "status": attendance.get("status", "absent"),
-            "punch_in": attendance.get("punch_in"),
-            "punch_out": attendance.get("punch_out"),
-            "duration_minutes": duration,
-            "is_late": attendance.get("is_late", False),
-            "punched_out_early": attendance.get("punched_out_early", False)
-        })
+        staff_report[uid]["records"].append(
+            {
+                "date": attendance["date"],
+                "status": attendance.get("status", "absent"),
+                "punch_in": attendance.get("punch_in"),
+                "punch_out": attendance.get("punch_out"),
+                "duration_minutes": duration,
+                "is_late": attendance.get("is_late", False),
+                "punched_out_early": attendance.get("punched_out_early", False),
+            }
+        )
     result = []
     for uid, data in staff_report.items():
         total_minutes = data["total_minutes"]
@@ -3058,26 +3425,30 @@ async def get_staff_attendance_report(
             f"{target_month}-01",
             f"{target_month}-{last_day}",
             user_data.get("punch_in_time", "10:30"),
-            user_data.get("punch_out_time", "19:00")
+            user_data.get("punch_out_time", "19:00"),
         )
         data["expected_hours"] = expected_hours
         result.append(data)
     result.sort(key=lambda x: x["total_minutes"], reverse=True)
     return result
 
+
 @api_router.get("/attendance/export-pdf")
 async def export_attendance_pdf(
-    user_id: str,
-    current_user: User = Depends(get_current_user)
+    user_id: str, current_user: User = Depends(get_current_user)
 ):
     if user_id != current_user.id:
         permissions = get_user_permissions(current_user)
         if current_user.role != "admin" and not permissions.get("can_view_attendance"):
-            raise HTTPException(status_code=403, detail="Not authorized to export other users' attendance")
-    records = await db.attendance.find(
-        {"user_id": user_id},
-        {"_id": 0}
-    ).sort("date", 1).to_list(1000)
+            raise HTTPException(
+                status_code=403,
+                detail="Not authorized to export other users' attendance",
+            )
+    records = (
+        await db.attendance.find({"user_id": user_id}, {"_id": 0})
+        .sort("date", 1)
+        .to_list(1000)
+    )
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", "B", 14)
@@ -3090,9 +3461,10 @@ async def export_attendance_pdf(
         early_flag = " [EARLY OUT]" if rec.get("punched_out_early") else ""
         if status == "absent":
             pdf.multi_cell(
-                0, 8,
+                0,
+                8,
                 f"Date: {rec.get('date')} | Status: ABSENT"
-                f"{' [AUTO-MARKED 7PM]' if rec.get('auto_marked') else ''}"
+                f"{' [AUTO-MARKED 7PM]' if rec.get('auto_marked') else ''}",
             )
         else:
             pdf.multi_cell(
@@ -3100,7 +3472,7 @@ async def export_attendance_pdf(
                 8,
                 f"Date: {rec.get('date')} | In: {rec.get('punch_in')} | "
                 f"Out: {rec.get('punch_out')} | Duration: {rec.get('duration_minutes')} mins"
-                f"{late_flag}{early_flag}"
+                f"{late_flag}{early_flag}",
             )
         pdf.ln(2)
     output = BytesIO()
@@ -3109,16 +3481,19 @@ async def export_attendance_pdf(
     return StreamingResponse(
         output,
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=attendance_{user_id}.pdf"}
+        headers={
+            "Content-Disposition": f"attachment; filename=attendance_{user_id}.pdf"
+        },
     )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # EDIT ATTENDANCE RECORD — Admin / permitted users
 # PATCH /api/attendance/edit-record
 # ─────────────────────────────────────────────────────────────────────────────
 @api_router.patch("/attendance/edit-record")
 async def edit_attendance_record(
-    data: dict,
-    current_user: User = Depends(get_current_user)
+    data: dict, current_user: User = Depends(get_current_user)
 ):
     """
     Allow admin or users with can_edit_attendance permission to
@@ -3126,41 +3501,45 @@ async def edit_attendance_record(
     Body: { date, user_id, status, note }
     """
     is_admin = current_user.role == "admin"
-    perms    = get_user_permissions(current_user)
+    perms = get_user_permissions(current_user)
     if not is_admin and not perms.get("can_edit_attendance", False):
-        raise HTTPException(status_code=403, detail="Not authorized to edit attendance records")
+        raise HTTPException(
+            status_code=403, detail="Not authorized to edit attendance records"
+        )
 
-    date_str  = data.get("date")
-    user_id   = data.get("user_id") or current_user.id
-    status    = data.get("status")
-    note      = data.get("note", "").strip()
+    date_str = data.get("date")
+    user_id = data.get("user_id") or current_user.id
+    status = data.get("status")
+    note = data.get("note", "").strip()
 
     if not date_str or not status:
         raise HTTPException(status_code=400, detail="date and status are required")
 
     valid_statuses = {"present", "absent", "half_day", "leave", "late", "wfh"}
     if status not in valid_statuses:
-        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}")
+        raise HTTPException(
+            status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}"
+        )
 
     existing = await db.attendance.find_one(
         {"user_id": user_id, "date": date_str}, {"_id": 0}
     )
 
     update_fields = {
-        "status":      status,
-        "edited_by":   current_user.id,
-        "edited_at":   datetime.now(timezone.utc).isoformat(),
-        "admin_note":  note or None,
+        "status": status,
+        "edited_by": current_user.id,
+        "edited_at": datetime.now(timezone.utc).isoformat(),
+        "admin_note": note or None,
         "auto_marked": False,
     }
 
     # Status-specific adjustments
     if status == "absent":
-        update_fields["punch_in"]  = None
+        update_fields["punch_in"] = None
         update_fields["punch_out"] = None
         update_fields["duration_minutes"] = 0
     elif status == "leave":
-        update_fields["punch_in"]  = None
+        update_fields["punch_in"] = None
         update_fields["punch_out"] = None
         update_fields["duration_minutes"] = 0
         update_fields["leave_reason"] = note or "Admin marked leave"
@@ -3172,9 +3551,7 @@ async def edit_attendance_record(
         update_fields["location_type"] = "wfh"
 
     await db.attendance.update_one(
-        {"user_id": user_id, "date": date_str},
-        {"$set": update_fields},
-        upsert=True
+        {"user_id": user_id, "date": date_str}, {"$set": update_fields}, upsert=True
     )
 
     await create_audit_log(
@@ -3188,10 +3565,11 @@ async def edit_attendance_record(
 
     return {
         "message": f"Attendance updated to '{status}' for {date_str}",
-        "date":    date_str,
+        "date": date_str,
         "user_id": user_id,
-        "status":  status,
+        "status": status,
     }
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MANUAL ABSENT MARKING ENDPOINT (Admin only)
@@ -3200,8 +3578,7 @@ async def edit_attendance_record(
 # ─────────────────────────────────────────────────────────────────────────────
 @api_router.post("/attendance/mark-absent-bulk")
 async def mark_absent_bulk(
-    data: dict = {},
-    current_user: User = Depends(require_admin())
+    data: dict = {}, current_user: User = Depends(require_admin())
 ):
     """
     Manually trigger absent-marking for a given date.
@@ -3215,7 +3592,9 @@ async def mark_absent_bulk(
     try:
         datetime.strptime(target_date_str, "%Y-%m-%d")
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+        raise HTTPException(
+            status_code=400, detail="Invalid date format. Use YYYY-MM-DD."
+        )
     result = await _mark_absent_for_date(target_date_str)
     return result
 
@@ -3226,8 +3605,7 @@ async def mark_absent_bulk(
 # ─────────────────────────────────────────────────────────────────────────────
 @api_router.get("/attendance/absent-summary")
 async def get_absent_summary(
-    month: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+    month: Optional[str] = None, current_user: User = Depends(get_current_user)
 ):
     """
     Returns per-user absent day counts for the given month.
@@ -3242,7 +3620,7 @@ async def get_absent_summary(
         query = {
             "user_id": current_user.id,
             "date": {"$regex": f"^{target_month}"},
-            "status": "absent"
+            "status": "absent",
         }
 
     absent_records = await db.attendance.find(query, {"_id": 0}).to_list(5000)
@@ -3257,8 +3635,7 @@ async def get_absent_summary(
     if current_user.role == "admin":
         user_ids = list(summary.keys())
         users = await db.users.find(
-            {"id": {"$in": user_ids}},
-            {"_id": 0, "id": 1, "full_name": 1}
+            {"id": {"$in": user_ids}}, {"_id": 0, "id": 1, "full_name": 1}
         ).to_list(1000)
         name_map = {u["id"]: u["full_name"] for u in users}
         for uid in summary:
@@ -3275,10 +3652,7 @@ async def get_absent_summary(
 # Falls back gracefully if the user is already punched out.
 # =============================================================
 @api_router.post("/attendance/punch-out")
-async def auto_punch_out(
-    data: dict,
-    current_user: User = Depends(get_current_user)
-):
+async def auto_punch_out(data: dict, current_user: User = Depends(get_current_user)):
     """
     Auto punch-out triggered by the frontend inactivity detector.
     Accepts { auto: true, reason: "inactive_after_shift" }.
@@ -3287,14 +3661,16 @@ async def auto_punch_out(
     today_str = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
 
     attendance = await db.attendance.find_one(
-        {"user_id": current_user.id, "date": today_str},
-        {"_id": 0}
+        {"user_id": current_user.id, "date": today_str}, {"_id": 0}
     )
     if not attendance or not attendance.get("punch_in"):
         raise HTTPException(status_code=400, detail="Not punched in yet")
     if attendance.get("punch_out"):
         # Already punched out — return silently (idempotent)
-        return {"message": "Already punched out", "duration": attendance.get("duration_minutes", 0)}
+        return {
+            "message": "Already punched out",
+            "duration": attendance.get("duration_minutes", 0),
+        }
 
     punch_in_dt = attendance.get("punch_in")
     punch_out_utc = datetime.now(timezone.utc)
@@ -3325,36 +3701,42 @@ async def auto_punch_out(
         _pot = datetime.strptime(_pot_str, "%H:%M")
     except ValueError:
         _pot = datetime.strptime("19:00", "%H:%M")
-    shift_end_ist = punch_out_ist.replace(hour=_pot.hour, minute=_pot.minute, second=0, microsecond=0)
+    shift_end_ist = punch_out_ist.replace(
+        hour=_pot.hour, minute=_pot.minute, second=0, microsecond=0
+    )
     overtime_minutes = 0
     if punch_out_ist > shift_end_ist:
-        overtime_minutes = max(0, int((punch_out_ist - shift_end_ist).total_seconds() / 60))
+        overtime_minutes = max(
+            0, int((punch_out_ist - shift_end_ist).total_seconds() / 60)
+        )
 
     update_fields = {
-        "punch_out":         punch_out_utc,
+        "punch_out": punch_out_utc,
         "punched_out_early": punched_out_early,
-        "duration_minutes":  duration_minutes,
-        "auto_punch_out":    True,
+        "duration_minutes": duration_minutes,
+        "auto_punch_out": True,
         "auto_punch_reason": data.get("reason", "inactive_after_shift"),
-        "overtime_minutes":  overtime_minutes,
+        "overtime_minutes": overtime_minutes,
     }
 
     await db.attendance.update_one(
-        {"user_id": current_user.id, "date": today_str},
-        {"$set": update_fields}
+        {"user_id": current_user.id, "date": today_str}, {"$set": update_fields}
     )
 
     logger.info(
         "Auto punch-out: user=%s date=%s duration=%dm overtime=%dm reason=%s",
-        current_user.id, today_str, duration_minutes, overtime_minutes,
-        data.get("reason", "inactive_after_shift")
+        current_user.id,
+        today_str,
+        duration_minutes,
+        overtime_minutes,
+        data.get("reason", "inactive_after_shift"),
     )
 
     return {
-        "message":          "Auto punch-out recorded",
-        "duration":         duration_minutes,
+        "message": "Auto punch-out recorded",
+        "duration": duration_minutes,
         "overtime_minutes": overtime_minutes,
-        "auto":             True,
+        "auto": True,
     }
 
 
@@ -3365,8 +3747,14 @@ async def auto_punch_out(
 # Files are saved to uploads/attendance_proof/ on the server.
 # The proof dict is embedded inside the attendance document.
 # =============================================================
-ALLOWED_PHOTO_TYPES  = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/heic"}
-ALLOWED_DOC_TYPES    = {
+ALLOWED_PHOTO_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "image/heic",
+}
+ALLOWED_DOC_TYPES = {
     "application/pdf",
     "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -3375,16 +3763,16 @@ ALLOWED_DOC_TYPES    = {
     "text/plain",
     "text/csv",
 }
-MAX_FILE_SIZE_MB     = 10
+MAX_FILE_SIZE_MB = 10
 MAX_FILES_PER_UPLOAD = 5
 
 
 @api_router.post("/attendance/proof")
 async def upload_attendance_proof(
-    note:      str              = Form(default=""),
-    photos:    List[UploadFile] = File(default=[]),
+    note: str = Form(default=""),
+    photos: List[UploadFile] = File(default=[]),
     documents: List[UploadFile] = File(default=[]),
-    current_user: User          = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """
     Attach proof to today's attendance record.
@@ -3395,40 +3783,48 @@ async def upload_attendance_proof(
     Each call REPLACES the existing proof for today (idempotent upsert).
     """
     today_str = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
-    now_iso   = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(timezone.utc).isoformat()
 
     # Validate counts
     if len(photos) > MAX_FILES_PER_UPLOAD:
-        raise HTTPException(status_code=400, detail=f"Maximum {MAX_FILES_PER_UPLOAD} photos allowed")
+        raise HTTPException(
+            status_code=400, detail=f"Maximum {MAX_FILES_PER_UPLOAD} photos allowed"
+        )
     if len(documents) > MAX_FILES_PER_UPLOAD:
-        raise HTTPException(status_code=400, detail=f"Maximum {MAX_FILES_PER_UPLOAD} documents allowed")
+        raise HTTPException(
+            status_code=400, detail=f"Maximum {MAX_FILES_PER_UPLOAD} documents allowed"
+        )
 
     saved_photos: List[str] = []
-    saved_docs:   List[str] = []
+    saved_docs: List[str] = []
 
     # ── Save photos ────────────────────────────────────────────────────────────
     for photo in photos:
         if not photo.filename:
             continue
         content_type = photo.content_type or ""
-        if content_type not in ALLOWED_PHOTO_TYPES and not content_type.startswith("image/"):
+        if content_type not in ALLOWED_PHOTO_TYPES and not content_type.startswith(
+            "image/"
+        ):
             raise HTTPException(
                 status_code=400,
-                detail=f"File '{photo.filename}' is not an allowed image type"
+                detail=f"File '{photo.filename}' is not an allowed image type",
             )
         contents = await photo.read()
         if len(contents) > MAX_FILE_SIZE_MB * 1024 * 1024:
             raise HTTPException(
                 status_code=413,
-                detail=f"Photo '{photo.filename}' exceeds {MAX_FILE_SIZE_MB} MB limit"
+                detail=f"Photo '{photo.filename}' exceeds {MAX_FILE_SIZE_MB} MB limit",
             )
         safe_name = re.sub(r"[^\w.\-]", "_", photo.filename)
-        filename  = f"{current_user.id}_{today_str}_photo_{uuid.uuid4().hex[:8]}_{safe_name}"
+        filename = (
+            f"{current_user.id}_{today_str}_photo_{uuid.uuid4().hex[:8]}_{safe_name}"
+        )
         file_path = PROOF_UPLOAD_DIR / filename
         with open(file_path, "wb") as f:
             f.write(contents)
         saved_photos.append(filename)
-        await photo.seek(0)   # reset for any downstream use
+        await photo.seek(0)  # reset for any downstream use
 
     # ── Save documents ─────────────────────────────────────────────────────────
     for doc in documents:
@@ -3440,16 +3836,18 @@ async def upload_attendance_proof(
         ):
             raise HTTPException(
                 status_code=400,
-                detail=f"File '{doc.filename}' is not an allowed document type"
+                detail=f"File '{doc.filename}' is not an allowed document type",
             )
         contents = await doc.read()
         if len(contents) > MAX_FILE_SIZE_MB * 1024 * 1024:
             raise HTTPException(
                 status_code=413,
-                detail=f"Document '{doc.filename}' exceeds {MAX_FILE_SIZE_MB} MB limit"
+                detail=f"Document '{doc.filename}' exceeds {MAX_FILE_SIZE_MB} MB limit",
             )
         safe_name = re.sub(r"[^\w.\-]", "_", doc.filename)
-        filename  = f"{current_user.id}_{today_str}_doc_{uuid.uuid4().hex[:8]}_{safe_name}"
+        filename = (
+            f"{current_user.id}_{today_str}_doc_{uuid.uuid4().hex[:8]}_{safe_name}"
+        )
         file_path = PROOF_UPLOAD_DIR / filename
         with open(file_path, "wb") as f:
             f.write(contents)
@@ -3459,48 +3857,50 @@ async def upload_attendance_proof(
     # ── Build proof dict ───────────────────────────────────────────────────────
     # Check if a previous proof exists so we can merge (not replace) file lists
     existing = await db.attendance.find_one(
-        {"user_id": current_user.id, "date": today_str},
-        {"_id": 0, "proof": 1}
+        {"user_id": current_user.id, "date": today_str}, {"_id": 0, "proof": 1}
     )
     existing_proof = existing.get("proof", {}) if existing else {}
 
     # Merge: keep old files, append new ones
     merged_photos = (existing_proof.get("photos") or []) + saved_photos
-    merged_docs   = (existing_proof.get("documents") or []) + saved_docs
+    merged_docs = (existing_proof.get("documents") or []) + saved_docs
 
     proof_payload = {
-        "note":        note.strip() if note.strip() else (existing_proof.get("note") or ""),
-        "photos":      merged_photos,
-        "documents":   merged_docs,
-        "uploaded_at": existing_proof.get("uploaded_at") or now_iso,  # first upload time
-        "updated_at":  now_iso,                                         # last update time
+        "note": note.strip() if note.strip() else (existing_proof.get("note") or ""),
+        "photos": merged_photos,
+        "documents": merged_docs,
+        "uploaded_at": existing_proof.get("uploaded_at")
+        or now_iso,  # first upload time
+        "updated_at": now_iso,  # last update time
     }
 
     await db.attendance.update_one(
         {"user_id": current_user.id, "date": today_str},
         {"$set": {"proof": proof_payload}},
-        upsert=True
+        upsert=True,
     )
 
     logger.info(
         "Proof uploaded: user=%s date=%s photos=%d docs=%d note_len=%d",
-        current_user.id, today_str, len(saved_photos), len(saved_docs), len(note)
+        current_user.id,
+        today_str,
+        len(saved_photos),
+        len(saved_docs),
+        len(note),
     )
 
     return {
-        "message":         "Proof saved successfully",
-        "photos_saved":    len(saved_photos),
+        "message": "Proof saved successfully",
+        "photos_saved": len(saved_photos),
         "documents_saved": len(saved_docs),
-        "note_saved":      bool(note.strip()),
-        "total_photos":    len(merged_photos),
+        "note_saved": bool(note.strip()),
+        "total_photos": len(merged_photos),
         "total_documents": len(merged_docs),
-        "date":            today_str,
+        "date": today_str,
     }
-async def get_top_performers_data(
-    period: str = "monthly",
-    limit: int = 5,
-    db=None
-):
+
+
+async def get_top_performers_data(period: str = "monthly", limit: int = 5, db=None):
     now = datetime.now(IST)
     if period == "weekly":
         start_date = now - timedelta(days=7)
@@ -3515,8 +3915,8 @@ async def get_top_performers_data(
                 "assigned_to": {"$ne": None},
                 "$or": [
                     {"completed_at": {"$gte": start_date.isoformat()}},
-                    {"updated_at": {"$gte": start_date.isoformat()}}
-                ]
+                    {"updated_at": {"$gte": start_date.isoformat()}},
+                ],
             }
         },
         {"$group": {"_id": "$assigned_to", "completed_tasks": {"$sum": 1}}},
@@ -3525,7 +3925,7 @@ async def get_top_performers_data(
                 "from": "users",
                 "localField": "_id",
                 "foreignField": "id",
-                "as": "user_info"
+                "as": "user_info",
             }
         },
         {"$unwind": "$user_info"},
@@ -3534,31 +3934,34 @@ async def get_top_performers_data(
                 "user_id": "$_id",
                 "user_name": "$user_info.full_name",
                 "profile_picture": "$user_info.profile_picture",
-                "completed_tasks": 1
+                "completed_tasks": 1,
             }
         },
         {"$sort": {"completed_tasks": -1}},
-        {"$limit": limit}
+        {"$limit": limit},
     ]
     performers = await db.tasks.aggregate(pipeline).to_list(limit)
     for idx, p in enumerate(performers):
         p["rank"] = idx + 1
     return performers
 
+
 # Task routes
 @api_router.post("/tasks", response_model=Task)
 async def create_task(
     task_data: TaskCreate,
-    current_user: User = Depends(check_module_permission("tasks", "create"))
+    current_user: User = Depends(check_module_permission("tasks", "create")),
 ):
-    if (task_data.assigned_to
-            and task_data.assigned_to != current_user.id
-            and current_user.role != "admin"):
+    if (
+        task_data.assigned_to
+        and task_data.assigned_to != current_user.id
+        and current_user.role != "admin"
+    ):
         perms = get_user_permissions(current_user)
         if not perms.get("can_assign_tasks", False):
             raise HTTPException(
                 status_code=403,
-                detail="You do not have permission to assign tasks to other users"
+                detail="You do not have permission to assign tasks to other users",
             )
     task_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
@@ -3567,7 +3970,7 @@ async def create_task(
         id=task_id,
         created_by=current_user.id,
         created_at=now,
-        updated_at=now
+        updated_at=now,
     )
     doc = task.model_dump()
     date_fields = ["created_at", "updated_at", "due_date", "recurrence_end_date"]
@@ -3580,21 +3983,21 @@ async def create_task(
             user_id=task.assigned_to,
             title="New Task Assigned",
             message=f"You have been assigned task '{task.title}'",
-            type="assignment"
+            type="assignment",
         )
     await create_audit_log(
         current_user=current_user,
         action="CREATE_TASK",
         module="tasks",
         record_id=task_id,
-        new_data={"title": task.title}
+        new_data={"title": task.title},
     )
     return task
 
+
 @api_router.get("/tasks/{task_id}/comments")
 async def get_task_comments(
-    task_id: str,
-    current_user: User = Depends(get_current_user)
+    task_id: str, current_user: User = Depends(get_current_user)
 ):
     task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not task:
@@ -3602,13 +4005,16 @@ async def get_task_comments(
     is_admin = getattr(current_user, "role", "").lower() == "admin"
     is_involved = is_own_record(current_user, task)
     if not is_admin and not is_involved:
-        raise HTTPException(status_code=403, detail="Unauthorized to view these comments")
+        raise HTTPException(
+            status_code=403, detail="Unauthorized to view these comments"
+        )
     return task.get("comments", [])
+
 
 @api_router.post("/tasks/bulk")
 async def create_tasks_bulk(
     payload: BulkTaskCreate,
-    current_user: User = Depends(check_module_permission("tasks", "create"))
+    current_user: User = Depends(check_module_permission("tasks", "create")),
 ):
     created_tasks = []
     for task_data in payload.tasks:
@@ -3624,15 +4030,16 @@ async def create_tasks_bulk(
             await create_notification(
                 user_id=task_dict["assigned_to"],
                 title="New Task Assigned",
-                message=f"You have been assigned task '{task_dict['title']}'"
+                message=f"You have been assigned task '{task_dict['title']}'",
             )
         created_tasks.append(task_dict)
     return {"message": "Tasks created successfully", "count": len(created_tasks)}
 
+
 @api_router.post("/tasks/import")
 async def import_tasks_from_csv(
     file: UploadFile = File(...),
-    current_user: User = Depends(check_module_permission("tasks", "create"))
+    current_user: User = Depends(check_module_permission("tasks", "create")),
 ):
     if file.content_type != "text/csv":
         raise HTTPException(400, "Invalid file type")
@@ -3645,7 +4052,9 @@ async def import_tasks_from_csv(
             title=row.get("title", ""),
             description=row.get("description"),
             assigned_to=row.get("assigned_to"),
-            sub_assignees=row.get("sub_assignees", "").split(",") if row.get("sub_assignees") else [],
+            sub_assignees=row.get("sub_assignees", "").split(",")
+            if row.get("sub_assignees")
+            else [],
             due_date=parser.parse(row["due_date"]) if row.get("due_date") else None,
             priority=row.get("priority", "medium"),
             status=row.get("status", "pending"),
@@ -3653,14 +4062,17 @@ async def import_tasks_from_csv(
             client_id=row.get("client_id"),
             is_recurring=bool(row.get("is_recurring", False)),
             recurrence_pattern=row.get("recurrence_pattern", "monthly"),
-            recurrence_interval=int(row.get("recurrence_interval", 1))
+            recurrence_interval=int(row.get("recurrence_interval", 1)),
         )
         tasks.append(task_data)
     payload = BulkTaskCreate(tasks=tasks)
     return await create_tasks_bulk(payload, current_user)
 
+
 @api_router.get("/tasks")
-async def get_tasks(current_user: User = Depends(check_module_permission("tasks", "view"))):
+async def get_tasks(
+    current_user: User = Depends(check_module_permission("tasks", "view")),
+):
     query = {"type": {"$ne": "todo"}}
     if current_user.role == "admin":
         pass
@@ -3683,12 +4095,9 @@ async def get_tasks(current_user: User = Depends(check_module_permission("tasks"
     tasks = await db.tasks.find(query, {"_id": 0}).to_list(1000)
     user_ids = {
         task.get("assigned_to") for task in tasks if task.get("assigned_to")
-    } | {
-        task.get("created_by") for task in tasks if task.get("created_by")
-    }
+    } | {task.get("created_by") for task in tasks if task.get("created_by")}
     users = await db.users.find(
-        {"id": {"$in": list(user_ids)}},
-        {"_id": 0, "password": 0}
+        {"id": {"$in": list(user_ids)}}, {"_id": 0, "password": 0}
     ).to_list(1000)
     user_map = {u["id"]: u["full_name"] for u in users}
     for task in tasks:
@@ -3702,6 +4111,7 @@ async def get_tasks(current_user: User = Depends(check_module_permission("tasks"
         if not isinstance(task.get("comments"), list):
             task["comments"] = []
     return tasks
+
 
 @api_router.get("/tasks/{task_id}/detail")
 async def get_task_detail(task_id: str, current_user: User = Depends(get_current_user)):
@@ -3718,21 +4128,26 @@ async def get_task_detail(task_id: str, current_user: User = Depends(get_current
             if task.get("assigned_to") not in allowed_users:
                 raise HTTPException(status_code=403, detail="Not authorized")
     # Batch all user lookups in one query instead of 3 separate find_one calls
-    user_ids_to_fetch = list(filter(None, [
-        task.get("assigned_to"),
-        task.get("created_by"),
-        *( task.get("sub_assignees") or [] ),
-    ]))
+    user_ids_to_fetch = list(
+        filter(
+            None,
+            [
+                task.get("assigned_to"),
+                task.get("created_by"),
+                *(task.get("sub_assignees") or []),
+            ],
+        )
+    )
     users_batch = {}
     if user_ids_to_fetch:
         fetched = await db.users.find(
             {"id": {"$in": user_ids_to_fetch}},
-            {"_id": 0, "id": 1, "full_name": 1, "profile_picture": 1, "email": 1}
+            {"_id": 0, "id": 1, "full_name": 1, "profile_picture": 1, "email": 1},
         ).to_list(100)
         users_batch = {u["id"]: u for u in fetched}
 
     assigned_user = users_batch.get(task.get("assigned_to"))
-    created_user  = users_batch.get(task.get("created_by"))
+    created_user = users_batch.get(task.get("created_by"))
     sub_assignee_names = [
         users_batch[uid]["full_name"]
         for uid in (task.get("sub_assignees") or [])
@@ -3742,15 +4157,20 @@ async def get_task_detail(task_id: str, current_user: User = Depends(get_current
     client_name = None
     if task.get("client_id"):
         client_doc = await db.clients.find_one(
-            {"id": task["client_id"]},
-            {"_id": 0, "company_name": 1}
+            {"id": task["client_id"]}, {"_id": 0, "company_name": 1}
         )
         if client_doc:
             client_name = client_doc.get("company_name")
-    task["assigned_to_name"] = assigned_user.get("full_name", "Unknown") if assigned_user else "Unknown"
+    task["assigned_to_name"] = (
+        assigned_user.get("full_name", "Unknown") if assigned_user else "Unknown"
+    )
     task["assigned_to_email"] = assigned_user.get("email") if assigned_user else None
-    task["assigned_to_picture"] = assigned_user.get("profile_picture") if assigned_user else None
-    task["created_by_name"] = created_user.get("full_name", "Unknown") if created_user else "Unknown"
+    task["assigned_to_picture"] = (
+        assigned_user.get("profile_picture") if assigned_user else None
+    )
+    task["created_by_name"] = (
+        created_user.get("full_name", "Unknown") if created_user else "Unknown"
+    )
     task["sub_assignee_names"] = sub_assignee_names
     task["client_name"] = client_name
     task["created_at"] = safe_dt(task.get("created_at"))
@@ -3760,8 +4180,11 @@ async def get_task_detail(task_id: str, current_user: User = Depends(get_current
         task["completed_at"] = safe_dt(task.get("completed_at"))
     return task
 
+
 @api_router.get("/tasks/{task_id}", response_model=Task)
-async def get_task(task_id: str, current_user: User = Depends(check_module_permission("tasks", "view"))):
+async def get_task(
+    task_id: str, current_user: User = Depends(check_module_permission("tasks", "view"))
+):
     task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -3779,18 +4202,18 @@ async def get_task(task_id: str, current_user: User = Depends(check_module_permi
             raise HTTPException(status_code=403, detail="Not authorized")
     return Task(**task)
 
+
 @api_router.api_route("/tasks/{task_id}", methods=["PATCH", "PUT"], response_model=Task)
 async def patch_task(
     task_id: str,
     updates: dict,
-    current_user: User = Depends(check_module_permission("tasks", "edit"))
+    current_user: User = Depends(check_module_permission("tasks", "edit")),
 ):
     existing_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not existing_task:
         raise HTTPException(status_code=404, detail="Task not found")
-    is_authorized = (
-        current_user.role.lower() == "admin" or
-        is_own_record(current_user, existing_task)
+    is_authorized = current_user.role.lower() == "admin" or is_own_record(
+        current_user, existing_task
     )
     if not is_authorized:
         raise HTTPException(status_code=403, detail="Unauthorized to modify this task")
@@ -3804,29 +4227,35 @@ async def patch_task(
         updates["completed_at"] = datetime.now(IST).isoformat()
     await db.tasks.update_one({"id": task_id}, {"$set": updates})
     updated_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
-    action_type = "TASK_STATUS_CHANGED" if "status" in updates and old_data.get("status") != updates.get("status") else "UPDATE_TASK"
+    action_type = (
+        "TASK_STATUS_CHANGED"
+        if "status" in updates and old_data.get("status") != updates.get("status")
+        else "UPDATE_TASK"
+    )
     await create_audit_log(
         current_user=current_user,
         action=action_type,
         module="task",
         record_id=task_id,
         old_data=old_data,
-        new_data=updates
+        new_data=updates,
     )
     return Task(**updated_task)
 
+
 @api_router.delete("/tasks/{task_id}")
-async def delete_task(
-    task_id: str,
-    current_user: User = Depends(get_current_user)
-):
+async def delete_task(task_id: str, current_user: User = Depends(get_current_user)):
     existing = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Task not found")
     # Issue #7: use can_delete_tasks (not can_edit_tasks)
     # Issue #1: must also satisfy visibility (own or team)
     assert_module_permission(current_user, "tasks", "delete")
-    team_ids = await get_team_user_ids(current_user.id) if current_user.role == "manager" else []
+    team_ids = (
+        await get_team_user_ids(current_user.id)
+        if current_user.role == "manager"
+        else []
+    )
     assert_record_visibility(current_user, existing, team_ids)
     await db.tasks.delete_one({"id": task_id})
     await create_audit_log(
@@ -3834,50 +4263,52 @@ async def delete_task(
         action="DELETE_TASK",
         module="task",
         record_id=task_id,
-        old_data=existing
+        old_data=existing,
     )
     return {"message": "Task deleted successfully"}
 
+
 @api_router.post("/tasks/{task_id}/comments")
 async def add_task_comment(
-    task_id: str,
-    comment_data: dict,
-    current_user: User = Depends(get_current_user)
+    task_id: str, comment_data: dict, current_user: User = Depends(get_current_user)
 ):
     task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    is_involved = (
-        current_user.role.lower() == "admin" or
-        is_own_record(current_user, task)
+    is_involved = current_user.role.lower() == "admin" or is_own_record(
+        current_user, task
     )
     if not is_involved:
-        raise HTTPException(status_code=403, detail="Access denied: You must be involved in this task to comment.")
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: You must be involved in this task to comment.",
+        )
     comment = {
         "id": str(uuid.uuid4()),
         "user_id": current_user.id,
         "user_name": current_user.full_name,
         "text": comment_data.get("text"),
-        "created_at": datetime.now(IST).isoformat()
+        "created_at": datetime.now(IST).isoformat(),
     }
     await db.tasks.update_one({"id": task_id}, {"$push": {"comments": comment}})
     return comment
+
 
 # =========================================================
 # EXPORT TASK AUDIT LOG PDF
 # =========================================================
 @api_router.get("/tasks/{task_id}/export-log-pdf")
 async def export_task_log_pdf(
-    task_id: str,
-    current_user: User = Depends(check_permission("can_view_audit_logs"))
+    task_id: str, current_user: User = Depends(check_permission("can_view_audit_logs"))
 ):
     task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    logs = await db.audit_logs.find(
-        {"module": "task", "record_id": task_id},
-        {"_id": 0}
-    ).sort("timestamp", 1).to_list(1000)
+    logs = (
+        await db.audit_logs.find({"module": "task", "record_id": task_id}, {"_id": 0})
+        .sort("timestamp", 1)
+        .to_list(1000)
+    )
     if not logs:
         raise HTTPException(status_code=404, detail="No audit logs found")
     pdf = FPDF()
@@ -3892,8 +4323,14 @@ async def export_task_log_pdf(
     pdf.set_font("Arial", size=11)
     pdf.multi_cell(0, 7, f"Title: {task.get('title', '-')}")
     pdf.multi_cell(0, 7, f"Description: {task.get('description', '-')}")
-    pdf.multi_cell(0, 7, f"Assigned To: {task.get('assigned_to_name', task.get('assigned_to', '-'))}")
-    pdf.multi_cell(0, 7, f"Created By: {task.get('created_by_name', task.get('created_by', '-'))}")
+    pdf.multi_cell(
+        0,
+        7,
+        f"Assigned To: {task.get('assigned_to_name', task.get('assigned_to', '-'))}",
+    )
+    pdf.multi_cell(
+        0, 7, f"Created By: {task.get('created_by_name', task.get('created_by', '-'))}"
+    )
     pdf.multi_cell(0, 7, f"Created At: {task.get('created_at', '-')}")
     pdf.multi_cell(0, 7, f"Current Status: {task.get('status', '-')}")
     pdf.ln(8)
@@ -3908,7 +4345,9 @@ async def export_task_log_pdf(
         action = log.get("action", "UNKNOWN")
         user = log.get("user_name", "Unknown User")
         pdf.set_font("Arial", "B", 10)
-        pdf.multi_cell(0, 6, f"{timestamp} — {action.replace('_', ' ').title()} by {user}")
+        pdf.multi_cell(
+            0, 6, f"{timestamp} — {action.replace('_', ' ').title()} by {user}"
+        )
         pdf.set_font("Arial", size=10)
         if action == "TASK_STATUS_CHANGED":
             old_status = log.get("old_data", {}).get("status", "-")
@@ -3929,23 +4368,33 @@ async def export_task_log_pdf(
                 old_val = old_data.get(key)
                 new_val = new_data.get(key)
                 if old_val != new_val:
-                    pdf.multi_cell(0, 6, f" {key.replace('_', ' ').title()}: {old_val} -> {new_val}")
+                    pdf.multi_cell(
+                        0,
+                        6,
+                        f" {key.replace('_', ' ').title()}: {old_val} -> {new_val}",
+                    )
         pdf.ln(3)
     pdf.ln(5)
     pdf.set_font("Arial", "I", 8)
-    pdf.multi_cell(0, 5, f"Generated on {datetime.utcnow().strftime('%b %d, %Y %I:%M %p')} UTC")
+    pdf.multi_cell(
+        0, 5, f"Generated on {datetime.utcnow().strftime('%b %d, %Y %I:%M %p')} UTC"
+    )
     output = BytesIO()
     output.write(pdf.output(dest="S").encode("latin1"))
     output.seek(0)
     return StreamingResponse(
         output,
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=task_lifecycle_{task_id}.pdf"}
+        headers={
+            "Content-Disposition": f"attachment; filename=task_lifecycle_{task_id}.pdf"
+        },
     )
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DSC ROUTES
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 def _to_iso(val) -> Optional[str]:
     """Safely convert datetime/date/string/None to ISO string for MongoDB storage."""
@@ -3959,7 +4408,7 @@ def _to_iso(val) -> Optional[str]:
 # ─── DSC Certificate Reader ────────────────────────────────────────────────────
 class DSCReadRequest(BaseModel):
     pin: str
-    lib_path: Optional[str] = None   # optional override for PKCS#11 library path
+    lib_path: Optional[str] = None  # optional override for PKCS#11 library path
 
 
 class DSCCertificateData(BaseModel):
@@ -3974,11 +4423,14 @@ class DSCCertificateData(BaseModel):
     read_method: str = "unknown"
 
 
-def _extract_dn_field(name_obj, oid_dotted: str, fallback_attr: str = "") -> Optional[str]:
+def _extract_dn_field(
+    name_obj, oid_dotted: str, fallback_attr: str = ""
+) -> Optional[str]:
     """Extract a field from an x509 Name by OID or attribute."""
     try:
         from cryptography.x509.oid import NameOID
         import cryptography.x509 as cx509
+
         oid = cx509.NameOID.__dict__.get(fallback_attr) if fallback_attr else None
         # Try by dotted string OID first
         for attr in name_obj:
@@ -4005,7 +4457,12 @@ def _parse_cert_bytes(cert_bytes: bytes) -> DSCCertificateData:
     except Exception:
         try:
             import base64
-            pem = b"-----BEGIN CERTIFICATE-----\n" + base64.b64encode(cert_bytes) + b"\n-----END CERTIFICATE-----"
+
+            pem = (
+                b"-----BEGIN CERTIFICATE-----\n"
+                + base64.b64encode(cert_bytes)
+                + b"\n-----END CERTIFICATE-----"
+            )
             cert = x509.load_pem_x509_certificate(pem, default_backend())
         except Exception:
             return DSCCertificateData()
@@ -4031,8 +4488,16 @@ def _parse_cert_bytes(cert_bytes: bytes) -> DSCCertificateData:
 
     serial_hex = format(cert.serial_number, "X")
 
-    not_before = cert.not_valid_before_utc if hasattr(cert, "not_valid_before_utc") else cert.not_valid_before
-    not_after  = cert.not_valid_after_utc  if hasattr(cert, "not_valid_after_utc")  else cert.not_valid_after
+    not_before = (
+        cert.not_valid_before_utc
+        if hasattr(cert, "not_valid_before_utc")
+        else cert.not_valid_before
+    )
+    not_after = (
+        cert.not_valid_after_utc
+        if hasattr(cert, "not_valid_after_utc")
+        else cert.not_valid_after
+    )
 
     try:
         raw_subject = cert.subject.rfc4514_string()
@@ -4043,7 +4508,7 @@ def _parse_cert_bytes(cert_bytes: bytes) -> DSCCertificateData:
         holder_name=holder_name,
         serial_number=serial_hex,
         issue_date=not_before.date().isoformat() if not_before else None,
-        expiry_date=not_after.date().isoformat()  if not_after  else None,
+        expiry_date=not_after.date().isoformat() if not_after else None,
         email=email,
         organization=organization,
         raw_subject=raw_subject,
@@ -4054,6 +4519,7 @@ def _parse_cert_bytes(cert_bytes: bytes) -> DSCCertificateData:
 def _ensure_opensc_installed() -> bool:
     """Auto-install opensc + pcscd on Linux if not already present. Returns True if pkcs11-tool is available."""
     import shutil, subprocess, os
+
     if shutil.which("pkcs11-tool"):
         return True
     if os.name == "nt":
@@ -4061,13 +4527,27 @@ def _ensure_opensc_installed() -> bool:
     try:
         # Install opensc (provides pkcs11-tool), pcscd (PC/SC daemon), and libpcsclite-dev
         subprocess.run(
-            ["apt-get", "install", "-y", "--no-install-recommends",
-             "opensc", "pcscd", "libpcsclite1", "libpcsclite-dev", "libccid", "pcsc-tools"],
-            check=True, capture_output=True, timeout=180
+            [
+                "apt-get",
+                "install",
+                "-y",
+                "--no-install-recommends",
+                "opensc",
+                "pcscd",
+                "libpcsclite1",
+                "libpcsclite-dev",
+                "libccid",
+                "pcsc-tools",
+            ],
+            check=True,
+            capture_output=True,
+            timeout=180,
         )
         # Also start pcscd if it isn't running
         try:
-            subprocess.run(["service", "pcscd", "start"], capture_output=True, timeout=10)
+            subprocess.run(
+                ["service", "pcscd", "start"], capture_output=True, timeout=10
+            )
         except Exception:
             pass
         return shutil.which("pkcs11-tool") is not None
@@ -4080,23 +4560,38 @@ def _ensure_pyscard_installed() -> bool:
     """Install pyscard after ensuring libpcsclite-dev is present. Returns True if importable."""
     try:
         import smartcard  # noqa
+
         return True
     except ImportError:
         pass
     import subprocess, sys, os
+
     if os.name == "nt":
         return False
     try:
         # libpcsclite-dev must be installed first
         subprocess.run(
-            ["apt-get", "install", "-y", "--no-install-recommends", "libpcsclite-dev", "libpcsclite1", "pcscd"],
-            check=True, capture_output=True, timeout=120
+            [
+                "apt-get",
+                "install",
+                "-y",
+                "--no-install-recommends",
+                "libpcsclite-dev",
+                "libpcsclite1",
+                "pcscd",
+            ],
+            check=True,
+            capture_output=True,
+            timeout=120,
         )
         subprocess.run(
             [sys.executable, "-m", "pip", "install", "--quiet", "pyscard>=2.0.7"],
-            check=True, capture_output=True, timeout=120
+            check=True,
+            capture_output=True,
+            timeout=120,
         )
         import smartcard  # noqa
+
         return True
     except Exception:
         return False
@@ -4128,7 +4623,16 @@ def _try_opensc_cli(pin: str) -> Optional[DSCCertificateData]:
 
     for lib in CANDIDATE_LIBS:
         try:
-            cmd = [pkcs11_tool, "--read-object", "--type", "cert", "--slot-index", "0", "--pin", pin]
+            cmd = [
+                pkcs11_tool,
+                "--read-object",
+                "--type",
+                "cert",
+                "--slot-index",
+                "0",
+                "--pin",
+                pin,
+            ]
             if lib and os.path.exists(lib):
                 cmd += ["--module", lib]
 
@@ -4186,7 +4690,13 @@ def _try_pyscard_read(pin: str) -> Optional[DSCCertificateData]:
                     cert_data = []
                     offset = 0
                     while True:
-                        read_apdu = [0x00, 0xB0, (offset >> 8) & 0xFF, offset & 0xFF, 0xFF]
+                        read_apdu = [
+                            0x00,
+                            0xB0,
+                            (offset >> 8) & 0xFF,
+                            offset & 0xFF,
+                            0xFF,
+                        ]
                         data_chunk, sw1, sw2 = connection.transmit(read_apdu)
                         if sw1 == 0x90 and data_chunk:
                             cert_data.extend(data_chunk)
@@ -4213,9 +4723,12 @@ def _try_pyscard_read(pin: str) -> Optional[DSCCertificateData]:
     return None
 
 
-def _try_pkcs11_read(pin: str, lib_path: Optional[str] = None) -> Optional[DSCCertificateData]:
+def _try_pkcs11_read(
+    pin: str, lib_path: Optional[str] = None
+) -> Optional[DSCCertificateData]:
     """Try to read certificate using PyKCS11 (python-pkcs11 wrapper)."""
     import os
+
     CANDIDATE_LIBS = [
         lib_path,
         "/usr/lib/x86_64-linux-gnu/pkcs11/opensc-pkcs11.so",
@@ -4245,7 +4758,9 @@ def _try_pkcs11_read(pin: str, lib_path: Optional[str] = None) -> Optional[DSCCe
             slots = pkcs11.getSlotList(tokenPresent=True)
             if not slots:
                 continue
-            session = pkcs11.openSession(slots[0], PyKCS11.CKF_SERIAL_SESSION | PyKCS11.CKF_RW_SESSION)
+            session = pkcs11.openSession(
+                slots[0], PyKCS11.CKF_SERIAL_SESSION | PyKCS11.CKF_RW_SESSION
+            )
             session.login(pin)
             certs = session.findObjects([(PyKCS11.CKA_CLASS, PyKCS11.CKO_CERTIFICATE)])
             if not certs:
@@ -4253,7 +4768,9 @@ def _try_pkcs11_read(pin: str, lib_path: Optional[str] = None) -> Optional[DSCCe
                 session.closeSession()
                 continue
             for cert_obj in certs:
-                attrs = session.getAttributeValue(cert_obj, [PyKCS11.CKA_VALUE, PyKCS11.CKA_CERTIFICATE_TYPE])
+                attrs = session.getAttributeValue(
+                    cert_obj, [PyKCS11.CKA_VALUE, PyKCS11.CKA_CERTIFICATE_TYPE]
+                )
                 cert_bytes = bytes(attrs[0])
                 if cert_bytes:
                     data = _parse_cert_bytes(cert_bytes)
@@ -4270,8 +4787,7 @@ def _try_pkcs11_read(pin: str, lib_path: Optional[str] = None) -> Optional[DSCCe
 
 @api_router.post("/dsc/read-certificate", response_model=DSCCertificateData)
 async def read_dsc_certificate(
-    req: DSCReadRequest,
-    current_user: User = Depends(get_current_user)
+    req: DSCReadRequest, current_user: User = Depends(get_current_user)
 ):
     """
     Read certificate data from a physically connected DSC USB token.
@@ -4284,7 +4800,9 @@ async def read_dsc_certificate(
     Returns holder_name, serial_number, issue_date, expiry_date, organization.
     """
     if not req.pin or not req.pin.strip():
-        raise HTTPException(status_code=422, detail="PIN is required to read the DSC token.")
+        raise HTTPException(
+            status_code=422, detail="PIN is required to read the DSC token."
+        )
 
     pin = req.pin.strip()
 
@@ -4312,25 +4830,25 @@ async def read_dsc_certificate(
             "(2) pcscd (PC/SC daemon) is running, and (3) the PIN is correct. "
             "On Render.com, the token must be plugged into your local machine and the backend "
             "must be running locally (not on the cloud) to access USB hardware."
-        )
+        ),
     )
 
 
 @api_router.post("/dsc", response_model=DSC)
 async def create_dsc(
     dsc_data: DSCCreate,
-    current_user: User = Depends(check_module_permission("dsc_register", "create"))
+    current_user: User = Depends(check_module_permission("dsc_register", "create")),
 ):
     try:
         now = datetime.now(timezone.utc)
         dsc = DSC(
             **dsc_data.model_dump(),
             created_by=current_user.id,
-            created_at=now,          # explicitly set — never None
+            created_at=now,  # explicitly set — never None
         )
         doc = dsc.model_dump()
-        doc["created_at"]  = _to_iso(doc["created_at"])
-        doc["issue_date"]  = _to_iso(doc["issue_date"])
+        doc["created_at"] = _to_iso(doc["created_at"])
+        doc["issue_date"] = _to_iso(doc["issue_date"])
         doc["expiry_date"] = _to_iso(doc["expiry_date"])
         await db.dsc_register.insert_one(doc)
         doc.pop("_id", None)
@@ -4347,7 +4865,7 @@ async def get_dsc_list(
     search: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(500, ge=1, le=500),
-    current_user: User = Depends(check_permission("can_view_all_dsc"))
+    current_user: User = Depends(check_permission("can_view_all_dsc")),
 ):
     query = {}
     if search:
@@ -4357,12 +4875,17 @@ async def get_dsc_list(
             {"holder_name": search_regex},
             {"dsc_type": search_regex},
             {"associated_with": search_regex},
-            {"current_status": search_regex}
+            {"current_status": search_regex},
         ]
     sort_dir = 1 if order.lower() == "asc" else -1
     skip = (page - 1) * limit
     total = await db.dsc_register.count_documents(query)
-    cursor = db.dsc_register.find(query, {"_id": 0}).sort(sort_by, sort_dir).skip(skip).limit(limit)
+    cursor = (
+        db.dsc_register.find(query, {"_id": 0})
+        .sort(sort_by, sort_dir)
+        .skip(skip)
+        .limit(limit)
+    )
     dsc_list = await cursor.to_list(length=limit)
     now = datetime.now(IST)
 
@@ -4385,22 +4908,31 @@ async def get_dsc_list(
             if expiry_date < now:
                 movement_log = dsc.get("movement_log", [])
                 updated = False
-                if not any(log.get("movement_type") == "EXPIRED" for log in movement_log):
-                    movement_log.append({
-                        "id": str(uuid.uuid4()),
-                        "movement_type": "EXPIRED",
-                        "person_name": "System Auto",
-                        "notes": "Auto marked as expired",
-                        "timestamp": now.isoformat(),
-                        "recorded_by": "System"
-                    })
+                if not any(
+                    log.get("movement_type") == "EXPIRED" for log in movement_log
+                ):
+                    movement_log.append(
+                        {
+                            "id": str(uuid.uuid4()),
+                            "movement_type": "EXPIRED",
+                            "person_name": "System Auto",
+                            "notes": "Auto marked as expired",
+                            "timestamp": now.isoformat(),
+                            "recorded_by": "System",
+                        }
+                    )
                     updated = True
                 if dsc.get("current_status") != "EXPIRED":
                     updated = True
                 if updated:
                     await db.dsc_register.update_one(
                         {"id": dsc["id"]},
-                        {"$set": {"current_status": "EXPIRED", "movement_log": movement_log}}
+                        {
+                            "$set": {
+                                "current_status": "EXPIRED",
+                                "movement_log": movement_log,
+                            }
+                        },
                     )
                     dsc["current_status"] = "EXPIRED"
                     dsc["movement_log"] = movement_log
@@ -4412,20 +4944,24 @@ async def get_dsc_list(
 async def update_dsc(
     dsc_id: str,
     dsc_data: DSCCreate,
-    current_user: User = Depends(check_permission("can_edit_dsc"))
+    current_user: User = Depends(check_permission("can_edit_dsc")),
 ):
     existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="DSC not found")
 
     update_data = dsc_data.model_dump()
-    update_data["issue_date"]  = _to_iso(update_data["issue_date"])
+    update_data["issue_date"] = _to_iso(update_data["issue_date"])
     update_data["expiry_date"] = _to_iso(update_data["expiry_date"])
 
     await db.dsc_register.update_one({"id": dsc_id}, {"$set": update_data})
     await create_audit_log(
-        current_user, action="UPDATE_DSC", module="dsc",
-        record_id=dsc_id, old_data=existing, new_data=update_data
+        current_user,
+        action="UPDATE_DSC",
+        module="dsc",
+        record_id=dsc_id,
+        old_data=existing,
+        new_data=update_data,
     )
 
     updated = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
@@ -4446,15 +4982,17 @@ async def update_dsc(
 
 @api_router.delete("/dsc/{dsc_id}")
 async def delete_dsc(
-    dsc_id: str,
-    current_user: User = Depends(check_permission("can_edit_dsc"))
+    dsc_id: str, current_user: User = Depends(check_permission("can_edit_dsc"))
 ):
     existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="DSC not found")
     await create_audit_log(
-        current_user, action="DELETE_DSC", module="dsc",
-        record_id=dsc_id, old_data=existing
+        current_user,
+        action="DELETE_DSC",
+        module="dsc",
+        record_id=dsc_id,
+        old_data=existing,
     )
     result = await db.dsc_register.delete_one({"id": dsc_id})
     if result.deleted_count == 0:
@@ -4466,19 +5004,19 @@ async def delete_dsc(
 async def record_dsc_movement(
     dsc_id: str,
     movement_data: DSCMovementRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="DSC not found")
 
     movement = {
-        "id":            str(uuid.uuid4()),
+        "id": str(uuid.uuid4()),
         "movement_type": movement_data.movement_type,
-        "person_name":   movement_data.person_name,
-        "timestamp":     datetime.now(IST).isoformat(),
-        "notes":         movement_data.notes,
-        "recorded_by":   current_user.full_name
+        "person_name": movement_data.person_name,
+        "timestamp": datetime.now(IST).isoformat(),
+        "notes": movement_data.notes,
+        "recorded_by": current_user.full_name,
     }
     movement_log = existing.get("movement_log", [])
     movement_log.append(movement)
@@ -4487,17 +5025,26 @@ async def record_dsc_movement(
         {"id": dsc_id},
         {
             "$set": {
-                "current_status":   movement_data.movement_type,
-                "current_location": "with_company" if movement_data.movement_type == "IN" else "taken_by_client",
-                "movement_log":     movement_log
+                "current_status": movement_data.movement_type,
+                "current_location": "with_company"
+                if movement_data.movement_type == "IN"
+                else "taken_by_client",
+                "movement_log": movement_log,
             }
-        }
+        },
     )
     await create_audit_log(
-        current_user, action="UPDATE_DSC", module="dsc",
-        record_id=dsc_id, old_data=existing, new_data={"movement_log": movement_log}
+        current_user,
+        action="UPDATE_DSC",
+        module="dsc",
+        record_id=dsc_id,
+        old_data=existing,
+        new_data={"movement_log": movement_log},
     )
-    return {"message": f"DSC marked as {movement_data.movement_type}", "movement": movement}
+    return {
+        "message": f"DSC marked as {movement_data.movement_type}",
+        "movement": movement,
+    }
 
 
 @api_router.put("/dsc/{dsc_id}/movement/{movement_id}")
@@ -4505,7 +5052,7 @@ async def update_dsc_movement(
     dsc_id: str,
     movement_id: str,
     update_data: MovementUpdateRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     existing = await db.dsc_register.find_one({"id": dsc_id}, {"_id": 0})
     if not existing:
@@ -4535,16 +5082,27 @@ async def update_dsc_movement(
 
     await db.dsc_register.update_one(
         {"id": dsc_id},
-        {"$set": {"current_status": new_status, "movement_log": movement_log}}
+        {"$set": {"current_status": new_status, "movement_log": movement_log}},
     )
     await create_audit_log(
-        current_user, action="UPDATE_DSC", module="dsc",
-        record_id=dsc_id, old_data=existing, new_data={"movement_log": movement_log}
+        current_user,
+        action="UPDATE_DSC",
+        module="dsc",
+        record_id=dsc_id,
+        old_data=existing,
+        new_data={"movement_log": movement_log},
     )
     return {"message": "Movement updated successfully", "movement_log": movement_log}
+
+
 # DOCUMENT REGISTER ROUTES
 @api_router.post("/documents", response_model=Document)
-async def create_document(document_data: DocumentCreate, current_user: User = Depends(check_module_permission("document_register", "create"))):
+async def create_document(
+    document_data: DocumentCreate,
+    current_user: User = Depends(
+        check_module_permission("document_register", "create")
+    ),
+):
     document = Document(**document_data.model_dump(), created_by=current_user.id)
     doc = document.model_dump()
     doc["created_at"] = doc["created_at"].isoformat()
@@ -4555,8 +5113,11 @@ async def create_document(document_data: DocumentCreate, current_user: User = De
     await db.documents.insert_one(doc)
     return document
 
+
 @api_router.get("/documents", response_model=List[Document])
-async def get_documents(current_user: User = Depends(check_permission("can_view_documents"))):
+async def get_documents(
+    current_user: User = Depends(check_permission("can_view_documents")),
+):
     documents = await db.documents.find({}, {"_id": 0}).to_list(1000)
     for d in documents:
         if isinstance(d["created_at"], str):
@@ -4567,8 +5128,13 @@ async def get_documents(current_user: User = Depends(check_permission("can_view_
             d["valid_upto"] = datetime.fromisoformat(d["valid_upto"])
     return documents
 
+
 @api_router.put("/documents/{document_id}", response_model=Document)
-async def update_document(document_id: str, document_data: DocumentCreate, current_user: User = Depends(check_permission("can_edit_documents"))):
+async def update_document(
+    document_id: str,
+    document_data: DocumentCreate,
+    current_user: User = Depends(check_permission("can_edit_documents")),
+):
     existing = await db.documents.find_one({"id": document_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -4578,28 +5144,46 @@ async def update_document(document_id: str, document_data: DocumentCreate, curre
     if update_data.get("valid_upto"):
         update_data["valid_upto"] = update_data["valid_upto"].isoformat()
     await db.documents.update_one({"id": document_id}, {"$set": update_data})
-    await create_audit_log(current_user, action="UPDATE_DOCUMENT", module="document", record_id=document_id, old_data=existing, new_data=update_data)
+    await create_audit_log(
+        current_user,
+        action="UPDATE_DOCUMENT",
+        module="document",
+        record_id=document_id,
+        old_data=existing,
+        new_data=update_data,
+    )
     updated = await db.documents.find_one({"id": document_id}, {"_id": 0})
     if isinstance(updated["created_at"], str):
         updated["created_at"] = datetime.fromisoformat(updated["created_at"])
     return Document(**updated)
 
+
 @api_router.delete("/documents/{document_id}")
-async def delete_document(document_id: str, current_user: User = Depends(check_permission("can_edit_documents"))):
+async def delete_document(
+    document_id: str,
+    current_user: User = Depends(check_permission("can_edit_documents")),
+):
     existing = await db.documents.find_one({"id": document_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Document not found")
-    await create_audit_log(current_user, action="DELETE_DOCUMENT", module="document", record_id=document_id, old_data=existing)
+    await create_audit_log(
+        current_user,
+        action="DELETE_DOCUMENT",
+        module="document",
+        record_id=document_id,
+        old_data=existing,
+    )
     result = await db.documents.delete_one({"id": document_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Document not found")
     return {"message": "Document deleted successfully"}
 
+
 @api_router.post("/documents/{document_id}/movement")
 async def record_document_movement(
     document_id: str,
     movement_data: DocumentMovementRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     document = await db.documents.find_one({"id": document_id}, {"_id": 0})
     if not document:
@@ -4610,23 +5194,36 @@ async def record_document_movement(
         "person_name": movement_data.person_name,
         "timestamp": datetime.now(IST).isoformat(),
         "notes": movement_data.notes,
-        "recorded_by": current_user.full_name
+        "recorded_by": current_user.full_name,
     }
     movement_log = document.get("movement_log", [])
     movement_log.append(movement)
     await db.documents.update_one(
         {"id": document_id},
-        {"$set": {"current_status": movement_data.movement_type, "movement_log": movement_log}}
+        {
+            "$set": {
+                "current_status": movement_data.movement_type,
+                "movement_log": movement_log,
+            }
+        },
     )
-    await create_audit_log(current_user, action="UPDATE_DOCUMENT", module="document", record_id=document_id, old_data=document, new_data={"movement_log": movement_log})
+    await create_audit_log(
+        current_user,
+        action="UPDATE_DOCUMENT",
+        module="document",
+        record_id=document_id,
+        old_data=document,
+        new_data={"movement_log": movement_log},
+    )
     return {"message": "Movement recorded successfully"}
+
 
 @api_router.put("/documents/{document_id}/movement/{movement_id}")
 async def update_document_movement(
     document_id: str,
     movement_id: str,
     update_data: DocumentMovementRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     document = await db.documents.find_one({"id": document_id}, {"_id": 0})
     if not document:
@@ -4647,66 +5244,192 @@ async def update_document_movement(
     new_status = movement_log[-1]["movement_type"] if movement_log else "IN"
     await db.documents.update_one(
         {"id": document_id},
-        {"$set": {"current_status": new_status, "movement_log": movement_log}}
+        {"$set": {"current_status": new_status, "movement_log": movement_log}},
     )
-    await create_audit_log(current_user, action="UPDATE_DOCUMENT", module="document", record_id=document_id, old_data=document, new_data={"movement_log": movement_log})
+    await create_audit_log(
+        current_user,
+        action="UPDATE_DOCUMENT",
+        module="document",
+        record_id=document_id,
+        old_data=document,
+        new_data={"movement_log": movement_log},
+    )
     return {"message": "Movement updated successfully"}
+
 
 # DUE DATE ROUTES
 COMPLIANCE_RULES = [
-    {"keywords": ["gstr-1", "gstr1", "outward supply"],                                "category": "GST",        "department": "GST"},
-    {"keywords": ["gstr-3b", "gstr3b", "summary return"],                              "category": "GST",        "department": "GST"},
-    {"keywords": ["gstr-9", "annual return gst"],                                      "category": "GST",        "department": "GST"},
-    {"keywords": ["gstr-4", "composition"],                                            "category": "GST",        "department": "GST"},
-    {"keywords": ["gstr-7", "tds return gst"],                                         "category": "GST",        "department": "GST"},
-    {"keywords": ["gstr-8", "tcs statement"],                                          "category": "GST",        "department": "GST"},
-    {"keywords": ["gstr-5", "non-resident"],                                           "category": "GST",        "department": "GST"},
-    {"keywords": ["gstr-6", "isd return"],                                             "category": "GST",        "department": "GST"},
-    {"keywords": ["gstr-10", "final return"],                                          "category": "GST",        "department": "GST"},
-    {"keywords": ["gst", "goods and service"],                                         "category": "GST",        "department": "GST"},
-    {"keywords": ["itr", "income tax return"],                                         "category": "Income Tax", "department": "IT"},
-    {"keywords": ["advance tax", "advance income tax"],                                "category": "Income Tax", "department": "IT"},
-    {"keywords": ["tax audit", "form 3ca", "form 3cb"],                                "category": "Audit",      "department": "IT"},
-    {"keywords": ["form 16", "form 26as"],                                             "category": "Income Tax", "department": "IT"},
-    {"keywords": ["income tax", "direct tax"],                                         "category": "Income Tax", "department": "IT"},
-    {"keywords": ["tds", "tax deducted at source", "form 24q", "form 26q", "form 27q"],"category": "TDS",        "department": "TDS"},
-    {"keywords": ["tcs", "tax collected at source"],                                   "category": "TDS",        "department": "TDS"},
-    {"keywords": ["challan 281"],                                                      "category": "TDS",        "department": "TDS"},
-    {"keywords": ["mgt-7", "annual return roc", "annual return mca"],                  "category": "ROC",        "department": "ROC"},
-    {"keywords": ["aoc-4", "financial statement", "filing of financial"],              "category": "ROC",        "department": "ROC"},
-    {"keywords": ["dir-3", "director kyc", "din kyc"],                                 "category": "ROC",        "department": "ROC"},
-    {"keywords": ["dir-8", "disqualification"],                                        "category": "ROC",        "department": "ROC"},
-    {"keywords": ["dir-12", "appointment", "resignation of director"],                 "category": "ROC",        "department": "ROC"},
-    {"keywords": ["mbp-1", "disclosure of interest"],                                  "category": "ROC",        "department": "ROC"},
-    {"keywords": ["agm", "annual general meeting"],                                    "category": "ROC",        "department": "ROC"},
-    {"keywords": ["dpt-3", "return of deposits"],                                      "category": "ROC",        "department": "ROC"},
-    {"keywords": ["msme-1", "msme samadhaan"],                                         "category": "ROC",        "department": "MSME"},
-    {"keywords": ["pas-6", "reconciliation of share"],                                 "category": "ROC",        "department": "ROC"},
-    {"keywords": ["roc", "mca", "companies act", "registrar of companies"],            "category": "ROC",        "department": "ROC"},
-    {"keywords": ["msme"],                                                             "category": "Other",      "department": "MSME"},
-    {"keywords": ["statutory audit", "internal audit", "audit report"],                "category": "Audit",      "department": "ACC"},
-    {"keywords": ["adt-1", "appointment of auditor"],                                  "category": "Audit",      "department": "ROC"},
-    {"keywords": ["trademark", "tm renewal"],                                          "category": "Trademark",  "department": "TM"},
-    {"keywords": ["fema", "foreign exchange", "fdi"],                                  "category": "FEMA",       "department": "FEMA"},
-    {"keywords": ["rera", "real estate"],                                              "category": "RERA",       "department": "OTHER"},
-    {"keywords": ["pf", "provident fund", "epfo"],                                     "category": "Other",      "department": "ACC"},
-    {"keywords": ["esi", "esic"],                                                      "category": "Other",      "department": "ACC"},
-    {"keywords": ["board meeting", "minute book"],                                     "category": "ROC",        "department": "ROC"},
+    {
+        "keywords": ["gstr-1", "gstr1", "outward supply"],
+        "category": "GST",
+        "department": "GST",
+    },
+    {
+        "keywords": ["gstr-3b", "gstr3b", "summary return"],
+        "category": "GST",
+        "department": "GST",
+    },
+    {
+        "keywords": ["gstr-9", "annual return gst"],
+        "category": "GST",
+        "department": "GST",
+    },
+    {"keywords": ["gstr-4", "composition"], "category": "GST", "department": "GST"},
+    {"keywords": ["gstr-7", "tds return gst"], "category": "GST", "department": "GST"},
+    {"keywords": ["gstr-8", "tcs statement"], "category": "GST", "department": "GST"},
+    {"keywords": ["gstr-5", "non-resident"], "category": "GST", "department": "GST"},
+    {"keywords": ["gstr-6", "isd return"], "category": "GST", "department": "GST"},
+    {"keywords": ["gstr-10", "final return"], "category": "GST", "department": "GST"},
+    {"keywords": ["gst", "goods and service"], "category": "GST", "department": "GST"},
+    {
+        "keywords": ["itr", "income tax return"],
+        "category": "Income Tax",
+        "department": "IT",
+    },
+    {
+        "keywords": ["advance tax", "advance income tax"],
+        "category": "Income Tax",
+        "department": "IT",
+    },
+    {
+        "keywords": ["tax audit", "form 3ca", "form 3cb"],
+        "category": "Audit",
+        "department": "IT",
+    },
+    {
+        "keywords": ["form 16", "form 26as"],
+        "category": "Income Tax",
+        "department": "IT",
+    },
+    {
+        "keywords": ["income tax", "direct tax"],
+        "category": "Income Tax",
+        "department": "IT",
+    },
+    {
+        "keywords": [
+            "tds",
+            "tax deducted at source",
+            "form 24q",
+            "form 26q",
+            "form 27q",
+        ],
+        "category": "TDS",
+        "department": "TDS",
+    },
+    {
+        "keywords": ["tcs", "tax collected at source"],
+        "category": "TDS",
+        "department": "TDS",
+    },
+    {"keywords": ["challan 281"], "category": "TDS", "department": "TDS"},
+    {
+        "keywords": ["mgt-7", "annual return roc", "annual return mca"],
+        "category": "ROC",
+        "department": "ROC",
+    },
+    {
+        "keywords": ["aoc-4", "financial statement", "filing of financial"],
+        "category": "ROC",
+        "department": "ROC",
+    },
+    {
+        "keywords": ["dir-3", "director kyc", "din kyc"],
+        "category": "ROC",
+        "department": "ROC",
+    },
+    {"keywords": ["dir-8", "disqualification"], "category": "ROC", "department": "ROC"},
+    {
+        "keywords": ["dir-12", "appointment", "resignation of director"],
+        "category": "ROC",
+        "department": "ROC",
+    },
+    {
+        "keywords": ["mbp-1", "disclosure of interest"],
+        "category": "ROC",
+        "department": "ROC",
+    },
+    {
+        "keywords": ["agm", "annual general meeting"],
+        "category": "ROC",
+        "department": "ROC",
+    },
+    {
+        "keywords": ["dpt-3", "return of deposits"],
+        "category": "ROC",
+        "department": "ROC",
+    },
+    {"keywords": ["msme-1", "msme samadhaan"], "category": "ROC", "department": "MSME"},
+    {
+        "keywords": ["pas-6", "reconciliation of share"],
+        "category": "ROC",
+        "department": "ROC",
+    },
+    {
+        "keywords": ["roc", "mca", "companies act", "registrar of companies"],
+        "category": "ROC",
+        "department": "ROC",
+    },
+    {"keywords": ["msme"], "category": "Other", "department": "MSME"},
+    {
+        "keywords": ["statutory audit", "internal audit", "audit report"],
+        "category": "Audit",
+        "department": "ACC",
+    },
+    {
+        "keywords": ["adt-1", "appointment of auditor"],
+        "category": "Audit",
+        "department": "ROC",
+    },
+    {
+        "keywords": ["trademark", "tm renewal"],
+        "category": "Trademark",
+        "department": "TM",
+    },
+    {
+        "keywords": ["fema", "foreign exchange", "fdi"],
+        "category": "FEMA",
+        "department": "FEMA",
+    },
+    {"keywords": ["rera", "real estate"], "category": "RERA", "department": "OTHER"},
+    {
+        "keywords": ["pf", "provident fund", "epfo"],
+        "category": "Other",
+        "department": "ACC",
+    },
+    {"keywords": ["esi", "esic"], "category": "Other", "department": "ACC"},
+    {
+        "keywords": ["board meeting", "minute book"],
+        "category": "ROC",
+        "department": "ROC",
+    },
 ]
 
 MONTH_MAP = {
-    "january": 1,  "jan": 1,
-    "february": 2, "feb": 2,
-    "march": 3,    "mar": 3,
-    "april": 4,    "apr": 4,
+    "january": 1,
+    "jan": 1,
+    "february": 2,
+    "feb": 2,
+    "march": 3,
+    "mar": 3,
+    "april": 4,
+    "apr": 4,
     "may": 5,
-    "june": 6,     "jun": 6,
-    "july": 7,     "jul": 7,
-    "august": 8,   "aug": 8,
-    "september": 9,"sep": 9, "sept": 9,
-    "october": 10, "oct": 10,
-    "november": 11,"nov": 11,
-    "december": 12,"dec": 12,
+    "june": 6,
+    "jun": 6,
+    "july": 7,
+    "jul": 7,
+    "august": 8,
+    "aug": 8,
+    "september": 9,
+    "sep": 9,
+    "sept": 9,
+    "october": 10,
+    "oct": 10,
+    "november": 11,
+    "nov": 11,
+    "december": 12,
+    "dec": 12,
 }
 
 
@@ -4716,32 +5439,42 @@ def parse_date_from_text(text: str):
     year = now.year
 
     m = re.search(
-        r'\b(\d{1,2})(?:st|nd|rd|th)?\s+'
-        r'(january|february|march|april|may|june|july|august|september|october|november|december)'
-        r'\s+(\d{4})\b', text, re.IGNORECASE)
+        r"\b(\d{1,2})(?:st|nd|rd|th)?\s+"
+        r"(january|february|march|april|may|june|july|august|september|october|november|december)"
+        r"\s+(\d{4})\b",
+        text,
+        re.IGNORECASE,
+    )
     if m:
         try:
-            return date(int(m.group(3)), MONTH_MAP[m.group(2).lower()], int(m.group(1))).isoformat()
+            return date(
+                int(m.group(3)), MONTH_MAP[m.group(2).lower()], int(m.group(1))
+            ).isoformat()
         except Exception:
             pass
 
     m = re.search(
-        r'\b(january|february|march|april|may|june|july|august|september|october|november|december)'
-        r'\s+(\d{1,2}),?\s+(\d{4})\b', text, re.IGNORECASE)
+        r"\b(january|february|march|april|may|june|july|august|september|october|november|december)"
+        r"\s+(\d{1,2}),?\s+(\d{4})\b",
+        text,
+        re.IGNORECASE,
+    )
     if m:
         try:
-            return date(int(m.group(3)), MONTH_MAP[m.group(1).lower()], int(m.group(2))).isoformat()
+            return date(
+                int(m.group(3)), MONTH_MAP[m.group(1).lower()], int(m.group(2))
+            ).isoformat()
         except Exception:
             pass
 
-    m = re.search(r'\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b', text)
+    m = re.search(r"\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b", text)
     if m:
         try:
             return date(int(m.group(3)), int(m.group(2)), int(m.group(1))).isoformat()
         except Exception:
             pass
 
-    m = re.search(r'\b(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})\b', text)
+    m = re.search(r"\b(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})\b", text)
     if m:
         try:
             return date(int(m.group(1)), int(m.group(2)), int(m.group(3))).isoformat()
@@ -4749,9 +5482,11 @@ def parse_date_from_text(text: str):
             pass
 
     m = re.search(
-        r'\b(\d{1,2})(?:st|nd|rd|th)?\s+'
-        r'(january|february|march|april|may|june|july|august|september|october|november|december)\b',
-        text, re.IGNORECASE)
+        r"\b(\d{1,2})(?:st|nd|rd|th)?\s+"
+        r"(january|february|march|april|may|june|july|august|september|october|november|december)\b",
+        text,
+        re.IGNORECASE,
+    )
     if m:
         try:
             mo = MONTH_MAP[m.group(2).lower()]
@@ -4764,8 +5499,11 @@ def parse_date_from_text(text: str):
             pass
 
     m = re.search(
-        r'\b(january|february|march|april|may|june|july|august|september|october|november|december)'
-        r'\s+(\d{1,2})\b', text, re.IGNORECASE)
+        r"\b(january|february|march|april|may|june|july|august|september|october|november|december)"
+        r"\s+(\d{1,2})\b",
+        text,
+        re.IGNORECASE,
+    )
     if m:
         try:
             mo = MONTH_MAP[m.group(1).lower()]
@@ -4777,7 +5515,9 @@ def parse_date_from_text(text: str):
         except Exception:
             pass
 
-    m = re.search(r'\b(\d{1,2})(?:st|nd|rd|th)?\s+of\s+next\s+month\b', text, re.IGNORECASE)
+    m = re.search(
+        r"\b(\d{1,2})(?:st|nd|rd|th)?\s+of\s+next\s+month\b", text, re.IGNORECASE
+    )
     if m:
         try:
             day = int(m.group(1))
@@ -4790,14 +5530,18 @@ def parse_date_from_text(text: str):
         except Exception:
             pass
 
-    m = re.search(r'within\s+(\d+)\s+days?', text, re.IGNORECASE)
+    m = re.search(r"within\s+(\d+)\s+days?", text, re.IGNORECASE)
     if m:
         try:
             return (date.today() + timedelta(days=int(m.group(1)))).isoformat()
         except Exception:
             pass
 
-    m = re.search(r'\b(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b', text, re.IGNORECASE)
+    m = re.search(
+        r"\b(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b",
+        text,
+        re.IGNORECASE,
+    )
     if m:
         try:
             mo = MONTH_MAP[m.group(2).lower()]
@@ -4821,10 +5565,10 @@ def classify_compliance(line: str):
 
 
 def extract_title(line: str) -> str:
-    title = re.sub(r'\s+', ' ', line).strip()
-    title = re.sub(r'^[\-\*\•\|]+\s*', '', title)
+    title = re.sub(r"\s+", " ", line).strip()
+    title = re.sub(r"^[\-\*\•\|]+\s*", "", title)
     if len(title) > 80:
-        title = title[:77].rsplit(' ', 1)[0] + '...'
+        title = title[:77].rsplit(" ", 1)[0] + "..."
     return title or "Compliance Task"
 
 
@@ -4851,7 +5595,10 @@ def parse_compliance_dates(raw_text: str):
             date_val = parse_date_from_text(lines[i + 1])
         if not date_val:
             continue
-        title_col = next((c for idx, c in enumerate(cols) if idx != date_col_idx and len(c) > 3), None)
+        title_col = next(
+            (c for idx, c in enumerate(cols) if idx != date_col_idx and len(c) > 3),
+            None,
+        )
         if not title_col:
             continue
         title = extract_title(title_col)
@@ -4859,19 +5606,25 @@ def parse_compliance_dates(raw_text: str):
             continue
         seen.add(title.lower())
         clf = classify_compliance(line)
-        results.append({
-            "title": title,
-            "due_date": date_val,
-            "category": clf["category"],
-            "department": clf["department"],
-            "description": title_col[:300],
-            "status": "pending",
-        })
+        results.append(
+            {
+                "title": title,
+                "due_date": date_val,
+                "category": clf["category"],
+                "department": clf["department"],
+                "description": title_col[:300],
+                "status": "pending",
+            }
+        )
 
     for i, line in enumerate(lines):
         if len(line) < 8:
             continue
-        if re.match(r'^(form|compliance|particulars|due date|applicability|sl\.?\s*no)', line, re.IGNORECASE):
+        if re.match(
+            r"^(form|compliance|particulars|due date|applicability|sl\.?\s*no)",
+            line,
+            re.IGNORECASE,
+        ):
             continue
         date_val = parse_date_from_text(line)
         if not date_val and i + 1 < len(lines):
@@ -4885,21 +5638,26 @@ def parse_compliance_dates(raw_text: str):
         if title.lower() in seen:
             continue
         seen.add(title.lower())
-        stripped = re.sub(r'\d{1,2}(?:st|nd|rd|th)?\s+\w+\s*\d{0,4}', '', line, flags=re.IGNORECASE).strip()
+        stripped = re.sub(
+            r"\d{1,2}(?:st|nd|rd|th)?\s+\w+\s*\d{0,4}", "", line, flags=re.IGNORECASE
+        ).strip()
         if len(stripped) < 5:
             continue
-        results.append({
-            "title": title,
-            "due_date": date_val,
-            "category": clf["category"],
-            "department": clf["department"],
-            "description": line[:300],
-            "status": "pending",
-        })
+        results.append(
+            {
+                "title": title,
+                "due_date": date_val,
+                "category": clf["category"],
+                "department": clf["department"],
+                "description": line[:300],
+                "status": "pending",
+            }
+        )
 
     form_pat = re.compile(
-        r'((?:GSTR?|ITR|MGT|AOC|DIR|DPT|ADT|PAS|INC|CHG|BEN|SH|CSR|MSME)-[\w\/]+)',
-        re.IGNORECASE)
+        r"((?:GSTR?|ITR|MGT|AOC|DIR|DPT|ADT|PAS|INC|CHG|BEN|SH|CSR|MSME)-[\w\/]+)",
+        re.IGNORECASE,
+    )
     for i, line in enumerate(lines):
         m = form_pat.search(line)
         if not m:
@@ -4917,14 +5675,16 @@ def parse_compliance_dates(raw_text: str):
             continue
         seen.add(title.lower())
         clf = classify_compliance(form_name + " " + line)
-        results.append({
-            "title": title,
-            "due_date": date_val,
-            "category": clf["category"],
-            "department": clf["department"],
-            "description": extract_title(line),
-            "status": "pending",
-        })
+        results.append(
+            {
+                "title": title,
+                "due_date": date_val,
+                "category": clf["category"],
+                "department": clf["department"],
+                "description": extract_title(line),
+                "status": "pending",
+            }
+        )
 
     results.sort(key=lambda x: x.get("due_date", "9999-12-31"))
     return results
@@ -4933,8 +5693,7 @@ def parse_compliance_dates(raw_text: str):
 # Route registered BEFORE /{due_date_id} param routes to prevent shadowing
 @api_router.post("/duedates/extract-from-file")
 async def extract_due_dates_from_file(
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user)
+    file: UploadFile = File(...), current_user: User = Depends(get_current_user)
 ):
     filename = (file.filename or "").lower()
     content_type = file.content_type or ""
@@ -4942,14 +5701,17 @@ async def extract_due_dates_from_file(
     raw_text = ""
 
     try:
-        if content_type.startswith("image/") or filename.endswith((".jpg", ".jpeg", ".png", ".webp", ".bmp")):
+        if content_type.startswith("image/") or filename.endswith(
+            (".jpg", ".jpeg", ".png", ".webp", ".bmp")
+        ):
             raise HTTPException(
                 status_code=400,
-                detail="Image upload is not supported on this server. Please upload a PDF or DOCX file instead."
+                detail="Image upload is not supported on this server. Please upload a PDF or DOCX file instead.",
             )
 
         elif content_type == "application/pdf" or filename.endswith(".pdf"):
             import pdfplumber
+
             parts = []
             with pdfplumber.open(BytesIO(file_bytes)) as pdf:
                 for page in pdf.pages:
@@ -4964,6 +5726,7 @@ async def extract_due_dates_from_file(
 
         elif filename.endswith((".docx", ".doc")):
             from docx import Document as DocxDocument
+
             doc = DocxDocument(BytesIO(file_bytes))
             parts = [p.text for p in doc.paragraphs if p.text.strip()]
             for table in doc.tables:
@@ -4972,7 +5735,10 @@ async def extract_due_dates_from_file(
             raw_text = "\n".join(parts)
 
         else:
-            raise HTTPException(status_code=400, detail="Unsupported file type. Use JPG, PNG, PDF, or DOCX.")
+            raise HTTPException(
+                status_code=400,
+                detail="Unsupported file type. Use JPG, PNG, PDF, or DOCX.",
+            )
 
     except HTTPException:
         raise
@@ -4981,72 +5747,87 @@ async def extract_due_dates_from_file(
         raise HTTPException(status_code=422, detail=f"Could not read file: {str(e)}")
 
     if not raw_text or len(raw_text.strip()) < 20:
-        raise HTTPException(status_code=422, detail="No readable text found. Try a clearer image or PDF.")
+        raise HTTPException(
+            status_code=422,
+            detail="No readable text found. Try a clearer image or PDF.",
+        )
 
     extracted = parse_compliance_dates(raw_text)
 
     if not extracted:
-        raise HTTPException(status_code=404, detail="No compliance dates detected in this document.")
+        raise HTTPException(
+            status_code=404, detail="No compliance dates detected in this document."
+        )
 
     return {"extracted": extracted, "count": len(extracted)}
+
+
 # ─── Calendar → Compliance Tracker sync helper ───────────────────────────────
 _CALENDAR_CATEGORY_MAP = {
-    'GST': 'GST', 'ROC': 'ROC', 'MCA': 'ROC', 'ITR': 'ITR',
-    'TDS': 'TDS', 'AUDIT': 'AUDIT', 'PF': 'PF_ESIC', 'ESIC': 'PF_ESIC',
-    'PT': 'PT', 'INCOME TAX': 'ITR',
+    "GST": "GST",
+    "ROC": "ROC",
+    "MCA": "ROC",
+    "ITR": "ITR",
+    "TDS": "TDS",
+    "AUDIT": "AUDIT",
+    "PF": "PF_ESIC",
+    "ESIC": "PF_ESIC",
+    "PT": "PT",
+    "INCOME TAX": "ITR",
 }
-_COMPLIANCE_CATEGORIES = ['ROC', 'GST', 'ITR', 'TDS', 'AUDIT', 'PF_ESIC', 'PT', 'OTHER']
+_COMPLIANCE_CATEGORIES = ["ROC", "GST", "ITR", "TDS", "AUDIT", "PF_ESIC", "PT", "OTHER"]
+
 
 async def _sync_due_date_to_compliance(dd: dict, current_user) -> None:
     """Upsert a compliance_master record linked to the given due_date doc."""
-    title    = (dd.get('title') or '').strip()
-    dd_id    = dd.get('id')
-    due_date = dd.get('due_date')
+    title = (dd.get("title") or "").strip()
+    dd_id = dd.get("id")
+    due_date = dd.get("due_date")
     if isinstance(due_date, datetime):
-        due_date = due_date.strftime('%Y-%m-%d')
-    elif isinstance(due_date, str) and 'T' in due_date:
+        due_date = due_date.strftime("%Y-%m-%d")
+    elif isinstance(due_date, str) and "T" in due_date:
         due_date = due_date[:10]
 
-    raw_cat  = (dd.get('category') or 'OTHER').upper()
-    category = _CALENDAR_CATEGORY_MAP.get(raw_cat, 'OTHER')
+    raw_cat = (dd.get("category") or "OTHER").upper()
+    category = _CALENDAR_CATEGORY_MAP.get(raw_cat, "OTHER")
     if category not in _COMPLIANCE_CATEGORIES:
-        category = 'OTHER'
+        category = "OTHER"
 
     existing = await db.compliance_masters.find_one(
-        {'calendar_due_date_id': dd_id}, {'_id': 0}
+        {"calendar_due_date_id": dd_id}, {"_id": 0}
     )
     now_str = datetime.now(timezone.utc).isoformat()
 
     if existing:
         await db.compliance_masters.update_one(
-            {'id': existing['id']},
-            {'$set': {'due_date': due_date, 'name': title, 'updated_at': now_str}}
+            {"id": existing["id"]},
+            {"$set": {"due_date": due_date, "name": title, "updated_at": now_str}},
         )
     else:
         import uuid as _uuid
+
         doc = {
-            'id':                      str(_uuid.uuid4()),
-            'name':                    title,
-            'category':                category,
-            'frequency':               'one_time',
-            'fy_year':                 None,
-            'period_label':            None,
-            'due_date':                due_date,
-            'description':             dd.get('description', ''),
-            'applicable_entity_types': [],
-            'calendar_due_date_id':    dd_id,
-            'created_by':              str(getattr(current_user, 'id', '')),
-            'created_by_name':         getattr(current_user, 'full_name', ''),
-            'created_at':              now_str,
-            'updated_at':              now_str,
+            "id": str(_uuid.uuid4()),
+            "name": title,
+            "category": category,
+            "frequency": "one_time",
+            "fy_year": None,
+            "period_label": None,
+            "due_date": due_date,
+            "description": dd.get("description", ""),
+            "applicable_entity_types": [],
+            "calendar_due_date_id": dd_id,
+            "created_by": str(getattr(current_user, "id", "")),
+            "created_by_name": getattr(current_user, "full_name", ""),
+            "created_at": now_str,
+            "updated_at": now_str,
         }
-        await db.compliance_masters.insert_one({**doc, '_id': doc['id']})
+        await db.compliance_masters.insert_one({**doc, "_id": doc["id"]})
 
 
 @api_router.post("/duedates", response_model=DueDate)
 async def create_due_date(
-    due_date_data: DueDateCreate,
-    current_user: User = Depends(get_current_user)
+    due_date_data: DueDateCreate, current_user: User = Depends(get_current_user)
 ):
     try:
         if not due_date_data.department:
@@ -5068,10 +5849,7 @@ async def create_due_date(
         # ✅ FIX 2: Build document safely
         data["due_date"] = parsed_date
 
-        due_date = DueDate(
-            **data,
-            created_by=current_user.id
-        )
+        due_date = DueDate(**data, created_by=current_user.id)
 
         doc = due_date.model_dump()
 
@@ -5114,10 +5892,10 @@ async def create_due_date(
 #       `(dd_date - now).days`, which is correct.
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 @api_router.get("/duedates/upcoming")
 async def get_upcoming_due_dates(
-    days: int = Query(30),
-    current_user: User = Depends(get_current_user)
+    days: int = Query(30), current_user: User = Depends(get_current_user)
 ):
     now = datetime.now(IST)
     future_date = now + timedelta(days=days)
@@ -5137,7 +5915,11 @@ async def get_upcoming_due_dates(
         {"is_closed": True}, {"_id": 0, "name": 1, "calendar_due_date_id": 1}
     ).to_list(1000)
     closed_names = {m["name"].strip().lower() for m in closed_masters if m.get("name")}
-    closed_cal_ids = {m["calendar_due_date_id"] for m in closed_masters if m.get("calendar_due_date_id")}
+    closed_cal_ids = {
+        m["calendar_due_date_id"]
+        for m in closed_masters
+        if m.get("calendar_due_date_id")
+    }
 
     results = []
 
@@ -5160,7 +5942,7 @@ async def get_upcoming_due_dates(
 
         if dd_date <= future_date:
             dd["due_date"] = dd_date
-            dd["days_remaining"] = (dd_date - now).days   # negative = overdue
+            dd["days_remaining"] = (dd_date - now).days  # negative = overdue
             results.append(dd)
 
     # Sort: overdue first (most-negative days_remaining), then by closest due date
@@ -5195,7 +5977,7 @@ async def get_due_dates(current_user: User = Depends(get_current_user)):
 async def update_due_date(
     due_date_id: str,
     due_date_data: DueDateCreate,
-    current_user: User = Depends(check_permission("can_edit_due_dates"))
+    current_user: User = Depends(check_permission("can_edit_due_dates")),
 ):
     existing = await db.due_dates.find_one({"id": due_date_id}, {"_id": 0})
     if not existing:
@@ -5209,7 +5991,7 @@ async def update_due_date(
         module="duedate",
         record_id=due_date_id,
         old_data=existing,
-        new_data=update_data
+        new_data=update_data,
     )
     updated = await db.due_dates.find_one({"id": due_date_id}, {"_id": 0})
     if isinstance(updated.get("created_at"), str):
@@ -5233,7 +6015,7 @@ async def update_due_date(
 @api_router.delete("/duedates/{due_date_id}")
 async def delete_due_date(
     due_date_id: str,
-    current_user: User = Depends(check_permission("can_edit_due_dates"))
+    current_user: User = Depends(check_permission("can_edit_due_dates")),
 ):
     existing = await db.due_dates.find_one({"id": due_date_id}, {"_id": 0})
     if not existing:
@@ -5243,7 +6025,7 @@ async def delete_due_date(
         action="DELETE_DUE_DATE",
         module="duedate",
         record_id=due_date_id,
-        old_data=existing
+        old_data=existing,
     )
     result = await db.due_dates.delete_one({"id": due_date_id})
     if result.deleted_count == 0:
@@ -5253,14 +6035,20 @@ async def delete_due_date(
 
 # Registered before /clients/{client_id} to prevent route shadowing
 @api_router.get("/clients/upcoming-birthdays")
-async def get_upcoming_birthdays(days: int = 7, current_user: User = Depends(get_current_user)):
+async def get_upcoming_birthdays(
+    days: int = 7, current_user: User = Depends(get_current_user)
+):
     clients = await db.clients.find({}, {"_id": 0}).to_list(1000)
     today = date.today()
     upcoming = []
     for client in clients:
         if client.get("birthday"):
             try:
-                bday = date.fromisoformat(client["birthday"]) if isinstance(client["birthday"], str) else client["birthday"]
+                bday = (
+                    date.fromisoformat(client["birthday"])
+                    if isinstance(client["birthday"], str)
+                    else client["birthday"]
+                )
                 # Added leap year guard
                 try:
                     this_year_bday = bday.replace(year=today.year)
@@ -5279,11 +6067,11 @@ async def get_upcoming_birthdays(days: int = 7, current_user: User = Depends(get
                 continue
     return sorted(upcoming, key=lambda x: x["days_until_birthday"])
 
+
 # ─── MANUAL BIRTHDAY WISH ────────────────────────────────────────────────────
 @api_router.post("/clients/{client_id}/send-birthday-wish")
 async def send_birthday_wish_manual(
-    client_id: str,
-    current_user: User = Depends(get_current_user)
+    client_id: str, current_user: User = Depends(get_current_user)
 ):
     """Manually send a birthday wish to a client. Admin/manager only."""
     if current_user.role not in ("admin", "manager"):
@@ -5296,7 +6084,7 @@ async def send_birthday_wish_manual(
     sent_to, failed, no_email = [], [], []
 
     # Main client email
-    client_name  = client.get("company_name") or "Valued Client"
+    client_name = client.get("company_name") or "Valued Client"
     client_email = client.get("email")
     wa_sent_to = []
 
@@ -5313,14 +6101,18 @@ async def send_birthday_wish_manual(
     if client_phone:
         try:
             from backend.whatsapp_integration import send_whatsapp_notification
+
             wa_msg = (
                 f"🎂 *Happy Birthday, {client_name}!*\n\n"
                 f"Wishing you a wonderful birthday filled with joy and prosperity! 🎉\n\n"
                 f"Best wishes,\n_Taskosphere Team_"
             )
             await send_whatsapp_notification(
-                to=client_phone, message=wa_msg, message_type="birthday",
-                context_id=client_id, sent_by=current_user.id,
+                to=client_phone,
+                message=wa_msg,
+                message_type="birthday",
+                context_id=client_id,
+                sent_by=current_user.id,
             )
             wa_sent_to.append(client_phone)
         except Exception as wa_err:
@@ -5329,7 +6121,7 @@ async def send_birthday_wish_manual(
     # Contact persons
     for cp in client.get("contact_persons") or []:
         cp_email = cp.get("email")
-        cp_name  = cp.get("name") or client_name
+        cp_name = cp.get("name") or client_name
         if cp_email:
             ok = await send_birthday_email(cp_email, cp_name)
             (sent_to if ok else failed).append(cp_email)
@@ -5343,21 +6135,31 @@ async def send_birthday_wish_manual(
         if cp_phone:
             try:
                 from backend.whatsapp_integration import send_whatsapp_notification
+
                 cp_msg = (
                     f"🎂 *Happy Birthday, {cp_name}!*\n\n"
                     f"Wishing you a wonderful day! 🎉\n\n"
                     f"_Taskosphere Team_"
                 )
                 await send_whatsapp_notification(
-                    to=cp_phone, message=cp_msg, message_type="birthday",
-                    context_id=client_id, sent_by=current_user.id,
+                    to=cp_phone,
+                    message=cp_msg,
+                    message_type="birthday",
+                    context_id=client_id,
+                    sent_by=current_user.id,
                 )
                 wa_sent_to.append(cp_phone)
             except Exception:
                 pass
 
-    return {"status": "completed", "sent_to": sent_to, "failed": failed,
-            "no_email": no_email, "whatsapp_sent_to": wa_sent_to}
+    return {
+        "status": "completed",
+        "sent_to": sent_to,
+        "failed": failed,
+        "no_email": no_email,
+        "whatsapp_sent_to": wa_sent_to,
+    }
+
 
 @api_router.get("/leads/meta/services")
 async def get_leads_services_meta(current_user: User = Depends(get_current_user)):
@@ -5369,17 +6171,20 @@ async def get_leads_services_meta(current_user: User = Depends(get_current_user)
     services = [s for s in services if s and isinstance(s, str)]
     return {"services": list(set(services))}
 
+
 # REPORTS ROUTES
 @api_router.get("/reports/efficiency")
 async def get_efficiency_report(
     user_id: Optional[str] = None,
-    current_user: User = Depends(check_module_permission("reports", "view"))
+    current_user: User = Depends(check_module_permission("reports", "view")),
 ):
     target_user_id = user_id or current_user.id
     if target_user_id != current_user.id:
         perms = get_user_permissions(current_user)
         if current_user.role != "admin" and not perms.get("can_view_reports", False):
-            raise HTTPException(status_code=403, detail="You do not have permission to view reports")
+            raise HTTPException(
+                status_code=403, detail="You do not have permission to view reports"
+            )
     if target_user_id != current_user.id:
         if current_user.role != "admin":
             permissions = get_user_permissions(current_user)
@@ -5387,32 +6192,47 @@ async def get_efficiency_report(
             # All non-admin roles (including manager) can only see own + explicitly granted users.
             # Manager does NOT get automatic team access to reports — must be granted via view_other_reports.
             if target_user_id not in allowed_users:
-                raise HTTPException(status_code=403, detail="Not authorized to view other users' reports")
-    logs = await db.activity_logs.find({"user_id": target_user_id}, {"_id": 0}).sort("date", -1).limit(30).to_list(100)
+                raise HTTPException(
+                    status_code=403,
+                    detail="Not authorized to view other users' reports",
+                )
+    logs = (
+        await db.activity_logs.find({"user_id": target_user_id}, {"_id": 0})
+        .sort("date", -1)
+        .limit(30)
+        .to_list(100)
+    )
     total_screen_time = sum(l.get("screen_time_minutes", 0) for l in logs)
     total_tasks_completed = sum(l.get("tasks_completed", 0) for l in logs)
-    target_user_doc = await db.users.find_one({"id": target_user_id}, {"_id": 0, "password": 0})
+    target_user_doc = await db.users.find_one(
+        {"id": target_user_id}, {"_id": 0, "password": 0}
+    )
     user_info = {
         "id": target_user_id,
-        "full_name": target_user_doc.get("full_name", "Unknown") if target_user_doc else "Unknown"
+        "full_name": target_user_doc.get("full_name", "Unknown")
+        if target_user_doc
+        else "Unknown",
     }
     return {
         "user_id": target_user_id,
         "user": user_info,
         "total_screen_time": total_screen_time,
         "total_tasks_completed": total_tasks_completed,
-        "days_logged": len(logs)
+        "days_logged": len(logs),
     }
+
 
 @api_router.get("/reports/export")
 async def export_reports(
     format: str = "csv",
     user_id: Optional[str] = None,
-    current_user: User = Depends(check_module_permission("reports", "download"))
+    current_user: User = Depends(check_module_permission("reports", "download")),
 ):
     perms = get_user_permissions(current_user)
     if current_user.role != "admin" and not perms.get("can_download_reports", False):
-        raise HTTPException(status_code=403, detail="You do not have permission to download reports")
+        raise HTTPException(
+            status_code=403, detail="You do not have permission to download reports"
+        )
     target_user_id = user_id or current_user.id
     if target_user_id != current_user.id:
         if current_user.role != "admin":
@@ -5420,38 +6240,49 @@ async def export_reports(
             allowed_users = permissions.get("view_other_reports", []) or []
             # All non-admin roles (including manager) can only export own + explicitly granted users.
             if target_user_id not in allowed_users:
-                raise HTTPException(status_code=403, detail="Not authorized to access other users' reports")
-    logs = await db.activity_logs.find({"user_id": target_user_id}, {"_id": 0}).to_list(100)
+                raise HTTPException(
+                    status_code=403,
+                    detail="Not authorized to access other users' reports",
+                )
+    logs = await db.activity_logs.find({"user_id": target_user_id}, {"_id": 0}).to_list(
+        100
+    )
     total_screen_time = sum(l.get("screen_time_minutes", 0) for l in logs)
     total_tasks_completed = sum(l.get("tasks_completed", 0) for l in logs)
     report = {
         "user_id": target_user_id,
         "total_screen_time": total_screen_time,
         "total_tasks_completed": total_tasks_completed,
-        "days_logged": len(logs)
+        "days_logged": len(logs),
     }
     if format == "csv":
         output = StringIO()
+
         def sanitize_csv_value(val):
             val_str = str(val)
             # Strip newlines to prevent CSV row injection in addition to formula injection
-            val_str = val_str.replace('\r', '').replace('\n', ' ')
-            if val_str and val_str[0] in ['=', '+', '-', '@']:
+            val_str = val_str.replace("\r", "").replace("\n", " ")
+            if val_str and val_str[0] in ["=", "+", "-", "@"]:
                 return f"'{val_str}"
             return val_str
+
         writer = csv.writer(output)
         writer.writerow(["User ID", "Screen Time", "Tasks Completed", "Days Logged"])
-        writer.writerow([
-            sanitize_csv_value(report["user_id"]),
-            sanitize_csv_value(report["total_screen_time"]),
-            sanitize_csv_value(report["total_tasks_completed"]),
-            sanitize_csv_value(report["days_logged"])
-        ])
+        writer.writerow(
+            [
+                sanitize_csv_value(report["user_id"]),
+                sanitize_csv_value(report["total_screen_time"]),
+                sanitize_csv_value(report["total_tasks_completed"]),
+                sanitize_csv_value(report["days_logged"]),
+            ]
+        )
         output.seek(0)
         return StreamingResponse(
             iter([output.getvalue()]),
             media_type="text/csv",
-            headers={"Content-Disposition": f"attachment; filename=efficiency_report_{target_user_id}.csv"}
+            headers={
+                "Content-Disposition": f"attachment; filename=efficiency_report_{target_user_id}.csv"
+            },
         )
     elif format == "pdf":
         pdf = FPDF()
@@ -5464,15 +6295,18 @@ async def export_reports(
         pdf.multi_cell(0, 8, f"Tasks Completed: {report['total_tasks_completed']}")
         pdf.multi_cell(0, 8, f"Days Logged: {report['days_logged']}")
         pdf_output = BytesIO()
-        pdf_output.write(pdf.output(dest='S').encode('latin1'))
+        pdf_output.write(pdf.output(dest="S").encode("latin1"))
         pdf_output.seek(0)
         return StreamingResponse(
             pdf_output,
             media_type="application/pdf",
-            headers={"Content-Disposition": f"attachment; filename=efficiency_report_{target_user_id}.pdf"}
+            headers={
+                "Content-Disposition": f"attachment; filename=efficiency_report_{target_user_id}.pdf"
+            },
         )
     else:
         raise HTTPException(status_code=400, detail="Invalid format")
+
 
 # ====================== PERFORMANCE RANKINGS ======================
 @api_router.get("/reports/performance-rankings", response_model=List[PerformanceMetric])
@@ -5480,15 +6314,17 @@ async def get_performance_rankings(
     period: str = Query("monthly", enum=["weekly", "monthly", "all_time"]),
     # FIX: was check_module_permission("reports","view") → can_view_reports.
     # Called as a secondary/widget call by Attendance page. All roles may see rankings.
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     global rankings_cache, rankings_cache_time
     cache_key = f"rankings_{period}"
     if (
-        cache_key in rankings_cache and
-        cache_key in rankings_cache_time and
+        cache_key in rankings_cache
+        and cache_key in rankings_cache_time
+        and
         # Use timezone-aware UTC datetime for cache comparison to avoid TypeError
-        (datetime.now(timezone.utc) - rankings_cache_time[cache_key]).total_seconds() < 300
+        (datetime.now(timezone.utc) - rankings_cache_time[cache_key]).total_seconds()
+        < 300
     ):
         return rankings_cache[cache_key]
     now = datetime.now(IST)
@@ -5505,54 +6341,50 @@ async def get_performance_rankings(
     end_date_str = now.strftime("%Y-%m-%d")
     start_date_str = start_date.strftime("%Y-%m-%d")
     users = await db.users.find(
-        {"role": {"$ne": "admin"}},
-        {"id": 1, "full_name": 1, "profile_picture": 1}
+        {"role": {"$ne": "admin"}}, {"id": 1, "full_name": 1, "profile_picture": 1}
     ).to_list(100)
     rankings = []
     for user in users:
         uid = user["id"]
         att_records = await db.attendance.find(
-            {
-                "user_id": uid,
-                "date": {"$gte": start_date_str, "$lte": end_date_str}
-            },
-            {"_id": 0, "duration_minutes": 1, "is_late": 1}
+            {"user_id": uid, "date": {"$gte": start_date_str, "$lte": end_date_str}},
+            {"_id": 0, "duration_minutes": 1, "is_late": 1},
         ).to_list(1000)
         days_present = len(att_records)
         total_minutes = sum(r.get("duration_minutes", 0) or 0 for r in att_records)
         total_hours = round(total_minutes / 60, 1)
-        attendance_percent = round(
-            (days_present / expected_working_days) * 100, 1
-        ) if expected_working_days else 0
+        attendance_percent = (
+            round((days_present / expected_working_days) * 100, 1)
+            if expected_working_days
+            else 0
+        )
         timely_days = len([r for r in att_records if not r.get("is_late", False)])
-        timely_punchin_percent = round(
-            (timely_days / days_present) * 100, 1
-        ) if days_present else 0
-        tasks_assigned = await db.tasks.count_documents({
-            "assigned_to": uid,
-            "created_at": {"$gte": start_date}
-        })
-        completed_tasks = await db.tasks.count_documents({
-            "assigned_to": uid,
-            "status": "completed",
-            "$or": [
-                {"completed_at": {"$gte": start_date}},
-                {"updated_at": {"$gte": start_date}}
-            ]
-        })
-        completed_todos = await db.todos.count_documents({
-            "user_id": uid,
-            "is_completed": True,
-            "completed_at": {"$gte": start_date}
-        })
+        timely_punchin_percent = (
+            round((timely_days / days_present) * 100, 1) if days_present else 0
+        )
+        tasks_assigned = await db.tasks.count_documents(
+            {"assigned_to": uid, "created_at": {"$gte": start_date}}
+        )
+        completed_tasks = await db.tasks.count_documents(
+            {
+                "assigned_to": uid,
+                "status": "completed",
+                "$or": [
+                    {"completed_at": {"$gte": start_date}},
+                    {"updated_at": {"$gte": start_date}},
+                ],
+            }
+        )
+        completed_todos = await db.todos.count_documents(
+            {"user_id": uid, "is_completed": True, "completed_at": {"$gte": start_date}}
+        )
         total_completed = completed_tasks + completed_todos
-        task_completion_percent = round(
-            (total_completed / tasks_assigned) * 100, 1
-        ) if tasks_assigned else 0
-        todos = await db.todos.find({
-            "user_id": uid,
-            "created_at": {"$gte": start_date}
-        }).to_list(500)
+        task_completion_percent = (
+            round((total_completed / tasks_assigned) * 100, 1) if tasks_assigned else 0
+        )
+        todos = await db.todos.find(
+            {"user_id": uid, "created_at": {"$gte": start_date}}
+        ).to_list(500)
         completed_ontime = 0
         for t in todos:
             if t.get("is_completed"):
@@ -5560,16 +6392,16 @@ async def get_performance_rankings(
                 completed_at = safe_dt(t.get("completed_at"))
                 if due and completed_at and completed_at <= due:
                     completed_ontime += 1
-        todo_ontime_percent = round(
-            (completed_ontime / len(todos)) * 100, 1
-        ) if todos else 0
+        todo_ontime_percent = (
+            round((completed_ontime / len(todos)) * 100, 1) if todos else 0
+        )
         safe_hours_ratio = min((total_hours / 180), 1) if total_hours else 0
         score = (
-            float(attendance_percent or 0) * 0.25 +
-            safe_hours_ratio * 100 * 0.20 +
-            float(task_completion_percent or 0) * 0.25 +
-            float(todo_ontime_percent or 0) * 0.15 +
-            float(timely_punchin_percent or 0) * 0.15
+            float(attendance_percent or 0) * 0.25
+            + safe_hours_ratio * 100 * 0.20
+            + float(task_completion_percent or 0) * 0.25
+            + float(todo_ontime_percent or 0) * 0.15
+            + float(timely_punchin_percent or 0) * 0.15
         )
         overall_score = round(min(score, 100), 1)
         if overall_score >= 95:
@@ -5589,7 +6421,7 @@ async def get_performance_rankings(
                 todo_ontime_percent=float(todo_ontime_percent or 0),
                 timely_punchin_percent=float(timely_punchin_percent or 0),
                 overall_score=float(overall_score or 0),
-                badge=str(badge)
+                badge=str(badge),
             )
         )
     rankings.sort(key=lambda x: x.overall_score, reverse=True)
@@ -5600,19 +6432,25 @@ async def get_performance_rankings(
     rankings_cache_time[cache_key] = datetime.now(timezone.utc)
     return rankings
 
+
 # ==============================================================
 # INTEGRATED MASTER DATA SYSTEM & CLIENT ROUTES
 # ==============================================================
 @api_router.post("/master/import-master-preview")
 async def import_master_data_preview(
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user)
+    file: UploadFile = File(...), current_user: User = Depends(get_current_user)
 ):
     if current_user.role.lower() != "admin":
-        raise HTTPException(status_code=403, detail="Administrative clearance required for Master Data access.")
+        raise HTTPException(
+            status_code=403,
+            detail="Administrative clearance required for Master Data access.",
+        )
     filename = file.filename.lower()
     if not filename.endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=400, detail="Deployment failed: Only Excel formats (.xlsx, .xls) supported.")
+        raise HTTPException(
+            status_code=400,
+            detail="Deployment failed: Only Excel formats (.xlsx, .xls) supported.",
+        )
     try:
         content = await file.read()
         excel = pd.ExcelFile(BytesIO(content))
@@ -5628,19 +6466,21 @@ async def import_master_data_preview(
             "status": "Ready for Audit",
             "message": f"Detected {len(excel.sheet_names)} operational layers with {total_vectors} vectors.",
             "sheets_found": excel.sheet_names,
-            "data": parsed_blueprint
+            "data": parsed_blueprint,
         }
     except Exception as e:
         logger.error(f"Blueprint Error: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Excel parse failure: {str(e)}")
 
+
 @api_router.post("/master/sync-sheets")
 async def sync_master_sheets(
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user)
+    file: UploadFile = File(...), current_user: User = Depends(get_current_user)
 ):
     if current_user.role.lower() != "admin":
-        raise HTTPException(status_code=403, detail="Master Data clearance level 5 required.")
+        raise HTTPException(
+            status_code=403, detail="Master Data clearance level 5 required."
+        )
     try:
         content = await file.read()
         excel = pd.ExcelFile(BytesIO(content))
@@ -5654,40 +6494,70 @@ async def sync_master_sheets(
                 for rec in records:
                     await db.clients.update_one(
                         {"company_name": str(rec.get("company_name", "")).strip()},
-                        {"$set": {**rec, "id": str(uuid.uuid4()) if "id" not in rec else rec["id"], "created_by": current_user.id, "updated_at": now_iso}},
-                        upsert=True
+                        {
+                            "$set": {
+                                **rec,
+                                "id": str(uuid.uuid4())
+                                if "id" not in rec
+                                else rec["id"],
+                                "created_by": current_user.id,
+                                "updated_at": now_iso,
+                            }
+                        },
+                        upsert=True,
                     )
                     sync_results["clients"] += 1
             elif "due" in sheet_type or "compliance" in sheet_type:
                 for rec in records:
-                    await db.due_dates.insert_one({**rec, "id": str(uuid.uuid4()), "created_by": current_user.id, "created_at": now_iso, "status": "pending"})
+                    await db.due_dates.insert_one(
+                        {
+                            **rec,
+                            "id": str(uuid.uuid4()),
+                            "created_by": current_user.id,
+                            "created_at": now_iso,
+                            "status": "pending",
+                        }
+                    )
                     sync_results["compliance"] += 1
             elif "staff" in sheet_type or "user" in sheet_type:
                 for rec in records:
                     await db.users.update_one(
                         {"email": rec.get("email")},
                         {"$set": {**rec, "id": str(uuid.uuid4()), "is_active": True}},
-                        upsert=True
+                        upsert=True,
                     )
                     sync_results["staff"] += 1
-            await create_audit_log(current_user=current_user, action="GLOBAL_MASTER_SYNC", module="master_data", record_id="multi_sheet_payload", new_data=sync_results)
-        return {"message": "Global Master Sync Successfully Executed", "telemetry": sync_results}
+            await create_audit_log(
+                current_user=current_user,
+                action="GLOBAL_MASTER_SYNC",
+                module="master_data",
+                record_id="multi_sheet_payload",
+                new_data=sync_results,
+            )
+        return {
+            "message": "Global Master Sync Successfully Executed",
+            "telemetry": sync_results,
+        }
     except Exception as e:
         logger.error(f"Sync Failure: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Database synchronization failed: {str(e)}")
+        raise HTTPException(
+            status_code=400, detail=f"Database synchronization failed: {str(e)}"
+        )
+
 
 # ==============================================================
 # GST CERTIFICATE PDF PARSER  (pure pdfplumber — no 3rd-party AI)
 # ==============================================================
+
 
 def _strip_watermark(s: str) -> str:
     """Remove single/short watermark chars from start/end of a string."""
     if not s:
         return s
     s = s.strip()
-    s = re.sub(r'^[A-Za-z]\s+(?=[A-Z])', '', s)
-    s = re.sub(r'\s+[A-Za-z]\s*$', '', s)
-    return re.sub(r'\s{2,}', ' ', s).strip()
+    s = re.sub(r"^[A-Za-z]\s+(?=[A-Z])", "", s)
+    s = re.sub(r"\s+[A-Za-z]\s*$", "", s)
+    return re.sub(r"\s{2,}", " ", s).strip()
 
 
 def _clean_gst_watermark(text: str) -> str:
@@ -5700,27 +6570,33 @@ def _clean_gst_watermark(text: str) -> str:
     """
     if not text:
         return text
-    WM_CHARS = set('goodservicstaxnewrk')
+    WM_CHARS = set("goodservicstaxnewrk")
     result_lines = []
     for line in text.splitlines():
         tokens = line.split()
         cleaned = []
         for i, tok in enumerate(tokens):
-            tok_alpha = re.sub(r'[^a-zA-Z]', '', tok)
+            tok_alpha = re.sub(r"[^a-zA-Z]", "", tok)
             is_wm_candidate = (
-                1 <= len(tok) <= 3 and
-                len(tok_alpha) >= 1 and
-                all(c.lower() in WM_CHARS for c in tok_alpha) and
-                tok_alpha.isalpha()
+                1 <= len(tok) <= 3
+                and len(tok_alpha) >= 1
+                and all(c.lower() in WM_CHARS for c in tok_alpha)
+                and tok_alpha.isalpha()
             )
             if is_wm_candidate:
-                prev_alpha_len = len(re.sub(r'[^a-zA-Z]', '', tokens[i-1])) if i > 0 else 0
-                next_alpha_len = len(re.sub(r'[^a-zA-Z]', '', tokens[i+1])) if i+1 < len(tokens) else 0
+                prev_alpha_len = (
+                    len(re.sub(r"[^a-zA-Z]", "", tokens[i - 1])) if i > 0 else 0
+                )
+                next_alpha_len = (
+                    len(re.sub(r"[^a-zA-Z]", "", tokens[i + 1]))
+                    if i + 1 < len(tokens)
+                    else 0
+                )
                 if prev_alpha_len > 3 and next_alpha_len > 3:
                     continue  # surrounded by real words — discard as watermark
             cleaned.append(tok)
-        result_lines.append(' '.join(cleaned))
-    return '\n'.join(result_lines)
+        result_lines.append(" ".join(cleaned))
+    return "\n".join(result_lines)
 
 
 def _parse_gst_reg06_pdf(pdf_bytes: bytes) -> dict:
@@ -5737,27 +6613,65 @@ def _parse_gst_reg06_pdf(pdf_bytes: bytes) -> dict:
     import pdfplumber
 
     _INDIAN_STATES = {
-        "andhra pradesh", "arunachal pradesh", "assam", "bihar", "chhattisgarh",
-        "goa", "gujarat", "haryana", "himachal pradesh", "jharkhand", "karnataka",
-        "kerala", "madhya pradesh", "maharashtra", "manipur", "meghalaya", "mizoram",
-        "nagaland", "odisha", "punjab", "rajasthan", "sikkim", "tamil nadu",
-        "telangana", "tripura", "uttar pradesh", "uttarakhand", "west bengal",
-        "andaman and nicobar islands", "andaman and nicobar", "chandigarh",
-        "dadra and nagar haveli and daman and diu", "dadra and nagar haveli",
-        "daman and diu", "delhi", "jammu and kashmir", "ladakh", "lakshadweep",
-        "puducherry", "pondicherry", "uttaranchal", "orissa",
+        "andhra pradesh",
+        "arunachal pradesh",
+        "assam",
+        "bihar",
+        "chhattisgarh",
+        "goa",
+        "gujarat",
+        "haryana",
+        "himachal pradesh",
+        "jharkhand",
+        "karnataka",
+        "kerala",
+        "madhya pradesh",
+        "maharashtra",
+        "manipur",
+        "meghalaya",
+        "mizoram",
+        "nagaland",
+        "odisha",
+        "punjab",
+        "rajasthan",
+        "sikkim",
+        "tamil nadu",
+        "telangana",
+        "tripura",
+        "uttar pradesh",
+        "uttarakhand",
+        "west bengal",
+        "andaman and nicobar islands",
+        "andaman and nicobar",
+        "chandigarh",
+        "dadra and nagar haveli and daman and diu",
+        "dadra and nagar haveli",
+        "daman and diu",
+        "delhi",
+        "jammu and kashmir",
+        "ladakh",
+        "lakshadweep",
+        "puducherry",
+        "pondicherry",
+        "uttaranchal",
+        "orissa",
     }
 
     with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
         raw_pages = [p.extract_text() or "" for p in pdf.pages]
 
     # Apply watermark cleaning to every page
-    pages      = [_clean_gst_watermark(p) for p in raw_pages]
-    page1      = pages[0] if pages else ""
+    pages = [_clean_gst_watermark(p) for p in raw_pages]
+    page1 = pages[0] if pages else ""
     annexure_b = next(
-        (p for p in pages
-         if "Annexure B" in p or "Details of Managing" in p or "Details of Proprietor" in p),
-        ""
+        (
+            p
+            for p in pages
+            if "Annexure B" in p
+            or "Details of Managing" in p
+            or "Details of Proprietor" in p
+        ),
+        "",
     )
 
     def _find(pat, text, group=1, flags=re.IGNORECASE | re.MULTILINE):
@@ -5765,36 +6679,46 @@ def _parse_gst_reg06_pdf(pdf_bytes: bytes) -> dict:
         return _strip_watermark(m.group(group).strip()) if m else ""
 
     # ── Core fields ──────────────────────────────────────────────────────────
-    gstin = _find(r'Registration Number\s*[:\-]?\s*([A-Z0-9]{15})', page1)
+    gstin = _find(r"Registration Number\s*[:\-]?\s*([A-Z0-9]{15})", page1)
 
     legal_name = _find(
-        r'(?:^\d+\.\s+)?Legal Name\s+([A-Z][A-Z0-9 &.\-,]+?)(?=\s*\n\s*\d+\.|\Z)', page1
+        r"(?:^\d+\.\s+)?Legal Name\s+([A-Z][A-Z0-9 &.\-,]+?)(?=\s*\n\s*\d+\.|\Z)", page1
     )
     if not legal_name:
-        legal_name = _find(r'Legal Name\s*\n\s*([A-Z][A-Z0-9 &.\-,]+)', page1)
+        legal_name = _find(r"Legal Name\s*\n\s*([A-Z][A-Z0-9 &.\-,]+)", page1)
 
     trade_name = _find(
-        r'Trade Name,?\s*if any\s+([A-Z][A-Z0-9 &.\-,]+?)(?=\s*\n\s*\d+\.|\Z)', page1
+        r"Trade Name,?\s*if any\s+([A-Z][A-Z0-9 &.\-,]+?)(?=\s*\n\s*\d+\.|\Z)", page1
     )
     if not trade_name:
-        trade_name = _find(r'Trade Name.*?\n\s*([A-Z][A-Z0-9 &.\-,]+)', page1)
+        trade_name = _find(r"Trade Name.*?\n\s*([A-Z][A-Z0-9 &.\-,]+)", page1)
 
     const_raw = _find(
-        r'Constitution of Business\s+([A-Za-z ]+?)(?=\s*\n\s*\d+\.|\Z)', page1
+        r"Constitution of Business\s+([A-Za-z ]+?)(?=\s*\n\s*\d+\.|\Z)", page1
     )
     if not const_raw:
-        const_raw = _find(r'Constitution of Business\s*\n\s*([A-Za-z ]+)', page1)
+        const_raw = _find(r"Constitution of Business\s*\n\s*([A-Za-z ]+)", page1)
 
     _cmap = {
-        "proprietorship": "proprietor", "proprietary": "proprietor",
-        "sole proprietorship": "proprietor", "proprietor": "proprietor",
-        "private limited company": "pvt_ltd", "private limited": "pvt_ltd",
-        "pvt ltd": "pvt_ltd", "pvt. ltd.": "pvt_ltd",
-        "limited liability partnership": "llp", "llp": "llp",
-        "partnership firm": "partnership", "partnership": "partnership",
-        "huf": "huf", "hindu undivided family": "huf",
-        "trust": "trust", "public limited company": "pvt_ltd",
-        "public limited": "pvt_ltd", "society": "other", "cooperative": "other",
+        "proprietorship": "proprietor",
+        "proprietary": "proprietor",
+        "sole proprietorship": "proprietor",
+        "proprietor": "proprietor",
+        "private limited company": "pvt_ltd",
+        "private limited": "pvt_ltd",
+        "pvt ltd": "pvt_ltd",
+        "pvt. ltd.": "pvt_ltd",
+        "limited liability partnership": "llp",
+        "llp": "llp",
+        "partnership firm": "partnership",
+        "partnership": "partnership",
+        "huf": "huf",
+        "hindu undivided family": "huf",
+        "trust": "trust",
+        "public limited company": "pvt_ltd",
+        "public limited": "pvt_ltd",
+        "society": "other",
+        "cooperative": "other",
     }
     lc_const = const_raw.lower().strip()
     constitution = _cmap.get(lc_const, "")
@@ -5818,17 +6742,22 @@ def _parse_gst_reg06_pdf(pdf_bytes: bytes) -> dict:
 
     # ── Address: extract the raw address block after watermark cleaning ───────
     addr_block_m = re.search(
-        r'Address of Principal Place of\s*(?:Business)?\s*(.+?)(?=\n\s*\d+\.\s+|Date of Liability|6\.\s|$)',
-        page1, re.DOTALL | re.IGNORECASE
+        r"Address of Principal Place of\s*(?:Business)?\s*(.+?)(?=\n\s*\d+\.\s+|Date of Liability|6\.\s|$)",
+        page1,
+        re.DOTALL | re.IGNORECASE,
     )
     addr_block_raw = ""
     if addr_block_m:
         chunk = addr_block_m.group(1) or ""
-        chunk = re.sub(r'(?i)^Business\s*[:\-]?\s*', '', chunk.strip())
-        chunk = re.sub(r'(?i)\nBusiness\s*[:\-]?\s*', ' ', chunk)
-        chunk = re.sub(r'(?i)^Address\s+of\s+Principal\s+Place\s+of\s+Business\s*[:\-]?\s*', '', chunk.strip())
-        chunk = re.sub(r'^\d+\.\s+', '', chunk.strip())
-        addr_block_raw = re.sub(r'\s+', ' ', chunk).strip()
+        chunk = re.sub(r"(?i)^Business\s*[:\-]?\s*", "", chunk.strip())
+        chunk = re.sub(r"(?i)\nBusiness\s*[:\-]?\s*", " ", chunk)
+        chunk = re.sub(
+            r"(?i)^Address\s+of\s+Principal\s+Place\s+of\s+Business\s*[:\-]?\s*",
+            "",
+            chunk.strip(),
+        )
+        chunk = re.sub(r"^\d+\.\s+", "", chunk.strip())
+        addr_block_raw = re.sub(r"\s+", " ", chunk).strip()
 
     address = city = state = pin = full_address = ""
 
@@ -5841,68 +6770,77 @@ def _parse_gst_reg06_pdf(pdf_bytes: bytes) -> dict:
         # Some 1-2 char WM residues may still remain between labels.
 
         ALL_LABELS = [
-            r'Floor No\.',
-            r'Building No\./Flat No\.',
-            r'Name Of Premises/Building',
-            r'Road/Street(?:/Lane)?',
-            r'Locality/Sub Loc(?:ality)?',
-            r'City/Town/Village',
-            r'District',
-            r'State',
-            r'PIN Code',
+            r"Floor No\.",
+            r"Building No\./Flat No\.",
+            r"Name Of Premises/Building",
+            r"Road/Street(?:/Lane)?",
+            r"Locality/Sub Loc(?:ality)?",
+            r"City/Town/Village",
+            r"District",
+            r"State",
+            r"PIN Code",
         ]
 
         def _lbl(start_pat, stop_pats, text):
             """Extract value between start label and first stop label."""
-            stop_re = '|'.join(stop_pats)
+            stop_re = "|".join(stop_pats)
             m = re.search(
-                start_pat + r'[:\s]+(?:[A-Za-z]{1,3}\s+)?(.+?)(?=\s+(?:' + stop_re + r')|$)',
-                text, re.IGNORECASE | re.DOTALL
+                start_pat
+                + r"[:\s]+(?:[A-Za-z]{1,3}\s+)?(.+?)(?=\s+(?:"
+                + stop_re
+                + r")|$)",
+                text,
+                re.IGNORECASE | re.DOTALL,
             )
             if not m:
                 return ""
             val = m.group(1).strip()
-            val = re.sub(r'\s+[A-Za-z]{1,3}\s*$', '', val).strip()
-            val = re.sub(r'^[A-Za-z]{1,3}\s+(?=[A-Z0-9])', '', val).strip()
+            val = re.sub(r"\s+[A-Za-z]{1,3}\s*$", "", val).strip()
+            val = re.sub(r"^[A-Za-z]{1,3}\s+(?=[A-Z0-9])", "", val).strip()
             return _strip_watermark(val)
 
-        floor    = _lbl(r'Floor No\.',                ALL_LABELS[2:], addr_block_raw)
-        building = _lbl(r'Building No\./Flat No\.',  ALL_LABELS[2:], addr_block_raw)
-        premises = _lbl(r'Name Of Premises/Building',  ALL_LABELS[3:], addr_block_raw)
-        road     = _lbl(r'Road/Street(?:/Lane)?',      ALL_LABELS[4:], addr_block_raw)
-        locality = _lbl(r'Locality/Sub Loc(?:ality)?', ALL_LABELS[5:], addr_block_raw)
-        city_lbl = _lbl(r'City/Town/Village',          ALL_LABELS[6:], addr_block_raw)
-        district = _lbl(r'District',                   ALL_LABELS[7:], addr_block_raw)
-        state_lbl= _lbl(r'State',                      ALL_LABELS[8:], addr_block_raw)
-        pin_lbl  = _find(r'PIN Code[:\s]+(\d{6})', addr_block_raw)
+        floor = _lbl(r"Floor No\.", ALL_LABELS[2:], addr_block_raw)
+        building = _lbl(r"Building No\./Flat No\.", ALL_LABELS[2:], addr_block_raw)
+        premises = _lbl(r"Name Of Premises/Building", ALL_LABELS[3:], addr_block_raw)
+        road = _lbl(r"Road/Street(?:/Lane)?", ALL_LABELS[4:], addr_block_raw)
+        locality = _lbl(r"Locality/Sub Loc(?:ality)?", ALL_LABELS[5:], addr_block_raw)
+        city_lbl = _lbl(r"City/Town/Village", ALL_LABELS[6:], addr_block_raw)
+        district = _lbl(r"District", ALL_LABELS[7:], addr_block_raw)
+        state_lbl = _lbl(r"State", ALL_LABELS[8:], addr_block_raw)
+        pin_lbl = _find(r"PIN Code[:\s]+(\d{6})", addr_block_raw)
 
         if any([building, premises, road, city_lbl, state_lbl, pin_lbl]):
-            addr_parts   = [x for x in [floor, building, premises, road, locality] if x]
-            address      = ", ".join(addr_parts)
-            city         = city_lbl or district
-            state        = state_lbl
-            pin          = pin_lbl
+            addr_parts = [x for x in [floor, building, premises, road, locality] if x]
+            address = ", ".join(addr_parts)
+            city = city_lbl or district
+            state = state_lbl
+            pin = pin_lbl
             full_address = ", ".join(x for x in [address, city, state, pin] if x)
         else:
             # ── Fallback: comma-separated inline address ────────────────────
             full_address = addr_block_raw
             raw = re.sub(
-                r'(?i)(signature not verified|digitally signed|date:.*|goods and services tax.*)',
-                '', addr_block_raw
+                r"(?i)(signature not verified|digitally signed|date:.*|goods and services tax.*)",
+                "",
+                addr_block_raw,
             ).strip()
-            parts = [p.strip() for p in re.split(r',\s*', raw) if p.strip()]
-            parts = [re.sub(r'(?i)^address\s*[:\-]\s*', '', p).strip() for p in parts if p.strip()]
+            parts = [p.strip() for p in re.split(r",\s*", raw) if p.strip()]
+            parts = [
+                re.sub(r"(?i)^address\s*[:\-]\s*", "", p).strip()
+                for p in parts
+                if p.strip()
+            ]
 
             for i, p in enumerate(parts):
-                if re.match(r'^\d{6}$', re.sub(r'\s+', '', p)):
-                    pin = re.sub(r'\s+', '', p)
-                    parts = parts[:i] + parts[i+1:]
+                if re.match(r"^\d{6}$", re.sub(r"\s+", "", p)):
+                    pin = re.sub(r"\s+", "", p)
+                    parts = parts[:i] + parts[i + 1 :]
                     break
 
             for i in range(len(parts) - 1, -1, -1):
                 if parts[i].lower().strip() in _INDIAN_STATES:
                     state = parts[i].strip().title()
-                    parts = parts[:i] + parts[i+1:]
+                    parts = parts[:i] + parts[i + 1 :]
                     break
 
             if parts:
@@ -5916,58 +6854,58 @@ def _parse_gst_reg06_pdf(pdf_bytes: bytes) -> dict:
             address = ", ".join(p for p in parts if p)
 
     # ── Other fields ──────────────────────────────────────────────────────────
-    reg_type = _find(r'Type of Registration\s*[\n\r]+\s*([A-Za-z ]+)', page1)
+    reg_type = _find(r"Type of Registration\s*[\n\r]+\s*([A-Za-z ]+)", page1)
     if not reg_type:
-        reg_type = _find(r'Type of Registration\s+([A-Za-z ]+)', page1)
-    valid_from = _find(r'Period of Validity\s+From\s+(\d{2}/\d{2}/\d{4})', page1)
+        reg_type = _find(r"Type of Registration\s+([A-Za-z ]+)", page1)
+    valid_from = _find(r"Period of Validity\s+From\s+(\d{2}/\d{2}/\d{4})", page1)
 
     # ── Partners / Directors (Annexure B) ─────────────────────────────────────
     partners = []
     if annexure_b:
         clean_lines = [
-            ln for ln in annexure_b.split('\n')
-            if not re.fullmatch(r'\s*[a-zA-Z]{1,2}\s*', ln)
+            ln
+            for ln in annexure_b.split("\n")
+            if not re.fullmatch(r"\s*[a-zA-Z]{1,2}\s*", ln)
         ]
-        clean = _clean_gst_watermark('\n'.join(clean_lines))
-        clean = re.sub(r'(?m)^[a-zA-Z]\s+(Designation/Status)', r'\1', clean)
+        clean = _clean_gst_watermark("\n".join(clean_lines))
+        clean = re.sub(r"(?m)^[a-zA-Z]\s+(Designation/Status)", r"\1", clean)
 
         entries = re.findall(
-            r'\d+\s+Name\s+([A-Z][A-Z \-]+?)\s*\n\s*Designation/Status\s+([A-Za-z /]+)',
-            clean, re.IGNORECASE
+            r"\d+\s+Name\s+([A-Z][A-Z \-]+?)\s*\n\s*Designation/Status\s+([A-Za-z /]+)",
+            clean,
+            re.IGNORECASE,
         )
         if not entries:
             entries = re.findall(
-                r'Name\s+([A-Z][A-Z \-]+?)\s*\n\s*Designation(?:/Status)?\s+([A-Za-z /]+)',
-                clean, re.IGNORECASE
+                r"Name\s+([A-Z][A-Z \-]+?)\s*\n\s*Designation(?:/Status)?\s+([A-Za-z /]+)",
+                clean,
+                re.IGNORECASE,
             )
         for name, desig in entries:
-            name_clean  = _strip_watermark(name.strip())
+            name_clean = _strip_watermark(name.strip())
             desig_clean = _strip_watermark(desig.strip())
             if name_clean:
                 partners.append({"name": name_clean, "designation": desig_clean})
 
     return {
-        "gstin":             gstin,
-        "legal_name":        legal_name,
-        "trade_name":        trade_name,
-        "constitution":      constitution,
-        "constitution_raw":  const_raw,
-        "address":           address,
-        "city":              city,
-        "state":             state,
-        "pin":               pin,
-        "full_address":      full_address,
+        "gstin": gstin,
+        "legal_name": legal_name,
+        "trade_name": trade_name,
+        "constitution": constitution,
+        "constitution_raw": const_raw,
+        "address": address,
+        "city": city,
+        "state": state,
+        "pin": pin,
+        "full_address": full_address,
         "registration_type": reg_type,
-        "valid_from":        valid_from,
-        "partners":          partners,
+        "valid_from": valid_from,
+        "partners": partners,
     }
 
 
 @api_router.get("/clients/check-gstin")
-async def check_gstin(
-    gstin: str,
-    current_user: User = Depends(get_current_user)
-):
+async def check_gstin(gstin: str, current_user: User = Depends(get_current_user)):
     """
     Check if a client with the given GSTIN already exists in the database.
     Returns { exists: bool, client_id: str|null, company_name: str|null }
@@ -5977,8 +6915,7 @@ async def check_gstin(
         return {"exists": False, "client_id": None, "company_name": None}
 
     existing = await db.clients.find_one(
-        {"gstin": gstin},
-        {"_id": 1, "company_name": 1}
+        {"gstin": gstin}, {"_id": 1, "company_name": 1}
     )
     if existing:
         return {
@@ -6013,54 +6950,71 @@ def _parse_udyam_pdf(pdf_bytes: bytes) -> dict:
         return m.group(group).strip() if m else ""
 
     # Udyam registration number
-    udyam_number = _find(r'(UDYAM-[A-Z]{2}-\d{2}-\d+)', full_text)
+    udyam_number = _find(r"(UDYAM-[A-Z]{2}-\d{2}-\d+)", full_text)
 
     # Enterprise name — strip M/S prefix
-    enterprise_name_raw = _find(r'NAME OF ENTERPRISE\s+([^\n]+)', full_text)
+    enterprise_name_raw = _find(r"NAME OF ENTERPRISE\s+([^\n]+)", full_text)
     if not enterprise_name_raw:
-        enterprise_name_raw = _find(r'Name of Enterprise\s*[:\-]?\s*([^\n]+)', full_text)
-    enterprise_name = re.sub(r'(?i)^M[/\.]?S[/\.]?\s+', '', enterprise_name_raw.strip()).strip()
+        enterprise_name_raw = _find(
+            r"Name of Enterprise\s*[:\-]?\s*([^\n]+)", full_text
+        )
+    enterprise_name = re.sub(
+        r"(?i)^M[/\.]?S[/\.]?\s+", "", enterprise_name_raw.strip()
+    ).strip()
 
     # MSME type — most recent classification year entry
-    type_matches = re.findall(r'\d{4}-\d{2,4}\s+(Micro|Small|Medium)', full_text, re.IGNORECASE)
-    msme_type = type_matches[0].title() if type_matches else _find(r'\b(Micro|Small|Medium)\b', full_text)
+    type_matches = re.findall(
+        r"\d{4}-\d{2,4}\s+(Micro|Small|Medium)", full_text, re.IGNORECASE
+    )
+    msme_type = (
+        type_matches[0].title()
+        if type_matches
+        else _find(r"\b(Micro|Small|Medium)\b", full_text)
+    )
 
     # Major activity
-    major_activity = _find(r'MAJOR ACTIVITY\s+([^\n]+)', full_text)
+    major_activity = _find(r"MAJOR ACTIVITY\s+([^\n]+)", full_text)
     if not major_activity:
-        major_activity = _find(r'Major Activity\s*[:\-]?\s*([^\n]+)', full_text)
+        major_activity = _find(r"Major Activity\s*[:\-]?\s*([^\n]+)", full_text)
 
     # Social category
     social_category = _find(
-        r'SOCIAL CATEGORY OF\s*\n\s*([A-Z][A-Z ]+?)(?=\s*\n\s*ENTREPRENEUR|\s*ENTREPRENEUR)',
-        full_text
+        r"SOCIAL CATEGORY OF\s*\n\s*([A-Z][A-Z ]+?)(?=\s*\n\s*ENTREPRENEUR|\s*ENTREPRENEUR)",
+        full_text,
     )
     if not social_category:
-        social_category = _find(r'Social Category.*?([A-Z][A-Z ]+?)(?=\n)', full_text)
+        social_category = _find(r"Social Category.*?([A-Z][A-Z ]+?)(?=\n)", full_text)
 
     # Mobile — prefer 10-digit Indian mobile number
-    mobile = _find(r'Mobile(?:\s*No\.?)?\s*[:\-]?\s*(\d{10})', full_text)
+    mobile = _find(r"Mobile(?:\s*No\.?)?\s*[:\-]?\s*(\d{10})", full_text)
 
     # Email
-    email = _find(r'Email(?:[\s:]|\s*Id)?\s*[:\-]?\s*([\w.+\-]+@[\w.\-]+\.\w+)', full_text)
+    email = _find(
+        r"Email(?:[\s:]|\s*Id)?\s*[:\-]?\s*([\w.+\-]+@[\w.\-]+\.\w+)", full_text
+    )
 
     # PAN
-    pan = _find(r'\bPAN\s+([A-Z]{5}\d{4}[A-Z])\b', full_text)
+    pan = _find(r"\bPAN\s+([A-Z]{5}\d{4}[A-Z])\b", full_text)
     if not pan:
-        pan = _find(r'\bPAN\b[:\s]+([A-Z]{5}\d{4}[A-Z])\b', full_text)
+        pan = _find(r"\bPAN\b[:\s]+([A-Z]{5}\d{4}[A-Z])\b", full_text)
 
     # Date of incorporation / registration
     doi_raw = _find(
-        r'DATE OF (?:INCORPORATION|REGISTRATION)[^\n]*\n[^\n]*\n\s*(\d{2}/\d{2}/\d{4})',
-        full_text
+        r"DATE OF (?:INCORPORATION|REGISTRATION)[^\n]*\n[^\n]*\n\s*(\d{2}/\d{2}/\d{4})",
+        full_text,
     )
     if not doi_raw:
-        doi_raw = _find(r'Date of Incorporation\s*[:\-]?\s*(\d{2}/\d{2}/\d{4})', full_text)
+        doi_raw = _find(
+            r"Date of Incorporation\s*[:\-]?\s*(\d{2}/\d{2}/\d{4})", full_text
+        )
     date_of_incorporation = ""
     if doi_raw:
         try:
             from dateutil import parser as date_parser
-            date_of_incorporation = date_parser.parse(doi_raw, dayfirst=True).strftime("%Y-%m-%d")
+
+            date_of_incorporation = date_parser.parse(doi_raw, dayfirst=True).strftime(
+                "%Y-%m-%d"
+            )
         except Exception:
             date_of_incorporation = doi_raw
 
@@ -6070,60 +7024,76 @@ def _parse_udyam_pdf(pdf_bytes: bytes) -> dict:
 
     def _addr_val(label_pat, text, stop_pats=None):
         if stop_pats:
-            stop = '|'.join(stop_pats)
+            stop = "|".join(stop_pats)
             m = re.search(
-                label_pat + r'\s+([^\n]+?)(?=\s{2,}(?:' + stop + r')\s|\n|$)',
-                text, re.IGNORECASE
+                label_pat + r"\s+([^\n]+?)(?=\s{2,}(?:" + stop + r")\s|\n|$)",
+                text,
+                re.IGNORECASE,
             )
             if not m:
                 m = re.search(
-                    label_pat + r'\s+(.+?)(?=\s+(?:' + stop + r')\s|\n|$)',
-                    text, re.IGNORECASE | re.DOTALL
+                    label_pat + r"\s+(.+?)(?=\s+(?:" + stop + r")\s|\n|$)",
+                    text,
+                    re.IGNORECASE | re.DOTALL,
                 )
         else:
-            m = re.search(label_pat + r'\s+([^\n]+)', text, re.IGNORECASE)
-        return m.group(1).strip().rstrip(',') if m else ""
+            m = re.search(label_pat + r"\s+([^\n]+)", text, re.IGNORECASE)
+        return m.group(1).strip().rstrip(",") if m else ""
 
-    flat_no   = _addr_val(
-        r'Flat/Door/Block No\.?',  full_text,
-        stop_pats=[r'Name of Premises', r'Building', r'Village/Town']
+    flat_no = _addr_val(
+        r"Flat/Door/Block No\.?",
+        full_text,
+        stop_pats=[r"Name of Premises", r"Building", r"Village/Town"],
     )
-    premises  = _addr_val(
-        r'Name of Premises/?\s*Building', full_text,
-        stop_pats=[r'Village/Town', r'Block', r'Road/Street']
+    premises = _addr_val(
+        r"Name of Premises/?\s*Building",
+        full_text,
+        stop_pats=[r"Village/Town", r"Block", r"Road/Street"],
     )
-    village   = _addr_val(
-        r'Village/Town', full_text,
-        stop_pats=[r'Block\b', r'Road/Street', r'City\b', r'State\b']
+    village = _addr_val(
+        r"Village/Town",
+        full_text,
+        stop_pats=[r"Block\b", r"Road/Street", r"City\b", r"State\b"],
     )
     block_val = _addr_val(
-        r'\bBlock\b', full_text,
-        stop_pats=[r'Road/Street', r'City\b', r'State\b', r'Flat/Door']
+        r"\bBlock\b",
+        full_text,
+        stop_pats=[r"Road/Street", r"City\b", r"State\b", r"Flat/Door"],
     )
     if len(block_val) <= 1:
         block_val = ""
     road = _addr_val(
-        r'Road/Street(?:/Lane)?', full_text,
-        stop_pats=[r'City\b', r'State\b', r'District\b']
+        r"Road/Street(?:/Lane)?",
+        full_text,
+        stop_pats=[r"City\b", r"State\b", r"District\b"],
     )
 
-    city_m   = re.search(r'\bCity\s+([A-Z][A-Z0-9 ]+?)(?=\s+State\b|\s+District\b|\s*$)',
-                         full_text, re.IGNORECASE | re.MULTILINE)
-    city     = city_m.group(1).strip().title() if city_m else ""
+    city_m = re.search(
+        r"\bCity\s+([A-Z][A-Z0-9 ]+?)(?=\s+State\b|\s+District\b|\s*$)",
+        full_text,
+        re.IGNORECASE | re.MULTILINE,
+    )
+    city = city_m.group(1).strip().title() if city_m else ""
 
-    state_m  = re.search(r'\bState\s+([A-Z][A-Z ]+?)(?=\s+District\b|\s*,|\s*$)',
-                         full_text, re.IGNORECASE | re.MULTILINE)
-    state    = state_m.group(1).strip().title() if state_m else ""
+    state_m = re.search(
+        r"\bState\s+([A-Z][A-Z ]+?)(?=\s+District\b|\s*,|\s*$)",
+        full_text,
+        re.IGNORECASE | re.MULTILINE,
+    )
+    state = state_m.group(1).strip().title() if state_m else ""
 
-    pin_m    = re.search(r'\bPin\s*[:\-,]?\s*(\d{6})', full_text, re.IGNORECASE)
-    pin      = pin_m.group(1) if pin_m else ""
+    pin_m = re.search(r"\bPin\s*[:\-,]?\s*(\d{6})", full_text, re.IGNORECASE)
+    pin = pin_m.group(1) if pin_m else ""
     if not pin:
-        pin_m2 = re.search(r',\s*(\d{6})\b', full_text)
-        pin    = pin_m2.group(1) if pin_m2 else ""
+        pin_m2 = re.search(r",\s*(\d{6})\b", full_text)
+        pin = pin_m2.group(1) if pin_m2 else ""
 
-    district_m = re.search(r'\bDistrict\s+([A-Z][A-Z ]+?)(?=\s*,|\s+Pin|\s*$)',
-                           full_text, re.IGNORECASE | re.MULTILINE)
-    district   = district_m.group(1).strip().title() if district_m else ""
+    district_m = re.search(
+        r"\bDistrict\s+([A-Z][A-Z ]+?)(?=\s*,|\s+Pin|\s*$)",
+        full_text,
+        re.IGNORECASE | re.MULTILINE,
+    )
+    district = district_m.group(1).strip().title() if district_m else ""
     if not city and district:
         city = district
 
@@ -6131,7 +7101,7 @@ def _parse_udyam_pdf(pdf_bytes: bytes) -> dict:
     seen_lower = set()
     addr_parts = []
     for p in addr_parts_raw:
-        p = p.strip().rstrip(',')
+        p = p.strip().rstrip(",")
         if not p or len(p) <= 1:
             continue
         if p.lower() in seen_lower:
@@ -6141,19 +7111,19 @@ def _parse_udyam_pdf(pdf_bytes: bytes) -> dict:
     address = ", ".join(addr_parts)
 
     return {
-        "udyam_number":          udyam_number,
-        "enterprise_name":       enterprise_name,
-        "msme_type":             msme_type,
-        "major_activity":        major_activity.strip().title() if major_activity else "",
-        "social_category":       social_category.strip() if social_category else "",
-        "mobile":                mobile,
-        "email":                 email,
+        "udyam_number": udyam_number,
+        "enterprise_name": enterprise_name,
+        "msme_type": msme_type,
+        "major_activity": major_activity.strip().title() if major_activity else "",
+        "social_category": social_category.strip() if social_category else "",
+        "mobile": mobile,
+        "email": email,
         "date_of_incorporation": date_of_incorporation,
-        "pan":                   pan,
-        "address":               address,
-        "city":                  city,
-        "state":                 state,
-        "pin":                   pin,
+        "pan": pan,
+        "address": address,
+        "city": city,
+        "state": state,
+        "pin": pin,
     }
 
 
@@ -6241,15 +7211,21 @@ def _parse_itr_computation_pdf(pdf_bytes: bytes) -> dict:
         result["itr_type"] = itr_norm
 
     # ── Filing Date ────────────────────────────────────────────────────────
-    filing_date = first(r"(?:FILING\s+DATE|DATE\s+OF\s+FILING)\s*[:\-]?\s*(\d{2}[/\-]\d{2}[/\-]\d{4})")
+    filing_date = first(
+        r"(?:FILING\s+DATE|DATE\s+OF\s+FILING)\s*[:\-]?\s*(\d{2}[/\-]\d{2}[/\-]\d{4})"
+    )
     if filing_date:
         # Convert DD/MM/YYYY or DD-MM-YYYY → YYYY-MM-DD
         parts = _re.split(r"[/\-]", filing_date)
         if len(parts) == 3 and len(parts[2]) == 4:
-            result["filing_date"] = f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+            result["filing_date"] = (
+                f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+            )
 
     # ── Acknowledgement Number ─────────────────────────────────────────────
-    ack = first(r"(?:ACK(?:NOWLEDGEMENT)?\.?\s*NO(?:\.)?|NO\.\s*[:\-])\s*[:\-]?\s*(\d{12,15})")
+    ack = first(
+        r"(?:ACK(?:NOWLEDGEMENT)?\.?\s*NO(?:\.)?|NO\.\s*[:\-])\s*[:\-]?\s*(\d{12,15})"
+    )
     if not ack:
         ack = first(r"\b(\d{15})\b")  # 15-digit standalone
     if ack:
@@ -6283,7 +7259,8 @@ def _parse_itr_computation_pdf(pdf_bytes: bytes) -> dict:
             r"\b(Gujarat|Maharashtra|Rajasthan|Madhya Pradesh|Uttar Pradesh|Karnataka|Tamil Nadu|"
             r"Kerala|West Bengal|Delhi|Haryana|Punjab|Andhra Pradesh|Telangana|Odisha|Bihar|"
             r"Jharkhand|Chhattisgarh|Uttarakhand|Himachal Pradesh|Assam|Goa)\b",
-            addr_text, _re.IGNORECASE
+            addr_text,
+            _re.IGNORECASE,
         )
         if state_m:
             result["state"] = state_m.group(1).title()
@@ -6292,7 +7269,8 @@ def _parse_itr_computation_pdf(pdf_bytes: bytes) -> dict:
             r"\b(Surat|Ahmedabad|Mumbai|Delhi|Pune|Bangalore|Bengaluru|Chennai|Hyderabad|"
             r"Kolkata|Jaipur|Vadodara|Rajkot|Indore|Bhopal|Nagpur|Lucknow|Patna|Chandigarh|"
             r"Coimbatore|Visakhapatnam)\b",
-            addr_text, _re.IGNORECASE
+            addr_text,
+            _re.IGNORECASE,
         )
         if city_m:
             result["city"] = city_m.group(1).title()
@@ -6302,10 +7280,14 @@ def _parse_itr_computation_pdf(pdf_bytes: bytes) -> dict:
     if dob:
         parts = _re.split(r"[/\-]", dob)
         if len(parts) == 3 and len(parts[2]) == 4:
-            result["date_of_birth"] = f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+            result["date_of_birth"] = (
+                f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+            )
 
     # ── Ward / Circle ──────────────────────────────────────────────────────
-    ward = first(r"WARD\s*(?:NO\.?|NUMBER)?\s*[:\-]?\s*([A-Z0-9\s\(\)/,]+?)(?:\n|FINANCIAL|GENDER|$)")
+    ward = first(
+        r"WARD\s*(?:NO\.?|NUMBER)?\s*[:\-]?\s*([A-Z0-9\s\(\)/,]+?)(?:\n|FINANCIAL|GENDER|$)"
+    )
     if ward:
         result["ward"] = ward.strip()
 
@@ -6315,12 +7297,16 @@ def _parse_itr_computation_pdf(pdf_bytes: bytes) -> dict:
         result["gender"] = gender.lower()
 
     # ── Residential Status ─────────────────────────────────────────────────
-    res_status = first(r"RESIDENTIAL\s+STATUS\s*[:\-]?\s*(RESIDENT|NON.RESIDENT|NRI|RNOR)")
+    res_status = first(
+        r"RESIDENTIAL\s+STATUS\s*[:\-]?\s*(RESIDENT|NON.RESIDENT|NRI|RNOR)"
+    )
     if res_status:
         result["residential_status"] = res_status.upper()
 
     # ── Bank Details ───────────────────────────────────────────────────────
-    bank_name = first(r"NAME\s+OF\s+BANK\s*[:\-]?\s*([A-Z][A-Z\s&.]+?)(?:\n|MICR|IFSC|ACCOUNT|$)")
+    bank_name = first(
+        r"NAME\s+OF\s+BANK\s*[:\-]?\s*([A-Z][A-Z\s&.]+?)(?:\n|MICR|IFSC|ACCOUNT|$)"
+    )
     if bank_name:
         result["bank_name"] = bank_name.strip()
 
@@ -6343,9 +7329,13 @@ def _parse_itr_computation_pdf(pdf_bytes: bytes) -> dict:
             result["income_salary"] = v
 
     # Business / Profession (u/s 44AD etc)
-    biz = first(r"PROFITS\s+AND\s+GAINS\s+FROM\s+BUSINESS\s+(?:OR\s+PROFESSION\s+)?(\d[\d,]+)")
+    biz = first(
+        r"PROFITS\s+AND\s+GAINS\s+FROM\s+BUSINESS\s+(?:OR\s+PROFESSION\s+)?(\d[\d,]+)"
+    )
     if not biz:
-        biz = first(r"PROFIT\s+(?:DECLARED|HIGHER\s+OF\s+THE\s+ABOVE)\s+(?:U/S\s+44AD[^\d]*)(\d[\d,]+)")
+        biz = first(
+            r"PROFIT\s+(?:DECLARED|HIGHER\s+OF\s+THE\s+ABOVE)\s+(?:U/S\s+44AD[^\d]*)(\d[\d,]+)"
+        )
     if biz:
         v = to_float(biz.replace(",", ""))
         if v is not None and v > 0:
@@ -6355,8 +7345,16 @@ def _parse_itr_computation_pdf(pdf_bytes: bytes) -> dict:
     cg = first(r"(?:TOTAL\s+)?CAPITAL\s+GAINS?\s+(\d[\d,]+)")
     if not cg:
         # Sum short-term + long-term from doc
-        stcg_vals = _re.findall(r"SHORT\s+TERM\s+CAPITAL\s+GAIN\s+@\s*\d+%[^0-9\-]*(-?\d[\d,]*)", text, _re.IGNORECASE)
-        ltcg_vals = _re.findall(r"LONG\s+TERM\s+CAPITAL\s+GAIN\s+@\s*\d+%[^0-9\-]*(-?\d[\d,]*)", text, _re.IGNORECASE)
+        stcg_vals = _re.findall(
+            r"SHORT\s+TERM\s+CAPITAL\s+GAIN\s+@\s*\d+%[^0-9\-]*(-?\d[\d,]*)",
+            text,
+            _re.IGNORECASE,
+        )
+        ltcg_vals = _re.findall(
+            r"LONG\s+TERM\s+CAPITAL\s+GAIN\s+@\s*\d+%[^0-9\-]*(-?\d[\d,]*)",
+            text,
+            _re.IGNORECASE,
+        )
         all_cg = stcg_vals + ltcg_vals
         if all_cg:
             total_cg = sum(to_float(v.replace(",", "")) or 0 for v in all_cg)
@@ -6414,7 +7412,11 @@ def _parse_itr_computation_pdf(pdf_bytes: bytes) -> dict:
         result["filing_status"] = "pending"
 
     # ── Section 115BAC ────────────────────────────────────────────────────
-    bac_m = _re.search(r"(?:OPTED\s+FOR\s+TAXATION\s+U/S\s+115BAC|115BAC)[^\n]*(YES|NO)", text, _re.IGNORECASE)
+    bac_m = _re.search(
+        r"(?:OPTED\s+FOR\s+TAXATION\s+U/S\s+115BAC|115BAC)[^\n]*(YES|NO)",
+        text,
+        _re.IGNORECASE,
+    )
     if bac_m:
         result["opted_115bac"] = bac_m.group(1).upper() == "YES"
 
@@ -6446,17 +7448,16 @@ async def parse_itr_computation_pdf(
         logger.error(f"parse_itr_computation_pdf error: {e}", exc_info=True)
         raise HTTPException(
             status_code=422,
-            detail="Could not parse this PDF. Please ensure it is an ITR Computation of Income document."
+            detail="Could not parse this PDF. Please ensure it is an ITR Computation of Income document.",
         )
 
     if not result.get("pan") and not result.get("company_name"):
         raise HTTPException(
             status_code=422,
-            detail="No ITR data found. Please upload a valid ITR Computation of Income PDF."
+            detail="No ITR data found. Please upload a valid ITR Computation of Income PDF.",
         )
 
     return result
-
 
 
 def _map_mca_constitution(raw: str) -> str:
@@ -6489,21 +7490,24 @@ def _clean_obfuscated_email(raw: str) -> str:
     v = (raw or "").strip()
     if not v:
         return ""
-    v = re.sub(r'\[\s*at\s*\]', '@', v, flags=re.IGNORECASE)
-    v = re.sub(r'\[\s*dot\s*\]', '.', v, flags=re.IGNORECASE)
-    v = re.sub(r'\(\s*at\s*\)', '@', v, flags=re.IGNORECASE)
-    v = re.sub(r'\(\s*dot\s*\)', '.', v, flags=re.IGNORECASE)
-    v = re.sub(r'\s+at\s+', '@', v, flags=re.IGNORECASE)
-    v = re.sub(r'\s+dot\s+', '.', v, flags=re.IGNORECASE)
+    v = re.sub(r"\[\s*at\s*\]", "@", v, flags=re.IGNORECASE)
+    v = re.sub(r"\[\s*dot\s*\]", ".", v, flags=re.IGNORECASE)
+    v = re.sub(r"\(\s*at\s*\)", "@", v, flags=re.IGNORECASE)
+    v = re.sub(r"\(\s*dot\s*\)", ".", v, flags=re.IGNORECASE)
+    v = re.sub(r"\s+at\s+", "@", v, flags=re.IGNORECASE)
+    v = re.sub(r"\s+dot\s+", ".", v, flags=re.IGNORECASE)
     v = v.replace(" ", "")
-    m = re.search(r'[\w.+\-]+@[\w.\-]+\.\w+', v)
+    m = re.search(r"[\w.+\-]+@[\w.\-]+\.\w+", v)
     return m.group(0).lower() if m else ""
 
 
 def _detect_entity_type_from_name(name: str) -> str:
     """Best-effort client_type guess from a company/LLP name suffix."""
     n = (name or "").lower()
-    if any(x in n for x in ["private limited", "pvt ltd", "pvt. ltd", "pvt.ltd", "pvt limited"]):
+    if any(
+        x in n
+        for x in ["private limited", "pvt ltd", "pvt. ltd", "pvt.ltd", "pvt limited"]
+    ):
         return "pvt_ltd"
     if "llp" in n or "limited liability" in n:
         return "llp"
@@ -6535,8 +7539,8 @@ _SCRAPE_HEADERS = {
 from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 
-_CIN_RE   = re.compile(r'^[UL]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6}$')
-_LLPIN_RE = re.compile(r'^[A-Z]{2,3}-\d{4,}$')
+_CIN_RE = re.compile(r"^[UL]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6}$")
+_LLPIN_RE = re.compile(r"^[A-Z]{2,3}-\d{4,}$")
 
 
 def _slugify_company_name(name: str) -> str:
@@ -6564,18 +7568,26 @@ def _slugify_company_name(name: str) -> str:
 # This text is present in the static HTML (no JS needed), which makes it a
 # far more reliable extraction target than label/value grids that are
 # populated client-side.
-_ZB_CIN          = re.compile(r'\(CIN:\s*([A-Z0-9]{21})\)|Corporate Identification Number\s*\(CIN\)\s*is\s*([A-Z0-9]{21})', re.I)
-_ZB_LLPIN        = re.compile(r'\(LLPIN:\s*([A-Z]{2,3}-\d{3,})\)|LLP Identification Number is\s*\(LLPIN\)\s*([A-Z]{2,3}-\d{3,})', re.I)
-_ZB_INCORPORATED = re.compile(r'incorporated on\s+(\d{1,2}\s+[A-Za-z]+\s+\d{4})', re.I)
-_ZB_CATEGORY     = re.compile(r'is a\s+(.+?)\s+incorporated on', re.I)
-_ZB_ROC          = re.compile(r'Registrar of Companies,\s*([A-Za-z .]+?)\.', re.I)
-_ZB_DIRECTORS    = re.compile(r'Directors? of [^.]*?\bare\s+(.+?)\.', re.I)
-_ZB_PARTNERS     = re.compile(r'Designated Partners of [^.]*?\bare\s+(.+?)\.', re.I)
-_ZB_EMAIL        = re.compile(r'Email address is\s+([\w.+\-]+@[\w.\-]+\.\w+)', re.I)
-_ZB_ADDRESS_PIN  = re.compile(r'registered address is\s+(.+?)\s*-\s*(\d{6})', re.I)
-_ZB_STATUS       = re.compile(r'Current status of [^.]*?\bis\s*-\s*([A-Za-z][A-Za-z /]*?)\.?\s*$', re.I)
-_ZB_AUTH_CAP     = re.compile(r'authorized?\s+share capital is Rs\.?\s*([\d,]+)', re.I)
-_ZB_PAIDUP_CAP   = re.compile(r'paid[- ]?up capital is Rs\.?\s*([\d,]+)', re.I)
+_ZB_CIN = re.compile(
+    r"\(CIN:\s*([A-Z0-9]{21})\)|Corporate Identification Number\s*\(CIN\)\s*is\s*([A-Z0-9]{21})",
+    re.I,
+)
+_ZB_LLPIN = re.compile(
+    r"\(LLPIN:\s*([A-Z]{2,3}-\d{3,})\)|LLP Identification Number is\s*\(LLPIN\)\s*([A-Z]{2,3}-\d{3,})",
+    re.I,
+)
+_ZB_INCORPORATED = re.compile(r"incorporated on\s+(\d{1,2}\s+[A-Za-z]+\s+\d{4})", re.I)
+_ZB_CATEGORY = re.compile(r"is a\s+(.+?)\s+incorporated on", re.I)
+_ZB_ROC = re.compile(r"Registrar of Companies,\s*([A-Za-z .]+?)\.", re.I)
+_ZB_DIRECTORS = re.compile(r"Directors? of [^.]*?\bare\s+(.+?)\.", re.I)
+_ZB_PARTNERS = re.compile(r"Designated Partners of [^.]*?\bare\s+(.+?)\.", re.I)
+_ZB_EMAIL = re.compile(r"Email address is\s+([\w.+\-]+@[\w.\-]+\.\w+)", re.I)
+_ZB_ADDRESS_PIN = re.compile(r"registered address is\s+(.+?)\s*-\s*(\d{6})", re.I)
+_ZB_STATUS = re.compile(
+    r"Current status of [^.]*?\bis\s*-\s*([A-Za-z][A-Za-z /]*?)\.?\s*$", re.I
+)
+_ZB_AUTH_CAP = re.compile(r"authorized?\s+share capital is Rs\.?\s*([\d,]+)", re.I)
+_ZB_PAIDUP_CAP = re.compile(r"paid[- ]?up capital is Rs\.?\s*([\d,]+)", re.I)
 
 
 def _parse_zaubacorp_summary(text: str, company_name: str = "") -> dict:
@@ -6583,7 +7595,7 @@ def _parse_zaubacorp_summary(text: str, company_name: str = "") -> dict:
     from datetime import date as _date
     from dateutil import parser as date_parser
 
-    text = re.sub(r'\s+', ' ', text or "").strip()
+    text = re.sub(r"\s+", " ", text or "").strip()
     out: dict = {}
 
     m = _ZB_CIN.search(text)
@@ -6597,7 +7609,9 @@ def _parse_zaubacorp_summary(text: str, company_name: str = "") -> dict:
     m = _ZB_INCORPORATED.search(text)
     if m:
         try:
-            out["date_of_incorporation"] = date_parser.parse(m.group(1), dayfirst=True).strftime("%Y-%m-%d")
+            out["date_of_incorporation"] = date_parser.parse(
+                m.group(1), dayfirst=True
+            ).strftime("%Y-%m-%d")
         except Exception:
             out["date_of_incorporation"] = m.group(1)
 
@@ -6625,11 +7639,19 @@ def _parse_zaubacorp_summary(text: str, company_name: str = "") -> dict:
     directors = []
     if directors_raw:
         # "A, B and C" / "A and B" / "A, and B"
-        directors_raw = re.sub(r'\s+and\s+', ', ', directors_raw, flags=re.I)
-        for part in directors_raw.split(','):
+        directors_raw = re.sub(r"\s+and\s+", ", ", directors_raw, flags=re.I)
+        for part in directors_raw.split(","):
             nm = part.strip(" .")
             if nm and len(nm) > 1:
-                directors.append({"name": nm.title(), "designation": "Director" if "llpin" not in out else "Designated Partner", "din": ""})
+                directors.append(
+                    {
+                        "name": nm.title(),
+                        "designation": "Director"
+                        if "llpin" not in out
+                        else "Designated Partner",
+                        "din": "",
+                    }
+                )
     out["directors"] = directors
 
     m = _ZB_EMAIL.search(text)
@@ -6641,7 +7663,7 @@ def _parse_zaubacorp_summary(text: str, company_name: str = "") -> dict:
     if m:
         address_full = m.group(1).strip()
         pin = m.group(2)
-        parts = [p.strip() for p in address_full.split(',') if p.strip()]
+        parts = [p.strip() for p in address_full.split(",") if p.strip()]
         if parts and parts[-1].strip().lower() in ("india", "in"):
             parts.pop()
         if parts:
@@ -6659,7 +7681,7 @@ def _parse_zaubacorp_summary(text: str, company_name: str = "") -> dict:
 
     m = _ZB_STATUS.search(text)
     if m:
-        out["company_status"] = m.group(1).strip().rstrip('.')
+        out["company_status"] = m.group(1).strip().rstrip(".")
 
     m = _ZB_AUTH_CAP.search(text)
     if m:
@@ -6686,18 +7708,22 @@ async def _scrape_quickcompany(query: str) -> dict:
     from datetime import date as _date
 
     q = query.strip()
-    is_cin   = bool(_CIN_RE.match(q.upper()))
+    is_cin = bool(_CIN_RE.match(q.upper()))
     is_llpin = bool(_LLPIN_RE.match(q.upper()))
 
     urls_to_try: list[str] = []
     if not is_cin and not is_llpin:
-        urls_to_try.append(f"https://www.quickcompany.in/company/{_slugify_company_name(q)}")
+        urls_to_try.append(
+            f"https://www.quickcompany.in/company/{_slugify_company_name(q)}"
+        )
     # Generic search fallback (best-effort; QuickCompany's /company search is
     # primarily client-rendered so this mostly helps when it does return a
     # server-rendered list of matches)
     urls_to_try.append(f"https://www.quickcompany.in/company?q={q}")
 
-    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, headers=_SCRAPE_HEADERS) as client:
+    async with httpx.AsyncClient(
+        timeout=15.0, follow_redirects=True, headers=_SCRAPE_HEADERS
+    ) as client:
         for url in urls_to_try:
             try:
                 resp = await client.get(url)
@@ -6712,7 +7738,7 @@ async def _scrape_quickcompany(query: str) -> dict:
                     company_name = h1.get_text(strip=True)
 
                 detail_soup = soup
-                detail_url  = url
+                detail_url = url
 
                 # If this looks like a search results page (no clean h1, or
                 # h1 doesn't resemble the query), try to follow the first
@@ -6725,7 +7751,7 @@ async def _scrape_quickcompany(query: str) -> dict:
                             dr = await client.get(f"https://www.quickcompany.in{href}")
                             if dr.status_code == 200:
                                 detail_soup = BeautifulSoup(dr.text, "html.parser")
-                                detail_url  = f"https://www.quickcompany.in{href}"
+                                detail_url = f"https://www.quickcompany.in{href}"
                                 dh1 = detail_soup.find("h1")
                                 if dh1:
                                     company_name = dh1.get_text(strip=True)
@@ -6739,11 +7765,13 @@ async def _scrape_quickcompany(query: str) -> dict:
                 # CIN / LLPIN — may appear in JSON-LD / meta tags even if the
                 # visible "Company Information" grid is populated client-side.
                 found_cin = ""
-                cin_m = re.search(r'\b([UL]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6})\b', page_text)
+                cin_m = re.search(
+                    r"\b([UL]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6})\b", page_text
+                )
                 if cin_m:
                     found_cin = cin_m.group(1)
                 found_llpin = ""
-                llpin_m = re.search(r'\b([A-Z]{2,3}-\d{4,})\b', page_text)
+                llpin_m = re.search(r"\b([A-Z]{2,3}-\d{4,})\b", page_text)
                 if llpin_m and not found_cin:
                     found_llpin = llpin_m.group(1)
 
@@ -6755,33 +7783,37 @@ async def _scrape_quickcompany(query: str) -> dict:
                         continue
                     dhref = a.get("href", "")
                     din_m = re.match(r"^/directors/(\d+)", dhref)
-                    directors.append({
-                        "name": dname,
-                        "designation": "Designated Partner" if "llp" in (company_name or "").lower() or found_llpin else "Director",
-                        "din": din_m.group(1) if din_m else "",
-                    })
+                    directors.append(
+                        {
+                            "name": dname,
+                            "designation": "Designated Partner"
+                            if "llp" in (company_name or "").lower() or found_llpin
+                            else "Director",
+                            "din": din_m.group(1) if din_m else "",
+                        }
+                    )
 
                 client_type = _map_mca_constitution(company_name)
 
                 return {
-                    "company_name":          company_name,
-                    "cin":                   found_cin,
-                    "llpin":                 found_llpin or None,
-                    "client_type":           client_type,
+                    "company_name": company_name,
+                    "cin": found_cin,
+                    "llpin": found_llpin or None,
+                    "client_type": client_type,
                     "date_of_incorporation": "",
-                    "email":                 "",
-                    "address":               "",
-                    "city":                  "",
-                    "state":                 "",
-                    "gst_pin":               "",
-                    "pan":                   "",
-                    "directors":             directors,
-                    "company_status":        "",
-                    "authorized_capital":    "",
-                    "paid_up_capital":       "",
-                    "mca_fetch_date":        _date.today().isoformat(),
-                    "source":                "quickcompany.in",
-                    "detail_url":            detail_url,
+                    "email": "",
+                    "address": "",
+                    "city": "",
+                    "state": "",
+                    "gst_pin": "",
+                    "pan": "",
+                    "directors": directors,
+                    "company_status": "",
+                    "authorized_capital": "",
+                    "paid_up_capital": "",
+                    "mca_fetch_date": _date.today().isoformat(),
+                    "source": "quickcompany.in",
+                    "detail_url": detail_url,
                 }
             except Exception as exc:
                 logger.debug(f"quickcompany scrape error for {url}: {exc}")
@@ -6865,7 +7897,9 @@ def _parse_zaubacorp_directors_table(soup: "BeautifulSoup") -> list:
         header_row = table.find("tr")
         if not header_row:
             continue
-        headers = [c.get_text(strip=True).lower() for c in header_row.find_all(["th", "td"])]
+        headers = [
+            c.get_text(strip=True).lower() for c in header_row.find_all(["th", "td"])
+        ]
         if not headers or "din" not in headers[0]:
             continue
         if "director name" not in " ".join(headers):
@@ -6874,35 +7908,50 @@ def _parse_zaubacorp_directors_table(soup: "BeautifulSoup") -> list:
         if any("cessation" in h for h in headers):
             continue
 
-        din_idx  = next((i for i, h in enumerate(headers) if "din" in h), 0)
-        name_idx = next((i for i, h in enumerate(headers) if "director name" in h or "name" in h), 1)
+        din_idx = next((i for i, h in enumerate(headers) if "din" in h), 0)
+        name_idx = next(
+            (i for i, h in enumerate(headers) if "director name" in h or "name" in h), 1
+        )
         desig_idx = next((i for i, h in enumerate(headers) if "designation" in h), None)
-        appt_idx  = next((i for i, h in enumerate(headers) if "appointment" in h), None)
+        appt_idx = next((i for i, h in enumerate(headers) if "appointment" in h), None)
 
         for row in table.find_all("tr")[1:]:
             cells = row.find_all(["td", "th"])
             if len(cells) <= max(din_idx, name_idx):
                 continue
-            din  = cells[din_idx].get_text(strip=True)
+            din = cells[din_idx].get_text(strip=True)
             name = cells[name_idx].get_text(strip=True)
             if not name or not re.match(r"^\d{6,8}$", din):
                 continue
-            designation = cells[desig_idx].get_text(strip=True) if desig_idx is not None and len(cells) > desig_idx else "Director"
-            appt_date_raw = cells[appt_idx].get_text(strip=True) if appt_idx is not None and len(cells) > appt_idx else ""
+            designation = (
+                cells[desig_idx].get_text(strip=True)
+                if desig_idx is not None and len(cells) > desig_idx
+                else "Director"
+            )
+            appt_date_raw = (
+                cells[appt_idx].get_text(strip=True)
+                if appt_idx is not None and len(cells) > appt_idx
+                else ""
+            )
             appt_date = ""
             if appt_date_raw:
                 try:
                     from dateutil import parser as date_parser
-                    appt_date = date_parser.parse(appt_date_raw, dayfirst=True).strftime("%Y-%m-%d")
+
+                    appt_date = date_parser.parse(
+                        appt_date_raw, dayfirst=True
+                    ).strftime("%Y-%m-%d")
                 except Exception:
                     appt_date = appt_date_raw
 
-            directors.append({
-                "name": name.title(),
-                "designation": designation or "Director",
-                "din": din,
-                "appointment_date": appt_date,
-            })
+            directors.append(
+                {
+                    "name": name.title(),
+                    "designation": designation or "Director",
+                    "din": din,
+                    "appointment_date": appt_date,
+                }
+            )
 
         if directors:
             break
@@ -6920,14 +7969,16 @@ async def _scrape_zaubacorp(query: str) -> dict:
     """
     q = query.strip()
     q_upper = q.upper()
-    is_cin   = bool(_CIN_RE.match(q_upper))
+    is_cin = bool(_CIN_RE.match(q_upper))
     is_llpin = bool(_LLPIN_RE.match(q_upper))
 
     hdrs = {**_SCRAPE_HEADERS, "Referer": "https://www.zaubacorp.com/"}
     detail_url = ""
     matched_name = ""
 
-    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, headers=hdrs) as client:
+    async with httpx.AsyncClient(
+        timeout=15.0, follow_redirects=True, headers=hdrs
+    ) as client:
         # ── 1. Resolve a detail-page URL via the search-results table ───────
         for param in _ZB_SEARCH_PARAM_CANDIDATES:
             search_url = f"https://www.zaubacorp.com/companysearchresults/company?{param}={quote_plus(q)}"
@@ -6938,11 +7989,19 @@ async def _scrape_zaubacorp(query: str) -> dict:
                 soup = BeautifulSoup(resp.text, "html.parser")
 
                 heading = soup.find(["h1", "h2", "h3"])
-                heading_text = heading.get_text(" ", strip=True).lower() if heading else ""
+                heading_text = (
+                    heading.get_text(" ", strip=True).lower() if heading else ""
+                )
                 # Skip the generic/default listing (heading doesn't mention
                 # any part of our query)
-                q_words = [w for w in re.findall(r"[A-Za-z0-9]+", q.lower()) if len(w) > 1]
-                if q_words and not any(w in heading_text for w in q_words) and not (is_cin or is_llpin):
+                q_words = [
+                    w for w in re.findall(r"[A-Za-z0-9]+", q.lower()) if len(w) > 1
+                ]
+                if (
+                    q_words
+                    and not any(w in heading_text for w in q_words)
+                    and not (is_cin or is_llpin)
+                ):
                     continue
 
                 picked = _zaubacorp_pick_row(soup, q, is_cin, is_llpin)
@@ -6991,9 +8050,7 @@ async def _scrape_zaubacorp(query: str) -> dict:
 
 @api_router.get("/clients/fetch-mca-details")
 async def fetch_mca_details(
-    query: str = "",
-    cin: str = "",
-    current_user: User = Depends(get_current_user)
+    query: str = "", cin: str = "", current_user: User = Depends(get_current_user)
 ):
     """
     Fetch company details by company name OR CIN/LLPIN.
@@ -7001,10 +8058,13 @@ async def fetch_mca_details(
     """
     q = (query or cin or "").strip()
     if not q or len(q) < 3:
-        raise HTTPException(status_code=400, detail="Please enter a company name or CIN (minimum 3 characters).")
+        raise HTTPException(
+            status_code=400,
+            detail="Please enter a company name or CIN (minimum 3 characters).",
+        )
 
-    q_upper  = q.upper()
-    is_cin   = bool(_CIN_RE.match(q_upper))
+    q_upper = q.upper()
+    is_cin = bool(_CIN_RE.match(q_upper))
     is_llpin = bool(_LLPIN_RE.match(q_upper))
 
     # ── 1. quickcompany.in ───────────────────────────────────────────────────
@@ -7029,48 +8089,71 @@ async def fetch_mca_details(
             async with httpx.AsyncClient(timeout=20.0) as http:
                 resp = await http.get(
                     "https://api.data.gov.in/resource/ec58dab7-d891-4abb-936e-d5d274a6ce9b",
-                    params={"api-key": MCA_API_KEY, "format": "json", "limit": "1", "filters[CIN]": q_upper}
+                    params={
+                        "api-key": MCA_API_KEY,
+                        "format": "json",
+                        "limit": "1",
+                        "filters[CIN]": q_upper,
+                    },
                 )
                 resp.raise_for_status()
                 records = resp.json().get("records", [])
                 if records:
                     from datetime import date as _date
-                    r   = records[0]
+
+                    r = records[0]
                     doi = ""
-                    raw_doi = r.get("DATE_OF_REGISTRATION") or r.get("date_of_registration") or ""
+                    raw_doi = (
+                        r.get("DATE_OF_REGISTRATION")
+                        or r.get("date_of_registration")
+                        or ""
+                    )
                     if raw_doi:
                         try:
                             from dateutil import parser as dp
-                            doi = dp.parse(str(raw_doi), dayfirst=True).strftime("%Y-%m-%d")
+
+                            doi = dp.parse(str(raw_doi), dayfirst=True).strftime(
+                                "%Y-%m-%d"
+                            )
                         except Exception:
                             doi = str(raw_doi)
                     raw_class = r.get("COMPANY_CLASS") or r.get("company_class") or ""
                     return {
-                        "company_name":          r.get("COMPANY_NAME") or r.get("company_name") or "",
-                        "cin":                   q_upper,
-                        "llpin":                 None,
-                        "client_type":           _map_mca_constitution(raw_class),
+                        "company_name": r.get("COMPANY_NAME")
+                        or r.get("company_name")
+                        or "",
+                        "cin": q_upper,
+                        "llpin": None,
+                        "client_type": _map_mca_constitution(raw_class),
                         "date_of_incorporation": doi,
-                        "email":                 "",
-                        "address":               r.get("REGISTERED_OFFICE_ADDRESS") or r.get("registered_office_address") or "",
-                        "city":                  "",
-                        "state":                 r.get("REGISTERED_STATE") or r.get("registered_state") or "",
-                        "gst_pin":               "",
-                        "pan":                   "",
-                        "directors":             [],
-                        "company_status":        r.get("COMPANY_STATUS") or r.get("company_status") or "",
-                        "authorized_capital":    r.get("AUTHORISED_CAPITAL_IN_INR") or "",
-                        "paid_up_capital":       r.get("PAIDUP_CAPITAL_IN_INR") or "",
-                        "mca_fetch_date":        _date.today().isoformat(),
-                        "source":                "data.gov.in",
+                        "email": "",
+                        "address": r.get("REGISTERED_OFFICE_ADDRESS")
+                        or r.get("registered_office_address")
+                        or "",
+                        "city": "",
+                        "state": r.get("REGISTERED_STATE")
+                        or r.get("registered_state")
+                        or "",
+                        "gst_pin": "",
+                        "pan": "",
+                        "directors": [],
+                        "company_status": r.get("COMPANY_STATUS")
+                        or r.get("company_status")
+                        or "",
+                        "authorized_capital": r.get("AUTHORISED_CAPITAL_IN_INR") or "",
+                        "paid_up_capital": r.get("PAIDUP_CAPITAL_IN_INR") or "",
+                        "mca_fetch_date": _date.today().isoformat(),
+                        "source": "data.gov.in",
                     }
         except Exception as exc:
             logger.warning(f"data.gov.in fallback failed: {exc}")
 
     raise HTTPException(
         status_code=404,
-        detail=f"No company found for '{q}'. Try a more specific name or the exact CIN/LLPIN."
+        detail=f"No company found for '{q}'. Try a more specific name or the exact CIN/LLPIN.",
     )
+
+
 def _parse_mca_pdf(pdf_bytes: bytes) -> dict:
     """
     Parse an MCA Company Master Data PDF (printed from mca.gov.in).
@@ -7095,7 +8178,7 @@ def _parse_mca_pdf(pdf_bytes: bytes) -> dict:
     def _line_val(label, default=""):
         """Extract value that follows label on the same line (tab or multi-space separated)."""
         # Try wide-spaced: "Label              VALUE"
-        pat = re.compile(r'^\s*' + re.escape(label) + r'\s{2,}(.+)$', re.IGNORECASE)
+        pat = re.compile(r"^\s*" + re.escape(label) + r"\s{2,}(.+)$", re.IGNORECASE)
         for line in lines:
             m = pat.match(line)
             if m:
@@ -7103,7 +8186,7 @@ def _parse_mca_pdf(pdf_bytes: bytes) -> dict:
                 if val and val not in ("-", "nan", ""):
                     return val
         # Fallback: single-space separated
-        pat2 = re.compile(r'^\s*' + re.escape(label) + r'\s+(.+)$', re.IGNORECASE)
+        pat2 = re.compile(r"^\s*" + re.escape(label) + r"\s+(.+)$", re.IGNORECASE)
         for line in lines:
             m = pat2.match(line)
             if m:
@@ -7113,28 +8196,31 @@ def _parse_mca_pdf(pdf_bytes: bytes) -> dict:
         return default
 
     # ── CIN / LLPIN ──────────────────────────────────────────────────────────
-    cin   = _find(r'\bCIN\s+([UL]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6})\b', full_text)
-    llpin = _find(r'\bLLPIN\s+([A-Z]{3}-\d{4,})\b', full_text)
+    cin = _find(r"\bCIN\s+([UL]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6})\b", full_text)
+    llpin = _find(r"\bLLPIN\s+([A-Z]{3}-\d{4,})\b", full_text)
     if not cin and not llpin:
-        cin = _find(r'\bCIN\b\s+([A-Z0-9]{21})\b', full_text)
+        cin = _find(r"\bCIN\b\s+([A-Z0-9]{21})\b", full_text)
 
     # ── Company / LLP Name ────────────────────────────────────────────────────
     company_name = _line_val("Company Name")
     if not company_name:
         company_name = _line_val("LLP Name")
     if not company_name:
-        m = re.search(r'^Company Name\s*\n\s*([A-Z][A-Z0-9 &.\-]+)',
-                      full_text, re.IGNORECASE | re.MULTILINE)
+        m = re.search(
+            r"^Company Name\s*\n\s*([A-Z][A-Z0-9 &.\-]+)",
+            full_text,
+            re.IGNORECASE | re.MULTILINE,
+        )
         if m:
             company_name = m.group(1).strip()
 
     # ── Company Category / Class (used to derive client_type) ─────────────────
     company_category = (
-        _line_val("Company Category") or
-        _line_val("Class of Company") or
-        _line_val("Company SubCategory") or
-        _line_val("Type of Company") or
-        ""
+        _line_val("Company Category")
+        or _line_val("Class of Company")
+        or _line_val("Company SubCategory")
+        or _line_val("Type of Company")
+        or ""
     )
     client_type = _map_mca_constitution(company_category)
     if client_type == "other":
@@ -7151,7 +8237,9 @@ def _parse_mca_pdf(pdf_bytes: bytes) -> dict:
     date_of_incorporation = ""
     if doi_raw:
         try:
-            date_of_incorporation = date_parser.parse(doi_raw, dayfirst=True).strftime("%Y-%m-%d")
+            date_of_incorporation = date_parser.parse(doi_raw, dayfirst=True).strftime(
+                "%Y-%m-%d"
+            )
         except Exception:
             date_of_incorporation = ""
 
@@ -7159,7 +8247,7 @@ def _parse_mca_pdf(pdf_bytes: bytes) -> dict:
     email_raw = _line_val("Email Id") or _line_val("Email")
     email = _clean_obfuscated_email(email_raw)
     if not email:
-        em = re.search(r'[\w.+\-]+@[\w.\-]+\.\w+', full_text)
+        em = re.search(r"[\w.+\-]+@[\w.\-]+\.\w+", full_text)
         email = em.group(0).lower() if em else ""
 
     # ── Registered Address ───────────────────────────────────────────────────
@@ -7170,86 +8258,157 @@ def _parse_mca_pdf(pdf_bytes: bytes) -> dict:
     #   Gujarat, India, 394210
     address = city = state = pin = ""
     SKIP_RE = re.compile(
-        r'^(Address at which|Listed|Authorised|Auth\.?|Paid|Date of|Company Status|'
-        r'Small Company|Category|Subcategory|Class of|Type of|ACTIVE|Director|Sr\.|DIN|'
-        r'Index of|Jurisdiction|ROC|RD\b|Email|CIN|LLPIN|Registration Number|'
-        r'Company Name|LLP Name)',
-        re.IGNORECASE
+        r"^(Address at which|Listed|Authorised|Auth\.?|Paid|Date of|Company Status|"
+        r"Small Company|Category|Subcategory|Class of|Type of|ACTIVE|Director|Sr\.|DIN|"
+        r"Index of|Jurisdiction|ROC|RD\b|Email|CIN|LLPIN|Registration Number|"
+        r"Company Name|LLP Name)",
+        re.IGNORECASE,
     )
     for i, line in enumerate(lines):
-        if re.match(r'^\s*Registered\s+(Office\s+)?Address\s*$', line, re.IGNORECASE):
+        if re.match(r"^\s*Registered\s+(Office\s+)?Address\s*$", line, re.IGNORECASE):
             part1 = lines[i - 1].strip() if i > 0 else ""
             part2 = lines[i + 1].strip() if i + 1 < len(lines) else ""
-            if SKIP_RE.match(part1): part1 = ""
-            if SKIP_RE.match(part2): part2 = ""
-            address = (part1.rstrip(",") + ", " + part2).strip(", ") if (part1 and part2) else (part1 or part2)
+            if SKIP_RE.match(part1):
+                part1 = ""
+            if SKIP_RE.match(part2):
+                part2 = ""
+            address = (
+                (part1.rstrip(",") + ", " + part2).strip(", ")
+                if (part1 and part2)
+                else (part1 or part2)
+            )
             break
-        m = re.match(r'^\s*Registered\s+(?:Office\s+)?Address\s{2,}(.+)$', line, re.IGNORECASE)
+        m = re.match(
+            r"^\s*Registered\s+(?:Office\s+)?Address\s{2,}(.+)$", line, re.IGNORECASE
+        )
         if m:
             address = m.group(1).strip()
             # may continue on next line until label
-            if i + 1 < len(lines) and lines[i + 1].strip() and not SKIP_RE.match(lines[i + 1].strip()):
-                address = (address.rstrip(",") + ", " + lines[i + 1].strip()).strip(", ")
+            if (
+                i + 1 < len(lines)
+                and lines[i + 1].strip()
+                and not SKIP_RE.match(lines[i + 1].strip())
+            ):
+                address = (address.rstrip(",") + ", " + lines[i + 1].strip()).strip(
+                    ", "
+                )
             break
 
     if not address:
-        m = re.search(r'Registered(?:\s+Office)?\s+Address\s*\n([^\n]+)', full_text, re.IGNORECASE)
+        m = re.search(
+            r"Registered(?:\s+Office)?\s+Address\s*\n([^\n]+)", full_text, re.IGNORECASE
+        )
         if m:
             address = m.group(1).strip()
 
     # Collapse double commas / stray whitespace
     if address:
-        address = re.sub(r'\s*,\s*,+\s*', ', ', address)
-        address = re.sub(r'\s+', ' ', address).strip(' ,')
+        address = re.sub(r"\s*,\s*,+\s*", ", ", address)
+        address = re.sub(r"\s+", " ", address).strip(" ,")
 
     INDIAN_STATES = [
-        "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
-        "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka",
-        "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram",
-        "Nagaland", "Odisha", "Orissa", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu",
-        "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
-        "Andaman and Nicobar Islands", "Chandigarh",
+        "Andhra Pradesh",
+        "Arunachal Pradesh",
+        "Assam",
+        "Bihar",
+        "Chhattisgarh",
+        "Goa",
+        "Gujarat",
+        "Haryana",
+        "Himachal Pradesh",
+        "Jharkhand",
+        "Karnataka",
+        "Kerala",
+        "Madhya Pradesh",
+        "Maharashtra",
+        "Manipur",
+        "Meghalaya",
+        "Mizoram",
+        "Nagaland",
+        "Odisha",
+        "Orissa",
+        "Punjab",
+        "Rajasthan",
+        "Sikkim",
+        "Tamil Nadu",
+        "Telangana",
+        "Tripura",
+        "Uttar Pradesh",
+        "Uttarakhand",
+        "West Bengal",
+        "Andaman and Nicobar Islands",
+        "Chandigarh",
         "Dadra and Nagar Haveli and Daman and Diu",
-        "Daman and Diu", "Delhi", "Jammu and Kashmir", "Ladakh", "Lakshadweep",
-        "Puducherry", "Pondicherry",
+        "Daman and Diu",
+        "Delhi",
+        "Jammu and Kashmir",
+        "Ladakh",
+        "Lakshadweep",
+        "Puducherry",
+        "Pondicherry",
     ]
     STATE_CODES = {
-        "GJ": "Gujarat", "MH": "Maharashtra", "DL": "Delhi", "KA": "Karnataka",
-        "TN": "Tamil Nadu", "UP": "Uttar Pradesh", "RJ": "Rajasthan",
-        "WB": "West Bengal", "AP": "Andhra Pradesh", "TS": "Telangana",
-        "HR": "Haryana", "PB": "Punjab", "MP": "Madhya Pradesh",
-        "OR": "Odisha", "BR": "Bihar", "KL": "Kerala", "UK": "Uttarakhand",
-        "JH": "Jharkhand", "HP": "Himachal Pradesh", "GA": "Goa",
-        "AS": "Assam", "CG": "Chhattisgarh", "JK": "Jammu and Kashmir",
+        "GJ": "Gujarat",
+        "MH": "Maharashtra",
+        "DL": "Delhi",
+        "KA": "Karnataka",
+        "TN": "Tamil Nadu",
+        "UP": "Uttar Pradesh",
+        "RJ": "Rajasthan",
+        "WB": "West Bengal",
+        "AP": "Andhra Pradesh",
+        "TS": "Telangana",
+        "HR": "Haryana",
+        "PB": "Punjab",
+        "MP": "Madhya Pradesh",
+        "OR": "Odisha",
+        "BR": "Bihar",
+        "KL": "Kerala",
+        "UK": "Uttarakhand",
+        "JH": "Jharkhand",
+        "HP": "Himachal Pradesh",
+        "GA": "Goa",
+        "AS": "Assam",
+        "CG": "Chhattisgarh",
+        "JK": "Jammu and Kashmir",
     }
     GENERIC_LOC = {"india", "bharat", "in"}
 
     if address:
         # PIN
-        pin_m = re.search(r'\b(\d{6})\b', address)
+        pin_m = re.search(r"\b(\d{6})\b", address)
         pin = pin_m.group(1) if pin_m else ""
 
         # State: prefer full name match, fall back to 2-letter code before PIN
         addr_lower = address.lower()
         for s in sorted(INDIAN_STATES, key=len, reverse=True):
-            if re.search(r'(^|[,\s])' + re.escape(s.lower()) + r'($|[,\s])', addr_lower):
+            if re.search(
+                r"(^|[,\s])" + re.escape(s.lower()) + r"($|[,\s])", addr_lower
+            ):
                 state = s
                 break
         if not state:
-            sc_m = re.search(r'\b([A-Z]{2})\s+\d{6}\b', address)
+            sc_m = re.search(r"\b([A-Z]{2})\s+\d{6}\b", address)
             if sc_m and sc_m.group(1) in STATE_CODES:
                 state = STATE_CODES[sc_m.group(1)]
 
         # City: strip PIN, country, state, and trailing state-code; take last token
-        addr_clean = re.sub(r',?\s*\d{6}\s*$', '', address).strip(' ,')
-        addr_clean = re.sub(r',?\s*(India|Bharat|IN)\s*$', '', addr_clean, flags=re.IGNORECASE).strip(' ,')
+        addr_clean = re.sub(r",?\s*\d{6}\s*$", "", address).strip(" ,")
+        addr_clean = re.sub(
+            r",?\s*(India|Bharat|IN)\s*$", "", addr_clean, flags=re.IGNORECASE
+        ).strip(" ,")
         if state:
-            addr_clean = re.sub(r',?\s*' + re.escape(state) + r'\s*$', '', addr_clean, flags=re.IGNORECASE).strip(' ,')
+            addr_clean = re.sub(
+                r",?\s*" + re.escape(state) + r"\s*$",
+                "",
+                addr_clean,
+                flags=re.IGNORECASE,
+            ).strip(" ,")
         # Strip trailing 2-letter state code ONLY if it's a known code,
         # otherwise we mangle words like 'SURAT' -> 'SUR'.
-        m_sc = re.search(r',\s*([A-Z]{2})\s*$', addr_clean)
+        m_sc = re.search(r",\s*([A-Z]{2})\s*$", addr_clean)
         if m_sc and m_sc.group(1) in STATE_CODES:
-            addr_clean = addr_clean[:m_sc.start()].strip(' ,')
+            addr_clean = addr_clean[: m_sc.start()].strip(" ,")
         parts = [x.strip() for x in addr_clean.split(",") if x.strip()]
         # Drop trailing generic tokens
         while parts and parts[-1].lower() in GENERIC_LOC:
@@ -7260,19 +8419,21 @@ def _parse_mca_pdf(pdf_bytes: bytes) -> dict:
         if parts and not city:
             # Pick last non-numeric token >= 2 chars
             for tok in reversed(parts):
-                t = tok.strip().strip('.')
-                if len(t) >= 2 and not re.fullmatch(r'\d+', t):
+                t = tok.strip().strip(".")
+                if len(t) >= 2 and not re.fullmatch(r"\d+", t):
                     city = t.title()
                     break
 
     # ── Company Status ────────────────────────────────────────────────────────
-    company_status = _line_val("Company Status(for efiling)") or _line_val("Company Status")
+    company_status = _line_val("Company Status(for efiling)") or _line_val(
+        "Company Status"
+    )
 
     # ── Directors ─────────────────────────────────────────────────────────────
     directors = []
     dir_start = None
     for i, line in enumerate(lines):
-        if re.search(r'Director[s/]*Signatory Details', line, re.IGNORECASE):
+        if re.search(r"Director[s/]*Signatory Details", line, re.IGNORECASE):
             dir_start = i + 1
             break
 
@@ -7284,92 +8445,117 @@ def _parse_mca_pdf(pdf_bytes: bytes) -> dict:
         # Match: optional leading Sr.No, DIN/PAN, anything (incl. partial name),
         # then a designation keyword, then a date.
         row_re = re.compile(
-            r'^\s*(?:\d{1,3}\s+)?'                               # optional Sr.No
-            r'(\d{8}|[A-Z]{5}\d{4}[A-Z])\s+'                     # DIN (8 digits) or PAN
-            r'(.*?)'                                                # middle (may include name fragment + category)
-            r'\b(Director|Designated Partner|Partner|Manager|Whole[- ]?Time Director|'
-            r'Managing Director|Additional Director|Nominee Director|Independent Director|'
-            r'Secretary|Chief[A-Za-z ]*|Chairman)\b'
-            r'[A-Za-z ]*?\s+'                                      # optional category words
-            r'(\d{2}/\d{2}/\d{4})',                                # appointment date
-            re.IGNORECASE
+            r"^\s*(?:\d{1,3}\s+)?"  # optional Sr.No
+            r"(\d{8}|[A-Z]{5}\d{4}[A-Z])\s+"  # DIN (8 digits) or PAN
+            r"(.*?)"  # middle (may include name fragment + category)
+            r"\b(Director|Designated Partner|Partner|Manager|Whole[- ]?Time Director|"
+            r"Managing Director|Additional Director|Nominee Director|Independent Director|"
+            r"Secretary|Chief[A-Za-z ]*|Chairman)\b"
+            r"[A-Za-z ]*?\s+"  # optional category words
+            r"(\d{2}/\d{2}/\d{4})",  # appointment date
+            re.IGNORECASE,
         )
         noise_re = re.compile(
-            r'^(Sr\.|Sr|No|DIN|PAN|Name|Designation|Category|Date|Signatory|'
-            r'Cessation|Appointment|of|-)$',
-            re.IGNORECASE
+            r"^(Sr\.|Sr|No|DIN|PAN|Name|Designation|Category|Date|Signatory|"
+            r"Cessation|Appointment|of|-)$",
+            re.IGNORECASE,
         )
+
         def _clean_name_part(s):
             s = (s or "").strip()
             # Remove a known designation/category word if it leaks in
-            s = re.sub(r'\b(Director|Partner|Promoter|Independent|Nominee|Additional|'
-                       r'Managing|Whole[- ]?Time|Designated|Secretary|Manager|Chairman|'
-                       r'Chief[A-Za-z ]*|Professional|Shareholder)\b', '', s, flags=re.IGNORECASE)
-            s = re.sub(r'\d', '', s)               # strip digits / dates leftovers
-            s = re.sub(r'[\.\-/]+', ' ', s)
-            s = re.sub(r'\s+', ' ', s).strip()
+            s = re.sub(
+                r"\b(Director|Partner|Promoter|Independent|Nominee|Additional|"
+                r"Managing|Whole[- ]?Time|Designated|Secretary|Manager|Chairman|"
+                r"Chief[A-Za-z ]*|Professional|Shareholder)\b",
+                "",
+                s,
+                flags=re.IGNORECASE,
+            )
+            s = re.sub(r"\d", "", s)  # strip digits / dates leftovers
+            s = re.sub(r"[\.\-/]+", " ", s)
+            s = re.sub(r"\s+", " ", s).strip()
             # Keep only letters and spaces
-            s = re.sub(r'[^A-Za-z ]', '', s).strip()
+            s = re.sub(r"[^A-Za-z ]", "", s).strip()
             return s
+
         for j, line in enumerate(dir_lines):
             m = row_re.search(line)
             if not m:
                 continue
-            din    = m.group(1).strip()
+            din = m.group(1).strip()
             middle = _clean_name_part(m.group(2))
-            desig  = m.group(3).strip().title()
+            desig = m.group(3).strip().title()
             # Collect name fragments from line above / below (single-token wrap is common)
             nb = dir_lines[j - 1].strip() if j > 0 else ""
             na = dir_lines[j + 1].strip() if j + 1 < len(dir_lines) else ""
-            if noise_re.match(nb) or row_re.search(nb): nb = ""
-            if noise_re.match(na) or row_re.search(na): na = ""
-            nb_clean = _clean_name_part(nb) if nb and re.match(r'^[A-Za-z .\-]+$', nb) else ""
-            na_clean = _clean_name_part(na) if na and re.match(r'^[A-Za-z .\-]+$', na) else ""
+            if noise_re.match(nb) or row_re.search(nb):
+                nb = ""
+            if noise_re.match(na) or row_re.search(na):
+                na = ""
+            nb_clean = (
+                _clean_name_part(nb) if nb and re.match(r"^[A-Za-z .\-]+$", nb) else ""
+            )
+            na_clean = (
+                _clean_name_part(na) if na and re.match(r"^[A-Za-z .\-]+$", na) else ""
+            )
             full_name = " ".join(x for x in [nb_clean, middle, na_clean] if x).strip()
-            full_name = re.sub(r'\s+', ' ', full_name).title() or "Unknown"
+            full_name = re.sub(r"\s+", " ", full_name).title() or "Unknown"
             # Skip duplicates by DIN
             if din and any(d.get("din") == din for d in directors):
                 continue
-            directors.append({
-                "name": full_name, "designation": desig,
-                "email": None, "phone": None, "birthday": None,
-                "din": din if din not in ("-", "") else None,
-            })
+            directors.append(
+                {
+                    "name": full_name,
+                    "designation": desig,
+                    "email": None,
+                    "phone": None,
+                    "birthday": None,
+                    "din": din if din not in ("-", "") else None,
+                }
+            )
         # Fallback: DIN followed by Name on same line (no leading Sr.No)
         if not directors:
-            din_re = re.compile(r'(\d{8})\s+([A-Z][A-Z .\-]+?)\s+(\d{2}/\d{2}/\d{4})', re.IGNORECASE)
+            din_re = re.compile(
+                r"(\d{8})\s+([A-Z][A-Z .\-]+?)\s+(\d{2}/\d{2}/\d{4})", re.IGNORECASE
+            )
             for line in dir_lines:
                 m = din_re.search(line)
                 if m:
-                    directors.append({
-                        "name": m.group(2).strip().title(), "designation": "Director",
-                        "email": None, "phone": None, "birthday": None,
-                        "din": m.group(1).strip(),
-                    })
+                    directors.append(
+                        {
+                            "name": m.group(2).strip().title(),
+                            "designation": "Director",
+                            "email": None,
+                            "phone": None,
+                            "birthday": None,
+                            "din": m.group(1).strip(),
+                        }
+                    )
 
     return {
-        "company_name":          company_name,
-        "cin":                   cin or llpin,
-        "llpin":                 llpin,
-        "client_type":           client_type,
-        "company_category":      company_category,
-        "email":                 email,
-        "phone":                 "",
+        "company_name": company_name,
+        "cin": cin or llpin,
+        "llpin": llpin,
+        "client_type": client_type,
+        "company_category": company_category,
+        "email": email,
+        "phone": "",
         "date_of_incorporation": date_of_incorporation,
-        "address":               address,
-        "city":                  city,
-        "state":                 state,
-        "pin":                   pin,
-        "company_status":        company_status,
-        "directors":             directors,
-        "pan":                   "",
-        "raw":                   {},
+        "address": address,
+        "city": city,
+        "state": state,
+        "pin": pin,
+        "company_status": company_status,
+        "directors": directors,
+        "pan": "",
+        "raw": {},
     }
+
 
 @api_router.post("/clients/parse-multi-documents")
 async def parse_multi_documents(
-    files: list[UploadFile] = File(...),
-    current_user: User = Depends(get_current_user)
+    files: list[UploadFile] = File(...), current_user: User = Depends(get_current_user)
 ):
     """
     Accept 1-3 documents: GST Registration Certificate (PDF),
@@ -7377,22 +8563,27 @@ async def parse_multi_documents(
     Auto-detects document type for each file, parses, and merges into one
     client record.  Field priority: GST > Udyam > MCA.
     """
-    gst_data: dict   = {}
+    gst_data: dict = {}
     udyam_data: dict = {}
-    mca_data: dict   = {}
+    mca_data: dict = {}
     doc_types_found: list = []
 
     for file in files:
         raw_content = await file.read()
         fname = (file.filename or "").lower()
-        ext   = fname.rsplit(".", 1)[-1] if "." in fname else ""
+        ext = fname.rsplit(".", 1)[-1] if "." in fname else ""
 
         if ext == "pdf":
             try:
                 import pdfplumber
+
                 with pdfplumber.open(BytesIO(raw_content)) as pdf:
-                    fp_text  = (pdf.pages[0].extract_text() or "") if pdf.pages else ""
-                    sp_text  = (pdf.pages[1].extract_text() or "") if len(pdf.pages) > 1 else ""
+                    fp_text = (pdf.pages[0].extract_text() or "") if pdf.pages else ""
+                    sp_text = (
+                        (pdf.pages[1].extract_text() or "")
+                        if len(pdf.pages) > 1
+                        else ""
+                    )
             except Exception:
                 fp_text = sp_text = ""
 
@@ -7400,22 +8591,35 @@ async def parse_multi_documents(
 
             # ── Document type detection ─────────────────────────────────────
             # Udyam: unambiguous — UDYAM-XX-YY-NNNNN pattern
-            is_udyam = bool(re.search(r'UDYAM-[A-Z]{2}-\d{2}-\d+', fp_text + sp_text))
+            is_udyam = bool(re.search(r"UDYAM-[A-Z]{2}-\d{2}-\d+", fp_text + sp_text))
 
             # GST REG-06: form title + 15-char GSTIN (2 digits + 5 alpha + 4 digits + 1 alpha + 1 digit + Z + 1 alphanum)
-            is_gst = bool(re.search(
-                r'\b\d{2}[A-Z]{5}\d{4}[A-Z]\d[Z][A-Z0-9]\b',
-                fp_text + sp_text, re.IGNORECASE
-            )) or ("form gst" in combined or "gst reg-06" in combined)
+            is_gst = bool(
+                re.search(
+                    r"\b\d{2}[A-Z]{5}\d{4}[A-Z]\d[Z][A-Z0-9]\b",
+                    fp_text + sp_text,
+                    re.IGNORECASE,
+                )
+            ) or ("form gst" in combined or "gst reg-06" in combined)
 
             # MCA: Company Master Data / Ministry of Corporate Affairs PDFs
             is_mca = (
-                "company master data" in combined or
-                "ministry of corporate affairs" in combined or
-                "mca services" in combined or
-                (bool(re.search(r'\bCIN\s+[UL]\d{5}', fp_text, re.IGNORECASE)) and
-                 any(k in combined for k in ["company name", "llp name", "registered address",
-                                             "date of incorporation", "company status"]))
+                "company master data" in combined
+                or "ministry of corporate affairs" in combined
+                or "mca services" in combined
+                or (
+                    bool(re.search(r"\bCIN\s+[UL]\d{5}", fp_text, re.IGNORECASE))
+                    and any(
+                        k in combined
+                        for k in [
+                            "company name",
+                            "llp name",
+                            "registered address",
+                            "date of incorporation",
+                            "company status",
+                        ]
+                    )
+                )
             )
 
             # Resolve: Udyam > GST > MCA (most-specific first)
@@ -7442,18 +8646,28 @@ async def parse_multi_documents(
             try:
                 excel = pd.ExcelFile(BytesIO(raw_content))
                 company_info: dict = {}
-                directors: list   = []
+                directors: list = []
 
                 for sheet_name in excel.sheet_names:
-                    df = pd.read_excel(excel, sheet_name=sheet_name, header=None).fillna("")
+                    df = pd.read_excel(
+                        excel, sheet_name=sheet_name, header=None
+                    ).fillna("")
                     sheet_lower = sheet_name.lower().strip()
-                    if any(k in sheet_lower for k in ["master", "company", "masterdata"]):
+                    if any(
+                        k in sheet_lower for k in ["master", "company", "masterdata"]
+                    ):
                         for _, row in df.iterrows():
                             key = str(row.iloc[0]).strip()
                             val = str(row.iloc[1]).strip() if len(row) > 1 else ""
-                            if key and key not in ("", "nan") and val not in ("", "nan"):
+                            if (
+                                key
+                                and key not in ("", "nan")
+                                and val not in ("", "nan")
+                            ):
                                 company_info[key] = val
-                    elif any(k in sheet_lower for k in ["director", "signatory", "partner"]):
+                    elif any(
+                        k in sheet_lower for k in ["director", "signatory", "partner"]
+                    ):
                         rows_list = df.values.tolist()
                         header_row_idx = None
                         for idx2, row in enumerate(rows_list):
@@ -7462,81 +8676,114 @@ async def parse_multi_documents(
                                 header_row_idx = idx2
                                 break
                         if header_row_idx is not None:
-                            headers = [str(h).strip() for h in rows_list[header_row_idx]]
-                            for row in rows_list[header_row_idx + 1:]:
+                            headers = [
+                                str(h).strip() for h in rows_list[header_row_idx]
+                            ]
+                            for row in rows_list[header_row_idx + 1 :]:
                                 row_dict = {
-                                    headers[i2]: str(row[i2]).strip() if i2 < len(row) else ""
+                                    headers[i2]: str(row[i2]).strip()
+                                    if i2 < len(row)
+                                    else ""
                                     for i2 in range(len(headers))
                                 }
                                 name = row_dict.get("Name", "").strip()
                                 if name and name != "nan":
-                                    din = row_dict.get("DIN/PAN", "") or row_dict.get("DIN", "")
-                                    directors.append({
-                                        "name": name,
-                                        "designation": row_dict.get("Designation", "Director") or "Director",
-                                        "email": None, "phone": None, "birthday": None,
-                                        "din": din if din not in ("nan", "-", "") else None,
-                                    })
+                                    din = row_dict.get("DIN/PAN", "") or row_dict.get(
+                                        "DIN", ""
+                                    )
+                                    directors.append(
+                                        {
+                                            "name": name,
+                                            "designation": row_dict.get(
+                                                "Designation", "Director"
+                                            )
+                                            or "Director",
+                                            "email": None,
+                                            "phone": None,
+                                            "birthday": None,
+                                            "din": din
+                                            if din not in ("nan", "-", "")
+                                            else None,
+                                        }
+                                    )
 
                 raw_addr = (
-                    company_info.get("Registered Address") or
-                    company_info.get("Registered Office Address") or
-                    company_info.get("Address") or ""
+                    company_info.get("Registered Address")
+                    or company_info.get("Registered Office Address")
+                    or company_info.get("Address")
+                    or ""
                 ).strip()
-                if raw_addr in ("-", "nan"): raw_addr = ""
+                if raw_addr in ("-", "nan"):
+                    raw_addr = ""
 
                 mca_city = mca_state = ""
                 if raw_addr:
                     addr_parts = [p.strip() for p in raw_addr.split(",") if p.strip()]
                     if len(addr_parts) >= 3:
                         mca_state = addr_parts[-3]
-                        mca_city  = addr_parts[-4] if len(addr_parts) >= 4 else ""
+                        mca_city = addr_parts[-4] if len(addr_parts) >= 4 else ""
 
-                raw_doi = company_info.get("Date of Incorporation") or company_info.get("Incorporation Date") or ""
+                raw_doi = (
+                    company_info.get("Date of Incorporation")
+                    or company_info.get("Incorporation Date")
+                    or ""
+                )
                 mca_doi = ""
                 if raw_doi:
                     try:
                         from dateutil import parser as date_parser
+
                         mca_doi = date_parser.parse(str(raw_doi)).strftime("%Y-%m-%d")
                     except Exception:
                         mca_doi = ""
 
                 mca_company_name = (
-                    company_info.get("Company Name") or company_info.get("LLP Name") or ""
+                    company_info.get("Company Name")
+                    or company_info.get("LLP Name")
+                    or ""
                 ).strip()
 
                 mca_category = (
-                    company_info.get("Company Category") or
-                    company_info.get("Class of Company") or
-                    company_info.get("Company SubCategory") or
-                    company_info.get("Type of Company") or ""
+                    company_info.get("Company Category")
+                    or company_info.get("Class of Company")
+                    or company_info.get("Company SubCategory")
+                    or company_info.get("Type of Company")
+                    or ""
                 ).strip()
                 mca_client_type = _map_mca_constitution(mca_category)
                 if mca_client_type == "other":
-                    mca_client_type = _map_mca_constitution(mca_category + " " + mca_company_name)
-                if mca_client_type == "other" and (company_info.get("LLPIN") or "").strip() not in ("", "-", "nan"):
+                    mca_client_type = _map_mca_constitution(
+                        mca_category + " " + mca_company_name
+                    )
+                if mca_client_type == "other" and (
+                    company_info.get("LLPIN") or ""
+                ).strip() not in ("", "-", "nan"):
                     mca_client_type = "llp"
                 if mca_client_type == "other":
-                    mca_client_type = _detect_entity_type_from_name(mca_company_name) or "other"
+                    mca_client_type = (
+                        _detect_entity_type_from_name(mca_company_name) or "other"
+                    )
 
                 mca_email = _clean_obfuscated_email(
                     company_info.get("Email Id") or company_info.get("Email") or ""
                 )
 
                 mca_data = {
-                    "company_name":          mca_company_name,
-                    "client_type":           mca_client_type,
-                    "company_category":      mca_category,
-                    "email":                 mca_email,
-                    "phone":                 company_info.get("Phone") or company_info.get("Mobile") or "",
+                    "company_name": mca_company_name,
+                    "client_type": mca_client_type,
+                    "company_category": mca_category,
+                    "email": mca_email,
+                    "phone": company_info.get("Phone")
+                    or company_info.get("Mobile")
+                    or "",
                     "date_of_incorporation": mca_doi,
-                    "address":               raw_addr,
-                    "city":                  mca_city,
-                    "state":                 mca_state,
-                    "pan":                   company_info.get("PAN") or "",
-                    "cin":                   company_info.get("CIN") or company_info.get("LLPIN") or "",
-                    "directors":             directors,
-                    "raw":                   company_info,
+                    "address": raw_addr,
+                    "city": mca_city,
+                    "state": mca_state,
+                    "pan": company_info.get("PAN") or "",
+                    "cin": company_info.get("CIN") or company_info.get("LLPIN") or "",
+                    "directors": directors,
+                    "raw": company_info,
                 }
                 doc_types_found.append("MCA Master Data (Excel)")
             except Exception as e:
@@ -7548,37 +8795,51 @@ async def parse_multi_documents(
             detail=(
                 "No recognizable documents found. Upload a GST Registration Certificate (PDF), "
                 "Udyam/MSME Certificate (PDF), or MCA Company Master Data (PDF or Excel .xlsx/.xls)."
-            )
+            ),
         )
 
     def _first(*vals):
-        return next((v for v in vals if v and str(v).strip() not in ("", "nan", "-")), "")
+        return next(
+            (v for v in vals if v and str(v).strip() not in ("", "nan", "-")), ""
+        )
 
     # ── Merge: GST > Udyam > MCA ──────────────────────────────────────────────
     merged_name = _first(
-        gst_data.get("legal_name"), gst_data.get("trade_name"),
-        udyam_data.get("enterprise_name"), mca_data.get("company_name"),
+        gst_data.get("legal_name"),
+        gst_data.get("trade_name"),
+        udyam_data.get("enterprise_name"),
+        mca_data.get("company_name"),
     )
-    merged_name = re.sub(r'(?i)^M[/\.]?S[/\.]?\s+', '', merged_name).strip()
+    merged_name = re.sub(r"(?i)^M[/\.]?S[/\.]?\s+", "", merged_name).strip()
 
     constitution = gst_data.get("constitution") or ""
-    const_raw    = gst_data.get("constitution_raw") or ""
-    gstin        = gst_data.get("gstin") or ""
+    const_raw = gst_data.get("constitution_raw") or ""
+    gstin = gst_data.get("gstin") or ""
     udyam_number = udyam_data.get("udyam_number") or ""
-    msme_type    = udyam_data.get("msme_type") or ""
-    pan          = _first(mca_data.get("pan"), udyam_data.get("pan"))
-    cin          = mca_data.get("cin") or ""
+    msme_type = udyam_data.get("msme_type") or ""
+    pan = _first(mca_data.get("pan"), udyam_data.get("pan"))
+    cin = mca_data.get("cin") or ""
 
-    address = _first(gst_data.get("address"),  udyam_data.get("address"),  mca_data.get("address"))
-    city    = _first(gst_data.get("city"),     udyam_data.get("city"),     mca_data.get("city"))
-    state   = _first(gst_data.get("state"),    udyam_data.get("state"),    mca_data.get("state"))
-    pin     = _first(gst_data.get("pin"),      udyam_data.get("pin"))
+    address = _first(
+        gst_data.get("address"), udyam_data.get("address"), mca_data.get("address")
+    )
+    city = _first(gst_data.get("city"), udyam_data.get("city"), mca_data.get("city"))
+    state = _first(
+        gst_data.get("state"), udyam_data.get("state"), mca_data.get("state")
+    )
+    pin = _first(gst_data.get("pin"), udyam_data.get("pin"))
     gst_full_address = gst_data.get("full_address") or ""
 
     mca_directors = mca_data.get("directors", [])
-    gst_partners  = [
-        {"name": p["name"], "designation": p.get("designation", "Director"),
-         "email": "", "phone": "", "birthday": "", "din": ""}
+    gst_partners = [
+        {
+            "name": p["name"],
+            "designation": p.get("designation", "Director"),
+            "email": "",
+            "phone": "",
+            "birthday": "",
+            "din": "",
+        }
         for p in gst_data.get("partners", [])
     ]
     all_contacts = list(mca_directors)
@@ -7588,9 +8849,20 @@ async def parse_multi_documents(
             all_contacts.append(c)
             existing_names.add(c["name"].lower().strip())
     if not all_contacts:
-        all_contacts = [{"name": "", "designation": "", "email": "", "phone": "", "birthday": "", "din": ""}]
+        all_contacts = [
+            {
+                "name": "",
+                "designation": "",
+                "email": "",
+                "phone": "",
+                "birthday": "",
+                "din": "",
+            }
+        ]
 
-    email     = _clean_obfuscated_email(_first(udyam_data.get("email"), mca_data.get("email")))
+    email = _clean_obfuscated_email(
+        _first(udyam_data.get("email"), mca_data.get("email"))
+    )
     phone_raw = _first(udyam_data.get("mobile"), mca_data.get("phone"))
     phone_digits = re.sub(r"\D", "", phone_raw or "")
     if len(phone_digits) == 12 and phone_digits.startswith("91"):
@@ -7613,36 +8885,39 @@ async def parse_multi_documents(
     company_category = mca_data.get("company_category") or ""
 
     notes_parts = []
-    if cin:          notes_parts.append(f"CIN/LLPIN: {cin}")
-    if udyam_number: notes_parts.append(f"Udyam: {udyam_number}")
-    if msme_type:    notes_parts.append(f"MSME Type: {msme_type}")
+    if cin:
+        notes_parts.append(f"CIN/LLPIN: {cin}")
+    if udyam_number:
+        notes_parts.append(f"Udyam: {udyam_number}")
+    if msme_type:
+        notes_parts.append(f"MSME Type: {msme_type}")
     notes = "\n".join(notes_parts)
 
     return {
-        "status":                "ok",
-        "doc_types_found":       doc_types_found,
-        "company_name":          merged_name,
-        "constitution":          constitution,
-        "constitution_raw":      const_raw,
-        "client_type":           client_type,
-        "company_category":      company_category,
-        "gstin":                 gstin,
-        "pan":                   pan,
-        "cin":                   cin,
-        "udyam_number":          udyam_number,
-        "msme_type":             msme_type,
-        "address":               address,
-        "city":                  city,
-        "state":                 state,
-        "pin":                   pin,
-        "gst_address":           gst_full_address,
-        "email":                 email,
-        "phone":                 phone,
+        "status": "ok",
+        "doc_types_found": doc_types_found,
+        "company_name": merged_name,
+        "constitution": constitution,
+        "constitution_raw": const_raw,
+        "client_type": client_type,
+        "company_category": company_category,
+        "gstin": gstin,
+        "pan": pan,
+        "cin": cin,
+        "udyam_number": udyam_number,
+        "msme_type": msme_type,
+        "address": address,
+        "city": city,
+        "state": state,
+        "pin": pin,
+        "gst_address": gst_full_address,
+        "email": email,
+        "phone": phone,
         "date_of_incorporation": date_of_incorporation,
-        "contact_persons":       all_contacts,
-        "notes":                 notes,
-        "gst_data":              gst_data,
-        "udyam_data":            udyam_data,
+        "contact_persons": all_contacts,
+        "notes": notes,
+        "gst_data": gst_data,
+        "udyam_data": udyam_data,
     }
 
 
@@ -7651,17 +8926,20 @@ async def parse_multi_documents(
 # ==============================================================
 @api_router.post("/clients/parse-mds-excel")
 async def parse_mds_excel_for_client_form(
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user)
+    file: UploadFile = File(...), current_user: User = Depends(get_current_user)
 ):
     filename = file.filename.lower()
     if not filename.endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=400, detail="Only Excel files (.xlsx / .xls) are supported.")
+        raise HTTPException(
+            status_code=400, detail="Only Excel files (.xlsx / .xls) are supported."
+        )
     try:
         content = await file.read()
         excel = pd.ExcelFile(BytesIO(content))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Could not open Excel file: {str(e)}")
+        raise HTTPException(
+            status_code=400, detail=f"Could not open Excel file: {str(e)}"
+        )
 
     def clean_email(raw: str) -> str:
         if not raw:
@@ -7677,7 +8955,9 @@ async def parse_mds_excel_for_client_form(
 
     def detect_type(name: str) -> str:
         n = name.lower()
-        if any(x in n for x in ["private limited", "pvt ltd", "pvt. ltd", "pvt limited"]):
+        if any(
+            x in n for x in ["private limited", "pvt ltd", "pvt. ltd", "pvt limited"]
+        ):
             return "pvt_ltd"
         if any(x in n for x in ["limited liability partnership", "llp"]):
             return "llp"
@@ -7706,18 +8986,33 @@ async def parse_mds_excel_for_client_form(
     for sheet_name in excel.sheet_names:
         df = pd.read_excel(excel, sheet_name=sheet_name, header=None).fillna("")
         sheet_lower = sheet_name.lower().strip()
-        if "master" in sheet_lower or "company" in sheet_lower or sheet_lower == "masterdata":
+        if (
+            "master" in sheet_lower
+            or "company" in sheet_lower
+            or sheet_lower == "masterdata"
+        ):
             for _, row in df.iterrows():
                 key = str(row.iloc[0]).strip()
                 value = str(row.iloc[1]).strip() if len(row) > 1 else ""
                 if key and key not in ("", "nan") and value not in ("", "nan"):
-                    if any(phrase in key for phrase in [
-                        "Accounts and Solvency", "Annual Returns", "Filing Information",
-                        "Interim Resolution", "Sr. No", "Date of filing"
-                    ]):
+                    if any(
+                        phrase in key
+                        for phrase in [
+                            "Accounts and Solvency",
+                            "Annual Returns",
+                            "Filing Information",
+                            "Interim Resolution",
+                            "Sr. No",
+                            "Date of filing",
+                        ]
+                    ):
                         continue
                     company_info[key] = value
-        elif "director" in sheet_lower or "signatory" in sheet_lower or "partner" in sheet_lower:
+        elif (
+            "director" in sheet_lower
+            or "signatory" in sheet_lower
+            or "partner" in sheet_lower
+        ):
             rows_list = df.values.tolist()
             header_row_idx = None
             for idx, row in enumerate(rows_list):
@@ -7728,21 +9023,26 @@ async def parse_mds_excel_for_client_form(
             if header_row_idx is None:
                 continue
             headers = [str(h).strip() for h in rows_list[header_row_idx]]
-            for row in rows_list[header_row_idx + 1:]:
-                row_dict = {headers[i]: str(row[i]).strip() if i < len(row) else "" for i in range(len(headers))}
+            for row in rows_list[header_row_idx + 1 :]:
+                row_dict = {
+                    headers[i]: str(row[i]).strip() if i < len(row) else ""
+                    for i in range(len(headers))
+                }
                 name = row_dict.get("Name", "").strip()
                 if not name or name in ("nan", ""):
                     continue
                 din = row_dict.get("DIN/PAN", "") or row_dict.get("DIN", "")
                 designation = row_dict.get("Designation", "")
-                directors.append({
-                    "name": name,
-                    "designation": designation or "Director",
-                    "email": None,
-                    "phone": None,
-                    "birthday": None,
-                    "din": din if din not in ("nan", "-", "") else None,
-                })
+                directors.append(
+                    {
+                        "name": name,
+                        "designation": designation or "Director",
+                        "email": None,
+                        "phone": None,
+                        "birthday": None,
+                        "din": din if din not in ("nan", "-", "") else None,
+                    }
+                )
         else:
             rows_list = df.values.tolist()
             if len(rows_list) >= 2:
@@ -7756,42 +9056,51 @@ async def parse_mds_excel_for_client_form(
                     extra_notes_parts.append(f"[{sheet_name}]")
                     for r in data_rows[:10]:
                         extra_notes_parts.append(
-                            " | ".join(f"{k}: {v}" for k, v in r.items() if v not in ("", "nan", "-"))
+                            " | ".join(
+                                f"{k}: {v}"
+                                for k, v in r.items()
+                                if v not in ("", "nan", "-")
+                            )
                         )
 
     # Support both Pvt Ltd (MCA) and LLP field naming conventions
     company_name = (
-        company_info.get("Company Name") or
-        company_info.get("LLP Name") or
-        company_info.get("company_name") or ""
+        company_info.get("Company Name")
+        or company_info.get("LLP Name")
+        or company_info.get("company_name")
+        or ""
     ).strip()
 
     raw_email = (
-        company_info.get("Email Id") or
-        company_info.get("Email") or
-        company_info.get("email") or ""
+        company_info.get("Email Id")
+        or company_info.get("Email")
+        or company_info.get("email")
+        or ""
     )
     email = clean_email(raw_email)
 
     raw_phone = (
-        company_info.get("Phone") or
-        company_info.get("Mobile") or
-        company_info.get("Contact") or ""
+        company_info.get("Phone")
+        or company_info.get("Mobile")
+        or company_info.get("Contact")
+        or ""
     )
     phone = clean_phone(raw_phone)
 
     raw_doi = (
-        company_info.get("Date of Incorporation") or
-        company_info.get("Incorporation Date") or ""
+        company_info.get("Date of Incorporation")
+        or company_info.get("Incorporation Date")
+        or ""
     )
     birthday = parse_date(raw_doi)
     # Use Company Class/Category from master data first; fall back to name-based detection
     raw_mca_class = (
-        company_info.get("Company Class") or
-        company_info.get("Company Category") or
-        company_info.get("Company SubCategory") or
-        company_info.get("Class of Company") or
-        company_info.get("Type of Company") or ""
+        company_info.get("Company Class")
+        or company_info.get("Company Category")
+        or company_info.get("Company SubCategory")
+        or company_info.get("Class of Company")
+        or company_info.get("Type of Company")
+        or ""
     ).strip()
     if raw_mca_class and raw_mca_class not in ("-", "nan", ""):
         client_type = _map_mca_constitution(raw_mca_class)
@@ -7802,9 +9111,10 @@ async def parse_mds_excel_for_client_form(
         client_type = detect_type(company_name)
 
     address = (
-        company_info.get("Registered Address") or
-        company_info.get("Registered Office Address") or
-        company_info.get("Address") or ""
+        company_info.get("Registered Address")
+        or company_info.get("Registered Office Address")
+        or company_info.get("Address")
+        or ""
     ).strip()
     if address in ("-", "nan"):
         address = ""
@@ -7826,7 +9136,9 @@ async def parse_mds_excel_for_client_form(
     if cin and cin not in ("-", "nan"):
         notes_lines.append(f"CIN/LLPIN: {cin}")
 
-    roc = company_info.get("ROC Name", "") or company_info.get("ROC (name and office)", "")
+    roc = company_info.get("ROC Name", "") or company_info.get(
+        "ROC (name and office)", ""
+    )
     if roc and roc not in ("-", "nan"):
         notes_lines.append(f"ROC: {roc}")
 
@@ -7834,9 +9146,8 @@ async def parse_mds_excel_for_client_form(
     if reg_no and reg_no not in ("-", "nan"):
         notes_lines.append(f"Reg No: {reg_no}")
 
-    auth_cap = (
-        company_info.get("Authorised Capital (Rs)", "") or
-        company_info.get("Total Obligation of Contribution", "")
+    auth_cap = company_info.get("Authorised Capital (Rs)", "") or company_info.get(
+        "Total Obligation of Contribution", ""
     )
     if auth_cap and auth_cap not in ("-", "nan"):
         notes_lines.append(f"Capital/Contribution: Rs{auth_cap}")
@@ -7851,8 +9162,8 @@ async def parse_mds_excel_for_client_form(
     notes = "\n".join(notes_lines)
 
     status_raw = (
-        company_info.get("Company Status", "") or
-        company_info.get("LLP Status", "Active")
+        company_info.get("Company Status", "")
+        or company_info.get("LLP Status", "Active")
     ).lower()
     status = "active" if "active" in status_raw else "inactive"
     return {
@@ -7874,6 +9185,7 @@ async def parse_mds_excel_for_client_form(
         "raw_company_info": company_info,
         "sheets_parsed": excel.sheet_names,
     }
+
 
 # ==============================================================
 # GENERAL CLIENT PDF PARSER  (used by Add-New-Client panel)
@@ -7903,9 +9215,7 @@ async def parse_client_pdf(
         import pdfplumber, re as _re
 
         with pdfplumber.open(BytesIO(content)) as pdf:
-            full_text = "\n".join(
-                (page.extract_text() or "") for page in pdf.pages
-            )
+            full_text = "\n".join((page.extract_text() or "") for page in pdf.pages)
 
         text = full_text
 
@@ -7920,19 +9230,43 @@ async def parse_client_pdf(
             result["gstin"] = gstin
             # State code → state name
             STATE_CODE_MAP = {
-                "01": "Jammu and Kashmir", "02": "Himachal Pradesh", "03": "Punjab",
-                "04": "Chandigarh", "05": "Uttarakhand", "06": "Haryana",
-                "07": "Delhi", "08": "Rajasthan", "09": "Uttar Pradesh",
-                "10": "Bihar", "11": "Sikkim", "12": "Arunachal Pradesh",
-                "13": "Nagaland", "14": "Manipur", "15": "Mizoram",
-                "16": "Tripura", "17": "Meghalaya", "18": "Assam",
-                "19": "West Bengal", "20": "Jharkhand", "21": "Odisha",
-                "22": "Chhattisgarh", "23": "Madhya Pradesh", "24": "Gujarat",
-                "25": "Dadra and Nagar Haveli and Daman and Diu", "26": "Dadra and Nagar Haveli and Daman and Diu",
-                "27": "Maharashtra", "28": "Andhra Pradesh", "29": "Karnataka",
-                "30": "Goa", "31": "Lakshadweep", "32": "Kerala",
-                "33": "Tamil Nadu", "34": "Puducherry", "35": "Andaman and Nicobar Islands",
-                "36": "Telangana", "37": "Andhra Pradesh",
+                "01": "Jammu and Kashmir",
+                "02": "Himachal Pradesh",
+                "03": "Punjab",
+                "04": "Chandigarh",
+                "05": "Uttarakhand",
+                "06": "Haryana",
+                "07": "Delhi",
+                "08": "Rajasthan",
+                "09": "Uttar Pradesh",
+                "10": "Bihar",
+                "11": "Sikkim",
+                "12": "Arunachal Pradesh",
+                "13": "Nagaland",
+                "14": "Manipur",
+                "15": "Mizoram",
+                "16": "Tripura",
+                "17": "Meghalaya",
+                "18": "Assam",
+                "19": "West Bengal",
+                "20": "Jharkhand",
+                "21": "Odisha",
+                "22": "Chhattisgarh",
+                "23": "Madhya Pradesh",
+                "24": "Gujarat",
+                "25": "Dadra and Nagar Haveli and Daman and Diu",
+                "26": "Dadra and Nagar Haveli and Daman and Diu",
+                "27": "Maharashtra",
+                "28": "Andhra Pradesh",
+                "29": "Karnataka",
+                "30": "Goa",
+                "31": "Lakshadweep",
+                "32": "Kerala",
+                "33": "Tamil Nadu",
+                "34": "Puducherry",
+                "35": "Andaman and Nicobar Islands",
+                "36": "Telangana",
+                "37": "Andhra Pradesh",
             }
             state_code = gstin[:2]
             if state_code in STATE_CODE_MAP and not result.get("state"):
@@ -7944,7 +9278,9 @@ async def parse_client_pdf(
             result["pan"] = pan
 
         # CIN  (21-char company registration)
-        cin = first(r"\b([UL][0-9]{5}[A-Z]{2}[0-9]{4}(?:PTC|PLC|OPC|FLC|GAP|AAP|MTC|NPL|NPC|GAT|FTC)[0-9]{6})\b")
+        cin = first(
+            r"\b([UL][0-9]{5}[A-Z]{2}[0-9]{4}(?:PTC|PLC|OPC|FLC|GAP|AAP|MTC|NPL|NPC|GAT|FTC)[0-9]{6})\b"
+        )
         if cin:
             result["cin"] = cin
 
@@ -7992,23 +9328,33 @@ async def parse_client_pdf(
         # Address block (rough)
         addr_m = _re.search(
             r"(?:Address|Principal Place of Business|Registered Office)[:\s]+([^\n]{10,120})",
-            text, _re.IGNORECASE
+            text,
+            _re.IGNORECASE,
         )
         if addr_m:
             result["address"] = addr_m.group(1).strip()
 
         # City / State from text
         if not result.get("city"):
-            city_m = _re.search(r"\b(Mumbai|Delhi|Surat|Ahmedabad|Bangalore|Bengaluru|Chennai|Hyderabad|Kolkata|Pune|Jaipur|Lucknow|Indore|Bhopal|Nagpur|Vadodara|Rajkot|Coimbatore|Visakhapatnam|Patna|Chandigarh)\b", text, _re.IGNORECASE)
+            city_m = _re.search(
+                r"\b(Mumbai|Delhi|Surat|Ahmedabad|Bangalore|Bengaluru|Chennai|Hyderabad|Kolkata|Pune|Jaipur|Lucknow|Indore|Bhopal|Nagpur|Vadodara|Rajkot|Coimbatore|Visakhapatnam|Patna|Chandigarh)\b",
+                text,
+                _re.IGNORECASE,
+            )
             if city_m:
                 result["city"] = city_m.group(1).title()
 
     except Exception as e:
         logger.error(f"parse_client_pdf error: {e}", exc_info=True)
-        raise HTTPException(status_code=422, detail="Could not parse PDF. Please fill in the details manually.")
+        raise HTTPException(
+            status_code=422,
+            detail="Could not parse PDF. Please fill in the details manually.",
+        )
 
     if not result:
-        raise HTTPException(status_code=422, detail="No recognizable client data found in this PDF.")
+        raise HTTPException(
+            status_code=422, detail="No recognizable client data found in this PDF."
+        )
 
     return result
 
@@ -8039,7 +9385,9 @@ async def parse_client_excel_row(
     """
     fname = file.filename.lower()
     if not any(fname.endswith(ext) for ext in (".xlsx", ".xls", ".csv")):
-        raise HTTPException(status_code=400, detail="Only .xlsx, .xls, or .csv files are supported.")
+        raise HTTPException(
+            status_code=400, detail="Only .xlsx, .xls, or .csv files are supported."
+        )
 
     content = await file.read()
 
@@ -8065,7 +9413,12 @@ async def parse_client_excel_row(
     def clean_email(raw: str) -> str:
         """Handles obfuscated emails like user[at]gmail[dot]com"""
         v = (raw or "").strip()
-        v = v.replace("[at]", "@").replace("[dot]", ".").replace(" at ", "@").replace(" dot ", ".")
+        v = (
+            v.replace("[at]", "@")
+            .replace("[dot]", ".")
+            .replace(" at ", "@")
+            .replace(" dot ", ".")
+        )
         return v.lower() if "@" in v else ""
 
     def clean_phone(raw: str) -> str:
@@ -8081,27 +9434,132 @@ async def parse_client_excel_row(
         into address / city / state.
         """
         INDIAN_STATES_SET = {
-            "andhra pradesh","arunachal pradesh","assam","bihar","chhattisgarh","goa","gujarat",
-            "haryana","himachal pradesh","jharkhand","karnataka","kerala","madhya pradesh",
-            "maharashtra","manipur","meghalaya","mizoram","nagaland","odisha","punjab","rajasthan",
-            "sikkim","tamil nadu","telangana","tripura","uttar pradesh","uttarakhand","west bengal",
-            "andaman and nicobar islands","chandigarh","dadra and nagar haveli","daman and diu",
-            "delhi","jammu and kashmir","ladakh","lakshadweep","puducherry",
+            "andhra pradesh",
+            "arunachal pradesh",
+            "assam",
+            "bihar",
+            "chhattisgarh",
+            "goa",
+            "gujarat",
+            "haryana",
+            "himachal pradesh",
+            "jharkhand",
+            "karnataka",
+            "kerala",
+            "madhya pradesh",
+            "maharashtra",
+            "manipur",
+            "meghalaya",
+            "mizoram",
+            "nagaland",
+            "odisha",
+            "punjab",
+            "rajasthan",
+            "sikkim",
+            "tamil nadu",
+            "telangana",
+            "tripura",
+            "uttar pradesh",
+            "uttarakhand",
+            "west bengal",
+            "andaman and nicobar islands",
+            "chandigarh",
+            "dadra and nagar haveli",
+            "daman and diu",
+            "delhi",
+            "jammu and kashmir",
+            "ladakh",
+            "lakshadweep",
+            "puducherry",
         }
         # Common Indian cities for positive identification
         KNOWN_CITIES = {
-            "mumbai","delhi","surat","ahmedabad","bangalore","bengaluru","chennai","hyderabad",
-            "kolkata","pune","jaipur","lucknow","indore","bhopal","nagpur","vadodara","rajkot",
-            "coimbatore","visakhapatnam","patna","chandigarh","thane","pimpri","nashik","faridabad",
-            "meerut","agra","varanasi","srinagar","ludhiana","amritsar","allahabad","prayagraj",
-            "vijayawada","madurai","raipur","kota","aurangabad","dhanbad","jodhpur","guwahati",
-            "ranchi","gwalior","jabalpur","tiruchirappalli","tirupur","hubli","mysore","mysuru",
-            "bareilly","aligarh","moradabad","noida","gurugram","gurgaon","navi mumbai","kalyan",
-            "solapur","jalandhar","bhubaneswar","cuttack","thiruvananthapuram","kozhikode","kochi",
-            "ernakulam","mangaluru","belagavi","davangere","bellary","hospet","shimla","dehradun",
-            "haridwar","rishikesh","udaipur","ajmer","bikaner","alwar","bhilwara","sikar",
+            "mumbai",
+            "delhi",
+            "surat",
+            "ahmedabad",
+            "bangalore",
+            "bengaluru",
+            "chennai",
+            "hyderabad",
+            "kolkata",
+            "pune",
+            "jaipur",
+            "lucknow",
+            "indore",
+            "bhopal",
+            "nagpur",
+            "vadodara",
+            "rajkot",
+            "coimbatore",
+            "visakhapatnam",
+            "patna",
+            "chandigarh",
+            "thane",
+            "pimpri",
+            "nashik",
+            "faridabad",
+            "meerut",
+            "agra",
+            "varanasi",
+            "srinagar",
+            "ludhiana",
+            "amritsar",
+            "allahabad",
+            "prayagraj",
+            "vijayawada",
+            "madurai",
+            "raipur",
+            "kota",
+            "aurangabad",
+            "dhanbad",
+            "jodhpur",
+            "guwahati",
+            "ranchi",
+            "gwalior",
+            "jabalpur",
+            "tiruchirappalli",
+            "tirupur",
+            "hubli",
+            "mysore",
+            "mysuru",
+            "bareilly",
+            "aligarh",
+            "moradabad",
+            "noida",
+            "gurugram",
+            "gurgaon",
+            "navi mumbai",
+            "kalyan",
+            "solapur",
+            "jalandhar",
+            "bhubaneswar",
+            "cuttack",
+            "thiruvananthapuram",
+            "kozhikode",
+            "kochi",
+            "ernakulam",
+            "mangaluru",
+            "belagavi",
+            "davangere",
+            "bellary",
+            "hospet",
+            "shimla",
+            "dehradun",
+            "haridwar",
+            "rishikesh",
+            "udaipur",
+            "ajmer",
+            "bikaner",
+            "alwar",
+            "bhilwara",
+            "sikar",
         }
-        parts = [p.strip() for p in raw.split(",") if p.strip() and p.strip().lower() not in ("india","nan","")]
+        parts = [
+            p.strip()
+            for p in raw.split(",")
+            if p.strip() and p.strip().lower() not in ("india", "nan", "")
+        ]
         # Remove PIN code part
         parts = [p for p in parts if not _re.match(r"^\d{6}$", p)]
         # Remove "X City" duplicates (e.g. "Surat City" when "Surat" already present)
@@ -8139,13 +9597,23 @@ async def parse_client_excel_row(
     # ── Load workbook (all sheets) ─────────────────────────────────────────
     try:
         if fname.endswith(".csv"):
-            sheets = {"Sheet1": pd.read_csv(BytesIO(content), dtype=str, header=None).fillna("")}
+            sheets = {
+                "Sheet1": pd.read_csv(BytesIO(content), dtype=str, header=None).fillna(
+                    ""
+                )
+            }
         elif fname.endswith(".xls"):
             xl = pd.ExcelFile(BytesIO(content), engine="xlrd")
-            sheets = {s: pd.read_excel(xl, sheet_name=s, dtype=str, header=None).fillna("") for s in xl.sheet_names}
+            sheets = {
+                s: pd.read_excel(xl, sheet_name=s, dtype=str, header=None).fillna("")
+                for s in xl.sheet_names
+            }
         else:
             xl = pd.ExcelFile(BytesIO(content), engine="openpyxl")
-            sheets = {s: pd.read_excel(xl, sheet_name=s, dtype=str, header=None).fillna("") for s in xl.sheet_names}
+            sheets = {
+                s: pd.read_excel(xl, sheet_name=s, dtype=str, header=None).fillna("")
+                for s in xl.sheet_names
+            }
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not read file: {str(e)}")
 
@@ -8158,7 +9626,11 @@ async def parse_client_excel_row(
     def is_kv_sheet(df: pd.DataFrame) -> bool:
         if df.shape[1] < 2 or df.shape[0] < 3:
             return False
-        col0_vals = [str(v).strip() for v in df.iloc[:8, 0] if str(v).strip() and str(v).strip().lower() != "nan"]
+        col0_vals = [
+            str(v).strip()
+            for v in df.iloc[:8, 0]
+            if str(v).strip() and str(v).strip().lower() != "nan"
+        ]
         # KV sheets have field-name-like strings in col 0 (mixed case, spaces)
         kv_like = sum(1 for v in col0_vals if " " in v or len(v) > 12)
         return kv_like >= 2
@@ -8167,8 +9639,12 @@ async def parse_client_excel_row(
     def extract_from_kv_sheets(sheets: dict) -> dict:
         kv: dict = {}
         # Prefer MasterData sheet; fall back to all sheets
-        priority = [s for s in sheets if "master" in s.lower() or "company" in s.lower() or "llp" in s.lower()]
-        ordered  = priority + [s for s in sheets if s not in priority]
+        priority = [
+            s
+            for s in sheets
+            if "master" in s.lower() or "company" in s.lower() or "llp" in s.lower()
+        ]
+        ordered = priority + [s for s in sheets if s not in priority]
         for sname in ordered:
             df = sheets[sname]
             if not is_kv_sheet(df):
@@ -8188,18 +9664,37 @@ async def parse_client_excel_row(
     if kv_data:
         # Map KV keys → client fields
         KV_NAME_KEYS = [
-            "llp name","company name","name of company","name of llp","business name",
-            "trade name","legal name","firm name","entity name",
+            "llp name",
+            "company name",
+            "name of company",
+            "name of llp",
+            "business name",
+            "trade name",
+            "legal name",
+            "firm name",
+            "entity name",
         ]
-        KV_EMAIL_KEYS  = ["email id","email","email address","e-mail","e mail"]
-        KV_PHONE_KEYS  = ["phone","mobile","contact","phone no","mobile no","telephone"]
-        KV_PAN_KEYS    = ["pan","pan no","pan number","permanent account number"]
-        KV_GSTIN_KEYS  = ["gstin","gst number","gst no","gstin no"]
-        KV_CIN_KEYS    = ["cin","cin no","company identification number"]
-        KV_LLPIN_KEYS  = ["llpin","llp identification number","llp in"]
-        KV_ADDR_KEYS   = ["registered address","principal place of business","office address","address"]
-        KV_CITY_KEYS   = ["city","town"]
-        KV_STATE_KEYS  = ["state","state name"]
+        KV_EMAIL_KEYS = ["email id", "email", "email address", "e-mail", "e mail"]
+        KV_PHONE_KEYS = [
+            "phone",
+            "mobile",
+            "contact",
+            "phone no",
+            "mobile no",
+            "telephone",
+        ]
+        KV_PAN_KEYS = ["pan", "pan no", "pan number", "permanent account number"]
+        KV_GSTIN_KEYS = ["gstin", "gst number", "gst no", "gstin no"]
+        KV_CIN_KEYS = ["cin", "cin no", "company identification number"]
+        KV_LLPIN_KEYS = ["llpin", "llp identification number", "llp in"]
+        KV_ADDR_KEYS = [
+            "registered address",
+            "principal place of business",
+            "office address",
+            "address",
+        ]
+        KV_CITY_KEYS = ["city", "town"]
+        KV_STATE_KEYS = ["state", "state name"]
 
         def kv_get(keys: list[str]) -> str:
             for k in keys:
@@ -8213,15 +9708,15 @@ async def parse_client_excel_row(
             return ""
 
         company_name = kv_get(KV_NAME_KEYS)
-        email_raw    = kv_get(KV_EMAIL_KEYS)
-        phone_raw    = kv_get(KV_PHONE_KEYS)
-        pan          = kv_get(KV_PAN_KEYS).upper()
-        gstin        = kv_get(KV_GSTIN_KEYS).upper()
-        cin          = kv_get(KV_CIN_KEYS).upper()
-        llpin        = kv_get(KV_LLPIN_KEYS).upper()
-        addr_raw     = kv_get(KV_ADDR_KEYS)
-        city         = kv_get(KV_CITY_KEYS)
-        state        = kv_get(KV_STATE_KEYS)
+        email_raw = kv_get(KV_EMAIL_KEYS)
+        phone_raw = kv_get(KV_PHONE_KEYS)
+        pan = kv_get(KV_PAN_KEYS).upper()
+        gstin = kv_get(KV_GSTIN_KEYS).upper()
+        cin = kv_get(KV_CIN_KEYS).upper()
+        llpin = kv_get(KV_LLPIN_KEYS).upper()
+        addr_raw = kv_get(KV_ADDR_KEYS)
+        city = kv_get(KV_CITY_KEYS)
+        state = kv_get(KV_STATE_KEYS)
 
         email = clean_email(email_raw)
         phone = clean_phone(phone_raw)
@@ -8229,8 +9724,10 @@ async def parse_client_excel_row(
         # If address is a full string (MCA style), split it
         if addr_raw and "," in addr_raw and not city:
             parsed_addr, parsed_city, parsed_state = parse_address(addr_raw)
-            if not city:   city   = parsed_city
-            if not state:  state  = parsed_state
+            if not city:
+                city = parsed_city
+            if not state:
+                state = parsed_state
             addr_raw = parsed_addr or addr_raw
 
         client_type = detect_entity_type(company_name)
@@ -8238,17 +9735,28 @@ async def parse_client_excel_row(
         if llpin and llpin != "-":
             client_type = "llp"
 
-        if company_name: result["company_name"] = company_name.strip()
-        if client_type:  result["client_type"]  = client_type
-        if email:        result["email"]         = email
-        if phone:        result["phone"]         = phone
-        if pan and pan != "-":    result["pan"]   = pan
-        if gstin and gstin != "-": result["gstin"] = gstin
-        if cin and cin != "-":    result["cin"]   = cin
-        if llpin and llpin != "-": result["llpin"] = llpin
-        if addr_raw:     result["address"]        = addr_raw.strip()
-        if city:         result["city"]           = city.strip()
-        if state:        result["state"]          = state.strip()
+        if company_name:
+            result["company_name"] = company_name.strip()
+        if client_type:
+            result["client_type"] = client_type
+        if email:
+            result["email"] = email
+        if phone:
+            result["phone"] = phone
+        if pan and pan != "-":
+            result["pan"] = pan
+        if gstin and gstin != "-":
+            result["gstin"] = gstin
+        if cin and cin != "-":
+            result["cin"] = cin
+        if llpin and llpin != "-":
+            result["llpin"] = llpin
+        if addr_raw:
+            result["address"] = addr_raw.strip()
+        if city:
+            result["city"] = city.strip()
+        if state:
+            result["state"] = state.strip()
 
     # ── Strategy 2: Horizontal header row (fallback) ───────────────────────
     if not result:
@@ -8276,20 +9784,38 @@ async def parse_client_excel_row(
                             return val
                 return ""
 
-            company_name = get_col(["company_name","name","client_name","business_name","entity_name","llp_name","company"])
+            company_name = get_col(
+                [
+                    "company_name",
+                    "name",
+                    "client_name",
+                    "business_name",
+                    "entity_name",
+                    "llp_name",
+                    "company",
+                ]
+            )
             if not company_name:
                 continue  # not the right sheet
 
-            client_type  = get_col(["client_type","entity_type","type"]) or detect_entity_type(company_name)
-            email        = clean_email(get_col(["email","email_id","email_address","e-mail"]))
-            phone        = clean_phone(get_col(["phone","mobile","phone_no","mobile_no","contact"]))
-            pan          = get_col(["pan","pan_no","pan_number"]).upper()
-            gstin        = get_col(["gstin","gst","gst_number","gstin_no"]).upper()
-            cin          = get_col(["cin","cin_no","company_identification_number"]).upper()
-            llpin        = get_col(["llpin","llp_in","llp_registration"]).upper()
-            addr_raw     = get_col(["address","addr","registered_address","office_address"])
-            city         = get_col(["city","town"])
-            state        = get_col(["state","state_name"])
+            client_type = get_col(
+                ["client_type", "entity_type", "type"]
+            ) or detect_entity_type(company_name)
+            email = clean_email(
+                get_col(["email", "email_id", "email_address", "e-mail"])
+            )
+            phone = clean_phone(
+                get_col(["phone", "mobile", "phone_no", "mobile_no", "contact"])
+            )
+            pan = get_col(["pan", "pan_no", "pan_number"]).upper()
+            gstin = get_col(["gstin", "gst", "gst_number", "gstin_no"]).upper()
+            cin = get_col(["cin", "cin_no", "company_identification_number"]).upper()
+            llpin = get_col(["llpin", "llp_in", "llp_registration"]).upper()
+            addr_raw = get_col(
+                ["address", "addr", "registered_address", "office_address"]
+            )
+            city = get_col(["city", "town"])
+            state = get_col(["state", "state_name"])
 
             if addr_raw and "," in addr_raw and not city:
                 addr_raw, city, state = parse_address(addr_raw)
@@ -8297,17 +9823,28 @@ async def parse_client_excel_row(
             if llpin:
                 client_type = "llp"
 
-            if company_name: result["company_name"] = company_name
-            if client_type:  result["client_type"]  = client_type
-            if email:        result["email"]         = email
-            if phone:        result["phone"]         = phone
-            if pan:          result["pan"]           = pan
-            if gstin:        result["gstin"]         = gstin
-            if cin:          result["cin"]           = cin
-            if llpin:        result["llpin"]         = llpin
-            if addr_raw:     result["address"]       = addr_raw
-            if city:         result["city"]          = city
-            if state:        result["state"]         = state
+            if company_name:
+                result["company_name"] = company_name
+            if client_type:
+                result["client_type"] = client_type
+            if email:
+                result["email"] = email
+            if phone:
+                result["phone"] = phone
+            if pan:
+                result["pan"] = pan
+            if gstin:
+                result["gstin"] = gstin
+            if cin:
+                result["cin"] = cin
+            if llpin:
+                result["llpin"] = llpin
+            if addr_raw:
+                result["address"] = addr_raw
+            if city:
+                result["city"] = city
+            if state:
+                result["state"] = state
             break  # found a usable sheet
 
     if not result:
@@ -8317,7 +9854,7 @@ async def parse_client_excel_row(
                 "No recognizable client data found in this file. "
                 "Expected either an MCA MDS export (key-value format) or a "
                 "spreadsheet with column headers: company_name, email, phone, pan, gstin, etc."
-            )
+            ),
         )
 
     return result
@@ -8325,8 +9862,7 @@ async def parse_client_excel_row(
 
 @api_router.post("/clients/import")
 async def import_clients_from_csv(
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user)
+    file: UploadFile = File(...), current_user: User = Depends(get_current_user)
 ):
     """
     Bulk-import clients from a CSV file.
@@ -8342,7 +9878,9 @@ async def import_clients_from_csv(
 
     filename = (file.filename or "").lower()
     if not filename.endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Only CSV files are supported (.csv)")
+        raise HTTPException(
+            status_code=400, detail="Only CSV files are supported (.csv)"
+        )
 
     content = await file.read()
     try:
@@ -8352,7 +9890,9 @@ async def import_clients_from_csv(
 
     reader = csv.DictReader(StringIO(text))
     if not reader.fieldnames:
-        raise HTTPException(status_code=422, detail="CSV file is empty or has no header row")
+        raise HTTPException(
+            status_code=422, detail="CSV file is empty or has no header row"
+        )
 
     created_count = 0
     skipped_count = 0
@@ -8360,15 +9900,23 @@ async def import_clients_from_csv(
     now_iso = datetime.now(timezone.utc).isoformat()
 
     for i, row in enumerate(reader, start=2):  # row 1 = header
-        company_name = str(row.get("company_name") or row.get("Company Name") or "").strip()
+        company_name = str(
+            row.get("company_name") or row.get("Company Name") or ""
+        ).strip()
         if not company_name:
             skipped_count += 1
             continue
 
         # Skip duplicate (same created_by + company_name)
         existing = await db.clients.find_one(
-            {"created_by": current_user.id, "company_name": {"$regex": f"^{re.escape(company_name)}$", "$options": "i"}},
-            {"_id": 0, "id": 1}
+            {
+                "created_by": current_user.id,
+                "company_name": {
+                    "$regex": f"^{re.escape(company_name)}$",
+                    "$options": "i",
+                },
+            },
+            {"_id": 0, "id": 1},
         )
         if existing:
             skipped_count += 1
@@ -8376,29 +9924,52 @@ async def import_clients_from_csv(
 
         # Parse services column (comma-separated string → list)
         raw_services = str(row.get("services") or row.get("Services") or "").strip()
-        services = [s.strip() for s in raw_services.split(",") if s.strip()] if raw_services else []
+        services = (
+            [s.strip() for s in raw_services.split(",") if s.strip()]
+            if raw_services
+            else []
+        )
 
         # Normalise client_type
-        raw_type = str(row.get("client_type") or row.get("Client Type") or "proprietor").strip().lower()
-        valid_types = {"proprietor", "pvt_ltd", "llp", "partnership", "huf", "trust", "other"}
+        raw_type = (
+            str(row.get("client_type") or row.get("Client Type") or "proprietor")
+            .strip()
+            .lower()
+        )
+        valid_types = {
+            "proprietor",
+            "pvt_ltd",
+            "llp",
+            "partnership",
+            "huf",
+            "trust",
+            "other",
+        }
         client_type = raw_type if raw_type in valid_types else "proprietor"
 
         doc = {
-            "id":           str(uuid.uuid4()),
+            "id": str(uuid.uuid4()),
             "company_name": company_name,
-            "client_type":  client_type,
-            "email":        str(row.get("email") or row.get("Email") or "").strip() or None,
-            "phone":        str(row.get("phone") or row.get("Phone") or "").strip() or None,
-            "birthday":     str(row.get("birthday") or row.get("Birthday") or "").strip() or None,
-            "address":      str(row.get("address") or row.get("Address") or "").strip() or None,
-            "city":         str(row.get("city") or row.get("City") or "").strip() or None,
-            "state":        str(row.get("state") or row.get("State") or "").strip() or None,
-            "services":     services,
-            "notes":        str(row.get("notes") or row.get("Notes") or "").strip() or None,
-            "assigned_to":  str(row.get("assigned_to") or row.get("Assigned To") or "").strip() or None,
-            "status":       str(row.get("status") or row.get("Status") or "active").strip().lower(),
-            "created_by":   current_user.id,
-            "created_at":   now_iso,
+            "client_type": client_type,
+            "email": str(row.get("email") or row.get("Email") or "").strip() or None,
+            "phone": str(row.get("phone") or row.get("Phone") or "").strip() or None,
+            "birthday": str(row.get("birthday") or row.get("Birthday") or "").strip()
+            or None,
+            "address": str(row.get("address") or row.get("Address") or "").strip()
+            or None,
+            "city": str(row.get("city") or row.get("City") or "").strip() or None,
+            "state": str(row.get("state") or row.get("State") or "").strip() or None,
+            "services": services,
+            "notes": str(row.get("notes") or row.get("Notes") or "").strip() or None,
+            "assigned_to": str(
+                row.get("assigned_to") or row.get("Assigned To") or ""
+            ).strip()
+            or None,
+            "status": str(row.get("status") or row.get("Status") or "active")
+            .strip()
+            .lower(),
+            "created_by": current_user.id,
+            "created_at": now_iso,
         }
 
         try:
@@ -8409,15 +9980,18 @@ async def import_clients_from_csv(
             skipped_count += 1
 
     return {
-        "message":         f"{created_count} client(s) imported successfully",
+        "message": f"{created_count} client(s) imported successfully",
         "clients_created": created_count,
         "clients_skipped": skipped_count,
-        "errors":          errors[:10],  # cap error list to avoid huge response
+        "errors": errors[:10],  # cap error list to avoid huge response
     }
 
 
 @api_router.post("/clients", response_model=Client)
-async def create_client(payload: dict, current_user: User = Depends(check_module_permission("clients", "create"))):
+async def create_client(
+    payload: dict,
+    current_user: User = Depends(check_module_permission("clients", "create")),
+):
     """
     Create a new client.
     Issue #5 + #6: requires clients.create permission (can_edit_clients flag).
@@ -8425,13 +9999,16 @@ async def create_client(payload: dict, current_user: User = Depends(check_module
     """
     if current_user.role != "admin":
         perms = get_user_permissions(current_user)
-        if not perms.get("can_edit_clients", False) and not perms.get("can_view_all_clients", False):
+        if not perms.get("can_edit_clients", False) and not perms.get(
+            "can_view_all_clients", False
+        ):
             raise HTTPException(
-                status_code=403,
-                detail="You do not have permission to create clients"
+                status_code=403, detail="You do not have permission to create clients"
             )
     try:
-        client_data = ClientCreate(**{k: v for k, v in payload.items() if k in ClientCreate.model_fields})
+        client_data = ClientCreate(
+            **{k: v for k, v in payload.items() if k in ClientCreate.model_fields}
+        )
         client = Client(**client_data.model_dump(), created_by=current_user.id)
         doc = client.model_dump()
 
@@ -8445,19 +10022,43 @@ async def create_client(payload: dict, current_user: User = Depends(check_module
                 return val.isoformat()
             return str(val)
 
-        doc["created_at"] = safe_iso(doc.get("created_at")) or datetime.now(timezone.utc).isoformat()
-        doc["birthday"]   = safe_iso(doc.get("birthday"))
+        doc["created_at"] = (
+            safe_iso(doc.get("created_at")) or datetime.now(timezone.utc).isoformat()
+        )
+        doc["birthday"] = safe_iso(doc.get("birthday"))
 
         # Persist extra fields from frontend that live outside Pydantic schema
-        for key in ("address", "city", "state", "client_type_label",
-                    "contact_persons", "dsc_details", "assignments",
-                    "referred_by", "gstin", "pan", "gst_treatment",
-                    "place_of_supply", "default_payment_terms", "credit_limit",
-                    "opening_balance", "opening_balance_type", "tally_ledger_name",
-                    "tally_group", "website", "msme_number",
-                    "gst_address", "gst_city", "gst_state", "gst_pin",
-                    "cin", "llpin", "mca_fetch_date",
-                    "is_itr_client", "itr_data"):
+        for key in (
+            "address",
+            "city",
+            "state",
+            "client_type_label",
+            "contact_persons",
+            "dsc_details",
+            "assignments",
+            "referred_by",
+            "gstin",
+            "pan",
+            "gst_treatment",
+            "place_of_supply",
+            "default_payment_terms",
+            "credit_limit",
+            "opening_balance",
+            "opening_balance_type",
+            "tally_ledger_name",
+            "tally_group",
+            "website",
+            "msme_number",
+            "gst_address",
+            "gst_city",
+            "gst_state",
+            "gst_pin",
+            "cin",
+            "llpin",
+            "mca_fetch_date",
+            "is_itr_client",
+            "itr_data",
+        ):
             val = payload.get(key)
             if val is not None:
                 doc[key] = val
@@ -8472,19 +10073,23 @@ async def create_client(payload: dict, current_user: User = Depends(check_module
         )
         raise HTTPException(status_code=422, detail=ve.errors())
     except Exception as e:
-        logger.error(f"create_client error for '{payload.get('company_name')}': {e}", exc_info=True)
+        logger.error(
+            f"create_client error for '{payload.get('company_name')}': {e}",
+            exc_info=True,
+        )
         raise HTTPException(status_code=400, detail=str(e))
 
+
 _DEPT_SERVICE_MAP: Dict[str, List[str]] = {
-    "GST":   ["GST", "Compliance"],
-    "IT":    ["Income Tax", "Tax Planning"],
-    "ACC":   ["Accounting", "Payroll", "Audit"],
-    "TDS":   ["TDS"],
-    "ROC":   ["ROC", "Company Registration", "Compliance"],
-    "TM":    ["Trademark"],
-    "MSME":  ["MSME"],
-    "FEMA":  ["FEMA"],
-    "DSC":   [],
+    "GST": ["GST", "Compliance"],
+    "IT": ["Income Tax", "Tax Planning"],
+    "ACC": ["Accounting", "Payroll", "Audit"],
+    "TDS": ["TDS"],
+    "ROC": ["ROC", "Company Registration", "Compliance"],
+    "TM": ["Trademark"],
+    "MSME": ["MSME"],
+    "FEMA": ["FEMA"],
+    "DSC": [],
     "OTHER": [],
 }
 
@@ -8518,7 +10123,9 @@ async def get_user_assigned_clients(
         cross_ids = await get_cross_visibility_union(current_user.id)
         if current_user.role == "manager":
             if user_id not in cross_ids and user_id != current_user.id:
-                raise HTTPException(status_code=403, detail="User not in your visibility scope")
+                raise HTTPException(
+                    status_code=403, detail="User not in your visibility scope"
+                )
         else:
             if not (can_view_dir and user_id in cross_ids):
                 raise HTTPException(status_code=403, detail="Not allowed")
@@ -8536,7 +10143,7 @@ async def get_user_assigned_clients(
     for c in clients_raw:
         # Compute which services this user is assigned to on this client
         assigned_services: List[str] = []
-        for a in (c.get("assignments") or []):
+        for a in c.get("assignments") or []:
             if (a or {}).get("user_id") == user_id:
                 svcs = a.get("services") or []
                 if isinstance(svcs, list):
@@ -8557,30 +10164,34 @@ async def get_user_assigned_clients(
         if isinstance(created_at, datetime):
             created_at = created_at.isoformat()
 
-        results.append({
-            "id": c.get("id"),
-            "company_name": c.get("company_name"),
-            "client_type": c.get("client_type"),
-            "client_type_label": c.get("client_type_label"),
-            "email": c.get("email"),
-            "phone": c.get("phone"),
-            "city": c.get("city"),
-            "state": c.get("state"),
-            "status": c.get("status") or "active",
-            "services": c.get("services") or [],
-            "assigned_services": assigned_services,
-            "assigned_to": c.get("assigned_to"),
-            "assignments": c.get("assignments") or [],
-            "gstin": c.get("gstin"),
-            "pan": c.get("pan"),
-            "created_at": created_at,
-        })
+        results.append(
+            {
+                "id": c.get("id"),
+                "company_name": c.get("company_name"),
+                "client_type": c.get("client_type"),
+                "client_type_label": c.get("client_type_label"),
+                "email": c.get("email"),
+                "phone": c.get("phone"),
+                "city": c.get("city"),
+                "state": c.get("state"),
+                "status": c.get("status") or "active",
+                "services": c.get("services") or [],
+                "assigned_services": assigned_services,
+                "assigned_to": c.get("assigned_to"),
+                "assignments": c.get("assignments") or [],
+                "gstin": c.get("gstin"),
+                "pan": c.get("pan"),
+                "created_at": created_at,
+            }
+        )
 
     # Sort: active first, then by company name
-    results.sort(key=lambda r: (
-        0 if (r.get("status") or "active") == "active" else 1,
-        (r.get("company_name") or "").lower(),
-    ))
+    results.sort(
+        key=lambda r: (
+            0 if (r.get("status") or "active") == "active" else 1,
+            (r.get("company_name") or "").lower(),
+        )
+    )
     return {"user_id": user_id, "count": len(results), "clients": results}
 
 
@@ -8670,12 +10281,14 @@ async def search_clients(
     search_filter: dict = {}
     if q.strip():
         regex = {"$regex": q.strip(), "$options": "i"}
-        search_filter = {"$or": [
-            {"company_name": regex},
-            {"phone": regex},
-            {"email": regex},
-            {"gstin": regex},
-        ]}
+        search_filter = {
+            "$or": [
+                {"company_name": regex},
+                {"phone": regex},
+                {"email": regex},
+                {"gstin": regex},
+            ]
+        }
 
     # Combine access control + text filter
     if access_query and search_filter:
@@ -8687,8 +10300,14 @@ async def search_clients(
 
     # Minimal projection — only what the Merge dialog renders
     projection = {
-        "_id": 0, "id": 1, "company_name": 1, "client_type": 1,
-        "phone": 1, "email": 1, "gstin": 1, "status": 1,
+        "_id": 0,
+        "id": 1,
+        "company_name": 1,
+        "client_type": 1,
+        "phone": 1,
+        "email": 1,
+        "gstin": 1,
+        "status": 1,
     }
 
     clients = (
@@ -8698,6 +10317,7 @@ async def search_clients(
         .to_list(limit)
     )
     return clients
+
 
 @api_router.get("/clients/{client_id}", response_model=Client)
 async def get_client(client_id: str, current_user: User = Depends(get_current_user)):
@@ -8711,8 +10331,8 @@ async def get_client(client_id: str, current_user: User = Depends(get_current_us
     # Visibility check - admin passes inside assert_module_permission
     if current_user.role != "admin":
         permissions = get_user_permissions(current_user)
-        can_view_all  = permissions.get("can_view_all_clients", False)
-        is_assigned   = client.get("assigned_to") == current_user.id
+        can_view_all = permissions.get("can_view_all_clients", False)
+        is_assigned = client.get("assigned_to") == current_user.id
         is_created_by = client.get("created_by") == current_user.id
         extra_clients = permissions.get("assigned_clients", []) or []
         in_extra_list = client_id in extra_clients
@@ -8725,13 +10345,21 @@ async def get_client(client_id: str, current_user: User = Depends(get_current_us
         team_in = False
         if current_user.role == "manager":
             team_ids = await get_team_user_ids(current_user.id)
-            team_in = (
-                client.get("assigned_to") in team_ids
-                or any((a or {}).get("user_id") in team_ids for a in assignments)
+            team_in = client.get("assigned_to") in team_ids or any(
+                (a or {}).get("user_id") in team_ids for a in assignments
             )
 
-        if not (can_view_all or is_assigned or is_created_by or in_extra_list or in_assignments or team_in):
-            raise HTTPException(status_code=403, detail="Not authorized to view this client")
+        if not (
+            can_view_all
+            or is_assigned
+            or is_created_by
+            or in_extra_list
+            or in_assignments
+            or team_in
+        ):
+            raise HTTPException(
+                status_code=403, detail="Not authorized to view this client"
+            )
 
     if isinstance(client["created_at"], str):
         client["created_at"] = datetime.fromisoformat(client["created_at"])
@@ -8739,32 +10367,33 @@ async def get_client(client_id: str, current_user: User = Depends(get_current_us
         client["birthday"] = date.fromisoformat(client["birthday"])
     return Client(**client)
 
+
 @api_router.put("/clients/{client_id}", response_model=Client)
 async def update_client(
     client_id: str,
-    client_data: dict,          # <-- Changed from ClientCreate to dict
-    current_user: User = Depends(check_module_permission("clients", "edit"))
+    client_data: dict,  # <-- Changed from ClientCreate to dict
+    current_user: User = Depends(check_module_permission("clients", "edit")),
 ):
     """
     Update an existing client record.
- 
+
     Accepts a raw dict instead of ClientCreate so that:
       - Extra frontend-only fields (address, city, state, client_type_label)
         are accepted without causing Pydantic validation failures.
       - Empty strings sent by the frontend (email="", phone="") are
         safely converted to None before any validation runs.
       - The referred_by field can be any string without pattern checks.
- 
+
     Only fields in ALLOWED_FIELDS are written to the database.
     """
     existing = await db.clients.find_one({"id": client_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Client not found")
- 
+
     perms = get_user_permissions(current_user)
     if current_user.role != "admin":
-        can_edit_all  = perms.get("can_edit_clients", False)
-        is_assigned   = existing.get("assigned_to") == current_user.id
+        can_edit_all = perms.get("can_edit_clients", False)
+        is_assigned = existing.get("assigned_to") == current_user.id
         is_created_by = existing.get("created_by") == current_user.id
         extra_clients = perms.get("assigned_clients", []) or []
         in_extra_list = client_id in extra_clients
@@ -8774,78 +10403,142 @@ async def update_client(
             (a or {}).get("user_id") == current_user.id for a in assignments
         )
 
-        if not (can_edit_all or is_assigned or is_created_by or in_extra_list or in_assignments):
-            raise HTTPException(status_code=403, detail="Not authorized to edit this client")
- 
+        if not (
+            can_edit_all
+            or is_assigned
+            or is_created_by
+            or in_extra_list
+            or in_assignments
+        ):
+            raise HTTPException(
+                status_code=403, detail="Not authorized to edit this client"
+            )
+
     # ── Whitelist: only persist known fields ────────────────────────
     ALLOWED_FIELDS = {
-        "company_name", "client_type", "client_type_label",
-        "email", "phone", "birthday", "date_of_incorporation",
-        "address", "city", "state",
-        "services", "notes", "assigned_to", "assignments",
-        "status", "contact_persons", "dsc_details", "referred_by",
+        "company_name",
+        "client_type",
+        "client_type_label",
+        "email",
+        "phone",
+        "birthday",
+        "date_of_incorporation",
+        "address",
+        "city",
+        "state",
+        "services",
+        "notes",
+        "assigned_to",
+        "assignments",
+        "status",
+        "contact_persons",
+        "dsc_details",
+        "referred_by",
         # Tax & Billing
-        "gstin", "pan", "gst_treatment", "place_of_supply",
-        "default_payment_terms", "credit_limit", "opening_balance",
-        "opening_balance_type", "tally_ledger_name", "tally_group",
-        "website", "msme_number", "gst_address",
-        "gst_city", "gst_state", "gst_pin",
+        "gstin",
+        "pan",
+        "gst_treatment",
+        "place_of_supply",
+        "default_payment_terms",
+        "credit_limit",
+        "opening_balance",
+        "opening_balance_type",
+        "tally_ledger_name",
+        "tally_group",
+        "website",
+        "msme_number",
+        "gst_address",
+        "gst_city",
+        "gst_state",
+        "gst_pin",
         # MCA / ROC
-        "cin", "llpin", "mca_fetch_date",
+        "cin",
+        "llpin",
+        "mca_fetch_date",
         # ITR Client
-        "is_itr_client", "itr_data",
+        "is_itr_client",
+        "itr_data",
     }
     update_data = {k: v for k, v in client_data.items() if k in ALLOWED_FIELDS}
- 
+
     # ── Convert empty strings → None for nullable fields ────────────
     NULLABLE_FIELDS = {
-        "email", "phone", "referred_by", "notes", "assigned_to",
-        "birthday", "date_of_incorporation", "address", "city",
-        "state", "client_type_label",
-        "gstin", "pan", "place_of_supply", "default_payment_terms",
-        "credit_limit", "opening_balance", "tally_ledger_name",
-        "tally_group", "website", "msme_number", "gst_address", "gst_city", "gst_state", "gst_pin",
+        "email",
+        "phone",
+        "referred_by",
+        "notes",
+        "assigned_to",
+        "birthday",
+        "date_of_incorporation",
+        "address",
+        "city",
+        "state",
+        "client_type_label",
+        "gstin",
+        "pan",
+        "place_of_supply",
+        "default_payment_terms",
+        "credit_limit",
+        "opening_balance",
+        "tally_ledger_name",
+        "tally_group",
+        "website",
+        "msme_number",
+        "gst_address",
+        "gst_city",
+        "gst_state",
+        "gst_pin",
     }
     for field in NULLABLE_FIELDS:
         if field in update_data and update_data[field] == "":
             update_data[field] = None
- 
+
     # ── Validate and normalise client_type ──────────────────────────
     VALID_CLIENT_TYPES = {
-        "proprietor", "pvt_ltd", "llp", "partnership",
-        "huf", "trust", "other",
+        "proprietor",
+        "pvt_ltd",
+        "llp",
+        "partnership",
+        "huf",
+        "trust",
+        "other",
         # Accept legacy uppercase variants from old data
-        "LLP", "PVT_LTD",
+        "LLP",
+        "PVT_LTD",
     }
     if "client_type" in update_data:
         ct = update_data["client_type"]
         if ct not in VALID_CLIENT_TYPES:
             raise HTTPException(
                 status_code=422,
-                detail=f"Invalid client_type '{ct}'. Must be one of: proprietor, pvt_ltd, llp, partnership, huf, trust, other"
+                detail=f"Invalid client_type '{ct}'. Must be one of: proprietor, pvt_ltd, llp, partnership, huf, trust, other",
             )
         # Normalise to lowercase for consistent storage
         lower_map = {"LLP": "llp", "PVT_LTD": "pvt_ltd"}
         update_data["client_type"] = lower_map.get(ct, ct)
- 
+
     # ── Validate company_name length ────────────────────────────────
     if "company_name" in update_data:
         name = str(update_data["company_name"]).strip()
         if len(name) < 3:
             raise HTTPException(
                 status_code=422,
-                detail="Company name must be at least 3 characters long"
+                detail="Company name must be at least 3 characters long",
             )
         update_data["company_name"] = name
- 
+
     # ── Validate phone if provided ──────────────────────────────────
     if update_data.get("phone"):
         cleaned_phone = re.sub(r"\s|-|\+", "", str(update_data["phone"]))
         if not cleaned_phone.isdigit():
-            raise HTTPException(status_code=422, detail="Phone number must contain only digits")
+            raise HTTPException(
+                status_code=422, detail="Phone number must contain only digits"
+            )
         if not (10 <= len(cleaned_phone) <= 15):
-            raise HTTPException(status_code=422, detail="Phone number must be 10–15 digits")
- 
+            raise HTTPException(
+                status_code=422, detail="Phone number must be 10–15 digits"
+            )
+
     # ── Sanitise date fields before writing so DB always stores ISO strings ──
     def safe_iso(val):
         """Convert None / str / date / datetime → ISO date string (YYYY-MM-DD) or None."""
@@ -8865,11 +10558,13 @@ async def update_client(
     if "dsc_details" in update_data and isinstance(update_data["dsc_details"], list):
         for dsc in update_data["dsc_details"]:
             if isinstance(dsc, dict):
-                dsc["issue_date"]  = safe_iso(dsc.get("issue_date"))
+                dsc["issue_date"] = safe_iso(dsc.get("issue_date"))
                 dsc["expiry_date"] = safe_iso(dsc.get("expiry_date"))
 
     # Sanitise dates inside contact_persons sub-documents
-    if "contact_persons" in update_data and isinstance(update_data["contact_persons"], list):
+    if "contact_persons" in update_data and isinstance(
+        update_data["contact_persons"], list
+    ):
         for cp in update_data["contact_persons"]:
             if isinstance(cp, dict):
                 cp["birthday"] = safe_iso(cp.get("birthday"))
@@ -8905,9 +10600,13 @@ async def update_client(
             updated["birthday"] = date.fromisoformat(updated["birthday"])
         except ValueError:
             updated["birthday"] = None
-    if updated.get("date_of_incorporation") and isinstance(updated["date_of_incorporation"], str):
+    if updated.get("date_of_incorporation") and isinstance(
+        updated["date_of_incorporation"], str
+    ):
         try:
-            updated["date_of_incorporation"] = date.fromisoformat(updated["date_of_incorporation"])
+            updated["date_of_incorporation"] = date.fromisoformat(
+                updated["date_of_incorporation"]
+            )
         except ValueError:
             updated["date_of_incorporation"] = None
 
@@ -8917,13 +10616,17 @@ async def update_client(
     try:
         return Client(**safe_updated)
     except Exception as e:
-        logger.error(f"update_client response construction error for {client_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Client updated but response failed: {str(e)}")
+        logger.error(
+            f"update_client response construction error for {client_id}: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500, detail=f"Client updated but response failed: {str(e)}"
+        )
+
+
 @api_router.delete("/clients/{client_id}")
-async def delete_client(
-    client_id: str,
-    current_user: User = Depends(get_current_user)
-):
+async def delete_client(client_id: str, current_user: User = Depends(get_current_user)):
     """
     Delete a client by ID.
     - Nullifies any leads that reference this client (converted_client_id)
@@ -8932,7 +10635,9 @@ async def delete_client(
     """
     perms = get_user_permissions(current_user)
     if current_user.role != "admin" and not perms.get("can_delete_data", False):
-        raise HTTPException(status_code=403, detail="You do not have permission to delete clients")
+        raise HTTPException(
+            status_code=403, detail="You do not have permission to delete clients"
+        )
 
     existing = await db.clients.find_one({"id": client_id}, {"_id": 0})
     if not existing:
@@ -8940,15 +10645,11 @@ async def delete_client(
 
     # Nullify any leads that were converted to this client
     await db.leads.update_many(
-        {"converted_client_id": client_id},
-        {"$set": {"converted_client_id": None}}
+        {"converted_client_id": client_id}, {"$set": {"converted_client_id": None}}
     )
 
     # Also unlink tasks referencing this client
-    await db.tasks.update_many(
-        {"client_id": client_id},
-        {"$set": {"client_id": None}}
-    )
+    await db.tasks.update_many({"client_id": client_id}, {"$set": {"client_id": None}})
 
     await create_audit_log(
         current_user,
@@ -8962,10 +10663,15 @@ async def delete_client(
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    return {"message": f"Client '{existing.get('company_name', client_id)}' deleted successfully"}
-#============================================
+    return {
+        "message": f"Client '{existing.get('company_name', client_id)}' deleted successfully"
+    }
+
+
+# ============================================
 # DASHBOARD ROUTES
-#============================================
+# ============================================
+
 
 @api_router.get("/dashboard/dept-members")
 async def get_dept_member_count(current_user: User = Depends(get_current_user)):
@@ -8979,12 +10685,19 @@ async def get_dept_member_count(current_user: User = Depends(get_current_user)):
     if current_user.role == "admin":
         all_users = await db.users.find(
             {"is_active": True, "status": "active"},
-            {"_id": 0, "id": 1, "full_name": 1, "departments": 1, "role": 1}
+            {"_id": 0, "id": 1, "full_name": 1, "departments": 1, "role": 1},
         ).to_list(1000)
         return {
             "count": len(all_users),
             "departments": [],
-            "members": [{"id": u["id"], "full_name": u.get("full_name", ""), "role": u.get("role", "")} for u in all_users]
+            "members": [
+                {
+                    "id": u["id"],
+                    "full_name": u.get("full_name", ""),
+                    "role": u.get("role", ""),
+                }
+                for u in all_users
+            ],
         }
 
     user_depts = current_user.departments or []
@@ -8998,13 +10711,20 @@ async def get_dept_member_count(current_user: User = Depends(get_current_user)):
             "is_active": True,
             "status": "active",
         },
-        {"_id": 0, "id": 1, "full_name": 1, "departments": 1, "role": 1}
+        {"_id": 0, "id": 1, "full_name": 1, "departments": 1, "role": 1},
     ).to_list(500)
 
     return {
         "count": len(dept_users),
         "departments": user_depts,
-        "members": [{"id": u["id"], "full_name": u.get("full_name", ""), "role": u.get("role", "")} for u in dept_users]
+        "members": [
+            {
+                "id": u["id"],
+                "full_name": u.get("full_name", ""),
+                "role": u.get("role", ""),
+            }
+            for u in dept_users
+        ],
     }
 
 
@@ -9053,20 +10773,26 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     expiring_dsc_list = []
     for dsc in dsc_list:
         try:
-            expiry_date = datetime.fromisoformat(dsc["expiry_date"]) if isinstance(dsc["expiry_date"], str) else dsc["expiry_date"]
+            expiry_date = (
+                datetime.fromisoformat(dsc["expiry_date"])
+                if isinstance(dsc["expiry_date"], str)
+                else dsc["expiry_date"]
+            )
             days_left = (expiry_date - now).days
             if days_left < 0:
                 expired_dsc_count += 1
             if days_left <= 90:
                 expiring_dsc_count += 1
-                expiring_dsc_list.append({
-                    "id": dsc["id"],
-                    "holder_name": dsc["holder_name"],
-                    "certificate_number": dsc.get("certificate_number", "N/A"),
-                    "expiry_date": dsc["expiry_date"],
-                    "days_left": days_left,
-                    "status": "expired" if days_left < 0 else "expiring"
-                })
+                expiring_dsc_list.append(
+                    {
+                        "id": dsc["id"],
+                        "holder_name": dsc["holder_name"],
+                        "certificate_number": dsc.get("certificate_number", "N/A"),
+                        "expiry_date": dsc["expiry_date"],
+                        "days_left": days_left,
+                        "status": "expired" if days_left < 0 else "expiring",
+                    }
+                )
         except (ValueError, TypeError):
             continue
 
@@ -9094,7 +10820,11 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     for client in clients:
         if client.get("birthday"):
             try:
-                bday = date.fromisoformat(client["birthday"]) if isinstance(client["birthday"], str) else client["birthday"]
+                bday = (
+                    date.fromisoformat(client["birthday"])
+                    if isinstance(client["birthday"], str)
+                    else client["birthday"]
+                )
                 try:
                     this_year_bday = bday.replace(year=today.year)
                 except ValueError:
@@ -9119,8 +10849,14 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     closed_masters_stat = await db.compliance_masters.find(
         {"is_closed": True}, {"_id": 0, "name": 1, "calendar_due_date_id": 1}
     ).to_list(1000)
-    closed_names_stat = {m["name"].strip().lower() for m in closed_masters_stat if m.get("name")}
-    closed_cal_ids_stat = {m["calendar_due_date_id"] for m in closed_masters_stat if m.get("calendar_due_date_id")}
+    closed_names_stat = {
+        m["name"].strip().lower() for m in closed_masters_stat if m.get("name")
+    }
+    closed_cal_ids_stat = {
+        m["calendar_due_date_id"]
+        for m in closed_masters_stat
+        if m.get("calendar_due_date_id")
+    }
 
     due_dates = await db.due_dates.find(due_date_query, {"_id": 0}).to_list(1000)
     for dd in due_dates:
@@ -9129,7 +10865,11 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         if dd.get("title", "").strip().lower() in closed_names_stat:
             continue
         try:
-            dd_date = datetime.fromisoformat(dd["due_date"]) if isinstance(dd["due_date"], str) else dd["due_date"]
+            dd_date = (
+                datetime.fromisoformat(dd["due_date"])
+                if isinstance(dd["due_date"], str)
+                else dd["due_date"]
+            )
             days_until_due = (dd_date - now).days
             if days_until_due <= 120:
                 upcoming_due_dates_count += 1
@@ -9141,13 +10881,19 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(100)
         for user in users:
             user_tasks = [t for t in tasks if t.get("assigned_to") == user["id"]]
-            team_workload.append({
-                "user_id": user["id"],
-                "user_name": user["full_name"],
-                "total_tasks": len(user_tasks),
-                "pending_tasks": len([t for t in user_tasks if t["status"] == "pending"]),
-                "completed_tasks": len([t for t in user_tasks if t["status"] == "completed"])
-            })
+            team_workload.append(
+                {
+                    "user_id": user["id"],
+                    "user_name": user["full_name"],
+                    "total_tasks": len(user_tasks),
+                    "pending_tasks": len(
+                        [t for t in user_tasks if t["status"] == "pending"]
+                    ),
+                    "completed_tasks": len(
+                        [t for t in user_tasks if t["status"] == "completed"]
+                    ),
+                }
+            )
 
     compliance_score = 100
     if total_tasks > 0:
@@ -9157,9 +10903,13 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
 
     compliance_status = {
         "score": max(0, int(compliance_score)),
-        "status": "good" if compliance_score >= 80 else "warning" if compliance_score >= 50 else "critical",
+        "status": "good"
+        if compliance_score >= 80
+        else "warning"
+        if compliance_score >= 50
+        else "critical",
         "overdue_tasks": overdue_tasks,
-        "expiring_certificates": expiring_dsc_count
+        "expiring_certificates": expiring_dsc_count,
     }
 
     return DashboardStats(
@@ -9175,16 +10925,16 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         upcoming_due_dates=upcoming_due_dates_count,
         team_workload=team_workload,
         compliance_status=compliance_status,
-        expired_dsc_count=expired_dsc_count
+        expired_dsc_count=expired_dsc_count,
     )
+
 
 # ==========================================================
 # STAFF ACTIVITY ROUTES
 # ==========================================================
 @api_router.post("/activity/log")
 async def log_staff_activity(
-    activity_data: StaffActivityCreate,
-    current_user: User = Depends(get_current_user)
+    activity_data: StaffActivityCreate, current_user: User = Depends(get_current_user)
 ):
     activity = StaffActivityLog(user_id=current_user.id, **activity_data.model_dump())
     doc = activity.model_dump()
@@ -9192,12 +10942,13 @@ async def log_staff_activity(
     await db.staff_activity.insert_one(doc)
     return {"message": "Activity logged successfully"}
 
+
 @api_router.get("/activity/summary")
 async def get_activity_summary(
     user_id: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
-    current_user: User = Depends(check_permission("can_view_staff_activity"))
+    current_user: User = Depends(check_permission("can_view_staff_activity")),
 ):
     # PERMISSION MATRIX:
     # Admin   → all activity
@@ -9213,7 +10964,10 @@ async def get_activity_summary(
 
         if user_id:
             if user_id != current_user.id and user_id not in visible_ids:
-                raise HTTPException(status_code=403, detail="Not authorised to view this user's activity")
+                raise HTTPException(
+                    status_code=403,
+                    detail="Not authorised to view this user's activity",
+                )
             query["user_id"] = user_id
         else:
             query["user_id"] = {"$in": visible_ids}
@@ -9248,7 +11002,7 @@ async def get_activity_summary(
                 "idle_duration": 0,
                 "apps": {},
                 "websites": {},
-                "categories": {}
+                "categories": {},
             }
         user_summary[uid]["total_duration"] += duration
         if idle:
@@ -9267,18 +11021,22 @@ async def get_activity_summary(
             user_summary[uid]["categories"][category] = 0
         user_summary[uid]["categories"][category] += duration
     users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(200)
-    user_map = {u.get("id"): u.get("full_name", "Unknown") for u in users if u.get("id")}
+    user_map = {
+        u.get("id"): u.get("full_name", "Unknown") for u in users if u.get("id")
+    }
     result = []
     for uid, data in user_summary.items():
         data["user_name"] = user_map.get(uid, "Unknown")
         data["apps_list"] = sorted(
             [{"name": k, **v} for k, v in data["apps"].items()],
             key=lambda x: x["duration"],
-            reverse=True
+            reverse=True,
         )
         productive_duration = data["categories"].get("productivity", 0)
         total_duration = data["total_duration"]
-        data["productivity_percent"] = (productive_duration / total_duration) * 100 if total_duration > 0 else 0
+        data["productivity_percent"] = (
+            (productive_duration / total_duration) * 100 if total_duration > 0 else 0
+        )
         result.append(data)
 
     intensity_map = {}
@@ -9286,21 +11044,33 @@ async def get_activity_summary(
     tool_chain_data = []
     for item in result:
         uid = item["user_id"]
-        intensity_map[uid] = {"duration": item["total_duration"], "productivity_percent": item["productivity_percent"]}
-        radar_metrics[uid] = {"productivity": item["productivity_percent"], "attendance": 75, "task_completion": 80}
-        tool_chain_data.append({"user_id": uid, "top_apps": item.get("apps_list", [])[:3]})
+        intensity_map[uid] = {
+            "duration": item["total_duration"],
+            "productivity_percent": item["productivity_percent"],
+        }
+        radar_metrics[uid] = {
+            "productivity": item["productivity_percent"],
+            "attendance": 75,
+            "task_completion": 80,
+        }
+        tool_chain_data.append(
+            {"user_id": uid, "top_apps": item.get("apps_list", [])[:3]}
+        )
     for item in result:
         uid = item["user_id"]
         item["intensityMap"] = intensity_map.get(uid, {})
         item["radarMetrics"] = radar_metrics.get(uid, {})
-        item["toolChainData"] = next((t for t in tool_chain_data if t["user_id"] == uid), {})
+        item["toolChainData"] = next(
+            (t for t in tool_chain_data if t["user_id"] == uid), {}
+        )
     return result
+
 
 @api_router.get("/activity/user/{user_id}")
 async def get_user_activity(
     user_id: str,
     limit: int = 100,
-    current_user: User = Depends(check_permission("can_view_staff_activity"))
+    current_user: User = Depends(check_permission("can_view_staff_activity")),
 ):
     # PERMISSION MATRIX:
     # Admin   → any user's activity
@@ -9311,21 +11081,29 @@ async def get_user_activity(
         allowed_others = permissions.get("view_other_activity", []) or []
         visible_ids = list(set(allowed_others + [current_user.id]))
         if user_id != current_user.id and user_id not in visible_ids:
-            raise HTTPException(status_code=403, detail="You are not authorised to view this user's activity")
-    activities = await db.staff_activity.find({"user_id": user_id}, {"_id": 0}).sort("timestamp", -1).to_list(limit)
+            raise HTTPException(
+                status_code=403,
+                detail="You are not authorised to view this user's activity",
+            )
+    activities = (
+        await db.staff_activity.find({"user_id": user_id}, {"_id": 0})
+        .sort("timestamp", -1)
+        .to_list(limit)
+    )
     return activities
+
 
 # TASK REMINDER ROUTES
 # ─── Email Template Defaults ──────────────────────────────────────────────────
 _DEFAULT_TASK_EMAIL_TEMPLATE = {
-    "accent_color":      "#4F46E5",
-    "company_name":      "Task-O-Sphere",
-    "tagline":           "Your Productivity. Our Priority.",
-    "support_email":     "info.taskosphere@gmail.com",
-    "website":           "www.taskosphere.com",
-    "footer_note":       "This is an automated notification from Task-O-Sphere. Please do not reply directly to this email.",
-    "subject_prefix":    "⏰ You Have Pending Tasks!",
-    "greeting_line":     "We hope you are doing well. This is an automated reminder from Task-O-Sphere to let you know that you have pending tasks that require your attention. Please review and complete them at your earliest convenience.",
+    "accent_color": "#4F46E5",
+    "company_name": "Task-O-Sphere",
+    "tagline": "Your Productivity. Our Priority.",
+    "support_email": "info.taskosphere@gmail.com",
+    "website": "www.taskosphere.com",
+    "footer_note": "This is an automated notification from Task-O-Sphere. Please do not reply directly to this email.",
+    "subject_prefix": "⏰ You Have Pending Tasks!",
+    "greeting_line": "We hope you are doing well. This is an automated reminder from Task-O-Sphere to let you know that you have pending tasks that require your attention. Please review and complete them at your earliest convenience.",
     "tips": [
         "Log in to Task-O-Sphere daily to review and update your task status.",
         "Use the Priority filter to focus on High-priority tasks first.",
@@ -9351,9 +11129,9 @@ def build_reminder_email(
 
     t = {**_DEFAULT_TASK_EMAIL_TEMPLATE, **(tpl or {})}
     user_map = user_map or {}
-    acc   = t["accent_color"]
+    acc = t["accent_color"]
     first = user_name.split()[0] if user_name else "there"
-    now   = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
 
     def fmt_date(raw):
         if not raw or raw == "N/A":
@@ -9378,26 +11156,32 @@ def build_reminder_email(
 
     def priority_info(p):
         p = (p or "medium").lower()
-        if p in ("critical", "high"):   return ("🔴", "High",   "#dc2626", "#fee2e2")
-        if p == "medium":               return ("🟠", "Medium", "#ea580c", "#fff7ed")
-        return ("🟡", "Low",    "#ca8a04", "#fefce8")
+        if p in ("critical", "high"):
+            return ("🔴", "High", "#dc2626", "#fee2e2")
+        if p == "medium":
+            return ("🟠", "Medium", "#ea580c", "#fff7ed")
+        return ("🟡", "Low", "#ca8a04", "#fefce8")
 
     def status_color(s):
         s = (s or "pending").lower().replace("_", " ")
-        if s in ("completed", "done"):   return ("#16a34a", "#dcfce7")
-        if s in ("in progress",):        return ("#2563eb", "#dbeafe")
+        if s in ("completed", "done"):
+            return ("#16a34a", "#dcfce7")
+        if s in ("in progress",):
+            return ("#2563eb", "#dbeafe")
         return ("#6b7280", "#f3f4f6")
 
-    total_count  = len(task_list)
+    total_count = len(task_list)
     overdue_count = sum(
-        1 for t2 in task_list
+        1
+        for t2 in task_list
         if parse_dt(t2.get("due_date")) and parse_dt(t2.get("due_date")) < now
     )
     week_secs = 7 * 86400
     due_week_count = sum(
-        1 for t2 in task_list
-        if parse_dt(t2.get("due_date")) and
-           0 <= (parse_dt(t2.get("due_date")) - now).total_seconds() <= week_secs
+        1
+        for t2 in task_list
+        if parse_dt(t2.get("due_date"))
+        and 0 <= (parse_dt(t2.get("due_date")) - now).total_seconds() <= week_secs
     )
 
     # ── Subject ───────────────────────────────────────────────────────────────
@@ -9406,11 +11190,11 @@ def build_reminder_email(
     # ── Build task rows ───────────────────────────────────────────────────────
     task_rows_html = ""
     for idx, task in enumerate(task_list, start=1):
-        title       = (task.get("title") or "Untitled")
+        title = task.get("title") or "Untitled"
         assigned_by = user_map.get(task.get("created_by", ""), "Admin")
-        due_str     = fmt_date(task.get("due_date"))
+        due_str = fmt_date(task.get("due_date"))
         prio_ico, prio_label, prio_fg, prio_bg = priority_info(task.get("priority"))
-        status_raw  = (task.get("status") or "Pending").replace("_", " ").title()
+        status_raw = (task.get("status") or "Pending").replace("_", " ").title()
         st_fg, st_bg = status_color(task.get("status"))
         row_bg = "#ffffff" if idx % 2 == 1 else "#f8fafc"
         task_rows_html += f"""
@@ -9445,9 +11229,9 @@ def build_reminder_email(
   <!-- HEADER -->
   <tr>
     <td style="background:linear-gradient(135deg,{acc} 0%,#7C3AED 100%);padding:36px 40px 28px;text-align:center">
-      <p style="margin:0 0 6px;color:rgba(255,255,255,0.75);font-size:12px;letter-spacing:2px;text-transform:uppercase">{t['company_name']}</p>
+      <p style="margin:0 0 6px;color:rgba(255,255,255,0.75);font-size:12px;letter-spacing:2px;text-transform:uppercase">{t["company_name"]}</p>
       <h1 style="margin:0 0 8px;color:#ffffff;font-size:26px;font-weight:800">⏰ You Have Pending Tasks!</h1>
-      <p style="margin:0;color:rgba(255,255,255,0.85);font-size:13px;font-style:italic">{t['tagline']}</p>
+      <p style="margin:0;color:rgba(255,255,255,0.85);font-size:13px;font-style:italic">{t["tagline"]}</p>
     </td>
   </tr>
 
@@ -9455,7 +11239,7 @@ def build_reminder_email(
   <tr>
     <td style="padding:32px 40px 0">
       <p style="margin:0 0 8px;color:#1e293b;font-size:16px">Dear <strong>{user_name}</strong>,</p>
-      <p style="margin:0;color:#475569;font-size:14px;line-height:1.7">{t['greeting_line']}</p>
+      <p style="margin:0;color:#475569;font-size:14px;line-height:1.7">{t["greeting_line"]}</p>
     </td>
   </tr>
 
@@ -9512,7 +11296,7 @@ def build_reminder_email(
   <!-- CTA BUTTON -->
   <tr>
     <td style="padding:0 40px 28px;text-align:center">
-      <a href="https://{t['website']}" style="display:inline-block;background:linear-gradient(135deg,{acc},#7C3AED);color:#ffffff;font-weight:700;font-size:15px;padding:14px 36px;border-radius:30px;text-decoration:none">🚀 Take Action Now &rarr;</a>
+      <a href="https://{t["website"]}" style="display:inline-block;background:linear-gradient(135deg,{acc},#7C3AED);color:#ffffff;font-weight:700;font-size:15px;padding:14px 36px;border-radius:30px;text-decoration:none">🚀 Take Action Now &rarr;</a>
     </td>
   </tr>
 
@@ -9531,16 +11315,16 @@ def build_reminder_email(
     <td style="padding:0 40px 24px">
       <p style="margin:0;color:#64748b;font-size:13px;line-height:1.6">If you have any questions or face issues accessing your tasks, please contact your system administrator or reply to this email.</p>
       <p style="margin:14px 0 0;color:#1e293b;font-size:14px">Thank you for your continued dedication.</p>
-      <p style="margin:10px 0 0;color:#1e293b;font-size:14px">Warm regards,<br><strong>The {t['company_name']} Team</strong></p>
-      <p style="margin:6px 0 0;color:{acc};font-size:13px">{t['support_email']} &nbsp;|&nbsp; {t['website']}</p>
+      <p style="margin:10px 0 0;color:#1e293b;font-size:14px">Warm regards,<br><strong>The {t["company_name"]} Team</strong></p>
+      <p style="margin:6px 0 0;color:{acc};font-size:13px">{t["support_email"]} &nbsp;|&nbsp; {t["website"]}</p>
     </td>
   </tr>
 
   <!-- FOOTER -->
   <tr>
     <td style="background:#f8fafc;padding:16px 40px;border-top:1px solid #e2e8f0;text-align:center">
-      <p style="margin:0;color:#94a3b8;font-size:11px">{t['footer_note']}</p>
-      <p style="margin:6px 0 0;color:#94a3b8;font-size:11px">© 2026 {t['company_name']}. All rights reserved.</p>
+      <p style="margin:0;color:#94a3b8;font-size:11px">{t["footer_note"]}</p>
+      <p style="margin:6px 0 0;color:#94a3b8;font-size:11px">© 2026 {t["company_name"]}. All rights reserved.</p>
     </td>
   </tr>
 
@@ -9552,18 +11336,27 @@ def build_reminder_email(
 
     return subject, html
 
+
 @api_router.post("/send-pending-task-reminders")
 async def send_pending_task_reminders(current_user: User = Depends(get_current_user)):
     perms = get_user_permissions(current_user)
     if current_user.role != "admin" and not perms.get("can_send_reminders", False):
         raise HTTPException(status_code=403, detail="Reminder permission required")
-    tasks = await db.tasks.find({"status": {"$ne": "completed"}}, {"_id": 0}).to_list(1000)
+    tasks = await db.tasks.find({"status": {"$ne": "completed"}}, {"_id": 0}).to_list(
+        1000
+    )
     if not tasks:
-        return {"message": "No pending tasks found", "emails_sent": 0, "emails_failed": []}
+        return {
+            "message": "No pending tasks found",
+            "emails_sent": 0,
+            "emails_failed": [],
+        }
 
     # Batch lookup: collect all unique assigned_to IDs, fetch users in one query
     assigned_ids = list({t["assigned_to"] for t in tasks if t.get("assigned_to")})
-    users_list = await db.users.find({"id": {"$in": assigned_ids}}, {"_id": 0}).to_list(1000)
+    users_list = await db.users.find({"id": {"$in": assigned_ids}}, {"_id": 0}).to_list(
+        1000
+    )
     user_by_id = {u["id"]: u for u in users_list}
 
     user_task_map = {}
@@ -9577,21 +11370,32 @@ async def send_pending_task_reminders(current_user: User = Depends(get_current_u
         email = user.get("email")
         if not email:
             continue
-        user_task_map.setdefault(email, {"user": user, "tasks": []})["tasks"].append(task)
+        user_task_map.setdefault(email, {"user": user, "tasks": []})["tasks"].append(
+            task
+        )
 
     # Fetch all users for "Assigned By" column + email template settings
-    all_users = await db.users.find({}, {"_id": 0, "id": 1, "full_name": 1}).to_list(500)
-    user_map  = {u["id"]: u.get("full_name", "Admin") for u in all_users}
-    tpl_doc   = await db.email_templates.find_one({"type": "task_reminder"}, {"_id": 0})
-    tpl       = tpl_doc.get("settings") if tpl_doc else None
+    all_users = await db.users.find({}, {"_id": 0, "id": 1, "full_name": 1}).to_list(
+        500
+    )
+    user_map = {u["id"]: u.get("full_name", "Admin") for u in all_users}
+    tpl_doc = await db.email_templates.find_one({"type": "task_reminder"}, {"_id": 0})
+    tpl = tpl_doc.get("settings") if tpl_doc else None
 
     success_count = 0
     failed_emails = []
     for email, data in user_task_map.items():
         try:
             user_name = data["user"].get("full_name", "")
-            subject, html_body = build_reminder_email(user_name, data["tasks"], user_map=user_map, tpl=tpl)
-            sent = await _brevo_send(email, subject, body_plain=f"Hello {user_name},\n\nYou have {len(data['tasks'])} pending tasks. Please log in to Task-O-Sphere to review them.", body_html=html_body)
+            subject, html_body = build_reminder_email(
+                user_name, data["tasks"], user_map=user_map, tpl=tpl
+            )
+            sent = await _brevo_send(
+                email,
+                subject,
+                body_plain=f"Hello {user_name},\n\nYou have {len(data['tasks'])} pending tasks. Please log in to Task-O-Sphere to review them.",
+                body_html=html_body,
+            )
             if sent:
                 success_count += 1
             else:
@@ -9603,17 +11407,18 @@ async def send_pending_task_reminders(current_user: User = Depends(get_current_u
         "message": "Reminder process completed",
         "total_users": len(user_task_map),
         "emails_sent": success_count,
-        "emails_failed": failed_emails
+        "emails_failed": failed_emails,
     }
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # EMAIL TEMPLATE SETTINGS  (GET / PUT)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 class EmailTemplateUpdateRequest(BaseModel):
     settings: dict
+
 
 @api_router.get("/email-templates/{template_type}")
 async def get_email_template(
@@ -9657,12 +11462,14 @@ async def update_email_template(
 
     await db.email_templates.update_one(
         {"type": template_type},
-        {"$set": {
-            "type": template_type,
-            "settings": merged,
-            "updated_by": current_user.id,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }},
+        {
+            "$set": {
+                "type": template_type,
+                "settings": merged,
+                "updated_by": current_user.id,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        },
         upsert=True,
     )
     return {"message": "Template updated successfully", "settings": merged}
@@ -9673,10 +11480,10 @@ async def update_email_template(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _DEFAULT_COMPLIANCE_EMAIL_TEMPLATE = {
-    "subject_prefix":   "📋 Compliance Reminder",
-    "greeting_line":    "We hope this message finds you well. Please find below the compliance items that require your attention. Kindly ensure timely completion to avoid any penalties or legal implications.",
-    "footer_note":      "This is an automated compliance reminder. For queries, please contact us at the details below.",
-    "cta_label":        "Contact Us Now",
+    "subject_prefix": "📋 Compliance Reminder",
+    "greeting_line": "We hope this message finds you well. Please find below the compliance items that require your attention. Kindly ensure timely completion to avoid any penalties or legal implications.",
+    "footer_note": "This is an automated compliance reminder. For queries, please contact us at the details below.",
+    "cta_label": "Contact Us Now",
     "tips": [
         "Ensure all documents are submitted well before the due date.",
         "Keep digital copies of all filed returns and acknowledgments.",
@@ -9687,18 +11494,21 @@ _DEFAULT_COMPLIANCE_EMAIL_TEMPLATE = {
 
 def _status_badge_compliance(s: str) -> tuple:
     s = (s or "pending").lower().replace("_", " ")
-    if s in ("completed", "filed"):   return ("#16a34a", "#dcfce7")
-    if s in ("in progress",):         return ("#2563eb", "#dbeafe")
-    if s == "overdue":                return ("#dc2626", "#fee2e2")
+    if s in ("completed", "filed"):
+        return ("#16a34a", "#dcfce7")
+    if s in ("in progress",):
+        return ("#2563eb", "#dbeafe")
+    if s == "overdue":
+        return ("#dc2626", "#fee2e2")
     return ("#6b7280", "#f3f4f6")
 
 
 class ComplianceEmailRequest(BaseModel):
-    company_id:    str
-    client_name:   str
-    client_email:  str
-    subject:       Optional[str] = None
-    compliance_items: List[dict]   # [{name, category, due_date, status, notes}]
+    company_id: str
+    client_name: str
+    client_email: str
+    subject: Optional[str] = None
+    compliance_items: List[dict]  # [{name, category, due_date, status, notes}]
 
 
 @api_router.post("/compliance/send-client-email")
@@ -9719,18 +11529,25 @@ async def send_compliance_client_email(
 
     # Check Brevo is configured
     if not os.getenv("BREVO_API_KEY") or not os.getenv("SENDER_EMAIL"):
-        raise HTTPException(500, "Brevo email not configured (set BREVO_API_KEY and SENDER_EMAIL)")
+        raise HTTPException(
+            500, "Brevo email not configured (set BREVO_API_KEY and SENDER_EMAIL)"
+        )
 
-    tpl_doc = await db.email_templates.find_one({"type": "compliance_reminder"}, {"_id": 0})
-    tpl = {**_DEFAULT_COMPLIANCE_EMAIL_TEMPLATE, **(tpl_doc.get("settings", {}) if tpl_doc else {})}
+    tpl_doc = await db.email_templates.find_one(
+        {"type": "compliance_reminder"}, {"_id": 0}
+    )
+    tpl = {
+        **_DEFAULT_COMPLIANCE_EMAIL_TEMPLATE,
+        **(tpl_doc.get("settings", {}) if tpl_doc else {}),
+    }
 
-    comp_name    = company.get("name", "Our Firm")
-    comp_phone   = company.get("phone", "")
+    comp_name = company.get("name", "Our Firm")
+    comp_phone = company.get("phone", "")
     comp_email_c = company.get("email", os.getenv("SENDER_EMAIL", ""))
     comp_website = company.get("website", "")
     comp_address = company.get("address", "")
-    comp_gstin   = company.get("gstin", "")
-    logo_b64     = company.get("logo_base64", "")
+    comp_gstin = company.get("gstin", "")
+    logo_b64 = company.get("logo_base64", "")
 
     # Strip data-URI prefix if present
     if logo_b64 and "base64," in logo_b64:
@@ -9739,34 +11556,46 @@ async def send_compliance_client_email(
     logo_tag = (
         f'<img src="data:image/png;base64,{logo_b64}" alt="{comp_name}" '
         f'style="max-height:54px;max-width:180px;object-fit:contain;margin-bottom:6px">'
-        if logo_b64 else
-        f'<span style="font-size:22px;font-weight:800;color:#ffffff">{comp_name}</span>'
+        if logo_b64
+        else f'<span style="font-size:22px;font-weight:800;color:#ffffff">{comp_name}</span>'
     )
 
     now = datetime.now(timezone.utc)
 
     def fmt_d(raw):
-        if not raw: return "—"
+        if not raw:
+            return "—"
         try:
-            return datetime.fromisoformat(str(raw).replace("Z","+00:00")).strftime("%d %b %Y")
+            return datetime.fromisoformat(str(raw).replace("Z", "+00:00")).strftime(
+                "%d %b %Y"
+            )
         except Exception:
             return str(raw)[:10]
 
-    total   = len(req.compliance_items)
-    overdue = sum(1 for c in req.compliance_items if c.get("status","").lower() in ("overdue",""))
-    pending = sum(1 for c in req.compliance_items if (c.get("status","") or "pending").lower() not in ("completed","filed","na"))
+    total = len(req.compliance_items)
+    overdue = sum(
+        1
+        for c in req.compliance_items
+        if c.get("status", "").lower() in ("overdue", "")
+    )
+    pending = sum(
+        1
+        for c in req.compliance_items
+        if (c.get("status", "") or "pending").lower()
+        not in ("completed", "filed", "na")
+    )
 
     rows_html = ""
     for idx, item in enumerate(req.compliance_items, 1):
-        st_fg, st_bg = _status_badge_compliance(item.get("status",""))
-        status_label = (item.get("status") or "Pending").replace("_"," ").title()
+        st_fg, st_bg = _status_badge_compliance(item.get("status", ""))
+        status_label = (item.get("status") or "Pending").replace("_", " ").title()
         row_bg = "#ffffff" if idx % 2 == 1 else "#f8fafc"
         rows_html += f"""
         <tr style="background:{row_bg}">
           <td style="padding:10px 14px;color:#64748b;font-size:13px;text-align:center;border-bottom:1px solid #e2e8f0">{idx}</td>
-          <td style="padding:10px 14px;color:#1e293b;font-size:13px;font-weight:600;border-bottom:1px solid #e2e8f0">{item.get("name","—")}</td>
+          <td style="padding:10px 14px;color:#1e293b;font-size:13px;font-weight:600;border-bottom:1px solid #e2e8f0">{item.get("name", "—")}</td>
           <td style="padding:10px 14px;border-bottom:1px solid #e2e8f0">
-            <span style="background:#ede9fe;color:#5b21b6;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700">{item.get("category","—")}</span>
+            <span style="background:#ede9fe;color:#5b21b6;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700">{item.get("category", "—")}</span>
           </td>
           <td style="padding:10px 14px;color:#475569;font-size:13px;border-bottom:1px solid #e2e8f0">{fmt_d(item.get("due_date"))}</td>
           <td style="padding:10px 14px;border-bottom:1px solid #e2e8f0">
@@ -9781,9 +11610,17 @@ async def send_compliance_client_email(
     )
 
     contact_parts = [p for p in [comp_phone, comp_email_c, comp_website] if p]
-    contact_line  = " &nbsp;|&nbsp; ".join(contact_parts)
-    addr_line     = f"<p style='margin:4px 0 0;color:rgba(255,255,255,0.75);font-size:12px'>{comp_address}</p>" if comp_address else ""
-    gstin_line    = f"<p style='margin:2px 0 0;color:rgba(255,255,255,0.65);font-size:11px'>GSTIN: {comp_gstin}</p>" if comp_gstin else ""
+    contact_line = " &nbsp;|&nbsp; ".join(contact_parts)
+    addr_line = (
+        f"<p style='margin:4px 0 0;color:rgba(255,255,255,0.75);font-size:12px'>{comp_address}</p>"
+        if comp_address
+        else ""
+    )
+    gstin_line = (
+        f"<p style='margin:2px 0 0;color:rgba(255,255,255,0.65);font-size:11px'>GSTIN: {comp_gstin}</p>"
+        if comp_gstin
+        else ""
+    )
 
     html = f"""<!DOCTYPE html>
 <html>
@@ -9814,7 +11651,7 @@ async def send_compliance_client_email(
   <tr>
     <td style="padding:28px 40px 0">
       <p style="margin:0 0 8px;color:#1e293b;font-size:16px">Dear <strong>{req.client_name}</strong>,</p>
-      <p style="margin:0;color:#475569;font-size:14px;line-height:1.7">{tpl['greeting_line']}</p>
+      <p style="margin:0;color:#475569;font-size:14px;line-height:1.7">{tpl["greeting_line"]}</p>
     </td>
   </tr>
 
@@ -9889,7 +11726,7 @@ async def send_compliance_client_email(
   <!-- FOOTER -->
   <tr>
     <td style="background:#f8fafc;padding:14px 40px;border-top:1px solid #e2e8f0;text-align:center">
-      <p style="margin:0;color:#94a3b8;font-size:11px">{tpl['footer_note']}</p>
+      <p style="margin:0;color:#94a3b8;font-size:11px">{tpl["footer_note"]}</p>
       <p style="margin:4px 0 0;color:#94a3b8;font-size:11px">© {now.year} {comp_name}. All rights reserved.</p>
     </td>
   </tr>
@@ -9905,7 +11742,7 @@ async def send_compliance_client_email(
         f"{tpl['greeting_line']}\n\n"
         f"You have {total} compliance item(s) requiring attention ({overdue} overdue).\n\n"
         + "\n".join(
-            f"- {c.get('name','?')} | Due: {fmt_d(c.get('due_date'))} | Status: {c.get('status','Pending')}"
+            f"- {c.get('name', '?')} | Due: {fmt_d(c.get('due_date'))} | Status: {c.get('status', 'Pending')}"
             for c in req.compliance_items
         )
         + f"\n\nRegards,\n{comp_name}\n{contact_line}"
@@ -9923,24 +11760,26 @@ async def send_compliance_client_email(
     return {"message": f"Compliance email sent to {req.client_email}"}
 
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # CLIENT EMAIL TEMPLATES  —  Full CRUD
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 class ClientEmailTemplate(BaseModel):
-    name:     str
-    subject:  str
-    body:     str
-    is_html:  bool = False
-    category: str  = "general"   # general | follow_up | compliance | greeting | custom
-    attachment_name:   Optional[str] = ""    # optional file attached to every send
-    attachment_base64: Optional[str] = ""    # base64 (no data: prefix) of the attachment
+    name: str
+    subject: str
+    body: str
+    is_html: bool = False
+    category: str = "general"  # general | follow_up | compliance | greeting | custom
+    attachment_name: Optional[str] = ""  # optional file attached to every send
+    attachment_base64: Optional[str] = ""  # base64 (no data: prefix) of the attachment
+
 
 @api_router.get("/email/client-templates")
 async def list_client_email_templates(current_user: User = Depends(get_current_user)):
     docs = await db.client_email_templates.find({}, {"_id": 0}).to_list(200)
-    return sorted(docs, key=lambda d: d.get("updated_at",""), reverse=True)
+    return sorted(docs, key=lambda d: d.get("updated_at", ""), reverse=True)
+
 
 @api_router.post("/email/client-templates")
 async def create_client_email_template(
@@ -9950,13 +11789,16 @@ async def create_client_email_template(
     now = datetime.now(timezone.utc).isoformat()
     doc = {
         "id": str(uuid.uuid4()),
-        "name": body.name, "subject": body.subject,
-        "body": body.body, "is_html": body.is_html,
+        "name": body.name,
+        "subject": body.subject,
+        "body": body.body,
+        "is_html": body.is_html,
         "category": body.category,
         "attachment_name": (body.attachment_name or ""),
         "attachment_base64": (body.attachment_base64 or ""),
         "created_by": current_user.id,
-        "created_at": now, "updated_at": now,
+        "created_at": now,
+        "updated_at": now,
     }
     try:
         await db.client_email_templates.insert_one(doc)
@@ -9968,6 +11810,7 @@ async def create_client_email_template(
     doc.pop("_id", None)
     return doc
 
+
 @api_router.put("/email/client-templates/{template_id}")
 async def update_client_email_template(
     template_id: str,
@@ -9977,14 +11820,24 @@ async def update_client_email_template(
     now = datetime.now(timezone.utc).isoformat()
     r = await db.client_email_templates.update_one(
         {"id": template_id},
-        {"$set": {"name": body.name, "subject": body.subject, "body": body.body,
-                  "is_html": body.is_html, "category": body.category,
-                  "attachment_name": (body.attachment_name or ""),
-                  "attachment_base64": (body.attachment_base64 or ""),
-                  "updated_at": now, "updated_by": current_user.id}},
+        {
+            "$set": {
+                "name": body.name,
+                "subject": body.subject,
+                "body": body.body,
+                "is_html": body.is_html,
+                "category": body.category,
+                "attachment_name": (body.attachment_name or ""),
+                "attachment_base64": (body.attachment_base64 or ""),
+                "updated_at": now,
+                "updated_by": current_user.id,
+            }
+        },
     )
-    if r.matched_count == 0: raise HTTPException(404, "Template not found")
+    if r.matched_count == 0:
+        raise HTTPException(404, "Template not found")
     return {"message": "Template updated"}
+
 
 @api_router.delete("/email/client-templates/{template_id}")
 async def delete_client_email_template(
@@ -9992,7 +11845,8 @@ async def delete_client_email_template(
     current_user: User = Depends(get_current_user),
 ):
     r = await db.client_email_templates.delete_one({"id": template_id})
-    if r.deleted_count == 0: raise HTTPException(404, "Template not found")
+    if r.deleted_count == 0:
+        raise HTTPException(404, "Template not found")
     return {"message": "Template deleted"}
 
 
@@ -10000,23 +11854,27 @@ async def delete_client_email_template(
 # BULK CLIENT EMAIL SEND  —  Brevo API  OR  Company / Gmail SMTP
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 class BulkEmailRecipient(BaseModel):
-    email:     str
-    name:      str = ""
+    email: str
+    name: str = ""
     variables: dict = {}
 
+
 class BulkClientEmailRequest(BaseModel):
-    recipients:              List[BulkEmailRecipient]
-    subject:                 str
-    body_template:           str          # plain-text or HTML with {variable} placeholders
-    is_html:                 bool = False
-    company_id:              Optional[str] = None   # if set, try company SMTP first
-    send_method:             str = "auto"           # "auto" | "brevo" | "smtp"
-    from_name:               Optional[str] = None
-    override_sender_email:   Optional[str] = None   # per-request sender override (Clients bulk modal)
-    override_sender_name:    Optional[str] = None
-    attachment_name:         Optional[str] = ""     # optional single attachment for all recipients
-    attachment_base64:       Optional[str] = ""     # base64 (no data: prefix)
+    recipients: List[BulkEmailRecipient]
+    subject: str
+    body_template: str  # plain-text or HTML with {variable} placeholders
+    is_html: bool = False
+    company_id: Optional[str] = None  # if set, try company SMTP first
+    send_method: str = "auto"  # "auto" | "brevo" | "smtp"
+    from_name: Optional[str] = None
+    override_sender_email: Optional[str] = (
+        None  # per-request sender override (Clients bulk modal)
+    )
+    override_sender_name: Optional[str] = None
+    attachment_name: Optional[str] = ""  # optional single attachment for all recipients
+    attachment_base64: Optional[str] = ""  # base64 (no data: prefix)
 
 
 def _render_body(template: str, variables: dict) -> str:
@@ -10028,8 +11886,16 @@ def _render_body(template: str, variables: dict) -> str:
 
 
 async def _send_one_smtp(
-    smtp_host, smtp_port, smtp_user, smtp_pass, from_name,
-    to_email, subject, body_plain, body_html=None, attachments=None
+    smtp_host,
+    smtp_port,
+    smtp_user,
+    smtp_pass,
+    from_name,
+    to_email,
+    subject,
+    body_plain,
+    body_html=None,
+    attachments=None,
 ):
     """Synchronous SMTP send wrapped for asyncio.
     `attachments` is an optional list of {"name": str, "content": base64str}.
@@ -10059,7 +11925,9 @@ async def _send_one_smtp(
             except Exception:
                 continue
             ctype, _ = mimetypes.guess_type(fname)
-            maintype, subtype = (ctype.split("/", 1) if ctype else ("application", "octet-stream"))
+            maintype, subtype = (
+                ctype.split("/", 1) if ctype else ("application", "octet-stream")
+            )
             part = MIMEBase(maintype, subtype)
             part.set_payload(raw)
             encoders.encode_base64(part)
@@ -10078,7 +11946,6 @@ async def _send_one_smtp(
         server.starttls(context=ctx)
         server.login(smtp_user, smtp_pass)
         server.sendmail(smtp_user, [to_email], msg.as_string())
-
 
 
 @api_router.post("/email/send-bulk-clients")
@@ -10102,7 +11969,7 @@ async def send_bulk_client_emails(
 
     # Per-request sender override from Clients bulk modal (takes highest priority for Brevo)
     _override_email = (req.override_sender_email or "").strip()
-    _override_name  = (req.override_sender_name  or "").strip()
+    _override_name = (req.override_sender_name or "").strip()
 
     if req.company_id and req.send_method in ("auto", "smtp"):
         comp = await db.companies.find_one({"id": req.company_id}, {"_id": 0})
@@ -10116,21 +11983,25 @@ async def send_bulk_client_emails(
                     "port": int(comp.get("smtp_port", 587)),
                     "user": su,
                     "password": sp,
-                    "from_name": comp.get("smtp_from_name") or comp.get("name") or company_name,
+                    "from_name": comp.get("smtp_from_name")
+                    or comp.get("name")
+                    or company_name,
                 }
                 company_name = company_smtp["from_name"]
 
     use_brevo = (req.send_method == "brevo") or (company_smtp is None)
 
     if use_brevo:
-        brevo_key  = os.getenv("BREVO_API_KEY")
+        brevo_key = os.getenv("BREVO_API_KEY")
         # Use per-request override if provided, else fall back to DB active sender, then env
         if _override_email:
             sender_email = _override_email
             company_name = _override_name or company_name
         else:
             try:
-                _s_doc = await db.email_sender_settings.find_one({"type": "active_sender"}, {"_id": 0})
+                _s_doc = await db.email_sender_settings.find_one(
+                    {"type": "active_sender"}, {"_id": 0}
+                )
                 sender_email = (_s_doc.get("email") or "").strip() if _s_doc else ""
                 if _s_doc and _s_doc.get("name"):
                     company_name = _s_doc["name"].strip()
@@ -10139,20 +12010,25 @@ async def send_bulk_client_emails(
             if not sender_email:
                 sender_email = os.getenv("SENDER_EMAIL")
         if not brevo_key or not sender_email:
-            raise HTTPException(500, "Brevo not configured (BREVO_API_KEY + SENDER_EMAIL required). "
-                                     "Or select a company with SMTP settings.")
+            raise HTTPException(
+                500,
+                "Brevo not configured (BREVO_API_KEY + SENDER_EMAIL required). "
+                "Or select a company with SMTP settings.",
+            )
 
     # ── Optional attachment (sent with every recipient) ─────────────────────
     _attachments = None
     if (req.attachment_base64 or "").strip():
-        _attachments = [{
-            "name": (req.attachment_name or "attachment"),
-            "content": req.attachment_base64.strip(),
-        }]
+        _attachments = [
+            {
+                "name": (req.attachment_name or "attachment"),
+                "content": req.attachment_base64.strip(),
+            }
+        ]
 
     # ── Send loop ──────────────────────────────────────────────────────────
-    sent_count  = 0
-    fail_count  = 0
+    sent_count = 0
+    fail_count = 0
     failed_list = []
     import asyncio
 
@@ -10162,26 +12038,42 @@ async def send_bulk_client_emails(
             continue
         vars_ = {"name": rec.name, "email": rec.email, **rec.variables}
         subject_rendered = _render_body(req.subject, vars_)
-        body_rendered    = _render_body(req.body_template, vars_)
+        body_rendered = _render_body(req.body_template, vars_)
         body_html_r = body_rendered if req.is_html else None
-        body_plain_r = body_rendered if not req.is_html else \
-                       body_rendered.replace("<br>","\\n").replace("<br/>","\\n").replace("<p>","\\n").replace("</p>","")
+        body_plain_r = (
+            body_rendered
+            if not req.is_html
+            else body_rendered.replace("<br>", "\\n")
+            .replace("<br/>", "\\n")
+            .replace("<p>", "\\n")
+            .replace("</p>", "")
+        )
 
         try:
             if use_brevo:
-                await _brevo_send(rec.email, subject_rendered, body_plain_r, body_html_r,
-                                  attachments=_attachments)
+                await _brevo_send(
+                    rec.email,
+                    subject_rendered,
+                    body_plain_r,
+                    body_html_r,
+                    attachments=_attachments,
+                )
             else:
                 loop = asyncio.get_event_loop()
                 await loop.run_in_executor(
                     None,
                     lambda: _send_one_smtp(
-                        company_smtp["host"], company_smtp["port"],
-                        company_smtp["user"],  company_smtp["password"],
+                        company_smtp["host"],
+                        company_smtp["port"],
+                        company_smtp["user"],
+                        company_smtp["password"],
                         company_smtp["from_name"],
-                        rec.email, subject_rendered, body_plain_r, body_html_r,
+                        rec.email,
+                        subject_rendered,
+                        body_plain_r,
+                        body_html_r,
                         attachments=_attachments,
-                    )
+                    ),
                 )
             sent_count += 1
         except Exception as e:
@@ -10189,9 +12081,11 @@ async def send_bulk_client_emails(
             failed_list.append({"email": rec.email, "error": str(e)})
             logger.error(f"Bulk email to {rec.email} failed: {e}")
 
-        await asyncio.sleep(0.05)   # gentle throttle
+        await asyncio.sleep(0.05)  # gentle throttle
 
-    logger.info(f"Bulk client email by {current_user.email}: {sent_count} sent, {fail_count} failed")
+    logger.info(
+        f"Bulk client email by {current_user.email}: {sent_count} sent, {fail_count} failed"
+    )
     return {
         "message": f"Sent {sent_count} email(s). {fail_count} failed.",
         "sent": sent_count,
@@ -10199,13 +12093,14 @@ async def send_bulk_client_emails(
         "failed_list": failed_list[:20],
     }
 
+
 # AUDIT LOGS ROUTE
 @api_router.get("/audit-logs")
 async def get_audit_logs(
     module: Optional[str] = None,
     record_id: Optional[str] = None,
     action: Optional[str] = None,
-    current_user: User = Depends(check_permission("can_view_audit_logs"))
+    current_user: User = Depends(check_permission("can_view_audit_logs")),
 ):
     """
     Task Audit Log — role-scoped data access:
@@ -10232,7 +12127,9 @@ async def get_audit_logs(
             visible_ids = [current_user.id]
         query["user_id"] = {"$in": visible_ids}
 
-    logs = await db.audit_logs.find(query, {"_id": 0}).sort("timestamp", -1).to_list(2000)
+    logs = (
+        await db.audit_logs.find(query, {"_id": 0}).sort("timestamp", -1).to_list(2000)
+    )
     logs = convert_objectids(logs)
     for log in logs:
         if isinstance(log.get("timestamp"), str):
@@ -10242,14 +12139,19 @@ async def get_audit_logs(
                 pass
     return logs
 
+
 # INTERNAL FUNCTION FOR AUTO REMINDER
 async def send_pending_task_reminders_internal():
-    tasks = await db.tasks.find({"status": {"$ne": "completed"}}, {"_id": 0}).to_list(1000)
+    tasks = await db.tasks.find({"status": {"$ne": "completed"}}, {"_id": 0}).to_list(
+        1000
+    )
     if not tasks:
         return
     # Batch user lookup - single query for all assigned users
     assigned_ids = list({t["assigned_to"] for t in tasks if t.get("assigned_to")})
-    users_list = await db.users.find({"id": {"$in": assigned_ids}}, {"_id": 0}).to_list(1000)
+    users_list = await db.users.find({"id": {"$in": assigned_ids}}, {"_id": 0}).to_list(
+        1000
+    )
     user_by_id = {u["id"]: u for u in users_list}
 
     user_task_map = {}
@@ -10261,20 +12163,32 @@ async def send_pending_task_reminders_internal():
         if not user or not user.get("email"):
             continue
         email = user["email"]
-        user_task_map.setdefault(email, {"user": user, "tasks": []})["tasks"].append(task)
+        user_task_map.setdefault(email, {"user": user, "tasks": []})["tasks"].append(
+            task
+        )
 
-    all_users = await db.users.find({}, {"_id": 0, "id": 1, "full_name": 1}).to_list(500)
-    user_map  = {u["id"]: u.get("full_name", "Admin") for u in all_users}
-    tpl_doc   = await db.email_templates.find_one({"type": "task_reminder"}, {"_id": 0})
-    tpl       = tpl_doc.get("settings") if tpl_doc else None
+    all_users = await db.users.find({}, {"_id": 0, "id": 1, "full_name": 1}).to_list(
+        500
+    )
+    user_map = {u["id"]: u.get("full_name", "Admin") for u in all_users}
+    tpl_doc = await db.email_templates.find_one({"type": "task_reminder"}, {"_id": 0})
+    tpl = tpl_doc.get("settings") if tpl_doc else None
 
     for email, data in user_task_map.items():
         try:
             user_name = data["user"].get("full_name", "")
-            subject, html_body = build_reminder_email(user_name, data["tasks"], user_map=user_map, tpl=tpl)
-            await _brevo_send(email, subject, body_plain=f"Hello {user_name},\n\nYou have {len(data['tasks'])} pending tasks. Please log in to Task-O-Sphere to review them.", body_html=html_body)
+            subject, html_body = build_reminder_email(
+                user_name, data["tasks"], user_map=user_map, tpl=tpl
+            )
+            await _brevo_send(
+                email,
+                subject,
+                body_plain=f"Hello {user_name},\n\nYou have {len(data['tasks'])} pending tasks. Please log in to Task-O-Sphere to review them.",
+                body_html=html_body,
+            )
         except Exception as e:
             logger.error(f"Auto reminder failed for {email}: {str(e)}")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AUTO DAILY REMINDER MIDDLEWARE
@@ -10283,7 +12197,9 @@ async def _run_daily_reminder_job(today_str: str):
     """Background job - never blocks requests."""
     global _last_reminder_date_cache
     try:
-        setting = await db.system_settings.find_one({"key": "last_reminder_date"}, {"_id": 0})
+        setting = await db.system_settings.find_one(
+            {"key": "last_reminder_date"}, {"_id": 0}
+        )
         db_last_date = setting["value"] if setting else None
         if db_last_date != today_str:
             logger.info("Auto daily reminder triggered at 10:00 AM IST")
@@ -10291,7 +12207,7 @@ async def _run_daily_reminder_job(today_str: str):
             await db.system_settings.update_one(
                 {"key": "last_reminder_date"},
                 {"$set": {"value": today_str}},
-                upsert=True
+                upsert=True,
             )
         _last_reminder_date_cache = today_str
     except Exception as e:
@@ -10318,6 +12234,7 @@ async def auto_daily_reminder(request: Request, call_next):
     response = await call_next(request)
     return response
 
+
 # ==================== HOLIDAY ROUTES ====================
 @api_router.get("/holidays", response_model=list[HolidayResponse])
 async def get_holidays(current_user: User = Depends(get_current_user)):
@@ -10335,6 +12252,7 @@ async def auto_sync_holidays(current_user: User = Depends(get_current_user)):
     Also upgrades any existing 'pending' holidays to 'confirmed' automatically.
     """
     import httpx as _httpx
+
     now = datetime.now(IST)
     added = 0
     upgraded = 0
@@ -10351,34 +12269,36 @@ async def auto_sync_holidays(current_user: User = Depends(get_current_user)):
                 continue
             for h in resp.json():
                 date_str = h["date"]
-                name     = h.get("localName") or h.get("name", "Holiday")
+                name = h.get("localName") or h.get("name", "Holiday")
                 existing = await db.holidays.find_one({"date": date_str}, {"_id": 0})
                 if not existing:
-                    await db.holidays.insert_one({
-                        "date": date_str,
-                        "name": name,
-                        "status": "confirmed",
-                        "type": "public",
-                        "created_at": now.isoformat(),
-                    })
+                    await db.holidays.insert_one(
+                        {
+                            "date": date_str,
+                            "name": name,
+                            "status": "confirmed",
+                            "type": "public",
+                            "created_at": now.isoformat(),
+                        }
+                    )
                     added += 1
                 elif existing.get("status") not in ("confirmed", "rejected"):
                     await db.holidays.update_one(
-                        {"date": date_str},
-                        {"$set": {"status": "confirmed"}}
+                        {"date": date_str}, {"$set": {"status": "confirmed"}}
                     )
                     upgraded += 1
         except Exception as e:
             errors.append(f"{year}: {e}")
 
-    logger.info(f"auto-sync holidays: +{added} new, {upgraded} upgraded — by {current_user.email}")
+    logger.info(
+        f"auto-sync holidays: +{added} new, {upgraded} upgraded — by {current_user.email}"
+    )
     return {"added": added, "upgraded": upgraded, "errors": errors}
 
 
 @api_router.post("/holidays", response_model=HolidayResponse)
 async def create_holiday(
-    holiday: HolidayCreate,
-    current_user: User = Depends(require_admin())
+    holiday: HolidayCreate, current_user: User = Depends(require_admin())
 ):
     """
     Create a holiday entry.
@@ -10388,9 +12308,9 @@ async def create_holiday(
     # ── Safe date → ISO string conversion ───────────────────────────────────
     raw_date = holiday.date
     if isinstance(raw_date, str):
-        date_str = raw_date.strip()[:10]   # already "YYYY-MM-DD", just normalise
+        date_str = raw_date.strip()[:10]  # already "YYYY-MM-DD", just normalise
     elif hasattr(raw_date, "isoformat"):
-        date_str = raw_date.isoformat()    # date / datetime object
+        date_str = raw_date.isoformat()  # date / datetime object
     else:
         date_str = str(raw_date)[:10]
 
@@ -10398,18 +12318,23 @@ async def create_holiday(
     try:
         date.fromisoformat(date_str)
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid date format: '{date_str}'. Use YYYY-MM-DD.")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid date format: '{date_str}'. Use YYYY-MM-DD.",
+        )
 
     holiday_dict = {
-        "date":        date_str,
-        "name":        holiday.name,
+        "date": date_str,
+        "name": holiday.name,
         "description": getattr(holiday, "description", None),
-        "status":      "confirmed",
-        "type":        getattr(holiday, "type", None) or "manual",
-        "created_at":  datetime.now(timezone.utc).isoformat(),
+        "status": "confirmed",
+        "type": getattr(holiday, "type", None) or "manual",
+        "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    logger.info(f"Creating holiday: date={holiday_dict['date']}, name={holiday_dict.get('name')}, by={current_user.id}")
+    logger.info(
+        f"Creating holiday: date={holiday_dict['date']}, name={holiday_dict.get('name')}, by={current_user.id}"
+    )
 
     # Upsert: if a record exists (auto-fetched with pending status), confirm it.
     # If it's already confirmed, return it silently (no 400 error on duplicates).
@@ -10421,13 +12346,15 @@ async def create_holiday(
         # Exists but not confirmed (pending/rejected from auto-fetch) -> confirm it
         await db.holidays.update_one(
             {"date": holiday_dict["date"]},
-            {"$set": {
-                "name": holiday_dict.get("name", existing.get("name")),
-                "status": "confirmed",
-                "type": holiday_dict.get("type", existing.get("type", "public")),
-                "updated_by": current_user.id,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }}
+            {
+                "$set": {
+                    "name": holiday_dict.get("name", existing.get("name")),
+                    "status": "confirmed",
+                    "type": holiday_dict.get("type", existing.get("type", "public")),
+                    "updated_by": current_user.id,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            },
         )
         updated = await db.holidays.find_one({"date": holiday_dict["date"]}, {"_id": 0})
         logger.info(f"Holiday upserted to confirmed: {holiday_dict['date']}")
@@ -10441,30 +12368,37 @@ async def create_holiday(
     except Exception as e:
         # Handle duplicate key error from unique index (race condition)
         logger.error(f"Holiday insert failed for {holiday_dict['date']}: {e}")
-        existing2 = await db.holidays.find_one({"date": holiday_dict["date"]}, {"_id": 0})
+        existing2 = await db.holidays.find_one(
+            {"date": holiday_dict["date"]}, {"_id": 0}
+        )
         if existing2:
             # A concurrent insert created it — just confirm and return it
             await db.holidays.update_one(
                 {"date": holiday_dict["date"]},
-                {"$set": {"status": "confirmed", "name": holiday_dict.get("name", existing2.get("name"))}}
+                {
+                    "$set": {
+                        "status": "confirmed",
+                        "name": holiday_dict.get("name", existing2.get("name")),
+                    }
+                },
             )
-            final = await db.holidays.find_one({"date": holiday_dict["date"]}, {"_id": 0})
+            final = await db.holidays.find_one(
+                {"date": holiday_dict["date"]}, {"_id": 0}
+            )
             return final
         raise HTTPException(status_code=500, detail=f"Failed to save holiday: {str(e)}")
 
 
 @api_router.patch("/holidays/{holiday_date}/status")
 async def update_holiday_status(
-    holiday_date: str,
-    data: dict,
-    current_user: User = Depends(require_admin())
+    holiday_date: str, data: dict, current_user: User = Depends(require_admin())
 ):
     new_status = data.get("status")
     if new_status not in ["confirmed", "rejected", "pending"]:
         raise HTTPException(status_code=400, detail="Invalid status")
     result = await db.holidays.update_one(
         {"date": holiday_date},
-        {"$set": {"status": new_status, "updated_by": current_user.id}}
+        {"$set": {"status": new_status, "updated_by": current_user.id}},
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Holiday not found")
@@ -10472,11 +12406,14 @@ async def update_holiday_status(
 
 
 @api_router.delete("/holidays/{holiday_date}")
-async def delete_holiday(holiday_date: str, current_user: User = Depends(require_admin())):
+async def delete_holiday(
+    holiday_date: str, current_user: User = Depends(require_admin())
+):
     result = await db.holidays.delete_one({"date": holiday_date})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Holiday not found")
     return {"message": "Holiday removed"}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PDF HOLIDAY EXTRACTOR — 100% FREE using pdfplumber + regex (no API key)
@@ -10484,20 +12421,39 @@ async def delete_holiday(holiday_date: str, current_user: User = Depends(require
 
 # Month name → number map (reused from compliance parser above)
 _HOLIDAY_MONTH_MAP = {
-    "january": 1, "jan": 1, "february": 2, "feb": 2,
-    "march": 3, "mar": 3, "april": 4, "apr": 4,
-    "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7,
-    "august": 8, "aug": 8, "september": 9, "sep": 9, "sept": 9,
-    "october": 10, "oct": 10, "november": 11, "nov": 11,
-    "december": 12, "dec": 12,
+    "january": 1,
+    "jan": 1,
+    "february": 2,
+    "feb": 2,
+    "march": 3,
+    "mar": 3,
+    "april": 4,
+    "apr": 4,
+    "may": 5,
+    "june": 6,
+    "jun": 6,
+    "july": 7,
+    "jul": 7,
+    "august": 8,
+    "aug": 8,
+    "september": 9,
+    "sep": 9,
+    "sept": 9,
+    "october": 10,
+    "oct": 10,
+    "november": 11,
+    "nov": 11,
+    "december": 12,
+    "dec": 12,
 }
+
 
 def _parse_holiday_date(text: str, default_year: int) -> Optional[str]:
     """Try every common date format found in Indian holiday PDFs. Returns YYYY-MM-DD or None."""
     text = text.strip()
 
     # YYYY-MM-DD or YYYY/MM/DD
-    m = re.search(r'\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})\b', text)
+    m = re.search(r"\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})\b", text)
     if m:
         try:
             return date(int(m.group(1)), int(m.group(2)), int(m.group(3))).isoformat()
@@ -10505,7 +12461,7 @@ def _parse_holiday_date(text: str, default_year: int) -> Optional[str]:
             pass
 
     # DD-MM-YYYY or DD/MM/YYYY
-    m = re.search(r'\b(\d{1,2})[-/](\d{1,2})[-/](\d{4})\b', text)
+    m = re.search(r"\b(\d{1,2})[-/](\d{1,2})[-/](\d{4})\b", text)
     if m:
         try:
             return date(int(m.group(3)), int(m.group(2)), int(m.group(1))).isoformat()
@@ -10514,11 +12470,12 @@ def _parse_holiday_date(text: str, default_year: int) -> Optional[str]:
 
     # "15 August 2026" or "15th August 2026"
     m = re.search(
-        r'\b(\d{1,2})(?:st|nd|rd|th)?\s+'
-        r'(january|february|march|april|may|june|july|august|september|october|november|december|'
-        r'jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)'
-        r'(?:\s+(\d{4}))?\b',
-        text, re.IGNORECASE
+        r"\b(\d{1,2})(?:st|nd|rd|th)?\s+"
+        r"(january|february|march|april|may|june|july|august|september|october|november|december|"
+        r"jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)"
+        r"(?:\s+(\d{4}))?\b",
+        text,
+        re.IGNORECASE,
     )
     if m:
         try:
@@ -10530,10 +12487,11 @@ def _parse_holiday_date(text: str, default_year: int) -> Optional[str]:
 
     # "August 15" or "August 15, 2026"
     m = re.search(
-        r'\b(january|february|march|april|may|june|july|august|september|october|november|december|'
-        r'jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\s+'
-        r'(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b',
-        text, re.IGNORECASE
+        r"\b(january|february|march|april|may|june|july|august|september|october|november|december|"
+        r"jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\s+"
+        r"(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b",
+        text,
+        re.IGNORECASE,
     )
     if m:
         try:
@@ -10558,9 +12516,10 @@ def _extract_holidays_from_text(raw_text: str) -> list:
     seen_dates = set()
 
     # Detect dominant year in the document (use current year as fallback)
-    year_matches = re.findall(r'\b(20\d{2})\b', raw_text)
+    year_matches = re.findall(r"\b(20\d{2})\b", raw_text)
     if year_matches:
         from collections import Counter
+
         default_year = int(Counter(year_matches).most_common(1)[0][0])
     else:
         default_year = datetime.now().year
@@ -10579,7 +12538,11 @@ def _extract_holidays_from_text(raw_text: str) -> list:
                 if d and d not in seen_dates:
                     date_val = d
                 else:
-                    if col and not re.match(r'^(sl\.?\s*no|s\.?\s*no|sr\.?\s*no|#|date|day|holiday|occasion|name)$', col, re.IGNORECASE):
+                    if col and not re.match(
+                        r"^(sl\.?\s*no|s\.?\s*no|sr\.?\s*no|#|date|day|holiday|occasion|name)$",
+                        col,
+                        re.IGNORECASE,
+                    ):
                         name_col = col
             if date_val and name_col and len(name_col) > 2:
                 seen_dates.add(date_val)
@@ -10588,7 +12551,11 @@ def _extract_holidays_from_text(raw_text: str) -> list:
     # --- Pass 2: lines where date and name appear together ---
     for line in lines:
         # Skip header-like lines
-        if re.match(r'^(sl\.?\s*no|s\.?\s*no|sr\.?\s*no|#|date|day|holiday|occasion|name|month)', line, re.IGNORECASE):
+        if re.match(
+            r"^(sl\.?\s*no|s\.?\s*no|sr\.?\s*no|#|date|day|holiday|occasion|name|month)",
+            line,
+            re.IGNORECASE,
+        ):
             continue
         if len(line) < 5:
             continue
@@ -10599,16 +12566,23 @@ def _extract_holidays_from_text(raw_text: str) -> list:
 
         # Remove the date portion to get the name
         name = re.sub(
-            r'\b\d{1,2}(?:st|nd|rd|th)?[\s\-/]*'
-            r'(?:january|february|march|april|may|june|july|august|september|october|november|december|'
-            r'jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)[\s,]*\d{0,4}\b',
-            '', line, flags=re.IGNORECASE
+            r"\b\d{1,2}(?:st|nd|rd|th)?[\s\-/]*"
+            r"(?:january|february|march|april|may|june|july|august|september|october|november|december|"
+            r"jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)[\s,]*\d{0,4}\b",
+            "",
+            line,
+            flags=re.IGNORECASE,
         )
-        name = re.sub(r'\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b', '', name)
-        name = re.sub(r'\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b', '', name)
-        name = re.sub(r'\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', '', name, flags=re.IGNORECASE)
-        name = re.sub(r'[\|\-–—,;:()\[\]]+', ' ', name)
-        name = re.sub(r'\s+', ' ', name).strip()
+        name = re.sub(r"\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b", "", name)
+        name = re.sub(r"\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b", "", name)
+        name = re.sub(
+            r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+            "",
+            name,
+            flags=re.IGNORECASE,
+        )
+        name = re.sub(r"[\|\-–—,;:()\[\]]+", " ", name)
+        name = re.sub(r"\s+", " ", name).strip()
 
         if len(name) < 3:
             continue
@@ -10623,8 +12597,7 @@ def _extract_holidays_from_text(raw_text: str) -> list:
 
 @api_router.post("/holidays/extract-from-pdf")
 async def extract_holidays_from_pdf(
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user)
+    file: UploadFile = File(...), current_user: User = Depends(get_current_user)
 ):
     """
     100% FREE holiday extractor.
@@ -10641,6 +12614,7 @@ async def extract_holidays_from_pdf(
     # Extract all text from the PDF using pdfplumber (already in requirements)
     try:
         import pdfplumber
+
         parts = []
         with pdfplumber.open(BytesIO(content)) as pdf:
             for page in pdf.pages:
@@ -10652,37 +12626,63 @@ async def extract_holidays_from_pdf(
                 for table in page.extract_tables():
                     for row in table:
                         if row:
-                            parts.append("  |  ".join(str(c or "").strip() for c in row))
+                            parts.append(
+                                "  |  ".join(str(c or "").strip() for c in row)
+                            )
         raw_text = "\n".join(parts)
     except Exception as exc:
         logger.error(f"pdfplumber failed: {exc}")
         raise HTTPException(status_code=422, detail=f"Could not read PDF: {str(exc)}")
 
     if not raw_text or len(raw_text.strip()) < 10:
-        raise HTTPException(status_code=422, detail="No readable text found in PDF. Try a text-based (non-scanned) PDF.")
+        raise HTTPException(
+            status_code=422,
+            detail="No readable text found in PDF. Try a text-based (non-scanned) PDF.",
+        )
 
     holidays = _extract_holidays_from_text(raw_text)
 
     if not holidays:
         raise HTTPException(
             status_code=404,
-            detail="No holidays detected. Make sure the PDF contains dates alongside holiday names."
+            detail="No holidays detected. Make sure the PDF contains dates alongside holiday names.",
         )
 
-    logger.info(f"PDF holiday extraction (free): {len(holidays)} holidays found by {current_user.email}")
+    logger.info(
+        f"PDF holiday extraction (free): {len(holidays)} holidays found by {current_user.email}"
+    )
     return {"holidays": holidays}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TRADEMARK / IP NOTICE PDF EXTRACTOR
 # ─────────────────────────────────────────────────────────────────────────────
 
 _TM_MONTH_MAP = {
-    "january": 1, "jan": 1, "february": 2, "feb": 2,
-    "march": 3, "mar": 3, "april": 4, "apr": 4,
-    "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7,
-    "august": 8, "aug": 8, "september": 9, "sep": 9, "sept": 9,
-    "october": 10, "oct": 10, "november": 11, "nov": 11,
-    "december": 12, "dec": 12,
+    "january": 1,
+    "jan": 1,
+    "february": 2,
+    "feb": 2,
+    "march": 3,
+    "mar": 3,
+    "april": 4,
+    "apr": 4,
+    "may": 5,
+    "june": 6,
+    "jun": 6,
+    "july": 7,
+    "jul": 7,
+    "august": 8,
+    "aug": 8,
+    "september": 9,
+    "sep": 9,
+    "sept": 9,
+    "october": 10,
+    "oct": 10,
+    "november": 11,
+    "nov": 11,
+    "december": 12,
+    "dec": 12,
 }
 
 
@@ -10696,7 +12696,7 @@ def _parse_tm_date(text: str) -> Optional[str]:
     text = text.strip()
 
     # DD/MM/YYYY or DD-MM-YYYY
-    m = re.search(r'\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b', text)
+    m = re.search(r"\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b", text)
     if m:
         try:
             return date(int(m.group(3)), int(m.group(2)), int(m.group(1))).isoformat()
@@ -10704,7 +12704,7 @@ def _parse_tm_date(text: str) -> Optional[str]:
             pass
 
     # YYYY-MM-DD
-    m = re.search(r'\b(\d{4})-(\d{2})-(\d{2})\b', text)
+    m = re.search(r"\b(\d{4})-(\d{2})-(\d{2})\b", text)
     if m:
         try:
             return date(int(m.group(1)), int(m.group(2)), int(m.group(3))).isoformat()
@@ -10713,11 +12713,12 @@ def _parse_tm_date(text: str) -> Optional[str]:
 
     # "06-04-2026" style already caught above, but also "06 April 2026"
     m = re.search(
-        r'\b(\d{1,2})(?:st|nd|rd|th)?[\s\-]+('
-        r'january|february|march|april|may|june|july|august|september|october|november|december|'
-        r'jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec'
-        r')[\s,]+(\d{4})\b',
-        text, re.IGNORECASE
+        r"\b(\d{1,2})(?:st|nd|rd|th)?[\s\-]+("
+        r"january|february|march|april|may|june|july|august|september|october|november|december|"
+        r"jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec"
+        r")[\s,]+(\d{4})\b",
+        text,
+        re.IGNORECASE,
     )
     if m:
         try:
@@ -10737,16 +12738,16 @@ def _extract_trademark_notice_data(raw_text: str) -> dict:
     Returns a dict with all extracted fields; missing fields are None.
     """
     result = {
-        "document_type":    None,
-        "application_no":   None,
-        "class":            None,
+        "document_type": None,
+        "application_no": None,
+        "class": None,
         "application_date": None,
-        "used_since":       None,
-        "applicant_name":   None,
-        "recipient_name":   None,
-        "hearing_date":     None,
-        "letter_date":      None,
-        "brand_name":       None,
+        "used_since": None,
+        "applicant_name": None,
+        "recipient_name": None,
+        "hearing_date": None,
+        "letter_date": None,
+        "brand_name": None,
         "raw_text_snippet": raw_text[:500].strip(),
     }
 
@@ -10769,32 +12770,36 @@ def _extract_trademark_notice_data(raw_text: str) -> dict:
     # Handles: "Application No: 5922988" or "Application No. 1234567" or
     # "आवेदन संख्या/Application No: 5922988"
     m = re.search(
-        r'(?:application\s*no\.?|app\.?\s*no\.?|आवेदन\s*संख्या)[:\s\/]*(\d{5,10})',
-        raw_text, re.IGNORECASE
+        r"(?:application\s*no\.?|app\.?\s*no\.?|आवेदन\s*संख्या)[:\s\/]*(\d{5,10})",
+        raw_text,
+        re.IGNORECASE,
     )
     if m:
         result["application_no"] = m.group(1).strip()
 
     # ── Class ────────────────────────────────────────────────────────────────
     m = re.search(
-        r'(?:in\s+class(?:es)?|class(?:es)?)[:\s\/]*(\d{1,2}(?:\s*[,&]\s*\d{1,2})*)',
-        raw_text, re.IGNORECASE
+        r"(?:in\s+class(?:es)?|class(?:es)?)[:\s\/]*(\d{1,2}(?:\s*[,&]\s*\d{1,2})*)",
+        raw_text,
+        re.IGNORECASE,
     )
     if m:
         result["class"] = m.group(1).strip()
 
     # ── Application Date ─────────────────────────────────────────────────────
     m = re.search(
-        r'(?:application\s+date|आवेदन\s+तिथि)[:\s\/]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})',
-        raw_text, re.IGNORECASE
+        r"(?:application\s+date|आवेदन\s+तिथि)[:\s\/]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})",
+        raw_text,
+        re.IGNORECASE,
     )
     if m:
         result["application_date"] = _parse_tm_date(m.group(1))
 
     # ── Used Since ───────────────────────────────────────────────────────────
     m = re.search(
-        r'(?:used\s+since|उपयोग\s+की\s+तिथि)[:\s\/]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})',
-        raw_text, re.IGNORECASE
+        r"(?:used\s+since|उपयोग\s+की\s+तिथि)[:\s\/]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})",
+        raw_text,
+        re.IGNORECASE,
     )
     if m:
         result["used_since"] = _parse_tm_date(m.group(1))
@@ -10802,45 +12807,46 @@ def _extract_trademark_notice_data(raw_text: str) -> dict:
     # ── Applicant Name ───────────────────────────────────────────────────────
     # "Name of Applicant: MR. RAJESH DHARIWAL"
     m = re.search(
-        r'(?:name\s+of\s+applicant|applicant(?:\'s)?\s+name|आवेदक\s+का\s+नाम)[:\s\/]*([A-Z][A-Za-z.\s]{3,60}?)(?:\n|$|\|)',
-        raw_text, re.IGNORECASE
+        r"(?:name\s+of\s+applicant|applicant(?:\'s)?\s+name|आवेदक\s+का\s+नाम)[:\s\/]*([A-Z][A-Za-z.\s]{3,60}?)(?:\n|$|\|)",
+        raw_text,
+        re.IGNORECASE,
     )
     if m:
-        result["applicant_name"] = re.sub(r'\s+', ' ', m.group(1)).strip().rstrip('.,')
+        result["applicant_name"] = re.sub(r"\s+", " ", m.group(1)).strip().rstrip(".,")
 
     # ── Recipient / Agent Name ───────────────────────────────────────────────
     # First block: "To,\n<NAME>\n<ADDRESS>" — take line after "To,"
     m = re.search(
-        r'(?:सेवा\s+में\s*\/\s*To|To\s*,)\s*\n\s*([A-Z][A-Za-z\s.]{2,50})\n',
-        raw_text, re.IGNORECASE
+        r"(?:सेवा\s+में\s*\/\s*To|To\s*,)\s*\n\s*([A-Z][A-Za-z\s.]{2,50})\n",
+        raw_text,
+        re.IGNORECASE,
     )
     if m:
-        result["recipient_name"] = re.sub(r'\s+', ' ', m.group(1)).strip()
+        result["recipient_name"] = re.sub(r"\s+", " ", m.group(1)).strip()
 
     # ── Hearing Date ─────────────────────────────────────────────────────────
     # "fixed for hearing on 06-04-2026" or "दिनांक 06-04-2026 को सुनवाई"
     # Try English first
     m = re.search(
-        r'(?:hearing\s+on|fixed\s+for\s+hearing\s+on|scheduled.*?on)\s+(\d{1,2}[-\/]\d{1,2}[-\/]\d{4})',
-        raw_text, re.IGNORECASE
+        r"(?:hearing\s+on|fixed\s+for\s+hearing\s+on|scheduled.*?on)\s+(\d{1,2}[-\/]\d{1,2}[-\/]\d{4})",
+        raw_text,
+        re.IGNORECASE,
     )
     if m:
         result["hearing_date"] = _parse_tm_date(m.group(1))
 
     if not result["hearing_date"]:
         # Hindi version: "दिनांक 06-04-2026 को सुनवाई"
-        m = re.search(
-            r'दिनांक\s+(\d{1,2}[-\/]\d{1,2}[-\/]\d{4})\s+को\s+सुनवाई',
-            raw_text
-        )
+        m = re.search(r"दिनांक\s+(\d{1,2}[-\/]\d{1,2}[-\/]\d{4})\s+को\s+सुनवाई", raw_text)
         if m:
             result["hearing_date"] = _parse_tm_date(m.group(1))
 
     if not result["hearing_date"]:
         # Bold date pattern in English block — "on **06-04-2026** as scheduled"
         m = re.search(
-            r'\bon\s+(\d{2}[-\/]\d{2}[-\/]\d{4})\s+as\s+scheduled',
-            raw_text, re.IGNORECASE
+            r"\bon\s+(\d{2}[-\/]\d{2}[-\/]\d{4})\s+as\s+scheduled",
+            raw_text,
+            re.IGNORECASE,
         )
         if m:
             result["hearing_date"] = _parse_tm_date(m.group(1))
@@ -10848,8 +12854,9 @@ def _extract_trademark_notice_data(raw_text: str) -> dict:
     # ── Letter Date ──────────────────────────────────────────────────────────
     # "Dated: 16-02-2026" at top of letter
     m = re.search(
-        r'(?:dated?|दिनांक)[:\s]*(\d{1,2}[-\/]\d{1,2}[-\/]\d{4})',
-        raw_text, re.IGNORECASE
+        r"(?:dated?|दिनांक)[:\s]*(\d{1,2}[-\/]\d{1,2}[-\/]\d{4})",
+        raw_text,
+        re.IGNORECASE,
     )
     if m:
         result["letter_date"] = _parse_tm_date(m.group(1))
@@ -10858,18 +12865,18 @@ def _extract_trademark_notice_data(raw_text: str) -> dict:
     # Not always present in show cause notices. Try common patterns.
     m = re.search(
         r'(?:trade\s*mark(?:s)?\s+(?:application\s+)?(?:for|of)|in\s+respect\s+of)[:\s]+"?([A-Z][A-Za-z0-9\s&\-\'\.]{1,40})"?',
-        raw_text, re.IGNORECASE
+        raw_text,
+        re.IGNORECASE,
     )
     if m:
-        result["brand_name"] = m.group(1).strip().strip('"\'')
+        result["brand_name"] = m.group(1).strip().strip("\"'")
 
     return result
 
 
 @api_router.post("/documents/extract-trademark-notice")
 async def extract_trademark_notice(
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user)
+    file: UploadFile = File(...), current_user: User = Depends(get_current_user)
 ):
     """
     Extract structured data from a trademark / IP notice PDF.
@@ -10894,6 +12901,7 @@ async def extract_trademark_notice(
     # Extract text using pdfplumber
     try:
         import pdfplumber
+
         parts = []
         with pdfplumber.open(BytesIO(content)) as pdf:
             for page in pdf.pages:
@@ -10904,7 +12912,9 @@ async def extract_trademark_notice(
                 for table in page.extract_tables():
                     for row in table:
                         if row:
-                            parts.append("  |  ".join(str(c or "").strip() for c in row))
+                            parts.append(
+                                "  |  ".join(str(c or "").strip() for c in row)
+                            )
         raw_text = "\n".join(parts)
     except Exception as exc:
         logger.error(f"pdfplumber failed on trademark notice: {exc}")
@@ -10913,7 +12923,7 @@ async def extract_trademark_notice(
     if not raw_text or len(raw_text.strip()) < 20:
         raise HTTPException(
             status_code=422,
-            detail="No readable text found. Please upload a text-based (non-scanned) PDF."
+            detail="No readable text found. Please upload a text-based (non-scanned) PDF.",
         )
 
     extracted = _extract_trademark_notice_data(raw_text)
@@ -10923,7 +12933,7 @@ async def extract_trademark_notice(
         raise HTTPException(
             status_code=404,
             detail="Could not find application number or hearing date. "
-                   "Make sure this is a valid IP Office notice PDF."
+            "Make sure this is a valid IP Office notice PDF.",
         )
 
     logger.info(
@@ -10948,6 +12958,7 @@ async def universal_exception_handler(request: Request, exc: Exception):
     # Echo back the request origin when it's a known safe origin.
     # Also accept any *.onrender.com preview URL so staging branches work.
     import re as _re
+
     origin = request.headers.get("origin", "")
     allowed_origins = [
         "https://final-taskosphere-frontend.onrender.com",
@@ -10958,8 +12969,12 @@ async def universal_exception_handler(request: Request, exc: Exception):
         "http://127.0.0.1:5174",
         "http://127.0.0.1:3000",
     ]
-    is_allowed = (origin in allowed_origins) or bool(_re.match(r"https://.*\.onrender\.com$", origin))
-    cors_origin = origin if is_allowed else "https://final-taskosphere-frontend.onrender.com"
+    is_allowed = (origin in allowed_origins) or bool(
+        _re.match(r"https://.*\.onrender\.com$", origin)
+    )
+    cors_origin = (
+        origin if is_allowed else "https://final-taskosphere-frontend.onrender.com"
+    )
     headers = {
         "Access-Control-Allow-Origin": cors_origin,
         "Access-Control-Allow-Credentials": "true",
@@ -10971,10 +12986,11 @@ async def universal_exception_handler(request: Request, exc: Exception):
         content={
             "error": "InternalServerError",
             "message": "A server error occurred. Please try again.",
-            "path": request.url.path
+            "path": request.url.path,
         },
         headers=headers,
     )
+
 
 # Api Router
 api_router.include_router(invoicing_router)
@@ -10995,6 +13011,7 @@ api_router.include_router(interviews_router)
 api_router.include_router(notification_router)
 api_router.include_router(email_router)
 api_router.include_router(activity_monitor_router)
+api_router.include_router(desktop_agent_router)
 api_router.include_router(client_portal_router)
 api_router.include_router(reminders_router)
 api_router.include_router(whatsapp_router)
@@ -11004,11 +13021,9 @@ app.include_router(google_auth_router)
 # CLIENT MERGE — merge two or more duplicate clients into one
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @api_router.post("/clients/merge")
-async def merge_clients(
-    payload: dict,
-    current_user: User = Depends(get_current_user)
-):
+async def merge_clients(payload: dict, current_user: User = Depends(get_current_user)):
     """
     Merge multiple duplicate clients into a primary client.
     payload: { primary_id: str, secondary_ids: [str], field_overrides: {field: value} }
@@ -11019,14 +13034,18 @@ async def merge_clients(
     """
     perms = get_user_permissions(current_user)
     if current_user.role != "admin" and not perms.get("can_edit_clients", False):
-        raise HTTPException(status_code=403, detail="Permission denied: cannot merge clients")
+        raise HTTPException(
+            status_code=403, detail="Permission denied: cannot merge clients"
+        )
 
     primary_id = payload.get("primary_id")
     secondary_ids = payload.get("secondary_ids", [])
     field_overrides = payload.get("field_overrides", {})
 
     if not primary_id or not secondary_ids:
-        raise HTTPException(status_code=400, detail="primary_id and secondary_ids are required")
+        raise HTTPException(
+            status_code=400, detail="primary_id and secondary_ids are required"
+        )
 
     primary = await db.clients.find_one({"id": primary_id})
     if not primary:
@@ -11046,12 +13065,31 @@ async def merge_clients(
 
     # Scalar fields: fill from secondaries if primary field is empty
     scalar_fields = [
-        "email", "phone", "birthday", "address", "city", "state",
-        "gstin", "pan", "gst_treatment", "place_of_supply",
-        "referred_by", "notes", "website", "msme_number",
-        "gst_address", "gst_city", "gst_state", "gst_pin",
-        "cin", "llpin", "tally_ledger_name", "tally_group",
-        "credit_limit", "opening_balance", "default_payment_terms",
+        "email",
+        "phone",
+        "birthday",
+        "address",
+        "city",
+        "state",
+        "gstin",
+        "pan",
+        "gst_treatment",
+        "place_of_supply",
+        "referred_by",
+        "notes",
+        "website",
+        "msme_number",
+        "gst_address",
+        "gst_city",
+        "gst_state",
+        "gst_pin",
+        "cin",
+        "llpin",
+        "tally_ledger_name",
+        "tally_group",
+        "credit_limit",
+        "opening_balance",
+        "default_payment_terms",
     ]
     for sc in secondaries:
         for f in scalar_fields:
@@ -11062,7 +13100,7 @@ async def merge_clients(
     # services
     all_services = list(merged.get("services") or [])
     for sc in secondaries:
-        for s in (sc.get("services") or []):
+        for s in sc.get("services") or []:
             if s and s not in all_services:
                 all_services.append(s)
     merged["services"] = all_services
@@ -11071,7 +13109,7 @@ async def merge_clients(
     existing_dsc = list(merged.get("dsc_details") or [])
     seen_dsc = {d.get("pan") or d.get("name") for d in existing_dsc}
     for sc in secondaries:
-        for d in (sc.get("dsc_details") or []):
+        for d in sc.get("dsc_details") or []:
             key = d.get("pan") or d.get("name")
             if key not in seen_dsc:
                 existing_dsc.append(d)
@@ -11080,9 +13118,11 @@ async def merge_clients(
 
     # contact_persons
     existing_contacts = list(merged.get("contact_persons") or [])
-    seen_cp = {(c.get("name") or "").lower() for c in existing_contacts if c.get("name")}
+    seen_cp = {
+        (c.get("name") or "").lower() for c in existing_contacts if c.get("name")
+    }
     for sc in secondaries:
-        for cp in (sc.get("contact_persons") or []):
+        for cp in sc.get("contact_persons") or []:
             key = (cp.get("name") or "").lower()
             if key and key not in seen_cp:
                 existing_contacts.append(cp)
@@ -11093,7 +13133,7 @@ async def merge_clients(
     existing_assignments = list(merged.get("assignments") or [])
     seen_assignments = {a.get("user_id") for a in existing_assignments}
     for sc in secondaries:
-        for a in (sc.get("assignments") or []):
+        for a in sc.get("assignments") or []:
             uid = a.get("user_id")
             if uid and uid not in seen_assignments:
                 existing_assignments.append(a)
@@ -11102,7 +13142,9 @@ async def merge_clients(
                 # merge services into existing assignment
                 for ea in existing_assignments:
                     if ea.get("user_id") == uid:
-                        ea["services"] = list(set((ea.get("services") or []) + (a.get("services") or [])))
+                        ea["services"] = list(
+                            set((ea.get("services") or []) + (a.get("services") or []))
+                        )
     merged["assignments"] = existing_assignments
 
     # Apply manual field overrides (user chose to take value from secondary)
@@ -11115,10 +13157,15 @@ async def merge_clients(
     secondary_notes_parts = [
         (sc.get("notes") or "").strip()
         for sc in secondaries
-        if (sc.get("notes") or "").strip() and (sc.get("notes") or "").strip() != primary_notes
+        if (sc.get("notes") or "").strip()
+        and (sc.get("notes") or "").strip() != primary_notes
     ]
     if secondary_notes_parts:
-        merged["notes"] = "\n\n---\n\n".join([primary_notes] + secondary_notes_parts) if primary_notes else "\n\n---\n\n".join(secondary_notes_parts)
+        merged["notes"] = (
+            "\n\n---\n\n".join([primary_notes] + secondary_notes_parts)
+            if primary_notes
+            else "\n\n---\n\n".join(secondary_notes_parts)
+        )
 
     merged["merged_from"] = secondary_ids
     merged["merged_at"] = datetime.now(timezone.utc).isoformat()
@@ -11129,8 +13176,12 @@ async def merge_clients(
 
     # Migrate tasks/leads that reference secondary clients to primary
     for sid in secondary_ids:
-        await db.tasks.update_many({"client_id": sid}, {"$set": {"client_id": primary_id}})
-        await db.leads.update_many({"converted_client_id": sid}, {"$set": {"converted_client_id": primary_id}})
+        await db.tasks.update_many(
+            {"client_id": sid}, {"$set": {"client_id": primary_id}}
+        )
+        await db.leads.update_many(
+            {"converted_client_id": sid}, {"$set": {"converted_client_id": primary_id}}
+        )
 
     # Delete secondaries
     for sid in secondary_ids:
@@ -11147,6 +13198,7 @@ async def merge_clients(
 # CLIENT GROUPS — group clients under a named label
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @api_router.get("/client-groups")
 async def list_client_groups(current_user: User = Depends(get_current_user)):
     """Return all client groups for this org (stored in client_groups collection)."""
@@ -11157,7 +13209,9 @@ async def list_client_groups(current_user: User = Depends(get_current_user)):
 
 
 @api_router.post("/client-groups")
-async def create_client_group(payload: dict, current_user: User = Depends(get_current_user)):
+async def create_client_group(
+    payload: dict, current_user: User = Depends(get_current_user)
+):
     """Create a new client group. payload: { name, description?, color? }"""
     perms = get_user_permissions(current_user)
     if current_user.role != "admin" and not perms.get("can_edit_clients", False):
@@ -11167,9 +13221,13 @@ async def create_client_group(payload: dict, current_user: User = Depends(get_cu
     if not name:
         raise HTTPException(status_code=400, detail="Group name is required")
 
-    existing = await db.client_groups.find_one({"name": {"$regex": f"^{name}$", "$options": "i"}})
+    existing = await db.client_groups.find_one(
+        {"name": {"$regex": f"^{name}$", "$options": "i"}}
+    )
     if existing:
-        raise HTTPException(status_code=409, detail="A group with this name already exists")
+        raise HTTPException(
+            status_code=409, detail="A group with this name already exists"
+        )
 
     group = {
         "id": str(uuid.uuid4()),
@@ -11186,7 +13244,9 @@ async def create_client_group(payload: dict, current_user: User = Depends(get_cu
 
 
 @api_router.put("/client-groups/{group_id}")
-async def update_client_group(group_id: str, payload: dict, current_user: User = Depends(get_current_user)):
+async def update_client_group(
+    group_id: str, payload: dict, current_user: User = Depends(get_current_user)
+):
     """Update group name/description/color or replace client_ids list."""
     perms = get_user_permissions(current_user)
     if current_user.role != "admin" and not perms.get("can_edit_clients", False):
@@ -11209,7 +13269,9 @@ async def update_client_group(group_id: str, payload: dict, current_user: User =
 
 
 @api_router.delete("/client-groups/{group_id}")
-async def delete_client_group(group_id: str, current_user: User = Depends(get_current_user)):
+async def delete_client_group(
+    group_id: str, current_user: User = Depends(get_current_user)
+):
     """Delete a client group (does NOT delete the clients themselves)."""
     perms = get_user_permissions(current_user)
     if current_user.role != "admin" and not perms.get("can_edit_clients", False):
@@ -11222,7 +13284,9 @@ async def delete_client_group(group_id: str, current_user: User = Depends(get_cu
 
 
 @api_router.post("/client-groups/{group_id}/members")
-async def add_clients_to_group(group_id: str, payload: dict, current_user: User = Depends(get_current_user)):
+async def add_clients_to_group(
+    group_id: str, payload: dict, current_user: User = Depends(get_current_user)
+):
     """Add client_ids to a group. payload: { client_ids: [str] }"""
     perms = get_user_permissions(current_user)
     if current_user.role != "admin" and not perms.get("can_edit_clients", False):
@@ -11230,8 +13294,7 @@ async def add_clients_to_group(group_id: str, payload: dict, current_user: User 
 
     ids_to_add = payload.get("client_ids", [])
     await db.client_groups.update_one(
-        {"id": group_id},
-        {"$addToSet": {"client_ids": {"$each": ids_to_add}}}
+        {"id": group_id}, {"$addToSet": {"client_ids": {"$each": ids_to_add}}}
     )
     updated = await db.client_groups.find_one({"id": group_id})
     if not updated:
@@ -11241,7 +13304,9 @@ async def add_clients_to_group(group_id: str, payload: dict, current_user: User 
 
 
 @api_router.delete("/client-groups/{group_id}/members")
-async def remove_clients_from_group(group_id: str, payload: dict, current_user: User = Depends(get_current_user)):
+async def remove_clients_from_group(
+    group_id: str, payload: dict, current_user: User = Depends(get_current_user)
+):
     """Remove client_ids from a group. payload: { client_ids: [str] }"""
     perms = get_user_permissions(current_user)
     if current_user.role != "admin" and not perms.get("can_edit_clients", False):
@@ -11249,14 +13314,14 @@ async def remove_clients_from_group(group_id: str, payload: dict, current_user: 
 
     ids_to_remove = payload.get("client_ids", [])
     await db.client_groups.update_one(
-        {"id": group_id},
-        {"$pull": {"client_ids": {"$in": ids_to_remove}}}
+        {"id": group_id}, {"$pull": {"client_ids": {"$in": ids_to_remove}}}
     )
     updated = await db.client_groups.find_one({"id": group_id})
     if not updated:
         raise HTTPException(status_code=404, detail="Group not found")
     updated.pop("_id", None)
     return updated
+
 
 app.include_router(api_router)
 
@@ -11269,10 +13334,12 @@ app.include_router(api_router)
 #
 # IMPORTANT: These routes must be at ROOT level — NOT under /api/identix/...
 # No auth middleware. No CORS required. Always return plain text "OK".
-app.include_router(qc_trademark_router, prefix="/api/trademark-qc", tags=["trademark-qc"])
+app.include_router(
+    qc_trademark_router, prefix="/api/trademark-qc", tags=["trademark-qc"]
+)
 from backend.attendance_identix import iclock_getrequest, iclock_cdata, iclock_devicecmd
 
-app.add_api_route("/iclock/cdata",       iclock_cdata,       methods=["GET", "POST"])
-app.add_api_route("/iclock/getrequest",  iclock_getrequest,  methods=["GET", "POST"])
-app.add_api_route("/iclock/devicecmd",   iclock_devicecmd,   methods=["GET", "POST"])
+app.add_api_route("/iclock/cdata", iclock_cdata, methods=["GET", "POST"])
+app.add_api_route("/iclock/getrequest", iclock_getrequest, methods=["GET", "POST"])
+app.add_api_route("/iclock/devicecmd", iclock_devicecmd, methods=["GET", "POST"])
 app.include_router(whatsapp_hub_router, prefix="/api")
