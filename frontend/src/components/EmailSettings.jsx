@@ -941,15 +941,23 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, on
             {conn.imap_host && <><span className="mx-1.5">·</span><span className="font-medium">{conn.imap_host}</span></>}
           </p>
           <div className="flex items-center gap-1 flex-shrink-0">
-            <button onClick={handleSync} disabled={syncing}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 hover:bg-slate-200 dark:hover:bg-slate-700 whitespace-nowrap"
+            {(adminDisabled || adminPaused) && (
+              <span className="flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-lg mr-1"
+                style={{ backgroundColor: isDark ? "rgba(245,158,11,0.10)" : "#fffbeb", color: isDark ? "#fcd34d" : "#92400e" }}>
+                <AlertTriangle className="w-3 h-3" />
+                {adminDisabled ? "Disabled — enable to sync" : "Paused — resume to sync"}
+              </span>
+            )}
+            <button onClick={handleSync} disabled={syncing || adminDisabled || adminPaused}
+              title={adminDisabled ? "Integration is disabled by admin — enable it first" : adminPaused ? "Sync is paused by admin — resume it first" : undefined}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 hover:bg-slate-200 dark:hover:bg-slate-700 whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
               style={{ color: isDark ? D.muted : "#64748b" }}>
               {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Sync Now
             </button>
             <div className="relative">
-              <button ref={retroBtnRef} onClick={toggleRetroMenu} disabled={retroSyncing}
-                title="Re-scan older mail (e.g. last 90 days / 1 year / all time) — already-imported emails are skipped automatically"
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 hover:bg-slate-200 dark:hover:bg-slate-700 whitespace-nowrap"
+              <button ref={retroBtnRef} onClick={toggleRetroMenu} disabled={retroSyncing || adminDisabled || adminPaused}
+                title={adminDisabled ? "Integration is disabled by admin" : adminPaused ? "Sync is paused by admin" : "Re-scan older mail (e.g. last 90 days / 1 year / all time) — already-imported emails are skipped automatically"}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 hover:bg-slate-200 dark:hover:bg-slate-700 whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{ color: isDark ? D.muted : "#64748b" }}>
                 {retroSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Clock className="w-3.5 h-3.5" />}
                 Sync Older Mail <ChevronDown className="w-3 h-3" />
