@@ -556,33 +556,57 @@ async def sync_users_to_device(
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
-    users = await db.users.find(
-        {"identix_uid": {"$exists": True}, "is_active": True},
+    # Fetch ALL active users (not just those with identix_uid already assigned)
+    all_users = await db.users.find(
+        {"is_active": True},
         {"_id": 0, "id": 1, "full_name": 1, "identix_uid": 1},
     ).to_list(1000)
 
-    if not users:
+    if not all_users:
         return {
             "success": True,
             "synced":  0,
             "failed":  0,
-            "message": "No users with Identix UIDs",
+            "message": "No active users found",
         }
 
-    # Queue commands for this device via ADMS (machine polls /iclock/devicecmd)
     sn = device.get("serial_number", "")
+    if not sn:
+        raise HTTPException(status_code=400, detail="Device has no serial number configured")
+
     queued = 0
-    for u in users:
+    failed = 0
+    for u in all_users:
         try:
-            await _queue_user_cmd(sn, u["identix_uid"], u.get("full_name", ""), u.get("id", ""))
+            identix_uid = u.get("identix_uid")
+            # Auto-assign a UID if user doesn't have one yet
+            if not identix_uid:
+                counter = await db.counters.find_one_and_update(
+                    {"_id": "identix_uid"},
+                    {"$inc": {"seq": 1}},
+                    upsert=True,
+                    return_document=True,
+                )
+                identix_uid = counter.get("seq", 1)
+                await db.users.update_one(
+                    {"id": u["id"]},
+                    {"$set": {
+                        "identix_uid":      identix_uid,
+                        "identix_enrolled": False,
+                        "thumb_enrolled":   False,
+                    }},
+                )
+            await _queue_user_cmd(sn, identix_uid, u.get("full_name", ""), u.get("id", ""))
             await db.users.update_one({"id": u["id"]}, {"$set": {"identix_enrolled": True}})
             queued += 1
         except Exception as eq:
             logger.warning(f"Failed to queue user {u.get('full_name')}: {eq}")
+            failed += 1
+
     return {
         "success": True,
         "synced":  queued,
-        "failed":  len(users) - queued,
+        "failed":  failed,
         "message": f"Queued {queued} user(s) for ADMS push to {device.get('name')}. Machine will receive commands on next poll (up to 1 min).",
     }
 
