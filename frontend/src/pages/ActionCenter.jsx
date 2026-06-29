@@ -838,7 +838,7 @@ export default function ActionCenter() {
       if (err?.response?.status === 404 || err?.response?.status === 422) {
         // fallback: use extract-events endpoint without force
         try {
-          const res2 = await api.get("/email/extract-events?limit=100", { timeout: 60000 });
+          const res2 = await api.get("/email/extract-events?force_refresh=true&limit=100", { timeout: 60000 });
           setEvents(res2.data || []);
         } catch { toast.error("Could not load events"); }
       } else {
