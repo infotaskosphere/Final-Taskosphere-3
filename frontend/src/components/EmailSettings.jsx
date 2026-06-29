@@ -653,6 +653,48 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, on
   const [retroSyncing, setRetroSyncing] = useState(false);
   const [showRetroMenu,setShowRetroMenu]= useState(false);
   const [retroMenuPos, setRetroMenuPos] = useState(null);
+
+  // ── Per-account settings panel ────────────────────────────────────────────
+  const [showSettings,    setShowSettings]    = useState(false);
+  const [acctAutoSync,    setAcctAutoSync]    = useState(!!conn.auto_sync);
+  const [acctLinkedPage,  setAcctLinkedPage]  = useState(conn.linked_page || "all");
+  const [savingSettings,  setSavingSettings]  = useState(false);
+
+  useEffect(() => { setAcctAutoSync(!!conn.auto_sync); },         [conn.auto_sync]);
+  useEffect(() => { setAcctLinkedPage(conn.linked_page || "all"); }, [conn.linked_page]);
+
+  const LINKED_PAGE_OPTIONS = [
+    { value: "all",       label: "All Pages",  icon: "🌐" },
+    { value: "leads",     label: "Leads",      icon: "🎯" },
+    { value: "invoicing", label: "Invoicing",  icon: "📄" },
+    { value: "tasks",     label: "Tasks",      icon: "✅" },
+    { value: "reminders", label: "Reminders",  icon: "🔔" },
+    { value: "visits",    label: "Visits",     icon: "📍" },
+  ];
+
+  const saveAccountSettings = async (patch) => {
+    setSavingSettings(true);
+    try {
+      await api.patch(`/email/connections/${encodeURIComponent(conn.email_address)}`, patch);
+      onUpdateSettings && onUpdateSettings(conn.email_address, patch);
+      toast.success("Account settings saved");
+    } catch {
+      toast.error("Failed to save account settings");
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const handleToggleAutoSync = async () => {
+    const next = !acctAutoSync;
+    setAcctAutoSync(next);
+    await saveAccountSettings({ auto_sync: next });
+  };
+
+  const handleChangeLinkedPage = async (val) => {
+    setAcctLinkedPage(val);
+    await saveAccountSettings({ linked_page: val });
+  };
   const retroBtnRef = useRef(null);
 
   // ── Keyword sync controls (per account) ──────────────────────────────────
@@ -942,6 +984,13 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, on
               style={{ color: isDark ? D.muted : "#64748b" }}>
               {conn.is_active ? "Pause" : "Resume"}
             </button>
+            <button
+              onClick={() => setShowSettings(s => !s)}
+              title="Account settings"
+              className={`p-1.5 rounded-lg transition-all active:scale-90 ${showSettings ? "bg-blue-100 dark:bg-blue-900/40" : "hover:bg-slate-200 dark:hover:bg-slate-700"}`}
+              style={{ color: showSettings ? COLORS.mediumBlue : (isDark ? D.muted : "#94a3b8") }}>
+              <Settings2 className="w-3.5 h-3.5" />
+            </button>
             <button onClick={() => onDisconnect(conn.email_address)} className="p-1.5 rounded-lg transition-all active:scale-90"
               style={{ color: isDark ? D.muted : "#94a3b8" }}
               onMouseEnter={e => { e.currentTarget.style.color = COLORS.red; e.currentTarget.style.backgroundColor = isDark ? "rgba(239,68,68,0.12)" : "#fef2f2"; }}
@@ -950,6 +999,91 @@ function ConnectedAccountCard({ conn, onDisconnect, onTest, onToggle, onSync, on
             </button>
           </div>
         </div>
+
+        {/* ── Per-account Settings Panel ──────────────────────────────────── */}
+        <AnimatePresence>
+          {showSettings && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.25, ease: [0.23, 1, 0.32, 1] }}
+              className="overflow-hidden">
+              <div className="border-t border-slate-100 dark:border-slate-700 px-4 py-4 space-y-4"
+                style={{ backgroundColor: isDark ? "rgba(30,41,59,0.6)" : "#f8fafc" }}>
+
+                {/* Header */}
+                <div className="flex items-center gap-2">
+                  <Settings2 className="w-4 h-4" style={{ color: COLORS.mediumBlue }} />
+                  <span className="text-xs font-bold uppercase tracking-widest" style={{ color: isDark ? "#93c5fd" : COLORS.mediumBlue }}>
+                    Account Settings
+                  </span>
+                  {savingSettings && <Loader2 className="w-3.5 h-3.5 animate-spin ml-auto" style={{ color: COLORS.mediumBlue }} />}
+                </div>
+
+                {/* Auto Sync Toggle */}
+                <div className="flex items-center justify-between gap-4 p-3 rounded-xl border"
+                  style={{ backgroundColor: isDark ? D.raised : "#ffffff", borderColor: isDark ? D.border : "#e2e8f0" }}>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <RefreshCw className="w-3.5 h-3.5" style={{ color: acctAutoSync ? COLORS.emeraldGreen : (isDark ? D.dimmer : "#94a3b8") }} />
+                      <p className="text-sm font-semibold" style={{ color: isDark ? D.text : "#1e293b" }}>Auto Sync</p>
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${acctAutoSync ? "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400" : "bg-slate-100 dark:bg-slate-700 text-slate-400"}`}>
+                        {acctAutoSync ? "ON" : "OFF"}
+                      </span>
+                    </div>
+                    <p className="text-xs mt-0.5" style={{ color: isDark ? D.dimmer : "#64748b" }}>
+                      Automatically fetch new emails daily without manual sync
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleToggleAutoSync}
+                    disabled={savingSettings}
+                    className="flex-shrink-0 active:scale-95 transition-all disabled:opacity-50">
+                    <div className={`relative w-11 h-6 rounded-full transition-colors ${acctAutoSync ? "bg-emerald-500" : (isDark ? "bg-slate-600" : "bg-slate-300")}`}>
+                      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${acctAutoSync ? "translate-x-5" : "translate-x-0"}`} />
+                    </div>
+                  </button>
+                </div>
+
+                {/* Linked Page Picker */}
+                <div className="p-3 rounded-xl border space-y-2"
+                  style={{ backgroundColor: isDark ? D.raised : "#ffffff", borderColor: isDark ? D.border : "#e2e8f0" }}>
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Tag className="w-3.5 h-3.5" style={{ color: COLORS.deepBlue }} />
+                    <p className="text-sm font-semibold" style={{ color: isDark ? D.text : "#1e293b" }}>Link to Page</p>
+                    <span className="text-xs ml-1" style={{ color: isDark ? D.dimmer : "#64748b" }}>events from this email appear in the selected page</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {LINKED_PAGE_OPTIONS.map(opt => (
+                      <button
+                        key={opt.value}
+                        onClick={() => handleChangeLinkedPage(opt.value)}
+                        disabled={savingSettings}
+                        className="flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold transition-all active:scale-95 disabled:opacity-50"
+                        style={{
+                          backgroundColor: acctLinkedPage === opt.value
+                            ? (isDark ? "rgba(31,111,178,0.20)" : "#eff6ff")
+                            : (isDark ? D.card : "#f8fafc"),
+                          borderColor: acctLinkedPage === opt.value
+                            ? COLORS.mediumBlue
+                            : (isDark ? D.border : "#e2e8f0"),
+                          color: acctLinkedPage === opt.value
+                            ? COLORS.mediumBlue
+                            : (isDark ? D.muted : "#64748b"),
+                        }}>
+                        <span>{opt.icon}</span>
+                        <span className="flex-1 text-left">{opt.label}</span>
+                        {acctLinkedPage === opt.value && <Check className="w-3 h-3 ml-auto flex-shrink-0" />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </SectionCard>
     </motion.div>
   );
