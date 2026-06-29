@@ -2206,34 +2206,45 @@ async def extract_events(
     async def process_account(conn):
         email_addr = conn["email_address"]
 
-        # The 30-minute result cache only applies to the normal rolling-window
-        # scan. A retrospective sync (since_date) or keyword-filtered sync
-        # always hits the mailbox.
-        if not force_refresh and not imap_since and not (conn.get("keywords") or []) and conn.get("last_synced"):
-            try:
-                last = datetime.fromisoformat(conn["last_synced"])
-                if (datetime.now(timezone.utc) - last).total_seconds() < 1800:
-                    cached = await db[COL_EVENTS].find(
-                        {"user_id": str(current_user.id), "email_account": email_addr},
-                        {"_id": 0}
-                    ).sort("created_at", -1).limit(limit).to_list(limit)
-                    return [_doc_to_out(d) for d in cached]
-            except Exception:
-                pass
+        # NOTE: Caching is now handled at the importer_events endpoint level.
+        # process_account always performs a real IMAP scan so that new mail
+        # (e.g. today's IP India examination report) is never missed.
+        # The effective_imap_since date filter below limits how far back we
+        # search, so this is still fast for normal incremental syncs.
 
         loop       = asyncio.get_event_loop()
         kw_list    = conn.get("keywords") or []
         kw_mode    = conn.get("keyword_match_mode", "or")
         kw_case    = bool(conn.get("keyword_case_sensitive", False))
         kw_autosave= bool(conn.get("keyword_auto_save", True))
-        # No 50-message cap for a date-bounded retrospective scan or for a
-        # keyword-scoped scan — both narrow the result set on their own.
-        fetch_cap  = 0 if (imap_since or kw_list) else 50
+        # For normal (non-retrospective, non-keyword) scans, use a SINCE date
+        # derived from last_synced (or 30 days ago as fallback) so we never
+        # miss emails that arrived since the previous sync. This replaces the
+        # old flat 50-message cap which could skip today's mail in a busy inbox.
+        effective_imap_since = imap_since
+        if not effective_imap_since and not kw_list:
+            ls = conn.get("last_synced")
+            if ls:
+                try:
+                    last_dt = datetime.fromisoformat(ls)
+                    if last_dt.tzinfo is None:
+                        last_dt = last_dt.replace(tzinfo=timezone.utc)
+                    # Go back 1 extra day to avoid timezone/boundary edge cases
+                    since_dt = last_dt - timedelta(days=1)
+                    effective_imap_since = since_dt.strftime("%d-%b-%Y")
+                except Exception:
+                    pass
+            if not effective_imap_since:
+                # First scan for this account — look back 30 days
+                fallback = datetime.now(timezone.utc) - timedelta(days=30)
+                effective_imap_since = fallback.strftime("%d-%b-%Y")
+        # No message count cap when we're already filtering by date
+        fetch_cap  = 0 if (effective_imap_since or kw_list) else 100
         raw_emails = await loop.run_in_executor(
             None, _scan_mailbox_sync,
             conn["imap_host"], conn["imap_port"], email_addr,
             _decrypt(conn["app_password_enc"]), fetch_cap, sender_whitelist or None,
-            imap_since, kw_list or None, kw_mode, kw_case,
+            effective_imap_since, kw_list or None, kw_mode, kw_case,
         )
         acc = []
         for raw in raw_emails:
@@ -2286,13 +2297,27 @@ async def extract_events(
         return acc
 
     completed = await asyncio.gather(*[process_account(c) for c in conns], return_exceptions=True)
-    final: List[ExtractedEventOut] = []
+    newly_found: List[ExtractedEventOut] = []
     for res in completed:
         if isinstance(res, list):
-            final.extend(res)
+            newly_found.extend(res)
         elif isinstance(res, Exception):
             logger.error(f"process_account error: {res}")
 
+    # Merge newly-scanned events with the full stored set so Action Center
+    # always shows ALL historical events plus anything just discovered.
+    # De-duplicate by event id (string form of ObjectId).
+    all_stored_docs = await db[COL_EVENTS].find(
+        {"user_id": str(current_user.id)}, {"_id": 0}
+    ).sort("date", -1).limit(limit).to_list(limit)
+    stored_by_id = {str(d.get("id") or d.get("_id", "")): _doc_to_out(d) for d in all_stored_docs}
+
+    # Overlay newly scanned results (they may have fresher auto_saved/matched_keywords state)
+    for ev in newly_found:
+        if ev.id:
+            stored_by_id[ev.id] = ev
+
+    final = list(stored_by_id.values())
     final.sort(key=lambda e: e.date or "0000-00-00", reverse=True)
     return final[:limit]
 
@@ -2318,14 +2343,50 @@ async def delete_event(event_id: str, current_user=Depends(check_module_permissi
 @router.get("/importer/events", response_model=List[ExtractedEventOut])
 async def importer_events(
     current_user=Depends(check_module_permission("email_accounts", "view")),
-    limit: int = Query(30),
+    limit: int = Query(200),
     force_refresh: bool = Query(False)
 ):
-    count = await db[COL_EVENTS].count_documents({"user_id": str(current_user.id)})
-    if count == 0 or force_refresh:
+    """
+    Serve cached events for the Action Center.
+    Triggers a real mailbox scan if:
+      - No events are stored yet (first run), OR
+      - force_refresh is True (Scan Fresh button), OR
+      - The most recent sync across all connections is older than 30 minutes
+        (catches new emails without user needing to hit Scan Fresh).
+    """
+    user_id = str(current_user.id)
+    count = await db[COL_EVENTS].count_documents({"user_id": user_id})
+
+    # Determine if any connected account has a stale last_synced (> 30 min ago)
+    needs_sync = False
+    if not force_refresh and count > 0:
+        conns = await db[COL_CONNECTIONS].find(
+            {"user_id": user_id, "is_active": True,
+             "admin_disabled": {"$ne": True}, "admin_paused": {"$ne": True}},
+            {"last_synced": 1, "_id": 0}
+        ).to_list(50)
+        now = datetime.now(timezone.utc)
+        for conn in conns:
+            ls = conn.get("last_synced")
+            if not ls:
+                needs_sync = True
+                break
+            try:
+                last = datetime.fromisoformat(ls)
+                if last.tzinfo is None:
+                    last = last.replace(tzinfo=timezone.utc)
+                if (now - last).total_seconds() > 1800:
+                    needs_sync = True
+                    break
+            except Exception:
+                needs_sync = True
+                break
+
+    if count == 0 or force_refresh or needs_sync:
         return await extract_events(current_user, limit, force_refresh)
+
     docs = await db[COL_EVENTS].find(
-        {"user_id": str(current_user.id)}, {"_id": 0}
+        {"user_id": user_id}, {"_id": 0}
     ).sort("date", -1).limit(limit).to_list(limit)
     return [_doc_to_out(d) for d in docs]
 
