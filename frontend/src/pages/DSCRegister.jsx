@@ -1358,7 +1358,7 @@ export default function DSCRegister() {
     })();
     return () => { cancelled = true; };
   }, []);
-  useEffect(() => { setCurrentPageIn(1); setCurrentPageOut(1); setCurrentPageExpired(1); setCurrentPageExpiring(1); }, [sortOrder, searchQuery]);
+  useEffect(() => { setCurrentPageIn(1); setCurrentPageOut(1); setCurrentPageExpired(1); setCurrentPageExpiring(1); if (searchQuery.trim()) { setActiveTab('all'); } else { setActiveTab('in'); } }, [sortOrder, searchQuery]);
 
   // ── WhatsApp alert handlers ───────────────────────────────────────────────
   // ── WhatsApp alert handlers ───────────────────────────────────────────────
@@ -1799,6 +1799,7 @@ export default function DSCRegister() {
     const dl = Math.ceil((new Date(d.expiry_date) - nowDate) / 86400000);
     return dl >= 0 && dl <= 7 && filterBySearch(d);
   }));
+  const allDSC = applySortOrder(dscList.filter(d => filterBySearch(d)));
 
   // ── Stats ─────────────────────────────────────────────────────────────────
   const statsExpiring7  = dscList.filter(d => { const dl = Math.ceil((new Date(d.expiry_date) - nowDate) / 86400000); return dl >= 0 && dl <= 7; }).length;
@@ -2348,6 +2349,12 @@ export default function DSCRegister() {
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className={`inline-flex h-11 items-center rounded-xl p-1 gap-1 ${isDark ? 'bg-slate-800 border border-slate-700' : 'bg-slate-100 border border-slate-200'}`}>
+            {searchQuery.trim() && (
+              <TabsTrigger value="all"
+                className="rounded-lg px-5 py-2 text-sm font-semibold transition-all data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md">
+                🔍 All Results ({allDSC.length})
+              </TabsTrigger>
+            )}
             <TabsTrigger value="in"
               className="rounded-lg px-5 py-2 text-sm font-semibold transition-all data-[state=active]:bg-emerald-500 data-[state=active]:text-white data-[state=active]:shadow-md">
               <ArrowDownCircle className="h-4 w-4 mr-1.5 inline" />IN ({inDSC.length})
@@ -2370,6 +2377,27 @@ export default function DSCRegister() {
               )}
             </TabsTrigger>
           </TabsList>
+
+          {/* ALL tab — shown only when searching */}
+          <TabsContent value="all" className="mt-4">
+            <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col" style={tabCard('#dbeafe')}>
+              <div className="bg-blue-50 border-b border-blue-200 px-5 py-3 flex items-center gap-2">
+                <Search className="h-4 w-4 text-blue-700 flex-shrink-0" />
+                <p className="text-sm font-semibold text-blue-700 uppercase tracking-wider">All Results for "{searchQuery}" ({allDSC.length})</p>
+              </div>
+              {allDSC.length === 0
+                ? <div className={`text-center py-16 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                    <Search className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                    <p className="font-medium">No DSC certificates found for "{searchQuery}"</p>
+                  </div>
+                : <DSCTable dscList={allDSC} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog}
+                    onViewLog={openLogDialog} getDSCStatus={getDSCStatus} type="IN"
+                    globalIndexStart={0} isDark={isDark}
+                    selectedIds={selectedIds} onToggleSelect={toggleSelect} onToggleAll={toggleAll}
+                    onWhatsAppAlert={handleWhatsAppAlert} />
+              }
+            </div>
+          </TabsContent>
 
           {/* IN tab */}
           <TabsContent value="in" className="mt-4">
