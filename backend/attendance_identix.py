@@ -434,6 +434,23 @@ class ScanRequest(BaseModel):
 @identix_router.get("/devices")
 async def list_devices(current_user: User = Depends(require_admin())):
     devices = await db.identix_devices.find({}, {"_id": 0}).to_list(100)
+    now = datetime.now(timezone.utc)
+    for d in devices:
+        last_hb = d.get("last_heartbeat_at")
+        if last_hb:
+            try:
+                hb_dt = datetime.fromisoformat(last_hb)
+                if hb_dt.tzinfo is None:
+                    hb_dt = hb_dt.replace(tzinfo=timezone.utc)
+                minutes_ago = (now - hb_dt).total_seconds() / 60
+                d["is_online"] = minutes_ago <= 10
+                d["minutes_since_heartbeat"] = round(minutes_ago, 1)
+            except Exception:
+                d["is_online"] = False
+                d["minutes_since_heartbeat"] = None
+        else:
+            d["is_online"] = False
+            d["minutes_since_heartbeat"] = None
     return {"devices": devices}
 
 
@@ -1116,8 +1133,29 @@ async def iclock_getrequest(request: Request):
     if pending_count > 0:
         logger.info(f"📬 {pending_count} pending command(s) for {sn} — signaling machine")
 
-    # Always return OK — machine will call /iclock/devicecmd on its own schedule
-    # The GetRequest response tells machine timing via headers
+    # ZKTeco ADMS protocol:
+    # - Pending commands: return "C:seq_id:CMD" lines → device calls /iclock/devicecmd
+    # - No commands: return "OK" with timing headers
+    if pending_count > 0:
+        pending_cmds = await db.identix_cmd_queue.find(
+            {"device_serial": sn, "status": "pending"},
+            {"_id": 0}
+        ).sort("seq_id", 1).to_list(50)
+        cmd_lines = []
+        for cmd in pending_cmds:
+            seq = cmd.get("seq_id", 1)
+            cmd_str = cmd.get("cmd_str", "")
+            cmd_lines.append(f"C:{seq}:{cmd_str}")
+            await db.identix_cmd_queue.update_one(
+                {"cmd_id": cmd["cmd_id"]},
+                {"$set": {"status": "sent", "sent_at": datetime.now(timezone.utc).isoformat()}}
+            )
+        logger.info(f"📤 Sending {len(cmd_lines)} command(s) to SN={sn}")
+        return PlainTextResponse("\n".join(cmd_lines) + "\n", headers={
+            "Pragma": "no-cache",
+            "Cache-Control": "no-store",
+        })
+
     return PlainTextResponse("OK\n", headers={
         "Pragma": "no-cache",
         "Cache-Control": "no-store",
@@ -1125,6 +1163,7 @@ async def iclock_getrequest(request: Request):
         "X-Ping-Interval":      "10",
         "X-Push-Content":       "attlog",
     })
+
 
 
 # 🔹 Main attendance data endpoint — ADMS cloud push (machine → Render)
