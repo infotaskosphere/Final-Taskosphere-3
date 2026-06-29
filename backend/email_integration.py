@@ -1,6 +1,7 @@
 import imaplib
 import email
 import email.header
+import email.utils
 import re
 import json
 import asyncio
@@ -761,6 +762,36 @@ def _extract_sender_email(from_header: str) -> str:
         return m.group(1).strip().lower()
     return from_header.strip().lower()
 
+def _parse_email_received_at(date_header: str) -> datetime:
+    """Parse RFC email Date header to UTC; fall back to now if malformed."""
+    try:
+        parsed = email.utils.parsedate_to_datetime(date_header or "")
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except Exception:
+        return datetime.now(timezone.utc)
+
+def _imap_since_from_dt(dt: datetime) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).strftime("%d-%b-%Y")
+
+def _stable_message_id(email_addr: str, raw: Dict) -> str:
+    """Return Message-ID, or a deterministic fallback for messages without one."""
+    mid = (raw.get("message_id") or "").strip()
+    if mid:
+        return mid
+    import hashlib
+    fingerprint = "|".join([
+        email_addr.lower(),
+        raw.get("uid") or "",
+        raw.get("msg_date") or "",
+        raw.get("from_addr") or "",
+        raw.get("subject") or "",
+    ])
+    return "fallback-" + hashlib.sha256(fingerprint.encode("utf-8", "ignore")).hexdigest()
+
 def _scan_mailbox_sync(
     host: str, port: int, email_addr: str, password: str,
     max_msgs: int = 50, sender_whitelist: Optional[List[str]] = None,
@@ -832,6 +863,7 @@ def _scan_mailbox_sync(
                 if not msg_data or not msg_data[0]:
                     continue
                 msg          = email.message_from_bytes(msg_data[0][1])
+                msg_uid      = msg_id.decode(errors="ignore") if isinstance(msg_id, bytes) else str(msg_id)
                 from_raw     = _decode_header_str(msg.get("From", ""))
                 sender_clean = _extract_sender_email(from_raw)
                 if sender_whitelist:
@@ -859,6 +891,8 @@ def _scan_mailbox_sync(
                     "msg_date":         msg.get("Date", ""),
                     "body":             _get_plain_body(msg, max_chars=4000),
                     "message_id":       (msg.get("Message-ID") or "").strip(),
+                    "uid":              msg_uid,
+                    "received_at":      _parse_email_received_at(msg.get("Date", "")).isoformat(),
                     "matched_keywords": matched,
                 })
             except Exception:
@@ -1408,6 +1442,7 @@ def _build_event_doc(user_id: str, email_addr: str, raw: Dict, ev: Dict) -> Dict
         "source_subject": raw["subject"][:200],
         "source_from":    raw["from_addr"][:200],
         "source_date":    raw["msg_date"][:100],
+        "received_at":    raw.get("received_at") or _parse_email_received_at(raw.get("msg_date", "")).isoformat(),
         "raw_snippet":    _clean_text(raw["body"][:500], 500),
         "created_at":     datetime.now(timezone.utc).isoformat(),
     }
@@ -1482,7 +1517,8 @@ async def _run_full_scan_for_user(user_id: str, prefs: Dict, limit: int = 50):
                 sender_whitelist or None,
             )
             for raw in raw_emails:
-                mid    = raw.get("message_id")
+                mid    = _stable_message_id(email_addr, raw)
+                raw["message_id"] = mid
                 exists = await db[COL_EVENTS].find_one(
                     {"user_id": user_id, "message_id": mid}, {"_id": 0}
                 )
@@ -2206,49 +2242,59 @@ async def extract_events(
     async def process_account(conn):
         email_addr = conn["email_address"]
 
-        # NOTE: Caching is now handled at the importer_events endpoint level.
-        # process_account always performs a real IMAP scan so that new mail
-        # (e.g. today's IP India examination report) is never missed.
-        # The effective_imap_since date filter below limits how far back we
-        # search, so this is still fast for normal incremental syncs.
+        # The 30-minute result cache only applies to the normal rolling-window
+        # scan. A retrospective sync (since_date) or keyword-filtered sync
+        # always hits the mailbox.
+        if not force_refresh and not imap_since and not (conn.get("keywords") or []) and conn.get("last_synced"):
+            try:
+                last = datetime.fromisoformat(conn["last_synced"])
+                if (datetime.now(timezone.utc) - last).total_seconds() < 1800:
+                    cached = await db[COL_EVENTS].find(
+                        {"user_id": str(current_user.id), "email_account": email_addr},
+                        {"_id": 0}
+                    ).sort("created_at", -1).limit(limit).to_list(limit)
+                    return [_doc_to_out(d) for d in cached]
+            except Exception:
+                pass
 
         loop       = asyncio.get_event_loop()
         kw_list    = conn.get("keywords") or []
         kw_mode    = conn.get("keyword_match_mode", "or")
         kw_case    = bool(conn.get("keyword_case_sensitive", False))
         kw_autosave= bool(conn.get("keyword_auto_save", True))
-        # For normal (non-retrospective, non-keyword) scans, use a SINCE date
-        # derived from last_synced (or 30 days ago as fallback) so we never
-        # miss emails that arrived since the previous sync. This replaces the
-        # old flat 50-message cap which could skip today's mail in a busy inbox.
-        effective_imap_since = imap_since
-        if not effective_imap_since and not kw_list:
-            ls = conn.get("last_synced")
-            if ls:
+        # Force-refresh must always ask IMAP for mail newer than the latest
+        # imported email date (with a 2-day overlap), not just the newest 50
+        # matching rows. Busy inboxes can otherwise get stuck on an older day
+        # (for example July 9) if newer relevant messages are outside that cap.
+        effective_since = imap_since
+        if force_refresh and not effective_since:
+            latest_doc = await db[COL_EVENTS].find_one(
+                {"user_id": str(current_user.id), "email_account": email_addr, "received_at": {"$exists": True, "$ne": None}},
+                {"_id": 0, "received_at": 1},
+                sort=[("received_at", -1)],
+            )
+            if latest_doc and latest_doc.get("received_at"):
                 try:
-                    last_dt = datetime.fromisoformat(ls)
-                    if last_dt.tzinfo is None:
-                        last_dt = last_dt.replace(tzinfo=timezone.utc)
-                    # Go back 1 extra day to avoid timezone/boundary edge cases
-                    since_dt = last_dt - timedelta(days=1)
-                    effective_imap_since = since_dt.strftime("%d-%b-%Y")
+                    latest_dt = datetime.fromisoformat(str(latest_doc["received_at"]).replace("Z", "+00:00"))
+                    effective_since = _imap_since_from_dt(latest_dt - timedelta(days=2))
                 except Exception:
-                    pass
-            if not effective_imap_since:
-                # First scan for this account — look back 30 days
-                fallback = datetime.now(timezone.utc) - timedelta(days=30)
-                effective_imap_since = fallback.strftime("%d-%b-%Y")
-        # No message count cap when we're already filtering by date
-        fetch_cap  = 0 if (effective_imap_since or kw_list) else 100
+                    effective_since = _imap_since_from_dt(datetime.now(timezone.utc) - timedelta(days=30))
+            else:
+                effective_since = _imap_since_from_dt(datetime.now(timezone.utc) - timedelta(days=30))
+
+        # Date-bounded scans and keyword-scoped scans are already narrowed by
+        # IMAP criteria, so do not cap them before parsing.
+        fetch_cap  = 0 if (effective_since or kw_list) else 100
         raw_emails = await loop.run_in_executor(
             None, _scan_mailbox_sync,
             conn["imap_host"], conn["imap_port"], email_addr,
             _decrypt(conn["app_password_enc"]), fetch_cap, sender_whitelist or None,
-            effective_imap_since, kw_list or None, kw_mode, kw_case,
+            effective_since, kw_list or None, kw_mode, kw_case,
         )
         acc = []
         for raw in raw_emails:
-            mid    = raw.get("message_id")
+            mid    = _stable_message_id(email_addr, raw)
+            raw["message_id"] = mid
             exists = await db[COL_EVENTS].find_one(
                 {"user_id": str(current_user.id), "message_id": mid}, {"_id": 0}
             )
@@ -2297,27 +2343,13 @@ async def extract_events(
         return acc
 
     completed = await asyncio.gather(*[process_account(c) for c in conns], return_exceptions=True)
-    newly_found: List[ExtractedEventOut] = []
+    final: List[ExtractedEventOut] = []
     for res in completed:
         if isinstance(res, list):
-            newly_found.extend(res)
+            final.extend(res)
         elif isinstance(res, Exception):
             logger.error(f"process_account error: {res}")
 
-    # Merge newly-scanned events with the full stored set so Action Center
-    # always shows ALL historical events plus anything just discovered.
-    # De-duplicate by event id (string form of ObjectId).
-    all_stored_docs = await db[COL_EVENTS].find(
-        {"user_id": str(current_user.id)}, {"_id": 0}
-    ).sort("date", -1).limit(limit).to_list(limit)
-    stored_by_id = {str(d.get("id") or d.get("_id", "")): _doc_to_out(d) for d in all_stored_docs}
-
-    # Overlay newly scanned results (they may have fresher auto_saved/matched_keywords state)
-    for ev in newly_found:
-        if ev.id:
-            stored_by_id[ev.id] = ev
-
-    final = list(stored_by_id.values())
     final.sort(key=lambda e: e.date or "0000-00-00", reverse=True)
     return final[:limit]
 
@@ -2343,50 +2375,14 @@ async def delete_event(event_id: str, current_user=Depends(check_module_permissi
 @router.get("/importer/events", response_model=List[ExtractedEventOut])
 async def importer_events(
     current_user=Depends(check_module_permission("email_accounts", "view")),
-    limit: int = Query(200),
+    limit: int = Query(30),
     force_refresh: bool = Query(False)
 ):
-    """
-    Serve cached events for the Action Center.
-    Triggers a real mailbox scan if:
-      - No events are stored yet (first run), OR
-      - force_refresh is True (Scan Fresh button), OR
-      - The most recent sync across all connections is older than 30 minutes
-        (catches new emails without user needing to hit Scan Fresh).
-    """
-    user_id = str(current_user.id)
-    count = await db[COL_EVENTS].count_documents({"user_id": user_id})
-
-    # Determine if any connected account has a stale last_synced (> 30 min ago)
-    needs_sync = False
-    if not force_refresh and count > 0:
-        conns = await db[COL_CONNECTIONS].find(
-            {"user_id": user_id, "is_active": True,
-             "admin_disabled": {"$ne": True}, "admin_paused": {"$ne": True}},
-            {"last_synced": 1, "_id": 0}
-        ).to_list(50)
-        now = datetime.now(timezone.utc)
-        for conn in conns:
-            ls = conn.get("last_synced")
-            if not ls:
-                needs_sync = True
-                break
-            try:
-                last = datetime.fromisoformat(ls)
-                if last.tzinfo is None:
-                    last = last.replace(tzinfo=timezone.utc)
-                if (now - last).total_seconds() > 1800:
-                    needs_sync = True
-                    break
-            except Exception:
-                needs_sync = True
-                break
-
-    if count == 0 or force_refresh or needs_sync:
+    count = await db[COL_EVENTS].count_documents({"user_id": str(current_user.id)})
+    if count == 0 or force_refresh:
         return await extract_events(current_user, limit, force_refresh)
-
     docs = await db[COL_EVENTS].find(
-        {"user_id": user_id}, {"_id": 0}
+        {"user_id": str(current_user.id)}, {"_id": 0}
     ).sort("date", -1).limit(limit).to_list(limit)
     return [_doc_to_out(d) for d in docs]
 
