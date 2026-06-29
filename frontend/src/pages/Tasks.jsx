@@ -231,6 +231,7 @@ const itemVariants = {
 const EMPTY_FORM = {
   title: '', description: '', assigned_to: 'unassigned', sub_assignees: [],
   due_date: '', priority: 'medium', status: 'pending', category: 'other',
+  categories: [],
   client_id: '', is_recurring: false, recurrence_pattern: 'monthly', recurrence_interval: 1,
 };
 
@@ -1089,7 +1090,7 @@ export default function Tasks() {
 
   const handleEdit = (task) => {
     setEditingTask(task);
-    setFormData({ title: task.title, description: task.description || '', assigned_to: task.assigned_to || 'unassigned', sub_assignees: task.sub_assignees || [], due_date: task.due_date ? format(new Date(task.due_date), 'yyyy-MM-dd') : '', priority: task.priority, status: task.status, category: task.category || 'other', client_id: task.client_id || '', is_recurring: task.is_recurring || false, recurrence_pattern: task.recurrence_pattern || 'monthly', recurrence_interval: task.recurrence_interval || 1 });
+    setFormData({ title: task.title, description: task.description || '', assigned_to: task.assigned_to || 'unassigned', sub_assignees: task.sub_assignees || [], due_date: task.due_date ? format(new Date(task.due_date), 'yyyy-MM-dd') : '', priority: task.priority, status: task.status, category: task.category || 'other', categories: task.categories && task.categories.length > 0 ? task.categories : (task.category && task.category !== 'other' ? [task.category] : []), client_id: task.client_id || '', is_recurring: task.is_recurring || false, recurrence_pattern: task.recurrence_pattern || 'monthly', recurrence_interval: task.recurrence_interval || 1 });
     setDialogOpen(true);
   };
 
@@ -2101,26 +2102,38 @@ export default function Tasks() {
                           <div className="p-5 space-y-4">
                             {/* Department chips */}
                             <div className="space-y-1.5">
-                              <Label className="text-[11px] font-semibold text-slate-500">Department</Label>
+                              <Label className="text-[11px] font-semibold text-slate-500">Department <span className="text-slate-400 font-normal">(select one or more)</span></Label>
                               <div className="flex flex-wrap gap-1.5">
-                                {DEPARTMENTS.map(dept => (
+                                {DEPARTMENTS.map(dept => {
+                                  const isSelected = (formData.categories || []).includes(dept.value);
+                                  return (
                                   <button
                                     key={dept.value}
                                     type="button"
-                                    onClick={() => setFormData(p => ({ ...p, category: dept.value }))}
+                                    onClick={() => setFormData(p => {
+                                      const cats = p.categories || [];
+                                      const next = cats.includes(dept.value)
+                                        ? cats.filter(c => c !== dept.value)
+                                        : [...cats, dept.value];
+                                      return { ...p, categories: next, category: next[0] || 'other' };
+                                    })}
                                     className={`h-7 px-3 rounded-lg text-[11px] font-bold uppercase tracking-wide transition-all duration-150 border ${
-                                      formData.category === dept.value
+                                      isSelected
                                         ? 'border-transparent shadow-md scale-105 text-white'
                                         : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-700 hover:bg-slate-50'
                                     }`}
-                                    style={formData.category === dept.value
+                                    style={isSelected
                                       ? { background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }
                                       : {}}
                                   >
                                     {dept.label}
                                   </button>
-                                ))}
+                                  );
+                                })}
                               </div>
+                              {(formData.categories || []).length === 0 && (
+                                <p className="text-[10px] text-amber-500 font-medium">Please select at least one department</p>
+                              )}
                             </div>
                             {/* Priority + Status */}
                             <div className="grid grid-cols-2 gap-4">
