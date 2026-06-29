@@ -421,7 +421,8 @@ class TaskBase(BaseModel):
     due_date: Optional[Any] = None
     priority: str = "medium"
     status: str = "pending"
-    category: str = "other"
+    category: str = "other"          # legacy single-value (kept for backward compat)
+    categories: List[str] = Field(default_factory=list)  # multi-department support
     client_id: Optional[str] = None
     is_recurring: bool = False
     recurrence_pattern: Optional[str] = "monthly"
