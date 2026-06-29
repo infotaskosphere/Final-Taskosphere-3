@@ -714,7 +714,7 @@ function IdentixDevicesTab() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, []);
 
   const openNew  = (prefill = {}) => { setEditing(null);  setForm({ ...emptyDevice, ...prefill }); setShowModal(true); };
   const openEdit = (d)            => { setEditing(d);     setForm({ ...d });                        setShowModal(true); };
