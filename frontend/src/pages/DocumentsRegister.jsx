@@ -261,7 +261,7 @@ export default function DocumentRegister() {
   const [editMovementData, setEditMovementData] = useState({ movement_type: 'IN', person_name: '', notes: '' });
 
   useEffect(() => { fetchDocuments(); }, []);
-  useEffect(() => { setCurrentPageIn(1); setCurrentPageOut(1); }, [sortOrder, searchQuery]);
+  useEffect(() => { setCurrentPageIn(1); setCurrentPageOut(1); if (searchQuery.trim()) { setActiveTab('all'); } else { setActiveTab('in'); } }, [sortOrder, searchQuery]);
 
   useEffect(() => {
     const handler = (e) => {
@@ -510,6 +510,7 @@ export default function DocumentRegister() {
 
   const inDocuments  = applySortOrder(documentList.filter(doc => getDocumentInOutStatus(doc) === 'IN'  && filterBySearch(doc)));
   const outDocuments = applySortOrder(documentList.filter(doc => getDocumentInOutStatus(doc) === 'OUT' && filterBySearch(doc)));
+  const allDocuments = applySortOrder(documentList.filter(doc => filterBySearch(doc)));
 
   // ── Stats ─────────────────────────────────────────────────────────────────
   const statsIn      = inDocuments.length;
@@ -1000,6 +1001,12 @@ export default function DocumentRegister() {
         {/* ── Tabs ── */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className={`inline-flex h-11 items-center rounded-xl p-1 gap-1 ${isDark ? 'bg-slate-800 border border-slate-700' : 'bg-slate-100 border border-slate-200'}`}>
+            {searchQuery.trim() && (
+              <TabsTrigger value="all"
+                className="rounded-lg px-5 py-2 text-sm font-semibold transition-all data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-md">
+                🔍 All Results ({allDocuments.length})
+              </TabsTrigger>
+            )}
             <TabsTrigger value="in"
               className="rounded-lg px-6 py-2 text-sm font-semibold transition-all data-[state=active]:bg-emerald-500 data-[state=active]:text-white data-[state=active]:shadow-md">
               <ArrowDownCircle className="h-4 w-4 mr-1.5 inline" />IN ({inDocuments.length})
@@ -1009,6 +1016,26 @@ export default function DocumentRegister() {
               <ArrowUpCircle className="h-4 w-4 mr-1.5 inline" />OUT ({outDocuments.length})
             </TabsTrigger>
           </TabsList>
+
+          {/* ALL tab — shown only when searching */}
+          <TabsContent value="all" className="mt-4">
+            <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col"
+              style={{ background: isDark ? '#1e293b' : '#fff', borderColor: isDark ? 'rgba(255,255,255,0.07)' : '#bfdbfe' }}>
+              <div className="bg-blue-50 border-b border-blue-200 px-5 py-3 flex items-center gap-2">
+                <Search className="h-4 w-4 text-blue-700 flex-shrink-0" />
+                <p className="text-sm font-semibold text-blue-700 uppercase tracking-wider">All Results for "{searchQuery}" ({allDocuments.length})</p>
+              </div>
+              {allDocuments.length === 0
+                ? <div className={`text-center py-16 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                    <Search className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                    <p className="font-medium">No documents found for "{searchQuery}"</p>
+                  </div>
+                : <DocumentTable documentList={allDocuments} onEdit={handleEdit} onDelete={handleDelete} onMovement={openMovementDialog}
+                    onViewLog={openLogDialog} onShowFullNotes={openFullNotes} type="IN" isDark={isDark}
+                    selectedIds={selectedIds} onToggleSelect={toggleSelect} onToggleAll={toggleAll} />
+              }
+            </div>
+          </TabsContent>
 
           {/* IN */}
           <TabsContent value="in" className="mt-4">
