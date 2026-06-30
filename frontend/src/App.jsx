@@ -7,6 +7,7 @@ import AppRoutes from "./AppRoutes.jsx";
 import { useLoading } from "./lib/api";
 import { AnimatePresence } from "framer-motion";
 import GifLoader from "@/components/ui/GifLoader.jsx";
+import ReminderPopupManager from "@/components/layout/ReminderPopupManager.jsx";
 
 /* ── Bottom loading bar ─────────────────────────────────────────────── */
 // memo: re-renders only when loading state changes, not on every route change
@@ -71,6 +72,9 @@ export default function App() {
         <BrowserRouter>
           {/* Bottom loading bar — always visible, no layout shift */}
           <BottomLoadingBar />
+
+          {/* Global reminder popup — polls every page, shows on top of any route */}
+          <ReminderPopupManager />
 
           {/* Suspense wraps lazy page chunks.
               GifLoader is full-screen only for the very first load.
