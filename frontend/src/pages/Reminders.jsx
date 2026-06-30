@@ -619,6 +619,172 @@ function RescheduleModal({ rem, isDark, onConfirm, onCancel }) {
   );
 }
 
+// ── Popup Settings Modal ─────────────────────────────────────────────────────
+// Lets a user configure WHEN they get on-screen popups across the app.
+// The 11:00 AM universal popup always fires for every user and can't be
+// removed — everything else is a custom additional time the user picks.
+function PopupSettingsModal({ isOpen, onClose }) {
+  const isDark = useDark();
+  const [enabled, setEnabled] = useState(true);
+  const [customTimes, setCustomTimes] = useState([]);
+  const [newTime, setNewTime] = useState("09:00");
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setLoading(true);
+    api
+      .get("/reminders/settings")
+      .then(({ data }) => {
+        setEnabled(data.enabled !== false);
+        setCustomTimes(data.custom_times || []);
+      })
+      .catch(() => toast.error("Failed to load popup settings"))
+      .finally(() => setLoading(false));
+  }, [isOpen]);
+
+  const addTime = () => {
+    if (!newTime) return;
+    if (customTimes.includes(newTime) || newTime === "11:00") {
+      toast.error("That time is already set");
+      return;
+    }
+    setCustomTimes((prev) => [...prev, newTime].sort());
+  };
+
+  const removeTime = (t) => {
+    setCustomTimes((prev) => prev.filter((x) => x !== t));
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.put("/reminders/settings", { custom_times: customTimes, enabled });
+      toast.success("Popup settings saved");
+      onClose();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to save popup settings");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-[100] bg-black/40 flex items-center justify-center p-4"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        className={`w-full max-w-md rounded-2xl shadow-2xl overflow-hidden ${isDark ? "bg-slate-800" : "bg-white"}`}
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className={`px-6 py-4 border-b flex items-center justify-between ${isDark ? "border-slate-700" : "border-slate-100"}`}>
+          <h3 className={`font-semibold text-sm flex items-center gap-2 ${isDark ? "text-white" : "text-slate-900"}`}>
+            <Bell className="h-4 w-4" /> Popup Reminder Settings
+          </h3>
+          <button onClick={onClose} className={isDark ? "text-slate-400 hover:text-white" : "text-slate-400 hover:text-slate-700"}>
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="px-6 py-5 space-y-4">
+          {loading ? (
+            <p className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>Loading…</p>
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className={`text-sm font-medium ${isDark ? "text-white" : "text-slate-900"}`}>Enable popups</p>
+                  <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                    Show on-screen popups on any page (task assignments &amp; visit alerts always fire even if off)
+                  </p>
+                </div>
+                <button
+                  onClick={() => setEnabled((v) => !v)}
+                  className={`w-11 h-6 rounded-full transition-colors flex-shrink-0 ${enabled ? "bg-indigo-600" : "bg-slate-300"}`}
+                >
+                  <span
+                    className={`block w-5 h-5 bg-white rounded-full shadow transform transition-transform ${enabled ? "translate-x-5" : "translate-x-0.5"}`}
+                  />
+                </button>
+              </div>
+
+              <div>
+                <p className={`text-sm font-medium mb-1 ${isDark ? "text-white" : "text-slate-900"}`}>Universal daily reminder</p>
+                <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg ${isDark ? "bg-slate-700 text-slate-300" : "bg-slate-50 text-slate-600"}`}>
+                  <Clock className="h-3.5 w-3.5" />
+                  Every day at <strong>11:00 AM</strong> — always on for every user
+                </div>
+              </div>
+
+              <div>
+                <p className={`text-sm font-medium mb-1 ${isDark ? "text-white" : "text-slate-900"}`}>Your custom popup times</p>
+                <div className="flex items-center gap-2 mb-2">
+                  <input
+                    type="time"
+                    value={newTime}
+                    onChange={(e) => setNewTime(e.target.value)}
+                    className={`flex-1 px-3 py-2 rounded-lg text-sm border ${isDark ? "bg-slate-700 border-slate-600 text-white" : "bg-white border-slate-200 text-slate-900"}`}
+                  />
+                  <Button size="sm" onClick={addTime} className="rounded-lg">
+                    <Plus className="h-3.5 w-3.5 mr-1" /> Add
+                  </Button>
+                </div>
+
+                {customTimes.length === 0 ? (
+                  <p className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>No custom times added yet.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {customTimes.map((t) => (
+                      <span
+                        key={t}
+                        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${isDark ? "bg-slate-700 text-slate-200" : "bg-indigo-50 text-indigo-700"}`}
+                      >
+                        {t}
+                        <button onClick={() => removeTime(t)} className="hover:text-red-500">
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <p className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                You'll also get an instant popup whenever a new task is assigned to you, and on the day of any scheduled client visit (at 11:00 AM).
+              </p>
+            </>
+          )}
+        </div>
+
+        <div className={`px-6 py-4 flex gap-2 border-t ${isDark ? "border-slate-700" : "border-slate-100"}`}>
+          <button
+            onClick={onClose}
+            className={`flex-1 py-2.5 rounded-xl text-xs font-semibold border transition-all ${isDark ? "border-slate-600 text-slate-300 hover:bg-slate-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={save}
+            disabled={saving || loading}
+            className="flex-1 py-2.5 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white transition-all"
+          >
+            {saving ? "Saving…" : "Save Settings"}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ── Main Component ───────────────────────────────────────────────────────────
 export default function Reminders() {
   const isDark = useDark();
@@ -682,6 +848,7 @@ export default function Reminders() {
     resetOrder: remReset,
   } = usePageLayout("reminders", REM_SECTIONS);
   const [showCustomize, setShowCustomize] = useState(false);
+  const [showPopupSettings, setShowPopupSettings] = useState(false);
 
   // Request notification permission on mount
   useEffect(() => {
@@ -1064,6 +1231,11 @@ export default function Reminders() {
         isDark={isDark}
       />
 
+      <PopupSettingsModal
+        isOpen={showPopupSettings}
+        onClose={() => setShowPopupSettings(false)}
+      />
+
       <motion.div
         className="space-y-4 pb-8"
         variants={containerVariants}
@@ -1131,6 +1303,13 @@ export default function Reminders() {
                   className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/20 text-white/70 border border-white/15 transition-all"
                 >
                   <Settings2 size={13} /> Customize
+                </button>
+                <button
+                  onClick={() => setShowPopupSettings(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/20 text-white/70 border border-white/15 transition-all"
+                  data-testid="popup-settings-btn"
+                >
+                  <Bell size={13} /> Popup Settings
                 </button>
               </div>
             }
