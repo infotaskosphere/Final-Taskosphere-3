@@ -16,7 +16,8 @@ Assumes:
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Optional, List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
+from zoneinfo import ZoneInfo
 from bson import ObjectId
 
 # ─── ADJUST THESE IMPORTS TO MATCH YOUR PROJECT ──────────────────────────────
@@ -28,8 +29,16 @@ from backend.models import User
 
 router = APIRouter()
 
+IST = ZoneInfo("Asia/Kolkata")
+
 # ─── Collections ──────────────────────────────────────────────────────────────
 reminders_col = db["reminders"]
+reminder_settings_col = db["reminder_settings"]
+reminder_fires_col = db["reminder_fires"]  # dedupe log for daily / visit popups
+
+# Universal popup time — always fires for every user, every day, regardless
+# of their personal settings.
+UNIVERSAL_POPUP_TIME = "11:00"
 
 
 # ─── Pydantic Models ─────────────────────────────────────────────────────────
@@ -58,6 +67,18 @@ class ReminderUpdate(BaseModel):
     hearing_decision: Optional[str] = None   # "favourable" | "unfavourable"
     hearing_adjourned: Optional[bool] = None
     hearing_notes: Optional[str] = None
+
+
+class ReminderSettings(BaseModel):
+    """Per-user popup reminder preferences.
+
+    `custom_times` are extra times (besides the fixed 11:00 AM universal
+    popup) the user wants to be shown a daily summary popup, e.g. ["09:00","17:30"].
+    `enabled` lets a user turn off the popup entirely (the universal 11:00
+    reminder still respects this flag).
+    """
+    custom_times: Optional[List[str]] = Field(default_factory=list)  # "HH:MM" 24h strings
+    enabled: Optional[bool] = True
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -201,3 +222,218 @@ async def delete_reminder(
         raise HTTPException(status_code=404, detail="Reminder not found")
 
     return {"message": "Reminder deleted", "id": reminder_id}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# POPUP SYSTEM
+# ────────────────────────────────────────────────────────────────────────────
+# Three kinds of popups can appear on ANY page of the app for a logged-in
+# user:
+#   1. Manual / scheduled reminders the user (or admin) created — including
+#      "New Task Assigned" popups, which are inserted the instant a task is
+#      assigned (remind_at = now, so they fire on the very next poll).
+#   2. Daily summary popups — the UNIVERSAL 11:00 AM popup (always on, every
+#      user, every day) plus any extra times the user configured in
+#      Reminder Settings.
+#   3. Visit popups — fired at 11:00 AM on the day a visit is scheduled, for
+#      the specific user assigned to that visit.
+#
+# The frontend polls GET /reminders/due-popups every ~30s. Anything this
+# endpoint returns should be shown as a popup immediately; calling it also
+# marks those items as fired so they are not shown again.
+# ════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/reminders/settings")
+async def get_reminder_settings(current_user: User = Depends(get_current_user)):
+    """Get this user's popup reminder preferences."""
+    doc = await reminder_settings_col.find_one({"user_id": str(current_user.id)})
+    if not doc:
+        return {
+            "user_id": str(current_user.id),
+            "custom_times": [],
+            "enabled": True,
+            "universal_time": UNIVERSAL_POPUP_TIME,
+        }
+    return {
+        "user_id": str(current_user.id),
+        "custom_times": doc.get("custom_times", []),
+        "enabled": doc.get("enabled", True),
+        "universal_time": UNIVERSAL_POPUP_TIME,
+    }
+
+
+@router.put("/reminders/settings")
+async def update_reminder_settings(
+    body: ReminderSettings,
+    current_user: User = Depends(get_current_user),
+):
+    """Update this user's popup reminder preferences (custom popup times)."""
+    # Validate HH:MM format, dedupe, drop the universal time if duplicated
+    clean_times = []
+    for t in body.custom_times or []:
+        t = (t or "").strip()
+        try:
+            hh, mm = t.split(":")
+            hh, mm = int(hh), int(mm)
+            assert 0 <= hh <= 23 and 0 <= mm <= 59
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"Invalid time format: '{t}' (expected HH:MM)")
+        norm = f"{hh:02d}:{mm:02d}"
+        if norm != UNIVERSAL_POPUP_TIME and norm not in clean_times:
+            clean_times.append(norm)
+
+    now = datetime.now(timezone.utc).isoformat()
+    await reminder_settings_col.update_one(
+        {"user_id": str(current_user.id)},
+        {
+            "$set": {
+                "user_id": str(current_user.id),
+                "custom_times": clean_times,
+                "enabled": body.enabled if body.enabled is not None else True,
+                "updated_at": now,
+            }
+        },
+        upsert=True,
+    )
+    return {
+        "user_id": str(current_user.id),
+        "custom_times": clean_times,
+        "enabled": body.enabled if body.enabled is not None else True,
+        "universal_time": UNIVERSAL_POPUP_TIME,
+    }
+
+
+async def _already_fired(key: str) -> bool:
+    return bool(await reminder_fires_col.find_one({"key": key}))
+
+
+async def _mark_fired(key: str, user_id: str, popup_type: str):
+    try:
+        await reminder_fires_col.insert_one({
+            "key": key,
+            "user_id": user_id,
+            "type": popup_type,
+            "fired_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception:
+        pass  # duplicate key race — fine, it just means another request beat us to it
+
+
+@router.get("/reminders/due-popups")
+async def get_due_popups(current_user: User = Depends(get_current_user)):
+    """
+    Returns every popup that should be shown to the current user RIGHT NOW,
+    across every page of the app. Marks each one as fired so it won't repeat.
+    """
+    uid = str(current_user.id)
+    now_utc = datetime.now(timezone.utc)
+    now_ist = datetime.now(IST)
+    today_str = now_ist.date().isoformat()
+    popups: List[dict] = []
+
+    # ── 1. Manual reminders (incl. instant "New Task Assigned" popups) ─────
+    cursor = reminders_col.find({
+        "user_id": uid,
+        "is_fired": {"$ne": True},
+        "$or": [
+            {"is_dismissed": {"$ne": True}},
+            {"is_dismissed": {"$exists": False}},
+        ],
+    })
+    due_ids = []
+    async for doc in cursor:
+        try:
+            remind_at = datetime.fromisoformat(str(doc["remind_at"]).replace("Z", "+00:00"))
+            if remind_at.tzinfo is None:
+                remind_at = remind_at.replace(tzinfo=timezone.utc)
+        except Exception:
+            continue
+        if remind_at <= now_utc:
+            popups.append({
+                "id": str(doc["_id"]),
+                "type": doc.get("reminder_type", "reminder"),
+                "title": doc.get("title", "Reminder"),
+                "message": doc.get("description", ""),
+                "priority": doc.get("priority", "medium"),
+                "source": doc.get("source", "manual"),
+            })
+            due_ids.append(doc["_id"])
+    if due_ids:
+        await reminders_col.update_many(
+            {"_id": {"$in": due_ids}},
+            {"$set": {"is_fired": True, "fired_at": now_utc.isoformat()}},
+        )
+
+    # ── 2. Daily summary popups (universal 11:00 AM + user custom times) ───
+    settings = await reminder_settings_col.find_one({"user_id": uid}) or {}
+    settings_enabled = settings.get("enabled", True)
+    custom_times = settings.get("custom_times", []) if settings_enabled else []
+    daily_times = [UNIVERSAL_POPUP_TIME] + [t for t in custom_times if t != UNIVERSAL_POPUP_TIME]
+
+    cur_hhmm = now_ist.strftime("%H:%M")
+    for t in daily_times:
+        if cur_hhmm < t:
+            continue  # that time hasn't arrived yet today
+        fire_key = f"daily-{uid}-{today_str}-{t}"
+        if await _already_fired(fire_key):
+            continue
+
+        # Build a quick summary of what's relevant today for this user
+        hearings_today = await reminders_col.count_documents({
+            "user_id": uid,
+            "reminder_type": "meeting",
+        })
+        visits_today = await db.visits.count_documents({
+            "assigned_to": uid,
+            "visit_date": today_str,
+            "status": "scheduled",
+        })
+        tasks_due_today = await db.tasks.count_documents({
+            "assigned_to": uid,
+            "status": {"$nin": ["completed", "cancelled"]},
+        })
+
+        is_universal = t == UNIVERSAL_POPUP_TIME
+        popups.append({
+            "id": fire_key,
+            "type": "daily_summary",
+            "title": "Daily Reminder" if is_universal else f"Reminder ({t})",
+            "message": (
+                f"You have {visits_today} visit(s) scheduled today and "
+                f"{tasks_due_today} open task(s)."
+            ),
+            "priority": "medium",
+            "source": "daily",
+        })
+        await _mark_fired(fire_key, uid, "daily_summary")
+
+    # ── 3. Visit popups — fire at 11:00 AM IST on the scheduled day ────────
+    if cur_hhmm >= UNIVERSAL_POPUP_TIME:
+        visits_cursor = db.visits.find({
+            "assigned_to": uid,
+            "visit_date": today_str,
+            "status": "scheduled",
+        })
+        async for v in visits_cursor:
+            vid = v.get("id") or str(v.get("_id"))
+            fire_key = f"visit-{vid}-{today_str}"
+            if await _already_fired(fire_key):
+                continue
+            popups.append({
+                "id": fire_key,
+                "type": "visit",
+                "title": "Client Visit Today",
+                "message": (
+                    f"You have a visit scheduled today with "
+                    f"{v.get('client_name') or 'a client'}"
+                    + (f" at {v.get('visit_time')}" if v.get("visit_time") else "")
+                    + (f" — {v.get('purpose')}" if v.get("purpose") else "")
+                    + "."
+                ),
+                "priority": v.get("priority", "medium"),
+                "source": "visit",
+            })
+            await _mark_fired(fire_key, uid, "visit")
+
+    return popups
