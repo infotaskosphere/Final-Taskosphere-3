@@ -233,6 +233,8 @@ const EMPTY_FORM = {
   due_date: '', priority: 'medium', status: 'pending', category: 'other',
   categories: [],
   client_id: '', is_recurring: false, recurrence_pattern: 'monthly', recurrence_interval: 1,
+  // Per-task popup interval in minutes. Empty/null = use universal default.
+  popup_interval_minutes: '',
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1073,7 +1075,17 @@ export default function Tasks() {
   // ── CRUD ──────────────────────────────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault(); setLoading(true);
-    const taskData = { ...formData, assigned_to: formData.assigned_to === 'unassigned' ? null : formData.assigned_to, sub_assignees: formData.sub_assignees || [], client_id: formData.client_id || null, due_date: formData.due_date || null };
+    const taskData = {
+      ...formData,
+      assigned_to: formData.assigned_to === 'unassigned' ? null : formData.assigned_to,
+      sub_assignees: formData.sub_assignees || [],
+      client_id: formData.client_id || null,
+      due_date: formData.due_date || null,
+      popup_interval_minutes:
+        formData.popup_interval_minutes === '' || formData.popup_interval_minutes == null
+          ? null
+          : Number(formData.popup_interval_minutes),
+    };
     try {
       if (editingTask) {
         const res = await fetch(`${API_BASE}/tasks/${editingTask.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...getAuthHeader() }, body: JSON.stringify(taskData) });
@@ -1090,7 +1102,7 @@ export default function Tasks() {
 
   const handleEdit = (task) => {
     setEditingTask(task);
-    setFormData({ title: task.title, description: task.description || '', assigned_to: task.assigned_to || 'unassigned', sub_assignees: task.sub_assignees || [], due_date: task.due_date ? format(new Date(task.due_date), 'yyyy-MM-dd') : '', priority: task.priority, status: task.status, category: task.category || 'other', categories: task.categories && task.categories.length > 0 ? task.categories : (task.category && task.category !== 'other' ? [task.category] : []), client_id: task.client_id || '', is_recurring: task.is_recurring || false, recurrence_pattern: task.recurrence_pattern || 'monthly', recurrence_interval: task.recurrence_interval || 1 });
+    setFormData({ title: task.title, description: task.description || '', assigned_to: task.assigned_to || 'unassigned', sub_assignees: task.sub_assignees || [], due_date: task.due_date ? format(new Date(task.due_date), 'yyyy-MM-dd') : '', priority: task.priority, status: task.status, category: task.category || 'other', categories: task.categories && task.categories.length > 0 ? task.categories : (task.category && task.category !== 'other' ? [task.category] : []), client_id: task.client_id || '', is_recurring: task.is_recurring || false, recurrence_pattern: task.recurrence_pattern || 'monthly', recurrence_interval: task.recurrence_interval || 1, popup_interval_minutes: task.popup_interval_minutes != null ? String(task.popup_interval_minutes) : '' });
     setDialogOpen(true);
   };
 
@@ -2037,6 +2049,24 @@ export default function Tasks() {
                                 />
                               </div>
                             </div>
+
+                            {/* Popup interval (minutes) — per-task override of the universal popup cadence */}
+                            <div className="space-y-1.5">
+                              <Label className="text-[11px] font-semibold text-slate-500">
+                                Popup interval (minutes)
+                                <span className="ml-1 font-normal text-slate-400">— blank uses the universal setting</span>
+                              </Label>
+                              <Input
+                                type="number"
+                                min="0"
+                                step="1"
+                                placeholder="e.g. 15"
+                                value={formData.popup_interval_minutes}
+                                onChange={(e) => setFormData(p => ({ ...p, popup_interval_minutes: e.target.value }))}
+                                className="h-10 text-sm rounded-xl border-slate-200 bg-slate-50 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-colors"
+                              />
+                            </div>
+
 
                             {canAssignTasks && (
                               <div className="grid grid-cols-2 gap-4">
