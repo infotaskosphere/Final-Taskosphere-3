@@ -13,10 +13,24 @@ import api from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 
 // How often to ask the backend "is anything due right now?"
-// Keeping this short (30s) is what makes the popup feel instant for
-// newly-assigned tasks, while the actual fire-times (11:00 AM universal,
-// custom times, visit day) are controlled server-side.
-const POLL_INTERVAL_MS = 30_000;
+// Default is 30 s; users can override it from the "Notification settings"
+// panel on the Reminders page (writes localStorage key below).
+// Per-item intervals live on the reminder/task itself (popup_interval_minutes)
+// and are honoured server-side when computing remind_at.
+const POPUP_POLL_LS_KEY = "universal_popup_poll_seconds";
+const DEFAULT_POLL_SECONDS = 30;
+const MIN_POLL_SECONDS = 5;
+
+const readPollIntervalMs = () => {
+  try {
+    const raw = localStorage.getItem(POPUP_POLL_LS_KEY);
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed >= MIN_POLL_SECONDS) {
+      return parsed * 1000;
+    }
+  } catch {}
+  return DEFAULT_POLL_SECONDS * 1000;
+};
 
 const TYPE_META = {
   task_assigned: { icon: ClipboardCheck, color: "text-indigo-600", bg: "bg-indigo-50" },
@@ -57,8 +71,26 @@ export default function ReminderPopupManager() {
   useEffect(() => {
     if (!user) return;
     fetchDuePopups(); // check immediately on login / page load
-    pollRef.current = setInterval(fetchDuePopups, POLL_INTERVAL_MS);
-    return () => clearInterval(pollRef.current);
+
+    const start = () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = setInterval(fetchDuePopups, readPollIntervalMs());
+    };
+    start();
+
+    // React live to setting changes from the Notification settings panel
+    const onChange = (e) => {
+      if (!e || e.key === POPUP_POLL_LS_KEY || e.type === "popup-interval-changed") {
+        start();
+      }
+    };
+    window.addEventListener("storage", onChange);
+    window.addEventListener("popup-interval-changed", onChange);
+    return () => {
+      clearInterval(pollRef.current);
+      window.removeEventListener("storage", onChange);
+      window.removeEventListener("popup-interval-changed", onChange);
+    };
   }, [user, fetchDuePopups]);
 
   const dismissCurrent = () => {
