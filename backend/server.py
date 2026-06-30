@@ -34,6 +34,40 @@ from backend.leads import router as leads_router
 from backend.interviews import router as interviews_router
 from backend.telegram import router as telegram_router
 from backend.notifications import router as notification_router, create_notification
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task-assigned popup helper
+# Inserts a manual reminder with remind_at = now so the assignee gets an
+# immediate on-screen popup the next time the frontend polls
+# GET /api/reminders/due-popups.
+#
+# NOTE: This previously lived in backend/reminders_router.py, which became an
+# accidental duplicate of this file and caused a circular-import crash on
+# boot. It now lives here and reminders_router.py is a thin shim.
+# ─────────────────────────────────────────────────────────────────────────────
+async def create_task_assigned_popup(assigned_to_user_id: str, task_title: str) -> None:
+    try:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        await db.reminders.insert_one({
+            "user_id": str(assigned_to_user_id),
+            "title": "New Task Assigned",
+            "description": f"You have been assigned a new task: \"{task_title}\".",
+            "remind_at": now_iso,
+            "event_id": f"task-assigned-{uuid.uuid4()}",
+            "source": "task",
+            "priority": "high",
+            "reminder_type": "task_assigned",
+            "related_task_id": None,
+            "is_dismissed": False,
+            "is_fired": False,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        })
+    except Exception as e:
+        logger.error(
+            f"[Popup] Failed to create task-assigned popup for {assigned_to_user_id}: {e}"
+        )
 from backend.email_integration import router as email_router
 from backend.trademark_sphere import router as trademark_sphere_router
 from backend.trademark_portals_router import router as trademark_portals_router
@@ -3985,6 +4019,7 @@ async def create_task(
             message=f"You have been assigned task '{task.title}'",
             type="assignment",
         )
+        await create_task_assigned_popup(task.assigned_to, task.title)
     await create_audit_log(
         current_user=current_user,
         action="CREATE_TASK",
@@ -4032,6 +4067,7 @@ async def create_tasks_bulk(
                 title="New Task Assigned",
                 message=f"You have been assigned task '{task_dict['title']}'",
             )
+            await create_task_assigned_popup(task_dict["assigned_to"], task_dict["title"])
         created_tasks.append(task_dict)
     return {"message": "Tasks created successfully", "count": len(created_tasks)}
 
