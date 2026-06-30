@@ -429,6 +429,8 @@ class TaskBase(BaseModel):
     recurrence_interval: Optional[int] = 1
     recurrence_end_date: Optional[Any] = None
     type: Optional[str] = None
+    # Per-task popup cadence override (minutes). None = use universal default.
+    popup_interval_minutes: Optional[int] = None
 
 
 class TaskCreate(TaskBase):
@@ -624,6 +626,7 @@ class MovementUpdateRequest(BaseModel):
 # REMINDER MODELS
 # ======================
 class ReminderCreate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     title: str
     description: Optional[str] = None
     remind_at: Any
@@ -632,6 +635,8 @@ class ReminderCreate(BaseModel):
     priority: Optional[str] = "medium"
     reminder_type: Optional[str] = "reminder"
     related_task_id: Optional[str] = None
+    # Per-reminder popup cadence override (minutes). None = universal default.
+    popup_interval_minutes: Optional[int] = None
 
 
 class Reminder(BaseModel):
@@ -649,6 +654,7 @@ class Reminder(BaseModel):
     is_dismissed: bool = False
     is_fired: bool = False
     status: Optional[str] = None
+    popup_interval_minutes: Optional[int] = None
     created_at: Optional[Any] = None
     updated_at: Optional[Any] = None
 
