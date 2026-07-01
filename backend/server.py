@@ -6444,28 +6444,25 @@ async def get_performance_rankings(
         effective_hours = agent_hours if agent_logs else total_hours
 
         # ---------------- Task completion percentage ----------------
-        # FIX (root cause of the 0% you were seeing): the denominator counted
-        # tasks *created* since start_date, while the numerator counted tasks
-        # *completed* since start_date — two different windows. Anyone who
-        # completed pre-existing tasks but had no BRAND NEW task created this
-        # period showed tasks_assigned = 0, forcing task_completion_percent to 0
-        # no matter how much work they actually finished. The denominator is now
-        # "everything currently assigned" (tasks + todos), which is never
-        # artificially zero.
+        # FIX (this is what was STILL causing 0% after the first patch):
+        # the numerator ("tasks completed") was gated to completed_at/updated_at
+        # >= start_date. That's fine for a mid-period check, but on day 1 of a
+        # new week/month essentially nobody has completed anything WITHIN that
+        # brand-new window yet, so the numerator is legitimately 0 and the
+        # percentage resets to 0 for the whole team every single period. This
+        # metric should reflect current workload completion — the same "17/20"
+        # style figure already shown on the Tasks page — not get wiped out at
+        # the start of every week/month. It is now a lifetime completed/assigned
+        # ratio (tasks + todos), independent of the period filter. Attendance,
+        # hours and punctuality below remain correctly period-scoped, since
+        # those genuinely are about "this week/month" specifically.
         tasks_assigned = await db.tasks.count_documents({"assigned_to": uid})
         completed_tasks = await db.tasks.count_documents(
-            {
-                "assigned_to": uid,
-                "status": "completed",
-                "$or": [
-                    {"completed_at": {"$gte": start_date}},
-                    {"updated_at": {"$gte": start_date}},
-                ],
-            }
+            {"assigned_to": uid, "status": "completed"}
         )
         todos_assigned = await db.todos.count_documents({"user_id": uid})
         completed_todos = await db.todos.count_documents(
-            {"user_id": uid, "is_completed": True, "completed_at": {"$gte": start_date}}
+            {"user_id": uid, "is_completed": True}
         )
         total_assigned = tasks_assigned + todos_assigned
         total_completed = completed_tasks + completed_todos
@@ -6476,24 +6473,17 @@ async def get_performance_rankings(
         )
 
         # ---------------- On-time completion ----------------
-        # FIX: this metric only ever looked at db.todos (the small personal
-        # checklist) and completely ignored db.tasks — the app's actual primary
-        # work unit (Task Management, 150+ tasks with due dates). Anyone who does
-        # real work through Tasks but rarely touches the separate To-Do widget
-        # always scored 0% here, losing 15 guaranteed points. Completed tasks
-        # with a due date are now included alongside todos.
+        # FIX: same period-reset problem as above, PLUS this metric used to only
+        # look at db.todos (the small personal checklist) and completely ignored
+        # db.tasks — the app's actual primary work unit (Task Management, 150+
+        # tasks with due dates). Anyone who does real work through Tasks but
+        # rarely touches the separate To-Do widget always scored 0% here, losing
+        # 15 guaranteed points. This is now a lifetime on-time ratio across both
+        # tasks and todos that have a due date, not reset every period.
         due_tasks = await db.tasks.find(
-            {
-                "assigned_to": uid,
-                "status": "completed",
-                "due_date": {"$ne": None},
-                "$or": [
-                    {"completed_at": {"$gte": start_date}},
-                    {"updated_at": {"$gte": start_date}},
-                ],
-            },
+            {"assigned_to": uid, "status": "completed", "due_date": {"$ne": None}},
             {"_id": 0, "due_date": 1, "completed_at": 1, "updated_at": 1},
-        ).to_list(1000)
+        ).to_list(2000)
         ontime_tasks = 0
         for t in due_tasks:
             due = safe_dt(t.get("due_date"))
@@ -6501,13 +6491,13 @@ async def get_performance_rankings(
             if due and completed_at and completed_at <= due:
                 ontime_tasks += 1
 
-        completed_todos_this_period = await db.todos.find(
-            {"user_id": uid, "is_completed": True, "completed_at": {"$gte": start_date}},
+        completed_todos_docs = await db.todos.find(
+            {"user_id": uid, "is_completed": True},
             {"_id": 0, "due_date": 1, "completed_at": 1},
-        ).to_list(500)
+        ).to_list(1000)
         ontime_todos = 0
         todos_with_due = 0
-        for t in completed_todos_this_period:
+        for t in completed_todos_docs:
             if t.get("due_date"):
                 todos_with_due += 1
                 due = safe_dt(t.get("due_date"))
