@@ -2583,6 +2583,48 @@ export default function Tasks() {
 
       {/* ── PERFORMANCE SCORE WIDGET ────────────────────────────────────────── */}
       {(() => {
+        // While tasks/rankings are still being fetched, reserve the widget's
+        // footprint with a skeleton instead of rendering nothing — this is
+        // what was causing the "page loads in stages" effect, since this
+        // whole block used to return null until data arrived, then pop in
+        // abruptly after everything else had already painted.
+        if (dataLoading || !rankingsLoaded) {
+          return (
+            <motion.div variants={itemVariants} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+              <div className={`rounded-2xl border overflow-hidden animate-pulse ${isDark ? 'bg-slate-800/90 border-slate-700' : 'bg-white border-slate-200'}`}
+                style={{ boxShadow: '0 4px 24px rgba(99,102,241,0.06), 0 1px 3px rgba(0,0,0,0.04)' }}>
+                <div className={`h-1 w-full ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`} />
+                <div className="flex flex-col lg:flex-row">
+                  <div className={`flex-shrink-0 lg:w-60 px-4 py-3.5 flex flex-col gap-2.5 ${isDark ? 'border-b lg:border-b-0 lg:border-r border-slate-700' : 'border-b lg:border-b-0 lg:border-r border-slate-100'}`}>
+                    <div className={`h-2.5 w-16 rounded ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
+                    <div className="flex items-center gap-3">
+                      <div className={`rounded-full ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} style={{ width: 66, height: 66 }} />
+                      <div className="flex-1 flex flex-col gap-2">
+                        <div className={`h-4 w-20 rounded-full ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
+                        <div className={`h-3 w-24 rounded ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
+                      </div>
+                    </div>
+                    <div className={`h-11 w-full rounded-lg ${isDark ? 'bg-slate-700/60' : 'bg-slate-100'}`} />
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {[0,1,2,3].map(i => <div key={i} className={`h-12 rounded-lg ${isDark ? 'bg-slate-700/60' : 'bg-slate-100'}`} />)}
+                    </div>
+                    <div className={`h-9 w-full rounded-lg ${isDark ? 'bg-slate-700/60' : 'bg-slate-100'}`} />
+                  </div>
+                  <div className={`flex-1 min-w-0 px-4 py-3 flex flex-col gap-2 ${isDark ? 'border-b lg:border-b-0 lg:border-r border-slate-700' : 'border-b lg:border-b-0 lg:border-r border-slate-100'}`}>
+                    <div className={`h-2.5 w-24 rounded ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
+                    {[0,1,2].map(i => <div key={i} className={`h-8 w-full rounded-lg ${isDark ? 'bg-slate-700/60' : 'bg-slate-100'}`} />)}
+                  </div>
+                  <div className="flex-shrink-0 lg:w-56 px-4 py-3 flex flex-col gap-2">
+                    <div className={`h-2.5 w-16 rounded ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
+                    <div className={`h-16 w-full rounded-lg ${isDark ? 'bg-slate-700/60' : 'bg-slate-100'}`} />
+                    <div className={`h-16 w-full rounded-lg ${isDark ? 'bg-slate-700/60' : 'bg-slate-100'}`} />
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          );
+        }
+
         if (myTasks.length === 0) return null;
 
         // ── Working days remaining this month (Mon–Fri only) ──
@@ -2892,74 +2934,68 @@ export default function Tasks() {
               <div className="flex flex-col lg:flex-row" style={{ minHeight: 0 }}>
 
                 {/* ══ PANEL 1: PERFORMANCE SCORE ══ */}
-                <div className={`flex-shrink-0 lg:w-56 px-3 py-3 flex flex-col gap-2 ${isDark ? 'border-b lg:border-b-0 lg:border-r border-slate-700' : 'border-b lg:border-b-0 lg:border-r border-slate-100'}`}>
+                <div className={`flex-shrink-0 lg:w-60 px-4 py-3.5 flex flex-col gap-2.5 ${isDark ? 'border-b lg:border-b-0 lg:border-r border-slate-700' : 'border-b lg:border-b-0 lg:border-r border-slate-100'}`}>
 
-                  {/* Badge + Score row — tight */}
-                  <div className="flex items-center gap-2.5">
-                    <div className="relative flex-shrink-0">
-                      <motion.div
-                        className="w-11 h-11 rounded-xl flex items-center justify-center"
-                        style={{ background: rankBgColor }}
-                        initial={{ scale: 0.5, opacity: 0, rotate: -15 }}
-                        animate={{ scale: 1, opacity: 1, rotate: 0 }}
-                        transition={{ type: 'spring', stiffness: 260, damping: 18, delay: 0.1 }}
+                  {/* Header row — label + rank pill */}
+                  <div className="flex items-center justify-between">
+                    <p className={`text-[9px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Your Score</p>
+                    {apiRank !== null && (
+                      <motion.span
+                        className="inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full text-white leading-none"
+                        style={{ background: apiRank === 1 ? '#B45309' : apiRank <= 3 ? '#4F46E5' : '#64748B' }}
+                        initial={{ opacity: 0, y: -4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.3, delay: 0.1 }}
                       >
-                        <motion.div
-                          animate={{ rotate: [0, -8, 8, -4, 4, 0] }}
-                          transition={{ duration: 1.4, ease: 'easeInOut', delay: 0.7, repeat: Infinity, repeatDelay: 7 }}
-                        >
-                          {apiRank === 1
-                            ? <Crown className="h-5 w-5 text-white" />
-                            : apiRank !== null && apiRank <= 3
-                            ? <Medal className="h-5 w-5 text-white" />
-                            : <Trophy className="h-5 w-5 text-white" />}
-                        </motion.div>
-                      </motion.div>
-                      {apiRank !== null && (
-                        <motion.span
-                          className="absolute -top-1 -right-1 text-[9px] font-black px-1 py-px rounded-full text-white leading-none"
-                          style={{ background: apiRank === 1 ? '#F59E0B' : '#6366f1' }}
-                          initial={{ scale: 0 }}
-                          animate={{ scale: 1 }}
-                          transition={{ type: 'spring', stiffness: 400, damping: 15, delay: 0.45 }}
-                        >
-                          #{apiRank}
-                        </motion.span>
-                      )}
+                        {apiRank === 1
+                          ? <Crown className="h-2.5 w-2.5" />
+                          : apiRank <= 3
+                          ? <Medal className="h-2.5 w-2.5" />
+                          : <Trophy className="h-2.5 w-2.5" />}
+                        Rank #{apiRank}{totalUsers ? `/${totalUsers}` : ''}
+                      </motion.span>
+                    )}
+                  </div>
+
+                  {/* Ring + score + badge + trend */}
+                  <div className="flex items-center gap-3">
+                    <div className="relative flex-shrink-0" style={{ width: 66, height: 66 }}>
+                      <svg viewBox="0 0 100 100" width="66" height="66" style={{ transform: 'rotate(-90deg)' }}>
+                        <circle cx="50" cy="50" r="42" fill="none" stroke={isDark ? '#334155' : '#EDEFF5'} strokeWidth="9" />
+                        <motion.circle
+                          cx="50" cy="50" r="42" fill="none"
+                          stroke="#4F46E5" strokeWidth="9" strokeLinecap="round"
+                          style={{ strokeDasharray: 263.9 }}
+                          initial={{ strokeDashoffset: 263.9 }}
+                          animate={{ strokeDashoffset: 263.9 - (263.9 * Math.min(displayScore, 100)) / 100 }}
+                          transition={{ duration: 0.9, ease: 'easeOut', delay: 0.15 }}
+                        />
+                      </svg>
+                      <div className="absolute inset-0 flex flex-col items-center justify-center">
+                        <span className={`text-base font-black leading-none tabular-nums ${isDark ? 'text-white' : 'text-slate-800'}`}>{Math.round(displayScore)}</span>
+                        <span className={`text-[8px] font-semibold leading-none mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>/ 100</span>
+                      </div>
                     </div>
 
-                    <div className="flex flex-col min-w-0">
-                      <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 leading-none">Performance Score</p>
-                      <div className="flex items-baseline gap-0.5">
-                        <motion.span
-                          className="text-2xl font-black leading-tight"
-                          style={{ color: '#6366f1' }}
-                          initial={{ opacity: 0, y: 6 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ duration: 0.4, delay: 0.2 }}
-                        >
-                          {Math.round(displayScore)}
-                        </motion.span>
-                        <span className="text-sm font-semibold text-slate-400">/100</span>
-                      </div>
-                      {apiRank !== null && (
-                        <p className={`text-[10px] font-bold leading-none ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                          Rank #{apiRank}{totalUsers ? `/${totalUsers}` : ''}
-                        </p>
-                      )}
-                      <motion.span
-                        className="mt-1 self-start inline-flex items-center gap-1 text-[9px] font-semibold px-1.5 py-px rounded-full border"
-                        style={{ color: badgeColor, borderColor: `${badgeColor}50`, background: `${badgeColor}12` }}
-                        initial={{ opacity: 0, x: -6 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ duration: 0.3, delay: 0.35 }}
+                    <div className="flex flex-col gap-1.5 min-w-0 flex-1">
+                      <span
+                        className="inline-flex items-center gap-1 self-start text-[9px] font-semibold px-2 py-0.5 rounded-full leading-none"
+                        style={{ color: badgeColor, background: `${badgeColor}14` }}
                       >
-                        <Star className="h-2 w-2" /> {displayBadge}
-                      </motion.span>
+                        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: badgeColor }} />
+                        {displayBadge}
+                      </span>
+                      <div className="flex items-center gap-1 flex-wrap">
+                        <TrendingUp className="h-2.5 w-2.5 flex-shrink-0" style={{ color: scoreTrend >= 0 ? '#1FAF5A' : '#DC2626' }} />
+                        <span className="text-[10px] font-bold tabular-nums" style={{ color: scoreTrend >= 0 ? '#1FAF5A' : '#DC2626' }}>
+                          {scoreTrend >= 0 ? `+${scoreTrend}` : scoreTrend} pts
+                        </span>
+                        <span className={`text-[9px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>this month</span>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Score Trend Sparkline Chart — flex-1 equal height */}
+                  {/* Score Trend Sparkline Chart — flatter, quieter container */}
                   {(() => {
                     const trendPoints = (() => {
                       const base = Math.max(10, displayScore - 18);
@@ -2972,99 +3008,79 @@ export default function Tasks() {
                       ];
                     })();
                     const trendUp = scoreTrend >= 0;
-                    const trendColor = trendUp ? '#6366f1' : '#EF4444';
+                    const trendColor = trendUp ? '#4F46E5' : '#DC2626';
                     return (
                       <motion.div
-                        className={`rounded-lg border flex-1 flex flex-col overflow-hidden ${isDark ? 'bg-slate-700/20 border-slate-700' : 'bg-slate-50 border-slate-200'}`}
-                        initial={{ opacity: 0, y: 5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.48 }}
+                        className={`rounded-lg border flex-shrink-0 overflow-hidden ${isDark ? 'bg-slate-900/40 border-slate-700' : 'bg-slate-50/70 border-slate-200'}`}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: 0.3 }}
+                        style={{ height: 44 }}
                       >
-                        {/* Header row */}
-                        <div className={`flex items-center justify-between px-2.5 pt-2 pb-1 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                          <div className="flex items-center gap-1">
-                            <TrendingUp className="h-2.5 w-2.5" style={{ color: trendColor }} />
-                            <span className={`text-[9px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Score Trend</span>
-                          </div>
-                          <span className="text-[10px] font-bold tabular-nums" style={{ color: trendColor }}>
-                            {scoreTrend >= 0 ? `+${scoreTrend}` : scoreTrend} pts
-                          </span>
-                        </div>
-                        {/* Chart area */}
-                        <div className="flex-1 px-1 py-1" style={{ minHeight: 40 }}>
-                          <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={trendPoints} margin={{ top: 2, right: 4, left: 4, bottom: 0 }}>
-                              <defs>
-                                <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="10%" stopColor={trendColor} stopOpacity={0.18} />
-                                  <stop offset="100%" stopColor={trendColor} stopOpacity={0} />
-                                </linearGradient>
-                              </defs>
-                              <Area type="monotone" dataKey="score" stroke={trendColor} strokeWidth={1.5} fill="url(#trendGrad)" dot={false} />
-                              <ReTooltip
-                                contentStyle={{ fontSize: 9, padding: '2px 7px', borderRadius: 5, border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`, background: isDark ? '#1e293b' : '#fff', color: isDark ? '#e2e8f0' : '#334155', boxShadow: '0 2px 8px rgba(0,0,0,0.10)' }}
-                                itemStyle={{ fontSize: 9, color: trendColor }}
-                                labelStyle={{ fontSize: 9, fontWeight: 600, color: isDark ? '#94a3b8' : '#64748b' }}
-                              />
-                            </AreaChart>
-                          </ResponsiveContainer>
-                        </div>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={trendPoints} margin={{ top: 6, right: 6, left: 6, bottom: 2 }}>
+                            <defs>
+                              <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="10%" stopColor={trendColor} stopOpacity={0.16} />
+                                <stop offset="100%" stopColor={trendColor} stopOpacity={0} />
+                              </linearGradient>
+                            </defs>
+                            <Area type="monotone" dataKey="score" stroke={trendColor} strokeWidth={1.5} fill="url(#trendGrad)" dot={false} />
+                            <ReTooltip
+                              contentStyle={{ fontSize: 9, padding: '2px 7px', borderRadius: 5, border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`, background: isDark ? '#1e293b' : '#fff', color: isDark ? '#e2e8f0' : '#334155', boxShadow: '0 2px 8px rgba(0,0,0,0.10)' }}
+                              itemStyle={{ fontSize: 9, color: trendColor }}
+                              labelStyle={{ fontSize: 9, fontWeight: 600, color: isDark ? '#94a3b8' : '#64748b' }}
+                            />
+                          </AreaChart>
+                        </ResponsiveContainer>
                       </motion.div>
                     );
                   })()}
 
-                  {/* 4-stat mini grid — flex-1 equal height */}
-                  <div className={`rounded-lg border flex-1 flex items-stretch overflow-hidden ${isDark ? 'bg-slate-700/20 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                  {/* 4-stat mini grid — clean, neutral, tabular numerals */}
+                  <div className={`grid grid-cols-4 gap-1.5`}>
                     {[
-                      { icon: <Calendar className="h-2.5 w-2.5 text-indigo-400" />, val: workingDaysLeft, label: 'Days Left', color: null },
-                      { icon: <Target className="h-2.5 w-2.5 text-violet-400" />, val: myPending, label: 'Pending', color: null },
-                      { icon: <TrendingUp className="h-2.5 w-2.5 text-indigo-400" />, val: `~${dailyTarget}/d`, label: 'To Finish', small: true, color: null },
-                      { icon: <Zap className="h-2.5 w-2.5" style={{ color: scoreTrend >= 0 ? '#6366f1' : '#EF4444' }} />, val: scoreTrend >= 0 ? `+${scoreTrend}` : `${scoreTrend}`, label: 'Trend', color: scoreTrend >= 0 ? '#6366f1' : '#EF4444' },
-                    ].map(({ icon, val, label, small, color }, i, arr) => (
+                      { val: workingDaysLeft, label: 'Days Left', color: null },
+                      { val: myPending, label: 'Pending', color: null },
+                      { val: `~${dailyTarget}/d`, label: 'To Finish', color: null },
+                      { val: scoreTrend >= 0 ? `+${scoreTrend}` : `${scoreTrend}`, label: 'Trend', color: scoreTrend >= 0 ? '#1FAF5A' : '#DC2626' },
+                    ].map(({ val, label, color }, i) => (
                       <motion.div
                         key={label}
-                        className={`flex flex-col items-center justify-center gap-0.5 flex-1 py-2 ${i < arr.length - 1 ? (isDark ? 'border-r border-slate-700' : 'border-r border-slate-200') : ''}`}
+                        className={`flex flex-col items-center justify-center gap-0.5 rounded-lg border py-1.5 ${isDark ? 'bg-slate-900/40 border-slate-700' : 'bg-slate-50 border-slate-200'}`}
                         initial={{ opacity: 0, y: 4 }}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.52 + i * 0.06 }}
+                        transition={{ delay: 0.4 + i * 0.05 }}
                       >
-                        {icon}
-                        <span className={`font-bold leading-tight tabular-nums ${small ? 'text-[9px]' : 'text-[11px]'}`} style={{ color: color || (isDark ? '#e2e8f0' : '#1e293b') }}>
+                        <span className="text-[11px] font-black leading-tight tabular-nums" style={{ color: color || (isDark ? '#e2e8f0' : '#1e293b') }}>
                           {val}
                         </span>
-                        <span className={`text-[7px] font-medium text-center leading-tight ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{label}</span>
+                        <span className={`text-[7px] font-semibold uppercase tracking-wide text-center leading-tight ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{label}</span>
                       </motion.div>
                     ))}
                   </div>
 
-                  {/* Action strip — flex-1 equal height, indigo-tinted business style */}
+                  {/* Footer CTA — quiet, single accent */}
                   <motion.div
-                    className={`rounded-lg border flex-1 flex items-center justify-between px-2.5 overflow-hidden ${isDark ? 'bg-indigo-950/30 border-indigo-900/50' : 'bg-indigo-50 border-indigo-100'}`}
-                    initial={{ opacity: 0, y: 4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.72 }}
+                    className={`rounded-lg border flex-1 flex items-center justify-between gap-2 px-2.5 py-2 ${isDark ? 'bg-indigo-500/10 border-indigo-500/20' : 'bg-indigo-50 border-indigo-100'}`}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.55 }}
                   >
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <motion.div animate={{ x: [0, 2, -2, 0] }} transition={{ duration: 1.8, repeat: Infinity, repeatDelay: 4 }} className="flex-shrink-0">
-                        <Zap className={`h-3 w-3 ${isDark ? 'text-indigo-400' : 'text-indigo-500'}`} />
-                      </motion.div>
-                      <div className="min-w-0">
-                        <p className={`text-[9px] font-semibold leading-tight truncate ${isDark ? 'text-indigo-300' : 'text-indigo-700'}`}>
-                          {displayScore >= 85 ? 'Outstanding!' : 'Keep pushing!'}
-                        </p>
-                        <p className={`text-[8px] leading-tight truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                          Each task completed boosts score.
-                        </p>
-                      </div>
+                    <div className="min-w-0">
+                      <p className={`text-[9px] font-bold leading-tight truncate ${isDark ? 'text-indigo-300' : 'text-indigo-700'}`}>
+                        {displayScore >= 85 ? 'Outstanding work' : 'Keep pushing'}
+                      </p>
+                      <p className={`text-[8px] leading-tight truncate ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                        Each task lifts your rank.
+                      </p>
                     </div>
-                    <motion.button
-                      className={`text-[8px] font-semibold px-2 py-0.5 rounded border flex-shrink-0 ml-2 whitespace-nowrap ${isDark ? 'bg-indigo-900/60 border-indigo-700 text-indigo-300' : 'bg-white border-indigo-200 text-indigo-600'}`}
-                      whileHover={{ scale: 1.04 }}
-                      whileTap={{ scale: 0.97 }}
+                    <button
+                      className={`text-[9px] font-semibold px-2.5 py-1 rounded-md flex-shrink-0 whitespace-nowrap transition-colors ${isDark ? 'bg-indigo-500 text-white hover:bg-indigo-400' : 'bg-slate-900 text-white hover:bg-slate-700'}`}
                       onClick={() => setShowTips(true)}
                     >
-                      View Tips →
-                    </motion.button>
+                      View Tips
+                    </button>
                   </motion.div>
                 </div>
 
