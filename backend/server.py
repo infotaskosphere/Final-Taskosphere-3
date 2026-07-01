@@ -6363,44 +6363,96 @@ async def get_performance_rankings(
         < 300
     ):
         return rankings_cache[cache_key]
+
     now = datetime.now(IST)
     if period == "weekly":
         start_date = now - timedelta(days=7)
-        expected_working_days = 5
     elif period == "monthly":
         start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        expected_working_days = 22
     else:
         start_date = datetime(2024, 1, 1, tzinfo=timezone.utc)
-        months = max((now - start_date).days // 30, 1)
-        expected_working_days = max(22, months * 22)
+
     end_date_str = now.strftime("%Y-%m-%d")
     start_date_str = start_date.strftime("%Y-%m-%d")
+
+    # FIX: expected_working_days used to be a hard-coded 22 (monthly) / 5 (weekly).
+    # That unfairly tanks attendance_percent for EVERYONE right after a new period
+    # starts — e.g. viewing "monthly" on the 1st compares 0-1 days present against
+    # 22 expected days, so the attendance component (25% of the score) rounds to 0
+    # for the whole team. We now count only the working days that have actually
+    # ELAPSED so far in the period (Mon-Fri, minus confirmed company holidays).
+    holiday_docs = await db.holidays.find(
+        {
+            "date": {"$gte": start_date_str, "$lte": end_date_str},
+            "status": "confirmed",
+        },
+        {"_id": 0, "date": 1},
+    ).to_list(500)
+    holiday_dates = {h["date"] for h in holiday_docs}
+    expected_working_days = 0
+    cursor_date = start_date.date()
+    today_date = now.date()
+    while cursor_date <= today_date:
+        if cursor_date.weekday() < 5 and cursor_date.isoformat() not in holiday_dates:
+            expected_working_days += 1
+        cursor_date += timedelta(days=1)
+    expected_working_days = max(expected_working_days, 1)
+
     users = await db.users.find(
         {"role": {"$ne": "admin"}}, {"id": 1, "full_name": 1, "profile_picture": 1}
     ).to_list(100)
+
     rankings = []
     for user in users:
         uid = user["id"]
+
+        # ---------------- Attendance & punctuality ----------------
         att_records = await db.attendance.find(
             {"user_id": uid, "date": {"$gte": start_date_str, "$lte": end_date_str}},
-            {"_id": 0, "duration_minutes": 1, "is_late": 1},
+            {"_id": 0, "duration_minutes": 1, "is_late": 1, "status": 1},
         ).to_list(1000)
-        days_present = len(att_records)
-        total_minutes = sum(r.get("duration_minutes", 0) or 0 for r in att_records)
+        # FIX: this used to count EVERY attendance document as a "present" day —
+        # including the auto-marked "absent" record the system inserts each night
+        # for anyone who never punched in. That silently counted absences as
+        # attendance. Only present-type statuses count now; absences are tracked
+        # separately below and used as an explicit discipline penalty.
+        present_statuses = {"present", "half_day", "wfh", "late"}
+        present_records = [r for r in att_records if r.get("status") in present_statuses]
+        days_present = len(present_records)
+        absent_days = len([r for r in att_records if r.get("status") == "absent"])
+        total_minutes = sum(r.get("duration_minutes", 0) or 0 for r in present_records)
         total_hours = round(total_minutes / 60, 1)
-        attendance_percent = (
-            round((days_present / expected_working_days) * 100, 1)
-            if expected_working_days
-            else 0
+        attendance_percent = round(
+            min((days_present / expected_working_days) * 100, 100), 1
         )
-        timely_days = len([r for r in att_records if not r.get("is_late", False)])
+        timely_days = len([r for r in present_records if not r.get("is_late", False)])
         timely_punchin_percent = (
             round((timely_days / days_present) * 100, 1) if days_present else 0
         )
-        tasks_assigned = await db.tasks.count_documents(
-            {"assigned_to": uid, "created_at": {"$gte": start_date}}
-        )
+
+        # ---------------- Desktop-agent hours worked on PC ----------------
+        # FIX: the desktop agent already reports real active-time per day
+        # (db.desktop_activity.activeSeconds) but it was never read anywhere in
+        # the ranking calculation. Where the agent is installed and has reported
+        # data for this period, its measured active time now drives "Duration of
+        # working"; otherwise we fall back to punch-in/punch-out duration.
+        agent_logs = await db.desktop_activity.find(
+            {"user_id": uid, "date": {"$gte": start_date_str, "$lte": end_date_str}},
+            {"_id": 0, "activeSeconds": 1},
+        ).to_list(2000)
+        agent_hours = round(sum(a.get("activeSeconds", 0) or 0 for a in agent_logs) / 3600, 1)
+        effective_hours = agent_hours if agent_logs else total_hours
+
+        # ---------------- Task completion percentage ----------------
+        # FIX (root cause of the 0% you were seeing): the denominator counted
+        # tasks *created* since start_date, while the numerator counted tasks
+        # *completed* since start_date — two different windows. Anyone who
+        # completed pre-existing tasks but had no BRAND NEW task created this
+        # period showed tasks_assigned = 0, forcing task_completion_percent to 0
+        # no matter how much work they actually finished. The denominator is now
+        # "everything currently assigned" (tasks + todos), which is never
+        # artificially zero.
+        tasks_assigned = await db.tasks.count_documents({"assigned_to": uid})
         completed_tasks = await db.tasks.count_documents(
             {
                 "assigned_to": uid,
@@ -6411,27 +6463,66 @@ async def get_performance_rankings(
                 ],
             }
         )
+        todos_assigned = await db.todos.count_documents({"user_id": uid})
         completed_todos = await db.todos.count_documents(
             {"user_id": uid, "is_completed": True, "completed_at": {"$gte": start_date}}
         )
+        total_assigned = tasks_assigned + todos_assigned
         total_completed = completed_tasks + completed_todos
         task_completion_percent = (
-            round((total_completed / tasks_assigned) * 100, 1) if tasks_assigned else 0
+            round(min((total_completed / total_assigned) * 100, 100), 1)
+            if total_assigned
+            else 0
         )
-        todos = await db.todos.find(
-            {"user_id": uid, "created_at": {"$gte": start_date}}
+
+        # ---------------- On-time completion ----------------
+        # FIX: this metric only ever looked at db.todos (the small personal
+        # checklist) and completely ignored db.tasks — the app's actual primary
+        # work unit (Task Management, 150+ tasks with due dates). Anyone who does
+        # real work through Tasks but rarely touches the separate To-Do widget
+        # always scored 0% here, losing 15 guaranteed points. Completed tasks
+        # with a due date are now included alongside todos.
+        due_tasks = await db.tasks.find(
+            {
+                "assigned_to": uid,
+                "status": "completed",
+                "due_date": {"$ne": None},
+                "$or": [
+                    {"completed_at": {"$gte": start_date}},
+                    {"updated_at": {"$gte": start_date}},
+                ],
+            },
+            {"_id": 0, "due_date": 1, "completed_at": 1, "updated_at": 1},
+        ).to_list(1000)
+        ontime_tasks = 0
+        for t in due_tasks:
+            due = safe_dt(t.get("due_date"))
+            completed_at = safe_dt(t.get("completed_at")) or safe_dt(t.get("updated_at"))
+            if due and completed_at and completed_at <= due:
+                ontime_tasks += 1
+
+        completed_todos_this_period = await db.todos.find(
+            {"user_id": uid, "is_completed": True, "completed_at": {"$gte": start_date}},
+            {"_id": 0, "due_date": 1, "completed_at": 1},
         ).to_list(500)
-        completed_ontime = 0
-        for t in todos:
-            if t.get("is_completed"):
+        ontime_todos = 0
+        todos_with_due = 0
+        for t in completed_todos_this_period:
+            if t.get("due_date"):
+                todos_with_due += 1
                 due = safe_dt(t.get("due_date"))
                 completed_at = safe_dt(t.get("completed_at"))
                 if due and completed_at and completed_at <= due:
-                    completed_ontime += 1
+                    ontime_todos += 1
+
+        ontime_total = len(due_tasks) + todos_with_due
+        ontime_completed = ontime_tasks + ontime_todos
         todo_ontime_percent = (
-            round((completed_ontime / len(todos)) * 100, 1) if todos else 0
+            round((ontime_completed / ontime_total) * 100, 1) if ontime_total else 0
         )
-        safe_hours_ratio = min((total_hours / 180), 1) if total_hours else 0
+
+        # ---------------- Composite score ----------------
+        safe_hours_ratio = min((effective_hours / 180), 1) if effective_hours else 0
         score = (
             float(attendance_percent or 0) * 0.25
             + safe_hours_ratio * 100 * 0.20
@@ -6439,30 +6530,42 @@ async def get_performance_rankings(
             + float(todo_ontime_percent or 0) * 0.15
             + float(timely_punchin_percent or 0) * 0.15
         )
-        overall_score = round(min(score, 100), 1)
+        # FIX: "number of absent days" was tracked nowhere in the score even
+        # though the spec calls for it. Each unexplained absence this period now
+        # costs 2 pts, capped at a 10-pt maximum deduction, so it visibly affects
+        # ranking without being able to wipe out an otherwise strong score.
+        discipline_penalty = min(absent_days * 2, 10)
+        overall_score = round(min(max(score - discipline_penalty, 0), 100), 1)
+
         if overall_score >= 95:
             badge = "Star Performer"
         elif overall_score >= 85:
             badge = "Top Performer"
         else:
             badge = "Good Performer"
+
         rankings.append(
             PerformanceMetric(
                 user_id=str(uid),
                 user_name=str(user.get("full_name", "Unknown")),
                 profile_picture=user.get("profile_picture"),
                 attendance_percent=float(attendance_percent or 0),
-                total_hours=float(total_hours or 0),
+                total_hours=float(effective_hours or 0),
                 task_completion_percent=float(task_completion_percent or 0),
                 todo_ontime_percent=float(todo_ontime_percent or 0),
                 timely_punchin_percent=float(timely_punchin_percent or 0),
                 overall_score=float(overall_score or 0),
                 badge=str(badge),
+                auto_absent_count=int(absent_days),
+                discipline_penalty=float(discipline_penalty),
+                final_score=float(overall_score or 0),
             )
         )
+
     rankings.sort(key=lambda x: x.overall_score, reverse=True)
     for i, r in enumerate(rankings):
         r.rank = i + 1
+
     rankings_cache[cache_key] = rankings
     # Store as timezone-aware UTC datetime so comparison never throws TypeError
     rankings_cache_time[cache_key] = datetime.now(timezone.utc)
