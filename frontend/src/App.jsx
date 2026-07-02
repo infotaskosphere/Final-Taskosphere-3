@@ -8,6 +8,8 @@ import { useLoading } from "./lib/api";
 import { AnimatePresence } from "framer-motion";
 import GifLoader from "@/components/ui/GifLoader.jsx";
 import ReminderPopupManager from "@/components/layout/ReminderPopupManager.jsx";
+import { BulkWASenderProvider } from "@/contexts/BulkWASenderContext";
+import BulkWASenderWidget from "@/components/BulkWASenderWidget";
 
 /* ── Bottom loading bar ─────────────────────────────────────────────── */
 // memo: re-renders only when loading state changes, not on every route change
@@ -70,20 +72,22 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <BrowserRouter>
-          {/* Bottom loading bar — always visible, no layout shift */}
-          <BottomLoadingBar />
+          <BulkWASenderProvider>
+            {/* Bottom loading bar — always visible, no layout shift */}
+            <BottomLoadingBar />
 
-          {/* Global reminder popup — polls every page, shows on top of any route */}
-          <ReminderPopupManager />
+            {/* Global reminder popup — polls every page, shows on top of any route */}
+            <ReminderPopupManager />
 
-          {/* Suspense wraps lazy page chunks.
-              GifLoader is full-screen only for the very first load.
-              Once the user is in-app, DashboardLayout's ContentLoader handles it. */}
-          <Suspense fallback={<GifLoader />}>
-            <AnimatedRoutes />
-          </Suspense>
+            {/* Persistent bulk-WhatsApp sender widget — survives page navigation */}
+            <BulkWASenderWidget />
 
-          <Toaster position="top-right" richColors />
+            <Suspense fallback={<GifLoader />}>
+              <AnimatedRoutes />
+            </Suspense>
+
+            <Toaster position="top-right" richColors />
+          </BulkWASenderProvider>
         </BrowserRouter>
       </AuthProvider>
     </QueryClientProvider>
