@@ -8,8 +8,8 @@ import { useLoading } from "./lib/api";
 import { AnimatePresence } from "framer-motion";
 import GifLoader from "@/components/ui/GifLoader.jsx";
 import ReminderPopupManager from "@/components/layout/ReminderPopupManager.jsx";
-import { BulkWASenderProvider } from "@/contexts/BulkWASenderContext";
-import BulkWASenderWidget from "@/components/BulkWASenderWidget";
+import { BulkWASenderProvider } from "@/components/BulkWASenderContext";
+import BulkWASenderWidget from "@/contexts/BulkWASenderWidget";
 
 /* ── Bottom loading bar ─────────────────────────────────────────────── */
 // memo: re-renders only when loading state changes, not on every route change
