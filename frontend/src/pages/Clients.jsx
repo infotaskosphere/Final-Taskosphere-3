@@ -36,6 +36,7 @@ import StandaloneGovtFeeDialog from '@/components/StandaloneGovtFeeDialog';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
 import MergeClientsDialog from '@/components/ui/MergeClientsDialog';
 import ClientGroupsPanel from '@/components/ClientGroupsPanel';
+import { useBulkWASender } from '@/contexts/BulkWASenderContext';
 import ClientPortalManager from '@/components/ClientPortalManager';
 import ITRClientDialog from '@/components/ITRClientDialog';
 import ITRBulkImportDialog from '@/components/ITRBulkImportDialog';
@@ -321,6 +322,9 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historySearch, setHistorySearch] = useState('');
   const [historyFilter, setHistoryFilter] = useState('all'); // all | sent | failed
+  const [batchName, setBatchName] = useState('');
+  const { startBatch, state: bulkState } = useBulkWASender();
+  const [selectedBatchId, setSelectedBatchId] = useState(null); // history batch drill-down
 
   const activeClients = useMemo(() => filteredClients.filter(c => (c?.status || 'active') !== 'inactive'), [filteredClients]);
   const archivedCount = filteredClients.length - activeClients.length;
@@ -331,7 +335,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
       setWaServiceFilter('all');
       setWaClientTypeFilter('all');
       setSelectedIds(new Set(activeClients.map(c => c.id)));
-      setMessage(''); setClientSearch(''); setCopied(false); setExportDone(false); setSelectedTemplate('');
+      setMessage(''); setClientSearch(''); setCopied(false); setExportDone(false); setSelectedTemplate(''); setBatchName(''); setSelectedBatchId(null);
       setSendProgress(null); setSendingBulk(false);
       setMediaFile(null); setSubjectLine('');
       // Fetch active sender info for email mode (use authenticated api instance)
@@ -392,6 +396,7 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
 
   const filteredHistory = useMemo(() => {
     let logs = historyLogs;
+    if (selectedBatchId) logs = logs.filter(l => (l.batch_id || '') === selectedBatchId);
     if (historyFilter === 'sent') logs = logs.filter(l => l.status === 'sent' || l.status === 'delivered' || l.status === 'read');
     if (historyFilter === 'failed') logs = logs.filter(l => l.status === 'failed' || l.status === 'error');
     if (historySearch.trim()) {
@@ -399,11 +404,34 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
       logs = logs.filter(l =>
         (l.to || l.phone || '').includes(q) ||
         (l.client_name || l.name || '').toLowerCase().includes(q) ||
-        (l.message || l.body || '').toLowerCase().includes(q)
+        (l.message || l.body || '').toLowerCase().includes(q) ||
+        (l.batch_name || '').toLowerCase().includes(q)
       );
     }
     return logs;
-  }, [historyLogs, historyFilter, historySearch]);
+  }, [historyLogs, historyFilter, historySearch, selectedBatchId]);
+
+  // Group history messages into batches (only entries that carry batch_id)
+  const historyBatches = useMemo(() => {
+    const map = new Map();
+    for (const l of historyLogs) {
+      const bid = l.batch_id;
+      if (!bid) continue;
+      let b = map.get(bid);
+      if (!b) {
+        b = { batch_id: bid, batch_name: l.batch_name || bid, total: 0, sent: 0, failed: 0, first_at: l.sent_at || l.created_at, last_at: l.sent_at || l.created_at };
+        map.set(bid, b);
+      }
+      b.total += 1;
+      if (['sent','delivered','read'].includes(l.status)) b.sent += 1;
+      if (['failed','error'].includes(l.status)) b.failed += 1;
+      const t = l.sent_at || l.created_at;
+      if (t && (!b.last_at || t > b.last_at)) b.last_at = t;
+      if (t && (!b.first_at || t < b.first_at)) b.first_at = t;
+      if (l.batch_name && !b.batch_name) b.batch_name = l.batch_name;
+    }
+    return Array.from(map.values()).sort((a, b) => (b.last_at || '').localeCompare(a.last_at || ''));
+  }, [historyLogs]);
 
   // Always show ALL clients — archived ones appear dimmed/unchecked in Active mode
   const displayedClients = useMemo(() => {
@@ -490,67 +518,38 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
   }, []);
 
   // Direct send via WA bridge
+  // Hands the job off to the global BulkWASenderProvider, so the batch keeps
+  // sending in the background even if this modal is closed or the user
+  // navigates to another page. A floating widget (bottom-right) shows progress.
   const handleDirectSend = useCallback(async () => {
     if (!message.trim() && !mediaFile) { toast.error('Please write a message or attach a file'); return; }
+    if (bulkState?.active) { toast.error('Another WhatsApp batch is already running. Wait for it to finish or cancel it from the widget.'); return; }
     const toSend = selectedClients.filter(c => c.phone);
     if (toSend.length === 0) { toast.error('No selected clients have a phone number'); return; }
-    setSendingBulk(true);
-    setPauseCountdown(null);
-    pauseRef.current = false;
-    setSendProgress({ done: 0, total: toSend.length, results: [] });
-    const results = [];
-    for (let i = 0; i < toSend.length; i++) {
-      if (pauseRef.current) break; // aborted by user
-      const client = toSend[i];
-      const personalMsg = personalizeMessage(message, client);
-      const digits = client.phone.replace(/\D/g, '');
-      const waPhone = digits.length === 10 ? `91${digits}` : digits;
-      try {
-        // Send text message if present
-        if (personalMsg.trim()) {
-          await api.post('/whatsapp/send', { to: waPhone, message: personalMsg, message_type: 'bulk_client', context_id: client.id, session_id: waSelectedSession || undefined });
-        }
-        // Send media if attached
-        if (mediaFile) {
-          await api.post('/whatsapp/send-media', {
-            to: waPhone,
-            caption: !personalMsg.trim() ? `Dear ${client.company_name || 'Client'},` : undefined,
-            base64: mediaFile.base64,
-            mime_type: mediaFile.mimeType,
-            filename: mediaFile.name,
-            message_type: 'bulk_client',
-            context_id: client.id,
-            session_id: waSelectedSession || undefined,
-          });
-        }
-        results.push({ id: client.id, name: client.company_name, status: 'sent' });
-      } catch (err) {
-        results.push({ id: client.id, name: client.company_name, status: 'failed', error: err?.response?.data?.detail || 'Failed' });
-      }
-      setSendProgress({ done: i + 1, total: toSend.length, results: [...results] });
+    if (!batchName.trim()) { toast.error('Please give this batch a name (e.g. "Income Tax Reminder") so you can find it later in History.'); return; }
 
-      // ── Pause logic ─────────────────────────────────────────────────────
-      const isLast = i === toSend.length - 1;
-      if (pauseEnabled && !isLast && (i + 1) % pauseAfterCount === 0) {
-        let remaining = pauseDurationSec;
-        setPauseCountdown(remaining);
-        await new Promise(resolve => {
-          const tick = setInterval(() => {
-            if (pauseRef.current) { clearInterval(tick); resolve(); return; }
-            remaining -= 1;
-            if (remaining <= 0) { clearInterval(tick); setPauseCountdown(null); resolve(); }
-            else { setPauseCountdown(remaining); }
-          }, 1000);
-        });
-      }
-    }
-    setPauseCountdown(null);
-    setSendingBulk(false);
-    pauseRef.current = false;
-    const sentCount = results.filter(r => r.status === 'sent').length;
-    const failCount = results.filter(r => r.status === 'failed').length;
-    toast.success(`Sent ${sentCount} messages${failCount > 0 ? `, ${failCount} failed` : ''}`);
-  }, [message, mediaFile, selectedClients, personalizeMessage, waSelectedSession, pauseEnabled, pauseAfterCount, pauseDurationSec]);
+    const recipients = toSend.map(client => ({
+      id: client.id,
+      name: client.company_name,
+      phone: client.phone,
+      message: personalizeMessage(message, client),
+      media: mediaFile ? { base64: mediaFile.base64, mimeType: mediaFile.mimeType, name: mediaFile.name } : null,
+    }));
+
+    // Fire-and-forget: the provider runs the loop independently of this modal.
+    startBatch({
+      batchName: batchName.trim(),
+      recipients,
+      sessionId: waSelectedSession || null,
+      pauseEnabled,
+      pauseAfterCount,
+      pauseDurationSec,
+      messageType: 'bulk_client',
+    });
+
+    // Close the modal so the user can keep working — the widget takes over.
+    onClose?.();
+  }, [message, mediaFile, selectedClients, personalizeMessage, waSelectedSession, pauseEnabled, pauseAfterCount, pauseDurationSec, batchName, startBatch, bulkState, onClose]);
 
   // Schedule bulk send
   const handleScheduleSend = useCallback(async () => {
@@ -750,6 +749,50 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
                 <svg className={`h-4 w-4 ${historyLoading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
               </button>
             </div>
+
+            {/* Batches strip — shown only when no batch is drilled into */}
+            {!selectedBatchId && historyBatches.length > 0 && (
+              <div className="px-5 py-2.5 border-b flex-shrink-0" style={{ borderColor: isDark ? '#1e3a5f' : '#f1f5f9', background: isDark ? '#0a1523' : '#fff' }}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Batches</span>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: isDark ? '#1e293b' : '#e0f2fe', color: isDark ? '#7dd3fc' : '#0369a1' }}>{historyBatches.length}</span>
+                  <span className="text-[10px]" style={{ color: isDark ? '#475569' : '#94a3b8' }}>Click a batch to see the full data for that send.</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {historyBatches.slice(0, 20).map(b => (
+                    <button
+                      key={b.batch_id}
+                      onClick={() => setSelectedBatchId(b.batch_id)}
+                      className="text-left rounded-lg border px-3 py-2 hover:opacity-90 transition-all"
+                      style={{ background: isDark ? '#0f172a' : '#f8fafc', borderColor: isDark ? '#1e3a5f' : '#e2e8f0', minWidth: 180 }}
+                      title={b.batch_name}
+                    >
+                      <div className="text-[11px] font-bold truncate" style={{ color: isDark ? '#e2e8f0' : '#0f172a', maxWidth: 200 }}>🏷️ {b.batch_name}</div>
+                      <div className="flex items-center gap-2 mt-1 text-[10px]">
+                        <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>{b.total} msgs</span>
+                        <span style={{ color: '#22c55e', fontWeight: 700 }}>✓ {b.sent}</span>
+                        {b.failed > 0 && <span style={{ color: '#ef4444', fontWeight: 700 }}>✗ {b.failed}</span>}
+                      </div>
+                      <div className="text-[9px] mt-0.5" style={{ color: isDark ? '#475569' : '#94a3b8' }}>
+                        {b.last_at ? new Date(b.last_at).toLocaleString('en-IN', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : ''}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Selected batch pill */}
+            {selectedBatchId && (
+              <div className="px-5 py-2 border-b flex-shrink-0 flex items-center gap-2" style={{ borderColor: isDark ? '#1e3a5f' : '#f1f5f9', background: isDark ? '#0a1523' : '#fff' }}>
+                <span className="text-[11px] font-bold" style={{ color: isDark ? '#7dd3fc' : '#0369a1' }}>
+                  🏷️ Viewing batch: {(historyBatches.find(b => b.batch_id === selectedBatchId)?.batch_name) || selectedBatchId}
+                </span>
+                <button onClick={() => setSelectedBatchId(null)} className="ml-auto text-[10px] font-bold px-2 py-1 rounded-lg" style={{ background: isDark ? '#1e293b' : '#f1f5f9', color: isDark ? '#94a3b8' : '#64748b' }}>
+                  ← All batches
+                </button>
+              </div>
+            )}
 
             {/* History list */}
             <div className="flex-1 overflow-y-auto">
@@ -1114,6 +1157,24 @@ const BulkMessageModal = React.memo(({ open, onClose, mode, filteredClients, isD
                     <div className="rounded-xl border p-4 space-y-3" style={{ background: isDark ? '#0a1628' : '#f0fdf4', borderColor: isDark ? '#1a3a1a' : '#bbf7d0' }}>
                       <p className="text-xs font-bold" style={{ color: isDark ? '#4ade80' : '#166534' }}>⚡ Direct Send — {phoneCount} clients with phone</p>
                       <p className="text-xs" style={{ color: isDark ? '#6ee7b7' : '#15803d' }}>Messages are sent individually with personalized content. Each client receives their own message with their name and details.</p>
+
+                      {/* Batch name — required, used to group messages in WhatsApp History */}
+                      <div className="rounded-lg border p-3" style={{ background: isDark ? '#0f1f2e' : '#fff', borderColor: isDark ? '#1e3a5f' : '#bae6fd' }}>
+                        <label className="text-[11px] font-bold block mb-1.5" style={{ color: isDark ? '#7dd3fc' : '#0369a1' }}>
+                          🏷️ Batch name <span style={{ color: '#ef4444' }}>*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={batchName}
+                          onChange={e => setBatchName(e.target.value)}
+                          placeholder="e.g. Income Tax Reminder – July 2026"
+                          className="w-full h-9 px-3 rounded-lg border text-sm font-medium"
+                          style={{ background: isDark ? '#1e293b' : '#f0f9ff', borderColor: isDark ? '#334155' : '#bae6fd', color: isDark ? '#e2e8f0' : '#0f172a' }}
+                        />
+                        <p className="text-[10px] mt-1.5" style={{ color: isDark ? '#64748b' : '#64748b' }}>
+                          All messages in this send will be tagged with this name. Open <b>History</b> and click a batch to see the full data for that send.
+                        </p>
+                      </div>
 
                       {/* ── Pause / Delay settings ───────────────────────── */}
                       <div className="rounded-lg border p-3 space-y-2.5" style={{ background: isDark ? '#0f1f2e' : '#fff', borderColor: isDark ? '#1e3a5f' : '#bae6fd' }}>
