@@ -15,7 +15,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Minimize2, Maximize2, StopCircle, CheckCircle2, AlertCircle, Loader2, Pause,
 } from 'lucide-react';
-import { useBulkWASender } from '@/contexts/BulkWASenderContext';
+import { useBulkWASender } from '@/components/BulkWASenderContext';
 
 const WA_GREEN = '#25D366';
 const WA_DARK  = '#128C7E';
