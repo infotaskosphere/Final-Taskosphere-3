@@ -128,6 +128,8 @@ class WASendMessageRequest(BaseModel):
     message_type: str = "general"
     context_id: Optional[str] = None
     session_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    batch_name: Optional[str] = None
 
 class WABulkSendRequest(BaseModel):
     recipients: List[str]
@@ -135,6 +137,8 @@ class WABulkSendRequest(BaseModel):
     message_type: str = "general"
     context_id: Optional[str] = None
     session_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    batch_name: Optional[str] = None
 
 class WASendMediaRequest(BaseModel):
     to: str
@@ -145,6 +149,8 @@ class WASendMediaRequest(BaseModel):
     message_type: str = "general"
     context_id: Optional[str] = None
     session_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    batch_name: Optional[str] = None
 
 # ── Bridge helpers ───────────────────────────────────────────────────────────
 
@@ -255,11 +261,12 @@ async def _has_wa_access(user: User) -> bool:
     rec = await _db()["whatsapp_access_requests"].find_one({"user_id": user.id, "status": "approved"})
     return rec is not None
 
-async def _store_message(sent_by, to, message, message_type, context_id, status_val, session_id=None, error=None):
+async def _store_message(sent_by, to, message, message_type, context_id, status_val, session_id=None, error=None, batch_id=None, batch_name=None):
     await _db()["whatsapp_messages"].insert_one({
         "sent_by": sent_by, "to": to, "message": message,
         "message_type": message_type, "context_id": context_id,
         "session_id": session_id, "status": status_val, "error": error,
+        "batch_id": batch_id, "batch_name": batch_name,
         "sent_at": datetime.now(timezone.utc).isoformat(),
     })
 
@@ -459,10 +466,10 @@ async def send_message(body: WASendMessageRequest, current_user: User = Depends(
         raise HTTPException(403, "You do not have permission to send WhatsApp messages.")
     try:
         result = await _bridge_post("/send", {"to": body.to, "message": body.message, "sessionId": body.session_id})
-        await _store_message(current_user.id, body.to, body.message, body.message_type, body.context_id, "sent", body.session_id)
+        await _store_message(current_user.id, body.to, body.message, body.message_type, body.context_id, "sent", body.session_id, batch_id=body.batch_id, batch_name=body.batch_name)
         return {"success": True, "messageId": result.get("messageId")}
     except Exception as exc:
-        await _store_message(current_user.id, body.to, body.message, body.message_type, body.context_id, "failed", body.session_id, str(exc))
+        await _store_message(current_user.id, body.to, body.message, body.message_type, body.context_id, "failed", body.session_id, str(exc), batch_id=body.batch_id, batch_name=body.batch_name)
         raise
 
 
@@ -474,10 +481,10 @@ async def send_bulk(body: WABulkSendRequest, current_user: User = Depends(get_cu
     for recipient in body.recipients:
         try:
             await _bridge_post("/send", {"to": recipient, "message": body.message, "sessionId": body.session_id})
-            await _store_message(current_user.id, recipient, body.message, body.message_type, body.context_id, "sent", body.session_id)
+            await _store_message(current_user.id, recipient, body.message, body.message_type, body.context_id, "sent", body.session_id, batch_id=body.batch_id, batch_name=body.batch_name)
             results.append({"to": recipient, "status": "sent"})
         except Exception as exc:
-            await _store_message(current_user.id, recipient, body.message, body.message_type, body.context_id, "failed", body.session_id, str(exc))
+            await _store_message(current_user.id, recipient, body.message, body.message_type, body.context_id, "failed", body.session_id, str(exc), batch_id=body.batch_id, batch_name=body.batch_name)
             results.append({"to": recipient, "status": "failed", "error": str(exc)})
         await asyncio.sleep(0.8)
     return {"results": results}
@@ -505,10 +512,10 @@ async def send_media(body: WASendMediaRequest, current_user: User = Depends(get_
             "filename":  body.filename,
         })
         caption_log = f"[{body.filename}] {body.caption or ''}"
-        await _store_message(current_user.id, body.to, caption_log, body.message_type, body.context_id, "sent", body.session_id)
+        await _store_message(current_user.id, body.to, caption_log, body.message_type, body.context_id, "sent", body.session_id, batch_id=body.batch_id, batch_name=body.batch_name)
         return {"success": True, "messageId": result.get("messageId"), "filename": body.filename}
     except Exception as exc:
-        await _store_message(current_user.id, body.to, f"[media:{body.filename}]", body.message_type, body.context_id, "failed", body.session_id, str(exc))
+        await _store_message(current_user.id, body.to, f"[media:{body.filename}]", body.message_type, body.context_id, "failed", body.session_id, str(exc), batch_id=body.batch_id, batch_name=body.batch_name)
         raise
 
 
@@ -525,16 +532,58 @@ async def get_wa_status(current_user: User = Depends(get_current_user)):
 
 
 @router.get("/messages")
-async def list_messages(message_type: Optional[str] = None, limit: int = 50, current_user: User = Depends(get_current_user)):
+async def list_messages(message_type: Optional[str] = None, batch_id: Optional[str] = None, limit: int = 50, current_user: User = Depends(get_current_user)):
     query: Dict[str, Any] = {}
     if current_user.role != "admin":
         query["sent_by"] = current_user.id
     if message_type:
         query["message_type"] = message_type
+    if batch_id:
+        query["batch_id"] = batch_id
     docs = await _db()["whatsapp_messages"].find(query).sort("sent_at", -1).limit(limit).to_list(limit)
     for d in docs:
         d["id"] = str(d.pop("_id"))
     return docs
+
+
+@router.get("/batches")
+async def list_batches(limit: int = 100, current_user: User = Depends(get_current_user)):
+    """Return WhatsApp send batches with per-batch summary.
+
+    Groups whatsapp_messages by batch_id. Non-admins see only their own batches.
+    """
+    match: Dict[str, Any] = {"batch_id": {"$ne": None}}
+    if current_user.role != "admin":
+        match["sent_by"] = current_user.id
+    pipeline = [
+        {"$match": match},
+        {"$group": {
+            "_id": "$batch_id",
+            "batch_name": {"$last": "$batch_name"},
+            "total": {"$sum": 1},
+            "sent": {"$sum": {"$cond": [{"$in": ["$status", ["sent", "delivered", "read"]]}, 1, 0]}},
+            "failed": {"$sum": {"$cond": [{"$in": ["$status", ["failed", "error"]]}, 1, 0]}},
+            "first_at": {"$min": "$sent_at"},
+            "last_at": {"$max": "$sent_at"},
+            "sent_by": {"$last": "$sent_by"},
+        }},
+        {"$sort": {"last_at": -1}},
+        {"$limit": limit},
+    ]
+    docs = await _db()["whatsapp_messages"].aggregate(pipeline).to_list(limit)
+    return [
+        {
+            "batch_id": d["_id"],
+            "batch_name": d.get("batch_name") or d["_id"],
+            "total": d.get("total", 0),
+            "sent": d.get("sent", 0),
+            "failed": d.get("failed", 0),
+            "first_at": d.get("first_at"),
+            "last_at": d.get("last_at"),
+            "sent_by": d.get("sent_by"),
+        }
+        for d in docs
+    ]
 
 
 # ── Internal helper ──────────────────────────────────────────────────────────
