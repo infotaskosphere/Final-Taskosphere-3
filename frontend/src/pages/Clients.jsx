@@ -36,7 +36,7 @@ import StandaloneGovtFeeDialog from '@/components/StandaloneGovtFeeDialog';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
 import MergeClientsDialog from '@/components/ui/MergeClientsDialog';
 import ClientGroupsPanel from '@/components/ClientGroupsPanel';
-import { useBulkWASender } from '@/contexts/BulkWASenderContext';
+import { useBulkWASender } from '@/components/BulkWASenderContext';
 import ClientPortalManager from '@/components/ClientPortalManager';
 import ITRClientDialog from '@/components/ITRClientDialog';
 import ITRBulkImportDialog from '@/components/ITRBulkImportDialog';
