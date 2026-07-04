@@ -23,7 +23,8 @@ import {
   ShieldOff, Fingerprint, Download, Pencil, Inbox, X,
   Monitor, Wifi, WifiOff, RefreshCw, Radar, Loader2,
   Network, Save, ClipboardList, LayoutDashboard, AlertTriangle, MapPin, UserMinus, ArrowRight,
-  Building2, MessageSquare, MessageCircle,
+  Building2, MessageSquare, MessageCircle, Wallet, IndianRupee, ChevronDown, ChevronUp,
+  TrendingDown, CalendarClock, CalendarX2, CalendarCheck2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -2332,10 +2333,18 @@ export default function Users() {
   const canManagePermissions = isAdmin || (isManager && !!perms.can_manage_users);
 
   // ── Main page tab (Users vs Identix) ─────────────────────────────────────
-  const [mainTab, setMainTab] = useState('users'); // 'users' | 'identix' | 'password_resets'
+  const [mainTab, setMainTab] = useState('users'); // 'users' | 'identix' | 'password_resets' | 'salary'
   // ── Identix sub-tab ───────────────────────────────────────────────────────
   const [identixTab, setIdentixTab] = useState('dashboard'); // 'dashboard' | 'devices' | 'enrollment' | 'logs'
   // ── Password reset requests (admin only) ──────────────────────────────────
+  // ── Salary tab (admin only) ────────────────────────────────────────────────
+  const [salaryMonth,     setSalaryMonth]     = useState(() => new Date().toISOString().slice(0, 7)); // 'YYYY-MM'
+  const [salaryReports,   setSalaryReports]   = useState([]);
+  const [salaryLoading,   setSalaryLoading]   = useState(false);
+  const [salarySearch,    setSalarySearch]    = useState('');
+  const [expandedSalaryId,setExpandedSalaryId]= useState(null);
+  const [salaryDetail,    setSalaryDetail]    = useState({}); // { [userId]: reportWithDays }
+  const [salaryDetailLoadingId, setSalaryDetailLoadingId] = useState(null);
 
 
   const [users,                setUsers]                = useState([]);
@@ -2362,7 +2371,7 @@ export default function Users() {
     punch_in_time: '10:30', grace_time: '00:10', punch_out_time: '19:00',
     telegram_id: '', is_active: true, status: 'active',
     company_id: '', company_name: '',
-    joining_date: '', training_period_end: '', payroll_date: '',
+    joining_date: '', training_period_end: '', payroll_date: '', monthly_salary: '',
   });
   const [permissions, setPermissions] = useState({ ...EMPTY_PERMISSIONS });
 
@@ -2398,6 +2407,39 @@ export default function Users() {
   useEffect(() => {
     if (mainTab === 'password_resets' && isAdmin && !users.length) fetchUsers();
   }, [mainTab, isAdmin]);
+
+  // ── Salary tab: fetch summary whenever the tab or selected month changes ──
+  const fetchSalaryReports = useCallback(async (month) => {
+    setSalaryLoading(true);
+    try {
+      const res = await api.get('/users/salary-report-all', { params: { month } });
+      setSalaryReports(res.data?.reports || []);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to load salary report');
+      setSalaryReports([]);
+    } finally { setSalaryLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (mainTab === 'salary' && isAdmin) {
+      fetchSalaryReports(salaryMonth);
+      setExpandedSalaryId(null);
+      setSalaryDetail({});
+    }
+  }, [mainTab, isAdmin, salaryMonth, fetchSalaryReports]);
+
+  const toggleSalaryDetail = useCallback(async (userId) => {
+    if (expandedSalaryId === userId) { setExpandedSalaryId(null); return; }
+    setExpandedSalaryId(userId);
+    if (salaryDetail[userId]?.month === salaryMonth) return; // already cached for this month
+    setSalaryDetailLoadingId(userId);
+    try {
+      const res = await api.get(`/users/${userId}/salary-report`, { params: { month: salaryMonth } });
+      setSalaryDetail(prev => ({ ...prev, [userId]: res.data }));
+    } catch {
+      toast.error('Failed to load day-by-day breakdown');
+    } finally { setSalaryDetailLoadingId(null); }
+  }, [expandedSalaryId, salaryDetail, salaryMonth]);
 
   const fetchPermissions = useCallback(async (userId) => {
     try {
@@ -2437,6 +2479,7 @@ export default function Users() {
       joining_date: userData.joining_date ? userData.joining_date.slice(0, 10) : '',
       training_period_end: userData.training_period_end ? userData.training_period_end.slice(0, 10) : '',
       payroll_date: userData.payroll_date ? userData.payroll_date.slice(0, 10) : '',
+      monthly_salary: userData.monthly_salary != null ? String(userData.monthly_salary) : '',
     });
     setDialogOpen(true);
   }, []);
@@ -2461,6 +2504,7 @@ export default function Users() {
           payroll_date: formData.payroll_date || null,
           ...(isAdmin && { email: formData.email.trim(), role: formData.role, status: formData.status, departments: formData.departments }),
           ...(isAdmin && formData.password.trim() && { password: formData.password.trim() }),
+          ...(isAdmin && { monthly_salary: formData.monthly_salary !== '' ? Number(formData.monthly_salary) : null }),
         };
         await api.put(`/users/${selectedUser.id}`, payload);
         if (selectedUser.id === user?.id) await refreshUser();
@@ -2479,6 +2523,7 @@ export default function Users() {
           joining_date: formData.joining_date || null,
           training_period_end: formData.training_period_end || null,
           payroll_date: formData.payroll_date || null,
+          monthly_salary: formData.monthly_salary !== '' ? Number(formData.monthly_salary) : null,
         });
         toast.success('✓ Member registered — awaiting approval');
       }
@@ -2640,7 +2685,9 @@ export default function Users() {
               <div className="w-14 h-14 rounded-2xl bg-white/15 backdrop-blur-md border border-white/20 flex items-center justify-center flex-shrink-0 shadow-inner">
                 {mainTab === 'identix'
                   ? <Fingerprint className="h-6 w-6 text-white" />
-                  : <UsersIcon className="h-6 w-6 text-white" />}
+                  : mainTab === 'salary'
+                    ? <Wallet className="h-6 w-6 text-white" />
+                    : <UsersIcon className="h-6 w-6 text-white" />}
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2 mb-1">
@@ -2650,12 +2697,14 @@ export default function Users() {
                   </span>
                 </div>
                 <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight leading-tight">
-                  {mainTab === 'identix' ? 'Identix Machine Integration' : 'User Directory'}
+                  {mainTab === 'identix' ? 'Identix Machine Integration' : mainTab === 'salary' ? 'Salary & Payroll' : 'User Directory'}
                 </h1>
                 <p className="text-white/70 text-xs sm:text-sm mt-1 max-w-md">
                   {mainTab === 'identix'
                     ? 'Manage biometric devices, enrollments, and attendance logs.'
-                    : `Organize roles, track access, and onboard new members — ${users.length} ${users.length === 1 ? 'member' : 'members'} in your team.`}
+                    : mainTab === 'salary'
+                      ? 'Attendance-based salary due, calculated automatically from punch records.'
+                      : `Organize roles, track access, and onboard new members — ${users.length} ${users.length === 1 ? 'member' : 'members'} in your team.`}
                 </p>
               </div>
             </div>
@@ -2666,6 +2715,7 @@ export default function Users() {
                   { id: 'users',           label: 'Users',           icon: UsersIcon   },
                   { id: 'identix',         label: 'Identix',         icon: Fingerprint },
                   ...(isAdmin ? [{ id: 'password_resets', label: 'Password Resets', icon: KeyRound }] : []),
+                  ...(isAdmin ? [{ id: 'salary',          label: 'Salary',          icon: Wallet   }] : []),
                 ].map(t => {
                   const Icon = t.icon;
                   return (
@@ -2684,7 +2734,7 @@ export default function Users() {
                   <Button
                     onClick={() => {
                       setSelectedUser(null);
-                      setFormData({ full_name:'',email:'',password:'',role:'staff',departments:[],phone:'',birthday:'',profile_picture:'',punch_in_time:'10:30',grace_time:'00:10',punch_out_time:'19:00',telegram_id:'',is_active:true,status:'active',company_id:'',company_name:'',joining_date:'',training_period_end:'',payroll_date:'' });
+                      setFormData({ full_name:'',email:'',password:'',role:'staff',departments:[],phone:'',birthday:'',profile_picture:'',punch_in_time:'10:30',grace_time:'00:10',punch_out_time:'19:00',telegram_id:'',is_active:true,status:'active',company_id:'',company_name:'',joining_date:'',training_period_end:'',payroll_date:'',monthly_salary:'' });
                       setDialogOpen(true);
                     }}
                     className="h-10 px-6 rounded-xl font-semibold text-sm shadow-lg bg-white/20 hover:bg-white/30 text-white border border-white/20 hover:border-white/30 transition-all">
@@ -2921,6 +2971,221 @@ export default function Users() {
         </motion.div>
       )}
 
+      {/* ════ SALARY TAB (Admin only) ════ */}
+      {mainTab === 'salary' && isAdmin && (
+        <motion.div variants={itemVariants} className="space-y-4">
+          {/* Info banner explaining the policy */}
+          <div className={`flex items-start gap-3 px-4 py-3 rounded-xl border text-xs ${
+            isDark ? 'bg-blue-950/30 border-blue-900/50 text-blue-300' : 'bg-blue-50 border-blue-100 text-blue-700'
+          }`}>
+            <ShieldCheck className="h-4 w-4 mt-0.5 flex-shrink-0 text-blue-500" />
+            <span>
+              Salary due is auto-calculated from Attendance: <b>absent</b> = −1 day, <b>half-day</b> = −0.5 day,
+              <b> late punch-in</b> (after 10:40 AM, using each user&apos;s configured grace) or <b> early punch-out</b> (before 6:00 PM) = −0.5 day each
+              (capped at −1 day/date). Set an employee&apos;s monthly salary via <b>Users</b> tab → Edit → Monthly Salary.
+            </span>
+          </div>
+
+          {/* Controls: month picker + search */}
+          <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Calendar className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                <Input
+                  type="month"
+                  value={salaryMonth}
+                  onChange={e => setSalaryMonth(e.target.value)}
+                  className={`pl-10 h-10 rounded-xl text-sm w-44 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
+                />
+              </div>
+              <Button onClick={() => fetchSalaryReports(salaryMonth)} variant="outline"
+                className={`h-10 px-3 rounded-lg text-xs gap-1.5 ${isDark ? 'border-slate-600 text-slate-300' : ''}`}>
+                <RefreshCw className={`h-3.5 w-3.5 ${salaryLoading ? 'animate-spin' : ''}`} />Refresh
+              </Button>
+            </div>
+            <div className="relative flex-1 sm:max-w-xs">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <Input
+                placeholder="Search by name or email…"
+                value={salarySearch}
+                onChange={e => setSalarySearch(e.target.value)}
+                className={`pl-10 h-10 rounded-xl text-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
+              />
+              {salarySearch && (
+                <button onClick={() => setSalarySearch('')} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Summary cards */}
+          {!salaryLoading && salaryReports.length > 0 && (() => {
+            const totalGross = salaryReports.reduce((s, r) => s + (r.monthly_salary || 0), 0);
+            const totalDeduction = salaryReports.reduce((s, r) => s + (r.deduction_amount || 0), 0);
+            const totalPayable = salaryReports.reduce((s, r) => s + (r.payable_salary || 0), 0);
+            const cards = [
+              { label: 'Employees on Payroll', value: salaryReports.length, icon: UsersIcon, color: COLORS.mediumBlue },
+              { label: 'Total Gross Salary', value: `₹${totalGross.toLocaleString('en-IN')}`, icon: Wallet, color: COLORS.indigo },
+              { label: 'Total Deductions', value: `₹${totalDeduction.toLocaleString('en-IN')}`, icon: TrendingDown, color: '#DC2626' },
+              { label: 'Total Payable', value: `₹${totalPayable.toLocaleString('en-IN')}`, icon: IndianRupee, color: COLORS.emeraldGreen },
+            ];
+            return (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                {cards.map(c => {
+                  const Icon = c.icon;
+                  return (
+                    <div key={c.label} className={`rounded-2xl border p-4 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="p-1.5 rounded-lg" style={{ background: `${c.color}15` }}>
+                          <Icon className="h-3.5 w-3.5" style={{ color: c.color }} />
+                        </div>
+                        <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{c.label}</p>
+                      </div>
+                      <p className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{c.value}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          {/* Salary table */}
+          <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <div className={`flex items-center justify-between px-5 py-3 border-b ${isDark ? 'border-slate-700 bg-slate-800/80' : 'border-slate-100 bg-slate-50/80'}`}>
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-lg" style={{ background: `${COLORS.mediumBlue}15` }}>
+                  <Wallet className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />
+                </div>
+                <div>
+                  <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Salary Due — {format(new Date(`${salaryMonth}-01`), 'MMMM yyyy')}</p>
+                  <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{salaryReports.length} employee{salaryReports.length === 1 ? '' : 's'} with salary configured</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className={`border-b ${isDark ? 'border-slate-700/80 bg-slate-800/50' : 'border-slate-100 bg-slate-50/50'}`}>
+                    {['Member', 'Monthly Salary', 'Present', 'Absent', 'Half-Day', 'Late', 'Early-Out', 'Deduction', 'Payable', ''].map(h => (
+                      <th key={h} className={`text-left py-2.5 px-4 text-[10px] font-semibold uppercase tracking-wider whitespace-nowrap ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className={`divide-y ${isDark ? 'divide-slate-700/40' : 'divide-slate-50'}`}>
+                  {salaryLoading && (
+                    <tr><td colSpan={10} className="py-14 text-center">
+                      <Loader2 className="h-6 w-6 mx-auto animate-spin text-slate-400" />
+                    </td></tr>
+                  )}
+                  {!salaryLoading && salaryReports
+                    .filter(r => {
+                      const q = salarySearch.toLowerCase();
+                      return !q || (r.full_name || '').toLowerCase().includes(q) || (r.email || '').toLowerCase().includes(q);
+                    })
+                    .map(r => {
+                      const isOpen = expandedSalaryId === r.user_id;
+                      const detail = salaryDetail[r.user_id];
+                      return (
+                        <React.Fragment key={r.user_id}>
+                          <tr className={`transition-colors cursor-pointer ${isDark ? 'hover:bg-slate-700/30' : 'hover:bg-slate-50/80'}`}
+                            onClick={() => toggleSalaryDetail(r.user_id)}>
+                            <td className="py-3 px-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-xl overflow-hidden flex-shrink-0 flex items-center justify-center text-white text-xs font-black bg-gradient-to-br from-blue-500 to-indigo-600">
+                                  {r.profile_picture
+                                    ? <img src={r.profile_picture} alt="" className="w-full h-full object-cover" />
+                                    : r.full_name?.charAt(0)?.toUpperCase()}
+                                </div>
+                                <div>
+                                  <p className={`font-semibold text-xs leading-tight ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{r.full_name}</p>
+                                  <p className="text-[11px] text-slate-400 truncate max-w-[160px]">{r.email}</p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 text-xs font-semibold">₹{(r.monthly_salary || 0).toLocaleString('en-IN')}</td>
+                            <td className="py-3 px-4 text-xs"><span className="text-emerald-600 font-semibold">{r.present_days}</span></td>
+                            <td className="py-3 px-4 text-xs"><span className="text-red-500 font-semibold">{r.absent_days}</span></td>
+                            <td className="py-3 px-4 text-xs"><span className="text-amber-600 font-semibold">{r.half_days}</span></td>
+                            <td className="py-3 px-4 text-xs"><span className="text-orange-500 font-semibold">{r.late_days}</span></td>
+                            <td className="py-3 px-4 text-xs"><span className="text-orange-500 font-semibold">{r.early_out_days}</span></td>
+                            <td className="py-3 px-4 text-xs font-semibold text-red-500">−₹{(r.deduction_amount || 0).toLocaleString('en-IN')}</td>
+                            <td className="py-3 px-4 text-xs font-bold" style={{ color: COLORS.emeraldGreen }}>₹{(r.payable_salary || 0).toLocaleString('en-IN')}</td>
+                            <td className="py-3 px-4">
+                              {isOpen ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+                            </td>
+                          </tr>
+                          {isOpen && (
+                            <tr>
+                              <td colSpan={10} className={`p-0 ${isDark ? 'bg-slate-900/40' : 'bg-slate-50/60'}`}>
+                                <div className="px-5 py-4">
+                                  {salaryDetailLoadingId === r.user_id && !detail && (
+                                    <div className="flex items-center gap-2 text-xs text-slate-400 py-4">
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />Loading day-by-day breakdown…
+                                    </div>
+                                  )}
+                                  {detail && (
+                                    <>
+                                      <div className="flex flex-wrap items-center gap-4 mb-3 text-[11px]">
+                                        <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>
+                                          {detail.total_working_days} working days this month · ₹{detail.per_day_salary?.toLocaleString('en-IN')}/day
+                                        </span>
+                                        <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>
+                                          Late after {detail.late_after} AM · Early-out before {detail.early_out_before}
+                                        </span>
+                                        <span className="font-semibold text-red-500">
+                                          Total deduction: {detail.total_deduction_days} day(s) = ₹{detail.deduction_amount?.toLocaleString('en-IN')}
+                                        </span>
+                                      </div>
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {(detail.days || []).map(d => {
+                                          const cfg = {
+                                            present:            { bg: '#DCFCE7', color: '#15803D', icon: CalendarCheck2, label: 'Present' },
+                                            absent:             { bg: '#FEE2E2', color: '#B91C1C', icon: CalendarX2,     label: 'Absent'  },
+                                            half_day:           { bg: '#FEF3C7', color: '#B45309', icon: CalendarClock, label: 'Half-day' },
+                                            late:               { bg: '#FFEDD5', color: '#C2410C', icon: CalendarClock, label: 'Late punch-in' },
+                                            early_out:          { bg: '#FFEDD5', color: '#C2410C', icon: CalendarClock, label: 'Early punch-out' },
+                                            late_and_early_out: { bg: '#FEE2E2', color: '#B91C1C', icon: CalendarClock, label: 'Late & early-out' },
+                                          }[d.status] || { bg: '#F1F5F9', color: '#64748B', icon: CalendarClock, label: d.status };
+                                          const Icon = cfg.icon;
+                                          return (
+                                            <div key={d.date} title={`${d.date} — ${cfg.label}${d.deduction ? ` (−${d.deduction} day)` : ''}`}
+                                              className="flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-lg text-[10px] font-semibold"
+                                              style={{ background: cfg.bg, color: cfg.color, minWidth: 44 }}>
+                                              <Icon className="h-3 w-3" />
+                                              <span>{format(new Date(d.date), 'd MMM')}</span>
+                                              {d.deduction > 0 && <span>−{d.deduction}d</span>}
+                                            </div>
+                                          );
+                                        })}
+                                        {(detail.days || []).length === 0 && (
+                                          <p className="text-xs text-slate-400">No working days elapsed yet this month.</p>
+                                        )}
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                </tbody>
+              </table>
+              {!salaryLoading && salaryReports.length === 0 && (
+                <div className={`py-14 text-center ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                  <Wallet className="h-8 w-8 mx-auto mb-2 opacity-25" />
+                  <p className="text-sm font-medium">No employees have a monthly salary set yet</p>
+                  <p className="text-xs mt-1">Open <b>Users</b> tab → Edit a member → set their Monthly Salary.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </motion.div>
+      )}
+
       {/* ════ IDENTIX TAB ════ */}
       {mainTab === 'identix' && (
         <motion.div variants={itemVariants}>
@@ -3056,6 +3321,17 @@ export default function Users() {
                   <Input type="date" name="payroll_date" value={formData.payroll_date} onChange={handleInput} className="h-11 rounded-xl" />
                   <p className="text-[10px] text-slate-400">Monthly salary processing date</p>
                 </div>
+                {isAdmin && (
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] font-semibold tracking-widest text-slate-500 uppercase">Monthly Salary (₹)</Label>
+                    <div className="relative">
+                      <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                      <Input type="number" min="0" step="0.01" name="monthly_salary" value={formData.monthly_salary}
+                        onChange={handleInput} placeholder="e.g. 30000" className="h-11 rounded-xl pl-8" />
+                    </div>
+                    <p className="text-[10px] text-slate-400">Used to auto-calculate salary due in the Salary tab</p>
+                  </div>
+                )}
               </div>
             </div>
 
