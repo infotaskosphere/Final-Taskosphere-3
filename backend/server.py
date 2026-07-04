@@ -2089,6 +2089,7 @@ async def register(
             getattr(user_data, "training_period_end", None)
         ),
         "payroll_date": _date_str(getattr(user_data, "payroll_date", None)),
+        "monthly_salary": getattr(user_data, "monthly_salary", None),
     }
 
     await db.users.insert_one(new_user)
@@ -2415,6 +2416,11 @@ async def get_users(
                 u["created_at"] = datetime.now(timezone.utc)
         else:
             u["created_at"] = datetime.now(timezone.utc)
+        # Salary is sensitive — only admins, or a user looking at their own
+        # record, may see it. Strip it from every other view (manager team
+        # lists, staff directory, cross-visibility lookups, etc).
+        if current_user.role != "admin" and u.get("id") != current_user.id:
+            u.pop("monthly_salary", None)
     return users_raw
 
 
@@ -2469,6 +2475,7 @@ async def update_user(
             "joining_date",
             "training_period_end",
             "payroll_date",
+            "monthly_salary",
         ]
     elif is_manager and has_edit_users and not is_own:
         # Manager editing a team staff member — can update profile + work settings, not role/permissions
@@ -2506,6 +2513,11 @@ async def update_user(
         if key in user_data:
             val = user_data[key]
             update_payload[key] = val if val != "" else None
+    if "monthly_salary" in update_payload and update_payload["monthly_salary"] is not None:
+        try:
+            update_payload["monthly_salary"] = float(update_payload["monthly_salary"])
+        except (TypeError, ValueError):
+            update_payload["monthly_salary"] = None
     new_password = user_data.get("password")
     if new_password and len(new_password.strip()) > 0:
         update_payload["password"] = get_password_hash(new_password)
@@ -3932,6 +3944,260 @@ async def upload_attendance_proof(
         "total_documents": len(merged_docs),
         "date": today_str,
     }
+
+
+# ====================================================================================
+# SALARY / PAYROLL — attendance-based salary due calculation
+# ====================================================================================
+# Policy (as configured by admin):
+#   • Absent day                          → deduct 1.0 day's pay
+#   • Half-day (leave or marked half_day) → deduct 0.5 day's pay
+#   • Late punch-in (after punch_in_time + grace, default 10:30 + 00:10 = 10:40 AM)
+#         OR early punch-out (before 6:00 PM)  → deduct 0.5 day's pay
+#   • Both late-in AND early-out on the same day → deduct 1.0 day's pay (capped)
+#   • Per-day rate = monthly_salary / total working days in that calendar month
+#     (working day = Mon-Sat is NOT counted — Sat & Sun are weekly-off, matching
+#      the rest of the app's attendance/ranking logic — and confirmed holidays
+#      are excluded too).
+EARLY_OUT_CUTOFF_MINUTES = 18 * 60  # 6:00 PM — fixed company policy cutoff
+
+
+def _hhmm_to_minutes(value: Optional[str], default: str) -> int:
+    try:
+        t = datetime.strptime(value or default, "%H:%M")
+        return t.hour * 60 + t.minute
+    except Exception:
+        d = datetime.strptime(default, "%H:%M")
+        return d.hour * 60 + d.minute
+
+
+async def _compute_salary_report_for_user(
+    user: dict, year: int, mon: int, holiday_dates: set
+) -> dict:
+    """Builds the salary-due breakdown for a single user for a given month."""
+    first_day = date(year, mon, 1)
+    last_day_num = calendar.monthrange(year, mon)[1]
+    last_day = date(year, mon, last_day_num)
+
+    now_ist = datetime.now(IST)
+    today_ist = now_ist.date()
+    if (year, mon) == (today_ist.year, today_ist.month):
+        effective_last_day = min(last_day, today_ist)
+    elif date(year, mon, 1) > today_ist:
+        effective_last_day = first_day - timedelta(days=1)  # future month → empty
+    else:
+        effective_last_day = last_day
+
+    start_str = first_day.isoformat()
+    end_str = last_day.isoformat()
+
+    # Total working days in the FULL month (drives the per-day rate)
+    total_working_days = 0
+    d = first_day
+    while d <= last_day:
+        if d.weekday() < 5 and d.isoformat() not in holiday_dates:
+            total_working_days += 1
+        d += timedelta(days=1)
+    total_working_days = max(total_working_days, 1)
+
+    monthly_salary = float(user.get("monthly_salary") or 0)
+    per_day_salary = monthly_salary / total_working_days
+
+    late_deadline_min = _hhmm_to_minutes(
+        user.get("punch_in_time"), "10:30"
+    ) + (_hhmm_to_minutes(user.get("grace_time"), "00:10"))
+
+    att_records = await db.attendance.find(
+        {"user_id": user["id"], "date": {"$gte": start_str, "$lte": end_str}},
+        {"_id": 0},
+    ).to_list(500)
+    att_by_date = {r["date"]: r for r in att_records}
+
+    days = []
+    working_days_elapsed = 0
+    present_days = 0
+    absent_days = 0
+    half_days = 0
+    late_days = 0
+    early_out_days = 0
+    total_deduction_days = 0.0
+
+    d = first_day
+    while d <= effective_last_day:
+        iso = d.isoformat()
+        if d.weekday() >= 5 or iso in holiday_dates:
+            d += timedelta(days=1)
+            continue
+        working_days_elapsed += 1
+        rec = att_by_date.get(iso)
+        status = (rec or {}).get("status") or "absent"
+        is_half_day = bool(rec and (rec.get("is_half_day") or status == "half_day"))
+        day_info = {
+            "date": iso, "status": "absent", "deduction": 1.0,
+            "is_late": False, "early_out": False,
+        }
+
+        if not rec or (status in ("absent",) and not is_half_day) or (
+            status == "leave" and not is_half_day
+        ):
+            day_info["status"] = "absent"
+            day_info["deduction"] = 1.0
+            absent_days += 1
+        elif is_half_day:
+            day_info["status"] = "half_day"
+            day_info["deduction"] = 0.5
+            half_days += 1
+        else:
+            is_late = bool(rec.get("is_late"))
+            early_out = False
+            punch_out = rec.get("punch_out")
+            if punch_out:
+                try:
+                    pout_dt = (
+                        punch_out if isinstance(punch_out, datetime)
+                        else datetime.fromisoformat(str(punch_out))
+                    )
+                    if pout_dt.tzinfo is None:
+                        pout_dt = pout_dt.replace(tzinfo=timezone.utc)
+                    pout_ist = pout_dt.astimezone(IST)
+                    early_out = (pout_ist.hour * 60 + pout_ist.minute) < EARLY_OUT_CUTOFF_MINUTES
+                except Exception:
+                    early_out = False
+
+            deduction = 0.0
+            if is_late:
+                deduction += 0.5
+                late_days += 1
+            if early_out:
+                deduction += 0.5
+                early_out_days += 1
+            deduction = min(deduction, 1.0)
+
+            day_info["is_late"] = is_late
+            day_info["early_out"] = early_out
+            day_info["deduction"] = deduction
+            if deduction == 0:
+                day_info["status"] = "present"
+                present_days += 1
+            else:
+                day_info["status"] = "late" if is_late and not early_out else (
+                    "early_out" if early_out and not is_late else "late_and_early_out"
+                )
+
+        total_deduction_days += day_info["deduction"]
+        days.append(day_info)
+        d += timedelta(days=1)
+
+    deduction_amount = round(per_day_salary * total_deduction_days, 2)
+    payable_salary = round(monthly_salary - deduction_amount, 2)
+
+    return {
+        "user_id": user["id"],
+        "full_name": user.get("full_name"),
+        "email": user.get("email"),
+        "profile_picture": user.get("profile_picture"),
+        "departments": user.get("departments") or [],
+        "month": f"{year:04d}-{mon:02d}",
+        "monthly_salary": round(monthly_salary, 2),
+        "total_working_days": total_working_days,
+        "working_days_elapsed": working_days_elapsed,
+        "per_day_salary": round(per_day_salary, 2),
+        "present_days": present_days,
+        "absent_days": absent_days,
+        "half_days": half_days,
+        "late_days": late_days,
+        "early_out_days": early_out_days,
+        "total_deduction_days": round(total_deduction_days, 2),
+        "deduction_amount": deduction_amount,
+        "payable_salary": payable_salary,
+        "late_after": f"{late_deadline_min // 60:02d}:{late_deadline_min % 60:02d}",
+        "early_out_before": "18:00",
+        "days": days,
+    }
+
+
+async def _get_confirmed_holiday_dates(start_str: str, end_str: str) -> set:
+    holiday_docs = await db.holidays.find(
+        {"date": {"$gte": start_str, "$lte": end_str}, "status": "confirmed"},
+        {"_id": 0, "date": 1},
+    ).to_list(500)
+    return {h["date"] for h in holiday_docs}
+
+
+def _parse_month_param(month: Optional[str]) -> tuple:
+    if month:
+        try:
+            year_s, mon_s = month.split("-")
+            year, mon = int(year_s), int(mon_s)
+            if not (1 <= mon <= 12):
+                raise ValueError
+            return year, mon
+        except Exception:
+            raise HTTPException(
+                status_code=400, detail="month must be in YYYY-MM format"
+            )
+    now_ist = datetime.now(IST)
+    return now_ist.year, now_ist.month
+
+
+@api_router.get("/users/salary-report-all")
+async def get_salary_report_all(
+    month: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+):
+    """Admin-only: salary-due summary for every user with a monthly_salary set."""
+    if current_user.role.lower() != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    year, mon = _parse_month_param(month)
+    first_day = date(year, mon, 1)
+    last_day = date(year, mon, calendar.monthrange(year, mon)[1])
+    holiday_dates = await _get_confirmed_holiday_dates(
+        first_day.isoformat(), last_day.isoformat()
+    )
+
+    users = await db.users.find(
+        {"is_active": True},
+        {
+            "_id": 0, "id": 1, "full_name": 1, "email": 1, "profile_picture": 1,
+            "departments": 1, "monthly_salary": 1, "punch_in_time": 1,
+            "grace_time": 1, "role": 1,
+        },
+    ).to_list(1000)
+
+    reports = []
+    for u in users:
+        if u.get("monthly_salary") in (None, 0):
+            continue
+        report = await _compute_salary_report_for_user(u, year, mon, holiday_dates)
+        report.pop("days", None)  # keep the summary list lightweight
+        reports.append(report)
+
+    reports.sort(key=lambda r: (r.get("full_name") or "").lower())
+    return {"month": f"{year:04d}-{mon:02d}", "reports": reports}
+
+
+@api_router.get("/users/{user_id}/salary-report")
+async def get_salary_report_for_user(
+    user_id: str,
+    month: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+):
+    """Detailed day-by-day salary-due breakdown for one user (admin, or self)."""
+    if current_user.role.lower() != "admin" and current_user.id != user_id:
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    year, mon = _parse_month_param(month)
+    first_day = date(year, mon, 1)
+    last_day = date(year, mon, calendar.monthrange(year, mon)[1])
+    holiday_dates = await _get_confirmed_holiday_dates(
+        first_day.isoformat(), last_day.isoformat()
+    )
+    return await _compute_salary_report_for_user(user, year, mon, holiday_dates)
 
 
 async def get_top_performers_data(period: str = "monthly", limit: int = 5, db=None):
