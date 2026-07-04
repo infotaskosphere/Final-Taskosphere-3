@@ -318,6 +318,17 @@ class User(BaseModel):
     joining_date: Optional[Any] = None          # Date the employee joined
     training_period_end: Optional[Any] = None   # End date of the training / probation period
     payroll_date: Optional[Any] = None          # Monthly payroll processing date (day of month or full date)
+    monthly_salary: Optional[float] = None      # Gross monthly salary (admin-set); used for salary-due calculation
+
+    @field_validator("monthly_salary", mode="before")
+    @classmethod
+    def empty_salary_to_none(cls, v):
+        if v == "" or v is None:
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
 
     @field_validator("birthday", mode="before")
     @classmethod
@@ -349,6 +360,7 @@ class UserCreate(BaseModel):
     joining_date: Optional[Any] = None
     training_period_end: Optional[Any] = None
     payroll_date: Optional[Any] = None
+    monthly_salary: Optional[float] = None
 
 
 class UserUpdate(BaseModel):
@@ -371,6 +383,7 @@ class UserUpdate(BaseModel):
     joining_date: Optional[Any] = None
     training_period_end: Optional[Any] = None
     payroll_date: Optional[Any] = None
+    monthly_salary: Optional[float] = None
     model_config = ConfigDict(from_attributes=True, extra="ignore")
 
 
