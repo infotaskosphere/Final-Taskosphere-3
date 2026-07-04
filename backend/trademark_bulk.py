@@ -60,8 +60,17 @@ from backend.pdf_renderer import (
     _decode_logo,
     _make_page_cb,
     _section_rule,
-    build_report_pdf,
 )
+
+# ── Single source of truth for per-mark PDF rendering ──────────────────────────
+# The "Run Report" single-search flow renders its PDF via qc_pdf_renderer
+# (Calibri font, Manthan Desai & Associates dossier layout, 22mm logo in the
+# header table). Bulk PDFs used to render per-mark pages with the OLDER
+# pdf_renderer.build_report_pdf implementation, which has a different layout
+# and logo placement — so a "Run Report" PDF and a bulk-exported PDF for the
+# exact same mark looked different. Importing the SAME function here
+# guarantees individual and bulk PDFs are always pixel-identical in format.
+from backend.qc_pdf_renderer import build_report_pdf
 
 log = logging.getLogger("trademark-bulk")
 
@@ -602,17 +611,25 @@ def build_executive_summary_pdf(items: List[dict], branding: Dict[str, Any], ana
 # Combined PDF: cover + per-mark dossier (identical to single-report renderer)
 # ──────────────────────────────────────────────────────────────────────────────
 def _per_mark_doc_record(item: dict, branding: Dict[str, Any]) -> dict:
-    """Construct a doc_record dict compatible with build_report_pdf()."""
+    """
+    Construct a doc_record dict compatible with qc_pdf_renderer.build_report_pdf().
+
+    Field names here MUST match what qc_pdf_renderer reads (report["footer"],
+    not "footer_text") — this is the same dict shape the single-report
+    endpoint (/trademark-qc/report) persists, which is what keeps bulk and
+    individual PDFs in the exact same format.
+    """
     report = dict(item.get("report") or {})
-    # Inject branding so build_report_pdf renders identical header/footer/watermark.
+    # Inject branding so build_report_pdf renders identical header/footer/watermark/logo.
     report.setdefault("logo_data_url",    branding.get("logo_data_url"))
-    report.setdefault("footer_text",      branding.get("footer", ""))
+    report.setdefault("footer",           branding.get("footer", ""))
     report.setdefault("tagline",          branding.get("tagline", "Trademark Availability Report"))
     report.setdefault("watermark",        branding.get("watermark", ""))
     report.setdefault("custom_watermark", branding.get("custom_watermark", ""))
     report.setdefault("client_name",      branding.get("client_name", ""))
     report.setdefault("client_mobile",    branding.get("client_mobile", ""))
     report.setdefault("report_date",      branding.get("report_date", ""))
+    report.setdefault("prepared_by",      branding.get("prepared_by", ""))
     return {
         "id": item.get("id"),
         "created_at": item.get("created_at") or datetime.now(timezone.utc).isoformat(),
