@@ -11794,7 +11794,46 @@ def build_reminder_email(
     return subject, html
 
 
+@api_router.get("/reminders/due-popups")
+async def get_due_reminder_popups(current_user: User = Depends(get_current_user)):
+    """
+    Polled every ~30s by ReminderPopupManager.jsx on the frontend.
+
+    Returns reminders for the current user that are due (remind_at <= now),
+    not yet dismissed, and not yet fired — then marks them as fired so they
+    don't pop up again on the next poll.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    cursor = db.reminders.find({
+        "user_id": str(current_user.id),
+        "remind_at": {"$lte": now_iso},
+        "is_dismissed": False,
+        "is_fired": False,
+    }).sort("remind_at", 1).limit(20)
+
+    due_docs = await cursor.to_list(length=20)
+    if not due_docs:
+        return []
+
+    ids = [doc["_id"] for doc in due_docs]
+    await db.reminders.update_many(
+        {"_id": {"$in": ids}},
+        {"$set": {"is_fired": True, "updated_at": now_iso}},
+    )
+
+    return [
+        {
+            "id": str(doc.get("_id")),
+            "type": doc.get("reminder_type", "reminder"),
+            "title": doc.get("title", "Reminder"),
+            "message": doc.get("description", ""),
+        }
+        for doc in due_docs
+    ]
+
+
 @api_router.post("/send-pending-task-reminders")
+
 async def send_pending_task_reminders(current_user: User = Depends(get_current_user)):
     perms = get_user_permissions(current_user)
     if current_user.role != "admin" and not perms.get("can_send_reminders", False):
