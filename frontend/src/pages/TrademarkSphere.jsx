@@ -1414,6 +1414,7 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
   const [analytics, setAnalytics] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
   const [dlId, setDlId] = useState(null);
+  const [dlAllProgress, setDlAllProgress] = useState(null); // { done, total } | null
 
   // Derive class_filter and class_filters from current mode
   const getClassParams = () => {
@@ -1456,6 +1457,43 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
       a.href = url; a.download = `trademark_report_${id.slice(0, 8)}.pdf`; a.click();
       URL.revokeObjectURL(url);
     } catch { toast.error("PDF download failed"); } finally { setDlId(null); }
+  };
+
+  /**
+   * Download every successful bulk result as its OWN separate PDF file —
+   * each one rendered through the exact same endpoint (and therefore the
+   * exact same qc_pdf_renderer format/logo placement) as a single "Run
+   * Report" download. Files land individually in the browser's downloads
+   * folder; nothing is zipped or merged.
+   */
+  const downloadAllIndividualPdfs = async () => {
+    const successful = items.filter(it => !it.error && it.id);
+    if (!successful.length) return toast.error("No successful results to download");
+    setDlAllProgress({ done: 0, total: successful.length });
+    let failed = 0;
+    for (let i = 0; i < successful.length; i++) {
+      const it = successful[i];
+      const safeName = (it.name || it.report?.query || `mark_${i + 1}`).replace(/[^a-zA-Z0-9-_]+/g, "_");
+      try {
+        const res = await api.get(`/trademark-qc/searches/${it.id}/pdf`, { responseType: "blob", timeout: 60000 });
+        const url = URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `trademark_${safeName}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch {
+        failed++;
+      }
+      setDlAllProgress({ done: i + 1, total: successful.length });
+      // Small stagger so browsers don't throttle/block rapid-fire downloads.
+      if (i < successful.length - 1) await new Promise(r => setTimeout(r, 350));
+    }
+    setDlAllProgress(null);
+    if (failed) toast.error(`${failed} of ${successful.length} PDFs failed to download`);
+    else toast.success(`Downloaded ${successful.length} individual PDFs`);
   };
 
   const handleCombinedPdf = async (fmt = "pdf") => {
@@ -1688,6 +1726,27 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
             </div>{/* end scrollable wrapper */}
           </div>
 
+          {/* Individual PDFs action bar — one file per mark, no zip */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: `${COLORS.emeraldGreen}0e`, border: `1px solid ${COLORS.emeraldGreen}33`, borderRadius: 10, marginBottom: 10 }}>
+            <div style={{ background: `${COLORS.emeraldGreen}22`, borderRadius: 8, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <Layers size={15} style={{ color: COLORS.emeraldGreen }} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>Individual PDFs</div>
+              <div style={{ fontSize: 11, color: T.dimmer }}>
+                {dlAllProgress
+                  ? `Downloading ${dlAllProgress.done} of ${dlAllProgress.total}…`
+                  : `${successCount} separate file${successCount !== 1 ? "s" : ""} · same format as Run Report · not zipped`}
+              </div>
+            </div>
+            <Btn T={T} variant="success" onClick={downloadAllIndividualPdfs} disabled={!!dlAllProgress || successCount === 0}
+              style={{ whiteSpace: "nowrap", padding: "8px 14px", fontSize: 12 }}>
+              {dlAllProgress
+                ? <><RefreshCw size={13} style={{ animation: "spin 1s linear infinite" }} /> {dlAllProgress.done}/{dlAllProgress.total}</>
+                : <><Download size={13} /> Download All ({successCount})</>}
+            </Btn>
+          </div>
+
           {/* Combined report action bar */}
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: `${COLORS.mediumBlue}0e`, border: `1px solid ${COLORS.mediumBlue}33`, borderRadius: 10 }}>
             <div style={{ background: `${COLORS.mediumBlue}22`, borderRadius: 8, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -1696,7 +1755,7 @@ function BulkPanel({ onPickReport, branding, clientInfo, T }) {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>Combined Report</div>
               <div style={{ fontSize: 11, color: T.dimmer }}>
-                {successCount} mark{successCount !== 1 ? "s" : ""} · all verdicts in one file
+                {successCount} mark{successCount !== 1 ? "s" : ""} · all verdicts merged into one file
                 {(clientInfo?.client_name) && <> · {clientInfo.client_name}</>}
               </div>
             </div>
@@ -1980,16 +2039,33 @@ export default function TrademarkSphere() {
                   <p style={{ margin: 0, fontSize: 12, color: T.dimmer, marginTop: 2 }}>Data source: quickcompany.in/trademarks</p>
                 </div>
               </div>
-              {/* Quick stats strip */}
-              {report && (
-                <div style={{ display: "flex", gap: 8 }}>
-                  <VerdictBadge status={report.overall_status} large />
-                  <div style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 10, padding: "6px 14px", display: "flex", alignItems: "center", gap: 6 }}>
-                    <BarChart3 size={13} style={{ color: T.blueL }} />
-                    <span style={{ fontSize: 12, fontWeight: 700, color: T.text, fontFamily: "'JetBrains Mono', monospace" }}>Risk {report.risk_score}/100</span>
-                  </div>
-                </div>
-              )}
+              {/* Quick stats strip + page refresh */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {report && (
+                  <>
+                    <VerdictBadge status={report.overall_status} large />
+                    <div style={{ background: T.raised, border: `1px solid ${T.border}`, borderRadius: 10, padding: "6px 14px", display: "flex", alignItems: "center", gap: 6 }}>
+                      <BarChart3 size={13} style={{ color: T.blueL }} />
+                      <span style={{ fontSize: 12, fontWeight: 700, color: T.text, fontFamily: "'JetBrains Mono', monospace" }}>Risk {report.risk_score}/100</span>
+                    </div>
+                  </>
+                )}
+                <button
+                  type="button"
+                  title="Refresh page"
+                  aria-label="Refresh page"
+                  onClick={() => window.location.reload()}
+                  onMouseEnter={e => { e.currentTarget.style.background = T.raised; e.currentTarget.style.transform = "rotate(90deg)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.transform = "rotate(0deg)"; }}
+                  style={{
+                    width: 36, height: 36, borderRadius: 10, border: `1px solid ${T.border}`,
+                    background: "transparent", display: "flex", alignItems: "center", justifyContent: "center",
+                    cursor: "pointer", color: T.muted, flexShrink: 0, transition: "transform 0.35s ease, background 0.15s ease",
+                  }}
+                >
+                  <RefreshCw size={15} />
+                </button>
+              </div>
             </div>
           </div>
 
