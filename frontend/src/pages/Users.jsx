@@ -24,7 +24,7 @@ import {
   Monitor, Wifi, WifiOff, RefreshCw, Radar, Loader2,
   Network, Save, ClipboardList, LayoutDashboard, AlertTriangle, MapPin, UserMinus, ArrowRight,
   Building2, MessageSquare, MessageCircle, Wallet, IndianRupee, ChevronDown, ChevronUp,
-  TrendingDown, CalendarClock, CalendarX2, CalendarCheck2,
+  TrendingDown, CalendarClock, CalendarX2, CalendarCheck2, CalendarOff,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -3187,7 +3187,7 @@ export default function Users() {
                                     <>
                                       <div className="flex flex-wrap items-center gap-4 mb-3 text-[11px]">
                                         <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>
-                                          {detail.total_working_days} working days this month · ₹{detail.per_day_salary?.toLocaleString('en-IN')}/day
+                                          {detail.total_working_days} days this month · ₹{detail.per_day_salary?.toLocaleString('en-IN')}/day
                                         </span>
                                         <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>
                                           Late after {detail.late_after} AM · Early-out before {detail.early_out_before}
@@ -3205,6 +3205,7 @@ export default function Users() {
                                             late:               { bg: '#FFEDD5', color: '#C2410C', icon: CalendarClock, label: 'Late punch-in' },
                                             early_out:          { bg: '#FFEDD5', color: '#C2410C', icon: CalendarClock, label: 'Early punch-out' },
                                             late_and_early_out: { bg: '#FEE2E2', color: '#B91C1C', icon: CalendarClock, label: 'Late & early-out' },
+                                            holiday:            { bg: '#E0F2FE', color: '#0369A1', icon: CalendarOff,   label: 'Holiday' },
                                           }[d.status] || { bg: '#F1F5F9', color: '#64748B', icon: CalendarClock, label: d.status };
                                           const Icon = cfg.icon;
                                           return (
