@@ -3955,10 +3955,19 @@ async def upload_attendance_proof(
 #   • Late punch-in (after punch_in_time + grace, default 10:30 + 00:10 = 10:40 AM)
 #         OR early punch-out (before 6:00 PM)  → deduct 0.5 day's pay
 #   • Both late-in AND early-out on the same day → deduct 1.0 day's pay (capped)
-#   • Per-day rate = monthly_salary / total working days in that calendar month
-#     (working day = Mon-Sat is NOT counted — Sat & Sun are weekly-off, matching
-#      the rest of the app's attendance/ranking logic — and confirmed holidays
-#      are excluded too).
+#   • Per-day rate = monthly_salary / TOTAL CALENDAR DAYS in that month
+#     (Sundays are already treated as the weekly holiday inside attendance,
+#      so the full number of days in the month — including Sundays — is used
+#      as the denominator, not just Mon-Sat working days).
+#   • Sunday is a holiday by default (no deduction, not counted as absent),
+#     EXCEPT when it's a "continuing holiday": if the employee was ALSO
+#     absent on the Saturday immediately before AND the Monday immediately
+#     after, the leave is treated as spanning straight across the weekend,
+#     so Sunday is deducted as an absent day too.
+#   • Confirmed/declared company holidays (any day of the week) are always
+#     a paid day off — never deducted.
+#   • Saturday is a normal working day, subject to the same
+#     absent/half-day/late/early-out rules as Mon-Fri.
 EARLY_OUT_CUTOFF_MINUTES = 18 * 60  # 6:00 PM — fixed company policy cutoff
 
 
@@ -3991,14 +4000,10 @@ async def _compute_salary_report_for_user(
     start_str = first_day.isoformat()
     end_str = last_day.isoformat()
 
-    # Total working days in the FULL month (drives the per-day rate)
-    total_working_days = 0
-    d = first_day
-    while d <= last_day:
-        if d.weekday() < 5 and d.isoformat() not in holiday_dates:
-            total_working_days += 1
-        d += timedelta(days=1)
-    total_working_days = max(total_working_days, 1)
+    # Per-day rate = monthly_salary / TOTAL CALENDAR DAYS in the month
+    # (includes Sundays — they're accounted for separately as holidays below,
+    #  not excluded from the denominator).
+    total_working_days = max(last_day_num, 1)
 
     monthly_salary = float(user.get("monthly_salary") or 0)
     per_day_salary = monthly_salary / total_working_days
@@ -4007,11 +4012,27 @@ async def _compute_salary_report_for_user(
         user.get("punch_in_time"), "10:30"
     ) + (_hhmm_to_minutes(user.get("grace_time"), "00:10"))
 
+    # Fetch with a 1-day buffer on each side so a Sunday that falls on the
+    # 1st or last day of the month can still look at the adjacent Sat/Mon
+    # attendance record when deciding whether it's a "continuing holiday".
+    fetch_start = (first_day - timedelta(days=1)).isoformat()
+    fetch_end = (last_day + timedelta(days=1)).isoformat()
     att_records = await db.attendance.find(
-        {"user_id": user["id"], "date": {"$gte": start_str, "$lte": end_str}},
+        {"user_id": user["id"], "date": {"$gte": fetch_start, "$lte": fetch_end}},
         {"_id": 0},
     ).to_list(500)
     att_by_date = {r["date"]: r for r in att_records}
+
+    def _is_absent_on(iso_date: str) -> bool:
+        """True if the given date counts as a full absence (no half-day)."""
+        rec = att_by_date.get(iso_date)
+        if not rec:
+            return True
+        status = rec.get("status") or "absent"
+        is_half_day = bool(rec.get("is_half_day") or status == "half_day")
+        if is_half_day:
+            return False
+        return status in ("absent", "leave")
 
     days = []
     working_days_elapsed = 0
@@ -4020,14 +4041,54 @@ async def _compute_salary_report_for_user(
     half_days = 0
     late_days = 0
     early_out_days = 0
+    holiday_days = 0
     total_deduction_days = 0.0
 
     d = first_day
     while d <= effective_last_day:
         iso = d.isoformat()
-        if d.weekday() >= 5 or iso in holiday_dates:
+
+        # Confirmed/declared company holiday → always a paid day off.
+        if iso in holiday_dates:
+            days.append({
+                "date": iso, "status": "holiday", "deduction": 0.0,
+                "is_late": False, "early_out": False,
+            })
+            holiday_days += 1
             d += timedelta(days=1)
             continue
+
+        # Sunday → weekly holiday by default. Only deducted as an absent
+        # day when it's a "continuing holiday" — the employee was also
+        # absent on the Saturday before AND the Monday after, i.e. the
+        # leave spans straight across the weekend.
+        if d.weekday() == 6:
+            monday = d + timedelta(days=1)
+            saturday_iso = (d - timedelta(days=1)).isoformat()
+            monday_iso = monday.isoformat()
+            monday_has_elapsed = monday <= effective_last_day
+            continuing_leave = (
+                monday_has_elapsed
+                and _is_absent_on(saturday_iso)
+                and _is_absent_on(monday_iso)
+            )
+            if continuing_leave:
+                days.append({
+                    "date": iso, "status": "absent", "deduction": 1.0,
+                    "is_late": False, "early_out": False,
+                })
+                absent_days += 1
+                total_deduction_days += 1.0
+            else:
+                days.append({
+                    "date": iso, "status": "holiday", "deduction": 0.0,
+                    "is_late": False, "early_out": False,
+                })
+                holiday_days += 1
+            d += timedelta(days=1)
+            continue
+
+        # Monday–Saturday → normal working day.
         working_days_elapsed += 1
         rec = att_by_date.get(iso)
         status = (rec or {}).get("status") or "absent"
@@ -4107,6 +4168,7 @@ async def _compute_salary_report_for_user(
         "half_days": half_days,
         "late_days": late_days,
         "early_out_days": early_out_days,
+        "holiday_days": holiday_days,
         "total_deduction_days": round(total_deduction_days, 2),
         "deduction_amount": deduction_amount,
         "payable_salary": payable_salary,
