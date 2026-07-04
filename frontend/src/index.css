@@ -9,6 +9,25 @@
 @tailwind base;
 
 /* ============================= */
+/* BASE SCALE                    */
+/* ============================= */
+/* The whole UI was designed/tuned while viewed at 90% browser zoom.
+   Dialing the root font-size down to 90% makes text and all of
+   Tailwind's rem-based spacing/sizing utilities render at native 100%
+   browser zoom the way they used to look at 90% zoom.
+   NOTE: we intentionally use font-size here, not the CSS `zoom`
+   property. This app's sidebar/header offsets are computed as raw
+   pixel numbers in JS and plugged into `calc(100vw - offsetPx)` for
+   the fixed header. `zoom` visually shrinks those boxes but doesn't
+   change how 100vw is measured for fixed-position elements, so the
+   content column and the fixed sidebar/header fall out of sync and
+   leave a gap on the right. font-size only affects rem units, so all
+   the px/vw layout math stays exactly as it was — no mismatch. */
+html {
+  font-size: 90%;
+}
+
+/* ============================= */
 /* BRAND COLORS                  */
 /* ============================= */
 :root {
