@@ -9,20 +9,6 @@
 @tailwind base;
 
 /* ============================= */
-/* BASE SCALE                    */
-/* ============================= */
-/* The whole UI was designed/tuned while viewed at 90% browser zoom.
-   Baking a 90% zoom into the app itself means it now renders at native
-   100% browser zoom exactly like it used to look at 90% — no more need
-   for users to manually zoom out. `zoom` (not a font-size hack) scales
-   every pixel value, image and border along with the rem-based Tailwind
-   utilities, matching real browser-zoom behaviour. Supported in all
-   current Chrome/Edge/Firefox/Safari versions. */
-html {
-  zoom: 90%;
-}
-
-/* ============================= */
 /* BRAND COLORS                  */
 /* ============================= */
 :root {
