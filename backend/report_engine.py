@@ -213,16 +213,20 @@ def build_report(query: str, scraped: Dict, class_filter: Optional[int] = None) 
         cb["blocking_pct"] = round(cb["blocking"] / cb["total"] * 100) if cb["total"] else 0
 
     # ── Focus analysis on class_filter if provided ────────────────────────────
+    # IMPORTANT: when a class is selected, the report must ONLY reflect that
+    # class. This used to silently fall back to ALL classes whenever the
+    # selected class had zero matches, which made class filtering look broken
+    # (a Class 5 search would show Class 25/35/44/... results in the table
+    # and PDF). Zero conflicting marks in a class is a valid, common, and
+    # GOOD outcome — it must never be masked by unrelated classes.
     if class_filter is not None:
         focused_results = [r for r in all_enriched if r.get("class") == class_filter]
-        # If no results found for this class, use all (fail-safe)
         if not focused_results:
-            logger.warning(
-                "build_report: class_filter=%d produced 0 results from %d total — "
-                "falling back to all classes. Check scraper class-specific fetch.",
+            logger.info(
+                "build_report: class_filter=%d produced 0 results from %d total "
+                "results across all classes — class appears clear.",
                 class_filter, len(all_enriched)
             )
-            focused_results = all_enriched
     else:
         focused_results = all_enriched
 
@@ -257,7 +261,11 @@ def build_report(query: str, scraped: Dict, class_filter: Optional[int] = None) 
         )
     else:
         overall  = "AVAILABLE"
-        headline = "No conflicting trademarks were found in the QuickCompany index."
+        headline = (
+            f"No conflicting trademarks were found in Class {class_filter} on the QuickCompany index."
+            if class_filter is not None
+            else "No conflicting trademarks were found in the QuickCompany index."
+        )
 
     # ── Risk score ────────────────────────────────────────────────────────────
     if focused_results:
