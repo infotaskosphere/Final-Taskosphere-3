@@ -25,6 +25,7 @@ import asyncio
 import base64
 import logging
 from typing import List, Dict, Optional, Set, Tuple
+from urllib.parse import quote_plus
 
 import httpx
 from bs4 import BeautifulSoup
@@ -307,9 +308,14 @@ async def _fetch_page(
     """
     params: dict = {"q": query.strip(), "page": page}
     if class_filter is not None:
-        # QC uses class[]=N array param for filtering
-        # httpx doesn't natively support repeated params with [] so we build manually
-        url = f"{SEARCH_URL}?q={query.strip()}&class[]={class_filter}&page={page}"
+        # QC uses class[]=N array param for filtering.
+        # httpx doesn't natively support repeated params with [] so we build the
+        # URL manually — the query MUST be percent-encoded or names containing
+        # spaces/&/# etc. would silently corrupt the class[] filter and make
+        # class-specific scraping return 0 results (which used to be masked by
+        # a fallback to all-classes results — now removed, see report_engine.py).
+        q_enc = quote_plus(query.strip())
+        url = f"{SEARCH_URL}?q={q_enc}&class[]={class_filter}&page={page}"
     else:
         url = SEARCH_URL
     
