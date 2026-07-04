@@ -17,7 +17,7 @@ import {
   Plus, Edit, Trash2, Shield, User as UserIcon, Settings, Eye,
   CheckCircle, XCircle, Search, Users as UsersIcon, Crown, Briefcase,
   Mail, Phone, Calendar, Camera, Clock, UserCheck, UserX,
-  AlertCircle, KeyRound, Receipt, Target, Zap, Lock, ChevronRight,
+  AlertCircle, KeyRound, Receipt, Target, Zap, Lock, ChevronRight, ChevronLeft,
   Activity, BarChart2, Star, Layers, FileText, Bell,
   Hash, ArrowUpRight, SlidersHorizontal, ShieldCheck,
   ShieldOff, Fingerprint, Download, Pencil, Inbox, X,
@@ -2345,6 +2345,10 @@ export default function Users() {
   const [expandedSalaryId,setExpandedSalaryId]= useState(null);
   const [salaryDetail,    setSalaryDetail]    = useState({}); // { [userId]: reportWithDays }
   const [salaryDetailLoadingId, setSalaryDetailLoadingId] = useState(null);
+  const [salaryDialogOpen,    setSalaryDialogOpen]    = useState(false);
+  const [salaryDialogUserId,  setSalaryDialogUserId]  = useState('');
+  const [salaryDialogAmount,  setSalaryDialogAmount]  = useState('');
+  const [salaryDialogSaving,  setSalaryDialogSaving]  = useState(false);
 
 
   const [users,                setUsers]                = useState([]);
@@ -2440,6 +2444,38 @@ export default function Users() {
       toast.error('Failed to load day-by-day breakdown');
     } finally { setSalaryDetailLoadingId(null); }
   }, [expandedSalaryId, salaryDetail, salaryMonth]);
+
+  // Move the selected salary month forward/back by one, e.g. '2026-07' → '2026-08'
+  const shiftSalaryMonth = useCallback((delta) => {
+    setSalaryMonth(prev => {
+      const [y, m] = prev.split('-').map(Number);
+      const d = new Date(y, (m - 1) + delta, 1);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    });
+  }, []);
+
+  const openSalaryDialogFor = useCallback((userId) => {
+    setSalaryDialogUserId(userId || '');
+    const u = users.find(x => x.id === userId);
+    setSalaryDialogAmount(u?.monthly_salary != null ? String(u.monthly_salary) : '');
+    setSalaryDialogOpen(true);
+  }, [users]);
+
+  const handleSaveQuickSalary = useCallback(async () => {
+    if (!salaryDialogUserId) { toast.error('Please select a member'); return; }
+    if (salaryDialogAmount === '' || Number(salaryDialogAmount) < 0) { toast.error('Enter a valid salary amount'); return; }
+    setSalaryDialogSaving(true);
+    try {
+      await api.put(`/users/${salaryDialogUserId}`, { monthly_salary: Number(salaryDialogAmount) });
+      toast.success('✓ Salary saved');
+      setSalaryDialogOpen(false);
+      setSalaryDialogUserId(''); setSalaryDialogAmount('');
+      fetchSalaryReports(salaryMonth);
+      fetchUsers();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to save salary');
+    } finally { setSalaryDialogSaving(false); }
+  }, [salaryDialogUserId, salaryDialogAmount, salaryMonth, fetchSalaryReports, fetchUsers]);
 
   const fetchPermissions = useCallback(async (userId) => {
     try {
@@ -2742,6 +2778,15 @@ export default function Users() {
                   </Button>
                 </motion.div>
               )}
+              {mainTab === 'salary' && isAdmin && (
+                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}>
+                  <Button
+                    onClick={() => openSalaryDialogFor('')}
+                    className="h-10 px-6 rounded-xl font-semibold text-sm shadow-lg bg-white/20 hover:bg-white/30 text-white border border-white/20 hover:border-white/30 transition-all">
+                    <Plus className="h-4 w-4 mr-2" />Add Salary
+                  </Button>
+                </motion.div>
+              )}
             </div>
           </div>
         </div>
@@ -2989,14 +3034,27 @@ export default function Users() {
           {/* Controls: month picker + search */}
           <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
-              <div className="relative">
-                <Calendar className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
-                <Input
-                  type="month"
-                  value={salaryMonth}
-                  onChange={e => setSalaryMonth(e.target.value)}
-                  className={`pl-10 h-10 rounded-xl text-sm w-44 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
-                />
+              <div className="flex items-center gap-1 rounded-xl border p-1"
+                style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                <button onClick={() => shiftSalaryMonth(-1)}
+                  className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-100 text-slate-600'}`}
+                  title="Previous month">
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <div className="relative">
+                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                  <Input
+                    type="month"
+                    value={salaryMonth}
+                    onChange={e => e.target.value && setSalaryMonth(e.target.value)}
+                    className={`pl-9 h-9 rounded-lg text-sm w-40 border-0 ${isDark ? 'bg-slate-800' : 'bg-white'}`}
+                  />
+                </div>
+                <button onClick={() => shiftSalaryMonth(1)}
+                  className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-slate-100 text-slate-600'}`}
+                  title="Next month">
+                  <ChevronRight className="h-4 w-4" />
+                </button>
               </div>
               <Button onClick={() => fetchSalaryReports(salaryMonth)} variant="outline"
                 className={`h-10 px-3 rounded-lg text-xs gap-1.5 ${isDark ? 'border-slate-600 text-slate-300' : ''}`}>
@@ -3692,6 +3750,56 @@ export default function Users() {
         allUsers={users}
         onComplete={() => { fetchUsers(); }}
       />
+
+      {/* ── QUICK ADD/UPDATE SALARY DIALOG (Salary tab) ── */}
+      <Dialog open={salaryDialogOpen} onOpenChange={setSalaryDialogOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Wallet className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />
+              {salaryDialogUserId ? 'Update Monthly Salary' : 'Add Salary'}
+            </DialogTitle>
+            <DialogDescription>Set an employee&apos;s monthly salary so it appears in the Salary tab.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label className="text-[11px] font-semibold tracking-widest text-slate-500 uppercase">Member</Label>
+              <Select value={salaryDialogUserId} onValueChange={v => {
+                setSalaryDialogUserId(v);
+                const u = users.find(x => x.id === v);
+                setSalaryDialogAmount(u?.monthly_salary != null ? String(u.monthly_salary) : '');
+              }}>
+                <SelectTrigger className="h-11 rounded-xl">
+                  <SelectValue placeholder="Select a member" />
+                </SelectTrigger>
+                <SelectContent>
+                  {users.filter(u => u.is_active !== false).map(u => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {u.full_name} {u.monthly_salary != null ? `· ₹${Number(u.monthly_salary).toLocaleString('en-IN')}` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[11px] font-semibold tracking-widest text-slate-500 uppercase">Monthly Salary (₹)</Label>
+              <div className="relative">
+                <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                <Input type="number" min="0" step="0.01" value={salaryDialogAmount}
+                  onChange={e => setSalaryDialogAmount(e.target.value)}
+                  placeholder="e.g. 30000" className="h-11 rounded-xl pl-8" />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSalaryDialogOpen(false)} className="h-10 px-6 rounded-xl text-sm">Cancel</Button>
+            <Button onClick={handleSaveQuickSalary} disabled={salaryDialogSaving}
+              className="h-10 px-6 rounded-xl font-semibold text-sm text-white" style={{ background: GRAD_GREEN }}>
+              {salaryDialogSaving ? 'Saving…' : 'Save Salary'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </motion.div>
   );
 }
