@@ -5628,6 +5628,7 @@ function Invoicing() {
   const [bulkWAOpen, setBulkWAOpen] = useState(false);
   const [referrerFilter, setReferrerFilter] = useState('all');
   const [referralSummaryOpen, setReferralSummaryOpen] = useState(false);
+  const [savedReferrers, setSavedReferrers] = useState([]);
 
   // ── B. ALL useRef ─────────────────────────────────────────────────────────
   const iframeRef = useRef(null);
@@ -5650,15 +5651,14 @@ function Invoicing() {
   // Maps each invoice to the referrer recorded on its client (the person/
   // company via whom that client was received) so invoices can be filtered
   // and grouped by referrer without an extra field on the invoice itself.
-  const { referrerById, referrerByName, availableReferrers } = useMemo(() => {
-    const byId = {}; const byName = {}; const set = new Set();
+  const { referrerById, referrerByName } = useMemo(() => {
+    const byId = {}; const byName = {};
     (clients || []).forEach(c => {
       if (!c.referred_by) return;
       if (c.id) byId[c.id] = c.referred_by;
       if (c.company_name) byName[c.company_name] = c.referred_by;
-      set.add(c.referred_by);
     });
-    return { referrerById: byId, referrerByName: byName, availableReferrers: Array.from(set).sort() };
+    return { referrerById: byId, referrerByName: byName };
   }, [clients]);
 
   const getInvoiceReferrer = useCallback((inv) => {
@@ -6094,6 +6094,20 @@ const fetchAll = useCallback(async () => {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
+  // ── referrers list ────────────────────────────────────────────────────────
+  // Uses the SAME saved-referrer list as the Clients page (/referrers) so the
+  // "Referred By" options are identical on both screens, instead of deriving
+  // them from raw client.referred_by values (which can contain stray/legacy
+  // entries such as a phone number typed directly into a client record).
+  useEffect(() => {
+    api.get('/referrers')
+      .then(r => setSavedReferrers((r.data || []).map(x => (typeof x === 'string' ? x : x.name)).filter(Boolean)))
+      .catch(() => {
+        try { setSavedReferrers(JSON.parse(localStorage.getItem('taskosphere_referrers') || '[]').map(x => (typeof x === 'string' ? x : x.name)).filter(Boolean)); }
+        catch { setSavedReferrers([]); }
+      });
+  }, []);
+
   // Deep-link: when navigated with ?invoice_id=… (e.g. just-converted from a
   // quotation), open that invoice's detail drawer as soon as it's loaded.
   useEffect(() => {
@@ -6179,8 +6193,8 @@ const fetchAll = useCallback(async () => {
           <Select value={yearFilter} onValueChange={setYearFilter}><SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><CalendarDays className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" /><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Years</SelectItem>{availableYears.map(y => <SelectItem key={y} value={y}>FY {y}-{String(parseInt(y) + 1).slice(2)}</SelectItem>)}</SelectContent></Select>
           <Select value={statusFilter} onValueChange={setStatusFilter}><SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Status</SelectItem><SelectItem value="outstanding">Outstanding</SelectItem>{Object.entries(STATUS_META).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent></Select>
           <Select value={typeFilter} onValueChange={setTypeFilter}><SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Types</SelectItem>{INV_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent></Select>
-          {availableReferrers.length > 0 && (
-            <Select value={referrerFilter} onValueChange={setReferrerFilter}><SelectTrigger className={`h-9 w-[150px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-violet-50 text-violet-700'}`}><Share2 className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" /><SelectValue placeholder="Referred By" /></SelectTrigger><SelectContent><SelectItem value="all">All Referrers</SelectItem>{availableReferrers.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent></Select>
+          {savedReferrers.length > 0 && (
+            <Select value={referrerFilter} onValueChange={setReferrerFilter}><SelectTrigger className={`h-9 w-[150px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-violet-50 text-violet-700'}`}><Share2 className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" /><SelectValue placeholder="Referred By" /></SelectTrigger><SelectContent><SelectItem value="all">All Referrers</SelectItem>{savedReferrers.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent></Select>
           )}
           <button onClick={() => setReferralSummaryOpen(true)} className={`h-9 px-3 rounded-xl text-xs font-semibold flex items-center gap-1.5 flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-200 hover:bg-slate-600' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}>
             <Share2 className="h-3.5 w-3.5" /> By Referral
