@@ -2763,6 +2763,95 @@ async def invoice_stats(year: Optional[int] = None, month: Optional[int] = None,
     }
 
 
+@router.get("/invoices/referral-summary")
+async def invoice_referral_summary(
+    current_user: User = Depends(check_module_permission("invoicing", "view")),
+):
+    """
+    Group clients — and every invoice raised against them — by the
+    referrer recorded on the client record (`referred_by`): the person
+    or company via whom that client was brought in, and who a referral
+    payout may be owed to.
+
+    This lets the Invoicing screen show, for each referrer: which
+    clients they brought in, how many invoices were raised for those
+    clients, and how much has been billed / collected / is still due —
+    so referral commissions can be tracked without leaving Invoicing.
+    """
+    from collections import defaultdict
+
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+
+    client_q: dict = {} if current_user.role == "admin" else {"created_by": current_user.id}
+    clients = await db.clients.find(
+        client_q, {"_id": 0, "id": 1, "company_name": 1, "referred_by": 1}
+    ).to_list(10000)
+
+    client_by_id = {c["id"]: c for c in clients if c.get("id")}
+    client_by_name = {c.get("company_name"): c for c in clients if c.get("company_name")}
+
+    inv_q: dict = {"status": {"$ne": "cancelled"}}
+    if current_user.role != "admin":
+        inv_q["created_by"] = current_user.id
+    invoices = await db.invoices.find(
+        inv_q,
+        {
+            "_id": 0, "client_id": 1, "client_name": 1,
+            "grand_total": 1, "amount_paid": 1, "status": 1,
+        },
+    ).to_list(20000)
+
+    def _paid(i: dict) -> float:
+        if i.get("status") == "paid":
+            return float(i.get("grand_total") or 0)
+        return float(i.get("amount_paid") or 0)
+
+    def _due(i: dict) -> float:
+        if i.get("status") in ("paid", "cancelled"):
+            return 0.0
+        return max(0.0, float(i.get("grand_total") or 0) - _paid(i))
+
+    groups: Dict[str, dict] = defaultdict(lambda: {
+        "referrer": None,
+        "clients": {},
+        "invoice_count": 0,
+        "total_invoiced": 0.0,
+        "total_collected": 0.0,
+        "total_due": 0.0,
+    })
+
+    for inv in invoices:
+        client = client_by_id.get(inv.get("client_id")) or client_by_name.get(inv.get("client_name"))
+        referrer = (client.get("referred_by") if client else None) or None
+        key = referrer or "__unreferred__"
+        g = groups[key]
+        g["referrer"] = referrer
+        g["invoice_count"] += 1
+        g["total_invoiced"] += float(inv.get("grand_total") or 0)
+        g["total_collected"] += _paid(inv)
+        g["total_due"] += _due(inv)
+        cname = (client.get("company_name") if client else None) or inv.get("client_name") or "Unknown"
+        cid = client.get("id") if client else None
+        g["clients"][cid or cname] = {"id": cid, "company_name": cname}
+
+    result = []
+    for g in groups.values():
+        result.append({
+            "referrer": g["referrer"],
+            "is_unreferred": g["referrer"] is None,
+            "client_count": len(g["clients"]),
+            "clients": sorted(g["clients"].values(), key=lambda c: c["company_name"] or ""),
+            "invoice_count": g["invoice_count"],
+            "total_invoiced": round(g["total_invoiced"], 2),
+            "total_collected": round(g["total_collected"], 2),
+            "total_due": round(g["total_due"], 2),
+        })
+
+    result.sort(key=lambda r: -r["total_invoiced"])
+    return {"groups": result}
+
+
 # ══════════════════════════════════════════════════════════════
 # FIX: drive-status MUST be declared BEFORE /invoices/{inv_id}
 # In v6.0 it was after, so FastAPI matched "drive-status" as an
