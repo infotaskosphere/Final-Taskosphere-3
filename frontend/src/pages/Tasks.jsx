@@ -32,9 +32,11 @@ import {
   TrendingUp, MoreHorizontal, Copy, SlidersHorizontal,
   Briefcase, Target, Activity, ChevronRight, Sun,
   Loader2, Mail, Send, Trophy, Medal, Star, Zap, Crown, ChevronsUpDown,
+  Minimize2, ClipboardList,
 } from 'lucide-react';
 import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
 import { AreaChart, Area, ResponsiveContainer, Tooltip as ReTooltip } from 'recharts';
+import { useFormMinimizer } from '@/contexts/MinimizedFormsContext';
 
 
 // ── Tasks session cache (2-minute TTL) ───────────────────────────────────────
@@ -816,6 +818,29 @@ export default function Tasks() {
   const [dialogOpen,         setDialogOpen]         = useState(false);
   const [editingTask,        setEditingTask]         = useState(null);
   const [formData,           setFormData]           = useState({ ...EMPTY_FORM });
+
+  // ── Minimize/restore: lets this Create/Edit Task form be shrunk to the
+  // global dock, navigated away from, and resumed later exactly as left.
+  // Key is per-record so several task edits can be minimized at once.
+  const taskFormKey = editingTask ? `create-task-${editingTask.id}` : 'create-task-new';
+  const { minimize: minimizeTaskForm } = useFormMinimizer({
+    formKey: taskFormKey,
+    title: formData.title ? `Task: ${formData.title}` : (editingTask ? 'Edit Task' : 'New Task'),
+    subtitle: editingTask ? 'Editing' : 'Creating',
+    path: '/tasks',
+    icon: 'ClipboardList',
+    data: { formData, editingTaskId: editingTask?.id || null },
+    onRestore: (data) => {
+      setFormData(data.formData || { ...EMPTY_FORM });
+      if (data.editingTaskId) {
+        const found = tasks.find((t) => t.id === data.editingTaskId);
+        if (found) setEditingTask(found);
+      } else {
+        setEditingTask(null);
+      }
+      setDialogOpen(true);
+    },
+  });
   const [viewMode,           setViewMode]           = useState('list');
   const [taskDetailOpen,     setTaskDetailOpen]     = useState(false);
   const [selectedDetailTask, setSelectedDetailTask] = useState(null);
@@ -1886,8 +1911,17 @@ export default function Tasks() {
                   {/* Dialog form — premium redesign */}
                   <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden p-0 gap-0 flex flex-col rounded-2xl shadow-2xl">
                     {/* Fixed gradient header */}
-                    <div className="flex-shrink-0 px-7 pt-6 pb-5" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)` }}>
+                    <div className="flex-shrink-0 px-7 pt-6 pb-5 relative" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)` }}>
                       <div className="absolute right-0 top-0 w-48 h-48 rounded-full -mr-16 -mt-16 opacity-10 pointer-events-none" style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+                      {/* Minimize — shrink this form to the dock and keep working elsewhere */}
+                      <button
+                        type="button"
+                        onClick={() => { minimizeTaskForm(); setDialogOpen(false); toast.message('Task form minimized', { description: 'Resume it anytime from the dock in the bottom-left corner.' }); }}
+                        className="absolute right-12 top-5 z-10 w-7 h-7 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center text-white transition-colors"
+                        title="Minimize (resume later without losing your progress)"
+                      >
+                        <Minimize2 className="h-3.5 w-3.5" />
+                      </button>
                       <DialogHeader>
                         <DialogTitle className="text-xl font-bold text-white flex items-center gap-2.5">
                           <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
