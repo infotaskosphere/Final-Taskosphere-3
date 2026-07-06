@@ -10,6 +10,8 @@ import GifLoader from "@/components/ui/GifLoader.jsx";
 import ReminderPopupManager from "@/components/layout/ReminderPopupManager.jsx";
 import { BulkWASenderProvider } from "@/components/BulkWASenderContext";
 import BulkWASenderWidget from "@/contexts/BulkWASenderWidget";
+import { MinimizedFormsProvider } from "@/contexts/MinimizedFormsContext";
+import MinimizedFormsDock from "@/components/layout/MinimizedFormsDock.jsx";
 
 /* ── Bottom loading bar ─────────────────────────────────────────────── */
 // memo: re-renders only when loading state changes, not on every route change
@@ -72,22 +74,29 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <BrowserRouter>
-          <BulkWASenderProvider>
-            {/* Bottom loading bar — always visible, no layout shift */}
-            <BottomLoadingBar />
+          <MinimizedFormsProvider>
+            <BulkWASenderProvider>
+              {/* Bottom loading bar — always visible, no layout shift */}
+              <BottomLoadingBar />
 
-            {/* Global reminder popup — polls every page, shows on top of any route */}
-            <ReminderPopupManager />
+              {/* Global reminder popup — polls every page, shows on top of any route */}
+              <ReminderPopupManager />
 
-            {/* Persistent bulk-WhatsApp sender widget — survives page navigation */}
-            <BulkWASenderWidget />
+              {/* Persistent bulk-WhatsApp sender widget — survives page navigation */}
+              <BulkWASenderWidget />
 
-            <Suspense fallback={<GifLoader />}>
-              <AnimatedRoutes />
-            </Suspense>
+              {/* Dock of minimized forms (Create Task, Add Client, Add User, ...) —
+                  rendered outside the route switcher so it survives navigation and
+                  lets you resume any in-progress form from any page. */}
+              <MinimizedFormsDock />
 
-            <Toaster position="top-right" richColors />
-          </BulkWASenderProvider>
+              <Suspense fallback={<GifLoader />}>
+                <AnimatedRoutes />
+              </Suspense>
+
+              <Toaster position="top-right" richColors />
+            </BulkWASenderProvider>
+          </MinimizedFormsProvider>
         </BrowserRouter>
       </AuthProvider>
     </QueryClientProvider>
