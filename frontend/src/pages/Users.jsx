@@ -25,9 +25,11 @@ import {
   Network, Save, ClipboardList, LayoutDashboard, AlertTriangle, MapPin, UserMinus, ArrowRight,
   Building2, MessageSquare, MessageCircle, Wallet, IndianRupee, ChevronDown, ChevronUp,
   TrendingDown, CalendarClock, CalendarX2, CalendarCheck2, CalendarOff,
+  Minimize2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useFormMinimizer } from '@/contexts/MinimizedFormsContext';
 
 // ── Brand Colors ─────────────────────────────────────────────────────────────
 const COLORS = {
@@ -382,7 +384,7 @@ function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
   );
 }
 
-function DialogGradHeader({ gradient, icon: Icon, eyebrow, title, subtitle, onClose }) {
+function DialogGradHeader({ gradient, icon: Icon, eyebrow, title, subtitle, onClose, onMinimize }) {
   return (
     <div className="relative overflow-hidden rounded-t-2xl" style={{ background: gradient }}>
       <div className="absolute right-0 top-0 w-56 h-56 rounded-full -mr-20 -mt-20 opacity-10"
@@ -398,12 +400,20 @@ function DialogGradHeader({ gradient, icon: Icon, eyebrow, title, subtitle, onCl
             {subtitle && <p className="text-white/55 text-sm mt-1">{subtitle}</p>}
           </div>
         </div>
-        {onClose && (
-          <button onClick={onClose}
-            className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center flex-shrink-0 transition-all active:scale-90 mt-0.5">
-            <X className="h-4 w-4 text-white" />
-          </button>
-        )}
+        <div className="flex items-center gap-2 flex-shrink-0 mt-0.5">
+          {onMinimize && (
+            <button type="button" onClick={onMinimize} title="Minimize (resume later without losing your progress)"
+              className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-all active:scale-90">
+              <Minimize2 className="h-4 w-4 text-white" />
+            </button>
+          )}
+          {onClose && (
+            <button onClick={onClose}
+              className="w-8 h-8 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-all active:scale-90">
+              <X className="h-4 w-4 text-white" />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -2379,6 +2389,29 @@ export default function Users() {
   });
   const [permissions, setPermissions] = useState({ ...EMPTY_PERMISSIONS });
 
+  // ── Minimize/restore: shrink the Add/Edit Team Member form to the global
+  // dock so it can be resumed later, from any page, without losing progress.
+  const userFormKey = selectedUser ? `create-user-${selectedUser.id}` : 'create-user-new';
+  const { minimize: minimizeUserForm } = useFormMinimizer({
+    formKey: userFormKey,
+    title: formData.full_name ? `Member: ${formData.full_name}` : (selectedUser ? 'Edit Member' : 'New Team Member'),
+    subtitle: selectedUser ? 'Editing' : 'Creating',
+    path: '/users',
+    icon: 'UserPlus',
+    data: { formData, permissions, editingUserId: selectedUser?.id || null },
+    onRestore: (data) => {
+      if (data.formData) setFormData(data.formData);
+      if (data.permissions) setPermissions(data.permissions);
+      if (data.editingUserId) {
+        const found = users.find((u) => u.id === data.editingUserId);
+        if (found) setSelectedUser(found);
+      } else {
+        setSelectedUser(null);
+      }
+      setDialogOpen(true);
+    },
+  });
+
   useEffect(() => {
     if (canViewUserPage) { fetchUsers(); fetchClients(); fetchCompanies(); }
   }, [canViewUserPage]);
@@ -3289,7 +3322,8 @@ export default function Users() {
           <DialogGradHeader gradient={GRADIENT} icon={selectedUser ? Pencil : Plus}
             eyebrow={selectedUser ? 'Edit Member' : 'New Member'}
             title={selectedUser ? selectedUser.full_name : 'Add Team Member'}
-            subtitle={isAdmin ? 'Full administrative control' : 'Update your personal information'} />
+            subtitle={isAdmin ? 'Full administrative control' : 'Update your personal information'}
+            onMinimize={() => { minimizeUserForm(); setDialogOpen(false); toast.message('Team member form minimized', { description: 'Resume it anytime from the dock in the bottom-left corner.' }); }} />
           <div className="p-6 space-y-6 bg-white dark:bg-slate-900">
             <div className="flex justify-center">
               <label className="relative group cursor-pointer">
