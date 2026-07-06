@@ -29,7 +29,7 @@ import {
   Shield, Download, UserCheck, AlertCircle, Sparkles, Loader2,
   ArrowLeftRight, RefreshCw, FileSpreadsheet, ExternalLink as ExternalLinkIcon,
   IndianRupee, Save as SaveIcon, Globe, Settings, Clock, Send, Repeat, Link,
-  Merge, Layers, Paperclip,
+  Merge, Layers, Paperclip, Minimize2,
 } from 'lucide-react';
 import { detectClientDuplicates } from '@/lib/aiDuplicateEngine';
 import StandaloneGovtFeeDialog from '@/components/StandaloneGovtFeeDialog';
@@ -42,6 +42,7 @@ import ITRClientDialog from '@/components/ITRClientDialog';
 import ITRBulkImportDialog from '@/components/ITRBulkImportDialog';
 import ClientWAAutoSend from '@/components/ClientWAAutoSend';
 import DSCLinkerSection from '@/components/DSCLinkerSection';
+import { useFormMinimizer } from '@/contexts/MinimizedFormsContext';
 import { format, startOfDay, differenceInDays } from 'date-fns';
 import WhatsAppSendDialog from '@/components/ui/WhatsAppSendDialog';
 import { buildClientMessage, getWASettings } from '@/hooks/useWhatsApp';
@@ -4790,6 +4791,28 @@ export default function Clients() {
   const [mcaFetching, setMcaFetching]   = useState(false);
   const [mcaQuery, setMcaQuery]         = useState('');
 
+  // ── Minimize/restore: shrink the Add/Edit Client form to the global dock so
+  // it can be resumed later (e.g. after checking something on another page).
+  const clientFormKey = editingClient ? `create-client-${editingClient.id}` : 'create-client-new';
+  const { minimize: minimizeClientForm } = useFormMinimizer({
+    formKey: clientFormKey,
+    title: formData.company_name ? `Client: ${formData.company_name}` : (editingClient ? 'Edit Client' : 'New Client'),
+    subtitle: editingClient ? 'Editing' : 'Creating',
+    path: '/clients',
+    icon: 'Building2',
+    data: { formData, editingClientId: editingClient?.id || null },
+    onRestore: (data) => {
+      if (data.formData) setFormData(data.formData);
+      if (data.editingClientId) {
+        const found = clients.find((c) => c.id === data.editingClientId);
+        if (found) setEditingClient(found);
+      } else {
+        setEditingClient(null);
+      }
+      setDialogOpen(true);
+    },
+  });
+
   // ── Refs ────────────────────────────────────────────────────────────────
   const fileInputRef  = useRef(null);
   const excelInputRef = useRef(null);
@@ -6074,10 +6097,21 @@ export default function Clients() {
                     <DialogTitle className={`text-xl font-bold tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{editingClient ? 'Edit Client Profile' : 'New Client Profile'}</DialogTitle>
                     <DialogDescription className="text-sm text-slate-400 mt-0.5">Complete client information and preferences</DialogDescription>
                   </div>
-                  <div className="flex items-center gap-3 bg-slate-50 px-4 py-2 rounded-xl border border-slate-200">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Status</span>
-                    <Switch checked={formData.status === 'active'} onCheckedChange={c => setFormData(p => ({ ...p, status: c ? 'active' : 'inactive' }))} />
-                    <span className={`text-xs font-semibold ${formData.status === 'active' ? 'text-emerald-600' : 'text-amber-600'}`}>{formData.status === 'active' ? 'Active' : 'Archived'}</span>
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 bg-slate-50 px-4 py-2 rounded-xl border border-slate-200">
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Status</span>
+                      <Switch checked={formData.status === 'active'} onCheckedChange={c => setFormData(p => ({ ...p, status: c ? 'active' : 'inactive' }))} />
+                      <span className={`text-xs font-semibold ${formData.status === 'active' ? 'text-emerald-600' : 'text-amber-600'}`}>{formData.status === 'active' ? 'Active' : 'Archived'}</span>
+                    </div>
+                    {/* Minimize — shrink this form to the dock, go do something else, resume later */}
+                    <button
+                      type="button"
+                      onClick={() => { minimizeClientForm(); setDialogOpen(false); toast.message('Client form minimized', { description: 'Resume it anytime from the dock in the bottom-left corner.' }); }}
+                      className="w-9 h-9 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 flex items-center justify-center text-slate-500 transition-colors"
+                      title="Minimize (resume later without losing your progress)"
+                    >
+                      <Minimize2 className="h-4 w-4" />
+                    </button>
                   </div>
                 </div>
                 <form onSubmit={handleSubmit} className="p-8 space-y-7">
