@@ -1,208 +1,173 @@
 /**
- * MinimizedFormsContext.jsx
+ * MinimizedFormsDock.jsx
  * ─────────────────────────────────────────────────────────────────────
- * Lets ANY create/edit form in the app be "minimized" instead of closed.
+ * Persistent floating dock that lists every minimized form as a small
+ * pill, regardless of which page you're currently on. Mounted once at
+ * the app root (outside the router's route-switching area) so it's
+ * always visible.
  *
- * Problem this solves:
- *   You're halfway through "Create New Task" and realise you need to
- *   check something on the Clients page (or create a client first).
- *   Closing the dialog throws your half-filled form away. This context
- *   lets you shrink it to a small pill in a persistent dock, go do the
- *   other work on any other page, then click the pill to reopen the
- *   form exactly as you left it — including which page it belongs to.
+ * Each pill shows: icon, title, which page it belongs to, how long ago
+ * it was minimized, a restore (maximize) button, and a discard (x)
+ * button. Clicking the body of the pill also restores it.
  *
- * Design:
- *   - `forms`: the list of minimized "chips" shown in the dock. Each one
- *     is a lightweight, JSON-serializable snapshot: { key, title,
- *     subtitle, path, icon, data, minimizedAt }.
- *   - `pendingRestore`: a transient map used to hand a chip's `data`
- *     back to the page that owns it. A page reads this via the
- *     `useFormMinimizer` hook (see hooks/useFormMinimizer.js).
- *   - Minimized forms are mirrored into sessionStorage, so an accidental
- *     tab refresh doesn't wipe out unsaved work either. Entries older
- *     than MAX_AGE_MS are dropped on load so the dock never fills up
- *     with stale, forgotten forms.
- *   - Multiple forms — even several of the same type (e.g. two tasks
- *     being edited at once) — can be minimized simultaneously as long
- *     as each is given a distinct `formKey` (see hook doc for the
- *     recommended `type-recordId` convention).
- *
- * This provider must be mounted once near the app root, OUTSIDE the
- * router's route-switching area (see App.jsx), so it — and the dock it
- * powers — survive page navigation.
+ * The whole dock itself can be collapsed to a single round badge when
+ * it's in the way — handy when several forms are minimized at once.
  */
-import React, {
-  createContext, useContext, useState, useCallback, useEffect, useRef,
-} from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { formatDistanceToNowStrict } from 'date-fns';
+import {
+  Maximize2, X, ClipboardList, UserPlus, Building2, FileEdit,
+  ChevronDown, ChevronUp, Layers, Mail, ShieldCheck, Receipt,
+} from 'lucide-react';
+import { useMinimizedForms } from '@/contexts/MinimizedFormsContext';
 
-const STORAGE_KEY = 'taskosphere_minimized_forms_v1';
-const MAX_AGE_MS = 24 * 60 * 60 * 1000; // auto-expire forgotten forms after 24h
+const ICONS = {
+  ClipboardList, UserPlus, Building2, FileEdit, Mail, ShieldCheck, Receipt, Layers,
+};
 
-function loadPersisted() {
-  try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    const now = Date.now();
-    return parsed.filter((f) => f && typeof f.key === 'string' && (now - (f.minimizedAt || 0)) < MAX_AGE_MS);
-  } catch {
-    return [];
-  }
+const PAGE_LABELS = {
+  '/tasks': 'Tasks',
+  '/clients': 'Clients',
+  '/users': 'Users',
+  '/compliance': 'Compliance',
+  '/invoicing': 'Invoicing',
+  '/trademark-sphere': 'Trademark Sphere',
+};
+
+function pageLabel(path) {
+  return PAGE_LABELS[path] || (path || '').replace(/^\//, '').replace(/-/g, ' ') || 'this page';
 }
 
-function persist(list) {
-  try {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-  } catch {
-    // Data contained something non-serializable (e.g. a File object) —
-    // the chip still works for this tab session, it just won't survive
-    // a hard refresh. Not fatal, so we swallow the error.
-  }
+function timeAgo(ts) {
+  try { return formatDistanceToNowStrict(new Date(ts), { addSuffix: true }); } catch { return ''; }
 }
 
-const Ctx = createContext(null);
+export default function MinimizedFormsDock() {
+  const { forms, restoreForm, discardForm, discardAll } = useMinimizedForms();
+  const [collapsed, setCollapsed] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(null); // key awaiting confirm
 
-export function MinimizedFormsProvider({ children }) {
-  const [forms, setForms] = useState(loadPersisted);
-  const [pendingRestore, setPendingRestore] = useState({});
-  const navigate = useNavigate();
+  if (!forms || forms.length === 0) return null;
 
-  useEffect(() => { persist(forms); }, [forms]);
+  const sorted = [...forms].sort((a, b) => b.minimizedAt - a.minimizedAt);
 
-  /** Shrink a form to a dock chip. Calling again with the same `key`
-   *  updates that chip in place (e.g. title changed) instead of
-   *  duplicating it. */
-  const minimizeForm = useCallback(({ key, title, subtitle, path, icon, data }) => {
-    setForms((prev) => {
-      const others = prev.filter((f) => f.key !== key);
-      return [
-        ...others,
-        {
-          key,
-          title: title || 'Untitled form',
-          subtitle: subtitle || '',
-          path: path || window.location.pathname,
-          icon: icon || 'FileEdit',
-          data,
-          minimizedAt: Date.now(),
-        },
-      ];
-    });
-  }, []);
+  return (
+    <div
+      className="fixed z-[70] flex flex-col items-start gap-2"
+      style={{ left: 16, bottom: 16 }}
+    >
+      {/* Collapsed badge */}
+      {collapsed ? (
+        <button
+          onClick={() => setCollapsed(false)}
+          className="flex items-center gap-2 h-11 pl-3 pr-4 rounded-full shadow-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors"
+          title="Show minimized forms"
+        >
+          <span className="relative flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white text-[11px] font-bold">
+            {sorted.length}
+          </span>
+          <span className="text-xs font-semibold text-slate-700">Minimized {sorted.length === 1 ? 'form' : 'forms'}</span>
+          <ChevronUp className="h-3.5 w-3.5 text-slate-400" />
+        </button>
+      ) : (
+        <div className="w-72 rounded-2xl shadow-2xl border border-slate-200 bg-white overflow-hidden">
+          {/* Dock header */}
+          <div className="flex items-center justify-between px-3.5 py-2.5 bg-slate-50 border-b border-slate-200">
+            <div className="flex items-center gap-1.5">
+              <Layers className="h-3.5 w-3.5 text-slate-500" />
+              <span className="text-xs font-bold text-slate-700">
+                Minimized {sorted.length === 1 ? 'form' : `forms (${sorted.length})`}
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              {sorted.length > 1 && (
+                <button
+                  onClick={discardAll}
+                  className="text-[10px] font-medium text-slate-400 hover:text-red-500 px-1.5 transition-colors"
+                  title="Discard all"
+                >
+                  clear all
+                </button>
+              )}
+              <button
+                onClick={() => setCollapsed(true)}
+                className="p-1 rounded-md hover:bg-slate-200 text-slate-500 transition-colors"
+                title="Collapse dock"
+              >
+                <ChevronDown className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
 
-  /** Bring a chip back. Navigates to the page that owns it (if we're
-   *  not already there) and hands its snapshot back via pendingRestore,
-   *  which the owning page consumes through useFormMinimizer. */
-  const restoreForm = useCallback((key) => {
-    setForms((prev) => {
-      const target = prev.find((f) => f.key === key);
-      if (!target) return prev;
-      setPendingRestore((pr) => ({ ...pr, [key]: { data: target.data, restoredAt: Date.now() } }));
-      if (target.path && target.path !== window.location.pathname) {
-        navigate(target.path);
-      }
-      return prev.filter((f) => f.key !== key);
-    });
-  }, [navigate]);
+          {/* Pills */}
+          <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
+            <AnimatePresence initial={false}>
+              {sorted.map((f) => {
+                const Icon = ICONS[f.icon] || FileEdit;
+                const confirming = confirmDiscard === f.key;
+                return (
+                  <motion.div
+                    key={f.key}
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="flex items-center gap-2.5 px-3.5 py-2.5 hover:bg-blue-50/60 group transition-colors">
+                      <button
+                        onClick={() => restoreForm(f.key)}
+                        className="w-8 h-8 rounded-xl bg-blue-50 flex items-center justify-center flex-shrink-0 text-blue-600"
+                        title="Restore"
+                      >
+                        <Icon className="h-4 w-4" />
+                      </button>
 
-  /** Discard a minimized form permanently, without reopening it. */
-  const discardForm = useCallback((key) => {
-    setForms((prev) => prev.filter((f) => f.key !== key));
-  }, []);
+                      <button
+                        onClick={() => restoreForm(f.key)}
+                        className="flex-1 min-w-0 text-left"
+                        title="Click to restore where you left off"
+                      >
+                        <div className="text-xs font-semibold text-slate-800 truncate">{f.title}</div>
+                        <div className="text-[10px] text-slate-400 truncate">
+                          {pageLabel(f.path)} · {timeAgo(f.minimizedAt)}
+                        </div>
+                      </button>
 
-  const discardAll = useCallback(() => setForms([]), []);
-
-  /** Called by the owning page once it has applied a restored snapshot. */
-  const clearRestore = useCallback((key) => {
-    setPendingRestore((prev) => {
-      if (!(key in prev)) return prev;
-      const next = { ...prev };
-      delete next[key];
-      return next;
-    });
-  }, []);
-
-  const isMinimized = useCallback((key) => forms.some((f) => f.key === key), [forms]);
-
-  const value = {
-    forms, pendingRestore, minimizeForm, restoreForm, discardForm, discardAll, clearRestore, isMinimized,
-  };
-
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
-}
-
-export function useMinimizedForms() {
-  const ctx = useContext(Ctx);
-  if (!ctx) {
-    // Safe no-op fallback so consumers don't crash if the provider is
-    // ever missing (e.g. isolated component tests).
-    return {
-      forms: [],
-      pendingRestore: {},
-      minimizeForm: () => {},
-      restoreForm: () => {},
-      discardForm: () => {},
-      discardAll: () => {},
-      clearRestore: () => {},
-      isMinimized: () => false,
-    };
-  }
-  return ctx;
-}
-
-/**
- * useFormMinimizer — the hook individual forms actually use.
- *
- * Example (inside a page component that already has `formData`,
- * `setFormData`, `dialogOpen`, `setDialogOpen`, `editingTask`):
- *
- *   const { minimize } = useFormMinimizer({
- *     formKey: editingTask ? `create-task-${editingTask.id}` : 'create-task-new',
- *     title: formData.title ? `Task: ${formData.title}` : 'New Task',
- *     subtitle: editingTask ? 'Editing' : 'Creating',
- *     path: '/tasks',
- *     icon: 'ClipboardList',
- *     data: { formData, editingTaskId: editingTask?.id || null },
- *     onRestore: (data) => {
- *       setFormData(data.formData);
- *       setEditingTask(data.editingTaskId ? tasks.find(t => t.id === data.editingTaskId) : null);
- *       setDialogOpen(true);
- *     },
- *   });
- *
- *   // In the dialog header, next to the built-in close (X) button:
- *   <button onClick={() => { minimize(); setDialogOpen(false); }}>
- *     <Minimize2 className="h-4 w-4" />
- *   </button>
- *
- * `formKey` should be unique per in-progress form. Use a stable key
- * like `create-task-new` for the "new" form and `create-task-<id>` per
- * record being edited, so several edits can be minimized at once.
- */
-export function useFormMinimizer({ formKey, title, subtitle, path, icon, data, onRestore }) {
-  const { pendingRestore, minimizeForm, clearRestore, isMinimized } = useMinimizedForms();
-  const onRestoreRef = useRef(onRestore);
-  onRestoreRef.current = onRestore;
-  const dataRef = useRef(data);
-  dataRef.current = data;
-  const metaRef = useRef({ title, subtitle, path, icon });
-  metaRef.current = { title, subtitle, path, icon };
-
-  useEffect(() => {
-    const pending = pendingRestore[formKey];
-    if (pending) {
-      onRestoreRef.current?.(pending.data);
-      clearRestore(formKey);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formKey, pendingRestore[formKey]]);
-
-  const minimize = useCallback(() => {
-    const m = metaRef.current;
-    minimizeForm({ key: formKey, title: m.title, subtitle: m.subtitle, path: m.path, icon: m.icon, data: dataRef.current });
-  }, [formKey, minimizeForm]);
-
-  return { minimize, isMinimized: isMinimized(formKey) };
+                      <div className="flex items-center gap-0.5 flex-shrink-0">
+                        <button
+                          onClick={() => restoreForm(f.key)}
+                          className="p-1.5 rounded-lg hover:bg-blue-100 text-blue-500 transition-colors"
+                          title="Maximize / resume"
+                        >
+                          <Maximize2 className="h-3.5 w-3.5" />
+                        </button>
+                        {confirming ? (
+                          <button
+                            onClick={() => { discardForm(f.key); setConfirmDiscard(null); }}
+                            className="text-[10px] font-bold text-white bg-red-500 hover:bg-red-600 rounded-lg px-2 py-1.5 transition-colors"
+                          >
+                            Discard?
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => setConfirmDiscard(f.key)}
+                            onBlur={() => setConfirmDiscard(null)}
+                            className="p-1.5 rounded-lg hover:bg-red-100 text-slate-400 hover:text-red-500 transition-colors"
+                            title="Discard this form"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
