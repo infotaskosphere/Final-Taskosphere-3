@@ -24,12 +24,13 @@ import {
   IndianRupee, CalendarDays, FileCheck, ArrowRightLeft, Layers,
   Upload, Database, FileUp, CheckSquare, AlertTriangle, Phone, Mail,
   FileSpreadsheet, Briefcase, PieChart, Settings, Table, FileDown, BookOpen,
-  ExternalLink, GripVertical, MessageCircle, Square} from 'lucide-react';
+  ExternalLink, GripVertical, MessageCircle, Square, Share2} from 'lucide-react';
 import InvoiceSettings, { getInvSettings } from './InvoiceSettings';
 import { COLOR_THEMES, INVOICE_TEMPLATES, generateInvoiceHTML } from './InvoiceTemplates';
 import PartyLedger from './PartyLedger';
 import WhatsAppSendDialog from '@/components/ui/WhatsAppSendDialog';
 import { buildInvoiceMessage, getWASettings } from '@/hooks/useWhatsApp';
+import ReferralSummaryDialog from '@/components/ReferralSummaryDialog';
 
 // ─── Brand Colors ─────────────────────────────────────────────────────────────
 const COLORS = {
@@ -5625,6 +5626,8 @@ function Invoicing() {
   const [waInvoice, setWaInvoice] = useState(null);
   const [waDialogOpen, setWaDialogOpen] = useState(false);
   const [bulkWAOpen, setBulkWAOpen] = useState(false);
+  const [referrerFilter, setReferrerFilter] = useState('all');
+  const [referralSummaryOpen, setReferralSummaryOpen] = useState(false);
 
   // ── B. ALL useRef ─────────────────────────────────────────────────────────
   const iframeRef = useRef(null);
@@ -5642,6 +5645,25 @@ function Invoicing() {
     const years = new Set((invoices || []).map(i => i.invoice_date?.slice(0, 4)).filter(Boolean));
     return Array.from(years).sort().reverse();
   }, [invoices]);
+
+  // ── referrerByClient / getInvoiceReferrer ────────────────────────────────
+  // Maps each invoice to the referrer recorded on its client (the person/
+  // company via whom that client was received) so invoices can be filtered
+  // and grouped by referrer without an extra field on the invoice itself.
+  const { referrerById, referrerByName, availableReferrers } = useMemo(() => {
+    const byId = {}; const byName = {}; const set = new Set();
+    (clients || []).forEach(c => {
+      if (!c.referred_by) return;
+      if (c.id) byId[c.id] = c.referred_by;
+      if (c.company_name) byName[c.company_name] = c.referred_by;
+      set.add(c.referred_by);
+    });
+    return { referrerById: byId, referrerByName: byName, availableReferrers: Array.from(set).sort() };
+  }, [clients]);
+
+  const getInvoiceReferrer = useCallback((inv) => {
+    return (inv.client_id && referrerById[inv.client_id]) || referrerByName[inv.client_name] || null;
+  }, [referrerById, referrerByName]);
 
   const localStats = useMemo(() => {
     const now = new Date();
@@ -5694,11 +5716,12 @@ function Invoicing() {
         if (!(inv.status === 'paid' || (calcDue(inv) <= 0 && inv.status !== 'draft' && inv.status !== 'cancelled'))) return false;
       }
       if (typeFilter !== 'all' && inv.invoice_type !== typeFilter) return false;
+      if (referrerFilter !== 'all' && getInvoiceReferrer(inv) !== referrerFilter) return false;
       if (fromDate && inv.invoice_date < fromDate) return false;
       if (toDate && inv.invoice_date > toDate) return false;
       return true;
     });
-  }, [invoices, companyFilter, yearFilter, searchTerm, statusFilter, typeFilter, fromDate, toDate, listViewFilter]);
+  }, [invoices, companyFilter, yearFilter, searchTerm, statusFilter, typeFilter, referrerFilter, getInvoiceReferrer, fromDate, toDate, listViewFilter]);
 
   // ── F. ALL useMemo: TOTALS / AGGREGATIONS ────────────────────────────────
 
@@ -6156,13 +6179,19 @@ const fetchAll = useCallback(async () => {
           <Select value={yearFilter} onValueChange={setYearFilter}><SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><CalendarDays className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" /><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Years</SelectItem>{availableYears.map(y => <SelectItem key={y} value={y}>FY {y}-{String(parseInt(y) + 1).slice(2)}</SelectItem>)}</SelectContent></Select>
           <Select value={statusFilter} onValueChange={setStatusFilter}><SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Status</SelectItem><SelectItem value="outstanding">Outstanding</SelectItem>{Object.entries(STATUS_META).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent></Select>
           <Select value={typeFilter} onValueChange={setTypeFilter}><SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Types</SelectItem>{INV_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent></Select>
+          {availableReferrers.length > 0 && (
+            <Select value={referrerFilter} onValueChange={setReferrerFilter}><SelectTrigger className={`h-9 w-[150px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-violet-50 text-violet-700'}`}><Share2 className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" /><SelectValue placeholder="Referred By" /></SelectTrigger><SelectContent><SelectItem value="all">All Referrers</SelectItem>{availableReferrers.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent></Select>
+          )}
+          <button onClick={() => setReferralSummaryOpen(true)} className={`h-9 px-3 rounded-xl text-xs font-semibold flex items-center gap-1.5 flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-200 hover:bg-slate-600' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}>
+            <Share2 className="h-3.5 w-3.5" /> By Referral
+          </button>
           <div className="flex items-center gap-1.5">
             <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className={`h-9 px-2 rounded-xl text-xs border ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 [color-scheme:dark]' : 'bg-white border-slate-200'}`} />
             <span className="text-slate-400 text-xs">–</span>
             <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className={`h-9 px-2 rounded-xl text-xs border ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 [color-scheme:dark]' : 'bg-white border-slate-200'}`} />
           </div>
-          {(statusFilter !== 'all' || typeFilter !== 'all' || companyFilter !== 'all' || yearFilter !== 'all' || fromDate || toDate) && (
-            <button onClick={() => { setStatusFilter('all'); setTypeFilter('all'); setCompanyFilter('all'); setYearFilter('all'); setFromDate(''); setToDate(''); }} className="h-9 px-3 rounded-xl text-xs font-semibold text-red-500 hover:bg-red-50 flex items-center gap-1"><X className="h-3 w-3" /> Clear</button>
+          {(statusFilter !== 'all' || typeFilter !== 'all' || companyFilter !== 'all' || yearFilter !== 'all' || referrerFilter !== 'all' || fromDate || toDate) && (
+            <button onClick={() => { setStatusFilter('all'); setTypeFilter('all'); setCompanyFilter('all'); setYearFilter('all'); setReferrerFilter('all'); setFromDate(''); setToDate(''); }} className="h-9 px-3 rounded-xl text-xs font-semibold text-red-500 hover:bg-red-50 flex items-center gap-1"><X className="h-3 w-3" /> Clear</button>
           )}
         </div>
         {selectedIds.size > 0 && (
@@ -6314,6 +6343,11 @@ const fetchAll = useCallback(async () => {
                             <Hl text={inv.client_name || '—'} query={searchTerm} />
                           </p>
                           {inv.client_gstin && <p className="text-[10px] text-slate-400 font-mono truncate">{inv.client_gstin}</p>}
+                          {getInvoiceReferrer(inv) && (
+                            <p className={`text-[10px] flex items-center gap-1 mt-0.5 truncate max-w-[180px] ${isDark ? 'text-violet-300' : 'text-violet-600'}`}>
+                              <Share2 className="h-2.5 w-2.5 flex-shrink-0" /> Ref: {getInvoiceReferrer(inv)}
+                            </p>
+                          )}
                         </div>
                       </div>
                     </td>
@@ -6469,6 +6503,12 @@ const fetchAll = useCallback(async () => {
         open={bulkWAOpen}
         onClose={() => setBulkWAOpen(false)}
         invoices={enrichedFiltered}
+        isDark={isDark}
+      />
+      {/* CLIENTS BY REFERRER */}
+      <ReferralSummaryDialog
+        open={referralSummaryOpen}
+        onClose={() => setReferralSummaryOpen(false)}
         isDark={isDark}
       />
     </div>
