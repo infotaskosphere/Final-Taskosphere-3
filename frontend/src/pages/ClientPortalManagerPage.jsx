@@ -1250,8 +1250,29 @@ function SmartConnectTab({ portalUsers, loading, isDark, isAdmin }) {
     }
   };
 
+  // Deletes the item from Google Drive itself (moves it to Trash — recoverable
+  // from Drive's own Trash for the usual retention window), not just from the
+  // client's visibility list. Confirmed inline (below) before firing.
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+
+  const deleteFromDrive = async (item) => {
+    setBusyIds(prev => new Set(prev).add(item.id));
+    try {
+      await api.delete('/client-portal/drive/item', {
+        params: { portal_user_id: selectedUserId, file_id: item.id },
+      });
+      setBrowseItems(prev => prev.filter(f => f.id !== item.id));
+      toast.success(`Moved "${item.name}" to Drive Trash`);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Could not delete from Drive');
+    } finally {
+      setBusyIds(prev => { const n = new Set(prev); n.delete(item.id); return n; });
+      setConfirmDeleteId(null);
+    }
+  };
+
   const resetAll = () => {
-    setStep(1); setSelectedUserId(''); resetFolderPick(); setBreadcrumb([]); setBrowseItems([]);
+    setStep(1); setSelectedUserId(''); resetFolderPick(); setBreadcrumb([]); setBrowseItems([]); setConfirmDeleteId(null);
   };
 
   /* ── Styles ───────────────────────────────────────────────────── */
@@ -1510,25 +1531,56 @@ function SmartConnectTab({ portalUsers, loading, isDark, isAdmin }) {
                 {browseItems.map(item => (
                   <div
                     key={item.id}
-                    className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg border text-sm ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50 border-slate-200'} ${item.is_folder ? 'cursor-pointer hover:border-indigo-400' : ''}`}
-                    onClick={() => item.is_folder && openFolder(item)}
+                    className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg border text-sm ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50 border-slate-200'} ${item.is_folder && confirmDeleteId !== item.id ? 'cursor-pointer hover:border-indigo-400' : ''}`}
+                    onClick={() => item.is_folder && confirmDeleteId !== item.id && openFolder(item)}
                   >
                     {item.is_folder ? <Folder className="h-4 w-4 text-amber-500 flex-shrink-0" /> : <File className="h-4 w-4 text-slate-400 flex-shrink-0" />}
                     <span className="flex-1 min-w-0 truncate font-medium text-slate-700 dark:text-slate-200">{item.name}</span>
-                    {!item.is_visible && (
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-500 dark:text-slate-300 flex-shrink-0">Hidden</span>
+
+                    {confirmDeleteId === item.id ? (
+                      <div className="flex items-center gap-1.5 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                        <span className="text-[11px] text-red-500 font-medium">Delete from Drive?</span>
+                        <button
+                          onClick={() => deleteFromDrive(item)}
+                          disabled={busyIds.has(item.id)}
+                          className="px-2 py-1 rounded-md text-[11px] font-semibold text-white bg-red-500 hover:bg-red-600 disabled:opacity-60 flex items-center gap-1"
+                        >
+                          {busyIds.has(item.id) ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Confirm'}
+                        </button>
+                        <button
+                          onClick={() => setConfirmDeleteId(null)}
+                          className="px-2 py-1 rounded-md text-[11px] font-medium text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-600"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        {!item.is_visible && (
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-500 dark:text-slate-300 flex-shrink-0">Hidden</span>
+                        )}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); toggleVisible(item); }}
+                          disabled={busyIds.has(item.id)}
+                          title={item.is_visible ? 'Visible to client — click to hide' : 'Hidden from client — click to show'}
+                          className={`p-1.5 rounded-lg flex-shrink-0 transition-all ${item.is_visible ? 'text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20' : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-600'}`}
+                        >
+                          {busyIds.has(item.id) ? <Loader2 className="h-4 w-4 animate-spin" /> : item.is_visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(item.id); }}
+                          disabled={busyIds.has(item.id)}
+                          title="Delete from Google Drive"
+                          className="p-1.5 rounded-lg flex-shrink-0 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </>
                     )}
-                    <button
-                      onClick={(e) => { e.stopPropagation(); toggleVisible(item); }}
-                      disabled={busyIds.has(item.id)}
-                      title={item.is_visible ? 'Visible to client — click to hide' : 'Hidden from client — click to show'}
-                      className={`p-1.5 rounded-lg flex-shrink-0 transition-all ${item.is_visible ? 'text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20' : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-600'}`}
-                    >
-                      {busyIds.has(item.id) ? <Loader2 className="h-4 w-4 animate-spin" /> : item.is_visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-                    </button>
                   </div>
                 ))}
               </div>
+
             )}
           </div>
         </div>
