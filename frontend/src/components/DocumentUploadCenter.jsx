@@ -24,7 +24,7 @@ import api from '@/lib/api.js';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Search, Users, FolderOpen, Folder, FileText, UploadCloud, Plus, Trash2,
+  Search, Users, FolderOpen, Folder, FolderPlus, FileText, UploadCloud, Plus, Trash2,
   ChevronRight, Home, Loader2, CheckCircle2, XCircle, Eye, EyeOff, X,
   ExternalLink, RefreshCw, KeyRound, Copy, Check, AlertCircle, CloudCog,
   FileImage, FileSpreadsheet, FileType2, Square, CheckSquare, Sparkles,
@@ -422,7 +422,7 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
 
   useEffect(() => { loadItems(); }, [loadItems]);
 
-  // ── provision (create login + drive folder in one click) ───────────
+  // ── provision (create portal login only) ─────────────────────────
   const provision = async () => {
     if (!selectedClient) return;
     setProvisioning(true);
@@ -436,9 +436,8 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
       if (res.data?.generated_password) {
         setNewCreds({ username: res.data.portal_username, password: res.data.generated_password });
       }
-      toast.success('Client is ready — portal login and Drive folder are set up.');
+      toast.success('Portal login created for this client.');
       await loadClients();
-      // refresh local portal user + selection
       const refreshed = await api.get('/client-portal/all-clients');
       const updated = (refreshed.data || []).find((c) => c.id === selectedClient.id);
       if (updated) {
@@ -449,6 +448,38 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
       toast.error(extractErrorMessage(err, 'Setup failed'));
     } finally {
       setProvisioning(false);
+    }
+  };
+
+  // ── create Drive folder for this client (client-name folder + saved template subfolders) ──
+  const [creatingDriveFolder, setCreatingDriveFolder] = useState(false);
+  const createDriveFolder = async () => {
+    if (!selectedClient || !portalUser) return;
+    setCreatingDriveFolder(true);
+    try {
+      const res = await api.post('/client-portal/drive/create-individual-folder', {
+        client_id: selectedClient.id,
+        client_name: clientName(selectedClient),
+        parent_folder_id: null,
+        // omitting subfolders → backend falls back to the saved template (or root-only if template is empty)
+      });
+      toast.success(
+        `Drive folder "${res.data.folder_name}" created!`,
+        res.data.folder_link
+          ? { action: { label: 'Open', onClick: () => window.open(res.data.folder_link, '_blank') } }
+          : undefined,
+      );
+      await loadClients();
+      const refreshed = await api.get('/client-portal/all-clients');
+      const updated = (refreshed.data || []).find((c) => c.id === selectedClient.id);
+      if (updated) {
+        setSelectedClient(updated);
+        setPortalUser((updated.portal_users || [])[0] || null);
+      }
+    } catch (err) {
+      toast.error(extractErrorMessage(err, 'Could not create Drive folder'));
+    } finally {
+      setCreatingDriveFolder(false);
     }
   };
 
@@ -904,14 +935,23 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
               {portalUser && !portalUser.google_drive_folder_id && (
                 <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 p-4 flex items-center gap-4 flex-wrap">
                   <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/40 flex-shrink-0">
-                    <FolderOpen className="h-4 w-4 text-amber-700 dark:text-amber-400" />
+                    <FolderPlus className="h-4 w-4 text-amber-700 dark:text-amber-400" />
                   </div>
                   <div className="flex-1 min-w-[220px]">
-                    <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">Drive folder not created yet</p>
+                    <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">No Drive folder yet</p>
                     <p className="text-xs text-amber-700 dark:text-amber-400">
-                      Go to <strong>Folder Architect</strong> to create the Drive folder for this client, then come back here to upload.
+                      Create a Drive folder for this client — a <strong>{clientName(selectedClient)}</strong> folder will be created using your saved Folder Architect template (or root-only if no template is set).
                     </p>
                   </div>
+                  <button
+                    onClick={createDriveFolder}
+                    disabled={creatingDriveFolder}
+                    className="inline-flex items-center gap-2 text-xs font-semibold text-white px-4 py-2.5 rounded-xl shadow-sm hover:opacity-90 transition disabled:opacity-60 flex-shrink-0"
+                    style={{ background: 'linear-gradient(135deg, #92400e 0%, #b45309 100%)' }}
+                  >
+                    {creatingDriveFolder ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FolderPlus className="h-3.5 w-3.5" />}
+                    {creatingDriveFolder ? 'Creating…' : 'Create Drive Folder'}
+                  </button>
                 </div>
               )}
             </div>
