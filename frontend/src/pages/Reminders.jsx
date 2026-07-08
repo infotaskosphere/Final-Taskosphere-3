@@ -785,6 +785,218 @@ function PopupSettingsModal({ isOpen, onClose }) {
   );
 }
 
+// ── Duplicates Modal ──────────────────────────────────────────────────────
+// Fetches groups of reminders that the backend has identified as likely
+// duplicates (matched on tm_app_no, fuzzy title, date proximity, and
+// description — every parameter of the reminder, not just its title). For
+// each group, the user can either delete the extra copies or mark the group
+// "Not a Duplicate" so it's never suggested again.
+function DuplicatesModal({ isOpen, isDark, onClose, onChanged }) {
+  const [loading, setLoading] = useState(true);
+  const [groups, setGroups] = useState([]);
+  const [busyId, setBusyId] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await api.get("/email/reminders/duplicates");
+      setGroups(Array.isArray(data?.duplicate_groups) ? data.duplicate_groups : []);
+    } catch {
+      toast.error("Failed to load duplicate reminders");
+      setGroups([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) load();
+  }, [isOpen, load]);
+
+  if (!isOpen) return null;
+
+  const removeMemberFromView = (groupId, memberId) => {
+    setGroups((prev) =>
+      prev
+        .map((g) =>
+          g.group_id !== groupId
+            ? g
+            : { ...g, members: g.members.filter((m) => resolveId(m) !== memberId) },
+        )
+        .filter((g) => g.members.length > 1),
+    );
+  };
+
+  const dropGroupFromView = (groupId) => {
+    setGroups((prev) => prev.filter((g) => g.group_id !== groupId));
+  };
+
+  // Delete one duplicate copy, keeping the rest of the group intact
+  const handleDeleteMember = async (group, member) => {
+    const memberId = resolveId(member);
+    if (!memberId) return;
+    setBusyId(memberId);
+    try {
+      await api.delete(`/email/reminders/${memberId}`);
+      toast.success("Duplicate reminder deleted");
+      removeMemberFromView(group.group_id, memberId);
+      onChanged?.();
+    } catch {
+      toast.error("Failed to delete reminder");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // Tell the backend this whole group is NOT actually a duplicate set —
+  // every pairwise combination is recorded so it never resurfaces here.
+  const handleNotDuplicate = async (group) => {
+    const ids = group.members.map((m) => resolveId(m)).filter(Boolean);
+    if (ids.length < 2) return;
+    setBusyId(group.group_id);
+    try {
+      await api.post("/email/reminders/duplicates/ignore", { ids });
+      toast.success("Marked as not duplicate — won't be suggested again");
+      dropGroupFromView(group.group_id);
+    } catch {
+      toast.error("Failed to update");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+      style={{ background: "rgba(7,15,30,0.72)", backdropFilter: "blur(10px)" }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.92, y: 30, opacity: 0 }}
+        animate={{ scale: 1, y: 0, opacity: 1 }}
+        exit={{ scale: 0.92, y: 30, opacity: 0 }}
+        transition={{ type: "spring", stiffness: 240, damping: 24 }}
+        className={`w-full max-w-2xl max-h-[85vh] rounded-3xl overflow-hidden shadow-2xl flex flex-col ${isDark ? "bg-slate-800 border border-slate-700" : "bg-white border border-slate-200"}`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div
+          className="px-6 py-5 flex items-center justify-between flex-shrink-0"
+          style={{ background: `linear-gradient(135deg, ${COLORS.coral}, ${COLORS.purple})` }}
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center">
+              <RefreshCw className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <p className="text-white/60 text-[10px] font-semibold uppercase tracking-widest">
+                Duplicate Reminders
+              </p>
+              <h2 className="text-lg font-bold text-white">
+                {loading ? "Scanning…" : `${groups.length} possible duplicate group${groups.length !== 1 ? "s" : ""}`}
+              </h2>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-all"
+          >
+            <X className="w-4 h-4 text-white" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-6 py-5 space-y-4 overflow-y-auto">
+          {loading ? (
+            <div className={`text-center py-14 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              Comparing titles, TM numbers, dates &amp; descriptions…
+            </div>
+          ) : groups.length === 0 ? (
+            <div className={`text-center py-14 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-emerald-500" />
+              <p className="text-sm font-semibold">No duplicates found</p>
+              <p className="text-xs mt-1">Every reminder looks unique.</p>
+            </div>
+          ) : (
+            groups.map((group) => (
+              <div
+                key={group.group_id}
+                className={`rounded-2xl border overflow-hidden ${isDark ? "border-slate-600" : "border-slate-200"}`}
+              >
+                <div className={`px-4 py-2.5 flex items-center justify-between ${isDark ? "bg-slate-700/60" : "bg-slate-50"}`}>
+                  <span className={`text-xs font-bold uppercase tracking-wide ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                    {group.members.length} similar reminders
+                  </span>
+                  <button
+                    onClick={() => handleNotDuplicate(group)}
+                    disabled={busyId === group.group_id}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all disabled:opacity-50 ${
+                      isDark
+                        ? "bg-slate-600 hover:bg-slate-500 text-slate-100"
+                        : "bg-white hover:bg-slate-100 text-slate-700 border border-slate-200"
+                    }`}
+                  >
+                    <CheckCircle2 className="h-3 w-3" /> Not a Duplicate
+                  </button>
+                </div>
+                <div className="divide-y divide-slate-200/70 dark:divide-slate-700/70">
+                  {group.members.map((m) => {
+                    const mId = resolveId(m);
+                    return (
+                      <div key={mId} className="px-4 py-3 flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                            <h4 className={`font-semibold text-sm truncate ${isDark ? "text-slate-100" : "text-slate-800"}`}>
+                              {m.title || "Untitled"}
+                            </h4>
+                            {m.suggested_keep && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-500 text-white flex-shrink-0">
+                                SUGGESTED KEEP
+                              </span>
+                            )}
+                            {m.source === "email_auto" && (
+                              <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 flex-shrink-0">
+                                Email
+                              </span>
+                            )}
+                          </div>
+                          <p className={`text-xs flex items-center gap-1.5 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                            <Clock className="h-3 w-3" /> {formatReminderTime(m.remind_at)}
+                          </p>
+                          {m.description && (
+                            <p className={`text-xs mt-1 line-clamp-2 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                              {stripHtml(m.description)}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => handleDeleteMember(group, m)}
+                          disabled={busyId === mId}
+                          title="Delete this duplicate"
+                          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold flex-shrink-0 transition-all disabled:opacity-50 ${
+                            isDark
+                              ? "bg-red-900/30 hover:bg-red-900/50 text-red-400"
+                              : "bg-red-50 hover:bg-red-100 text-red-600"
+                          }`}
+                        >
+                          <Trash2 className="h-3 w-3" /> Delete
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ── Main Component ───────────────────────────────────────────────────────────
 export default function Reminders() {
   const isDark = useDark();
@@ -849,6 +1061,19 @@ export default function Reminders() {
   } = usePageLayout("reminders", REM_SECTIONS);
   const [showCustomize, setShowCustomize] = useState(false);
   const [showPopupSettings, setShowPopupSettings] = useState(false);
+  const [showDuplicates, setShowDuplicates] = useState(false);
+  const [duplicateCount, setDuplicateCount] = useState(0);
+
+  // Keep a lightweight count of duplicate groups for the badge on the
+  // "Duplicates" button — refreshed whenever the reminder list changes.
+  const refreshDuplicateCount = useCallback(async () => {
+    try {
+      const { data } = await api.get("/email/reminders/duplicates");
+      setDuplicateCount(Array.isArray(data?.duplicate_groups) ? data.duplicate_groups.length : 0);
+    } catch {
+      // Non-critical — badge just won't update
+    }
+  }, []);
 
   // Request notification permission on mount
   useEffect(() => {
@@ -886,6 +1111,10 @@ export default function Reminders() {
   useEffect(() => {
     fetchReminders();
   }, [fetchReminders]);
+
+  useEffect(() => {
+    refreshDuplicateCount();
+  }, [refreshDuplicateCount, reminders.length]);
 
   // ── Keep popup in sync: if reminder is updated, refresh popup data ─────────
   useEffect(() => {
@@ -1236,6 +1465,20 @@ export default function Reminders() {
         onClose={() => setShowPopupSettings(false)}
       />
 
+      <AnimatePresence>
+        {showDuplicates && (
+          <DuplicatesModal
+            isOpen={showDuplicates}
+            isDark={isDark}
+            onClose={() => setShowDuplicates(false)}
+            onChanged={() => {
+              fetchReminders();
+              refreshDuplicateCount();
+            }}
+          />
+        )}
+      </AnimatePresence>
+
       <motion.div
         className="space-y-4 pb-8"
         variants={containerVariants}
@@ -1310,6 +1553,19 @@ export default function Reminders() {
                   data-testid="popup-settings-btn"
                 >
                   <Bell size={13} /> Popup Settings
+                </button>
+                <button
+                  onClick={() => setShowDuplicates(true)}
+                  className="relative flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/20 text-white/70 border border-white/15 transition-all"
+                  data-testid="duplicates-btn"
+                  title="Find and remove duplicate reminders"
+                >
+                  <RefreshCw size={13} /> Duplicates
+                  {duplicateCount > 0 && (
+                    <span className="ml-0.5 min-w-[16px] h-4 px-1 rounded-full bg-coral text-[10px] font-bold flex items-center justify-center text-white" style={{ backgroundColor: COLORS.coral }}>
+                      {duplicateCount}
+                    </span>
+                  )}
                 </button>
               </div>
             }
