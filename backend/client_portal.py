@@ -12,6 +12,7 @@ Handles:
 import uuid
 import logging
 import re
+import random
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 
@@ -24,6 +25,9 @@ from jose import jwt, JWTError
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from backend.dependencies import db, JWT_SECRET as SECRET_KEY, ALGORITHM
+# Reuse the same Brevo-backed OTP emailer the main-app forgot-password flow
+# uses, so client portal password resets need no separate email infra.
+from backend.auth_password_reset import _send_otp_email
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/client-portal", tags=["client-portal"])
@@ -95,6 +99,18 @@ class PortalUserUpdate(BaseModel):
 class PortalLoginRequest(BaseModel):
     username: str
     password: str
+
+
+class PortalForgotPasswordRequest(BaseModel):
+    # Accepts either the portal username or the email on file — client
+    # doesn't need to remember which one was used to set up the account.
+    username: str
+
+
+class PortalResetPasswordRequest(BaseModel):
+    username: str
+    otp: str = Field(..., min_length=6, max_length=6)
+    new_password: str = Field(..., min_length=6)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -286,6 +302,124 @@ async def client_portal_login(body: PortalLoginRequest):
 
     safe = {k: v for k, v in doc.items() if k != "hashed_password"}
     return {"access_token": token, "token_type": "bearer", "user": safe}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Public endpoints  –  Forgot / Reset password (no main-app auth required)
+# ═══════════════════════════════════════════════════════════════════════════
+# Mirrors backend/auth_password_reset.py's OTP flow used for staff accounts:
+#   1. Client enters their portal username (or email) → we email a 6-digit
+#      code to whatever address is on file for that account.
+#   2. Client enters the code + a new password → account is updated.
+# Both routes always return a generic success message so a bad actor can't
+# use them to discover which usernames/emails exist in the system.
+# ═══════════════════════════════════════════════════════════════════════════
+
+@router.post("/forgot-password")
+async def portal_forgot_password(body: PortalForgotPasswordRequest):
+    identifier = body.username.strip().lower()
+    portal_user = await db.client_portal_users.find_one(
+        {"$or": [{"portal_username": identifier}, {"email": identifier}]},
+        {"_id": 0},
+    )
+
+    if portal_user and portal_user.get("is_active", True):
+        # Prefer the email stored on the portal account; fall back to the
+        # client's on-file email if the portal account itself has none.
+        target_email = portal_user.get("email")
+        if not target_email:
+            client_doc = await db.clients.find_one(
+                {"id": portal_user.get("client_id")}, {"_id": 0, "email": 1}
+            )
+            target_email = (client_doc or {}).get("email")
+
+        if target_email:
+            otp = str(random.randint(100000, 999999))
+            expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+
+            await db.client_portal_reset_tokens.delete_many({"portal_user_id": portal_user["id"]})
+            await db.client_portal_reset_tokens.insert_one({
+                "portal_user_id": portal_user["id"],
+                "portal_username": portal_user["portal_username"],
+                "token": otp,
+                "expires_at": expires_at,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+
+            subject = "Taskosphere Client Portal – Your Password Reset Code"
+            email_body = (
+                f"Hi {portal_user.get('display_name') or ''},\n\n"
+                f"You requested to reset your Client Portal password.\n\n"
+                f"Your 6-digit verification code is:\n\n"
+                f"        {otp}\n\n"
+                f"Enter this code on the portal to set a new password.\n"
+                f"This code expires in 10 minutes.\n\n"
+                f"If you did not request this, you can safely ignore this email — "
+                f"your password will not be changed.\n\n"
+                f"— Taskosphere"
+            )
+
+            try:
+                await _send_otp_email(target_email, subject, email_body)
+                logger.info(f"Client portal reset OTP sent for portal user {portal_user['id']}")
+                await db.client_portal_activity.insert_one({
+                    "portal_user_id": portal_user["id"],
+                    "client_id": portal_user.get("client_id"),
+                    "event": "forgot_password_requested",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+            except Exception as e:
+                logger.error(f"Failed to send client portal reset OTP: {e}")
+        else:
+            logger.warning(
+                f"Client portal forgot-password: no email on file for "
+                f"portal user {portal_user.get('id')}"
+            )
+
+    # Always the same response — don't reveal whether the account exists.
+    return {"message": "If that account exists, a verification code has been sent to the registered email."}
+
+
+@router.post("/reset-password")
+async def portal_reset_password(body: PortalResetPasswordRequest):
+    identifier = body.username.strip().lower()
+    portal_user = await db.client_portal_users.find_one(
+        {"$or": [{"portal_username": identifier}, {"email": identifier}]},
+        {"_id": 0},
+    )
+    if not portal_user:
+        raise HTTPException(400, "Invalid or expired code.")
+
+    record = await db.client_portal_reset_tokens.find_one(
+        {"portal_user_id": portal_user["id"], "token": body.otp.strip()}
+    )
+    if not record:
+        raise HTTPException(400, "Invalid or expired code.")
+
+    try:
+        expires_at = datetime.fromisoformat(record["expires_at"])
+    except Exception:
+        expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+
+    if datetime.now(timezone.utc) > expires_at:
+        await db.client_portal_reset_tokens.delete_many({"portal_user_id": portal_user["id"]})
+        raise HTTPException(400, "Code has expired. Please request a new one.")
+
+    hashed = pwd_context.hash(body.new_password)
+    await db.client_portal_users.update_one(
+        {"id": portal_user["id"]}, {"$set": {"hashed_password": hashed}}
+    )
+    await db.client_portal_reset_tokens.delete_many({"portal_user_id": portal_user["id"]})
+
+    await db.client_portal_activity.insert_one({
+        "portal_user_id": portal_user["id"],
+        "client_id": portal_user.get("client_id"),
+        "event": "password_reset",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+    logger.info(f"Client portal password reset for portal user {portal_user['id']}")
+    return {"message": "Password updated successfully. You can now sign in."}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1083,8 +1217,13 @@ async def portal_drive_files(
         if e.status_code == 503:
             return {"files": [], "folders": [], "breadcrumb": breadcrumb,
                     "message": "Google Drive integration not configured. Contact support."}
+        # Log the real cause (e.g. expired/revoked OAuth refresh token) for
+        # the admin, but never show internal auth/reconnect instructions to
+        # the client — they can't act on those anyway.
+        logger.error(f"Drive fetch failed for portal user {portal_user.get('id')}: {e.detail}")
         return {"files": [], "folders": [], "breadcrumb": breadcrumb,
-                "error": f"Could not load files ({e.status_code})."}
+                "error": "Your documents are temporarily unavailable. Please contact your "
+                         "account manager if this continues."}
     except Exception as e:
         logger.warning(f"Drive fetch error for client: {e}")
         return {"files": [], "folders": [], "breadcrumb": breadcrumb,
