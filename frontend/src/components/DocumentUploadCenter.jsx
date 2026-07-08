@@ -370,6 +370,11 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
   const [uploadItems, setUploadItems] = useState([]);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef(null);
+  const folderInputRef = useRef(null);
+  // Caches subfolder-path -> Drive folder id for the current session, so
+  // dropping the same folder twice (or a folder with lots of files inside
+  // one subfolder) doesn't call simple-create-folder once per file.
+  const folderIdCache = useRef(new Map());
 
   // ── load clients (from the same source as the Clients page) ────────────
   const loadClients = useCallback(async () => {
@@ -542,14 +547,44 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
   // ── upload (background, parallel, one call per file) ───────────────────
   const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
 
-  const uploadOne = useCallback(async (file, trayId, { isRetry = false } = {}) => {
+  // Reset the subfolder cache whenever the client or the folder the user is
+  // looking at changes, so stale ids from a previous client can't leak in.
+  useEffect(() => { folderIdCache.current = new Map(); }, [portalUser?.id, currentFolderId]);
+
+  // Resolves (creating as needed) the Drive folder that a dropped file's
+  // relative path points to, e.g. ["DOCUMENTS", "Gst Returns"] becomes the
+  // id of currentFolder/DOCUMENTS/Gst Returns, reusing the same
+  // "+ New Folder" endpoint so nested folders get created idempotently.
+  const resolveTargetFolder = useCallback(async (pathParts) => {
+    let parentId = currentFolderId || null;
+    if (!pathParts?.length) return parentId;
+    let cacheKey = `${parentId || 'root'}`;
+    for (const name of pathParts) {
+      cacheKey += `/${name}`;
+      if (folderIdCache.current.has(cacheKey)) {
+        parentId = folderIdCache.current.get(cacheKey);
+        continue;
+      }
+      const res = await api.post('/client-portal/drive/simple-create-folder', {
+        portal_user_id: portalUser.id,
+        folder_name: name,
+        parent_folder_id: parentId,
+      });
+      parentId = res.data.id;
+      folderIdCache.current.set(cacheKey, parentId);
+    }
+    return parentId;
+  }, [portalUser, currentFolderId]);
+
+  const uploadOne = useCallback(async (file, trayId, { isRetry = false, folderId } = {}) => {
+    const targetFolderId = folderId !== undefined ? folderId : currentFolderId;
     const form = new FormData();
     form.append('portal_user_id', portalUser.id);
-    if (currentFolderId) form.append('folder_id', currentFolderId);
+    if (targetFolderId) form.append('folder_id', targetFolderId);
     form.append('file', file);
 
     setUploadItems((prev) => prev.map((it) => (
-      it.id === trayId ? { ...it, status: 'uploading', file, errorMsg: null } : it
+      it.id === trayId ? { ...it, status: 'uploading', file, folderId: targetFolderId, errorMsg: null } : it
     )));
 
     try {
@@ -566,43 +601,137 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
       // behind a pointless retry.
       if (!isRetry && isLikelyClientSideBlock(err)) {
         await sleep(1200);
-        return uploadOne(file, trayId, { isRetry: true });
+        return uploadOne(file, trayId, { isRetry: true, folderId: targetFolderId });
       }
       const msg = uploadFailureMessage(file.name, err);
       setUploadItems((prev) => prev.map((it) => (
-        it.id === trayId ? { ...it, status: 'error', errorMsg: msg, file } : it
+        it.id === trayId ? { ...it, status: 'error', errorMsg: msg, file, folderId: targetFolderId } : it
       )));
       toast.error(msg);
     }
   }, [portalUser, currentFolderId, loadItems]);
 
-  const uploadFiles = useCallback((fileList) => {
+  // Accepts an array of { file, pathParts } entries. pathParts is the chain
+  // of folder names the file sat inside when it was dropped/selected (empty
+  // for a plain file picked with no folder structure) — used to recreate
+  // the same structure on Drive before the file itself is uploaded.
+  const queueUploads = useCallback((entries) => {
     if (!portalUser?.google_drive_folder_id) {
       toast.error('Set up this client\'s Drive folder first.');
       return;
     }
+    if (!entries.length) return;
+
+    const trayItems = entries.map((e) => ({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      name: e.pathParts?.length ? [...e.pathParts, e.file.name].join('/') : e.file.name,
+      status: 'uploading',
+    }));
+    setUploadItems((prev) => [...prev, ...trayItems]);
+
+    entries.forEach(async (entry, idx) => {
+      const trayId = trayItems[idx].id;
+      try {
+        const folderId = entry.pathParts?.length
+          ? await resolveTargetFolder(entry.pathParts)
+          : (currentFolderId || null);
+        uploadOne(entry.file, trayId, { folderId });
+      } catch (err) {
+        const msg = uploadFailureMessage(entry.file.name, err);
+        setUploadItems((prev) => prev.map((it) => (
+          it.id === trayId ? { ...it, status: 'error', errorMsg: msg, file: entry.file } : it
+        )));
+        toast.error(msg);
+      }
+    });
+  }, [portalUser, currentFolderId, resolveTargetFolder, uploadOne]);
+
+  // Kept for the plain "Choose Files" input, which never carries folder info.
+  const uploadFiles = useCallback((fileList) => {
     const files = Array.from(fileList);
-    if (files.length === 0) return;
-
-    const newTrayItems = files.map((f) => ({ id: `${Date.now()}-${Math.random()}`, name: f.name, status: 'uploading' }));
-    setUploadItems((prev) => [...prev, ...newTrayItems]);
-
-    files.forEach((file, idx) => uploadOne(file, newTrayItems[idx].id));
-  }, [portalUser, uploadOne]);
+    queueUploads(files.map((file) => ({ file, pathParts: [] })));
+  }, [queueUploads]);
 
   const retryUpload = useCallback((trayItem) => {
     if (!trayItem?.file) {
       toast.error('Can\'t retry -- please re-drag this file in.');
       return;
     }
-    uploadOne(trayItem.file, trayItem.id);
+    uploadOne(trayItem.file, trayItem.id, { folderId: trayItem.folderId });
   }, [uploadOne]);
 
+  // ── recursively read a dropped folder into a flat file list ─────────
+  // Browsers only expose real folder contents via the drag-and-drop
+  // FileSystemEntry API (dataTransfer.items[i].webkitGetAsEntry()) --
+  // dataTransfer.files alone gives you a single, unreadable 0-byte entry
+  // for a dropped folder, which is what was silently failing before.
+  function readEntry(entry, pathParts) {
+    return new Promise((resolve) => {
+      if (!entry) return resolve([]);
+      if (entry.isFile) {
+        entry.file(
+          (file) => resolve([{ file, pathParts }]),
+          () => resolve([]),
+        );
+      } else if (entry.isDirectory) {
+        const reader = entry.createReader();
+        const collected = [];
+        const readBatch = () => {
+          reader.readEntries(async (batch) => {
+            if (!batch.length) {
+              const nested = await Promise.all(
+                collected.map((child) => readEntry(child, [...pathParts, entry.name])),
+              );
+              resolve(nested.flat());
+              return;
+            }
+            // readEntries only returns up to 100 entries per call --
+            // keep calling until it returns an empty batch.
+            collected.push(...batch);
+            readBatch();
+          }, () => resolve([]));
+        };
+        readBatch();
+      } else {
+        resolve([]);
+      }
+    });
+  }
+
+  async function collectDroppedEntries(dataTransfer) {
+    const items = Array.from(dataTransfer.items || []);
+    const entries = items
+      .map((it) => (it.webkitGetAsEntry ? it.webkitGetAsEntry() : null))
+      .filter(Boolean);
+
+    if (!entries.length) {
+      // Older/other browsers without entry support: flat files only.
+      return Array.from(dataTransfer.files || []).map((file) => ({ file, pathParts: [] }));
+    }
+    const nested = await Promise.all(entries.map((entry) => readEntry(entry, [])));
+    return nested.flat();
+  }
+
   // ── drag & drop handlers ────────────────────────────────────────────
-  const onDrop = (e) => {
+  const onDrop = async (e) => {
     e.preventDefault();
     setDragOver(false);
-    if (e.dataTransfer.files?.length) uploadFiles(e.dataTransfer.files);
+    const dt = e.dataTransfer;
+    if (!dt) return;
+    const entries = await collectDroppedEntries(dt);
+    if (entries.length) queueUploads(entries);
+  };
+
+  // ── "Upload Folder" button (click-to-pick, no drag needed) ─────────
+  const onFolderInputChange = (e) => {
+    const files = Array.from(e.target.files || []);
+    const entries = files.map((file) => {
+      const parts = (file.webkitRelativePath || file.name).split('/');
+      parts.pop(); // last segment is the filename itself
+      return { file, pathParts: parts };
+    });
+    queueUploads(entries);
+    e.target.value = ''; // allow picking the same folder again later
   };
 
   // ── client removal (single + bulk) ──────────────────────────────────
@@ -821,12 +950,31 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
                   }`}
                 >
                   <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => e.target.files && uploadFiles(e.target.files)} />
+                  {/* webkitdirectory lets people pick a whole OS folder without
+                      dragging — same recursive pipeline handles both. */}
+                  <input
+                    ref={folderInputRef}
+                    type="file"
+                    webkitdirectory=""
+                    directory=""
+                    mozdirectory=""
+                    multiple
+                    hidden
+                    onChange={onFolderInputChange}
+                  />
                   <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: `${COLORS.mediumBlue}12` }}>
                     <UploadCloud className="h-6 w-6" style={{ color: COLORS.mediumBlue }} />
                   </div>
-                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Drag files here to upload</p>
+                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Drag files or a whole folder here to upload</p>
                   <p className="text-xs text-slate-400">or click anywhere in this box to choose files from your computer</p>
-                  <p className="text-[11px] text-slate-400">Files upload in the background — you can keep working while they finish.</p>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click(); }}
+                    className={`mt-1 text-[11px] font-semibold px-3 py-1.5 rounded-lg border transition ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-600 hover:bg-slate-100'}`}
+                  >
+                    Upload a folder instead
+                  </button>
+                  <p className="text-[11px] text-slate-400">Files upload in the background — you can keep working while they finish. Folder structure is recreated on Drive automatically.</p>
                 </div>
 
                 {/* Items grid */}
