@@ -727,6 +727,30 @@ DEFAULT_SUBFOLDERS = [
     "Correspondence", "Reports", "Bank Statements",
 ]
 
+# All client folders are created inside this shared Drive folder by default,
+# so every client's Drive folder lives in one place instead of scattered
+# across the connected account's My Drive root. This can still be overridden
+# per-client via `parent_folder_id`, or globally via the Folder Architect
+# template (Client Portal -> Folder Architect), which takes priority over
+# this constant whenever a value has been saved there.
+#   https://drive.google.com/drive/folders/1nYpYErhuHLGjYWaUUMt7ZDT2sFhAa7FB
+DEFAULT_PARENT_FOLDER_ID = "1nYpYErhuHLGjYWaUUMt7ZDT2sFhAa7FB"
+
+
+async def _resolve_parent_folder_id(explicit: Optional[str] = None) -> Optional[str]:
+    """
+    Resolve which Drive folder new client folders should be created under.
+    Priority: explicit value passed in > saved Folder Architect template >
+    the hard-coded DEFAULT_PARENT_FOLDER_ID above.
+    """
+    explicit_id = _extract_folder_id(explicit)
+    if explicit_id:
+        return explicit_id
+    tmpl = await db.portal_folder_template.find_one({}, {"_id": 0})
+    if tmpl and tmpl.get("parent_folder_id"):
+        return _extract_folder_id(tmpl["parent_folder_id"])
+    return DEFAULT_PARENT_FOLDER_ID
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # All Clients  –  returns every client with their portal connection status
@@ -780,7 +804,9 @@ async def get_folder_template(
         raise HTTPException(403, "Insufficient permissions")
     doc = await db.portal_folder_template.find_one({}, {"_id": 0})
     if not doc:
-        return {"subfolders": DEFAULT_SUBFOLDERS, "parent_folder_id": ""}
+        return {"subfolders": DEFAULT_SUBFOLDERS, "parent_folder_id": DEFAULT_PARENT_FOLDER_ID}
+    if not doc.get("parent_folder_id"):
+        doc["parent_folder_id"] = DEFAULT_PARENT_FOLDER_ID
     return doc
 
 
@@ -906,7 +932,8 @@ async def create_client_drive_folders(
         or body.client_name
     ).strip()
 
-    result = _create_drive_folder_sync(service, folder_name, body.parent_folder_id, subfolders)
+    parent_id = await _resolve_parent_folder_id(body.parent_folder_id)
+    result = _create_drive_folder_sync(service, folder_name, parent_id, subfolders)
     root_id = result["folder_id"]
     folder_link = result.get("folder_link", "")
 
@@ -961,12 +988,9 @@ async def bulk_create_client_drive_folders(
     service = _get_drive_service()
     subfolders = body.subfolders if body.subfolders is not None else await _resolve_subfolders()
 
-    # Resolve parent_folder_id: prefer explicit, else fall back to template
-    parent_id = body.parent_folder_id
-    if not parent_id:
-        tmpl = await db.portal_folder_template.find_one({}, {"_id": 0})
-        if tmpl:
-            parent_id = tmpl.get("parent_folder_id") or None
+    # Resolve parent_folder_id: prefer explicit, else fall back to the saved
+    # Folder Architect template, else the shared default folder.
+    parent_id = await _resolve_parent_folder_id(body.parent_folder_id)
 
     # Fetch clients
     query = {}
@@ -1953,10 +1977,11 @@ async def ensure_root_folder(
         if not _drive_configured():
             raise HTTPException(503, "Google Drive not configured.")
         subfolders = await _resolve_subfolders()
+        parent_id = await _resolve_parent_folder_id()
         service = _get_drive_service()
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
-            None, _create_drive_folder_sync, service, client_name, None, subfolders,
+            None, _create_drive_folder_sync, service, client_name, parent_id, subfolders,
         )
         folder_id = result.get("folder_id")
         folder_link = result.get("folder_link")
