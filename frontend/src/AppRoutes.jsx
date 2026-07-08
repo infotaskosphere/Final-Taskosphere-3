@@ -1,46 +1,50 @@
-import React, { Suspense, lazy, memo } from "react";
+import React, { Suspense, memo } from "react";
 import GifLoader, { ContentLoader } from "@/components/ui/GifLoader.jsx";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext.jsx";
 import DashboardLayout from "@/components/layout/DashboardLayout.jsx";
+import { lazyWithRetry } from "@/lib/lazyWithRetry.js";
 
 /* ── Lazy Loaded Pages ──────────────────────────────────────────────────── */
 // Each import() is a separate chunk. Vite will prefetch these after the first
 // paint because we're using dynamic import — no change to routing behaviour.
+// lazyWithRetry auto-recovers from "Failed to fetch dynamically imported
+// module" errors that happen when a browser tab is left open across a new
+// deploy (stale index.html referencing an old, now-deleted chunk hash).
 
-const Login             = lazy(() => import("@/pages/Login.jsx"));
-const ForgotPassword    = lazy(() => import("@/pages/ForgotPassword.jsx"));
-const TrademarkSphere   = lazy(() => import("@/pages/TrademarkSphere.jsx"));
-const TaskAudit         = lazy(() => import("@/pages/TaskAudit.jsx"));
-const Register          = lazy(() => import("@/pages/Register.jsx"));
-const Dashboard         = lazy(() => import("@/pages/Dashboard.jsx"));
-const Tasks             = lazy(() => import("@/pages/Tasks.jsx"));
-const TodoDashboard     = lazy(() => import("@/pages/TodoDashboard.jsx"));
-const DSCRegister       = lazy(() => import("@/pages/DSCRegister.jsx"));
-const DocumentsRegister = lazy(() => import("@/pages/DocumentsRegister.jsx"));
-const Attendance        = lazy(() => import("@/pages/Attendance.jsx"));
-const Reports           = lazy(() => import("@/pages/Reports.jsx"));
-const Clients           = lazy(() => import("@/pages/Clients.jsx"));
-const Users             = lazy(() => import("@/pages/Users.jsx"));
-const Interviews        = lazy(() => import("@/pages/Interviews.jsx"));
-const LeadsPage         = lazy(() => import("@/pages/Leads.jsx"));
-const VisitsPage        = lazy(() => import("@/pages/VisitsPage.jsx"));
-const EmailSettings     = lazy(() => import("@/components/EmailSettings.jsx"));
-const Quotations        = lazy(() => import("@/pages/Quotations.jsx"));
-const GeneralSettings   = lazy(() => import("@/pages/GeneralSettings.jsx"));
-const WhatsAppSettings  = lazy(() => import("@/pages/WhatsAppSettings.jsx"));
-const Passvault         = lazy(() => import("@/pages/Passvault.jsx"));
-const WhatsAppHub       = lazy(() => import("@/pages/WhatsAppHub.jsx"));
-const Invoicing         = lazy(() => import("@/pages/Invoicing.jsx"));
-const Reminders         = lazy(() => import("@/pages/Reminders.jsx"));
-const CompliancePage    = lazy(() => import("@/pages/CompliancePage.jsx"));
-const GSTReconciliation = lazy(() => import("@/pages/GSTReconciliation.jsx"));
-const AIDocumentReader  = lazy(() => import("@/pages/AIDocumentReader.jsx"));
-const StaffActivity     = lazy(() => import("@/pages/StaffActivity.jsx"));
-const ActionCenter      = lazy(() => import("@/pages/ActionCenter.jsx"));
-const ClientPortalLogin        = lazy(() => import("@/pages/ClientPortalLogin.jsx"));
-const ClientPortalDashboard    = lazy(() => import("@/pages/ClientPortalDashboard.jsx"));
-const ClientPortalManagerPage  = lazy(() => import("@/pages/ClientPortalManagerPage.jsx"));
+const Login             = lazyWithRetry(() => import("@/pages/Login.jsx"), "Login");
+const ForgotPassword    = lazyWithRetry(() => import("@/pages/ForgotPassword.jsx"), "ForgotPassword");
+const TrademarkSphere   = lazyWithRetry(() => import("@/pages/TrademarkSphere.jsx"), "TrademarkSphere");
+const TaskAudit         = lazyWithRetry(() => import("@/pages/TaskAudit.jsx"), "TaskAudit");
+const Register          = lazyWithRetry(() => import("@/pages/Register.jsx"), "Register");
+const Dashboard         = lazyWithRetry(() => import("@/pages/Dashboard.jsx"), "Dashboard");
+const Tasks             = lazyWithRetry(() => import("@/pages/Tasks.jsx"), "Tasks");
+const TodoDashboard     = lazyWithRetry(() => import("@/pages/TodoDashboard.jsx"), "TodoDashboard");
+const DSCRegister       = lazyWithRetry(() => import("@/pages/DSCRegister.jsx"), "DSCRegister");
+const DocumentsRegister = lazyWithRetry(() => import("@/pages/DocumentsRegister.jsx"), "DocumentsRegister");
+const Attendance        = lazyWithRetry(() => import("@/pages/Attendance.jsx"), "Attendance");
+const Reports           = lazyWithRetry(() => import("@/pages/Reports.jsx"), "Reports");
+const Clients           = lazyWithRetry(() => import("@/pages/Clients.jsx"), "Clients");
+const Users             = lazyWithRetry(() => import("@/pages/Users.jsx"), "Users");
+const Interviews        = lazyWithRetry(() => import("@/pages/Interviews.jsx"), "Interviews");
+const LeadsPage         = lazyWithRetry(() => import("@/pages/Leads.jsx"), "LeadsPage");
+const VisitsPage        = lazyWithRetry(() => import("@/pages/VisitsPage.jsx"), "VisitsPage");
+const EmailSettings     = lazyWithRetry(() => import("@/components/EmailSettings.jsx"), "EmailSettings");
+const Quotations        = lazyWithRetry(() => import("@/pages/Quotations.jsx"), "Quotations");
+const GeneralSettings   = lazyWithRetry(() => import("@/pages/GeneralSettings.jsx"), "GeneralSettings");
+const WhatsAppSettings  = lazyWithRetry(() => import("@/pages/WhatsAppSettings.jsx"), "WhatsAppSettings");
+const Passvault         = lazyWithRetry(() => import("@/pages/Passvault.jsx"), "Passvault");
+const WhatsAppHub       = lazyWithRetry(() => import("@/pages/WhatsAppHub.jsx"), "WhatsAppHub");
+const Invoicing         = lazyWithRetry(() => import("@/pages/Invoicing.jsx"), "Invoicing");
+const Reminders         = lazyWithRetry(() => import("@/pages/Reminders.jsx"), "Reminders");
+const CompliancePage    = lazyWithRetry(() => import("@/pages/CompliancePage.jsx"), "CompliancePage");
+const GSTReconciliation = lazyWithRetry(() => import("@/pages/GSTReconciliation.jsx"), "GSTReconciliation");
+const AIDocumentReader  = lazyWithRetry(() => import("@/pages/AIDocumentReader.jsx"), "AIDocumentReader");
+const StaffActivity     = lazyWithRetry(() => import("@/pages/StaffActivity.jsx"), "StaffActivity");
+const ActionCenter      = lazyWithRetry(() => import("@/pages/ActionCenter.jsx"), "ActionCenter");
+const ClientPortalLogin        = lazyWithRetry(() => import("@/pages/ClientPortalLogin.jsx"), "ClientPortalLogin");
+const ClientPortalDashboard    = lazyWithRetry(() => import("@/pages/ClientPortalDashboard.jsx"), "ClientPortalDashboard");
+const ClientPortalManagerPage  = lazyWithRetry(() => import("@/pages/ClientPortalManagerPage.jsx"), "ClientPortalManagerPage");
 
 /* ── Route Guards ───────────────────────────────────────────────────────── */
 
