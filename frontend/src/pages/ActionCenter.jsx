@@ -214,13 +214,24 @@ function AddTaskModal({ event, isDark, onClose, canAssignTasks, users, clients, 
     if (!form.title.trim()) { toast.error("Title is required"); return; }
     setSaving(true);
     try {
-      await api.post("/tasks", {
+      const res = await api.post("/tasks", {
         ...form,
         assigned_to: form.assigned_to === "unassigned" ? null : form.assigned_to,
         due_date: form.due_date || null,
         client_id: form.client_id || null,
         sub_assignees: form.sub_assignees || [],
       });
+      // Flag the source Action Center event as saved on the backend so it
+      // stops reappearing on future syncs — /tasks itself has no concept of
+      // email-extracted events, so this has to happen as a follow-up call.
+      if (event?.id) {
+        try {
+          await api.post(`/email/events/${event.id}/mark-saved`, {
+            category: "task",
+            saved_id: res?.data?.id || res?.data?._id || null,
+          });
+        } catch (_) { /* best-effort — task itself is already created */ }
+      }
       toast.success("✓ Task created");
       onTaskCreated?.();
       onClose();
