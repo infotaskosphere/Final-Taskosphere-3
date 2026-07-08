@@ -836,16 +836,10 @@ async def save_folder_template(
 # ═══════════════════════════════════════════════════════════════════════════
 
 async def _resolve_subfolders() -> List[str]:
-    """Return the saved template subfolders.
-
-    If the admin has saved a template (even an empty one), always honour it —
-    an empty list explicitly means "only create the company-name root folder;
-    do not auto-create any subfolders". Defaults apply only when no template
-    has ever been saved.
-    """
+    """Return the saved template subfolders or fall back to defaults."""
     doc = await db.portal_folder_template.find_one({}, {"_id": 0})
-    if doc is not None and "subfolders" in doc:
-        return list(doc.get("subfolders") or [])
+    if doc and doc.get("subfolders"):
+        return doc["subfolders"]
     return DEFAULT_SUBFOLDERS
 
 
@@ -1332,14 +1326,36 @@ EXPORT_MIME_MAP = {
 @router.get("/drive/download")
 async def portal_drive_download(
     file_id: str = Query(..., description="Drive file ID to download"),
-    portal_user=Depends(get_current_portal_client),
+    token: Optional[str] = Query(None, description="Portal JWT (for direct browser downloads via <a>/window.open)"),
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ):
     """
     Proxy-downloads a Drive file through the backend using the server's OAuth
     credentials, so the client never needs their own Google account access.
-    Security: confirms the file is visible (not in hidden_ids) for this portal user.
+
+    Auth: accepts EITHER an Authorization: Bearer <token> header (normal API
+    calls) OR a ?token=<jwt> query param (needed when the browser opens the
+    URL directly via window.open / <a href> — those cannot set headers).
     """
     from backend.invoicing import _get_drive_service, _drive_configured
+
+    # Resolve JWT from header or query param
+    raw_token = credentials.credentials if credentials else token
+    if not raw_token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        payload = jwt.decode(raw_token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("sub_type") != "client":
+            raise HTTPException(status_code=401, detail="Invalid token type")
+        portal_id = payload.get("portal_id")
+        if not portal_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    portal_user = await db.client_portal_users.find_one({"id": portal_id}, {"_id": 0})
+    if not portal_user or not portal_user.get("is_active", True):
+        raise HTTPException(status_code=401, detail="Portal account not found or disabled")
 
     if not _drive_configured():
         raise HTTPException(503, "Google Drive not configured.")
@@ -1555,19 +1571,13 @@ async def create_individual_folder(
     if not _drive_configured():
         raise HTTPException(503, "Google Drive not configured.")
 
-    # Always resolve the parent through the shared helper so that a blank
-    # parent_folder_id falls back to the saved Folder Architect template or
-    # the default TASKOSPHERE parent — never to the connected account's
-    # My Drive root.
-    parent_id = await _resolve_parent_folder_id(payload.parent_folder_id)
-
     loop = asyncio.get_event_loop()
     try:
         service = _get_drive_service()
         result = await loop.run_in_executor(
             None,
             _create_drive_folder_sync,
-            service, folder_name, parent_id, subfolders,
+            service, folder_name, payload.parent_folder_id, subfolders,
         )
     except Exception as e:
         logger.error(f"Drive folder creation failed: {e}", exc_info=True)
