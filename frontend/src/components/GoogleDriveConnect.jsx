@@ -19,7 +19,6 @@ import {
   Unplug, RefreshCw, ExternalLink, ShieldCheck,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { getToken } from '@/lib/api';
 
 // ── Resolve the raw backend base URL (no /api suffix) ────────────────────
 const BACKEND_URL = (() => {
@@ -29,9 +28,22 @@ const BACKEND_URL = (() => {
   return raw;
 })();
 
+// ── Token lookup ───────────────────────────────────────────────────────────
+// NOTE: api.js's exported getToken() only checks localStorage, but
+// AuthContext.persistAuth() stores the token in sessionStorage instead
+// whenever "Keep me signed in" was NOT checked at login. Axios calls still
+// work in that case because AuthContext also sets
+// api.defaults.headers.common.Authorization directly in memory — but this
+// component talks to the backend via raw fetch(), bypassing axios entirely,
+// so it must check both storages itself or it silently sends no auth header
+// for any session that isn't "remembered".
+function getAuthToken() {
+  return localStorage.getItem('token') || sessionStorage.getItem('token');
+}
+
 // ── Authenticated fetch directly to BACKEND_URL (bypasses /api prefix) ───
 async function authFetch(path, options = {}) {
-  const token = getToken();
+  const token = getAuthToken();
   const res = await fetch(`${BACKEND_URL}${path}`, {
     ...options,
     headers: {
