@@ -15,12 +15,210 @@ const API = axios.create({ baseURL: API_BASE });
 // Bare backend root (no /api) — used only for the wake-up health ping
 const BACKEND_URL = API_BASE.replace(/\/api$/, "");
 
+function extractErrorMessage(err, fallback) {
+  const detail = err?.response?.data?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) return detail.map((d) => d.msg || JSON.stringify(d)).join(" | ");
+  if (detail) return JSON.stringify(detail);
+  if (!err?.response) return "Server is starting up — please wait ~30 seconds and try again.";
+  if (err?.response?.status === 503) return "Server is temporarily unavailable. Please wait ~30 seconds and try again.";
+  return fallback;
+}
+
+// ── Forgot Password panel ─────────────────────────────────────────────────
+// Two steps: (1) enter username/email → request a 6-digit code by email,
+// (2) enter the code + a new password → account is updated. Falls back to
+// the login screen on success.
+function ForgotPasswordPanel({ initialUsername, onBackToLogin, onResetSuccess }) {
+  const [step, setStep] = useState("request"); // "request" | "verify"
+  const [identifier, setIdentifier] = useState(initialUsername || "");
+  const [otp, setOtp] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
+
+  const requestCode = async (e) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const res = await API.post("/client-portal/forgot-password", { username: identifier.trim() });
+      setInfo(res?.data?.message || "If that account exists, a verification code has been sent to the registered email.");
+      setStep("verify");
+    } catch (err) {
+      setError(extractErrorMessage(err, "Could not send the verification code. Please try again."));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitReset = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (newPassword.length < 6) {
+      setError("New password must be at least 6 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await API.post("/client-portal/reset-password", {
+        username: identifier.trim(),
+        otp: otp.trim(),
+        new_password: newPassword,
+      });
+      onResetSuccess(identifier.trim());
+    } catch (err) {
+      setError(extractErrorMessage(err, "Invalid or expired code. Please try again."));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-2xl shadow-xl p-8">
+      <h2 className="text-lg font-bold text-gray-900 mb-1">
+        {step === "request" ? "Forgot Password" : "Enter Verification Code"}
+      </h2>
+      <p className="text-sm text-gray-500 mb-5">
+        {step === "request"
+          ? "Enter your portal username or email — we'll send a 6-digit code to the email linked to your account."
+          : `We've sent a 6-digit code to the email linked to "${identifier}". Enter it below along with your new password.`}
+      </p>
+
+      {step === "request" ? (
+        <form onSubmit={requestCode} className="space-y-5">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Username or Email</label>
+            <input
+              type="text"
+              required
+              autoFocus
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              placeholder="Enter your username or email"
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+            />
+          </div>
+
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading || !identifier.trim()}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition text-sm shadow-sm"
+          >
+            {loading ? "Sending code…" : "Send Verification Code"}
+          </button>
+
+          <button
+            type="button"
+            onClick={onBackToLogin}
+            className="w-full text-center text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+          >
+            ← Back to Sign In
+          </button>
+        </form>
+      ) : (
+        <form onSubmit={submitReset} className="space-y-5">
+          {info && (
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm rounded-lg px-4 py-3">
+              {info}
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">6-Digit Code</label>
+            <input
+              type="text"
+              required
+              autoFocus
+              inputMode="numeric"
+              maxLength={6}
+              value={otp}
+              onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              placeholder="000000"
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm tracking-[0.3em] text-center font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">New Password</label>
+            <input
+              type="password"
+              required
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="At least 6 characters"
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Confirm New Password</label>
+            <input
+              type="password"
+              required
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="Re-enter new password"
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+            />
+          </div>
+
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading || otp.length !== 6}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition text-sm shadow-sm"
+          >
+            {loading ? "Updating password…" : "Reset Password"}
+          </button>
+
+          <div className="flex items-center justify-between text-sm">
+            <button
+              type="button"
+              onClick={() => { setStep("request"); setError(""); setOtp(""); }}
+              className="text-indigo-600 hover:text-indigo-700 font-medium"
+            >
+              ← Use a different code
+            </button>
+            <button
+              type="button"
+              onClick={onBackToLogin}
+              className="text-gray-400 hover:text-gray-600 font-medium"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
 export default function ClientPortalLogin() {
   const navigate = useNavigate();
   const [form, setForm] = useState({ username: "", password: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [serverWaking, setServerWaking] = useState(false);
+  const [view, setView] = useState("login"); // "login" | "forgot"
+  const [successNotice, setSuccessNotice] = useState("");
 
   // Retry login up to 3 times with increasing delay — handles Render cold starts
   const loginWithRetry = async (retries = 3, retryDelay = 3000) => {
@@ -101,64 +299,93 @@ export default function ClientPortalLogin() {
             </svg>
           </div>
           <h1 className="text-2xl font-bold text-gray-900">Client Portal</h1>
-          <p className="text-sm text-gray-500 mt-1">Sign in to access your documents & updates</p>
-        </div>
-
-        <div className="bg-white rounded-2xl shadow-xl p-8">
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Username</label>
-              <input
-                type="text"
-                required
-                autoFocus
-                value={form.username}
-                onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
-                placeholder="Enter your username"
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
-              <input
-                type="password"
-                required
-                value={form.password}
-                onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-                placeholder="Enter your password"
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
-              />
-            </div>
-
-            {serverWaking && !error && (
-              <div className="bg-amber-50 border border-amber-200 text-amber-700 text-sm rounded-lg px-4 py-3 flex items-start gap-2">
-                <svg className="w-4 h-4 mt-0.5 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                <span>Server is waking up — this may take up to 30 seconds on first sign-in…</span>
-              </div>
-            )}
-
-            {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
-                {error}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition text-sm shadow-sm"
-            >
-              {loading ? "Signing in…" : "Sign In"}
-            </button>
-          </form>
-
-          <p className="text-xs text-center text-gray-400 mt-6">
-            Need access? Contact your account manager.
+          <p className="text-sm text-gray-500 mt-1">
+            {view === "login" ? "Sign in to access your documents & updates" : "Reset your portal password"}
           </p>
         </div>
+
+        {view === "forgot" ? (
+          <ForgotPasswordPanel
+            initialUsername={form.username}
+            onBackToLogin={() => { setView("login"); setSuccessNotice(""); }}
+            onResetSuccess={(usedIdentifier) => {
+              setForm((f) => ({ ...f, username: usedIdentifier, password: "" }));
+              setSuccessNotice("Password updated successfully. Please sign in with your new password.");
+              setView("login");
+            }}
+          />
+        ) : (
+          <div className="bg-white rounded-2xl shadow-xl p-8">
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Username</label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  value={form.username}
+                  onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
+                  placeholder="Enter your username"
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-sm font-medium text-gray-700">Password</label>
+                  <button
+                    type="button"
+                    onClick={() => { setView("forgot"); setError(""); setSuccessNotice(""); }}
+                    className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+                <input
+                  type="password"
+                  required
+                  value={form.password}
+                  onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+                  placeholder="Enter your password"
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+                />
+              </div>
+
+              {successNotice && !error && (
+                <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm rounded-lg px-4 py-3">
+                  {successNotice}
+                </div>
+              )}
+
+              {serverWaking && !error && (
+                <div className="bg-amber-50 border border-amber-200 text-amber-700 text-sm rounded-lg px-4 py-3 flex items-start gap-2">
+                  <svg className="w-4 h-4 mt-0.5 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>Server is waking up — this may take up to 30 seconds on first sign-in…</span>
+                </div>
+              )}
+
+              {error && (
+                <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
+                  {error}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition text-sm shadow-sm"
+              >
+                {loading ? "Signing in…" : "Sign In"}
+              </button>
+            </form>
+
+            <p className="text-xs text-center text-gray-400 mt-6">
+              Need access? Contact your account manager.
+            </p>
+          </div>
+        )}
 
         <p className="text-center text-xs text-gray-400 mt-4">
           Powered by Taskosphere
