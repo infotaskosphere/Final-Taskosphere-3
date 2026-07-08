@@ -48,6 +48,11 @@ const fmtSize = (b) => {
 
 const isFolderMime = (m) => m === 'application/vnd.google-apps.folder';
 
+// Clients in this app store their display name under `company_name` (falls
+// back to `name` for older records) — matches the field used on the
+// Clients / All Clients tabs so names show up consistently everywhere.
+const clientName = (c) => c?.company_name || c?.name || 'Unnamed Client';
+
 function iconFor(mime) {
   if (isFolderMime(mime)) return { Icon: Folder, color: '#F5A524' };
   if (mime === 'application/pdf') return { Icon: FileType2, color: '#E5484D' };
@@ -73,7 +78,7 @@ function ClientRail({
 }) {
   const [search, setSearch] = useState('');
   const filtered = clients.filter((c) =>
-    (c.name || c.client_name || '').toLowerCase().includes(search.toLowerCase())
+    clientName(c).toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -130,7 +135,7 @@ function ClientRail({
         ) : (
           <div className="p-2 space-y-1">
             {filtered.map((c) => {
-              const name = c.name || c.client_name || 'Unnamed Client';
+              const name = clientName(c);
               const active = selectedClientId === c.id;
               const hasPortal = c.has_portal;
               const hasDrive = c.has_drive;
@@ -388,8 +393,10 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
     try {
       const form = new FormData();
       form.append('client_id', selectedClient.id);
-      form.append('client_name', selectedClient.name || selectedClient.client_name);
-      const res = await api.post('/client-portal/drive/ensure-root-folder', form);
+      form.append('client_name', clientName(selectedClient));
+      const res = await api.post('/client-portal/drive/ensure-root-folder', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
       if (res.data?.generated_password) {
         setNewCreds({ username: res.data.portal_username, password: res.data.generated_password });
       }
@@ -520,7 +527,9 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
       if (currentFolderId) form.append('folder_id', currentFolderId);
       form.append('file', file);
       try {
-        await api.post('/client-portal/drive/upload-file', form);
+        await api.post('/client-portal/drive/upload-file', form, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
         setUploadItems((prev) => prev.map((it) => (it.id === trayId ? { ...it, status: 'done' } : it)));
         setItems((prev) => (prev.some((p) => p.name === file.name) ? prev : prev)); // no-op placeholder
         loadItems();
@@ -550,7 +559,7 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
   const removeClientFromPortal = async (c) => {
     const pu = (c.portal_users || [])[0];
     if (!pu) { toast.error('This client has no portal login to remove.'); return; }
-    if (!window.confirm(`Remove ${c.name || c.client_name} from the Client Portal? Their login will stop working. Drive files are kept.`)) return;
+    if (!window.confirm(`Remove ${clientName(c)} from the Client Portal? Their login will stop working. Drive files are kept.`)) return;
     try {
       await api.delete(`/client-portal/users/${pu.id}`);
       toast.success('Client removed from portal');
@@ -584,7 +593,22 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
   const isProvisioned = !!(portalUser?.google_drive_folder_id);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-4">
+    <div className="space-y-4">
+      {/* ── Simple 3-step guide ── */}
+      <div className={`rounded-2xl border shadow-sm p-4 flex flex-wrap items-center gap-x-8 gap-y-3 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        {[
+          { n: '1', text: 'Pick a client on the left' },
+          { n: '2', text: 'Click "Set Up Client" once (only needed the first time)' },
+          { n: '3', text: 'Drag files onto the page — done!' },
+        ].map((s) => (
+          <div key={s.n} className="flex items-center gap-2.5">
+            <span className="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: GRADIENT }}>{s.n}</span>
+            <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{s.text}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-4">
       {/* ── Left rail: clients ── */}
       <ClientRail
         clients={clients}
@@ -618,10 +642,10 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
               <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="w-11 h-11 rounded-xl flex items-center justify-center text-white font-bold flex-shrink-0" style={{ background: GRADIENT }}>
-                    {(selectedClient.name || selectedClient.client_name || '?')[0].toUpperCase()}
+                    {clientName(selectedClient)[0].toUpperCase()}
                   </div>
                   <div className="min-w-0">
-                    <h2 className="font-bold text-slate-800 dark:text-slate-100 text-sm truncate">{selectedClient.name || selectedClient.client_name}</h2>
+                    <h2 className="font-bold text-slate-800 dark:text-slate-100 text-sm truncate">{clientName(selectedClient)}</h2>
                     <p className="text-xs text-slate-400">
                       {isProvisioned ? 'Portal & Drive folder ready' : 'Not set up yet'}
                     </p>
@@ -782,6 +806,7 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
             )}
           </div>
         )}
+      </div>
       </div>
 
       <AnimatePresence>
