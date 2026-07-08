@@ -602,7 +602,7 @@ function IndividualFolderPanel({ clients, loadingClients, subfolders, parentId, 
                 )}
                 <Button
                   size="sm"
-                  disabled={applyingSingle === c.id || (subfolders.length === 0)}
+                  disabled={applyingSingle === c.id}
                   onClick={() => applyToClient(c.id, defaultName)}
                   className="text-[10px] h-7 px-2.5 flex-shrink-0 text-white"
                   style={{ background: c.has_drive ? '#059669' : GRADIENT }}
@@ -617,8 +617,8 @@ function IndividualFolderPanel({ clients, loadingClients, subfolders, parentId, 
         })}
       </div>
       {subfolders.length === 0 && (
-        <p className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-          ⚠️ Define subfolders in the Folder Architecture panel on the left before creating.
+        <p className="text-[10px] text-slate-500 bg-slate-50 border border-slate-200 dark:bg-slate-700/30 dark:border-slate-600 dark:text-slate-400 rounded-lg px-3 py-2">
+          ℹ️ No subfolders defined — a root folder will be created. Subfolders are also added automatically when files are uploaded via the Document panel.
         </p>
       )}
     </div>
@@ -684,11 +684,12 @@ function FolderArchitectTab({ isDark, isAdmin }) {
   };
 
   const saveTemplate = async () => {
-    if (subfolders.length === 0) { toast.error('Add at least one subfolder'); return; }
+    // Allow saving with 0 subfolders — a root-only folder is valid.
+    // Subfolders are also created automatically when files are uploaded via the Document panel.
     setSaving(true);
     try {
       await api.put('/client-portal/folder-template', { subfolders, parent_folder_id: parentId });
-      toast.success('Folder template saved!');
+      toast.success(subfolders.length === 0 ? 'Template saved — root folder only (no subfolders).' : 'Folder template saved!');
     } catch { toast.error('Failed to save template'); }
     finally { setSaving(false); }
   };
@@ -714,7 +715,7 @@ function FolderArchitectTab({ isDark, isAdmin }) {
   };
 
   const applyBulk = async () => {
-    if (subfolders.length === 0) { toast.error('Save the template first'); return; }
+    // 0 subfolders is valid — creates a root-only Drive folder per client.
     const clientIds = bulkMode === 'selected' ? selectedClients : [];
     if (bulkMode === 'selected' && clientIds.length === 0) { toast.error('Select at least one client'); return; }
     setApplying(true);
@@ -826,21 +827,23 @@ function FolderArchitectTab({ isDark, isAdmin }) {
               </div>
             </div>
 
-            {/* Preview */}
-            {subfolders.length > 0 && (
-              <div className={`rounded-xl p-3 border ${isDark ? 'border-slate-600 bg-slate-700/30' : 'border-blue-100 bg-blue-50'}`}>
-                <p className="text-[10px] font-bold text-blue-700 dark:text-blue-400 uppercase tracking-wider mb-2">Preview</p>
-                <div className="font-mono text-xs text-slate-600 dark:text-slate-300 space-y-0.5">
-                  <p>📁 [Client Name]</p>
-                  {subfolders.map((f, i) => (
+            {/* Preview — always shown */}
+            <div className={`rounded-xl p-3 border ${isDark ? 'border-slate-600 bg-slate-700/30' : 'border-blue-100 bg-blue-50'}`}>
+              <p className="text-[10px] font-bold text-blue-700 dark:text-blue-400 uppercase tracking-wider mb-2">Preview</p>
+              <div className="font-mono text-xs text-slate-600 dark:text-slate-300 space-y-0.5">
+                <p>📁 [Client Name]</p>
+                {subfolders.length === 0 ? (
+                  <p className="ml-4 text-slate-400 dark:text-slate-500 italic">└── (no subfolders — root only)</p>
+                ) : (
+                  subfolders.map((f, i) => (
                     <p key={i} className="ml-4">├── 📁 {f}</p>
-                  ))}
-                </div>
+                  ))
+                )}
               </div>
-            )}
+            </div>
 
             {isAdmin && (
-              <Button onClick={saveTemplate} disabled={saving || subfolders.length === 0} className="w-full text-white text-xs" style={{ background: GRADIENT }}>
+              <Button onClick={saveTemplate} disabled={saving} className="w-full text-white text-xs" style={{ background: GRADIENT }}>
                 {saving ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />Saving…</> : <><Check className="h-3.5 w-3.5 mr-1" />Save Template</>}
               </Button>
             )}
@@ -1028,7 +1031,7 @@ function FolderArchitectTab({ isDark, isAdmin }) {
                 {/* Create button */}
                 <Button
                   onClick={applyBulk}
-                  disabled={applying || subfolders.length === 0}
+                  disabled={applying}
                   className="w-full text-white text-xs"
                   style={{ background: GRADIENT }}
                 >
