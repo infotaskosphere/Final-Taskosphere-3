@@ -2037,7 +2037,7 @@ export default function ClientPortalManagerPage() {
             <button onClick={() => navigate('/client-portal-manager/all-clients')} className="underline font-semibold text-blue-600 dark:text-blue-400">All Clients</button>{' '}
             to view and manage portal access for every client. Use{' '}
             <button onClick={() => navigate('/client-portal-manager/folder-architect')} className="underline font-semibold text-blue-600 dark:text-blue-400">Folder Architect</button>{' '}
-            to design your Drive folder structure and bulk-create folders. When a portal user is created, their Drive folder is created automatically.
+            to design your Drive folder structure and bulk-create folders. Drive folders are only created when you explicitly do so via the Folder Architect.
           </p>
         </div>
       )}
