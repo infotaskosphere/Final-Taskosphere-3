@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import ClientPortalHeader from '@/components/layout/ClientPortalHeader.jsx';
 import ClientPortalManager from '@/components/ClientPortalManager.jsx';
+import DocumentUploadCenter from '@/components/DocumentUploadCenter.jsx';
 import {
   Building2, Users, Shield, FileText, ExternalLink,
   Search, Globe, Lock, CreditCard, ClipboardList,
@@ -1079,91 +1080,8 @@ function FolderArchitectTab({ isDark, isAdmin }) {
 
 
 /* ── Documents Tab ──────────────────────────────────────────────────────────── */
-function DocumentsTab({ portalUsers, loading, isDark }) {
-  const [selectedUser, setSelectedUser] = useState('');
-  const [docs, setDocs] = useState([]);
-  const [docsLoading, setDocsLoading] = useState(false);
-  const usersWithDrive = portalUsers.filter((u) => u.google_drive_folder_id);
-
-  const loadDocs = useCallback(async (userId) => {
-    if (!userId) return;
-    setDocsLoading(true);
-    try {
-      const res = await api.get(`/client-portal/drive/admin/files/${userId}`);
-      // Backend returns { files: [...], hidden_ids: [...] } — extract the files array
-      const raw = res.data;
-      setDocs(Array.isArray(raw) ? raw : (raw?.files ?? []));
-    } catch { setDocs([]); toast.error('Failed to load documents'); }
-    finally { setDocsLoading(false); }
-  }, []);
-
-  useEffect(() => { if (selectedUser) loadDocs(selectedUser); else setDocs([]); }, [selectedUser, loadDocs]);
-
-  const fmtSize = (b) => { if (!b) return ''; const n = Number(b); if (n < 1024) return `${n} B`; if (n < 1048576) return `${(n/1024).toFixed(1)} KB`; return `${(n/1048576).toFixed(1)} MB`; };
-  const ICONS = { 'application/vnd.google-apps.folder':'📁','application/vnd.google-apps.document':'📄','application/vnd.google-apps.spreadsheet':'📊','application/vnd.google-apps.presentation':'📽️','application/pdf':'📑','image/jpeg':'🖼️','image/png':'🖼️' };
-
-  return (
-    <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-      <div className={`flex items-center px-5 py-4 border-b gap-2.5 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-        <div className="p-1.5 rounded-lg" style={{ background: `${COLORS.deepBlue}12` }}>
-          <FileText className="h-4 w-4" style={{ color: COLORS.deepBlue }} />
-        </div>
-        <div>
-          <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Client Documents</h3>
-          <p className="text-xs text-slate-400">Browse Drive files linked to each client</p>
-        </div>
-      </div>
-      <div className="p-5 space-y-4">
-        {loading ? (
-          <div className="flex items-center justify-center py-16 gap-2 text-slate-400"><Loader2 className="h-5 w-5 animate-spin" /><span className="text-sm">Loading…</span></div>
-        ) : usersWithDrive.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4" style={{ background: `${COLORS.deepBlue}10` }}>
-              <FolderOpen className="h-6 w-6" style={{ color: COLORS.deepBlue }} />
-            </div>
-            <h3 className="font-semibold text-slate-700 dark:text-slate-300 text-sm mb-1">No Drive folders linked</h3>
-            <p className="text-xs text-slate-400 max-w-xs">Link a Google Drive folder to a portal user from the Clients page to manage their documents here.</p>
-          </div>
-        ) : (
-          <>
-            <div>
-              <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block mb-1.5">Select Client</label>
-              <select value={selectedUser} onChange={(e) => setSelectedUser(e.target.value)}
-                className={`w-full max-w-sm border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-white border-slate-200 text-slate-800'}`}
-              >
-                <option value="">— Choose a client —</option>
-                {usersWithDrive.map((u) => (
-                  <option key={u.id} value={u.id}>{u.display_name || u.portal_username} ({u.google_drive_folder_name || 'Drive'})</option>
-                ))}
-              </select>
-            </div>
-            {selectedUser && (docsLoading ? (
-              <div className="flex items-center justify-center py-10 gap-2 text-slate-400"><Loader2 className="h-5 w-5 animate-spin" /><span className="text-sm">Loading documents…</span></div>
-            ) : docs.length === 0 ? (
-              <p className="text-center py-10 text-slate-400 text-sm">No documents found in this folder.</p>
-            ) : (
-              <div className="space-y-1">
-                {docs.map((f) => (
-                  <div key={f.id} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-                    <span className="text-lg flex-shrink-0">{ICONS[f.mimeType] || '📎'}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-slate-800 dark:text-slate-200 truncate">{f.name}</p>
-                      {f.size && <p className="text-[10px] text-slate-400">{fmtSize(f.size)}</p>}
-                    </div>
-                    {f.webViewLink && (
-                      <a href={f.webViewLink} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-0.5 flex-shrink-0">
-                        <ExternalLink className="h-3 w-3" /> Open
-                      </a>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ))}
-          </>
-        )}
-      </div>
-    </div>
-  );
+function DocumentsTab({ isDark, isAdmin }) {
+  return <DocumentUploadCenter isDark={isDark} isAdmin={isAdmin} />;
 }
 
 
@@ -2076,7 +1994,7 @@ export default function ClientPortalManagerPage() {
       {activeTab === 'all-clients'      && <AllClientsTab      isDark={isDark} isAdmin={isAdmin} />}
       {activeTab === 'clients'          && <ClientsTab         portalUsers={portalUsers} loading={loading} onManage={handleManage} isAdmin={isAdmin} isDark={isDark} />}
       {activeTab === 'folder-architect' && <FolderArchitectTab isDark={isDark} isAdmin={isAdmin} />}
-      {activeTab === 'documents'        && <DocumentsTab       portalUsers={portalUsers} loading={loading} isDark={isDark} />}
+      {activeTab === 'documents'        && <DocumentsTab       isDark={isDark} isAdmin={isAdmin} />}
       {activeTab === 'smart-upload'     && <SmartBulkUploadTab portalUsers={portalUsers} loading={loading} isDark={isDark} isAdmin={isAdmin} />}
       {activeTab === 'messages'         && <MessagesTab        portalUsers={portalUsers} isDark={isDark} />}
       {activeTab === 'settings'         && <SettingsTab        isDark={isDark} />}
