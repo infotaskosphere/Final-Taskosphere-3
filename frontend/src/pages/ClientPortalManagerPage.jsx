@@ -16,6 +16,7 @@ import {
   Plus, Trash2, GripVertical, FolderPlus, CheckCircle2,
   XCircle, Play, RotateCcw, Check, X, ChevronDown, ChevronUp,
   Folder, FolderCheck, UploadCloud, Upload, Sparkles, AlertTriangle, RefreshCcw, Eye, ChevronRight as ChevronRightIcon, Zap,
+  Link2, EyeOff, FolderSearch, File,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -1086,162 +1087,177 @@ function DocumentsTab({ isDark, isAdmin }) {
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   Smart Bulk Upload Tab
+   Smart Connect Tab
    3-step flow:
-     1) Select client(s) + their Drive subfolders
-     2) Drop files → AI classifies each → preview table (admin can override)
-     3) Confirm → upload to correct Drive subfolders
+     1) Select a client
+     2) Find a folder that already exists in Drive (search by name, or paste
+        an ID / share URL) and preview its contents before linking it
+     3) Connect it — no new folder is created, the existing one is linked —
+        then manage which items inside it are visible/hidden to the client
    ════════════════════════════════════════════════════════════════════════════ */
-const COMMON_DOC_TYPES = [
-  'Documents','Invoices','GST Returns','Income Tax','Audit Reports',
-  'Bank Statements','ROC Filings','Compliance','Correspondence',
-  'Agreements','Board Minutes','Reports',
-];
-
-function SmartBulkUploadTab({ portalUsers, loading, isDark, isAdmin }) {
+function SmartConnectTab({ portalUsers, loading, isDark, isAdmin }) {
   /* ── Step state ─────────────────────────────────────────────────── */
-  const [step, setStep] = useState(1);          // 1=select, 2=classify, 3=upload
+  const [step, setStep] = useState(1);          // 1=select client, 2=find folder, 3=manage visibility
 
   /* Step 1 */
-  const [selectedUserId, setSelectedUserId]   = useState('');
-  const [subfolders, setSubfolders]           = useState([]);
-  const [subLoading, setSubLoading]           = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState('');
+  const [overrides, setOverrides] = useState({}); // { [userId]: {folder_id, folder_name} } — local view of newly-connected folders
 
-  /* Step 2 */
-  const [files, setFiles]                     = useState([]);   // raw File objects
-  const [classifying, setClassifying]         = useState(false);
-  const [classifyProgress, setClassifyProgress] = useState(0);
-  const [classified, setClassified]           = useState([]);   // [{file, filename, suggested_folder, override_folder, document_type, company_name, confidence, notes}]
-  const [dragOver, setDragOver]               = useState(false);
-  const fileInputRef                          = useRef(null);
+  /* Step 2 — search */
+  const [searchQuery, setSearchQuery]   = useState('');
+  const [searching, setSearching]       = useState(false);
+  const [searchResults, setSearchResults] = useState(null); // null = not searched yet
+  const [manualInput, setManualInput]   = useState('');
 
-  /* Step 3 */
-  const [uploading, setUploading]             = useState(false);
-  const [uploadResults, setUploadResults]     = useState(null);
+  /* Step 2 — preview */
+  const [previewFolder, setPreviewFolder] = useState(null); // {id, name}
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewFiles, setPreviewFiles] = useState([]);
+  const [previewError, setPreviewError] = useState('');
+  const [connecting, setConnecting] = useState(false);
 
-  const usersWithDrive = (portalUsers || []).filter(u => u.google_drive_folder_id);
-  const selectedUser   = usersWithDrive.find(u => u.id === selectedUserId);
+  /* Step 3 — visibility browser */
+  const [breadcrumb, setBreadcrumb] = useState([]); // [{id, name}]
+  const [browseItems, setBrowseItems] = useState([]);
+  const [browseLoading, setBrowseLoading] = useState(false);
+  const [busyIds, setBusyIds] = useState(new Set());
 
-  /* Load subfolders when client changes */
-  useEffect(() => {
-    if (!selectedUserId) { setSubfolders([]); return; }
-    setSubLoading(true);
-    api.get(`/client-portal/drive/subfolders/${selectedUserId}`)
-      .then(r => {
-        const subs = r.data?.subfolders || [];
-        // Merge with common doc types so user can classify into standard folders
-        // even if they don't exist yet (will be auto-created on upload)
-        const names = subs.map(s => s.name);
-        const merged = [...new Set([...names, ...COMMON_DOC_TYPES])];
-        setSubfolders(merged);
-      })
-      .catch(() => setSubfolders(COMMON_DOC_TYPES))
-      .finally(() => setSubLoading(false));
+  const selectedUser = portalUsers.find(u => u.id === selectedUserId);
+  const connectedFolderId   = overrides[selectedUserId]?.folder_id   ?? selectedUser?.google_drive_folder_id;
+  const connectedFolderName = overrides[selectedUserId]?.folder_name ?? selectedUser?.google_drive_folder_name;
+
+  /* ── Reset everything tied to a folder connection ────────────────── */
+  const resetFolderPick = () => {
+    setSearchQuery(''); setSearchResults(null); setManualInput('');
+    setPreviewFolder(null); setPreviewFiles([]); setPreviewError('');
+  };
+
+  const pickClient = (id) => {
+    setSelectedUserId(id);
+    resetFolderPick();
+    setStep(2);
+  };
+
+  /* ── Step 2: search Drive by folder name ─────────────────────────── */
+  const runSearch = async () => {
+    if (!searchQuery.trim()) return;
+    setSearching(true);
+    setSearchResults(null);
+    try {
+      const res = await api.get('/client-portal/drive/search-folders', { params: { query: searchQuery.trim() } });
+      setSearchResults(res.data?.folders || []);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Search failed');
+      setSearchResults([]);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  /* ── Step 2: preview a folder before connecting (search result OR pasted ID/URL) ── */
+  const previewById = async (folderId, fallbackName) => {
+    if (!folderId) return;
+    setPreviewLoading(true);
+    setPreviewError('');
+    setPreviewFiles([]);
+    try {
+      const res = await api.get('/client-portal/drive/admin/browse', { params: { folder_id: folderId } });
+      setPreviewFolder({ id: folderId, name: fallbackName || folderId });
+      setPreviewFiles(res.data?.files || []);
+    } catch (err) {
+      setPreviewError(err?.response?.data?.detail || 'Could not open that folder — check the ID/URL and Drive sharing permissions.');
+      setPreviewFolder({ id: folderId, name: fallbackName || folderId });
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const previewManual = () => {
+    if (!manualInput.trim()) return;
+    // Extract a plausible display name isn't possible client-side for a bare ID/URL —
+    // the backend will resolve the real name; we just use the raw input as a placeholder.
+    previewById(manualInput.trim(), null);
+  };
+
+  /* ── Step 2 → 3: confirm the link ─────────────────────────────────── */
+  const confirmConnect = async () => {
+    if (!selectedUserId || !previewFolder) return;
+    setConnecting(true);
+    try {
+      const res = await api.put(`/client-portal/clients/${selectedUser.client_id}/link-drive-folder`, {
+        folder_id_or_url: previewFolder.id,
+        folder_name: previewFolder.name && previewFolder.name !== previewFolder.id ? previewFolder.name : undefined,
+      });
+      const folderId   = res.data?.folder_id;
+      const folderName = res.data?.folder_name;
+      setOverrides(prev => ({ ...prev, [selectedUserId]: { folder_id: folderId, folder_name: folderName } }));
+      toast.success(`Connected "${folderName}" — ${res.data?.portal_users_updated || 1} portal user(s) updated`);
+      setBreadcrumb([]);
+      setStep(3);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Could not connect that folder');
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  /* ── Step 3: browse the connected folder + visibility toggles ───────── */
+  const loadBrowse = useCallback(async (folderId) => {
+    if (!selectedUserId) return;
+    setBrowseLoading(true);
+    try {
+      const res = await api.get(`/client-portal/drive/admin/files/${selectedUserId}`, {
+        params: folderId ? { folder_id: folderId } : {},
+      });
+      setBrowseItems(res.data?.files || []);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Could not load folder contents');
+      setBrowseItems([]);
+    } finally {
+      setBrowseLoading(false);
+    }
   }, [selectedUserId]);
 
-  /* ── File add helpers ─────────────────────────────────────────── */
-  const addFiles = (fileList) => {
-    setFiles(prev => {
-      const existing = new Set(prev.map(f => f.name + f.size));
-      const fresh = Array.from(fileList).filter(f => !existing.has(f.name + f.size));
-      return [...prev, ...fresh];
-    });
-    setClassified([]);
-    setUploadResults(null);
-  };
-
-  const removeFile = (idx) => {
-    setFiles(prev => prev.filter((_, i) => i !== idx));
-    setClassified(prev => prev.filter((_, i) => i !== idx));
-  };
-
-  /* ── AI Classify ──────────────────────────────────────────────── */
-  const classifyAll = async () => {
-    if (!files.length) return;
-    setClassifying(true);
-    setClassifyProgress(0);
-    const results = [];
-    for (let i = 0; i < files.length; i++) {
-      const f = files[i];
-      try {
-        const fd = new FormData();
-        fd.append('file', f);
-        fd.append('filename', f.name);
-        fd.append('available_subfolders', JSON.stringify(subfolders));
-        const res = await api.post('/client-portal/drive/classify-document', fd, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
-        results.push({
-          file: f,
-          filename: f.name,
-          suggested_folder: res.data.suggested_folder || 'Documents',
-          override_folder: '',
-          document_type: res.data.document_type || '',
-          company_name: res.data.company_name || '',
-          confidence: res.data.confidence || 'low',
-          notes: res.data.notes || '',
-        });
-      } catch {
-        results.push({
-          file: f,
-          filename: f.name,
-          suggested_folder: 'Documents',
-          override_folder: '',
-          document_type: 'Unknown',
-          company_name: '',
-          confidence: 'low',
-          notes: 'Classification failed — will go to Documents',
-        });
-      }
-      setClassifyProgress(Math.round(((i + 1) / files.length) * 100));
+  useEffect(() => {
+    if (step === 3 && selectedUserId) {
+      loadBrowse(breadcrumb.length ? breadcrumb[breadcrumb.length - 1].id : undefined);
     }
-    setClassified(results);
-    setClassifying(false);
-    setStep(3);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, selectedUserId, breadcrumb]);
+
+  const openFolder = (item) => {
+    if (!item.is_folder) return;
+    setBreadcrumb(prev => [...prev, { id: item.id, name: item.name }]);
   };
 
-  const setOverride = (idx, val) => {
-    setClassified(prev => prev.map((c, i) => i === idx ? { ...c, override_folder: val } : c));
+  const jumpToCrumb = (idx) => {
+    // idx === -1 means "root"
+    setBreadcrumb(prev => idx < 0 ? [] : prev.slice(0, idx + 1));
   };
 
-  /* ── Final Upload ─────────────────────────────────────────────── */
-  const confirmUpload = async () => {
-    if (!selectedUserId || !classified.length) return;
-    setUploading(true);
-    const fd = new FormData();
-    fd.append('portal_user_id', selectedUserId);
-    const classMap = classified.map(c => ({
-      filename: c.filename,
-      suggested_folder: c.suggested_folder,
-      override_folder: c.override_folder || '',
-      document_type: c.document_type,
-    }));
-    fd.append('classifications', JSON.stringify(classMap));
-    classified.forEach(c => fd.append('files', c.file));
+  const toggleVisible = async (item) => {
+    setBusyIds(prev => new Set(prev).add(item.id));
+    const nextVisible = !item.is_visible;
     try {
-      const res = await api.post('/client-portal/drive/smart-bulk-upload', fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      await api.patch(`/client-portal/drive/admin/visibility/${selectedUserId}/toggle`, null, {
+        params: { file_id: item.id, visible: nextVisible },
       });
-      setUploadResults(res.data);
-      if (res.data.uploaded > 0)
-        toast.success(`✅ ${res.data.uploaded} files uploaded to client portal!`);
-      if (res.data.failed > 0)
-        toast.error(`${res.data.failed} file(s) failed`);
+      setBrowseItems(prev => prev.map(f => f.id === item.id ? { ...f, is_visible: nextVisible } : f));
     } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Upload failed');
-    } finally { setUploading(false); }
+      toast.error(err?.response?.data?.detail || 'Could not update visibility');
+    } finally {
+      setBusyIds(prev => { const n = new Set(prev); n.delete(item.id); return n; });
+    }
   };
 
-  const reset = () => {
-    setStep(1); setFiles([]); setClassified([]);
-    setUploadResults(null); setClassifyProgress(0);
+  const resetAll = () => {
+    setStep(1); setSelectedUserId(''); resetFolderPick(); setBreadcrumb([]); setBrowseItems([]);
   };
 
   /* ── Styles ───────────────────────────────────────────────────── */
   const card  = `rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`;
   const hdr   = `flex items-center px-5 py-4 border-b gap-2.5 ${isDark ? 'border-slate-700' : 'border-slate-100'}`;
-  const selCls = `w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-white border-slate-200 text-slate-800'}`;
-  const confBadge = (c) => c === 'high' ? 'bg-green-100 text-green-700' : c === 'medium' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500';
+  const inputCls = `w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-white border-slate-200 text-slate-800'}`;
 
   const stepDot = (n) => (
     <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
@@ -1261,15 +1277,15 @@ function SmartBulkUploadTab({ portalUsers, loading, isDark, isAdmin }) {
       <div className={card}>
         <div className={hdr}>
           <div className="p-1.5 rounded-lg" style={{ background: '#1F6FB212' }}>
-            <Zap className="h-4 w-4" style={{ color: '#1F6FB2' }} />
+            <Link2 className="h-4 w-4" style={{ color: '#1F6FB2' }} />
           </div>
           <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Smart Bulk Upload</h3>
-            <p className="text-xs text-slate-400">AI reads each document, identifies the company name and type, then routes it to the correct subfolder automatically</p>
+            <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Smart Connect</h3>
+            <p className="text-xs text-slate-400">Link a folder that already exists in Google Drive to a client's portal — no files are moved or created — then choose what's visible to them</p>
           </div>
-          {(step > 1 || files.length > 0) && (
-            <button onClick={reset} className="text-xs text-slate-400 hover:text-red-500 flex items-center gap-1 flex-shrink-0">
-              <RefreshCcw className="h-3.5 w-3.5" /> Reset
+          {(step > 1) && (
+            <button onClick={resetAll} className="text-xs text-slate-400 hover:text-red-500 flex items-center gap-1 flex-shrink-0">
+              <RefreshCcw className="h-3.5 w-3.5" /> Start over
             </button>
           )}
         </div>
@@ -1278,9 +1294,9 @@ function SmartBulkUploadTab({ portalUsers, loading, isDark, isAdmin }) {
         <div className="px-5 py-3 flex items-center gap-2">
           {stepDot(1)}<span className={`text-xs font-medium ${step === 1 ? 'text-indigo-600' : 'text-slate-400'}`}>Select Client</span>
           <div className={`flex-1 h-px ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
-          {stepDot(2)}<span className={`text-xs font-medium ${step === 2 ? 'text-indigo-600' : 'text-slate-400'}`}>Add Files</span>
+          {stepDot(2)}<span className={`text-xs font-medium ${step === 2 ? 'text-indigo-600' : 'text-slate-400'}`}>Find Folder</span>
           <div className={`flex-1 h-px ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
-          {stepDot(3)}<span className={`text-xs font-medium ${step === 3 ? 'text-indigo-600' : 'text-slate-400'}`}>Review & Upload</span>
+          {stepDot(3)}<span className={`text-xs font-medium ${step === 3 ? 'text-indigo-600' : 'text-slate-400'}`}>Manage Visibility</span>
         </div>
       </div>
 
@@ -1290,248 +1306,230 @@ function SmartBulkUploadTab({ portalUsers, loading, isDark, isAdmin }) {
           <div className={hdr}>
             <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Step 1 — Select Client</span>
           </div>
-          <div className="p-5 space-y-4">
-            {usersWithDrive.length === 0 ? (
+          <div className="p-5">
+            {portalUsers.length === 0 ? (
               <p className="text-sm text-slate-400 text-center py-8">
-                No clients with Drive folders. Create folders in <strong>Folder Architect</strong> first.
+                No portal users yet. Create one from <strong>Clients</strong> first.
               </p>
             ) : (
-              <>
-                <div>
-                  <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1.5">Client with Drive Folder</label>
-                  <select value={selectedUserId} onChange={e => setSelectedUserId(e.target.value)} className={selCls + ' max-w-sm'}>
-                    <option value="">— Choose a client —</option>
-                    {usersWithDrive.map(u => (
-                      <option key={u.id} value={u.id}>{u.display_name || u.portal_username} ({u.google_drive_folder_name || 'Drive'})</option>
-                    ))}
-                  </select>
-                </div>
-
-                {selectedUserId && (
-                  <div>
-                    <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">Drive Subfolders (AI will route documents into these)</p>
-                    {subLoading ? (
-                      <span className="text-xs text-slate-400 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Loading subfolders…</span>
-                    ) : (
-                      <div className="flex flex-wrap gap-1.5">
-                        {subfolders.map(s => (
-                          <span key={s} className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${isDark ? 'bg-slate-700 border-slate-600 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
-                            📁 {s}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <button
-                  onClick={() => selectedUserId && setStep(2)}
-                  disabled={!selectedUserId}
-                  className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white flex items-center gap-2 transition-all disabled:opacity-40"
-                  style={{ background: '#1F6FB2' }}
-                >
-                  Continue <ChevronRight className="h-4 w-4" />
-                </button>
-              </>
+              <div className="grid sm:grid-cols-2 gap-2.5">
+                {portalUsers.map(u => {
+                  const folderId = overrides[u.id]?.folder_id ?? u.google_drive_folder_id;
+                  const folderName = overrides[u.id]?.folder_name ?? u.google_drive_folder_name;
+                  return (
+                    <button
+                      key={u.id}
+                      onClick={() => pickClient(u.id)}
+                      className={`text-left px-4 py-3 rounded-xl border transition-all hover:border-indigo-400 hover:shadow-sm ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50 border-slate-200'}`}
+                    >
+                      <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 truncate">{u.display_name || u.portal_username}</p>
+                      {folderId ? (
+                        <p className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1 mt-1 truncate">
+                          <Link2 className="h-3 w-3 flex-shrink-0" /> Connected — {folderName || 'Drive folder'}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-slate-400 mt-1">No Drive folder connected yet</p>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             )}
           </div>
         </div>
       )}
 
-      {/* ══ STEP 2: Add Files ═══════════════════════════════════════ */}
+      {/* ══ STEP 2: Find Folder ═══════════════════════════════════ */}
       {step === 2 && (
         <div className={card}>
           <div className={hdr}>
-            <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Step 2 — Add Files for <span className="text-indigo-600">{selectedUser?.display_name || selectedUser?.portal_username}</span></span>
+            <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+              Step 2 — Find a folder in Drive for <span className="text-indigo-600">{selectedUser?.display_name || selectedUser?.portal_username}</span>
+            </span>
           </div>
-          <div className="p-5 space-y-4">
-
-            {/* Drop zone */}
-            <div
-              onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={e => { e.preventDefault(); setDragOver(false); addFiles(e.dataTransfer.files); }}
-              onClick={() => fileInputRef.current?.click()}
-              className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer select-none transition-all ${
-                dragOver ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20'
-                : isDark ? 'border-slate-600 hover:border-slate-500 hover:bg-slate-700/30' : 'border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/40'
-              }`}
-            >
-              <UploadCloud className={`h-10 w-10 mx-auto mb-2 ${dragOver ? 'text-indigo-500' : 'text-slate-300'}`} />
-              <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">{dragOver ? 'Drop here!' : 'Drag & drop any documents'}</p>
-              <p className="text-xs text-slate-400 mt-1">PDFs, images, Excel, Word, ZIP — AI will classify each one automatically</p>
-              <input ref={fileInputRef} type="file" multiple className="hidden" onChange={e => { addFiles(e.target.files); e.target.value = ''; }} />
-            </div>
-
-            {/* File list */}
-            {files.length > 0 && (
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{files.length} file{files.length > 1 ? 's' : ''} queued</p>
-                  <button onClick={() => { setFiles([]); setClassified([]); }} className="text-xs text-slate-400 hover:text-red-500">Clear all</button>
-                </div>
-                <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
-                  {files.map((f, i) => (
-                    <div key={i} className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border text-xs ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-                      <span className="text-base">📄</span>
-                      <div className="flex-1 min-w-0">
-                        <p className="truncate font-medium text-slate-700 dark:text-slate-200">{f.name}</p>
-                        <p className="text-slate-400">{f.size < 1048576 ? `${(f.size/1024).toFixed(1)} KB` : `${(f.size/1048576).toFixed(1)} MB`}</p>
-                      </div>
-                      <button onClick={() => removeFile(i)} className="text-slate-400 hover:text-red-500"><X className="h-3.5 w-3.5" /></button>
-                    </div>
-                  ))}
-                </div>
+          <div className="p-5 space-y-5">
+            {connectedFolderId && (
+              <div className={`p-3 rounded-xl text-xs border flex items-center gap-2 ${isDark ? 'bg-slate-700/50 border-slate-600 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+                <AlertCircle className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
+                Currently connected to <strong className="mx-1">{connectedFolderName}</strong> — connecting a different folder below will replace it.
               </div>
             )}
 
-            {/* AI classify button */}
-            {files.length > 0 && (
-              <div className="space-y-3">
-                {classifying && (
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between text-xs text-slate-500">
-                      <span className="flex items-center gap-1"><Sparkles className="h-3.5 w-3.5 text-indigo-500" /> AI is reading documents…</span>
-                      <span>{classifyProgress}%</span>
-                    </div>
-                    <div className={`w-full h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
-                      <div className="h-full rounded-full transition-all duration-300" style={{ width: `${classifyProgress}%`, background: 'linear-gradient(90deg, #6366f1, #1F6FB2)' }} />
-                    </div>
-                  </div>
-                )}
+            {/* Search by name */}
+            <div>
+              <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1.5">Search Drive by folder name</label>
+              <div className="flex gap-2">
+                <input
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && runSearch()}
+                  placeholder="e.g. Escape City Trips and Treks LLP"
+                  className={inputCls}
+                />
                 <button
-                  onClick={classifyAll}
-                  disabled={classifying}
-                  className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold text-white transition-all disabled:opacity-60"
-                  style={{ background: 'linear-gradient(135deg, #6366f1, #1F6FB2)' }}
+                  onClick={runSearch}
+                  disabled={searching || !searchQuery.trim()}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-1.5 flex-shrink-0 disabled:opacity-40"
+                  style={{ background: '#1F6FB2' }}
                 >
-                  {classifying
-                    ? <><Loader2 className="h-4 w-4 animate-spin" /> AI Classifying {classifyProgress}%…</>
-                    : <><Sparkles className="h-4 w-4" /> Analyse & Auto-Classify {files.length} File{files.length > 1 ? 's' : ''}</>
-                  }
+                  {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />} Search
                 </button>
               </div>
+
+              {searchResults !== null && (
+                <div className="mt-3 space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                  {searchResults.length === 0 ? (
+                    <p className="text-xs text-slate-400 py-3 text-center">No folders found matching "{searchQuery}".</p>
+                  ) : searchResults.map(f => (
+                    <button
+                      key={f.id}
+                      onClick={() => previewById(f.id, f.name)}
+                      className={`w-full text-left flex items-center gap-2.5 px-3 py-2 rounded-lg border text-xs transition-all hover:border-indigo-400 ${
+                        previewFolder?.id === f.id ? 'border-indigo-400 ring-1 ring-indigo-300' : isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'
+                      }`}
+                    >
+                      <FolderSearch className="h-4 w-4 text-amber-500 flex-shrink-0" />
+                      <span className="flex-1 min-w-0 truncate font-medium text-slate-700 dark:text-slate-200">{f.name}</span>
+                      {f.modifiedTime && <span className="text-slate-400 flex-shrink-0">{new Date(f.modifiedTime).toLocaleDateString()}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 text-xs text-slate-400">
+              <div className={`flex-1 h-px ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
+              or
+              <div className={`flex-1 h-px ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
+            </div>
+
+            {/* Paste ID/URL directly */}
+            <div>
+              <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1.5">Paste a folder ID or Drive share link</label>
+              <div className="flex gap-2">
+                <input
+                  value={manualInput}
+                  onChange={e => setManualInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && previewManual()}
+                  placeholder="https://drive.google.com/drive/folders/1nYp… or bare folder ID"
+                  className={inputCls}
+                />
+                <button
+                  onClick={previewManual}
+                  disabled={previewLoading || !manualInput.trim()}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold border flex items-center gap-1.5 flex-shrink-0 disabled:opacity-40 border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300"
+                >
+                  {previewLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />} Preview
+                </button>
+              </div>
+            </div>
+
+            {/* Preview panel */}
+            {previewLoading && !previewFolder && (
+              <div className="flex items-center gap-2 text-xs text-slate-400 py-2"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Opening folder…</div>
+            )}
+            {previewFolder && (
+              <div className={`p-4 rounded-xl border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-indigo-50/50 border-indigo-200'}`}>
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <FolderOpen className="h-4 w-4 text-indigo-500 flex-shrink-0" />
+                    <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 truncate">{previewFolder.name}</span>
+                  </div>
+                  {!previewError && (
+                    <button
+                      onClick={confirmConnect}
+                      disabled={connecting}
+                      className="px-4 py-2 rounded-lg text-xs font-bold text-white flex items-center gap-1.5 flex-shrink-0 disabled:opacity-60"
+                      style={{ background: '#1FAF5A' }}
+                    >
+                      {connecting ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Connecting…</> : <><Link2 className="h-3.5 w-3.5" /> Connect this folder</>}
+                    </button>
+                  )}
+                </div>
+                {previewError ? (
+                  <p className="text-xs text-red-500">{previewError}</p>
+                ) : previewLoading ? (
+                  <p className="text-xs text-slate-400 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Loading contents…</p>
+                ) : (
+                  <>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">{previewFiles.length} item{previewFiles.length !== 1 ? 's' : ''} inside — nothing will move, this only links the folder.</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {previewFiles.slice(0, 12).map(f => (
+                        <span key={f.id} className={`px-2 py-1 rounded-md text-[10.5px] font-medium border ${isDark ? 'bg-slate-800 border-slate-600 text-slate-300' : 'bg-white border-slate-200 text-slate-600'}`}>
+                          {f.is_folder ? '📁' : '📄'} {f.name}
+                        </span>
+                      ))}
+                      {previewFiles.length > 12 && (
+                        <span className="px-2 py-1 text-[10.5px] text-slate-400">+{previewFiles.length - 12} more</span>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
             )}
           </div>
         </div>
       )}
 
-      {/* ══ STEP 3: Review & Upload ════════════════════════════════ */}
-      {step === 3 && classified.length > 0 && !uploadResults && (
+      {/* ══ STEP 3: Manage Visibility ══════════════════════════════ */}
+      {step === 3 && (
         <div className={card}>
           <div className={hdr}>
-            <Sparkles className="h-4 w-4 text-indigo-500 flex-shrink-0" />
             <div className="flex-1 min-w-0">
-              <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Step 3 — Review AI Classification</h3>
-              <p className="text-xs text-slate-400">Override any folder assignment before uploading. Folder will be auto-created if it doesn't exist.</p>
+              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                Step 3 — Visibility for <span className="text-indigo-600">{selectedUser?.display_name || selectedUser?.portal_username}</span>
+              </span>
+              <p className="text-xs text-slate-400 mt-0.5">Toggle the eye to control what the client can see. Hidden items stay on Drive but never appear in their portal.</p>
             </div>
           </div>
-          <div className="p-5 space-y-4">
-            {/* Classification table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                    {['File', 'Document Type', 'Company Found', 'AI Folder', 'Override Folder', 'Confidence'].map(h => (
-                      <th key={h} className="text-left pb-2 pr-3 font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                  {classified.map((c, i) => (
-                    <tr key={i} className="group">
-                      <td className="py-2 pr-3 max-w-[140px]">
-                        <p className="truncate font-medium text-slate-700 dark:text-slate-200" title={c.filename}>{c.filename}</p>
-                        {c.notes && <p className="text-slate-400 truncate text-[10px]" title={c.notes}>{c.notes}</p>}
-                      </td>
-                      <td className="py-2 pr-3 text-slate-600 dark:text-slate-300 max-w-[140px]">
-                        <span className="truncate block">{c.document_type || '—'}</span>
-                      </td>
-                      <td className="py-2 pr-3 text-slate-500 dark:text-slate-400 max-w-[120px]">
-                        <span className="truncate block">{c.company_name || '—'}</span>
-                      </td>
-                      <td className="py-2 pr-3">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium whitespace-nowrap">
-                          📁 {c.suggested_folder}
-                        </span>
-                      </td>
-                      <td className="py-2 pr-3">
-                        <select
-                          value={c.override_folder}
-                          onChange={e => setOverride(i, e.target.value)}
-                          className={`border rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-white border-slate-200 text-slate-700'}`}
-                        >
-                          <option value="">— Use AI suggestion —</option>
-                          {subfolders.map(s => <option key={s} value={s}>{s}</option>)}
-                        </select>
-                      </td>
-                      <td className="py-2">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${confBadge(c.confidence)}`}>
-                          {c.confidence}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
 
-            {/* Summary */}
-            <div className={`p-3 rounded-xl text-xs border ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-              <p className="font-semibold text-slate-700 dark:text-slate-200 mb-1">Upload Summary</p>
-              <p className="text-slate-500 dark:text-slate-400">
-                Client: <strong>{selectedUser?.display_name || selectedUser?.portal_username}</strong> ·
-                {' '}{classified.length} file{classified.length > 1 ? 's' : ''} ·
-                {' '}{[...new Set(classified.map(c => c.override_folder || c.suggested_folder))].length} folder{[...new Set(classified.map(c => c.override_folder || c.suggested_folder))].length > 1 ? 's' : ''} →
-                {' '}{[...new Set(classified.map(c => c.override_folder || c.suggested_folder))].join(', ')}
-              </p>
-            </div>
-
-            <button
-              onClick={confirmUpload}
-              disabled={uploading}
-              className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-60"
-              style={{ background: '#1FAF5A' }}
-            >
-              {uploading ? <><Loader2 className="h-4 w-4 animate-spin" /> Uploading to Drive…</> : <><Upload className="h-4 w-4" /> Confirm & Upload to Client Drive</>}
+          {/* breadcrumb */}
+          <div className="px-5 pt-3 flex items-center gap-1 text-xs flex-wrap">
+            <button onClick={() => jumpToCrumb(-1)} className={`flex items-center gap-1 px-2 py-1 rounded-md ${breadcrumb.length === 0 ? 'font-semibold text-indigo-600' : 'text-slate-400 hover:text-indigo-500'}`}>
+              <FolderOpen className="h-3.5 w-3.5" /> {connectedFolderName || 'Root'}
             </button>
+            {breadcrumb.map((b, i) => (
+              <React.Fragment key={b.id}>
+                <ChevronRight className="h-3 w-3 text-slate-300" />
+                <button onClick={() => jumpToCrumb(i)} className={`px-2 py-1 rounded-md truncate max-w-[160px] ${i === breadcrumb.length - 1 ? 'font-semibold text-indigo-600' : 'text-slate-400 hover:text-indigo-500'}`}>
+                  {b.name}
+                </button>
+              </React.Fragment>
+            ))}
           </div>
-        </div>
-      )}
 
-      {/* ══ RESULTS ═══════════════════════════════════════════════ */}
-      {uploadResults && (
-        <div className={card}>
-          <div className={hdr}>
-            <CheckCircle2 className="h-4 w-4 text-green-500 flex-shrink-0" />
-            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Upload Complete</h3>
-          </div>
-          <div className="p-5 space-y-3">
-            <div className={`p-3 rounded-xl text-sm border ${uploadResults.failed === 0 ? isDark ? 'bg-green-900/20 border-green-800 text-green-300' : 'bg-green-50 border-green-200 text-green-700' : isDark ? 'bg-amber-900/20 border-amber-800 text-amber-300' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>
-              <strong>{uploadResults.uploaded} files uploaded successfully</strong>
-              {uploadResults.failed > 0 && ` · ${uploadResults.failed} failed`}
-              {' — '}Files are now visible in the client portal.
-            </div>
-            <div className="space-y-1">
-              {uploadResults.results?.map((r, i) => (
-                <div key={i} className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border text-xs ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-                  {r.status === 'uploaded' ? <CheckCircle2 className="h-3.5 w-3.5 text-green-500 flex-shrink-0" /> : <AlertTriangle className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />}
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-slate-700 dark:text-slate-200 truncate">{r.filename}</p>
-                    <p className="text-slate-400">📁 {r.folder}{r.document_type ? ` · ${r.document_type}` : ''}</p>
+          <div className="p-5 pt-3">
+            {browseLoading ? (
+              <div className="flex items-center justify-center py-14 gap-2 text-slate-400">
+                <Loader2 className="h-5 w-5 animate-spin" /><span>Loading contents…</span>
+              </div>
+            ) : browseItems.length === 0 ? (
+              <p className="text-sm text-slate-400 text-center py-14">This folder is empty.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {browseItems.map(item => (
+                  <div
+                    key={item.id}
+                    className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg border text-sm ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50 border-slate-200'} ${item.is_folder ? 'cursor-pointer hover:border-indigo-400' : ''}`}
+                    onClick={() => item.is_folder && openFolder(item)}
+                  >
+                    {item.is_folder ? <Folder className="h-4 w-4 text-amber-500 flex-shrink-0" /> : <File className="h-4 w-4 text-slate-400 flex-shrink-0" />}
+                    <span className="flex-1 min-w-0 truncate font-medium text-slate-700 dark:text-slate-200">{item.name}</span>
+                    {!item.is_visible && (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-500 dark:text-slate-300 flex-shrink-0">Hidden</span>
+                    )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleVisible(item); }}
+                      disabled={busyIds.has(item.id)}
+                      title={item.is_visible ? 'Visible to client — click to hide' : 'Hidden from client — click to show'}
+                      className={`p-1.5 rounded-lg flex-shrink-0 transition-all ${item.is_visible ? 'text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20' : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-600'}`}
+                    >
+                      {busyIds.has(item.id) ? <Loader2 className="h-4 w-4 animate-spin" /> : item.is_visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                    </button>
                   </div>
-                  {r.web_link && (
-                    <a href={r.web_link} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline flex items-center gap-0.5 flex-shrink-0">
-                      <Eye className="h-3 w-3" /> View
-                    </a>
-                  )}
-                  {r.status === 'error' && <span className="text-red-500 flex-shrink-0">{r.error}</span>}
-                </div>
-              ))}
-            </div>
-            <button onClick={reset} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-all">
-              <RefreshCcw className="h-3.5 w-3.5" /> Upload More Files
-            </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1928,7 +1926,7 @@ export default function ClientPortalManagerPage() {
   if (path.endsWith('/documents'))        activeTab = 'documents';
   if (path.endsWith('/messages'))         activeTab = 'messages';
   if (path.endsWith('/settings'))         activeTab = 'settings';
-  if (path.endsWith('/smart-upload'))     activeTab = 'smart-upload';
+  if (path.endsWith('/smart-connect'))    activeTab = 'smart-connect';
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -1995,7 +1993,7 @@ export default function ClientPortalManagerPage() {
       {activeTab === 'clients'          && <ClientsTab         portalUsers={portalUsers} loading={loading} onManage={handleManage} isAdmin={isAdmin} isDark={isDark} />}
       {activeTab === 'folder-architect' && <FolderArchitectTab isDark={isDark} isAdmin={isAdmin} />}
       {activeTab === 'documents'        && <DocumentsTab       isDark={isDark} isAdmin={isAdmin} />}
-      {activeTab === 'smart-upload'     && <SmartBulkUploadTab portalUsers={portalUsers} loading={loading} isDark={isDark} isAdmin={isAdmin} />}
+      {activeTab === 'smart-connect'    && <SmartConnectTab    portalUsers={portalUsers} loading={loading} isDark={isDark} isAdmin={isAdmin} />}
       {activeTab === 'messages'         && <MessagesTab        portalUsers={portalUsers} isDark={isDark} />}
       {activeTab === 'settings'         && <SettingsTab        isDark={isDark} />}
 
