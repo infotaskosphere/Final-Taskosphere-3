@@ -1108,6 +1108,49 @@ async def link_existing_drive_folder(
     }
 
 
+# ── Admin: search Drive for existing folders by name ─────────────────────
+# Powers "Smart Connect" — lets the admin find a folder that already exists
+# in Drive (created outside Taskosphere) instead of having to know/paste its
+# raw ID or share URL.
+
+@router.get("/drive/admin/search-folders")
+async def admin_search_drive_folders(
+    query: str = Query(..., min_length=1, description="Folder name (or partial name) to search for"),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Search all of Drive for folders whose name contains `query`.
+    Read-only preview — nothing is linked until the admin explicitly confirms.
+    """
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Insufficient permissions")
+
+    from backend.invoicing import _get_drive_service, _drive_configured
+
+    if not _drive_configured():
+        raise HTTPException(503, "Google Drive not configured.")
+
+    service = _get_drive_service()
+    safe_query = query.replace("\\", "\\\\").replace("'", "\\'")
+    q = (
+        "mimeType = 'application/vnd.google-apps.folder' "
+        "and trashed = false "
+        f"and name contains '{safe_query}'"
+    )
+    try:
+        result = service.files().list(
+            q=q,
+            fields="files(id,name,parents,webViewLink,modifiedTime)",
+            orderBy="name",
+            pageSize=25,
+        ).execute()
+    except Exception as exc:
+        raise HTTPException(503, f"Could not search Google Drive: {exc}")
+
+    folders = result.get("files", [])
+    return {"query": query, "folders": folders, "total": len(folders)}
+
+
 # ── Admin: browse any Drive folder (not tied to a portal user) ──────────────
 # Useful for previewing a folder before linking it to a client.
 
