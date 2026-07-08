@@ -1,21 +1,22 @@
 // =============================================================================
-// GeneralSettings.jsx — Full width, real performance ranking, bigger avatar
+// GeneralSettings.jsx — v2 · Multi-drive integrations, improved UI
 // =============================================================================
 import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDark } from "@/hooks/useDark";
 import api from "@/lib/api";
 import { toast } from "sonner";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   User, Camera, Phone, Calendar as CalendarIcon,
   Save, Loader2, CheckCircle2, Mail, Shield,
   Settings, Clock, Hash, Star, Trophy, TrendingUp,
   CheckSquare, Timer, Zap, Users as UsersIcon, Link2,
+  HardDrive, Plug, ChevronRight,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import GoogleDriveConnect from "@/components/GoogleDriveConnect";
+import DriveIntegrations from "@/components/DriveIntegrations";
 import AssignedClientsPanel from "@/components/AssignedClientsPanel";
 
 const COLORS = {
@@ -54,12 +55,72 @@ function MiniBar({ value, color, isDark }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Integration category nav — shown inside the integrations tab
+// ─────────────────────────────────────────────────────────────────────────────
+
+const INT_SECTIONS = [
+  { id: 'drives',  label: 'Cloud Drives', icon: HardDrive,  desc: 'Google Drive, OneDrive, Dropbox & more' },
+  { id: 'email',   label: 'Email',        icon: Mail,       desc: 'IMAP email account connections' },
+];
+
+function IntegrationSidebar({ active, onChange, isDark }) {
+  return (
+    <div className={`flex flex-row sm:flex-col gap-1 sm:gap-1.5 sm:min-w-[160px]`}>
+      {INT_SECTIONS.map(s => {
+        const I = s.icon;
+        const isActive = active === s.id;
+        return (
+          <button
+            key={s.id}
+            onClick={() => onChange(s.id)}
+            className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-left transition-all text-sm font-medium w-full
+              ${isActive
+                ? 'bg-blue-600 text-white shadow-sm'
+                : isDark
+                  ? 'text-slate-400 hover:bg-slate-700/60 hover:text-slate-200'
+                  : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
+              }`}
+          >
+            <I size={15} className={isActive ? 'text-white' : ''} />
+            <div className="text-left min-w-0">
+              <p className="text-[13px] font-semibold truncate">{s.label}</p>
+              <p className={`text-[10px] hidden sm:block truncate font-normal ${isActive ? 'text-blue-100' : isDark ? 'text-slate-500' : 'text-slate-400'}`}>{s.desc}</p>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Placeholder for email integrations panel (renders existing EmailSettings component)
+// In production: import EmailSettings from "@/components/EmailSettings";
+function EmailIntegrationsPlaceholder({ isDark }) {
+  const muted = isDark ? 'text-slate-400' : 'text-slate-500';
+  const card  = isDark ? 'bg-slate-800/40 border-slate-700' : 'bg-slate-50 border-slate-200';
+  return (
+    <div className={`rounded-2xl border p-6 text-center ${card}`}>
+      <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3" style={{ background: 'rgba(13,59,102,0.10)' }}>
+        <Mail size={22} style={{ color: COLORS.mediumBlue }} />
+      </div>
+      <p className={`text-sm font-bold mb-1 ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Email Accounts</p>
+      <p className={`text-xs ${muted}`}>Manage IMAP email connections from the Email Accounts page in the sidebar.</p>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN COMPONENT
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function GeneralSettings() {
   const { user, refreshUser } = useAuth();
   const isDark  = useDark();
   const fileRef = useRef(null);
 
   const [activeTab, setActiveTab] = useState("profile"); // profile | clients | integrations
+  const [intSection, setIntSection] = useState("drives"); // drives | email
 
   const [profile, setProfile] = useState({
     full_name: "", phone: "", birthday: "", profile_picture: "",
@@ -127,7 +188,7 @@ export default function GeneralSettings() {
   return (
     <div className="space-y-4 w-full min-w-0 overflow-x-hidden">
 
-      {/* TOP BANNER */}
+      {/* ── TOP BANNER ──────────────────────────────────────────────────── */}
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
         <div
           className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
@@ -150,9 +211,9 @@ export default function GeneralSettings() {
           {/* Tab bar */}
           <div className="relative mt-4 flex flex-wrap gap-1 bg-white/10 p-1 rounded-xl w-fit">
             {[
-              { id: "profile",      label: "Profile",            icon: User },
+              { id: "profile",      label: "Profile",              icon: User      },
               { id: "clients",      label: "All Assigned Clients", icon: UsersIcon },
-              { id: "integrations", label: "Integrations",       icon: Link2 },
+              { id: "integrations", label: "Integrations",         icon: Link2     },
             ].map(t => {
               const I = t.icon;
               const active = activeTab === t.id;
@@ -171,9 +232,9 @@ export default function GeneralSettings() {
         </div>
       </motion.div>
 
+      {/* ── PROFILE TAB ──────────────────────────────────────────────────── */}
       {activeTab === "profile" && (
       <>
-      {/* MAIN GRID */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 items-stretch">
 
         {/* LEFT: Profile card */}
@@ -183,7 +244,7 @@ export default function GeneralSettings() {
         >
           <div className={`rounded-2xl border overflow-hidden shadow-sm flex flex-col flex-1 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
 
-            {/* Taller gradient strip */}
+            {/* Gradient strip */}
             <div className="h-20 relative flex-shrink-0" style={{ background: GRADIENT }}>
               <div className="absolute inset-0 opacity-10"
                 style={{ background: 'radial-gradient(circle at 80% 50%, white 0%, transparent 60%)' }} />
@@ -195,7 +256,7 @@ export default function GeneralSettings() {
               )}
             </div>
 
-            {/* Avatar — 110px */}
+            {/* Avatar */}
             <div className="px-5 pb-4 -mt-[52px] flex flex-col items-center text-center">
               <div className="relative group mb-3">
                 <div
@@ -279,7 +340,7 @@ export default function GeneralSettings() {
               </div>
             </div>
 
-            {/* Performance mini-stats — fills empty space */}
+            {/* Performance mini-stats */}
             <div className={`border-t px-4 py-3 space-y-3 flex-1 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
               <p className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                 This Month's Performance
@@ -315,7 +376,7 @@ export default function GeneralSettings() {
               )}
             </div>
 
-            {/* Security tip — pinned to bottom */}
+            {/* Security tip */}
             <div className={`border-t px-4 py-3 flex items-start gap-2.5 ${isDark ? 'border-slate-700 bg-blue-950/20' : 'border-slate-100 bg-blue-50/60'}`}>
               <Shield className="w-3.5 h-3.5 text-blue-500 flex-shrink-0 mt-0.5" />
               <p className={`text-xs leading-relaxed ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>
@@ -438,31 +499,89 @@ export default function GeneralSettings() {
       </>
       )}
 
+      {/* ── CLIENTS TAB ──────────────────────────────────────────────────── */}
       {activeTab === "clients" && (
         <AssignedClientsPanel isDark={isDark} />
       )}
 
+      {/* ── INTEGRATIONS TAB ─────────────────────────────────────────────── */}
       {activeTab === "integrations" && (
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.15 }}
+        transition={{ delay: 0.1 }}
       >
         <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-          {/* Section header */}
-          <div className={`flex items-center gap-2.5 px-5 py-3 border-b ${isDark ? 'border-slate-700 bg-slate-800/70' : 'border-slate-100 bg-slate-50/60'}`}>
-            <div className={`p-1.5 rounded-lg ${isDark ? 'bg-blue-900/40' : 'bg-blue-50'}`}>
-              <Settings className="h-3.5 w-3.5 text-blue-500" />
+
+          {/* Header */}
+          <div className={`flex items-center gap-3 px-5 py-4 border-b ${isDark ? 'border-slate-700 bg-slate-800/70' : 'border-slate-100 bg-slate-50/60'}`}>
+            <div className={`p-2 rounded-xl ${isDark ? 'bg-blue-900/40' : 'bg-blue-50'}`}>
+              <Plug className="h-4 w-4 text-blue-500" />
             </div>
-            <div>
+            <div className="flex-1">
               <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Integrations</p>
-              <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Connect external services</p>
+              <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                Connect cloud drives, email accounts, and external services
+              </p>
+            </div>
+            {/* Connected badge summary */}
+            <div className={`hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-semibold ${isDark ? 'border-emerald-800/50 bg-emerald-900/20 text-emerald-400' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              1 connected
             </div>
           </div>
 
-          {/* Content */}
-          <div className="p-5">
-            <GoogleDriveConnect isDark={isDark} />
+          {/* Body: sidebar + content */}
+          <div className="flex flex-col sm:flex-row gap-0">
+
+            {/* Left sidebar nav */}
+            <div className={`sm:w-48 flex-shrink-0 p-3 border-b sm:border-b-0 sm:border-r ${isDark ? 'border-slate-700 bg-slate-800/30' : 'border-slate-100 bg-slate-50/40'}`}>
+              <IntegrationSidebar
+                active={intSection}
+                onChange={setIntSection}
+                isDark={isDark}
+              />
+            </div>
+
+            {/* Right content panel */}
+            <div className="flex-1 p-5 min-w-0">
+              <AnimatePresence mode="wait">
+                {intSection === 'drives' && (
+                  <motion.div
+                    key="drives"
+                    initial={{ opacity: 0, x: 10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -10 }}
+                    transition={{ duration: 0.18 }}
+                  >
+                    <DriveIntegrations isDark={isDark} />
+                  </motion.div>
+                )}
+
+                {intSection === 'email' && (
+                  <motion.div
+                    key="email"
+                    initial={{ opacity: 0, x: 10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -10 }}
+                    transition={{ duration: 0.18 }}
+                  >
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: 'rgba(13,59,102,0.10)' }}>
+                          <Mail size={13} style={{ color: COLORS.mediumBlue }} />
+                        </div>
+                        <div>
+                          <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Email Accounts</p>
+                          <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>IMAP email connections for calendar & reminder sync</p>
+                        </div>
+                      </div>
+                      <EmailIntegrationsPlaceholder isDark={isDark} />
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
         </div>
       </motion.div>
