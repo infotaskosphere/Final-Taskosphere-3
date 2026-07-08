@@ -192,6 +192,14 @@ class ManualSaveVisitRequest(BaseModel):
     visit_date: str
     notes: Optional[str] = None
 
+class MarkEventSavedRequest(BaseModel):
+    # Free-form label for what the event became — "task" from the Action
+    # Center "Add Task" flow, or "reminder" | "todo" | "visit" if ever called
+    # from elsewhere. Not restricted to an enum since new save types may be
+    # added later without a backend change.
+    category: str
+    saved_id: Optional[str] = None
+
 class SenderWhitelistEntry(BaseModel):
     email_address: str
     label: Optional[str] = None
@@ -961,6 +969,69 @@ async def _get_dismissed_titles(user_id: str) -> Set[str]:
         return set()
 
 
+# =============================================================================
+# SAVED-EVENT TRACKING (Action Center dedup fix)
+# =============================================================================
+# Problem this section fixes:
+#   Once a user saved an Action Center event as a Reminder / Todo / Visit /
+#   Task, the underlying cached event record in `email_extracted_events` was
+#   never flagged. So the very next sync (or even the next normal page load)
+#   fetched that same record again and displayed it as if it had never been
+#   saved — because nothing on the backend remembered the save had happened.
+#
+#   Two things are fixed:
+#   1. `_mark_event_saved` stamps the source event document with
+#      saved_category / saved_id / saved_at as soon as a save succeeds
+#      (see save_as_reminder / save_as_todo / save_as_visit / mark_event_saved).
+#   2. `_get_saved_event_ids` cross-checks the reminders / todos / visits
+#      collections directly (the "respective pages") so an event is hidden
+#      from the Action Center even if it was saved from one of those pages
+#      instead of the Action Center itself, or if it predates this fix.
+# =============================================================================
+
+async def _mark_event_saved(user_id: str, event_id: Optional[str], category: str, saved_id: str = "") -> None:
+    """Stamp the source `email_extracted_events` document as saved, so it is
+    excluded from every future Action Center sync. Safe to call repeatedly."""
+    if not event_id:
+        return
+    query: Dict[str, Any] = {"user_id": user_id}
+    try:
+        query["_id"] = ObjectId(event_id)
+    except Exception:
+        # Not a valid ObjectId (e.g. legacy/manual synthetic id) — try the
+        # string "id" field instead, in case a migration ever backfills it.
+        query["id"] = event_id
+    try:
+        await db[COL_EVENTS].update_one(
+            query,
+            {"$set": {
+                "saved_category": category,
+                "saved_id":       saved_id or "",
+                "saved_at":       datetime.now(timezone.utc).isoformat(),
+            }}
+        )
+    except Exception as e:
+        logger.warning(f"_mark_event_saved failed for event_id={event_id}: {e}")
+
+
+async def _get_saved_event_ids(user_id: str) -> Set[str]:
+    """Union of `event_id` values already present in reminders / todos /
+    visits for this user. Lets the Action Center hide an event even when it
+    was saved directly from the Reminders / To-Do / Visits page (not via the
+    Action Center's own Save button), or before saved_category existed."""
+    ids: Set[str] = set()
+    for col in ("reminders", "todos", "visits"):
+        try:
+            docs = await db[col].find(
+                {"user_id": user_id, "event_id": {"$exists": True, "$ne": None}},
+                {"_id": 0, "event_id": 1}
+            ).to_list(5000)
+            ids.update(d["event_id"] for d in docs if d.get("event_id"))
+        except Exception:
+            pass
+    return ids
+
+
 async def _extract_events_from_email(
     subject: str, body: str, from_addr: str, msg_date: str,
     dismissed_titles: Optional[Set[str]] = None,
@@ -1520,9 +1591,13 @@ async def _run_full_scan_for_user(user_id: str, prefs: Dict, limit: int = 50):
                 mid    = _stable_message_id(email_addr, raw)
                 raw["message_id"] = mid
                 exists = await db[COL_EVENTS].find_one(
-                    {"user_id": user_id, "message_id": mid}, {"_id": 0}
+                    {"user_id": user_id, "message_id": mid}
                 )
                 if exists:
+                    # Already saved by the user (Action Center or the
+                    # Reminders/Todos/Visits page directly) — don't re-save it.
+                    if exists.get("saved_category"):
+                        continue
                     ev_out = _doc_to_out(exists)
                     ev_out._is_adjournment = exists.get("is_adjournment", False)
                     ev_out._reminder_seq   = exists.get("reminder_seq", 0)
@@ -2021,6 +2096,9 @@ async def save_as_reminder(body: ManualSaveReminderRequest, current_user=Depends
             dup_query["title"] = body.title
         existing = await db["reminders"].find_one(dup_query, {"_id": 0, "id": 1})
         if existing:
+            # Already saved previously — make sure the source event is (still)
+            # flagged so it stays out of the Action Center, then report back.
+            await _mark_event_saved(str(current_user.id), incoming_event_id, "reminder", existing.get("id", ""))
             return {"status": "already_exists", "id": existing.get("id", "")}
 
         nid = str(_uuid.uuid4())
@@ -2045,6 +2123,9 @@ async def save_as_reminder(body: ManualSaveReminderRequest, current_user=Depends
             doc["hearing_notes"] = body.hearing_notes
 
         await db["reminders"].insert_one(doc)
+        # Flag the source Action Center event as saved so it never
+        # resurfaces on a later sync.
+        await _mark_event_saved(str(current_user.id), incoming_event_id, "reminder", nid)
         return {"status": "created", "id": nid}
     except HTTPException:
         raise
@@ -2054,11 +2135,19 @@ async def save_as_reminder(body: ManualSaveReminderRequest, current_user=Depends
 @router.post("/save-as-visit", status_code=201)
 async def save_as_visit(body: ManualSaveVisitRequest, current_user=Depends(check_module_permission("email_accounts", "create"))):
     try:
-        existing = await db["visits"].find_one(
-            {"user_id": str(current_user.id), "title": body.title, "visit_date": body.visit_date},
-            {"_id": 0, "id": 1}
-        )
+        incoming_event_id = (body.event_id or "").strip() or None
+        # Duplicate guard — prefer the strong event_id key (same reasoning as
+        # save-as-reminder: two visits can share a generic title), falling
+        # back to title+date for older/manual rows without an event_id.
+        dup_query = {"user_id": str(current_user.id)}
+        if incoming_event_id:
+            dup_query["event_id"] = incoming_event_id
+        else:
+            dup_query["title"] = body.title
+            dup_query["visit_date"] = body.visit_date
+        existing = await db["visits"].find_one(dup_query, {"_id": 0, "id": 1})
         if existing:
+            await _mark_event_saved(str(current_user.id), incoming_event_id, "visit", existing.get("id", ""))
             return {"status": "already_exists", "id": existing.get("id", "")}
         nid = str(_uuid.uuid4())
         await db["visits"].insert_one({
@@ -2067,6 +2156,7 @@ async def save_as_visit(body: ManualSaveVisitRequest, current_user=Depends(check
             "status": "scheduled", "source": "email_manual", "event_id": body.event_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
+        await _mark_event_saved(str(current_user.id), incoming_event_id, "visit", nid)
         return {"status": "created", "id": nid}
     except HTTPException:
         raise
@@ -2076,10 +2166,15 @@ async def save_as_visit(body: ManualSaveVisitRequest, current_user=Depends(check
 @router.post("/save-as-todo", status_code=201)
 async def save_as_todo(body: ManualSaveReminderRequest, current_user=Depends(check_module_permission("email_accounts", "create"))):
     try:
-        existing = await db["todos"].find_one(
-            {"user_id": str(current_user.id), "title": body.title}, {"_id": 0, "id": 1}
-        )
+        incoming_event_id = (body.event_id or "").strip() or None
+        dup_query = {"user_id": str(current_user.id)}
+        if incoming_event_id:
+            dup_query["event_id"] = incoming_event_id
+        else:
+            dup_query["title"] = body.title
+        existing = await db["todos"].find_one(dup_query, {"_id": 0, "id": 1})
         if existing:
+            await _mark_event_saved(str(current_user.id), incoming_event_id, "todo", existing.get("id", ""))
             return {"status": "already_exists", "id": existing.get("id", "")}
         nid = str(_uuid.uuid4())
         await db["todos"].insert_one({
@@ -2090,11 +2185,29 @@ async def save_as_todo(body: ManualSaveReminderRequest, current_user=Depends(che
             "created_at": datetime.now(timezone.utc).isoformat(),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         })
+        await _mark_event_saved(str(current_user.id), incoming_event_id, "todo", nid)
         return {"status": "created", "id": nid}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save todo: {e}")
+
+
+@router.post("/events/{event_id}/mark-saved", status_code=200)
+async def mark_event_saved(
+    event_id: str,
+    body: MarkEventSavedRequest,
+    current_user=Depends(check_module_permission("email_accounts", "create")),
+):
+    """
+    Flag an Action Center event as saved without going through
+    save-as-reminder/todo/visit. Used by the "Add Task" flow (Action Center →
+    Create Task posts straight to /tasks, which knows nothing about
+    email-extracted events), so that event also disappears from future
+    Action Center syncs once a task has been created from it.
+    """
+    await _mark_event_saved(str(current_user.id), event_id, body.category, body.saved_id or "")
+    return {"status": "ok"}
 
 
 # =============================================================================
@@ -2238,6 +2351,7 @@ async def extract_events(
         if wl_doc else []
     )
     dismissed_titles = await _get_dismissed_titles(str(current_user.id))
+    saved_event_ids  = await _get_saved_event_ids(str(current_user.id))
 
     async def process_account(conn):
         email_addr = conn["email_address"]
@@ -2250,10 +2364,19 @@ async def extract_events(
                 last = datetime.fromisoformat(conn["last_synced"])
                 if (datetime.now(timezone.utc) - last).total_seconds() < 1800:
                     cached = await db[COL_EVENTS].find(
-                        {"user_id": str(current_user.id), "email_account": email_addr},
-                        {"_id": 0}
+                        {
+                            "user_id": str(current_user.id),
+                            "email_account": email_addr,
+                            # Already saved (Action Center Save button, or
+                            # directly on the Reminders/Todos/Visits page) —
+                            # never resurface it from the cache.
+                            "saved_category": {"$exists": False},
+                        }
                     ).sort("created_at", -1).limit(limit).to_list(limit)
-                    return [_doc_to_out(d) for d in cached]
+                    return [
+                        _doc_to_out(d) for d in cached
+                        if str(d.get("_id", "")) not in saved_event_ids
+                    ]
             except Exception:
                 pass
 
@@ -2296,7 +2419,7 @@ async def extract_events(
             mid    = _stable_message_id(email_addr, raw)
             raw["message_id"] = mid
             exists = await db[COL_EVENTS].find_one(
-                {"user_id": str(current_user.id), "message_id": mid}, {"_id": 0}
+                {"user_id": str(current_user.id), "message_id": mid}
             )
             matched_kw = raw.get("matched_keywords") or []
             # When keyword filter is active but auto-save is OFF, this email
@@ -2305,6 +2428,11 @@ async def extract_events(
             may_autosave  = (not matched_kw) or kw_autosave
 
             if exists:
+                # Already saved (Action Center Save button, or directly from
+                # the Reminders/Todos/Visits page) — hide it permanently
+                # instead of re-adding it to this sync's results.
+                if exists.get("saved_category") or str(exists.get("_id", "")) in saved_event_ids:
+                    continue
                 ev_out = _doc_to_out(exists)
                 ev_out.matched_keywords     = matched_kw or exists.get("matched_keywords") or []
                 ev_out.requires_confirmation= needs_confirm
@@ -2381,10 +2509,14 @@ async def importer_events(
     count = await db[COL_EVENTS].count_documents({"user_id": str(current_user.id)})
     if count == 0 or force_refresh:
         return await extract_events(current_user, limit, force_refresh)
+    saved_event_ids = await _get_saved_event_ids(str(current_user.id))
     docs = await db[COL_EVENTS].find(
-        {"user_id": str(current_user.id)}, {"_id": 0}
+        {"user_id": str(current_user.id), "saved_category": {"$exists": False}}
     ).sort("date", -1).limit(limit).to_list(limit)
-    return [_doc_to_out(d) for d in docs]
+    return [
+        _doc_to_out(d) for d in docs
+        if str(d.get("_id", "")) not in saved_event_ids
+    ]
 
 
 # =============================================================================
@@ -2573,8 +2705,7 @@ async def get_events_by_tm_app_no(tm_app_no: str, current_user=Depends(check_mod
     Useful for frontend to show full history of a trademark case.
     """
     docs = await db[COL_EVENTS].find(
-        {"user_id": str(current_user.id), "tm_app_no": tm_app_no},
-        {"_id": 0}
+        {"user_id": str(current_user.id), "tm_app_no": tm_app_no}
     ).sort("date", 1).to_list(50)
     return [_doc_to_out(d) for d in docs]
 
