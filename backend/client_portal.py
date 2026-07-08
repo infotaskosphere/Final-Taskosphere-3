@@ -1927,22 +1927,21 @@ async def ensure_root_folder(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Idempotent one-click provisioning used by the Upload Center: if the client
-    already has a portal account + Drive root folder, returns it as-is.
-    Otherwise creates whatever is missing (portal account with an auto-generated
-    password, and/or the Drive root folder) so uploads can start immediately.
+    Idempotent one-click provisioning used by the Upload Center.
+
+    Creates a portal login for the client if one does not already exist.
+    Drive folder creation is intentionally NOT done here — use the
+    Folder Architect to create Drive folders manually with the desired
+    subfolder structure.
     """
     if current_user.role not in ("admin", "manager"):
         raise HTTPException(403, "Insufficient permissions")
-
-    from backend.invoicing import _get_drive_service, _drive_configured
-    import asyncio
 
     portal_user = await db.client_portal_users.find_one({"client_id": client_id}, {"_id": 0})
     generated_password = None
 
     if not portal_user:
-        # Auto-provision a portal login so the client can be uploaded to right away.
+        # Auto-provision a portal login so the client can log in immediately.
         base_username = re.sub(r"[^a-z0-9]+", "", client_name.lower())[:20] or "client"
         username = base_username
         suffix = 1
@@ -1971,27 +1970,9 @@ async def ensure_root_folder(
         await db.client_portal_users.insert_one(new_user)
         portal_user = new_user
 
+    # Drive folder is NOT auto-created here. Use Folder Architect to create
+    # it manually with the correct subfolder structure.
     folder_id = portal_user.get("google_drive_folder_id")
-    folder_link = None
-    if not folder_id:
-        if not _drive_configured():
-            raise HTTPException(503, "Google Drive not configured.")
-        subfolders = await _resolve_subfolders()
-        parent_id = await _resolve_parent_folder_id()
-        service = _get_drive_service()
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None, _create_drive_folder_sync, service, client_name, parent_id, subfolders,
-        )
-        folder_id = result.get("folder_id")
-        folder_link = result.get("folder_link")
-        await db.client_portal_users.update_many(
-            {"client_id": client_id},
-            {"$set": {"google_drive_folder_id": folder_id, "google_drive_folder_name": client_name}},
-        )
-        await db.clients.update_one(
-            {"id": client_id}, {"$set": {"google_drive_folder_id": folder_id, "has_drive": True}}
-        )
 
     return {
         "success": True,
@@ -1999,7 +1980,7 @@ async def ensure_root_folder(
         "portal_username": portal_user["portal_username"],
         "generated_password": generated_password,  # only present when a new account was just created
         "google_drive_folder_id": folder_id,
-        "google_drive_folder_link": folder_link,
+        "google_drive_folder_link": None,
     }
 
 
