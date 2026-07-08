@@ -1820,6 +1820,295 @@ async def smart_bulk_upload(
     }
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Simple Upload Center  –  easy drag-and-drop uploads, folder create/delete,
+# and single + bulk deletion of Drive items and portal clients.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _get_or_create_subfolder_sync(service, parent_id: str, name: str) -> str:
+    """Synchronous helper – find (or create) a folder named `name` inside `parent_id`."""
+    safe_name = name.replace("'", "\\'").strip()
+    existing = service.files().list(
+        q=f"'{parent_id}' in parents and name='{safe_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false",
+        fields="files(id,name)",
+    ).execute().get("files", [])
+    if existing:
+        return existing[0]["id"]
+    created = service.files().create(
+        body={"name": name.strip(), "mimeType": "application/vnd.google-apps.folder", "parents": [parent_id]},
+        fields="id",
+    ).execute()
+    return created["id"]
+
+
+def _upload_file_to_drive_sync(service, folder_id: str, filename: str, file_bytes: bytes, mime_type: str) -> dict:
+    """Synchronous helper – upload raw bytes to a Drive folder. Returns the created file resource."""
+    from googleapiclient.http import MediaIoBaseUpload
+    import io as _io
+    media = MediaIoBaseUpload(_io.BytesIO(file_bytes), mimetype=mime_type or "application/octet-stream", resumable=False)
+    return service.files().create(
+        body={"name": filename, "parents": [folder_id]},
+        media_body=media,
+        fields="id,name,webViewLink,mimeType,size,modifiedTime,iconLink",
+    ).execute()
+
+
+@router.post("/drive/ensure-root-folder")
+async def ensure_root_folder(
+    client_id: str = Form(...),
+    client_name: str = Form(...),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Idempotent one-click provisioning used by the Upload Center: if the client
+    already has a portal account + Drive root folder, returns it as-is.
+    Otherwise creates whatever is missing (portal account with an auto-generated
+    password, and/or the Drive root folder) so uploads can start immediately.
+    """
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Insufficient permissions")
+
+    from backend.invoicing import _get_drive_service, _drive_configured
+    import asyncio
+
+    portal_user = await db.client_portal_users.find_one({"client_id": client_id}, {"_id": 0})
+    generated_password = None
+
+    if not portal_user:
+        # Auto-provision a portal login so the client can be uploaded to right away.
+        base_username = re.sub(r"[^a-z0-9]+", "", client_name.lower())[:20] or "client"
+        username = base_username
+        suffix = 1
+        while await db.client_portal_users.find_one({"portal_username": username}):
+            suffix += 1
+            username = f"{base_username}{suffix}"
+        generated_password = f"{base_username[:4]}{random.randint(1000, 9999)}"
+        new_user = {
+            "id": str(uuid.uuid4()),
+            "client_id": client_id,
+            "client_name": client_name,
+            "portal_username": username,
+            "hashed_password": pwd_context.hash(generated_password),
+            "display_name": client_name,
+            "email": None,
+            "is_active": True,
+            "can_view_tasks": True,
+            "can_view_documents": True,
+            "can_view_invoices": True,
+            "can_view_compliance": False,
+            "google_drive_folder_id": None,
+            "google_drive_folder_name": None,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_by": current_user.id,
+        }
+        await db.client_portal_users.insert_one(new_user)
+        portal_user = new_user
+
+    folder_id = portal_user.get("google_drive_folder_id")
+    folder_link = None
+    if not folder_id:
+        if not _drive_configured():
+            raise HTTPException(503, "Google Drive not configured.")
+        subfolders = await _resolve_subfolders()
+        service = _get_drive_service()
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, _create_drive_folder_sync, service, client_name, None, subfolders,
+        )
+        folder_id = result.get("folder_id")
+        folder_link = result.get("folder_link")
+        await db.client_portal_users.update_many(
+            {"client_id": client_id},
+            {"$set": {"google_drive_folder_id": folder_id, "google_drive_folder_name": client_name}},
+        )
+        await db.clients.update_one(
+            {"id": client_id}, {"$set": {"google_drive_folder_id": folder_id, "has_drive": True}}
+        )
+
+    return {
+        "success": True,
+        "portal_user_id": portal_user["id"],
+        "portal_username": portal_user["portal_username"],
+        "generated_password": generated_password,  # only present when a new account was just created
+        "google_drive_folder_id": folder_id,
+        "google_drive_folder_link": folder_link,
+    }
+
+
+@router.post("/drive/upload-file")
+async def simple_upload_file(
+    portal_user_id: str = Form(...),
+    folder_id: Optional[str] = Form(None),
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    One-file-at-a-time upload used by the Upload Center's drag-and-drop zone.
+    The frontend fires one call per file (in parallel) so uploads happen in
+    the background while the admin keeps working / drops more files.
+    """
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Insufficient permissions")
+
+    from backend.invoicing import _get_drive_service, _drive_configured
+    import asyncio, mimetypes
+
+    if not _drive_configured():
+        raise HTTPException(503, "Google Drive not configured.")
+
+    portal_user = await db.client_portal_users.find_one({"id": portal_user_id}, {"_id": 0})
+    if not portal_user:
+        raise HTTPException(404, "Portal user not found")
+
+    target_folder = folder_id or portal_user.get("google_drive_folder_id")
+    if not target_folder:
+        raise HTTPException(400, "This client has no Drive folder yet. Create one first.")
+
+    file_bytes = await file.read()
+    mime = file.content_type or mimetypes.guess_type(file.filename)[0] or "application/octet-stream"
+
+    service = _get_drive_service()
+    loop = asyncio.get_event_loop()
+    try:
+        uploaded = await loop.run_in_executor(
+            None, _upload_file_to_drive_sync, service, target_folder, file.filename, file_bytes, mime,
+        )
+    except Exception as e:
+        logger.error(f"Simple upload failed: {e}", exc_info=True)
+        raise HTTPException(500, f"Upload failed: {e}")
+
+    return {
+        "success": True,
+        "id": uploaded.get("id"),
+        "name": uploaded.get("name"),
+        "webViewLink": uploaded.get("webViewLink"),
+        "mimeType": uploaded.get("mimeType"),
+        "folder_id": target_folder,
+    }
+
+
+class CreateSubfolderRequest(BaseModel):
+    portal_user_id: str
+    folder_name: str = Field(..., min_length=1, max_length=200)
+    parent_folder_id: Optional[str] = None
+
+
+@router.post("/drive/simple-create-folder")
+async def simple_create_folder(
+    body: CreateSubfolderRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Create a single new folder (used by the Upload Center's '+ New Folder' button)."""
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Insufficient permissions")
+
+    from backend.invoicing import _get_drive_service, _drive_configured
+    import asyncio
+
+    if not _drive_configured():
+        raise HTTPException(503, "Google Drive not configured.")
+
+    portal_user = await db.client_portal_users.find_one({"id": body.portal_user_id}, {"_id": 0})
+    if not portal_user:
+        raise HTTPException(404, "Portal user not found")
+
+    parent_id = body.parent_folder_id or portal_user.get("google_drive_folder_id")
+    if not parent_id:
+        raise HTTPException(400, "This client has no Drive folder yet. Create one first.")
+
+    service = _get_drive_service()
+    loop = asyncio.get_event_loop()
+    folder_id = await loop.run_in_executor(
+        None, _get_or_create_subfolder_sync, service, parent_id, body.folder_name,
+    )
+    return {"success": True, "id": folder_id, "name": body.folder_name, "parent_folder_id": parent_id}
+
+
+class BulkDeleteRequest(BaseModel):
+    portal_user_id: str
+    file_ids: List[str] = Field(..., min_length=1)
+
+
+@router.delete("/drive/item")
+async def delete_drive_item(
+    portal_user_id: str = Query(...),
+    file_id: str = Query(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Move a single Drive file/folder to Trash and drop it from any visibility list."""
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Insufficient permissions")
+
+    from backend.invoicing import _get_drive_service, _drive_configured
+    import asyncio
+
+    if not _drive_configured():
+        raise HTTPException(503, "Google Drive not configured.")
+
+    service = _get_drive_service()
+    loop = asyncio.get_event_loop()
+    try:
+        await loop.run_in_executor(None, lambda: service.files().update(fileId=file_id, body={"trashed": True}).execute())
+    except Exception as e:
+        raise HTTPException(500, f"Failed to delete: {e}")
+
+    await db.client_drive_visibility.update_one(
+        {"portal_user_id": portal_user_id}, {"$pull": {"hidden_ids": file_id}}
+    )
+    return {"success": True, "deleted_id": file_id}
+
+
+@router.post("/drive/bulk-delete")
+async def bulk_delete_drive_items(
+    body: BulkDeleteRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Trash multiple Drive files/folders at once (used by the Upload Center's bulk-delete action)."""
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Insufficient permissions")
+
+    from backend.invoicing import _get_drive_service, _drive_configured
+    import asyncio
+
+    if not _drive_configured():
+        raise HTTPException(503, "Google Drive not configured.")
+
+    service = _get_drive_service()
+    loop = asyncio.get_event_loop()
+
+    deleted, errors = [], []
+    for fid in body.file_ids:
+        try:
+            await loop.run_in_executor(None, lambda fid=fid: service.files().update(fileId=fid, body={"trashed": True}).execute())
+            deleted.append(fid)
+        except Exception as e:
+            errors.append({"id": fid, "error": str(e)})
+
+    if deleted:
+        await db.client_drive_visibility.update_one(
+            {"portal_user_id": body.portal_user_id}, {"$pull": {"hidden_ids": {"$in": deleted}}}
+        )
+
+    return {"success": True, "deleted": deleted, "failed": errors}
+
+
+class BulkUserDeleteRequest(BaseModel):
+    portal_user_ids: List[str] = Field(..., min_length=1)
+
+
+@router.post("/users/bulk-delete")
+async def bulk_delete_portal_users(
+    body: BulkUserDeleteRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Remove multiple clients from the Client Portal at once (revokes their login; Drive files are untouched)."""
+    if current_user.role != "admin":
+        raise HTTPException(403, "Only admins can remove clients from the portal")
+
+    res = await db.client_portal_users.delete_many({"id": {"$in": body.portal_user_ids}})
+    return {"success": True, "deleted_count": res.deleted_count}
+
+
 @router.get("/drive/subfolders/{portal_user_id}")
 async def list_client_subfolders(
     portal_user_id: str,
