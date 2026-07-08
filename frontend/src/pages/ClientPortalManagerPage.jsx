@@ -747,9 +747,9 @@ function FolderArchitectTab({ isDark, isAdmin }) {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="space-y-6">
 
-        {/* Left: Folder Structure Designer */}
+        {/* Folder Structure Designer */}
         <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <div className={`flex items-center gap-2.5 px-5 py-4 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
             <div className="p-1.5 rounded-lg" style={{ background: `${COLORS.deepBlue}12` }}>
@@ -850,27 +850,8 @@ function FolderArchitectTab({ isDark, isAdmin }) {
           </div>
         </div>
 
-        {/* Right: Apply to Clients */}
-        <div className="space-y-4">
-          {/* Individual Apply — with custom folder name */}
-          <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-            <div className={`flex items-center gap-2.5 px-5 py-4 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-              <div className="p-1.5 rounded-lg" style={{ background: '#3B82F612' }}>
-                <Folder className="h-4 w-4 text-blue-600" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Add Folder to Company</h3>
-                <p className="text-xs text-slate-400">Create a Drive folder for any client — optionally with a custom folder name</p>
-              </div>
-            </div>
-            <div className="p-5 space-y-3">
-              {/* Quick-add a single folder for any company */}
-              <IndividualFolderPanel clients={clients} loadingClients={loadingClients} subfolders={subfolders} parentId={parentId} isDark={isDark} onRefresh={loadClients} />
-            </div>
-          </div>
-
-          {/* Bulk Apply */}
-          {isAdmin && (
+        {/* Bulk Apply */}
+        {isAdmin && (
             <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
               <div className={`flex items-center gap-2.5 px-5 py-4 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
                 <div className="p-1.5 rounded-lg" style={{ background: `${COLORS.emeraldGreen}15` }}>
@@ -1075,8 +1056,7 @@ function FolderArchitectTab({ isDark, isAdmin }) {
                 )}
               </div>
             </div>
-          )}
-        </div>
+        )}
       </div>
     </div>
   );
