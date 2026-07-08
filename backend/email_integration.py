@@ -7,6 +7,7 @@ import json
 import asyncio
 import logging
 import html
+import difflib
 import uuid as _uuid
 from html.parser import HTMLParser
 from datetime import datetime, timezone, timedelta
@@ -1251,18 +1252,156 @@ def _reminder_to_dict(doc: Dict) -> Dict:
     raw_id = doc.get("id") or doc.get("_id")
     str_id = str(raw_id) if raw_id is not None else ""
     return {
-        "id":           str_id,
-        "_id":          str_id,   # legacy field — kept so any old frontend code still works
-        "user_id":      doc.get("user_id", ""),
-        "title":        doc.get("title", ""),
-        "description":  doc.get("description"),
-        "remind_at":    doc.get("remind_at"),
-        "is_dismissed": doc.get("is_dismissed", False),
-        "source":       doc.get("source"),
-        "tm_app_no":    doc.get("tm_app_no"),
-        "urgency":      doc.get("urgency", "medium"),
-        "created_at":   doc.get("created_at"),
+        "id":                str_id,
+        "_id":               str_id,   # legacy field — kept so any old frontend code still works
+        "user_id":           doc.get("user_id", ""),
+        "title":             doc.get("title", ""),
+        "description":       doc.get("description"),
+        "remind_at":         doc.get("remind_at"),
+        "is_dismissed":      doc.get("is_dismissed", False),
+        "source":            doc.get("source"),
+        "event_id":          doc.get("event_id"),
+        "tm_app_no":         doc.get("tm_app_no"),
+        "urgency":           doc.get("urgency", "medium"),
+        "created_at":        doc.get("created_at"),
+        # Trademark Hearing outcome fields — read through so the frontend
+        # (and the duplicate-completeness scoring) sees the full record,
+        # not just title/date.
+        "brand_name":        doc.get("brand_name"),
+        "hearing_attended":  doc.get("hearing_attended"),
+        "hearing_decision":  doc.get("hearing_decision"),
+        "hearing_adjourned": doc.get("hearing_adjourned"),
+        "hearing_notes":     doc.get("hearing_notes"),
     }
+
+
+# =============================================================================
+# REMINDER DUPLICATE DETECTION
+# =============================================================================
+# These helpers read EVERY relevant parameter of a reminder — not just its
+# title or event_id — to decide whether two reminder documents represent the
+# same real-world reminder:
+#   • tm_app_no    (strongest signal — the official IP-India application no.)
+#   • title        (fuzzy-matched, so "TM App No. 6384945" and "TM Application
+#                    No. 6384945" are still recognised as the same thing)
+#   • remind_at    (two hearings on the same TM number 30 days apart are NOT
+#                    the same reminder, so proximity in time is required too)
+#   • description  (used as a tie-breaker signal when nothing else decides it)
+# =============================================================================
+
+def _normalize_title_for_dedup(title: str) -> str:
+    """Lowercase, strip punctuation/extra whitespace so near-identical
+    titles ("TM App No. 6384945" vs "TM Application No 6384945") compare
+    the same way."""
+    t = (title or "").lower().strip()
+    t = re.sub(r"[^a-z0-9]+", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _title_similarity(a: str, b: str) -> float:
+    """0.0–1.0 fuzzy similarity between two reminder titles."""
+    na, nb = _normalize_title_for_dedup(a), _normalize_title_for_dedup(b)
+    if not na or not nb:
+        return 0.0
+    return difflib.SequenceMatcher(None, na, nb).ratio()
+
+
+def _parse_dt_safe(iso_str: Optional[str]) -> Optional[datetime]:
+    if not iso_str:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(iso_str).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
+def _dates_close(a_iso: Optional[str], b_iso: Optional[str], hours: float = 36) -> bool:
+    """True when both timestamps parse and land within `hours` hours of each other."""
+    da, db_ = _parse_dt_safe(a_iso), _parse_dt_safe(b_iso)
+    if not da or not db_:
+        return False
+    return abs((da - db_).total_seconds()) <= hours * 3600
+
+
+def _reminders_are_duplicate(a: Dict, b: Dict) -> bool:
+    """
+    Read every relevant parameter of both reminders and decide whether they
+    describe the same underlying reminder. Returns True only when the
+    combined evidence (tm_app_no + title + date + description) makes that
+    very likely, so legitimately distinct reminders are never merged.
+    """
+    if not a or not b:
+        return False
+    if str(a.get("id") or a.get("_id")) == str(b.get("id") or b.get("_id")):
+        return False
+
+    tm_a = (a.get("tm_app_no") or "").strip().lower()
+    tm_b = (b.get("tm_app_no") or "").strip().lower()
+    title_sim = _title_similarity(a.get("title", ""), b.get("title", ""))
+    desc_sim = _title_similarity(a.get("description", "") or "", b.get("description", "") or "")
+    same_window = _dates_close(a.get("remind_at"), b.get("remind_at"), hours=36)
+
+    # Strongest signal: identical official TM application number, and the
+    # reminders are scheduled within the same short window of time.
+    if tm_a and tm_b and tm_a == tm_b and same_window:
+        return True
+
+    # One side is missing a tm_app_no (e.g. a manually-created reminder that
+    # never had it parsed) — fall back to a very high title match instead.
+    if (tm_a or tm_b) and title_sim >= 0.92 and same_window:
+        return True
+
+    # Neither side has a tm_app_no at all — require strong title AND date
+    # agreement (a high description match raises confidence further).
+    if not tm_a and not tm_b and title_sim >= 0.82 and same_window:
+        if title_sim >= 0.95 or desc_sim >= 0.7 or (a.get("description") is None and b.get("description") is None):
+            return True
+
+    return False
+
+
+def _pair_key(id_a: str, id_b: str) -> str:
+    return "|".join(sorted([str(id_a), str(id_b)]))
+
+
+class _DisjointSet:
+    """Tiny union-find used to cluster reminders into duplicate groups."""
+    def __init__(self, n: int):
+        self.parent = list(range(n))
+
+    def find(self, x: int) -> int:
+        while self.parent[x] != x:
+            self.parent[x] = self.parent[self.parent[x]]
+            x = self.parent[x]
+        return x
+
+    def union(self, x: int, y: int) -> None:
+        rx, ry = self.find(x), self.find(y)
+        if rx != ry:
+            self.parent[ry] = rx
+
+
+async def _find_existing_duplicate(user_id: str, candidate: Dict, ignored_pairs: Optional[Set[str]] = None) -> Optional[Dict]:
+    """
+    Scan every one of the user's active reminders and read all of their
+    parameters against `candidate` to see if a duplicate already exists.
+    Used at CREATE time (manual save + email auto-save) so duplicates are
+    prevented up front, not just cleaned up later.
+    """
+    cursor = db["reminders"].find(
+        {"user_id": user_id, "is_dismissed": {"$ne": True}}
+    )
+    async for doc in cursor:
+        existing = _reminder_to_dict(doc)
+        if ignored_pairs and _pair_key(existing["id"], candidate.get("id", "")) in ignored_pairs:
+            continue
+        if _reminders_are_duplicate(existing, candidate):
+            return existing
+    return None
 
 
 # =============================================================================
@@ -1428,6 +1567,25 @@ async def _auto_save_event(user_id: str, event: ExtractedEventOut, prefs: Dict):
                     logger.info(f"[REMINDER] Adjourned TM#{tm_app_no} → new date {date_str}")
                 else:
                     logger.debug(f"[REMINDER] Skip duplicate hearing TM#{tm_app_no}")
+                return
+
+            # Extra safety net: the exact-match lookups above only catch
+            # duplicates keyed on tm_app_no or an identical title. Before
+            # inserting, also read every parameter of every other active
+            # reminder this user has (title similarity, date proximity,
+            # description) to catch near-duplicates the exact-match queries
+            # would miss (e.g. same hearing re-imported with a slightly
+            # reformatted subject line).
+            fuzzy_candidate = {
+                "id": "", "title": event.title, "tm_app_no": tm_app_no,
+                "remind_at": remind_dt.isoformat(), "description": clean_desc,
+            }
+            fuzzy_existing = await _find_existing_duplicate(user_id, fuzzy_candidate)
+            if fuzzy_existing:
+                logger.debug(
+                    f"[REMINDER] Skip near-duplicate of existing reminder "
+                    f"{fuzzy_existing.get('id')} (TM#{tm_app_no})"
+                )
                 return
 
             # New reminder — build description
@@ -1658,6 +1816,9 @@ async def create_email_indexes():
         )
         await db["reminders"].create_index(
             [("user_id", 1), ("id", 1)], background=True, sparse=True
+        )
+        await db["reminder_dup_ignores"].create_index(
+            [("user_id", 1), ("pair_key", 1)], unique=True, background=True
         )
         await db["todos"].create_index(
             [("user_id", 1), ("tm_app_no", 1), ("is_completed", 1)],
@@ -2101,6 +2262,23 @@ async def save_as_reminder(body: ManualSaveReminderRequest, current_user=Depends
             await _mark_event_saved(str(current_user.id), incoming_event_id, "reminder", existing.get("id", ""))
             return {"status": "already_exists", "id": existing.get("id", "")}
 
+        # Second, stronger guard: the exact-match query above only catches
+        # duplicates keyed on event_id or an identical title. Read every
+        # parameter (title similarity, remind_at proximity, tm_app_no,
+        # description) of every other active reminder this user has to also
+        # catch near-duplicates — e.g. the same hearing saved twice from two
+        # slightly different Action Center rows.
+        fuzzy_candidate = {
+            "id": "", "title": body.title,
+            "tm_app_no": _extract_tm_app_no(body.title or "") or _extract_tm_app_no(body.description or ""),
+            "remind_at": remind_dt.isoformat(),
+            "description": body.description or "",
+        }
+        fuzzy_existing = await _find_existing_duplicate(str(current_user.id), fuzzy_candidate)
+        if fuzzy_existing:
+            await _mark_event_saved(str(current_user.id), incoming_event_id, "reminder", fuzzy_existing.get("id", ""))
+            return {"status": "already_exists", "id": fuzzy_existing.get("id", "")}
+
         nid = str(_uuid.uuid4())
         doc = {
             "id": nid, "user_id": str(current_user.id), "title": body.title,
@@ -2305,6 +2483,113 @@ async def delete_reminder(
             )
         except Exception:
             pass  # Invalid ObjectId format — silently ignore, return 204 anyway
+
+
+# =============================================================================
+# API ROUTES — REMINDER DUPLICATE DETECTION
+# =============================================================================
+# Powers the "Duplicates" tab on the Reminders page. Unlike the create-time
+# guards above (which only stop NEW duplicates from being inserted), these
+# routes scan every existing reminder the user already has and group ones
+# that look like duplicates of each other, so old/legacy duplicates can be
+# cleaned up too.
+# =============================================================================
+
+@router.get("/reminders/duplicates")
+async def get_duplicate_reminders(
+    current_user=Depends(check_module_permission("email_accounts", "view")),
+    user_id: Optional[str] = Query(None),
+):
+    """
+    Reads every parameter (title, tm_app_no, remind_at, description, source)
+    of every active reminder belonging to the user and groups the ones that
+    are very likely duplicates of one another.
+
+    Pairs the user has previously marked "Not a Duplicate" (via the ignore
+    endpoint below) are permanently excluded from future results.
+    """
+    target_uid = user_id if user_id else str(current_user.id)
+
+    docs = await db["reminders"].find(
+        {"user_id": target_uid, "is_dismissed": {"$ne": True}}
+    ).to_list(2000)
+    reminders = [_reminder_to_dict(d) for d in docs]
+
+    ignored_pairs: Set[str] = set()
+    async for ig in db["reminder_dup_ignores"].find({"user_id": target_uid}, {"_id": 0, "pair_key": 1}):
+        ignored_pairs.add(ig["pair_key"])
+
+    n = len(reminders)
+    dsu = _DisjointSet(n)
+    for i in range(n):
+        for j in range(i + 1, n):
+            if _pair_key(reminders[i]["id"], reminders[j]["id"]) in ignored_pairs:
+                continue
+            if _reminders_are_duplicate(reminders[i], reminders[j]):
+                dsu.union(i, j)
+
+    clusters: Dict[int, List[Dict]] = {}
+    for idx, rem in enumerate(reminders):
+        root = dsu.find(idx)
+        clusters.setdefault(root, []).append(rem)
+
+    def completeness(r: Dict) -> int:
+        return sum(1 for k in ("description", "tm_app_no", "brand_name") if r.get(k))
+
+    groups = []
+    for members in clusters.values():
+        if len(members) < 2:
+            continue
+        members_sorted = sorted(
+            members,
+            key=lambda r: (-completeness(r), r.get("created_at") or ""),
+        )
+        for i, m in enumerate(members_sorted):
+            m["suggested_keep"] = (i == 0)
+        groups.append({
+            "group_id": members_sorted[0]["id"],
+            "members": members_sorted,
+        })
+
+    groups.sort(key=lambda g: g["members"][0].get("remind_at") or "")
+
+    return {
+        "duplicate_groups": groups,
+        "group_count": len(groups),
+        "total_duplicate_reminders": sum(len(g["members"]) for g in groups),
+    }
+
+
+@router.post("/reminders/duplicates/ignore", status_code=200)
+async def ignore_duplicate_reminders(
+    body: dict,
+    current_user=Depends(check_module_permission("email_accounts", "create")),
+):
+    """
+    Mark a set of reminders as "Not a Duplicate" of one another. Every
+    pairwise combination inside `ids` is recorded, so the group (or any
+    subset of it) never gets suggested as a duplicate match again.
+    body: { "ids": ["<reminder_id>", "<reminder_id>", ...] }
+    """
+    user_id = str(current_user.id)
+    ids = [str(x) for x in (body.get("ids") or []) if x]
+    if len(ids) < 2:
+        raise HTTPException(status_code=400, detail="At least two reminder ids are required")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    pairs_written = 0
+    for i in range(len(ids)):
+        for j in range(i + 1, len(ids)):
+            key = _pair_key(ids[i], ids[j])
+            await db["reminder_dup_ignores"].update_one(
+                {"user_id": user_id, "pair_key": key},
+                {"$set": {"user_id": user_id, "pair_key": key, "updated_at": now_iso},
+                 "$setOnInsert": {"created_at": now_iso}},
+                upsert=True,
+            )
+            pairs_written += 1
+
+    return {"status": "ok", "ignored_pairs": pairs_written}
 
 
 # =============================================================================
