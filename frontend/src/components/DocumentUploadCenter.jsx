@@ -69,6 +69,24 @@ function extractErrorMessage(err, fallback = 'Something went wrong. Please try a
   return fallback;
 }
 
+// A request that got a response (even an error one, like 403/500) reached our
+// server -- that's a normal backend error. A request with NO response at all
+// (err.response is undefined, err.code is ERR_NETWORK / ERR_FAILED / etc.)
+// never reached the server: it was blocked before leaving the browser, almost
+// always by antivirus "web shield" software, a browser extension, or a
+// corporate firewall -- NOT a bug in Taskosphere. We label these differently
+// so the tray gives people something actionable instead of a generic failure.
+function isLikelyClientSideBlock(err) {
+  return !err?.response;
+}
+
+function uploadFailureMessage(fileName, err) {
+  if (isLikelyClientSideBlock(err)) {
+    return `"${fileName}" was blocked before it left your browser -- likely your antivirus/firewall or an extension. Try Incognito mode or whitelist this site, then hit Retry.`;
+  }
+  return extractErrorMessage(err, `Failed to upload "${fileName}"`);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Client list (left rail)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -222,7 +240,7 @@ function CredentialsCard({ username, password, onDismiss }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // Upload progress tray (floating, bottom-right)
 // ═══════════════════════════════════════════════════════════════════════════
-function UploadTray({ items, onClear }) {
+function UploadTray({ items, onClear, onRetry }) {
   if (items.length === 0) return null;
   const done = items.filter((i) => i.status !== 'uploading').length;
   return (
@@ -240,11 +258,24 @@ function UploadTray({ items, onClear }) {
       </div>
       <div className="max-h-64 overflow-y-auto divide-y divide-slate-50 dark:divide-slate-700">
         {items.map((it) => (
-          <div key={it.id} className="flex items-center gap-2.5 px-4 py-2">
-            {it.status === 'uploading' && <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500 flex-shrink-0" />}
-            {it.status === 'done' && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />}
-            {it.status === 'error' && <XCircle className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />}
-            <span className="text-xs text-slate-600 dark:text-slate-300 truncate flex-1">{it.name}</span>
+          <div key={it.id} className="px-4 py-2">
+            <div className="flex items-center gap-2.5">
+              {it.status === 'uploading' && <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500 flex-shrink-0" />}
+              {it.status === 'done' && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />}
+              {it.status === 'error' && <XCircle className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />}
+              <span className="text-xs text-slate-600 dark:text-slate-300 truncate flex-1">{it.name}</span>
+              {it.status === 'error' && (
+                <button
+                  onClick={() => onRetry?.(it)}
+                  className="text-[11px] font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1 flex-shrink-0"
+                >
+                  <RefreshCw className="h-3 w-3" /> Retry
+                </button>
+              )}
+            </div>
+            {it.status === 'error' && it.errorMsg && (
+              <p className="text-[10.5px] text-red-500 mt-0.5 pl-6 leading-snug">{it.errorMsg}</p>
+            )}
           </div>
         ))}
       </div>
@@ -509,6 +540,42 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
   };
 
   // ── upload (background, parallel, one call per file) ───────────────────
+  const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+
+  const uploadOne = useCallback(async (file, trayId, { isRetry = false } = {}) => {
+    const form = new FormData();
+    form.append('portal_user_id', portalUser.id);
+    if (currentFolderId) form.append('folder_id', currentFolderId);
+    form.append('file', file);
+
+    setUploadItems((prev) => prev.map((it) => (
+      it.id === trayId ? { ...it, status: 'uploading', file, errorMsg: null } : it
+    )));
+
+    try {
+      await api.post('/client-portal/drive/upload-file', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setUploadItems((prev) => prev.map((it) => (it.id === trayId ? { ...it, status: 'done' } : it)));
+      loadItems();
+    } catch (err) {
+      // Network-level blocks (no response reached us at all) are often
+      // transient -- a first attempt trips something, a second gets through.
+      // Only auto-retry once, and only for that class of failure, so a real
+      // backend error (403/500 etc.) surfaces immediately instead of hiding
+      // behind a pointless retry.
+      if (!isRetry && isLikelyClientSideBlock(err)) {
+        await sleep(1200);
+        return uploadOne(file, trayId, { isRetry: true });
+      }
+      const msg = uploadFailureMessage(file.name, err);
+      setUploadItems((prev) => prev.map((it) => (
+        it.id === trayId ? { ...it, status: 'error', errorMsg: msg, file } : it
+      )));
+      toast.error(msg);
+    }
+  }, [portalUser, currentFolderId, loadItems]);
+
   const uploadFiles = useCallback((fileList) => {
     if (!portalUser?.google_drive_folder_id) {
       toast.error('Set up this client\'s Drive folder first.');
@@ -520,25 +587,16 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
     const newTrayItems = files.map((f) => ({ id: `${Date.now()}-${Math.random()}`, name: f.name, status: 'uploading' }));
     setUploadItems((prev) => [...prev, ...newTrayItems]);
 
-    files.forEach(async (file, idx) => {
-      const trayId = newTrayItems[idx].id;
-      const form = new FormData();
-      form.append('portal_user_id', portalUser.id);
-      if (currentFolderId) form.append('folder_id', currentFolderId);
-      form.append('file', file);
-      try {
-        await api.post('/client-portal/drive/upload-file', form, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
-        setUploadItems((prev) => prev.map((it) => (it.id === trayId ? { ...it, status: 'done' } : it)));
-        setItems((prev) => (prev.some((p) => p.name === file.name) ? prev : prev)); // no-op placeholder
-        loadItems();
-      } catch (err) {
-        setUploadItems((prev) => prev.map((it) => (it.id === trayId ? { ...it, status: 'error' } : it)));
-        toast.error(`Failed to upload "${file.name}"`);
-      }
-    });
-  }, [portalUser, currentFolderId, loadItems]);
+    files.forEach((file, idx) => uploadOne(file, newTrayItems[idx].id));
+  }, [portalUser, uploadOne]);
+
+  const retryUpload = useCallback((trayItem) => {
+    if (!trayItem?.file) {
+      toast.error('Can\'t retry -- please re-drag this file in.');
+      return;
+    }
+    uploadOne(trayItem.file, trayItem.id);
+  }, [uploadOne]);
 
   // ── drag & drop handlers ────────────────────────────────────────────
   const onDrop = (e) => {
@@ -811,7 +869,7 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
 
       <AnimatePresence>
         {uploadItems.length > 0 && (
-          <UploadTray items={uploadItems} onClear={() => setUploadItems([])} />
+          <UploadTray items={uploadItems} onClear={() => setUploadItems([])} onRetry={retryUpload} />
         )}
       </AnimatePresence>
     </div>
