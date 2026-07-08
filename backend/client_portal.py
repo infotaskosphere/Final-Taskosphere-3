@@ -836,10 +836,16 @@ async def save_folder_template(
 # ═══════════════════════════════════════════════════════════════════════════
 
 async def _resolve_subfolders() -> List[str]:
-    """Return the saved template subfolders or fall back to defaults."""
+    """Return the saved template subfolders.
+
+    If the admin has saved a template (even an empty one), always honour it —
+    an empty list explicitly means "only create the company-name root folder;
+    do not auto-create any subfolders". Defaults apply only when no template
+    has ever been saved.
+    """
     doc = await db.portal_folder_template.find_one({}, {"_id": 0})
-    if doc and doc.get("subfolders"):
-        return doc["subfolders"]
+    if doc is not None and "subfolders" in doc:
+        return list(doc.get("subfolders") or [])
     return DEFAULT_SUBFOLDERS
 
 
@@ -1549,13 +1555,19 @@ async def create_individual_folder(
     if not _drive_configured():
         raise HTTPException(503, "Google Drive not configured.")
 
+    # Always resolve the parent through the shared helper so that a blank
+    # parent_folder_id falls back to the saved Folder Architect template or
+    # the default TASKOSPHERE parent — never to the connected account's
+    # My Drive root.
+    parent_id = await _resolve_parent_folder_id(payload.parent_folder_id)
+
     loop = asyncio.get_event_loop()
     try:
         service = _get_drive_service()
         result = await loop.run_in_executor(
             None,
             _create_drive_folder_sync,
-            service, folder_name, payload.parent_folder_id, subfolders,
+            service, folder_name, parent_id, subfolders,
         )
     except Exception as e:
         logger.error(f"Drive folder creation failed: {e}", exc_info=True)
