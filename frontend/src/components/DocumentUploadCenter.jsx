@@ -555,23 +555,44 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
   // relative path points to, e.g. ["DOCUMENTS", "Gst Returns"] becomes the
   // id of currentFolder/DOCUMENTS/Gst Returns, reusing the same
   // "+ New Folder" endpoint so nested folders get created idempotently.
+  //
+  // RACE-CONDITION FIX: When multiple files share the same folder path (e.g.
+  // three files all inside "KYC/"), queueUploads calls resolveTargetFolder
+  // for all of them simultaneously.  Without protection the cache is empty for
+  // all three, so all three fire a create-folder request → three duplicate
+  // KYC folders.
+  //
+  // Fix: store an in-flight Promise in the cache as soon as we start creating.
+  // Any concurrent call that reaches the same key finds the Promise and awaits
+  // it instead of sending another create request.  Once the Promise resolves we
+  // replace it with the plain string folder-id for instant future lookups.
   const resolveTargetFolder = useCallback(async (pathParts) => {
     let parentId = currentFolderId || null;
     if (!pathParts?.length) return parentId;
     let cacheKey = `${parentId || 'root'}`;
     for (const name of pathParts) {
       cacheKey += `/${name}`;
-      if (folderIdCache.current.has(cacheKey)) {
-        parentId = folderIdCache.current.get(cacheKey);
+
+      const cached = folderIdCache.current.get(cacheKey);
+      if (cached !== undefined) {
+        // May be a resolved string id OR an in-flight Promise — await either.
+        parentId = await Promise.resolve(cached);
         continue;
       }
-      const res = await api.post('/client-portal/drive/simple-create-folder', {
-        portal_user_id: portalUser.id,
-        folder_name: name,
-        parent_folder_id: parentId,
-      });
-      parentId = res.data.id;
-      folderIdCache.current.set(cacheKey, parentId);
+
+      // Nothing cached yet — start creating and immediately store the Promise
+      // so parallel calls for the same key await us instead of duplicating.
+      const promise = api
+        .post('/client-portal/drive/simple-create-folder', {
+          portal_user_id: portalUser.id,
+          folder_name: name,
+          parent_folder_id: parentId,
+        })
+        .then((res) => res.data.id);
+
+      folderIdCache.current.set(cacheKey, promise);      // store Promise first
+      parentId = await promise;
+      folderIdCache.current.set(cacheKey, parentId);    // replace with resolved id
     }
     return parentId;
   }, [portalUser, currentFolderId]);
@@ -820,7 +841,7 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
               <FolderOpen className="h-7 w-7" style={{ color: COLORS.deepBlue }} />
             </div>
             <h3 className="font-semibold text-slate-700 dark:text-slate-300 text-sm mb-1">Pick a client to get started</h3>
-            <p className="text-xs text-slate-400 max-w-xs">Choose any client from the list on the left. If they're new, we'll set up their portal login and Drive folder for you in one click.</p>
+            <p className="text-xs text-slate-400 max-w-xs">Choose any client from the list on the left. Use Folder Architect to create Drive folders — upload here once a folder exists.</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -857,14 +878,15 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
 
               {newCreds && <div className="mt-4"><CredentialsCard username={newCreds.username} password={newCreds.password} onDismiss={() => setNewCreds(null)} /></div>}
 
-              {!isProvisioned && (
+              {/* Step 1 — no portal user yet */}
+              {!portalUser && (
                 <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-800 p-4 flex items-center gap-4 flex-wrap">
                   <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/40 flex-shrink-0">
                     <CloudCog className="h-4 w-4 text-blue-700 dark:text-blue-400" />
                   </div>
                   <div className="flex-1 min-w-[220px]">
-                    <p className="text-sm font-semibold text-blue-800 dark:text-blue-300">Set up this client to start uploading</p>
-                    <p className="text-xs text-blue-600 dark:text-blue-400">Creates a portal login (if needed) and a Google Drive folder — one click, nothing to fill in.</p>
+                    <p className="text-sm font-semibold text-blue-800 dark:text-blue-300">Create portal login for this client</p>
+                    <p className="text-xs text-blue-600 dark:text-blue-400">Generates a username &amp; password — one click, nothing to fill in.</p>
                   </div>
                   <button
                     onClick={provision}
@@ -873,8 +895,23 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
                     style={{ background: GRADIENT }}
                   >
                     {provisioning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                    {provisioning ? 'Setting up…' : 'Set Up Client'}
+                    {provisioning ? 'Creating…' : 'Create Portal Login'}
                   </button>
+                </div>
+              )}
+
+              {/* Step 2 — portal user exists but no Drive folder yet */}
+              {portalUser && !portalUser.google_drive_folder_id && (
+                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 p-4 flex items-center gap-4 flex-wrap">
+                  <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/40 flex-shrink-0">
+                    <FolderOpen className="h-4 w-4 text-amber-700 dark:text-amber-400" />
+                  </div>
+                  <div className="flex-1 min-w-[220px]">
+                    <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">Drive folder not created yet</p>
+                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                      Go to <strong>Folder Architect</strong> to create the Drive folder for this client, then come back here to upload.
+                    </p>
+                  </div>
                 </div>
               )}
             </div>
