@@ -83,10 +83,10 @@ async def callback(request: Request):
 
     # User denied access
     if error:
-        return RedirectResponse(f"{FRONTEND_URL}/settings?drive=denied")
+        return RedirectResponse(f"{FRONTEND_URL}/settings/general?drive=denied")
 
     if not code:
-        return RedirectResponse(f"{FRONTEND_URL}/settings?drive=error&reason=no_code")
+        return RedirectResponse(f"{FRONTEND_URL}/settings/general?drive=error&reason=no_code")
 
     try:
         flow = _build_flow()
@@ -98,7 +98,7 @@ async def callback(request: Request):
             # If it's missing, the token has already been issued — user should
             # disconnect and reconnect to force a new consent screen.
             return RedirectResponse(
-                f"{FRONTEND_URL}/settings?drive=error&reason=no_refresh_token"
+                f"{FRONTEND_URL}/settings/general?drive=error&reason=no_refresh_token"
             )
 
         # ── Persist in MongoDB ──────────────────────────────────────────
@@ -120,11 +120,11 @@ async def callback(request: Request):
         #  or add a config-reload endpoint)
         os.environ["GOOGLE_REFRESH_TOKEN"] = creds.refresh_token
 
-        return RedirectResponse(f"{FRONTEND_URL}/settings?drive=connected")
+        return RedirectResponse(f"{FRONTEND_URL}/settings/general?drive=connected")
 
     except Exception as exc:
         return RedirectResponse(
-            f"{FRONTEND_URL}/settings?drive=error&reason={str(exc)[:80]}"
+            f"{FRONTEND_URL}/settings/general?drive=error&reason={str(exc)[:80]}"
         )
 
 
