@@ -800,15 +800,15 @@ export default function ClientPortalDashboard() {
     </div>
   );
 
+  // Documents tab removed — My Drive already contains the client's documents.
+  // Tasks is placed second-to-last (just before Messages) per requirement.
   const tabs = [
-    user.can_view_tasks      && { id: "tasks",      label: "Tasks",      icon: "✅" },
-    user.can_view_documents  && { id: "documents",  label: "Documents",  icon: "📂" },
     user.can_view_invoices   && { id: "invoices",   label: "Invoices",   icon: "🧾" },
     user.can_view_compliance && { id: "compliance", label: "Compliance", icon: "📋" },
-    user.google_drive_folder_id && { id: "drive",  label: "My Drive",   icon: "☁️" },
+    { id: "drive", label: "My Drive", icon: "☁️" },
+    user.can_view_tasks      && { id: "tasks",      label: "Tasks",      icon: "✅" },
     { id: "messages", label: "Messages", icon: "💬", badge: unreadMessages },
   ].filter(Boolean);
-  if (!tabs.find(t => t.id === "drive")) tabs.push({ id: "drive", label: "My Drive", icon: "☁️" });
 
   return (
     // ── FULL-WIDTH layout: removed max-w-5xl constraint ──
