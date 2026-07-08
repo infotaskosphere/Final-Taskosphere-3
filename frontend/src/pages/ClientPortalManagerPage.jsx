@@ -519,7 +519,7 @@ function IndividualFolderPanel({ clients, loadingClients, subfolders, parentId, 
         client_name: defaultName,
         custom_folder_name: customName !== defaultName ? customName : undefined,
         parent_folder_id: parentId || null,
-        subfolders: subfolders.length > 0 ? subfolders : undefined,
+        subfolders: subfolders,  // always send explicit list (empty = root only, no auto defaults)
       });
       if (res.data.folder_link) {
         toast.success(`Folder "${customName}" created!`, {
