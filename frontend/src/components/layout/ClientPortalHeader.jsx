@@ -56,11 +56,11 @@ const ClientPortalHeader = ({ title, subtitle, actions }) => {
           <div className="flex items-center gap-4 min-w-0">
             <motion.button
               type="button"
-              onClick={() => navigate('/dashboard')}
+              onClick={() => navigate(-1)}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               transition={springSnap}
-              title="Back to Dashboard"
+              title="Back"
               className="w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center flex-shrink-0 shadow-sm border border-white/20 hover:border-white/40 transition-all"
             >
               <ArrowLeft className="h-4 w-4 text-white" />
