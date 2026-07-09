@@ -1940,17 +1940,50 @@ function SettingsTab({ isDark }) {
     allow_client_messages: true,
     show_task_comments: true,
     portal_status: 'live',
+    root_drive_folder: '',
   });
+  const [rootFolderInfo, setRootFolderInfo] = useState({ id: null, name: null });
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.get('/client-portal/settings');
+      const d = res.data || {};
+      setSettings(s => ({
+        ...s,
+        portal_name: d.portal_name ?? s.portal_name,
+        welcome_message: d.welcome_message ?? s.welcome_message,
+        allow_client_messages: d.allow_client_messages ?? s.allow_client_messages,
+        show_task_comments: d.show_task_comments ?? s.show_task_comments,
+        portal_status: d.portal_status ?? s.portal_status,
+        root_drive_folder: d.root_drive_folder || '',
+      }));
+      setRootFolderInfo({ id: d.root_drive_folder_id || null, name: d.root_drive_folder_name || null });
+    } catch {
+      toast.error('Failed to load settings');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
 
   const save = async () => {
     setSaving(true);
     try {
-      await api.put('/client-portal/settings', settings).catch(() => {});
+      const res = await api.put('/client-portal/settings', settings);
+      setRootFolderInfo({ id: res.data?.root_drive_folder_id || null, name: null });
       setSaved(true); setTimeout(() => setSaved(false), 3000);
       toast.success('Settings saved!');
-    } finally { setSaving(false); }
+      load(); // refresh to pick up the resolved folder name
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to save settings');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -1965,6 +1998,28 @@ function SettingsTab({ isDark }) {
         </div>
       </div>
       <div className="p-5 space-y-5 max-w-lg">
+        {loading && (
+          <div className="flex justify-center py-6">
+            <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+          </div>
+        )}
+        <div>
+          <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">Drive Parent Folder</label>
+          <Input
+            value={settings.root_drive_folder}
+            onChange={(e) => setSettings(s => ({ ...s, root_drive_folder: e.target.value }))}
+            className="text-sm"
+            placeholder="Paste a Google Drive folder link or ID"
+          />
+          <p className="text-[10px] text-slate-400 mt-1">
+            {rootFolderInfo.name
+              ? `Currently: "${rootFolderInfo.name}". `
+              : rootFolderInfo.id
+                ? `Currently linked (id: ${rootFolderInfo.id}). `
+                : ''}
+            All new client Drive folders (and their subfolders) are created inside this folder. Leave blank to create them at the root of the connected Drive account. Make sure this folder is shared with the connected Google account.
+          </p>
+        </div>
         <div>
           <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">Portal Name</label>
           <Input value={settings.portal_name} onChange={(e) => setSettings(s => ({ ...s, portal_name: e.target.value }))} className="text-sm" placeholder="Client Portal" />
