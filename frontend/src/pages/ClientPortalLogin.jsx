@@ -102,7 +102,7 @@ function ForgotPasswordPanel({ initialUsername, onBackToLogin, onResetSuccess })
               value={identifier}
               onChange={(e) => setIdentifier(e.target.value)}
               placeholder="Enter your username or email"
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1F6FB2] focus:border-transparent transition"
             />
           </div>
 
@@ -115,7 +115,7 @@ function ForgotPasswordPanel({ initialUsername, onBackToLogin, onResetSuccess })
           <button
             type="submit"
             disabled={loading || !identifier.trim()}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition text-sm shadow-sm"
+            className="w-full bg-[#0D3B66] hover:bg-[#0a2e50] disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition text-sm shadow-sm"
           >
             {loading ? "Sending code…" : "Send Verification Code"}
           </button>
@@ -123,7 +123,7 @@ function ForgotPasswordPanel({ initialUsername, onBackToLogin, onResetSuccess })
           <button
             type="button"
             onClick={onBackToLogin}
-            className="w-full text-center text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+            className="w-full text-center text-sm text-[#1F6FB2] hover:text-[#0D3B66] font-medium"
           >
             ← Back to Sign In
           </button>
@@ -147,7 +147,7 @@ function ForgotPasswordPanel({ initialUsername, onBackToLogin, onResetSuccess })
               value={otp}
               onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
               placeholder="000000"
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm tracking-[0.3em] text-center font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm tracking-[0.3em] text-center font-semibold focus:outline-none focus:ring-2 focus:ring-[#1F6FB2] focus:border-transparent transition"
             />
           </div>
 
@@ -159,7 +159,7 @@ function ForgotPasswordPanel({ initialUsername, onBackToLogin, onResetSuccess })
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               placeholder="At least 6 characters"
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1F6FB2] focus:border-transparent transition"
             />
           </div>
 
@@ -171,7 +171,7 @@ function ForgotPasswordPanel({ initialUsername, onBackToLogin, onResetSuccess })
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               placeholder="Re-enter new password"
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1F6FB2] focus:border-transparent transition"
             />
           </div>
 
@@ -184,7 +184,7 @@ function ForgotPasswordPanel({ initialUsername, onBackToLogin, onResetSuccess })
           <button
             type="submit"
             disabled={loading || otp.length !== 6}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition text-sm shadow-sm"
+            className="w-full bg-[#0D3B66] hover:bg-[#0a2e50] disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition text-sm shadow-sm"
           >
             {loading ? "Updating password…" : "Reset Password"}
           </button>
@@ -193,7 +193,7 @@ function ForgotPasswordPanel({ initialUsername, onBackToLogin, onResetSuccess })
             <button
               type="button"
               onClick={() => { setStep("request"); setError(""); setOtp(""); }}
-              className="text-indigo-600 hover:text-indigo-700 font-medium"
+              className="text-[#1F6FB2] hover:text-[#0D3B66] font-medium"
             >
               ← Use a different code
             </button>
@@ -289,14 +289,16 @@ export default function ClientPortalLogin() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-600 rounded-2xl mb-4 shadow-lg">
-            <svg className="w-9 h-9 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-            </svg>
+          <div className="inline-flex items-center justify-center mb-4">
+            <img
+              src="/logo.png"
+              alt="TaskOsphere"
+              className="object-contain"
+              style={{ maxHeight: "64px", width: "auto" }}
+            />
           </div>
           <h1 className="text-2xl font-bold text-gray-900">Client Portal</h1>
           <p className="text-sm text-gray-500 mt-1">
@@ -326,7 +328,7 @@ export default function ClientPortalLogin() {
                   value={form.username}
                   onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
                   placeholder="Enter your username"
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1F6FB2] focus:border-transparent transition"
                 />
               </div>
 
@@ -336,7 +338,7 @@ export default function ClientPortalLogin() {
                   <button
                     type="button"
                     onClick={() => { setView("forgot"); setError(""); setSuccessNotice(""); }}
-                    className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                    className="text-xs font-medium text-[#1F6FB2] hover:text-[#0D3B66]"
                   >
                     Forgot password?
                   </button>
@@ -347,7 +349,7 @@ export default function ClientPortalLogin() {
                   value={form.password}
                   onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
                   placeholder="Enter your password"
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1F6FB2] focus:border-transparent transition"
                 />
               </div>
 
@@ -375,7 +377,7 @@ export default function ClientPortalLogin() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition text-sm shadow-sm"
+                className="w-full bg-[#0D3B66] hover:bg-[#0a2e50] disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg transition text-sm shadow-sm"
               >
                 {loading ? "Signing in…" : "Sign In"}
               </button>
