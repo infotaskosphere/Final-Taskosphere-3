@@ -91,17 +91,104 @@ function uploadFailureMessage(fileName, err) {
 // ═══════════════════════════════════════════════════════════════════════════
 // Client list (left rail)
 // ═══════════════════════════════════════════════════════════════════════════
+// Sorts a client list in place per the chosen key.
+function sortClients(list, sortKey) {
+  const arr = [...list];
+  switch (sortKey) {
+    case 'name_desc':
+      return arr.sort((a, b) => clientName(b).localeCompare(clientName(a)));
+    case 'newest':
+      return arr.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+    case 'oldest':
+      return arr.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+    case 'name_asc':
+    default:
+      return arr.sort((a, b) => clientName(a).localeCompare(clientName(b)));
+  }
+}
+
+const SORT_OPTIONS = [
+  { value: 'name_asc',  label: 'Name A–Z' },
+  { value: 'name_desc', label: 'Name Z–A' },
+  { value: 'newest',    label: 'Newest first' },
+  { value: 'oldest',    label: 'Oldest first' },
+];
+
+function SortSelect({ value, onChange, isDark }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      title="Sort this list"
+      className={`text-[10.5px] font-medium rounded-lg border px-1.5 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-400 ${
+        isDark ? 'bg-slate-700 border-slate-600 text-slate-300' : 'bg-white border-slate-200 text-slate-500'
+      }`}
+    >
+      {SORT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  );
+}
+
+function ClientListRow({ c, active, selectMode, selectedIds, onToggleSelect, onSelect, isDark }) {
+  const name = clientName(c);
+  const hasPortal = c.has_portal;
+  const hasDrive = c.has_drive;
+  return (
+    <div
+      className={`flex items-center gap-2.5 rounded-xl px-2.5 py-2 cursor-pointer transition-colors ${
+        active
+          ? 'bg-blue-50 dark:bg-blue-900/30 ring-1 ring-inset ring-blue-200 dark:ring-blue-800'
+          : isDark ? 'hover:bg-slate-700/60' : 'hover:bg-slate-50'
+      }`}
+    >
+      {selectMode && (
+        <button onClick={() => onToggleSelect(c)} className="flex-shrink-0">
+          {selectedIds.has(c.id)
+            ? <CheckSquare className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />
+            : <Square className="h-4 w-4 text-slate-300" />}
+        </button>
+      )}
+      <button onClick={() => onSelect(c)} className="flex items-center gap-2.5 min-w-0 flex-1 text-left">
+        <div
+          className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-[11px] flex-shrink-0"
+          style={{ background: active ? GRADIENT : (hasPortal ? '#1FAF5A' : '#94a3b8') }}
+        >
+          {name[0]?.toUpperCase()}
+        </div>
+        <div className="min-w-0">
+          <p className={`text-xs font-semibold truncate ${active ? 'text-blue-700 dark:text-blue-300' : 'text-slate-700 dark:text-slate-200'}`}>{name}</p>
+          {hasPortal ? (
+            <span className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 mt-0.5">
+              {hasDrive ? 'Drive linked' : 'No Drive folder yet'}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-400 dark:bg-slate-700 mt-0.5">
+              Not set up yet
+            </span>
+          )}
+        </div>
+      </button>
+    </div>
+  );
+}
+
 function ClientRail({
   clients, loadingClients, selectedClientId, onSelect, isDark, isAdmin,
   selectMode, onToggleSelectMode, selectedIds, onToggleSelect, onBulkRemove, removing,
 }) {
   const [search, setSearch] = useState('');
+  const [linkedSort, setLinkedSort] = useState('name_asc');
+  const [unlinkedSort, setUnlinkedSort] = useState('name_asc');
+
   const filtered = clients.filter((c) =>
     clientName(c).toLowerCase().includes(search.toLowerCase())
   );
+  const linked = sortClients(filtered.filter((c) => c.has_portal), linkedSort);
+  const unlinked = sortClients(filtered.filter((c) => !c.has_portal), unlinkedSort);
 
   return (
     <div className={`rounded-2xl border shadow-sm flex flex-col overflow-hidden h-full ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+      {/* Header */}
       <div className={`px-4 py-3.5 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
         <div className="flex items-center gap-2 mb-2.5">
           <div className="p-1.5 rounded-lg" style={{ background: `${COLORS.deepBlue}12` }}>
@@ -109,7 +196,7 @@ function ClientRail({
           </div>
           <div className="min-w-0 flex-1">
             <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100 leading-none">Clients</h3>
-            <p className="text-[11px] text-slate-400 mt-0.5">{clients.length} total</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">{clients.length} total · {linked.length} linked</p>
           </div>
           {isAdmin && (
             <button
@@ -144,63 +231,68 @@ function ClientRail({
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto max-h-[560px]">
-        {loadingClients ? (
-          <div className="flex items-center justify-center py-14 gap-2 text-slate-400">
-            <Loader2 className="h-4 w-4 animate-spin" /><span className="text-xs">Loading clients…</span>
+      {loadingClients ? (
+        <div className="flex-1 flex items-center justify-center py-14 gap-2 text-slate-400">
+          <Loader2 className="h-4 w-4 animate-spin" /><span className="text-xs">Loading clients…</span>
+        </div>
+      ) : filtered.length === 0 ? (
+        <p className="text-center text-xs text-slate-400 py-14 px-4">No clients match your search.</p>
+      ) : (
+        // Two equal-height halves — Linked always on top, each independently
+        // scrollable and sortable, so a short list never leaves dead space
+        // while the other half is packed.
+        <div className="flex-1 min-h-0 flex flex-col">
+          <div className="flex-1 basis-0 min-h-0 flex flex-col">
+            <div className={`flex items-center justify-between gap-2 px-4 py-2 sticky top-0 z-10 ${isDark ? 'bg-slate-800/95' : 'bg-white/95'} backdrop-blur border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+              <div className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                <h4 className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Linked to Portal</h4>
+                <span className="text-[10px] font-semibold text-slate-400">({linked.length})</span>
+              </div>
+              {linked.length > 1 && <SortSelect value={linkedSort} onChange={setLinkedSort} isDark={isDark} />}
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+              {linked.length === 0 ? (
+                <p className="text-center text-[11px] text-slate-400 py-8 px-4">No clients linked to the portal yet.</p>
+              ) : (
+                linked.map((c) => (
+                  <ClientListRow
+                    key={c.id} c={c} active={selectedClientId === c.id}
+                    selectMode={selectMode} selectedIds={selectedIds}
+                    onToggleSelect={onToggleSelect} onSelect={onSelect} isDark={isDark}
+                  />
+                ))
+              )}
+            </div>
           </div>
-        ) : filtered.length === 0 ? (
-          <p className="text-center text-xs text-slate-400 py-14 px-4">No clients match your search.</p>
-        ) : (
-          <div className="p-2 space-y-1">
-            {filtered.map((c) => {
-              const name = clientName(c);
-              const active = selectedClientId === c.id;
-              const hasPortal = c.has_portal;
-              const hasDrive = c.has_drive;
-              return (
-                <div
-                  key={c.id}
-                  className={`flex items-center gap-2.5 rounded-xl px-2.5 py-2 cursor-pointer transition-colors ${
-                    active
-                      ? 'bg-blue-50 dark:bg-blue-900/30'
-                      : isDark ? 'hover:bg-slate-700/60' : 'hover:bg-slate-50'
-                  }`}
-                >
-                  {selectMode && (
-                    <button onClick={() => onToggleSelect(c)} className="flex-shrink-0">
-                      {selectedIds.has(c.id)
-                        ? <CheckSquare className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />
-                        : <Square className="h-4 w-4 text-slate-300" />}
-                    </button>
-                  )}
-                  <button onClick={() => onSelect(c)} className="flex items-center gap-2.5 min-w-0 flex-1 text-left">
-                    <div
-                      className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-[11px] flex-shrink-0"
-                      style={{ background: active ? GRADIENT : '#94a3b8' }}
-                    >
-                      {name[0]?.toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <p className={`text-xs font-semibold truncate ${active ? 'text-blue-700 dark:text-blue-300' : 'text-slate-700 dark:text-slate-200'}`}>{name}</p>
-                      <div className="flex items-center gap-1 mt-0.5">
-                        <span className={`inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${hasPortal ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400' : 'bg-slate-100 text-slate-400 dark:bg-slate-700'}`}>
-                          {hasPortal ? 'Portal ready' : 'No login yet'}
-                        </span>
-                        {hasPortal && (
-                          <span className={`inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${hasDrive ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : 'bg-amber-50 text-amber-600'}`}>
-                            {hasDrive ? 'Drive linked' : 'No folder'}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </button>
-                </div>
-              );
-            })}
+
+          <div className={`border-t-2 ${isDark ? 'border-slate-700' : 'border-slate-100'}`} />
+
+          <div className="flex-1 basis-0 min-h-0 flex flex-col">
+            <div className={`flex items-center justify-between gap-2 px-4 py-2 sticky top-0 z-10 ${isDark ? 'bg-slate-800/95' : 'bg-white/95'} backdrop-blur border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+              <div className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                <h4 className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Not Linked</h4>
+                <span className="text-[10px] font-semibold text-slate-400">({unlinked.length})</span>
+              </div>
+              {unlinked.length > 1 && <SortSelect value={unlinkedSort} onChange={setUnlinkedSort} isDark={isDark} />}
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+              {unlinked.length === 0 ? (
+                <p className="text-center text-[11px] text-slate-400 py-8 px-4">Every client is linked. 🎉</p>
+              ) : (
+                unlinked.map((c) => (
+                  <ClientListRow
+                    key={c.id} c={c} active={selectedClientId === c.id}
+                    selectMode={selectMode} selectedIds={selectedIds}
+                    onToggleSelect={onToggleSelect} onSelect={onSelect} isDark={isDark}
+                  />
+                ))
+              )}
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -893,7 +985,7 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4">
       {/* ── Left rail: clients ── */}
       <ClientRail
         clients={clients}
