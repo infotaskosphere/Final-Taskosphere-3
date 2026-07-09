@@ -242,7 +242,7 @@ function CredentialsCard({ username, password, onDismiss }) {
 // ═══════════════════════════════════════════════════════════════════════════
 function UploadTray({ items, onClear, onRetry }) {
   if (items.length === 0) return null;
-  const done = items.filter((i) => i.status !== 'uploading').length;
+  const done = items.filter((i) => i.status !== 'uploading' && i.status !== 'queued').length;
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}
@@ -260,6 +260,7 @@ function UploadTray({ items, onClear, onRetry }) {
         {items.map((it) => (
           <div key={it.id} className="px-4 py-2">
             <div className="flex items-center gap-2.5">
+              {it.status === 'queued' && <Loader2 className="h-3.5 w-3.5 text-slate-300 flex-shrink-0" />}
               {it.status === 'uploading' && <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500 flex-shrink-0" />}
               {it.status === 'done' && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />}
               {it.status === 'error' && <XCircle className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />}
@@ -667,6 +668,21 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
   // of folder names the file sat inside when it was dropped/selected (empty
   // for a plain file picked with no folder structure) — used to recreate
   // the same structure on Drive before the file itself is uploaded.
+  // Uploads used to fire fully in parallel (one request per file, no cap).
+  // With large batches (drag-and-drop a whole folder = dozens/hundreds of
+  // files) that meant every file hit the backend at the exact same instant —
+  // each request reads the whole file into memory and spins up its own
+  // Google Drive upload thread. On a memory-constrained backend instance
+  // this reliably ran the process out of memory partway through a big
+  // batch, which killed/restarted the instance; requests in flight at that
+  // moment come back as a bare 502 with no CORS headers (since the app never
+  // got a chance to attach them), which shows up in the browser as a
+  // confusing "CORS policy" error rather than an obvious crash.
+  //
+  // Fix: only ever run a small, fixed number of uploads at once. Everything
+  // else waits in the tray with a 'queued' status until a slot frees up.
+  const MAX_CONCURRENT_UPLOADS = 4;
+
   const queueUploads = useCallback((entries) => {
     if (!portalUser?.google_drive_folder_id) {
       toast.error('Set up this client\'s Drive folder first.');
@@ -677,17 +693,17 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
     const trayItems = entries.map((e) => ({
       id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       name: e.pathParts?.length ? [...e.pathParts, e.file.name].join('/') : e.file.name,
-      status: 'uploading',
+      status: 'queued',
     }));
     setUploadItems((prev) => [...prev, ...trayItems]);
 
-    entries.forEach(async (entry, idx) => {
+    const processEntry = async (entry, idx) => {
       const trayId = trayItems[idx].id;
       try {
         const folderId = entry.pathParts?.length
           ? await resolveTargetFolder(entry.pathParts)
           : (currentFolderId || null);
-        uploadOne(entry.file, trayId, { folderId });
+        await uploadOne(entry.file, trayId, { folderId });
       } catch (err) {
         const msg = uploadFailureMessage(entry.file.name, err);
         setUploadItems((prev) => prev.map((it) => (
@@ -695,7 +711,17 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
         )));
         toast.error(msg);
       }
-    });
+    };
+
+    let cursor = 0;
+    const runWorker = async () => {
+      while (cursor < entries.length) {
+        const idx = cursor++;
+        await processEntry(entries[idx], idx);
+      }
+    };
+    const workerCount = Math.min(MAX_CONCURRENT_UPLOADS, entries.length);
+    for (let i = 0; i < workerCount; i++) runWorker();
   }, [portalUser, currentFolderId, resolveTargetFolder, uploadOne]);
 
   // Kept for the plain "Choose Files" input, which never carries folder info.
