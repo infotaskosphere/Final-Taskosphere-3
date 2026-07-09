@@ -24,7 +24,8 @@ from passlib.context import CryptContext
 from jose import jwt, JWTError
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from backend.dependencies import db, JWT_SECRET as SECRET_KEY, ALGORITHM
+from backend.dependencies import db, JWT_SECRET as SECRET_KEY, ALGORITHM, get_current_user
+from backend.models import User
 # Reuse the same Brevo-backed OTP emailer the main-app forgot-password flow
 # uses, so client portal password resets need no separate email infra.
 from backend.auth_password_reset import _send_otp_email
@@ -62,6 +63,82 @@ async def get_current_portal_client(
     if not doc or not doc.get("is_active", True):
         raise HTTPException(status_code=401, detail="Portal account not found or disabled")
     return doc
+
+
+# ── Password Vault sync ────────────────────────────────────────────────────
+# Client Portal login passwords are stored bcrypt-hashed (irreversible) for
+# actual authentication — that must never change. But admins need to be able
+# to look the current password back up (to hand it to a client, re-share
+# access, etc). So, alongside the hash, we also keep an *encrypted* (not
+# hashed) copy using the same Fernet-based encryption the Password Vault
+# already uses, and mirror it into the Password Vault as a "Client Portal"
+# entry so it shows up there automatically too.
+from backend.passwords import _encrypt as _vault_encrypt, _decrypt as _vault_decrypt
+
+
+async def _sync_portal_password(
+    *,
+    client_id: str,
+    client_name: str,
+    portal_username: str,
+    plain_password: str,
+    current_user: Optional[User] = None,
+):
+    """
+    Store an encrypted (recoverable) copy of a client-portal password and
+    upsert a matching Password Vault entry (Portal Type: Other, heading
+    "Client Portal") so admins can find/retrieve it from either place.
+    Safe to call repeatedly — updates the same vault entry instead of
+    creating duplicates.
+    """
+    encrypted = _vault_encrypt(plain_password)
+
+    await db.client_portal_users.update_one(
+        {"client_id": client_id},
+        {"$set": {"password_encrypted": encrypted}},
+    )
+
+    now = datetime.now(timezone.utc).isoformat()
+    existing = await db.passwords.find_one(
+        {"client_id": client_id, "_auto_client_portal": True}, {"_id": 0, "id": 1}
+    )
+    if existing:
+        await db.passwords.update_one(
+            {"id": existing["id"]},
+            {"$set": {
+                "username": portal_username,
+                "password_encrypted": encrypted,
+                "_password_set": True,
+                "client_name": client_name,
+                "updated_at": now,
+            }},
+        )
+    else:
+        await db.passwords.insert_one({
+            "id": str(uuid.uuid4()),
+            "portal_name": "Client Portal",
+            "portal_type": "OTHER",
+            "url": None,
+            "username": portal_username,
+            "password_encrypted": encrypted,
+            "_password_set": True,
+            "department": "OTHER",
+            "holder_type": "COMPANY",
+            "holder_name": None,
+            "holder_pan": None,
+            "holder_din": None,
+            "mobile": None,
+            "trade_name": None,
+            "client_name": client_name,
+            "client_id": client_id,
+            "notes": "Auto-synced from Client Portal login setup.",
+            "tags": ["client-portal"],
+            "_auto_client_portal": True,
+            "created_by": current_user.id if current_user else "system",
+            "created_at": now,
+            "updated_at": now,
+            "last_accessed_at": now,
+        })
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -117,9 +194,6 @@ class PortalResetPasswordRequest(BaseModel):
 # Admin / staff endpoints  (require main-app JWT)
 # ═══════════════════════════════════════════════════════════════════════════
 
-from backend.dependencies import get_current_user
-from backend.models import User
-
 
 @router.post("/users", status_code=201)
 async def create_portal_user(
@@ -174,6 +248,13 @@ async def create_portal_user(
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.client_portal_users.insert_one(portal_doc)
+    await _sync_portal_password(
+        client_id=body.client_id,
+        client_name=portal_doc["display_name"] or client_doc.get("company_name", ""),
+        portal_username=portal_doc["portal_username"],
+        plain_password=body.portal_password,
+        current_user=current_user,
+    )
     portal_doc.pop("hashed_password", None)
     portal_doc.pop("_id", None)
     return portal_doc
@@ -191,6 +272,8 @@ async def list_portal_users(
     if client_id:
         query["client_id"] = client_id
     docs = await db.client_portal_users.find(query, {"_id": 0, "hashed_password": 0}).to_list(500)
+    for d in docs:
+        d["has_recoverable_password"] = bool(d.pop("password_encrypted", None))
     return docs
 
 
@@ -229,7 +312,47 @@ async def update_portal_user(
     res = await db.client_portal_users.update_one({"id": portal_user_id}, {"$set": update})
     if res.matched_count == 0:
         raise HTTPException(404, "Portal user not found")
+
+    if body.portal_password:
+        pu = await db.client_portal_users.find_one({"id": portal_user_id}, {"_id": 0})
+        if pu:
+            await _sync_portal_password(
+                client_id=pu.get("client_id"),
+                client_name=pu.get("display_name") or pu.get("client_name") or "",
+                portal_username=pu.get("portal_username"),
+                plain_password=body.portal_password,
+                current_user=current_user,
+            )
     return {"success": True}
+
+
+@router.get("/users/{portal_user_id}/reveal-password")
+async def reveal_portal_password(
+    portal_user_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Admin: reveal the current plaintext client-portal password for a portal
+    user (decrypted from the same recoverable copy mirrored into the
+    Password Vault — the bcrypt hash used for actual login is never
+    returned/decryptable).
+    """
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Insufficient permissions")
+    pu = await db.client_portal_users.find_one({"id": portal_user_id}, {"_id": 0})
+    if not pu:
+        raise HTTPException(404, "Portal user not found")
+    encrypted = pu.get("password_encrypted")
+    if not encrypted:
+        raise HTTPException(
+            404,
+            "No recoverable password on file for this account yet — set/reset the "
+            "password once to enable this.",
+        )
+    return {
+        "portal_username": pu.get("portal_username"),
+        "password": _vault_decrypt(encrypted),
+    }
 
 
 @router.delete("/users/{portal_user_id}")
@@ -410,6 +533,13 @@ async def portal_reset_password(body: PortalResetPasswordRequest):
         {"id": portal_user["id"]}, {"$set": {"hashed_password": hashed}}
     )
     await db.client_portal_reset_tokens.delete_many({"portal_user_id": portal_user["id"]})
+    await _sync_portal_password(
+        client_id=portal_user.get("client_id"),
+        client_name=portal_user.get("display_name") or portal_user.get("client_name") or "",
+        portal_username=portal_user.get("portal_username"),
+        plain_password=body.new_password,
+        current_user=None,
+    )
 
     await db.client_portal_activity.insert_one({
         "portal_user_id": portal_user["id"],
@@ -2028,6 +2158,13 @@ async def ensure_root_folder(
         }
         await db.client_portal_users.insert_one(new_user)
         portal_user = new_user
+        await _sync_portal_password(
+            client_id=client_id,
+            client_name=client_name,
+            portal_username=username,
+            plain_password=generated_password,
+            current_user=current_user,
+        )
 
     # Drive folder is NOT auto-created here. Use Folder Architect to create
     # it manually with the correct subfolder structure.
