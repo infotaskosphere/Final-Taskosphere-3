@@ -1,8 +1,9 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Building2, Users, FileText, MessageSquare, Settings, ExternalLink, ChevronRight, Link2, ArrowLeft } from 'lucide-react';
+import { Building2, Users, FileText, MessageSquare, Settings, ExternalLink, ChevronRight, Link2, ArrowLeft, SlidersHorizontal, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useDark } from '@/hooks/useDark.jsx';
+import { useDocumentUploads } from '@/contexts/DocumentUploadContext.jsx';
 
 const COLORS = {
   deepBlue:     '#0D3B66',
@@ -14,12 +15,13 @@ const COLORS = {
 const GRADIENT = `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`;
 
 const NAV_ITEMS = [
-  { path: '/client-portal-manager',                icon: Building2,     label: 'Overview'      },
-  { path: '/client-portal-manager/clients',        icon: Users,         label: 'Clients'       },
-  { path: '/client-portal-manager/documents',      icon: FileText,      label: 'Documents'     },
-  { path: '/client-portal-manager/smart-connect',  icon: Link2,         label: 'Smart Connect' },
-  { path: '/client-portal-manager/messages',       icon: MessageSquare, label: 'Messages'      },
-  { path: '/client-portal-manager/settings',       icon: Settings,      label: 'Settings'      },
+  { path: '/client-portal-manager',                icon: Building2,          label: 'Overview'            },
+  { path: '/client-portal-manager/clients',        icon: Users,              label: 'Clients'             },
+  { path: '/client-portal-manager/documents',      icon: FileText,           label: 'Documents'           },
+  { path: '/client-portal-manager/smart-connect',  icon: Link2,              label: 'Smart Connect'       },
+  { path: '/client-portal-manager/messages',       icon: MessageSquare,      label: 'Messages'            },
+  { path: '/client-portal-manager/settings',       icon: Settings,           label: 'Client Portal Setting' },
+  { path: '/client-portal-manager/advanced-settings', icon: SlidersHorizontal, label: 'Advanced Settings' },
 ];
 
 const springSnap = { type: 'spring', stiffness: 500, damping: 28 };
@@ -33,6 +35,8 @@ const ClientPortalHeader = ({ title, subtitle, actions }) => {
   const navigate  = useNavigate();
   const location  = useLocation();
   const { isDark } = useDark();
+  const { items: uploadItems } = useDocumentUploads();
+  const activeUploadCount = uploadItems.filter((i) => i.status === 'queued' || i.status === 'uploading').length;
 
   return (
     <div className="mb-6 -mx-0">
@@ -112,6 +116,7 @@ const ClientPortalHeader = ({ title, subtitle, actions }) => {
             const isActive = location.pathname === item.path ||
               (item.path !== '/client-portal-manager' &&
                location.pathname.startsWith(item.path));
+            const showUploadBadge = item.path === '/client-portal-manager/documents' && activeUploadCount > 0;
 
             return (
               <motion.button
@@ -120,7 +125,7 @@ const ClientPortalHeader = ({ title, subtitle, actions }) => {
                 whileHover={{ y: -1 }}
                 whileTap={{ scale: 0.96 }}
                 transition={springSnap}
-                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                className={`relative flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
                   isActive
                     ? 'bg-white text-slate-800 shadow-md'
                     : 'text-white/70 hover:text-white hover:bg-white/15'
@@ -128,6 +133,16 @@ const ClientPortalHeader = ({ title, subtitle, actions }) => {
               >
                 <Icon className="h-3.5 w-3.5 flex-shrink-0" />
                 {item.label}
+                {showUploadBadge && (
+                  <span
+                    title={`${activeUploadCount} file(s) uploading in the background`}
+                    className={`ml-0.5 inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                      isActive ? 'bg-blue-100 text-blue-700' : 'bg-white/20 text-white'
+                    }`}
+                  >
+                    <Loader2 className="h-2.5 w-2.5 animate-spin" /> {activeUploadCount}
+                  </span>
+                )}
               </motion.button>
             );
           })}
