@@ -1022,11 +1022,29 @@ async def save_folder_template(
     """Saves (upserts) the folder architecture template."""
     if current_user.role not in ("admin", "manager"):
         raise HTTPException(403, "Insufficient permissions")
+
+    normalised_parent = _extract_folder_id(body.parent_folder_id)
+
+    # Verify the folder is actually reachable before saving — otherwise a
+    # typo'd/unshared link silently becomes the template's parent_folder_id,
+    # which takes priority over the Settings root folder for every future
+    # folder creation and fails with a 404 at creation time instead of here.
+    if normalised_parent:
+        try:
+            from backend.invoicing import _get_drive_service, _drive_configured
+            if _drive_configured():
+                service = _get_drive_service()
+                service.files().get(fileId=normalised_parent, fields="id,name").execute()
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(400, "Couldn't access that Drive folder. Check the link and make sure it's shared with the connected Google account.")
+
     await db.portal_folder_template.update_one(
         {},
         {"$set": {
             "subfolders": body.subfolders,
-            "parent_folder_id": _extract_folder_id(body.parent_folder_id) or "",
+            "parent_folder_id": normalised_parent or "",
             "updated_by": current_user.id,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }},
@@ -1844,6 +1862,13 @@ async def create_individual_folder(
         )
     except Exception as e:
         logger.error(f"Drive folder creation failed: {e}", exc_info=True)
+        if parent_id and ("not found" in str(e).lower() or "404" in str(e)):
+            raise HTTPException(
+                400,
+                "The configured Drive parent folder could not be found or isn't shared "
+                "with the connected Google account. Fix it in Client Portal → Settings "
+                "(or Folder Architect) by pasting a valid folder link, then try again.",
+            )
         raise HTTPException(500, f"Drive error: {e}")
 
     # Persist folder_id to portal user and client
