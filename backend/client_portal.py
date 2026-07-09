@@ -872,8 +872,15 @@ class PortalSettings(BaseModel):
     portal_status: Optional[str] = "live"
     # Accepts either a bare Drive folder ID or a full share URL — normalised
     # to a bare ID before being saved. This is the single source of truth
-    # for where client Drive folders get created.
+    # for where client Drive folders get created. Lives in the "Advanced
+    # Settings" tab now — kept here (unchanged) so nothing downstream that
+    # reads root_drive_folder from the settings doc needs to change.
     root_drive_folder: Optional[str] = None
+    # Data-URI (data:image/png;base64,....) of the portal logo, shown on the
+    # client login screen and the client dashboard header. Kept small
+    # (validated at upload time) so it can live directly on the settings
+    # document instead of needing separate file storage/CDN.
+    logo_url: Optional[str] = None
 
 
 @router.get("/settings")
@@ -928,6 +935,76 @@ async def save_portal_settings(
 
     await db.portal_settings.update_one({}, {"$set": update}, upsert=True)
     return {"success": True, "root_drive_folder_id": normalised_root}
+
+
+@router.get("/public-settings")
+async def get_public_portal_settings():
+    """
+    No-auth branding endpoint for the client-facing login screen and
+    dashboard header — only exposes the handful of fields that are safe to
+    show before a client signs in (name, welcome message, logo, whether the
+    portal is live). Never returns root_drive_folder or anything internal.
+    """
+    doc = await db.portal_settings.find_one({}, {"_id": 0})
+    if not doc:
+        doc = PortalSettings().model_dump()
+    return {
+        "portal_name": doc.get("portal_name") or "Client Portal",
+        "welcome_message": doc.get("welcome_message") or "Welcome to your client portal.",
+        "logo_url": doc.get("logo_url") or None,
+        "portal_status": doc.get("portal_status") or "live",
+    }
+
+
+# Kept intentionally small — this is stored inline on the settings document
+# as a data URI, not on disk/CDN, so we cap it well below Mongo's 16MB
+# document limit and well below what's sensible to inline in a data URI.
+MAX_LOGO_SIZE_BYTES = 1_500_000  # ~1.5 MB
+ALLOWED_LOGO_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/svg+xml"}
+
+
+@router.post("/settings/logo")
+async def upload_portal_logo(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Uploads/replaces the portal logo shown on the client login page and dashboard."""
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Insufficient permissions")
+
+    content_type = (file.content_type or "").lower()
+    if content_type not in ALLOWED_LOGO_TYPES:
+        raise HTTPException(400, "Logo must be a PNG, JPG, WEBP or SVG image.")
+
+    contents = await file.read()
+    if len(contents) > MAX_LOGO_SIZE_BYTES:
+        raise HTTPException(413, f"Logo must be smaller than {MAX_LOGO_SIZE_BYTES // 1_000_000} MB.")
+
+    import base64
+    encoded = base64.b64encode(contents).decode("ascii")
+    data_uri = f"data:{content_type};base64,{encoded}"
+
+    await db.portal_settings.update_one(
+        {},
+        {"$set": {
+            "logo_url": data_uri,
+            "logo_updated_by": current_user.id,
+            "logo_updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True,
+    )
+    return {"success": True, "logo_url": data_uri}
+
+
+@router.delete("/settings/logo")
+async def delete_portal_logo(
+    current_user: User = Depends(get_current_user),
+):
+    """Removes the portal logo — the login/dashboard fall back to the default Taskosphere mark."""
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Insufficient permissions")
+    await db.portal_settings.update_one({}, {"$set": {"logo_url": None}}, upsert=True)
+    return {"success": True}
 
 
 async def _resolve_settings_root_folder() -> Optional[str]:
@@ -2330,7 +2407,16 @@ async def simple_upload_file(
     if not target_folder:
         raise HTTPException(400, "This client has no Drive folder yet. Create one first.")
 
+    # Guard against a single huge file blowing up process memory (the whole
+    # file is read into RAM below, then handed to Drive) — a handful of
+    # large files uploading in parallel is what was crashing the backend
+    # process outright, which the browser then reported as a confusing
+    # "CORS policy" error since the crashed process never got to attach
+    # CORS headers to the response.
+    MAX_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB per file
     file_bytes = await file.read()
+    if len(file_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"\"{file.filename}\" is larger than the 100 MB per-file limit.")
     mime = file.content_type or mimetypes.guess_type(file.filename)[0] or "application/octet-stream"
 
     service = _get_drive_service()
