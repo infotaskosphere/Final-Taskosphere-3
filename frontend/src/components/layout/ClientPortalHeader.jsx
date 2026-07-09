@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Building2, Users, FileText, MessageSquare, Settings, ExternalLink, ChevronRight, Link2 } from 'lucide-react';
+import { Building2, Users, FileText, MessageSquare, Settings, ExternalLink, ChevronRight, Link2, ArrowLeft } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useDark } from '@/hooks/useDark.jsx';
 
@@ -52,8 +52,19 @@ const ClientPortalHeader = ({ title, subtitle, actions }) => {
         />
 
         <div className="relative px-6 py-5 flex items-center justify-between gap-4">
-          {/* Left: icon + text */}
+          {/* Left: back + icon + text */}
           <div className="flex items-center gap-4 min-w-0">
+            <motion.button
+              type="button"
+              onClick={() => navigate('/dashboard')}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              transition={springSnap}
+              title="Back to Dashboard"
+              className="w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center flex-shrink-0 shadow-sm border border-white/20 hover:border-white/40 transition-all"
+            >
+              <ArrowLeft className="h-4 w-4 text-white" />
+            </motion.button>
             <div className="w-12 h-12 rounded-2xl bg-white/15 flex items-center justify-center flex-shrink-0 shadow-sm">
               <Building2 className="h-6 w-6 text-white" />
             </div>
