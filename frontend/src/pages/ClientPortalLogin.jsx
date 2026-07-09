@@ -220,6 +220,16 @@ export default function ClientPortalLogin() {
   const [view, setView] = useState("login"); // "login" | "forgot"
   const [successNotice, setSuccessNotice] = useState("");
 
+  // ── Branding (custom logo / portal name set by the admin in Client
+  // Portal Setting) — falls back to the default Taskosphere mark if none
+  // has been uploaded. No-auth endpoint, safe to call before login.
+  const [branding, setBranding] = useState({ portal_name: "Client Portal", logo_url: null });
+  React.useEffect(() => {
+    API.get("/client-portal/public-settings")
+      .then((res) => res?.data && setBranding((b) => ({ ...b, ...res.data })))
+      .catch(() => {}); // silent — default branding is fine if this fails
+  }, []);
+
   // Retry login up to 3 times with increasing delay — handles Render cold starts
   const loginWithRetry = async (retries = 3, retryDelay = 3000) => {
     for (let i = 0; i < retries; i++) {
@@ -294,13 +304,13 @@ export default function ClientPortalLogin() {
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center mb-4">
             <img
-              src="/logo-transparent.png"
-              alt="TaskOsphere"
+              src={branding.logo_url || "/logo-transparent.png"}
+              alt={branding.portal_name || "TaskOsphere"}
               className="object-contain"
               style={{ maxHeight: "64px", width: "auto" }}
             />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">Client Portal</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{branding.portal_name || "Client Portal"}</h1>
           <p className="text-sm text-gray-500 mt-1">
             {view === "login" ? "Sign in to access your documents & updates" : "Reset your portal password"}
           </p>
