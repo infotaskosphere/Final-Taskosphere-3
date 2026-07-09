@@ -857,21 +857,94 @@ DEFAULT_SUBFOLDERS = [
     "Correspondence", "Reports", "Bank Statements",
 ]
 
-# All client folders are created inside this shared Drive folder by default,
-# so every client's Drive folder lives in one place instead of scattered
-# across the connected account's My Drive root. This can still be overridden
-# per-client via `parent_folder_id`, or globally via the Folder Architect
-# template (Client Portal -> Folder Architect), which takes priority over
-# this constant whenever a value has been saved there.
-#   https://drive.google.com/drive/folders/1nYpYErhuHLGjYWaUUMt7ZDT2sFhAa7FB
-DEFAULT_PARENT_FOLDER_ID = "1nYpYErhuHLGjYWaUUMt7ZDT2sFhAa7FB"
+# ═══════════════════════════════════════════════════════════════════════════
+# Portal Settings  –  admin-configurable options (Client Portal -> Settings)
+# ═══════════════════════════════════════════════════════════════════════════
+# The Drive folder that ALL client folders/subfolders get created inside is
+# no longer hard-coded in source. It is configured once by the admin on the
+# Settings page (root_drive_folder) and read from the database from then on.
+
+class PortalSettings(BaseModel):
+    portal_name: Optional[str] = "Client Portal"
+    welcome_message: Optional[str] = "Welcome to your client portal."
+    allow_client_messages: Optional[bool] = True
+    show_task_comments: Optional[bool] = True
+    portal_status: Optional[str] = "live"
+    # Accepts either a bare Drive folder ID or a full share URL — normalised
+    # to a bare ID before being saved. This is the single source of truth
+    # for where client Drive folders get created.
+    root_drive_folder: Optional[str] = None
+
+
+@router.get("/settings")
+async def get_portal_settings(
+    current_user: User = Depends(get_current_user),
+):
+    """Returns the saved portal settings (creates sane defaults if none saved yet)."""
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Insufficient permissions")
+    doc = await db.portal_settings.find_one({}, {"_id": 0})
+    if not doc:
+        doc = PortalSettings().model_dump()
+    # Also resolve + attach the folder's display name/link so the UI can
+    # show "MS ADVISORY... root folder" style confirmation without a
+    # separate round trip.
+    folder_id = _extract_folder_id(doc.get("root_drive_folder"))
+    doc["root_drive_folder_id"] = folder_id
+    doc["root_drive_folder_name"] = _get_folder_name(folder_id) if folder_id else None
+    return doc
+
+
+@router.put("/settings")
+async def save_portal_settings(
+    body: PortalSettings,
+    current_user: User = Depends(get_current_user),
+):
+    """Saves (upserts) portal settings, including the root Drive folder."""
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Insufficient permissions")
+
+    normalised_root = _extract_folder_id(body.root_drive_folder)
+
+    # If a root folder was provided, verify it's actually reachable before
+    # saving, so a typo/bad link doesn't silently break every future folder
+    # creation. Skip the check if Drive isn't configured at all — settings
+    # should still be saveable in that case.
+    if normalised_root:
+        try:
+            from backend.invoicing import _get_drive_service, _drive_configured
+            if _drive_configured():
+                service = _get_drive_service()
+                service.files().get(fileId=normalised_root, fields="id,name").execute()
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(400, "Couldn't access that Drive folder. Check the link and make sure it's shared with the connected Google account.")
+
+    update = body.model_dump()
+    update["root_drive_folder"] = normalised_root or ""
+    update["updated_by"] = current_user.id
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    await db.portal_settings.update_one({}, {"$set": update}, upsert=True)
+    return {"success": True, "root_drive_folder_id": normalised_root}
+
+
+async def _resolve_settings_root_folder() -> Optional[str]:
+    """Reads the admin-configured root Drive folder from Settings (if any)."""
+    doc = await db.portal_settings.find_one({}, {"_id": 0, "root_drive_folder": 1})
+    if doc and doc.get("root_drive_folder"):
+        return _extract_folder_id(doc["root_drive_folder"])
+    return None
 
 
 async def _resolve_parent_folder_id(explicit: Optional[str] = None) -> Optional[str]:
     """
     Resolve which Drive folder new client folders should be created under.
-    Priority: explicit value passed in > saved Folder Architect template >
-    the hard-coded DEFAULT_PARENT_FOLDER_ID above.
+    Priority: explicit value passed in > saved Folder Architect template's
+    parent_folder_id (a per-template override) > the root Drive folder
+    configured on the Settings page > None (Drive root — only if nothing
+    has ever been configured anywhere).
     """
     explicit_id = _extract_folder_id(explicit)
     if explicit_id:
@@ -879,7 +952,7 @@ async def _resolve_parent_folder_id(explicit: Optional[str] = None) -> Optional[
     tmpl = await db.portal_folder_template.find_one({}, {"_id": 0})
     if tmpl and tmpl.get("parent_folder_id"):
         return _extract_folder_id(tmpl["parent_folder_id"])
-    return DEFAULT_PARENT_FOLDER_ID
+    return await _resolve_settings_root_folder()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -933,10 +1006,11 @@ async def get_folder_template(
     if current_user.role not in ("admin", "manager"):
         raise HTTPException(403, "Insufficient permissions")
     doc = await db.portal_folder_template.find_one({}, {"_id": 0})
+    settings_root = await _resolve_settings_root_folder()
     if not doc:
-        return {"subfolders": DEFAULT_SUBFOLDERS, "parent_folder_id": DEFAULT_PARENT_FOLDER_ID}
+        return {"subfolders": DEFAULT_SUBFOLDERS, "parent_folder_id": settings_root or ""}
     if not doc.get("parent_folder_id"):
-        doc["parent_folder_id"] = DEFAULT_PARENT_FOLDER_ID
+        doc["parent_folder_id"] = settings_root or ""
     return doc
 
 
@@ -966,9 +1040,19 @@ async def save_folder_template(
 # ═══════════════════════════════════════════════════════════════════════════
 
 async def _resolve_subfolders() -> List[str]:
-    """Return the saved template subfolders or fall back to defaults."""
+    """
+    Return the saved Folder Architect template's subfolders.
+
+    IMPORTANT: an explicitly saved *empty* list (admin wants root-only
+    folders, no subfolders) must be respected and NOT overridden by
+    DEFAULT_SUBFOLDERS. We only fall back to the hard-coded defaults when
+    no template has ever been saved at all (doc is None) — the previous
+    `doc.get("subfolders")` truthiness check treated `[]` the same as
+    "missing", which silently created the 6 default subfolders even when
+    the Folder Architect UI showed "No subfolders yet".
+    """
     doc = await db.portal_folder_template.find_one({}, {"_id": 0})
-    if doc and doc.get("subfolders"):
+    if doc is not None and "subfolders" in doc:
         return doc["subfolders"]
     return DEFAULT_SUBFOLDERS
 
@@ -1481,10 +1565,17 @@ EXPORT_MIME_MAP = {
     "application/vnd.google-apps.form":         ("application/pdf", ".pdf"),
 }
 
+# MIME types the browser can render natively inside an <img>/<iframe> preview.
+PREVIEWABLE_INLINE_MIMES = {
+    "application/pdf",
+    "image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml", "image/bmp",
+}
+
 @router.get("/drive/download")
 async def portal_drive_download(
     file_id: str = Query(..., description="Drive file ID to download"),
     token: Optional[str] = Query(None, description="Portal JWT (for direct browser downloads via <a>/window.open)"),
+    disposition: str = Query("attachment", description="'attachment' forces a download, 'inline' renders in-browser for previewable types (images/PDF)"),
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ):
     """
@@ -1561,11 +1652,16 @@ async def portal_drive_download(
         # Sanitise filename for Content-Disposition header
         safe_name = file_name.replace('"', "'")
 
+        # Only honour "inline" for types the browser can actually render
+        # (images / PDF). Everything else always downloads as an attachment.
+        use_inline = disposition == "inline" and content_type in PREVIEWABLE_INLINE_MIMES
+        disposition_value = "inline" if use_inline else "attachment"
+
         return StreamingResponse(
             buf,
             media_type=content_type,
             headers={
-                "Content-Disposition": f'attachment; filename="{safe_name}"',
+                "Content-Disposition": f'{disposition_value}; filename="{safe_name}"',
                 "Cache-Control": "no-store",
             },
         )
