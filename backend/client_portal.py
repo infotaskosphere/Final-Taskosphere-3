@@ -17,7 +17,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 import io
 from pydantic import BaseModel, EmailStr, Field
 from passlib.context import CryptContext
@@ -2295,11 +2295,49 @@ def _get_or_create_subfolder_sync(service, parent_id: str, name: str) -> str:
     return created["id"]
 
 
-def _upload_file_to_drive_sync(service, folder_id: str, filename: str, file_bytes: bytes, mime_type: str) -> dict:
-    """Synchronous helper – upload raw bytes to a Drive folder. Returns the created file resource."""
+def _find_existing_file_sync(service, folder_id: str, filename: str) -> Optional[dict]:
+    """Look for a non-trashed file with this exact name directly inside `folder_id`.
+    Used to detect duplicate uploads before they happen, so the caller can
+    ask the admin whether to overwrite or keep both instead of Drive silently
+    creating a second file with the identical name."""
+    safe_name = filename.replace("'", "\\'").strip()
+    existing = service.files().list(
+        q=f"'{folder_id}' in parents and name='{safe_name}' and trashed=false",
+        fields="files(id,name,modifiedTime,size)",
+    ).execute().get("files", [])
+    return existing[0] if existing else None
+
+
+def _unique_filename_sync(service, folder_id: str, filename: str) -> str:
+    """When the admin chooses 'keep both', avoid creating a second file with
+    the byte-identical name (confusing in Drive's UI) by appending ' (1)',
+    ' (2)', etc. — the same convention Windows/macOS/Drive's own web
+    uploader use for same-name conflicts."""
+    stem, dot, ext = filename.rpartition(".")
+    base, ext = (stem, f".{ext}") if dot else (filename, "")
+    candidate = filename
+    n = 1
+    while _find_existing_file_sync(service, folder_id, candidate):
+        candidate = f"{base} ({n}){ext}"
+        n += 1
+    return candidate
+
+
+def _upload_file_to_drive_sync(service, folder_id: str, filename: str, file_bytes: bytes, mime_type: str, existing_file_id: str = None) -> dict:
+    """Synchronous helper – upload raw bytes to a Drive folder.
+    If `existing_file_id` is given, the existing file's *content* is
+    replaced in place (same file id, new revision) instead of creating a
+    new file — this is the 'overwrite' path for duplicate resolution.
+    Returns the created/updated file resource."""
     from googleapiclient.http import MediaIoBaseUpload
     import io as _io
     media = MediaIoBaseUpload(_io.BytesIO(file_bytes), mimetype=mime_type or "application/octet-stream", resumable=False)
+    if existing_file_id:
+        return service.files().update(
+            fileId=existing_file_id,
+            media_body=media,
+            fields="id,name,webViewLink,mimeType,size,modifiedTime,iconLink",
+        ).execute()
     return service.files().create(
         body={"name": filename, "parents": [folder_id]},
         media_body=media,
@@ -2383,12 +2421,24 @@ async def simple_upload_file(
     portal_user_id: str = Form(...),
     folder_id: Optional[str] = Form(None),
     file: UploadFile = File(...),
+    conflict_action: Optional[str] = Form(None),  # None/"ask" | "overwrite" | "keep_both"
     current_user: User = Depends(get_current_user),
 ):
     """
     One-file-at-a-time upload used by the Upload Center's drag-and-drop zone.
     The frontend fires one call per file (in parallel) so uploads happen in
     the background while the admin keeps working / drops more files.
+
+    Duplicate handling: before creating anything, we check whether a file
+    with this exact name already exists directly in the target folder.
+      - conflict_action is None/"ask" (default) and a duplicate exists →
+        respond 409 with the existing file's id so the frontend can prompt
+        the admin to choose "Overwrite" or "Keep both", instead of silently
+        creating a second file with the same name.
+      - conflict_action == "overwrite" → replace the existing file's
+        content in place (same Drive file id, new revision).
+      - conflict_action == "keep_both" → upload as a new file, auto-suffixed
+        " (1)", " (2)", … if needed so it doesn't share the exact same name.
     """
     if current_user.role not in ("admin", "manager"):
         raise HTTPException(403, "Insufficient permissions")
@@ -2421,10 +2471,37 @@ async def simple_upload_file(
 
     service = _get_drive_service()
     loop = asyncio.get_event_loop()
+
     try:
+        existing = await loop.run_in_executor(None, _find_existing_file_sync, service, target_folder, file.filename)
+
+        existing_file_id = None
+        upload_filename = file.filename
+
+        if existing and conflict_action in (None, "ask"):
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": {
+                        "conflict": True,
+                        "existing_file_id": existing["id"],
+                        "existing_modified_time": existing.get("modifiedTime"),
+                        "filename": file.filename,
+                        "message": f"\"{file.filename}\" already exists in this folder.",
+                    }
+                },
+            )
+        elif existing and conflict_action == "overwrite":
+            existing_file_id = existing["id"]
+        elif existing and conflict_action == "keep_both":
+            upload_filename = await loop.run_in_executor(None, _unique_filename_sync, service, target_folder, file.filename)
+        # else: no existing file with this name — proceed as a normal create
+
         uploaded = await loop.run_in_executor(
-            None, _upload_file_to_drive_sync, service, target_folder, file.filename, file_bytes, mime,
+            None, _upload_file_to_drive_sync, service, target_folder, upload_filename, file_bytes, mime, existing_file_id,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Simple upload failed: {e}", exc_info=True)
         raise HTTPException(500, f"Upload failed: {e}")
@@ -2436,6 +2513,7 @@ async def simple_upload_file(
         "webViewLink": uploaded.get("webViewLink"),
         "mimeType": uploaded.get("mimeType"),
         "folder_id": target_folder,
+        "overwritten": bool(existing_file_id),
     }
 
 
