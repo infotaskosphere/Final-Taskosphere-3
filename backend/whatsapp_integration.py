@@ -42,6 +42,10 @@ from backend.dependencies import get_current_user, require_admin
 from backend.models import User
 
 logger = logging.getLogger(__name__)
+
+# Guards wa_scheduled_bulk_job against overlapping runs now that it no
+# longer blocks-and-waits on the coroutine (see wa_scheduled_bulk_job).
+_bulk_job_running = False
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
 
 WA_BRIDGE_URL = os.getenv("WA_BRIDGE_URL", "http://localhost:3002")
@@ -822,14 +826,37 @@ def wa_scheduled_bulk_job():
     APScheduler calls this from a background thread, but Motor (async MongoDB)
     is bound to the main Uvicorn event loop.  Creating a *new* event loop here
     causes "Future attached to a different loop".  Instead we schedule the
-    coroutine on the already-running main loop and block until it finishes.
+    coroutine on the already-running main loop.
+
+    We do NOT block-and-wait here anymore: large recipient batches (each
+    recipient costs ~0.8s+ network latency) can easily exceed the 60s
+    scheduler interval, which previously caused this wrapper to time out,
+    collide with the next scheduled run, and cascade into a growing backlog
+    of missed/skipped executions. Firing-and-forgetting lets the bulk job
+    run to completion on the main loop regardless of how long it takes,
+    while _bulk_job_lock prevents two bulk runs from overlapping.
     """
+    global _bulk_job_running
+    if _bulk_job_running:
+        logger.info("wa_scheduled_bulk_job: previous run still in progress, skipping this tick.")
+        return
     try:
         from backend.server import app_event_loop
         if app_event_loop is None or app_event_loop.is_closed():
             logger.warning("wa_scheduled_bulk_job: main event loop not available yet, skipping.")
             return
-        future = asyncio.run_coroutine_threadsafe(_run_scheduled_bulk_jobs(), app_event_loop)
-        future.result(timeout=55)  # wait up to 55 s (job runs every 60 s)
+
+        async def _guarded_run():
+            global _bulk_job_running
+            _bulk_job_running = True
+            try:
+                await _run_scheduled_bulk_jobs()
+            except Exception as exc:
+                logger.error("wa_scheduled_bulk_job failed: %s: %s", type(exc).__name__, exc)
+            finally:
+                _bulk_job_running = False
+
+        asyncio.run_coroutine_threadsafe(_guarded_run(), app_event_loop)
     except Exception as exc:
-        logger.error("wa_scheduled_bulk_job failed: %s", exc)
+        _bulk_job_running = False
+        logger.error("wa_scheduled_bulk_job failed to schedule: %s: %s", type(exc).__name__, exc)
