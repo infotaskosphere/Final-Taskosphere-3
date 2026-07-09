@@ -16,7 +16,7 @@ import {
   Plus, Trash2, GripVertical, FolderPlus, CheckCircle2,
   XCircle, Play, RotateCcw, Check, X, ChevronDown, ChevronUp,
   Folder, FolderCheck, UploadCloud, Upload, Sparkles, AlertTriangle, RefreshCcw, Eye, ChevronRight as ChevronRightIcon, Zap,
-  Link2, EyeOff, FolderSearch, File, Copy, KeyRound,
+  Link2, EyeOff, FolderSearch, File, Copy, KeyRound, SlidersHorizontal, Image as ImageIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -1932,20 +1932,25 @@ function MessagesTab({ portalUsers, isDark }) {
   );
 }
 
-/* ── Settings Tab ───────────────────────────────────────────────────────────── */
-function SettingsTab({ isDark }) {
+/* ── Client Portal Setting Tab (renamed from "Settings") ─────────────────────
+   Drive Parent Folder was moved out to the new "Advanced Settings" tab —
+   it's an infrastructure/admin concern, not something that belongs next to
+   portal branding. A logo upload was added here instead: it's shown on the
+   client login screen and the client dashboard header. */
+function ClientPortalSettingTab({ isDark }) {
   const [settings, setSettings] = useState({
     portal_name: 'Client Portal',
     welcome_message: 'Welcome to your client portal.',
     allow_client_messages: true,
     show_task_comments: true,
     portal_status: 'live',
-    root_drive_folder: '',
+    logo_url: null,
   });
-  const [rootFolderInfo, setRootFolderInfo] = useState({ id: null, name: null });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const logoInputRef = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1959,9 +1964,8 @@ function SettingsTab({ isDark }) {
         allow_client_messages: d.allow_client_messages ?? s.allow_client_messages,
         show_task_comments: d.show_task_comments ?? s.show_task_comments,
         portal_status: d.portal_status ?? s.portal_status,
-        root_drive_folder: d.root_drive_folder || '',
+        logo_url: d.logo_url ?? null,
       }));
-      setRootFolderInfo({ id: d.root_drive_folder_id || null, name: d.root_drive_folder_name || null });
     } catch {
       toast.error('Failed to load settings');
     } finally {
@@ -1974,15 +1978,57 @@ function SettingsTab({ isDark }) {
   const save = async () => {
     setSaving(true);
     try {
-      const res = await api.put('/client-portal/settings', settings);
-      setRootFolderInfo({ id: res.data?.root_drive_folder_id || null, name: null });
+      // The backend's PortalSettings model still has root_drive_folder — we
+      // simply don't touch it from this tab, so PUT-ing without it would
+      // wipe it. Fetch the current value first and pass it through untouched.
+      const current = await api.get('/client-portal/settings');
+      await api.put('/client-portal/settings', { ...settings, root_drive_folder: current.data?.root_drive_folder || '' });
       setSaved(true); setTimeout(() => setSaved(false), 3000);
       toast.success('Settings saved!');
-      load(); // refresh to pick up the resolved folder name
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Failed to save settings');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const onLogoChosen = async (file) => {
+    if (!file) return;
+    const okTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/svg+xml'];
+    if (!okTypes.includes(file.type)) {
+      toast.error('Logo must be a PNG, JPG, WEBP or SVG image.');
+      return;
+    }
+    if (file.size > 1_500_000) {
+      toast.error('Logo must be smaller than 1.5 MB.');
+      return;
+    }
+    setUploadingLogo(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await api.post('/client-portal/settings/logo', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setSettings(s => ({ ...s, logo_url: res.data?.logo_url || null }));
+      toast.success('Logo updated — it will now show on the client login page and dashboard.');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Could not upload logo');
+    } finally {
+      setUploadingLogo(false);
+    }
+  };
+
+  const removeLogo = async () => {
+    setUploadingLogo(true);
+    try {
+      await api.delete('/client-portal/settings/logo');
+      setSettings(s => ({ ...s, logo_url: null }));
+      toast.success('Logo removed — the default Taskosphere mark will be used.');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Could not remove logo');
+    } finally {
+      setUploadingLogo(false);
     }
   };
 
@@ -1993,8 +2039,8 @@ function SettingsTab({ isDark }) {
           <Settings className="h-4 w-4" style={{ color: COLORS.deepBlue }} />
         </div>
         <div>
-          <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Portal Settings</h3>
-          <p className="text-xs text-slate-400">Configure your client portal behaviour</p>
+          <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Client Portal Setting</h3>
+          <p className="text-xs text-slate-400">Configure your client portal's branding and behaviour</p>
         </div>
       </div>
       <div className="p-5 space-y-5 max-w-lg">
@@ -2003,23 +2049,38 @@ function SettingsTab({ isDark }) {
             <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
           </div>
         )}
+
+        {/* ── Portal Logo ── */}
         <div>
-          <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">Drive Parent Folder</label>
-          <Input
-            value={settings.root_drive_folder}
-            onChange={(e) => setSettings(s => ({ ...s, root_drive_folder: e.target.value }))}
-            className="text-sm"
-            placeholder="Paste a Google Drive folder link or ID"
-          />
-          <p className="text-[10px] text-slate-400 mt-1">
-            {rootFolderInfo.name
-              ? `Currently: "${rootFolderInfo.name}". `
-              : rootFolderInfo.id
-                ? `Currently linked (id: ${rootFolderInfo.id}). `
-                : ''}
-            All new client Drive folders (and their subfolders) are created inside this folder. Leave blank to create them at the root of the connected Drive account. Make sure this folder is shared with the connected Google account.
-          </p>
+          <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">Portal Logo</label>
+          <div className="flex items-center gap-3">
+            <div className={`w-16 h-16 rounded-xl border flex items-center justify-center overflow-hidden flex-shrink-0 ${isDark ? 'border-slate-600 bg-slate-700' : 'border-slate-200 bg-slate-50'}`}>
+              {settings.logo_url
+                ? <img src={settings.logo_url} alt="Portal logo" className="w-full h-full object-contain" />
+                : <ImageIcon className="h-6 w-6 text-slate-300" />}
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <input ref={logoInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden
+                onChange={(e) => { onLogoChosen(e.target.files?.[0]); e.target.value = ''; }} />
+              <button
+                type="button"
+                onClick={() => logoInputRef.current?.click()}
+                disabled={uploadingLogo}
+                className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition disabled:opacity-60 ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+              >
+                {uploadingLogo ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                {settings.logo_url ? 'Replace logo' : 'Upload logo'}
+              </button>
+              {settings.logo_url && (
+                <button type="button" onClick={removeLogo} disabled={uploadingLogo} className="text-[11px] font-medium text-red-500 hover:text-red-600 text-left disabled:opacity-60">
+                  Remove logo
+                </button>
+              )}
+            </div>
+          </div>
+          <p className="text-[10px] text-slate-400 mt-1.5">Shown on the client login screen and in the client dashboard header. PNG, JPG, WEBP or SVG, up to 1.5 MB.</p>
         </div>
+
         <div>
           <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">Portal Name</label>
           <Input value={settings.portal_name} onChange={(e) => setSettings(s => ({ ...s, portal_name: e.target.value }))} className="text-sm" placeholder="Client Portal" />
@@ -2076,6 +2137,101 @@ function SettingsTab({ isDark }) {
   );
 }
 
+/* ── Advanced Settings Tab ─────────────────────────────────────────────────
+   Everything more "infrastructure" than "branding": the Drive Parent
+   Folder (moved out of Client Portal Setting) and the Folder Architect
+   template builder, which previously only had a link from the info banner
+   and no tab of its own. */
+function AdvancedSettingsTab({ isDark, isAdmin }) {
+  const [rootFolder, setRootFolder] = useState('');
+  const [rootFolderInfo, setRootFolderInfo] = useState({ id: null, name: null });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.get('/client-portal/settings');
+      const d = res.data || {};
+      setRootFolder(d.root_drive_folder || '');
+      setRootFolderInfo({ id: d.root_drive_folder_id || null, name: d.root_drive_folder_name || null });
+    } catch {
+      toast.error('Failed to load settings');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      // Same reasoning as ClientPortalSettingTab in reverse: fetch the rest
+      // of the settings doc first so saving the Drive folder here doesn't
+      // clobber portal_name / welcome_message / logo / etc.
+      const current = await api.get('/client-portal/settings');
+      const res = await api.put('/client-portal/settings', { ...current.data, root_drive_folder: rootFolder });
+      setRootFolderInfo({ id: res.data?.root_drive_folder_id || null, name: null });
+      setSaved(true); setTimeout(() => setSaved(false), 3000);
+      toast.success('Advanced settings saved!');
+      load();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to save settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <div className={`flex items-center px-5 py-4 border-b gap-2.5 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+          <div className="p-1.5 rounded-lg" style={{ background: `${COLORS.deepBlue}12` }}>
+            <SlidersHorizontal className="h-4 w-4" style={{ color: COLORS.deepBlue }} />
+          </div>
+          <div>
+            <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Drive Parent Folder</h3>
+            <p className="text-xs text-slate-400">Where new client Drive folders get created</p>
+          </div>
+        </div>
+        <div className="p-5 space-y-3 max-w-lg">
+          {loading && (
+            <div className="flex justify-center py-6">
+              <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+            </div>
+          )}
+          <div>
+            <Input
+              value={rootFolder}
+              onChange={(e) => setRootFolder(e.target.value)}
+              className="text-sm"
+              placeholder="Paste a Google Drive folder link or ID"
+            />
+            <p className="text-[10px] text-slate-400 mt-1">
+              {rootFolderInfo.name
+                ? `Currently: "${rootFolderInfo.name}". `
+                : rootFolderInfo.id
+                  ? `Currently linked (id: ${rootFolderInfo.id}). `
+                  : ''}
+              All new client Drive folders (and their subfolders) are created inside this folder. Leave blank to create them at the root of the connected Drive account. Make sure this folder is shared with the connected Google account.
+            </p>
+          </div>
+          <div className="pt-1">
+            <Button onClick={save} disabled={saving} className="text-xs text-white px-6" style={{ background: GRADIENT }}>
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
+              {saving ? 'Saving…' : saved ? '✓ Saved!' : 'Save'}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <FolderArchitectTab isDark={isDark} isAdmin={isAdmin} />
+    </div>
+  );
+}
+
 /* ── Main Page ──────────────────────────────────────────────────────────────── */
 export default function ClientPortalManagerPage() {
   const { user }   = useAuth();
@@ -2098,6 +2254,7 @@ export default function ClientPortalManagerPage() {
   if (path.endsWith('/documents'))        activeTab = 'documents';
   if (path.endsWith('/messages'))         activeTab = 'messages';
   if (path.endsWith('/settings'))         activeTab = 'settings';
+  if (path.endsWith('/advanced-settings')) activeTab = 'advanced-settings';
   if (path.endsWith('/smart-connect'))    activeTab = 'smart-connect';
 
   const loadUsers = useCallback(async () => {
@@ -2153,7 +2310,7 @@ export default function ClientPortalManagerPage() {
             <strong>Tip:</strong> Use{' '}
             <button onClick={() => navigate('/client-portal-manager/all-clients')} className="underline font-semibold text-blue-600 dark:text-blue-400">All Clients</button>{' '}
             to view and manage portal access for every client. Use{' '}
-            <button onClick={() => navigate('/client-portal-manager/folder-architect')} className="underline font-semibold text-blue-600 dark:text-blue-400">Folder Architect</button>{' '}
+            <button onClick={() => navigate('/client-portal-manager/advanced-settings')} className="underline font-semibold text-blue-600 dark:text-blue-400">Folder Architect</button>{' '}
             to design your Drive folder structure and bulk-create folders. Drive folders are only created when you explicitly do so via the Folder Architect.
           </p>
         </div>
@@ -2167,7 +2324,8 @@ export default function ClientPortalManagerPage() {
       {activeTab === 'documents'        && <DocumentsTab       isDark={isDark} isAdmin={isAdmin} />}
       {activeTab === 'smart-connect'    && <SmartConnectTab    portalUsers={portalUsers} loading={loading} isDark={isDark} isAdmin={isAdmin} />}
       {activeTab === 'messages'         && <MessagesTab        portalUsers={portalUsers} isDark={isDark} />}
-      {activeTab === 'settings'         && <SettingsTab        isDark={isDark} />}
+      {activeTab === 'settings'         && <ClientPortalSettingTab isDark={isDark} />}
+      {activeTab === 'advanced-settings' && <AdvancedSettingsTab isDark={isDark} isAdmin={isAdmin} />}
 
       {/* ── Manage modal ── */}
       {manageTarget && (
