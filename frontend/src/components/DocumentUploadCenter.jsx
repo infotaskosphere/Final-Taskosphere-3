@@ -253,13 +253,15 @@ const fmtElapsed = (ts) => {
   return `${Math.round(mins / 60)}h ago`;
 };
 
-function UploadStatusCard({ items, onRetry, onClearFinished, onClearAll, onRemove, isDark }) {
+function UploadStatusCard({ items, onRetry, onResolveConflict, onResolveAllConflicts, onClearFinished, onClearAll, onRemove, isDark }) {
   if (!items.length) return null;
 
-  const queued    = items.filter((i) => i.status === 'queued').length;
-  const uploading = items.filter((i) => i.status === 'uploading').length;
-  const done      = items.filter((i) => i.status === 'done').length;
-  const errored   = items.filter((i) => i.status === 'error').length;
+  const queued      = items.filter((i) => i.status === 'queued').length;
+  const uploading    = items.filter((i) => i.status === 'uploading').length;
+  const done          = items.filter((i) => i.status === 'done').length;
+  const errored        = items.filter((i) => i.status === 'error').length;
+  const conflicted       = items.filter((i) => i.status === 'conflict').length;
+  const interrupted        = items.filter((i) => i.status === 'interrupted').length;
   const total     = items.length;
   const finished  = done + errored;
   const pct       = total ? Math.round((finished / total) * 100) : 0;
@@ -290,11 +292,31 @@ function UploadStatusCard({ items, onRetry, onClearFinished, onClearAll, onRemov
                 {uploading > 0 && ` · ${uploading} uploading`}
                 {queued > 0 && ` · ${queued} queued`}
                 {errored > 0 && ` · ${errored} failed`}
-                {allDone && ' · safe to leave this page'}
+                {conflicted > 0 && ` · ${conflicted} need a decision`}
+                {interrupted > 0 && ` · ${interrupted} interrupted by a reload`}
+                {allDone && conflicted === 0 && ' · safe to leave this page'}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
+            {conflicted > 1 && (
+              <>
+                <button
+                  onClick={() => onResolveAllConflicts('overwrite')}
+                  className="text-[11px] font-semibold text-white bg-white/15 hover:bg-white/25 px-2.5 py-1.5 rounded-lg transition"
+                  title="Replace the existing file's content for every conflicting item"
+                >
+                  Overwrite all
+                </button>
+                <button
+                  onClick={() => onResolveAllConflicts('keep_both')}
+                  className="text-[11px] font-semibold text-white bg-white/15 hover:bg-white/25 px-2.5 py-1.5 rounded-lg transition"
+                  title="Upload every conflicting item alongside the existing file"
+                >
+                  Keep both all
+                </button>
+              </>
+            )}
             {errored > 0 && !uploading && !queued && (
               <button
                 onClick={() => ordered.filter((i) => i.status === 'error').forEach((i) => onRetry(i))}
@@ -311,7 +333,7 @@ function UploadStatusCard({ items, onRetry, onClearFinished, onClearAll, onRemov
                 Clear finished
               </button>
             )}
-            {allDone && (
+            {allDone && conflicted === 0 && (
               <button onClick={onClearAll} className="text-white/70 hover:text-white flex-shrink-0" title="Dismiss">
                 <X className="h-4 w-4" />
               </button>
@@ -332,12 +354,14 @@ function UploadStatusCard({ items, onRetry, onClearFinished, onClearAll, onRemov
       {/* Detailed file-by-file list */}
       <div className="max-h-80 overflow-y-auto divide-y divide-slate-50 dark:divide-slate-700">
         {ordered.map((it) => (
-          <div key={it.id} className="px-5 py-2.5 flex items-center gap-3">
+          <div key={it.id} className="px-5 py-2.5 flex items-center gap-3 flex-wrap">
             <div className="flex-shrink-0">
-              {it.status === 'queued'    && <Loader2 className="h-4 w-4 text-slate-300" />}
-              {it.status === 'uploading' && <Loader2 className="h-4 w-4 animate-spin text-blue-500" />}
-              {it.status === 'done'      && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
-              {it.status === 'error'     && <XCircle className="h-4 w-4 text-red-500" />}
+              {it.status === 'queued'      && <Loader2 className="h-4 w-4 text-slate-300" />}
+              {it.status === 'uploading'   && <Loader2 className="h-4 w-4 animate-spin text-blue-500" />}
+              {it.status === 'done'        && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
+              {it.status === 'error'       && <XCircle className="h-4 w-4 text-red-500" />}
+              {it.status === 'conflict'    && <AlertCircle className="h-4 w-4 text-amber-500" />}
+              {it.status === 'interrupted' && <AlertCircle className="h-4 w-4 text-slate-400" />}
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
@@ -351,12 +375,32 @@ function UploadStatusCard({ items, onRetry, onClearFinished, onClearAll, onRemov
               <p className="text-[10.5px] text-slate-400 mt-0.5">
                 {it.status === 'queued' && 'Waiting for a free upload slot…'}
                 {it.status === 'uploading' && 'Uploading…'}
-                {it.status === 'done' && `Uploaded ${fmtElapsed(it.finishedAt)}`}
+                {it.status === 'done' && `${it.overwritten ? 'Replaced existing file' : 'Uploaded'} ${fmtElapsed(it.finishedAt)}`}
                 {it.status === 'error' && (it.errorMsg || 'Upload failed')}
+                {it.status === 'conflict' && (it.conflict?.message || 'A file with this name already exists.')}
+                {it.status === 'interrupted' && 'Page was reloaded mid-upload — re-drag this file to continue.'}
                 {it.size ? ` · ${fmtSize(it.size)}` : ''}
               </p>
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
+              {it.status === 'conflict' && (
+                <>
+                  <button
+                    onClick={() => onResolveConflict(it, 'overwrite')}
+                    className="text-[11px] font-semibold text-white bg-amber-500 hover:bg-amber-600 px-2.5 py-1 rounded-lg transition"
+                    title="Replace the existing file's content"
+                  >
+                    Overwrite
+                  </button>
+                  <button
+                    onClick={() => onResolveConflict(it, 'keep_both')}
+                    className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition ${isDark ? 'border-slate-600 text-slate-200 hover:bg-slate-700' : 'border-slate-300 text-slate-600 hover:bg-slate-50'}`}
+                    title="Upload alongside the existing file (renamed to avoid an exact-name clash)"
+                  >
+                    Keep both
+                  </button>
+                </>
+              )}
               {it.status === 'error' && (
                 <button
                   onClick={() => onRetry(it)}
@@ -365,7 +409,7 @@ function UploadStatusCard({ items, onRetry, onClearFinished, onClearAll, onRemov
                   <RefreshCw className="h-3 w-3" /> Retry
                 </button>
               )}
-              {(it.status === 'done' || it.status === 'error') && (
+              {(it.status === 'done' || it.status === 'error' || it.status === 'interrupted') && (
                 <button onClick={() => onRemove(it.id)} className="text-slate-300 hover:text-slate-500" title="Remove from list">
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -463,7 +507,7 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
 
   // uploads — actual queueing/progress lives in DocumentUploadContext so it
   // survives navigating away from this page; we just read+trigger it here.
-  const { items: allUploadItems, queueUploads: queueUploadsCtx, retryItem, clearFinished, clearAll, removeItem } = useDocumentUploads();
+  const { items: allUploadItems, queueUploads: queueUploadsCtx, retryItem, resolveConflict, resolveAllConflicts, clearFinished, clearAll, removeItem } = useDocumentUploads();
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
@@ -697,6 +741,14 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
   const retryUpload = useCallback((item) => {
     retryItem(item, loadItems);
   }, [retryItem, loadItems]);
+
+  const resolveUploadConflict = useCallback((item, action) => {
+    resolveConflict(item, action, loadItems);
+  }, [resolveConflict, loadItems]);
+
+  const resolveAllUploadConflicts = useCallback((action) => {
+    resolveAllConflicts(action, loadItems);
+  }, [resolveAllConflicts, loadItems]);
 
   // Only this client's uploads are shown in the status card while a client
   // is selected — switching clients doesn't lose other clients' progress,
@@ -1088,6 +1140,8 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
                     <UploadStatusCard
                       items={clientUploadItems}
                       onRetry={retryUpload}
+                      onResolveConflict={resolveUploadConflict}
+                      onResolveAllConflicts={resolveAllUploadConflicts}
                       onClearFinished={clearFinished}
                       onClearAll={clearAll}
                       onRemove={removeItem}
