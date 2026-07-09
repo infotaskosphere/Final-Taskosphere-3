@@ -294,7 +294,7 @@ export default function ClientPortalLogin() {
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center mb-4">
             <img
-              src="/logo.png"
+              src="/logo-transparent.png"
               alt="TaskOsphere"
               className="object-contain"
               style={{ maxHeight: "64px", width: "auto" }}
