@@ -16,7 +16,7 @@ import {
   Plus, Trash2, GripVertical, FolderPlus, CheckCircle2,
   XCircle, Play, RotateCcw, Check, X, ChevronDown, ChevronUp,
   Folder, FolderCheck, UploadCloud, Upload, Sparkles, AlertTriangle, RefreshCcw, Eye, ChevronRight as ChevronRightIcon, Zap,
-  Link2, EyeOff, FolderSearch, File,
+  Link2, EyeOff, FolderSearch, File, Copy, KeyRound,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -63,6 +63,41 @@ function StatCard({ icon: Icon, label, value, color, bg }) {
 function PortalUserCard({ pu, onManage, isAdmin }) {
   const { isDark } = useDark();
   const perm = pu.permissions || pu;
+  const [revealed, setRevealed] = useState(null); // null = not fetched, else the plaintext password
+  const [revealing, setRevealing] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+
+  const toggleReveal = async () => {
+    if (showPassword) { setShowPassword(false); return; }
+    if (revealed !== null) { setShowPassword(true); return; }
+    setRevealing(true);
+    try {
+      const res = await api.get(`/client-portal/users/${pu.id}/reveal-password`);
+      setRevealed(res.data?.password || '');
+      setShowPassword(true);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Could not retrieve password');
+    } finally {
+      setRevealing(false);
+    }
+  };
+
+  const copyCreds = async () => {
+    let pwd = revealed;
+    if (pwd === null) {
+      try {
+        const res = await api.get(`/client-portal/users/${pu.id}/reveal-password`);
+        pwd = res.data?.password || '';
+        setRevealed(pwd);
+      } catch (err) {
+        toast.error(err?.response?.data?.detail || 'Could not retrieve password');
+        return;
+      }
+    }
+    await navigator.clipboard.writeText(`User: ${pu.portal_username}  Pass: ${pwd}`);
+    toast.success('Login copied to clipboard');
+  };
+
   return (
     <motion.div
       variants={itemVariants}
@@ -102,6 +137,47 @@ function PortalUserCard({ pu, onManage, isAdmin }) {
             <span className="text-xs font-medium text-slate-600 dark:text-slate-300 truncate">{pu.client_name}</span>
           </div>
         )}
+
+        {/* ── Portal ID / Password ─────────────────────────────────────── */}
+        <div className={`mb-3 px-2.5 py-2 rounded-lg space-y-1.5 ${isDark ? 'bg-slate-700/60' : 'bg-slate-50'}`}>
+          <div className="flex items-center justify-between gap-2">
+            <span className="flex items-center gap-1.5 text-[11px] text-slate-400 font-medium">
+              <UserCheck className="h-3 w-3" /> ID
+            </span>
+            <span className="text-xs font-mono text-slate-600 dark:text-slate-300 truncate">{pu.portal_username}</span>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="flex items-center gap-1.5 text-[11px] text-slate-400 font-medium">
+              <KeyRound className="h-3 w-3" /> Password
+            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-mono text-slate-600 dark:text-slate-300 truncate max-w-[110px]">
+                {showPassword ? (revealed ?? '••••••••') : '••••••••'}
+              </span>
+              {isAdmin && (
+                <>
+                  <button
+                    type="button"
+                    onClick={toggleReveal}
+                    disabled={revealing}
+                    title={showPassword ? 'Hide password' : 'Show password'}
+                    className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                  >
+                    {revealing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={copyCreds}
+                    title="Copy username & password"
+                    className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
 
         <div className="flex flex-wrap gap-1.5 mb-4">
           {[
@@ -1156,10 +1232,16 @@ function SmartConnectTab({ portalUsers, loading, isDark, isAdmin }) {
   };
 
   const previewManual = () => {
-    if (!manualInput.trim()) return;
-    // Extract a plausible display name isn't possible client-side for a bare ID/URL —
-    // the backend will resolve the real name; we just use the raw input as a placeholder.
-    previewById(manualInput.trim(), null);
+    const raw = manualInput.trim();
+    if (!raw) return;
+    // Normalise a pasted Drive share URL (e.g. https://drive.google.com/drive/u/4/folders/<id>?usp=…)
+    // down to the bare folder ID before calling the API — sending the full URL as the ID
+    // causes Drive to 404. The backend now normalises this too, but we do it here as well
+    // so the ID shown/used is clean even before the request goes out.
+    const folderMatch = raw.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+    const idMatch = raw.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    const folderId = folderMatch ? folderMatch[1] : (idMatch ? idMatch[1] : raw);
+    previewById(folderId, null);
   };
 
   /* ── Step 2 → 3: confirm the link ─────────────────────────────────── */
