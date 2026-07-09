@@ -223,11 +223,15 @@ export default function ClientPortalLogin() {
   // ── Branding (custom logo / portal name set by the admin in Client
   // Portal Setting) — falls back to the default Taskosphere mark if none
   // has been uploaded. No-auth endpoint, safe to call before login.
+  // `brandingLoaded` gates rendering of the logo so we never flash the
+  // default Taskosphere mark before the client's own logo arrives.
   const [branding, setBranding] = useState({ portal_name: "Client Portal", logo_url: null });
+  const [brandingLoaded, setBrandingLoaded] = useState(false);
   React.useEffect(() => {
     API.get("/client-portal/public-settings")
       .then((res) => res?.data && setBranding((b) => ({ ...b, ...res.data })))
-      .catch(() => {}); // silent — default branding is fine if this fails
+      .catch(() => {}) // silent — default branding is fine if this fails
+      .finally(() => setBrandingLoaded(true));
   }, []);
 
   // Retry login up to 3 times with increasing delay — handles Render cold starts
@@ -302,13 +306,20 @@ export default function ClientPortalLogin() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center mb-4">
-            <img
-              src={branding.logo_url || "/logo-transparent.png"}
-              alt={branding.portal_name || "TaskOsphere"}
-              className="object-contain"
-              style={{ maxHeight: "64px", width: "auto" }}
-            />
+          <div className="inline-flex items-center justify-center mb-4" style={{ minHeight: "64px" }}>
+            {brandingLoaded && (
+              <img
+                src={branding.logo_url || "/logo-transparent.png"}
+                alt={branding.portal_name || "TaskOsphere"}
+                className="object-contain"
+                // mix-blend-mode helps a logo that was exported with a white
+                // (non-transparent) background blend into the page instead
+                // of showing as a visible white box. For a fully clean
+                // result, re-upload the logo as a transparent PNG in
+                // Client Portal Setting — this is a visual fallback only.
+                style={{ maxHeight: "64px", width: "auto", mixBlendMode: "multiply" }}
+              />
+            )}
           </div>
           <h1 className="text-2xl font-bold text-gray-900">{branding.portal_name || "Client Portal"}</h1>
           <p className="text-sm text-gray-500 mt-1">
@@ -399,8 +410,14 @@ export default function ClientPortalLogin() {
           </div>
         )}
 
-        <p className="text-center text-xs text-gray-400 mt-4">
-          Powered by Taskosphere
+        <p className="text-center text-xs text-gray-400 mt-4 flex items-center justify-center gap-1.5">
+          Powered by
+          <img
+            src="/logo-transparent.png"
+            alt="Taskosphere"
+            style={{ height: "14px", width: "auto" }}
+            className="object-contain inline-block"
+          />
         </p>
       </div>
     </div>
