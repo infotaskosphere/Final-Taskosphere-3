@@ -23,11 +23,12 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import api from '@/lib/api.js';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useDocumentUploads } from '@/contexts/DocumentUploadContext.jsx';
 import {
   Search, Users, FolderOpen, Folder, FolderPlus, FileText, UploadCloud, Plus, Trash2,
   ChevronRight, Home, Loader2, CheckCircle2, XCircle, Eye, EyeOff, X,
   ExternalLink, RefreshCw, KeyRound, Copy, Check, AlertCircle, CloudCog,
-  FileImage, FileSpreadsheet, FileType2, Square, CheckSquare, Sparkles,
+  FileImage, FileSpreadsheet, FileType2, Square, CheckSquare, Sparkles, ListChecks,
 } from 'lucide-react';
 
 const COLORS = {
@@ -238,45 +239,138 @@ function CredentialsCard({ username, password, onDismiss }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Upload progress tray (floating, bottom-right)
+// Upload status card — persistent, sits below the documents grid.
+// Backed by DocumentUploadContext, so it keeps showing live progress even
+// after navigating away and back (uploads run in the background regardless
+// of whether this card/component is mounted).
 // ═══════════════════════════════════════════════════════════════════════════
-function UploadTray({ items, onClear, onRetry }) {
-  if (items.length === 0) return null;
-  const done = items.filter((i) => i.status !== 'uploading' && i.status !== 'queued').length;
+const fmtElapsed = (ts) => {
+  if (!ts) return '';
+  const secs = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  return `${Math.round(mins / 60)}h ago`;
+};
+
+function UploadStatusCard({ items, onRetry, onClearFinished, onClearAll, onRemove, isDark }) {
+  if (!items.length) return null;
+
+  const queued    = items.filter((i) => i.status === 'queued').length;
+  const uploading = items.filter((i) => i.status === 'uploading').length;
+  const done      = items.filter((i) => i.status === 'done').length;
+  const errored   = items.filter((i) => i.status === 'error').length;
+  const total     = items.length;
+  const finished  = done + errored;
+  const pct       = total ? Math.round((finished / total) * 100) : 0;
+  const allDone   = finished === total;
+
+  // Newest first so the most recently dropped files are easy to find.
+  const ordered = [...items].sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}
-      className="fixed bottom-5 right-5 w-80 rounded-2xl shadow-2xl border border-slate-200 bg-white dark:bg-slate-800 dark:border-slate-700 overflow-hidden z-50"
+      layout
+      initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+      className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
     >
-      <div className="flex items-center justify-between px-4 py-3" style={{ background: GRADIENT }}>
-        <p className="text-xs font-semibold text-white flex items-center gap-1.5">
-          <UploadCloud className="h-3.5 w-3.5" /> Uploading… {done}/{items.length}
-        </p>
-        {done === items.length && (
-          <button onClick={onClear} className="text-white/70 hover:text-white"><X className="h-3.5 w-3.5" /></button>
-        )}
+      {/* Header + overall progress */}
+      <div className="px-5 py-4" style={{ background: GRADIENT }}>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="p-1.5 rounded-lg bg-white/15 flex-shrink-0">
+              {allDone ? <ListChecks className="h-4 w-4 text-white" /> : <UploadCloud className="h-4 w-4 text-white animate-pulse" />}
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-white leading-none">
+                {allDone ? 'Upload complete' : 'Uploading in background'}
+              </p>
+              <p className="text-[11px] text-white/70 mt-0.5">
+                {finished}/{total} finished
+                {uploading > 0 && ` · ${uploading} uploading`}
+                {queued > 0 && ` · ${queued} queued`}
+                {errored > 0 && ` · ${errored} failed`}
+                {allDone && ' · safe to leave this page'}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {errored > 0 && !uploading && !queued && (
+              <button
+                onClick={() => ordered.filter((i) => i.status === 'error').forEach((i) => onRetry(i))}
+                className="text-[11px] font-semibold text-white bg-white/15 hover:bg-white/25 px-2.5 py-1.5 rounded-lg transition"
+              >
+                Retry all failed
+              </button>
+            )}
+            {finished > 0 && (
+              <button
+                onClick={onClearFinished}
+                className="text-[11px] font-semibold text-white/80 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-lg transition"
+              >
+                Clear finished
+              </button>
+            )}
+            {allDone && (
+              <button onClick={onClearAll} className="text-white/70 hover:text-white flex-shrink-0" title="Dismiss">
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        </div>
+        {/* progress bar */}
+        <div className="mt-3 h-1.5 rounded-full bg-white/20 overflow-hidden">
+          <motion.div
+            className="h-full rounded-full bg-white"
+            initial={false}
+            animate={{ width: `${pct}%` }}
+            transition={{ duration: 0.3 }}
+          />
+        </div>
       </div>
-      <div className="max-h-64 overflow-y-auto divide-y divide-slate-50 dark:divide-slate-700">
-        {items.map((it) => (
-          <div key={it.id} className="px-4 py-2">
-            <div className="flex items-center gap-2.5">
-              {it.status === 'queued' && <Loader2 className="h-3.5 w-3.5 text-slate-300 flex-shrink-0" />}
-              {it.status === 'uploading' && <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500 flex-shrink-0" />}
-              {it.status === 'done' && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />}
-              {it.status === 'error' && <XCircle className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />}
-              <span className="text-xs text-slate-600 dark:text-slate-300 truncate flex-1">{it.name}</span>
+
+      {/* Detailed file-by-file list */}
+      <div className="max-h-80 overflow-y-auto divide-y divide-slate-50 dark:divide-slate-700">
+        {ordered.map((it) => (
+          <div key={it.id} className="px-5 py-2.5 flex items-center gap-3">
+            <div className="flex-shrink-0">
+              {it.status === 'queued'    && <Loader2 className="h-4 w-4 text-slate-300" />}
+              {it.status === 'uploading' && <Loader2 className="h-4 w-4 animate-spin text-blue-500" />}
+              {it.status === 'done'      && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
+              {it.status === 'error'     && <XCircle className="h-4 w-4 text-red-500" />}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-xs font-medium text-slate-700 dark:text-slate-200 truncate max-w-[280px]">{it.name}</p>
+                {it.clientName && (
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 flex-shrink-0">
+                    {it.clientName}
+                  </span>
+                )}
+              </div>
+              <p className="text-[10.5px] text-slate-400 mt-0.5">
+                {it.status === 'queued' && 'Waiting for a free upload slot…'}
+                {it.status === 'uploading' && 'Uploading…'}
+                {it.status === 'done' && `Uploaded ${fmtElapsed(it.finishedAt)}`}
+                {it.status === 'error' && (it.errorMsg || 'Upload failed')}
+                {it.size ? ` · ${fmtSize(it.size)}` : ''}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
               {it.status === 'error' && (
                 <button
-                  onClick={() => onRetry?.(it)}
-                  className="text-[11px] font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1 flex-shrink-0"
+                  onClick={() => onRetry(it)}
+                  className="text-[11px] font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1"
                 >
                   <RefreshCw className="h-3 w-3" /> Retry
                 </button>
               )}
+              {(it.status === 'done' || it.status === 'error') && (
+                <button onClick={() => onRemove(it.id)} className="text-slate-300 hover:text-slate-500" title="Remove from list">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
-            {it.status === 'error' && it.errorMsg && (
-              <p className="text-[10.5px] text-red-500 mt-0.5 pl-6 leading-snug">{it.errorMsg}</p>
-            )}
           </div>
         ))}
       </div>
@@ -367,15 +461,12 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
   const [newFolderName, setNewFolderName] = useState('');
   const [creatingFolder, setCreatingFolder] = useState(false);
 
-  // uploads
-  const [uploadItems, setUploadItems] = useState([]);
+  // uploads — actual queueing/progress lives in DocumentUploadContext so it
+  // survives navigating away from this page; we just read+trigger it here.
+  const { items: allUploadItems, queueUploads: queueUploadsCtx, retryItem, clearFinished, clearAll, removeItem } = useDocumentUploads();
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
-  // Caches subfolder-path -> Drive folder id for the current session, so
-  // dropping the same folder twice (or a folder with lots of files inside
-  // one subfolder) doesn't call simple-create-folder once per file.
-  const folderIdCache = useRef(new Map());
 
   // ── load clients (from the same source as the Clients page) ────────────
   const loadClients = useCallback(async () => {
@@ -576,153 +667,26 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
     }
   };
 
-  // ── upload (background, parallel, one call per file) ───────────────────
-  const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
-
-  // Reset the subfolder cache whenever the client or the folder the user is
-  // looking at changes, so stale ids from a previous client can't leak in.
-  useEffect(() => { folderIdCache.current = new Map(); }, [portalUser?.id, currentFolderId]);
-
-  // Resolves (creating as needed) the Drive folder that a dropped file's
-  // relative path points to, e.g. ["DOCUMENTS", "Gst Returns"] becomes the
-  // id of currentFolder/DOCUMENTS/Gst Returns, reusing the same
-  // "+ New Folder" endpoint so nested folders get created idempotently.
-  //
-  // RACE-CONDITION FIX: When multiple files share the same folder path (e.g.
-  // three files all inside "KYC/"), queueUploads calls resolveTargetFolder
-  // for all of them simultaneously.  Without protection the cache is empty for
-  // all three, so all three fire a create-folder request → three duplicate
-  // KYC folders.
-  //
-  // Fix: store an in-flight Promise in the cache as soon as we start creating.
-  // Any concurrent call that reaches the same key finds the Promise and awaits
-  // it instead of sending another create request.  Once the Promise resolves we
-  // replace it with the plain string folder-id for instant future lookups.
-  const resolveTargetFolder = useCallback(async (pathParts) => {
-    let parentId = currentFolderId || null;
-    if (!pathParts?.length) return parentId;
-    let cacheKey = `${parentId || 'root'}`;
-    for (const name of pathParts) {
-      cacheKey += `/${name}`;
-
-      const cached = folderIdCache.current.get(cacheKey);
-      if (cached !== undefined) {
-        // May be a resolved string id OR an in-flight Promise — await either.
-        parentId = await Promise.resolve(cached);
-        continue;
-      }
-
-      // Nothing cached yet — start creating and immediately store the Promise
-      // so parallel calls for the same key await us instead of duplicating.
-      const promise = api
-        .post('/client-portal/drive/simple-create-folder', {
-          portal_user_id: portalUser.id,
-          folder_name: name,
-          parent_folder_id: parentId,
-        })
-        .then((res) => res.data.id);
-
-      folderIdCache.current.set(cacheKey, promise);      // store Promise first
-      parentId = await promise;
-      folderIdCache.current.set(cacheKey, parentId);    // replace with resolved id
-    }
-    return parentId;
-  }, [portalUser, currentFolderId]);
-
-  const uploadOne = useCallback(async (file, trayId, { isRetry = false, folderId } = {}) => {
-    const targetFolderId = folderId !== undefined ? folderId : currentFolderId;
-    const form = new FormData();
-    form.append('portal_user_id', portalUser.id);
-    if (targetFolderId) form.append('folder_id', targetFolderId);
-    form.append('file', file);
-
-    setUploadItems((prev) => prev.map((it) => (
-      it.id === trayId ? { ...it, status: 'uploading', file, folderId: targetFolderId, errorMsg: null } : it
-    )));
-
-    try {
-      await api.post('/client-portal/drive/upload-file', form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      setUploadItems((prev) => prev.map((it) => (it.id === trayId ? { ...it, status: 'done' } : it)));
-      loadItems();
-    } catch (err) {
-      // Network-level blocks (no response reached us at all) are often
-      // transient -- a first attempt trips something, a second gets through.
-      // Only auto-retry once, and only for that class of failure, so a real
-      // backend error (403/500 etc.) surfaces immediately instead of hiding
-      // behind a pointless retry.
-      if (!isRetry && isLikelyClientSideBlock(err)) {
-        await sleep(1200);
-        return uploadOne(file, trayId, { isRetry: true, folderId: targetFolderId });
-      }
-      const msg = uploadFailureMessage(file.name, err);
-      setUploadItems((prev) => prev.map((it) => (
-        it.id === trayId ? { ...it, status: 'error', errorMsg: msg, file, folderId: targetFolderId } : it
-      )));
-      toast.error(msg);
-    }
-  }, [portalUser, currentFolderId, loadItems]);
-
-  // Accepts an array of { file, pathParts } entries. pathParts is the chain
-  // of folder names the file sat inside when it was dropped/selected (empty
-  // for a plain file picked with no folder structure) — used to recreate
-  // the same structure on Drive before the file itself is uploaded.
-  // Uploads used to fire fully in parallel (one request per file, no cap).
-  // With large batches (drag-and-drop a whole folder = dozens/hundreds of
-  // files) that meant every file hit the backend at the exact same instant —
-  // each request reads the whole file into memory and spins up its own
-  // Google Drive upload thread. On a memory-constrained backend instance
-  // this reliably ran the process out of memory partway through a big
-  // batch, which killed/restarted the instance; requests in flight at that
-  // moment come back as a bare 502 with no CORS headers (since the app never
-  // got a chance to attach them), which shows up in the browser as a
-  // confusing "CORS policy" error rather than an obvious crash.
-  //
-  // Fix: only ever run a small, fixed number of uploads at once. Everything
-  // else waits in the tray with a 'queued' status until a slot frees up.
-  const MAX_CONCURRENT_UPLOADS = 4;
+  // ── upload (queues into the global DocumentUploadContext) ──────────────
+  // The actual network calls, concurrency cap and retry logic all live in
+  // DocumentUploadContext so they keep running even if the admin navigates
+  // away from this page mid-batch. Here we just build the entries + target
+  // and hand them off, and pass `loadItems` as the "a file just finished"
+  // callback so the grid below refreshes live while this tab is open.
+  const uploadTarget = useMemo(() => ({
+    portalUserId: portalUser?.id,
+    folderId: currentFolderId || null,
+    clientId: selectedClient?.id,
+    clientName: selectedClient ? clientName(selectedClient) : undefined,
+  }), [portalUser?.id, currentFolderId, selectedClient]);
 
   const queueUploads = useCallback((entries) => {
     if (!portalUser?.google_drive_folder_id) {
       toast.error('Set up this client\'s Drive folder first.');
       return;
     }
-    if (!entries.length) return;
-
-    const trayItems = entries.map((e) => ({
-      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      name: e.pathParts?.length ? [...e.pathParts, e.file.name].join('/') : e.file.name,
-      status: 'queued',
-    }));
-    setUploadItems((prev) => [...prev, ...trayItems]);
-
-    const processEntry = async (entry, idx) => {
-      const trayId = trayItems[idx].id;
-      try {
-        const folderId = entry.pathParts?.length
-          ? await resolveTargetFolder(entry.pathParts)
-          : (currentFolderId || null);
-        await uploadOne(entry.file, trayId, { folderId });
-      } catch (err) {
-        const msg = uploadFailureMessage(entry.file.name, err);
-        setUploadItems((prev) => prev.map((it) => (
-          it.id === trayId ? { ...it, status: 'error', errorMsg: msg, file: entry.file } : it
-        )));
-        toast.error(msg);
-      }
-    };
-
-    let cursor = 0;
-    const runWorker = async () => {
-      while (cursor < entries.length) {
-        const idx = cursor++;
-        await processEntry(entries[idx], idx);
-      }
-    };
-    const workerCount = Math.min(MAX_CONCURRENT_UPLOADS, entries.length);
-    for (let i = 0; i < workerCount; i++) runWorker();
-  }, [portalUser, currentFolderId, resolveTargetFolder, uploadOne]);
+    queueUploadsCtx(entries, uploadTarget, loadItems);
+  }, [portalUser, uploadTarget, queueUploadsCtx, loadItems]);
 
   // Kept for the plain "Choose Files" input, which never carries folder info.
   const uploadFiles = useCallback((fileList) => {
@@ -730,13 +694,17 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
     queueUploads(files.map((file) => ({ file, pathParts: [] })));
   }, [queueUploads]);
 
-  const retryUpload = useCallback((trayItem) => {
-    if (!trayItem?.file) {
-      toast.error('Can\'t retry -- please re-drag this file in.');
-      return;
-    }
-    uploadOne(trayItem.file, trayItem.id, { folderId: trayItem.folderId });
-  }, [uploadOne]);
+  const retryUpload = useCallback((item) => {
+    retryItem(item, loadItems);
+  }, [retryItem, loadItems]);
+
+  // Only this client's uploads are shown in the status card while a client
+  // is selected — switching clients doesn't lose other clients' progress,
+  // it's just not shown until you pick them again (or see the badge count).
+  const clientUploadItems = useMemo(
+    () => allUploadItems.filter((it) => it.portalUserId === portalUser?.id),
+    [allUploadItems, portalUser?.id],
+  );
 
   // ── recursively read a dropped folder into a flat file list ─────────
   // Browsers only expose real folder contents via the drag-and-drop
@@ -1111,18 +1079,28 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
                     </div>
                   )}
                 </div>
+
+                {/* Upload status — persists across navigation; keeps showing
+                    progress for this client even if a batch was started,
+                    the admin left the page, and came back later. */}
+                <AnimatePresence>
+                  {clientUploadItems.length > 0 && (
+                    <UploadStatusCard
+                      items={clientUploadItems}
+                      onRetry={retryUpload}
+                      onClearFinished={clearFinished}
+                      onClearAll={clearAll}
+                      onRemove={removeItem}
+                      isDark={isDark}
+                    />
+                  )}
+                </AnimatePresence>
               </>
             )}
           </div>
         )}
       </div>
       </div>
-
-      <AnimatePresence>
-        {uploadItems.length > 0 && (
-          <UploadTray items={uploadItems} onClear={() => setUploadItems([])} onRetry={retryUpload} />
-        )}
-      </AnimatePresence>
     </div>
   );
 }
