@@ -12,6 +12,7 @@ import { BulkWASenderProvider } from "@/components/BulkWASenderContext";
 import BulkWASenderWidget from "@/contexts/BulkWASenderWidget";
 import { MinimizedFormsProvider } from "@/contexts/MinimizedFormsContext";
 import MinimizedFormsDock from "@/components/layout/MinimizedFormsDock.jsx";
+import { DocumentUploadProvider } from "@/contexts/DocumentUploadContext.jsx";
 
 /* ── Bottom loading bar ─────────────────────────────────────────────── */
 // memo: re-renders only when loading state changes, not on every route change
@@ -76,6 +77,7 @@ export default function App() {
         <BrowserRouter>
           <MinimizedFormsProvider>
             <BulkWASenderProvider>
+              <DocumentUploadProvider>
               {/* Bottom loading bar — always visible, no layout shift */}
               <BottomLoadingBar />
 
@@ -95,6 +97,7 @@ export default function App() {
               </Suspense>
 
               <Toaster position="top-right" richColors />
+              </DocumentUploadProvider>
             </BulkWASenderProvider>
           </MinimizedFormsProvider>
         </BrowserRouter>
