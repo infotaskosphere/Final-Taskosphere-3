@@ -77,9 +77,21 @@ const fmtSize = (bytes) => {
 // All file access goes through our backend's authenticated Drive proxy so that
 // clients never need their own Google account. Direct Drive links return 403
 // ("Request access") for any non-owner Google account.
-function getProxyDownloadUrl(file) {
+function getProxyDownloadUrl(file, { inline = false } = {}) {
   const token = sessionStorage.getItem("client_portal_token");
-  return `${API_BASE}/client-portal/drive/download?file_id=${encodeURIComponent(file.id)}&token=${encodeURIComponent(token)}`;
+  const disposition = inline ? "&disposition=inline" : "";
+  return `${API_BASE}/client-portal/drive/download?file_id=${encodeURIComponent(file.id)}&token=${encodeURIComponent(token)}${disposition}`;
+}
+
+// Mime types we can render inline inside the preview modal
+const PREVIEWABLE_IMAGE = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp"]);
+const PREVIEWABLE_PDF = new Set([
+  "application/pdf",
+  "application/vnd.google-apps.document",     // exported to PDF by backend
+  "application/vnd.google-apps.presentation",  // exported to PDF by backend
+]);
+function isPreviewable(mimeType) {
+  return PREVIEWABLE_IMAGE.has(mimeType) || PREVIEWABLE_PDF.has(mimeType);
 }
 
 // ── Share Link Button ─────────────────────────────────────────────────────
@@ -134,6 +146,107 @@ function ShareBtn({ file }) {
           <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
         </svg>
       )}
+    </button>
+  );
+}
+
+// ── Preview Modal ──────────────────────────────────────────────────────────
+// Renders images and PDFs inline; anything else shows a friendly fallback
+// with a direct download action instead of a broken preview.
+function PreviewModal({ file, onClose }) {
+  if (!file) return null;
+  const meta = driveIcon(file.mimeType);
+  const isImage = PREVIEWABLE_IMAGE.has(file.mimeType);
+  const isPdf = PREVIEWABLE_PDF.has(file.mimeType);
+  const src = getProxyDownloadUrl(file, { inline: true });
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = ""; };
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-gray-100 bg-gray-50">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className={`text-xl flex-shrink-0 ${meta.color}`}>{meta.icon}</span>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-gray-800 truncate">{file.name}</p>
+              <p className="text-xs text-gray-400">
+                {file.modifiedTime ? fmtDate(file.modifiedTime) : ""}{file.size ? ` · ${fmtSize(file.size)}` : ""}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <a
+              href={getProxyDownloadUrl(file)}
+              title="Download"
+              className="p-2 rounded-lg text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" />
+              </svg>
+            </a>
+            <button
+              onClick={onClose}
+              title="Close"
+              className="p-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-auto bg-gray-100 flex items-center justify-center min-h-[300px]">
+          {isImage && (
+            <img src={src} alt={file.name} className="max-w-full max-h-[75vh] object-contain mx-auto" />
+          )}
+          {isPdf && (
+            <iframe title={file.name} src={src} className="w-full h-[75vh] border-0" />
+          )}
+          {!isImage && !isPdf && (
+            <div className="text-center py-16 px-6">
+              <span className="text-5xl block mb-3 opacity-60">{meta.icon}</span>
+              <p className="text-sm text-gray-500 mb-4">Preview isn't available for this file type.</p>
+              <a
+                href={getProxyDownloadUrl(file)}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition"
+              >
+                Download to view
+              </a>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PreviewBtn({ file, onPreview }) {
+  if (!isPreviewable(file.mimeType)) return null;
+  return (
+    <button
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); onPreview(file); }}
+      title="Preview"
+      className="flex-shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 transition opacity-0 group-hover:opacity-100"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+      </svg>
     </button>
   );
 }
@@ -240,12 +353,22 @@ function Breadcrumb({ crumbs, onNavigate }) {
   );
 }
 
+const SORT_OPTIONS = [
+  { id: "name",     label: "Name (A–Z)" },
+  { id: "date",     label: "Date modified" },
+  { id: "size",     label: "Size" },
+];
+
 function DriveTab({ user }) {
   const [driveData, setDriveData] = useState({ files: [], folders: [], breadcrumb: [] });
   // Local breadcrumb stack: array of { id, name } representing current navigation path
   const [crumbStack, setCrumbStack] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState("name");
+  const [viewMode, setViewMode] = useState("grid"); // grid | list
+  const [previewFile, setPreviewFile] = useState(null);
 
   // fetchFolder: folderId = null means root.
   // parentFolderId = the folder we navigated FROM (needed by backend security check).
@@ -307,8 +430,29 @@ function DriveTab({ user }) {
 
   const totalItems = (driveData.folders?.length || 0) + (driveData.files?.length || 0);
 
+  const q = search.trim().toLowerCase();
+  const filteredFolders = (driveData.folders || []).filter(f => f.name.toLowerCase().includes(q));
+  const filteredFiles = (driveData.files || []).filter(f => f.name.toLowerCase().includes(q));
+
+  const sortFn = (a, b) => {
+    if (sortBy === "date") return new Date(b.modifiedTime || 0) - new Date(a.modifiedTime || 0);
+    if (sortBy === "size") return (Number(b.size) || 0) - (Number(a.size) || 0);
+    return a.name.localeCompare(b.name);
+  };
+  const sortedFolders = [...filteredFolders].sort((a, b) => a.name.localeCompare(b.name));
+  const sortedFiles = [...filteredFiles].sort(sortFn);
+
+  const totalSize = (driveData.files || []).reduce((sum, f) => sum + (Number(f.size) || 0), 0);
+
+  const handleOpenFile = (f) => {
+    if (isPreviewable(f.mimeType)) setPreviewFile(f);
+    else window.open(getProxyDownloadUrl(f), "_blank", "noopener,noreferrer");
+  };
+
   return (
     <Section title="My Documents" icon="☁️" count={totalItems}>
+      {previewFile && <PreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />}
+
       {driveData.message && (
         <div className="bg-blue-50 border border-blue-200 text-blue-700 text-sm rounded-xl px-4 py-3 mb-4">
           ℹ️ {driveData.message}
@@ -325,17 +469,69 @@ function DriveTab({ user }) {
         <Breadcrumb crumbs={crumbStack} onNavigate={navigateToBreadcrumb} />
       )}
 
+      {/* Toolbar: search, sort, view toggle, stats */}
+      {!loading && (totalItems > 0 || search) && (
+        <div className="flex flex-wrap items-center gap-2.5 mb-5 pb-4 border-b border-gray-100">
+          <div className="relative flex-1 min-w-[180px]">
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 10.5a6.5 6.5 0 11-13 0 6.5 6.5 0 0113 0z" />
+            </svg>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search this folder..."
+              className="w-full pl-9 pr-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition"
+            />
+          </div>
+
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            className="text-sm px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/30 text-gray-600"
+          >
+            {SORT_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+          </select>
+
+          <div className="flex items-center bg-gray-50 border border-gray-200 rounded-lg p-0.5">
+            <button
+              onClick={() => setViewMode("grid")}
+              title="Grid view"
+              className={`p-1.5 rounded-md transition ${viewMode === "grid" ? "bg-white shadow-sm text-blue-600" : "text-gray-400 hover:text-gray-600"}`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+              </svg>
+            </button>
+            <button
+              onClick={() => setViewMode("list")}
+              title="List view"
+              className={`p-1.5 rounded-md transition ${viewMode === "list" ? "bg-white shadow-sm text-blue-600" : "text-gray-400 hover:text-gray-600"}`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+          </div>
+
+          {totalSize > 0 && (
+            <span className="text-xs text-gray-400 ml-auto hidden sm:block">
+              {driveData.files.length} file{driveData.files.length !== 1 ? "s" : ""} · {fmtSize(totalSize)}
+            </span>
+          )}
+        </div>
+      )}
+
       {loading ? (
         <div className="flex justify-center py-10">
           <div className="w-7 h-7 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
         </div>
       ) : (
         <>
-          {driveData.folders?.length > 0 && (
+          {sortedFolders.length > 0 && (
             <div className="mb-5">
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Folders</p>
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                {driveData.folders.map((f) => (
+              <div className={viewMode === "grid" ? "grid sm:grid-cols-2 lg:grid-cols-3 gap-2" : "space-y-2"}>
+                {sortedFolders.map((f) => (
                   <div
                     key={f.id}
                     className="flex items-center gap-3 p-3 bg-yellow-50 rounded-xl border border-yellow-100 hover:border-yellow-300 hover:bg-yellow-100 transition text-left group w-full relative"
@@ -365,18 +561,19 @@ function DriveTab({ user }) {
             </div>
           )}
 
-          {driveData.files?.length > 0 && (
+          {sortedFiles.length > 0 && (
             <div>
-              {driveData.folders?.length > 0 && (
+              {sortedFolders.length > 0 && (
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Files</p>
               )}
-              <div className="space-y-2">
-                {driveData.files.map((f) => {
+              <div className={viewMode === "grid" ? "grid sm:grid-cols-2 lg:grid-cols-3 gap-2" : "space-y-2"}>
+                {sortedFiles.map((f) => {
                   const meta = driveIcon(f.mimeType);
                   return (
                     <div
                       key={f.id}
-                      className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100 hover:border-blue-200 hover:bg-blue-50 transition group"
+                      onClick={() => handleOpenFile(f)}
+                      className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100 hover:border-blue-200 hover:bg-blue-50 transition group cursor-pointer"
                     >
                       <span className={`text-2xl flex-shrink-0 ${meta.color}`}>{meta.icon}</span>
 
@@ -392,25 +589,14 @@ function DriveTab({ user }) {
 
                       {/* Action buttons — visible on hover */}
                       <div className="flex items-center gap-1 flex-shrink-0">
+                        {/* Preview (images / PDFs) */}
+                        <PreviewBtn file={f} onPreview={setPreviewFile} />
+
                         {/* Share link */}
                         <ShareBtn file={f} />
 
                         {/* Download */}
                         <DownloadBtn file={f} />
-
-                        {/* Open / View file via backend proxy */}
-                        <a
-                          href={getProxyDownloadUrl(f)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          title="Open / View file"
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-100 transition opacity-0 group-hover:opacity-100"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                          </svg>
-                        </a>
                       </div>
                     </div>
                   );
@@ -419,8 +605,8 @@ function DriveTab({ user }) {
             </div>
           )}
 
-          {!driveData.files?.length && !driveData.folders?.length && !driveData.message && !driveData.error && !error && (
-            <Empty message="No files found in this folder." />
+          {!sortedFiles.length && !sortedFolders.length && !driveData.message && !driveData.error && !error && (
+            <Empty message={q ? `No files matching "${search}".` : "No files found in this folder."} />
           )}
         </>
       )}
@@ -740,10 +926,10 @@ export default function ClientPortalDashboard() {
     }
     if (!u) { navigate("/client-portal"); return; }
     setUser(u);
-    if (u.can_view_tasks) setActiveTab("tasks");
-    else if (u.can_view_documents) setActiveTab("documents");
-    else if (u.can_view_invoices) setActiveTab("invoices");
-    else setActiveTab("drive");
+    // Always land on "My Drive" first — it's the client's home base for
+    // documents. Previously this defaulted to "tasks" whenever the client
+    // could view tasks, which overrode the "drive" initial state.
+    setActiveTab("drive");
   }, [navigate]);
 
   const fetchTab = useCallback(async (tab) => {
