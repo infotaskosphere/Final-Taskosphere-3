@@ -843,32 +843,52 @@ async def _resolve_subfolders() -> List[str]:
     return DEFAULT_SUBFOLDERS
 
 
-def _create_drive_folder_sync(service, client_name: str, parent_folder_id: Optional[str], subfolders: List[str]):
+def _create_drive_folder_sync(
+    service,
+    client_name: str,
+    parent_folder_id: Optional[str],
+    subfolders: List[str],
+    force_create: bool = True,
+):
     """
-    Synchronous helper that creates (or reuses) a root folder + subfolders in Drive.
+    Synchronous helper that creates a root folder + subfolders in Drive.
+
+    By default (force_create=True) this ALWAYS creates a brand-new root
+    folder — it never searches for / reuses a pre-existing folder that
+    happens to share the same name. That "find an existing folder and link
+    to it" behaviour is intentionally reserved for the explicit Smart
+    Connect flow (see /drive/search-folders + /clients/{id}/link-drive-folder),
+    so that a same-named folder belonging to a different client (or created
+    outside the app) is never silently attached to the wrong client here.
+
+    Pass force_create=False to opt into the old reuse-if-exists behaviour.
     Returns a result dict.
     """
     # Accept full Drive URLs or bare IDs — always normalise to a bare ID
     parent_folder_id = _extract_folder_id(parent_folder_id)
     safe_name = client_name.strip()
 
-    query_parts = [
-        f"name='{safe_name}'",
-        "mimeType='application/vnd.google-apps.folder'",
-        "trashed=false",
-    ]
-    if parent_folder_id:
-        query_parts.insert(0, f"'{parent_folder_id}' in parents")
+    root_folder, created_root = None, False
 
-    existing = service.files().list(
-        q=" and ".join(query_parts),
-        fields="files(id,name,webViewLink)",
-        spaces="drive",
-    ).execute().get("files", [])
+    if not force_create:
+        query_parts = [
+            f"name='{safe_name}'",
+            "mimeType='application/vnd.google-apps.folder'",
+            "trashed=false",
+        ]
+        if parent_folder_id:
+            query_parts.insert(0, f"'{parent_folder_id}' in parents")
 
-    if existing:
-        root_folder, created_root = existing[0], False
-    else:
+        existing = service.files().list(
+            q=" and ".join(query_parts),
+            fields="files(id,name,webViewLink)",
+            spaces="drive",
+        ).execute().get("files", [])
+
+        if existing:
+            root_folder, created_root = existing[0], False
+
+    if root_folder is None:
         root_meta = {"name": safe_name, "mimeType": "application/vnd.google-apps.folder"}
         if parent_folder_id:
             root_meta["parents"] = [parent_folder_id]
@@ -933,7 +953,7 @@ async def create_client_drive_folders(
     ).strip()
 
     parent_id = await _resolve_parent_folder_id(body.parent_folder_id)
-    result = _create_drive_folder_sync(service, folder_name, parent_id, subfolders)
+    result = _create_drive_folder_sync(service, folder_name, parent_id, subfolders, force_create=True)
     root_id = result["folder_id"]
     folder_link = result.get("folder_link", "")
 
@@ -1003,7 +1023,7 @@ async def bulk_create_client_drive_folders(
         client_id = client.get("id", "")
         client_name = client.get("company_name") or client.get("name") or "Unknown"
         try:
-            res = _create_drive_folder_sync(service, client_name, parent_id, subfolders)
+            res = _create_drive_folder_sync(service, client_name, parent_id, subfolders, force_create=True)
             root_id = res["folder_id"]
             folder_link = res.get("folder_link", "")
 
@@ -1190,8 +1210,16 @@ async def admin_browse_drive_folder(
     if current_user.role not in ("admin", "manager"):
         raise HTTPException(403, "Insufficient permissions")
 
+    # Accept a bare folder ID OR a full Google Drive share URL — normalise to
+    # a bare ID before hitting the Drive API. Without this, pasting a share
+    # link (e.g. "https://drive.google.com/drive/u/4/folders/<id>") causes
+    # the whole URL to be sent as the ID, which Drive rejects with a 404.
+    resolved_folder_id = _extract_folder_id(folder_id)
+    if not resolved_folder_id:
+        raise HTTPException(400, "Please provide a valid Drive folder ID or share link.")
+
     try:
-        files = _fetch_drive_files_raw(folder_id)
+        files = _fetch_drive_files_raw(resolved_folder_id)
     except Exception as exc:
         raise HTTPException(503, f"Could not reach Google Drive: {exc}")
 
@@ -1199,7 +1227,7 @@ async def admin_browse_drive_folder(
         f["is_folder"] = f.get("mimeType") == "application/vnd.google-apps.folder"
 
     return {
-        "folder_id": folder_id,
+        "folder_id": resolved_folder_id,
         "files": files,
         "total": len(files),
     }
@@ -1571,13 +1599,22 @@ async def create_individual_folder(
     if not _drive_configured():
         raise HTTPException(503, "Google Drive not configured.")
 
+    # Resolve parent: explicit override > saved Folder Architect template >
+    # the shared default TaskOsphere Drive folder. Previously this endpoint
+    # skipped resolution entirely, so an unset parent meant the "existing
+    # folder" search below ran against ALL of Drive — which is how this
+    # action ended up silently linking to unrelated pre-existing folders
+    # with a matching name instead of creating a fresh one inside TaskOsphere.
+    parent_id = await _resolve_parent_folder_id(payload.parent_folder_id)
+
     loop = asyncio.get_event_loop()
     try:
         service = _get_drive_service()
         result = await loop.run_in_executor(
             None,
-            _create_drive_folder_sync,
-            service, folder_name, payload.parent_folder_id, subfolders,
+            lambda: _create_drive_folder_sync(
+                service, folder_name, parent_id, subfolders, force_create=True,
+            ),
         )
     except Exception as e:
         logger.error(f"Drive folder creation failed: {e}", exc_info=True)
