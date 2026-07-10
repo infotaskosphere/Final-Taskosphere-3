@@ -355,26 +355,31 @@ const DashboardLayout = ({ children }) => {
           boxShadow:   '10px 0 30px rgba(0,0,0,0.25)',
         }}
       >
-        {/* Logo — always sits on a white pill for contrast against the dark sidebar */}
-        <div className="h-20 flex items-center justify-center flex-shrink-0 border-b" style={{ borderColor: COLORS.sidebarBorder }}>
+        {/* Logo — height matches the header bar (HEADER_H) exactly so the sidebar's
+            top divider lines up with the header's bottom border on every page.
+            Sits on a grey pill for contrast against the dark sidebar. */}
+        <div
+          className="flex items-center justify-center flex-shrink-0 border-b"
+          style={{ height: HEADER_H, borderColor: COLORS.sidebarBorder }}
+        >
           <div
             className={`relative flex items-center justify-center ${
               collapsed ? 'w-12' : 'w-full px-5'
             }`}
           >
             <div style={{
-              background: 'linear-gradient(160deg, #ffffff 0%, #f1f5f9 100%)',
-              borderRadius: 12,
-              padding: '6px 10px',
+              background: 'linear-gradient(160deg, #e2e8f0 0%, #cbd5e1 100%)',
+              borderRadius: 10,
+              padding: '4px 8px',
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              border: '1px solid rgba(255,255,255,0.9)',
+              border: '1px solid rgba(255,255,255,0.6)',
               boxShadow: [
-                '0 8px 18px rgba(0,0,0,0.30)',      // outer drop shadow — lifts the pill off the dark sidebar
-                '0 2px 4px rgba(0,0,0,0.18)',        // tight contact shadow
-                'inset 0 1px 0 rgba(255,255,255,0.9)', // top inner highlight — embossed edge
-                'inset 0 -1px 2px rgba(15,23,42,0.06)', // bottom inner shade — embossed edge
+                '0 4px 10px rgba(0,0,0,0.28)',        // outer drop shadow — lifts the pill off the dark sidebar
+                '0 1px 3px rgba(0,0,0,0.16)',          // tight contact shadow
+                'inset 0 1px 0 rgba(255,255,255,0.8)', // top inner highlight — embossed edge
+                'inset 0 -1px 2px rgba(15,23,42,0.10)', // bottom inner shade — embossed edge
               ].join(', '),
             }}>
               <img
@@ -383,7 +388,7 @@ const DashboardLayout = ({ children }) => {
                 className="object-contain cursor-pointer block"
                 onClick={() => navigate('/dashboard')}
                 style={{
-                  maxHeight: collapsed ? '38px' : '46px',
+                  maxHeight: collapsed ? '26px' : '32px',
                   width: 'auto',
                   filter: 'drop-shadow(0 1px 1px rgba(15,23,42,0.15))',
                 }}
