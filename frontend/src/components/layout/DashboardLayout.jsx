@@ -363,13 +363,19 @@ const DashboardLayout = ({ children }) => {
             }`}
           >
             <div style={{
-              background: '#ffffff',
-              borderRadius: 10,
-              padding: '4px 8px',
+              background: 'linear-gradient(160deg, #ffffff 0%, #f1f5f9 100%)',
+              borderRadius: 12,
+              padding: '6px 10px',
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: '0 2px 10px rgba(0,0,0,0.15)',
+              border: '1px solid rgba(255,255,255,0.9)',
+              boxShadow: [
+                '0 8px 18px rgba(0,0,0,0.30)',      // outer drop shadow — lifts the pill off the dark sidebar
+                '0 2px 4px rgba(0,0,0,0.18)',        // tight contact shadow
+                'inset 0 1px 0 rgba(255,255,255,0.9)', // top inner highlight — embossed edge
+                'inset 0 -1px 2px rgba(15,23,42,0.06)', // bottom inner shade — embossed edge
+              ].join(', '),
             }}>
               <img
                 src="/logo.png"
@@ -377,8 +383,9 @@ const DashboardLayout = ({ children }) => {
                 className="object-contain cursor-pointer block"
                 onClick={() => navigate('/dashboard')}
                 style={{
-                  maxHeight: collapsed ? '38px' : '48px',
+                  maxHeight: collapsed ? '38px' : '46px',
                   width: 'auto',
+                  filter: 'drop-shadow(0 1px 1px rgba(15,23,42,0.15))',
                 }}
               />
             </div>
