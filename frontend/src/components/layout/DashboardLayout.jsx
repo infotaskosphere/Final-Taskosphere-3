@@ -33,7 +33,7 @@ const COLORS = {
 
 const SIDEBAR_EXPANDED  = 280;
 const SIDEBAR_COLLAPSED = 80;
-const HEADER_H          = 56;
+const HEADER_H          = 64;
 
 // NAV_GROUPS: items with no `permission` key are visible to ALL authenticated users
 // (matching <Protected> routes). Items with a `permission` key are only shown
@@ -341,7 +341,7 @@ const DashboardLayout = ({ children }) => {
       {/* ── Sidebar ── */}
       <aside
         className={`
-          fixed top-0 left-0 h-full z-50 flex flex-col
+          fixed left-0 z-[45] flex flex-col
           transition-all duration-300 ease-in-out
           ${isDesktop
             ? 'translate-x-0'
@@ -349,60 +349,14 @@ const DashboardLayout = ({ children }) => {
           }
         `}
         style={{
+          top:         HEADER_H,
+          height:      `calc(100% - ${HEADER_H}px)`,
           width:       sidebarPx,
           background:  `linear-gradient(180deg, ${COLORS.sidebarBg} 0%, ${COLORS.sidebarBgSoft} 100%)`,
           borderRight: `1px solid ${COLORS.sidebarBorder}`,
           boxShadow:   '10px 0 30px rgba(0,0,0,0.25)',
         }}
       >
-        {/* Logo — height matches the header bar (HEADER_H) exactly so the sidebar's
-            top divider lines up with the header's bottom border on every page.
-            Sits on a grey pill for contrast against the dark sidebar. */}
-        <div
-          className="flex items-center justify-center flex-shrink-0 border-b"
-          style={{ height: HEADER_H, borderColor: COLORS.sidebarBorder }}
-        >
-          <div
-            className={`relative flex items-center justify-center ${
-              collapsed ? 'w-12' : 'w-full px-5'
-            }`}
-          >
-            <div style={{
-              background: 'linear-gradient(160deg, #e2e8f0 0%, #cbd5e1 100%)',
-              borderRadius: 10,
-              padding: '4px 8px',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              border: '1px solid rgba(255,255,255,0.6)',
-              boxShadow: [
-                '0 4px 10px rgba(0,0,0,0.28)',        // outer drop shadow — lifts the pill off the dark sidebar
-                '0 1px 3px rgba(0,0,0,0.16)',          // tight contact shadow
-                'inset 0 1px 0 rgba(255,255,255,0.8)', // top inner highlight — embossed edge
-                'inset 0 -1px 2px rgba(15,23,42,0.10)', // bottom inner shade — embossed edge
-              ].join(', '),
-            }}>
-              <img
-                src="/logo.png"
-                alt="TaskOsphere"
-                className="object-contain cursor-pointer block"
-                onClick={() => navigate('/dashboard')}
-                style={{
-                  maxHeight: collapsed ? '26px' : '32px',
-                  width: 'auto',
-                  filter: 'drop-shadow(0 1px 1px rgba(15,23,42,0.15))',
-                }}
-              />
-            </div>
-            {hasUnread && (
-              <span
-                className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#1FAF5A] rounded-full border-2 z-20"
-                style={{ borderColor: COLORS.sidebarBg }}
-              />
-            )}
-          </div>
-        </div>
-
         {/* Nav scroll container */}
         <div
           ref={sidebarNavRef}
@@ -445,19 +399,50 @@ const DashboardLayout = ({ children }) => {
         </div>
       </aside>
 
-      {/* ── Header ── */}
+      {/* ── Header — full width, sits above both the sidebar and the content ── */}
       <header
-        className="fixed top-0 right-0 z-30 flex items-center transition-all duration-300 ease-in-out backdrop-blur-md"
+        className="fixed top-0 left-0 right-0 z-50 flex items-center transition-all duration-300 ease-in-out backdrop-blur-md"
         style={{
-          left:         offsetPx,
           height:       HEADER_H,
-          background:   isDark ? 'rgba(15,23,42,0.85)' : 'rgba(255,255,255,0.85)',
+          background:   isDark ? 'rgba(15,23,42,0.92)' : 'rgba(255,255,255,0.95)',
           borderBottom: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
-          maxWidth:     `calc(100vw - ${offsetPx}px)`,
           overflow:     'visible',
         }}
       >
-        <div className="flex-1 flex items-center justify-between px-3 sm:px-5 min-w-0 gap-2">
+        {/* Brand block — same width as the sidebar so the logo lines up with it */}
+        <div
+          className="flex items-center flex-shrink-0 h-full transition-all duration-300 ease-in-out overflow-hidden"
+          style={{ width: isDesktop ? sidebarPx : 'auto', paddingLeft: isDesktop ? 0 : undefined }}
+        >
+          <Link
+            to="/dashboard"
+            className={`relative flex items-center gap-2.5 min-w-0 ${collapsed && isDesktop ? 'justify-center w-full' : 'pl-4 sm:pl-5'}`}
+          >
+            <div className="relative flex-shrink-0">
+              <img
+                src="/logo.png"
+                alt="Task-O-Sphere"
+                className="object-contain block"
+                style={{ height: 30, width: 30 }}
+              />
+              {hasUnread && (
+                <span
+                  className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full border-2"
+                  style={{ background: COLORS.emeraldGreen, borderColor: isDark ? '#0f172a' : '#ffffff' }}
+                />
+              )}
+            </div>
+            {(!collapsed || !isDesktop) && (
+              <span className="whitespace-nowrap font-extrabold tracking-tight text-[15px] sm:text-base">
+                <span style={{ color: isDark ? '#e2e8f0' : COLORS.deepBlue }}>TASK</span>
+                <span style={{ color: COLORS.emeraldGreen }}>-O-</span>
+                <span style={{ color: isDark ? '#e2e8f0' : COLORS.deepBlue }}>SPHERE</span>
+              </span>
+            )}
+          </Link>
+        </div>
+
+        <div className="flex-1 flex items-center justify-between px-3 sm:px-5 min-w-0 gap-2 h-full border-l" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
           <div className="flex items-center gap-2 sm:gap-4 min-w-0">
             {/* Hamburger — mobile only */}
             <button
