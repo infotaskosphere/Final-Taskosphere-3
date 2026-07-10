@@ -23,6 +23,12 @@ const COLORS = {
   lightBlue:    '#E0F2FE',
   emeraldGreen: '#1FAF5A',
   lightGreen:   '#5CCB5F',
+  // Sidebar is always this dark-navy palette, independent of the app's
+  // light/dark theme toggle (which only affects the header + page content).
+  sidebarBg:      '#0A1E3A',
+  sidebarBgSoft:  '#0F2847',
+  sidebarBorder:  'rgba(255,255,255,0.08)',
+  sidebarActive:  '#2E8BE6',
 };
 
 const SIDEBAR_EXPANDED  = 280;
@@ -265,13 +271,10 @@ const DashboardLayout = ({ children }) => {
           className={`relative flex items-center gap-3 min-w-0
             ${collapsed ? 'justify-center px-0 py-3' : 'px-3 py-2.5'}
             rounded-xl transition-all duration-200 group
-            ${isActive
-              ? 'text-white'
-              : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100/80 dark:hover:text-slate-200 dark:hover:bg-slate-700/60'
-            }`}
+            ${isActive ? 'text-white' : 'text-slate-300 hover:text-white hover:bg-white/[0.07]'}`}
           style={isActive ? {
-            background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})`,
-            boxShadow: '0 4px 14px rgba(13,59,102,0.28)',
+            background: `linear-gradient(135deg, ${COLORS.mediumBlue}, ${COLORS.sidebarActive})`,
+            boxShadow: '0 4px 14px rgba(46,139,230,0.35)',
           } : {}}
         >
           {isActive && !collapsed && (
@@ -283,10 +286,7 @@ const DashboardLayout = ({ children }) => {
           <Icon
             className={`flex-shrink-0 transition-colors
               ${collapsed ? 'h-5 w-5' : 'h-4 w-4'}
-              ${isActive
-                ? 'text-white'
-                : 'text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300'
-              }`}
+              ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-100'}`}
           />
           {!collapsed && (
             <span className="font-medium text-sm whitespace-nowrap tracking-tight truncate">
@@ -297,9 +297,9 @@ const DashboardLayout = ({ children }) => {
             <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-white/70" />
           )}
           {collapsed && (
-            <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-800 dark:bg-slate-700 text-white text-xs font-medium rounded-lg whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 translate-x-1 group-hover:translate-x-0 transition-all duration-200 z-[100] shadow-lg">
+            <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-800 text-white text-xs font-medium rounded-lg whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 translate-x-1 group-hover:translate-x-0 transition-all duration-200 z-[100] shadow-lg">
               {item.label}
-              <span className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-slate-800 dark:border-r-slate-700" />
+              <span className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-slate-800" />
             </div>
           )}
         </Link>
@@ -310,11 +310,11 @@ const DashboardLayout = ({ children }) => {
   const NavDivider = ({ label }) => (
     <div className={`mt-4 mb-2 ${collapsed ? 'px-2' : 'px-3'}`}>
       {!collapsed && label ? (
-        <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">
+        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">
           {label}
         </p>
       ) : (
-        <div className="border-t border-slate-100 dark:border-slate-700/60 mx-1" />
+        <div className="border-t mx-1" style={{ borderColor: COLORS.sidebarBorder }} />
       )}
     </div>
   );
@@ -350,29 +350,26 @@ const DashboardLayout = ({ children }) => {
         `}
         style={{
           width:       sidebarPx,
-          background:  isDark ? '#1e293b' : '#ffffff',
-          borderRight: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
-          boxShadow:   isDark ? '10px 0 30px rgba(0,0,0,0.2)' : '10px 0 30px rgba(0,0,0,0.03)',
+          background:  `linear-gradient(180deg, ${COLORS.sidebarBg} 0%, ${COLORS.sidebarBgSoft} 100%)`,
+          borderRight: `1px solid ${COLORS.sidebarBorder}`,
+          boxShadow:   '10px 0 30px rgba(0,0,0,0.25)',
         }}
       >
-        {/* Logo */}
-        <div
-          className={`h-20 flex items-center justify-center flex-shrink-0 border-b ${
-            isDark ? 'border-slate-700/60' : 'border-slate-100'
-          }`}
-        >
+        {/* Logo — always sits on a white pill for contrast against the dark sidebar */}
+        <div className="h-20 flex items-center justify-center flex-shrink-0 border-b" style={{ borderColor: COLORS.sidebarBorder }}>
           <div
             className={`relative flex items-center justify-center ${
               collapsed ? 'w-12' : 'w-full px-5'
             }`}
           >
             <div style={{
-              background: isDark ? 'transparent' : '#ffffff',
-              borderRadius: 8,
-              padding: isDark ? 0 : '2px 6px',
+              background: '#ffffff',
+              borderRadius: 10,
+              padding: '4px 8px',
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
+              boxShadow: '0 2px 10px rgba(0,0,0,0.15)',
             }}>
               <img
                 src="/logo.png"
@@ -380,15 +377,15 @@ const DashboardLayout = ({ children }) => {
                 className="object-contain cursor-pointer block"
                 onClick={() => navigate('/dashboard')}
                 style={{
-                  maxHeight: collapsed ? '42px' : '52px',
+                  maxHeight: collapsed ? '38px' : '48px',
                   width: 'auto',
-                  mixBlendMode: isDark ? 'normal' : 'multiply',
                 }}
               />
             </div>
             {hasUnread && (
               <span
-                className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#1FAF5A] rounded-full border-2 border-white dark:border-slate-800 shadow-sm z-20"
+                className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#1FAF5A] rounded-full border-2 z-20"
+                style={{ borderColor: COLORS.sidebarBg }}
               />
             )}
           </div>
@@ -397,7 +394,7 @@ const DashboardLayout = ({ children }) => {
         {/* Nav scroll container */}
         <div
           ref={sidebarNavRef}
-          className="flex-1 overflow-y-auto overflow-x-hidden slim-scroll py-4"
+          className="flex-1 overflow-y-auto overflow-x-hidden slim-scroll sidebar-scroll py-4"
         >
           {NAV_GROUPS.map((group) => {
             const visibleGroupItems = group.items.filter(
@@ -418,11 +415,11 @@ const DashboardLayout = ({ children }) => {
         </div>
 
         {/* Collapse button — desktop only */}
-        <div className={`p-4 ${isDark ? 'border-t border-slate-700/60' : 'border-t border-slate-100'} hidden lg:block`}>
+        <div className="p-4 border-t hidden lg:block" style={{ borderColor: COLORS.sidebarBorder }}>
           <Button
             variant="ghost"
             onClick={() => setCollapsed(!collapsed)}
-            className={`w-full flex items-center ${collapsed ? 'justify-center' : 'justify-start gap-3'} h-11 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700/60 transition-all`}
+            className={`w-full flex items-center ${collapsed ? 'justify-center' : 'justify-start gap-3'} h-11 rounded-xl text-slate-300 hover:text-white hover:bg-white/[0.07] transition-all`}
           >
             {collapsed ? (
               <PanelLeftOpen className="h-5 w-5" />
