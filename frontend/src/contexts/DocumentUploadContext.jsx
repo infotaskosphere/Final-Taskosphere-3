@@ -272,20 +272,51 @@ export function DocumentUploadProvider({ children }) {
 
   // Applies the same choice to every currently-conflicting item in one go
   // (e.g. re-uploading a whole folder that was previously uploaded).
-  const resolveAllConflicts = useCallback((action, onDone) => {
-    setItems((prev) => {
-      prev.filter((it) => it.status === 'conflict' && it.file).forEach((it) => {
-        uploadOne(it.file, it.id, { portalUserId: it.portalUserId, folderId: it.folderId, conflictAction: action, onDone });
-      });
-      return prev;
-    });
-  }, [uploadOne]);
+  //
+  // Important: do not start these uploads from inside a React state updater.
+  // React may invoke updaters more than once in development and that can
+  // duplicate requests. Also keep the same concurrency cap used by normal
+  // uploads; firing dozens of overwrite requests at once can overwhelm the
+  // backend/Drive and surface as browser network/CORS-looking failures.
+  const resolveAllConflicts = useCallback((action, onDone, scope = {}) => {
+    const conflicts = items.filter((it) => (
+      it.status === 'conflict' &&
+      it.file &&
+      (!scope.portalUserId || it.portalUserId === scope.portalUserId)
+    ));
+    if (!conflicts.length) return;
 
-  const clearFinished = useCallback(() => {
-    setItems((prev) => prev.filter((it) => it.status === 'queued' || it.status === 'uploading' || it.status === 'conflict'));
+    conflicts.forEach((it) => {
+      updateItem(it.id, { status: 'queued', conflict: null, errorMsg: null });
+    });
+
+    let cursor = 0;
+    const runWorker = async () => {
+      while (cursor < conflicts.length) {
+        const it = conflicts[cursor++];
+        await uploadOne(it.file, it.id, {
+          portalUserId: it.portalUserId,
+          folderId: it.folderId,
+          conflictAction: action,
+          onDone,
+        });
+      }
+    };
+
+    const workerCount = Math.min(MAX_CONCURRENT_UPLOADS, conflicts.length);
+    for (let i = 0; i < workerCount; i++) runWorker();
+  }, [items, uploadOne, updateItem]);
+
+  const clearFinished = useCallback((scope = {}) => {
+    setItems((prev) => prev.filter((it) => {
+      if (scope.portalUserId && it.portalUserId !== scope.portalUserId) return true;
+      return it.status === 'queued' || it.status === 'uploading' || it.status === 'conflict';
+    }));
   }, []);
 
-  const clearAll = useCallback(() => setItems([]), []);
+  const clearAll = useCallback((scope = {}) => {
+    setItems((prev) => (scope.portalUserId ? prev.filter((it) => it.portalUserId !== scope.portalUserId) : []));
+  }, []);
 
   const removeItem = useCallback((id) => {
     setItems((prev) => prev.filter((it) => it.id !== id));
