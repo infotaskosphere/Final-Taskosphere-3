@@ -100,7 +100,16 @@ function loadPersisted() {
 }
 
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
-const MAX_CONCURRENT_UPLOADS = 3;
+// Keep uploads deliberately conservative. Render instances can restart when
+// several files are read/proxied to Drive at the same time; the browser then
+// reports those restarts as "interrupted before a response came back".
+const MAX_CONCURRENT_UPLOADS = 1;
+const RETRY_DELAYS_MS = [1500, 4000, 9000, 16000];
+
+function isRetryableUploadError(err) {
+  const status = err?.response?.status;
+  return !err?.response || status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
 
 export function DocumentUploadProvider({ children }) {
   // Every queued/uploading/done/error/conflict/interrupted item across ALL
@@ -154,7 +163,7 @@ export function DocumentUploadProvider({ children }) {
     return parentId;
   }, []);
 
-  const uploadOne = useCallback(async (file, itemId, { portalUserId, folderId, isRetry = false, conflictAction = null, onDone } = {}) => {
+  const uploadOne = useCallback(async (file, itemId, { portalUserId, folderId, attempt = 0, conflictAction = null, onDone } = {}) => {
     const form = new FormData();
     form.append('portal_user_id', portalUserId);
     if (folderId) form.append('folder_id', folderId);
@@ -184,9 +193,13 @@ export function DocumentUploadProvider({ children }) {
         });
         return;
       }
-      if (!isRetry && isLikelyClientSideBlock(err)) {
-        await sleep(1200);
-        return uploadOne(file, itemId, { portalUserId, folderId, isRetry: true, conflictAction, onDone });
+      if (attempt < RETRY_DELAYS_MS.length && isRetryableUploadError(err)) {
+        updateItem(itemId, {
+          status: 'queued',
+          errorMsg: `Connection interrupted. Retrying automatically (${attempt + 1}/${RETRY_DELAYS_MS.length})…`,
+        });
+        await sleep(RETRY_DELAYS_MS[attempt]);
+        return uploadOne(file, itemId, { portalUserId, folderId, attempt: attempt + 1, conflictAction, onDone });
       }
       const msg = uploadFailureMessage(file.name, err);
       updateItem(itemId, { status: 'error', errorMsg: msg, file, folderId, finishedAt: Date.now() });
