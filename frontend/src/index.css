@@ -304,6 +304,11 @@ svg {
 .dark .slim-scroll::-webkit-scrollbar-thumb       { background: #475569; }
 .dark .slim-scroll::-webkit-scrollbar-thumb:hover { background: #64748b; }
 
+/* Sidebar nav is always on a dark-navy background regardless of app theme,
+   so its scrollbar thumb needs to stay light for contrast in both modes. */
+.sidebar-scroll::-webkit-scrollbar-thumb       { background: rgba(255,255,255,0.18); }
+.sidebar-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.32); }
+
 /* ── No scrollbar utility ── */
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
