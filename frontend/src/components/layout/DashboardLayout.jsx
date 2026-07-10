@@ -35,7 +35,7 @@ const COLORS = {
 
 const SIDEBAR_EXPANDED  = 280;
 const SIDEBAR_COLLAPSED = 80;
-const HEADER_H          = 64;
+const HEADER_H          = 84;
 
 // NAV_GROUPS: items with no `permission` key are visible to ALL authenticated users
 // (matching <Protected> routes). Items with a `permission` key are only shown
@@ -418,22 +418,22 @@ const DashboardLayout = ({ children }) => {
         >
           <Link
             to="/dashboard"
-            className={`relative flex items-center min-w-0 ${collapsed && isDesktop ? 'justify-center w-full' : 'pl-4 sm:pl-5'}`}
+            className="relative flex items-center justify-center w-full min-w-0"
           >
-            <div className="relative flex-shrink-0">
+            <div className="relative flex-shrink-0 flex items-center justify-center">
               {collapsed && isDesktop ? (
                 <img
                   src="/icon-192.png"
                   alt="Task-O-Sphere"
                   className="object-contain block"
-                  style={{ height: 34, width: 34 }}
+                  style={{ height: 56, width: 56 }}
                 />
               ) : (
                 <img
                   src="/logo-transparent.png"
                   alt="Task-O-Sphere"
-                  className="object-contain block"
-                  style={{ height: 34, maxWidth: isDesktop ? sidebarPx - 24 : 160 }}
+                  className="object-contain block mx-auto"
+                  style={{ height: 56, maxWidth: isDesktop ? sidebarPx - 32 : 200 }}
                 />
               )}
               {hasUnread && (
