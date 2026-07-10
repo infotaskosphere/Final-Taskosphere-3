@@ -10,7 +10,7 @@ import { format, parseISO, isToday, isTomorrow, startOfDay } from 'date-fns';
 import { formatInTimeZone } from 'date-fns-tz';
 import { toast } from 'sonner';
 
-import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -703,59 +703,109 @@ const SectionCard = memo(function SectionCard({ children, className = '' }) {
   );
 });
 
-const DonutMetricCard = memo(function DonutMetricCard({ isDark, title, centerValue, centerLabel, data, footer }) {
+const DonutMetricCard = memo(function DonutMetricCard({ isDark, title, centerValue, centerLabel, data, footer, onSegmentClick, onCardClick }) {
   const total   = data.reduce((sum, d) => sum + (d.value || 0), 0);
   const pieData = total > 0
     ? data.filter(d => d.value > 0)
-    : [{ name: 'empty', value: 1, color: isDark ? '#334155' : '#e2e8f0' }];
+    : [{ name: 'empty', value: 1, color: isDark ? '#334155' : '#e2e8f0', _empty: true }];
+
+  const [activeIndex, setActiveIndex] = React.useState(-1);
+
+  const handleSegmentClick = (entry) => {
+    if (entry && !entry._empty && onSegmentClick) onSegmentClick(entry);
+  };
 
   return (
     <div
-      className={`rounded-2xl shadow-sm border p-4 min-w-0 flex flex-col ${
-        isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'
-      }`}
+      className={`group rounded-2xl shadow-sm border p-5 min-w-0 h-full flex flex-col transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 ${
+        isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200/80 hover:border-slate-300'
+      } ${onCardClick ? 'cursor-pointer' : ''}`}
+      onClick={onCardClick}
+      role={onCardClick ? 'button' : undefined}
     >
-      <h3 className={`text-sm font-semibold mb-2 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{title}</h3>
-      <div className="flex items-center gap-4 flex-1">
-        <div className="relative flex-shrink-0" style={{ width: 96, height: 96 }}>
+      <h3 className={`text-sm font-semibold mb-3 break-words ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{title}</h3>
+      <div className="flex items-center gap-5 flex-1 min-w-0">
+        <div className="relative flex-shrink-0" style={{ width: 140, height: 140 }}>
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
+              <defs>
+                {pieData.map((d, i) => (
+                  <linearGradient key={i} id={`donut-grad-${title.replace(/\s+/g,'')}-${i}`} x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stopColor={d.color} stopOpacity={1} />
+                    <stop offset="100%" stopColor={d.color} stopOpacity={0.75} />
+                  </linearGradient>
+                ))}
+              </defs>
               <Pie
                 data={pieData}
                 dataKey="value"
                 nameKey="name"
-                innerRadius={30}
-                outerRadius={46}
+                innerRadius={44}
+                outerRadius={66}
                 startAngle={90}
                 endAngle={-270}
-                paddingAngle={total > 0 && pieData.length > 1 ? 2 : 0}
-                stroke="none"
+                paddingAngle={total > 0 && pieData.length > 1 ? 3 : 0}
+                cornerRadius={6}
+                stroke={isDark ? '#0f172a' : '#ffffff'}
+                strokeWidth={2}
                 isAnimationActive={true}
+                onMouseEnter={(_, i) => setActiveIndex(i)}
+                onMouseLeave={() => setActiveIndex(-1)}
+                onClick={(entry) => handleSegmentClick(entry)}
               >
                 {pieData.map((d, i) => (
-                  <Cell key={i} fill={d.color} />
+                  <Cell
+                    key={i}
+                    fill={`url(#donut-grad-${title.replace(/\s+/g,'')}-${i})`}
+                    style={{
+                      cursor: !d._empty && onSegmentClick ? 'pointer' : 'default',
+                      filter: activeIndex === i ? 'brightness(1.1) drop-shadow(0 4px 8px rgba(0,0,0,0.15))' : 'none',
+                      transform: activeIndex === i ? 'scale(1.04)' : 'scale(1)',
+                      transformOrigin: 'center',
+                      transition: 'all 200ms ease',
+                    }}
+                  />
                 ))}
               </Pie>
+              <Tooltip
+                contentStyle={{
+                  background: isDark ? '#1e293b' : '#ffffff',
+                  border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
+                  borderRadius: 10,
+                  fontSize: 12,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                }}
+                formatter={(value, name) => [value, name]}
+              />
             </PieChart>
           </ResponsiveContainer>
           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-            <span className={`text-lg font-bold leading-none ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+            <span className={`text-2xl font-extrabold leading-none tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
               {centerValue}
             </span>
-            <span className={`text-[9px] mt-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{centerLabel}</span>
+            <span className={`text-[10px] mt-1.5 font-medium uppercase tracking-wider ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              {centerLabel}
+            </span>
           </div>
         </div>
-        <div className="flex-1 min-w-0 space-y-1.5">
+        <div className="flex-1 min-w-0 space-y-2">
           {data.map((d, i) => (
-            <div key={i} className="flex items-center justify-between gap-2 text-xs">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: d.color }} />
-                <span className={`truncate ${isDark ? 'text-slate-300' : 'text-slate-500'}`}>{d.name}</span>
+            <button
+              type="button"
+              key={i}
+              onClick={(e) => { e.stopPropagation(); if (onSegmentClick) onSegmentClick(d); }}
+              className={`w-full flex items-center justify-between gap-2 text-xs px-2 py-1.5 rounded-lg transition-colors ${
+                onSegmentClick ? (isDark ? 'hover:bg-slate-700/60' : 'hover:bg-slate-100') : 'cursor-default'
+              }`}
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 shadow-sm" style={{ background: d.color }} />
+                <span className={`break-words text-left ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{d.name}</span>
               </div>
-              <span className={`font-semibold flex-shrink-0 ${isDark ? 'text-slate-100' : 'text-slate-700'}`}>
+              <span className={`font-bold flex-shrink-0 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
                 {d.value}{d.suffix || ''}
               </span>
-            </div>
+            </button>
           ))}
         </div>
       </div>
@@ -2005,9 +2055,9 @@ export default function Dashboard() {
           </motion.div>
         </motion.div>
 
-        {/* TASK OVERVIEW / TASKS BY TYPE / TASK COMPLETION — DONUT CARDS */}
+        {/* TASK OVERVIEW / TASKS BY TYPE — INTERACTIVE DONUT CARDS */}
         <motion.div
-          className="grid grid-cols-1 md:grid-cols-3 gap-3 [&>*]:min-w-0"
+          className="grid grid-cols-1 md:grid-cols-2 gap-4 [&>*]:min-w-0 items-stretch"
           variants={itemVariants}
         >
           {(() => {
@@ -2020,7 +2070,8 @@ export default function Dashboard() {
             const myTasksCt    = myTaskCount;
             const teamTasksCt  = hasCrossVisibility ? teamTaskTotal : 0;
 
-            const remainingCt  = Math.max(0, totalTasks - completedCt);
+            const goTasks = (filter) => navigate(`/tasks${filter ? `?filter=${filter}` : ''}`);
+            const goTodos = () => navigate('/todo');
 
             return (
               <>
@@ -2029,6 +2080,12 @@ export default function Dashboard() {
                   title="Task Overview"
                   centerValue={totalTasks}
                   centerLabel="Total Tasks"
+                  onCardClick={() => goTasks()}
+                  onSegmentClick={(d) => {
+                    if (d.name === 'To Do') return goTodos();
+                    const map = { Pending: 'pending', Completed: 'completed', Overdue: 'overdue' };
+                    goTasks(map[d.name]);
+                  }}
                   data={[
                     { name: 'Pending',   value: pendingCt,   color: COLORS.mediumBlue },
                     { name: 'Completed', value: completedCt, color: COLORS.emeraldGreen },
@@ -2041,26 +2098,17 @@ export default function Dashboard() {
                   title="Tasks by Type"
                   centerValue={myTasksCt + teamTasksCt + todoCt}
                   centerLabel="Total"
+                  onCardClick={() => goTasks()}
+                  onSegmentClick={(d) => {
+                    if (d.name === 'To Do') return goTodos();
+                    const map = { 'My Tasks': 'mine', 'Team Tasks': 'team' };
+                    goTasks(map[d.name]);
+                  }}
                   data={[
                     { name: 'My Tasks',   value: myTasksCt,   color: COLORS.mediumBlue },
                     { name: 'Team Tasks', value: teamTasksCt, color: '#22D3EE' },
                     { name: 'To Do',      value: todoCt,      color: '#8B5CF6' },
                   ]}
-                />
-                <DonutMetricCard
-                  isDark={isDark}
-                  title="Task Completion"
-                  centerValue={`${completionRate}%`}
-                  centerLabel="Completed"
-                  data={[
-                    { name: 'Completed', value: completedCt, color: COLORS.emeraldGreen },
-                    { name: 'Remaining', value: remainingCt, color: COLORS.mediumBlue },
-                  ]}
-                  footer={
-                    <p className={`mt-3 text-[11px] font-medium ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
-                      {completionRate >= 100 && totalTasks > 0 ? 'All tasks completed! 🎉' : 'Keep up the great work! 🎉'}
-                    </p>
-                  }
                 />
               </>
             );
