@@ -172,31 +172,71 @@ function ClientListRow({ c, active, selectMode, selectedIds, onToggleSelect, onS
   );
 }
 
+// Tab filter pills — replaces the old fixed 50/50 split-pane layout.
+// The old layout gave "Linked" and "Not Linked" a hard-coded equal share of
+// height regardless of how many items were in each — so with (say) 1 linked
+// client and 400 unlinked ones, the linked pane was mostly empty dead space
+// while the unlinked pane was starved for room and had to be scrolled
+// constantly, which read as items "randomly" disappearing. A single
+// tab-filtered list gives every row the full height of the panel, every time.
+const CLIENT_TABS = [
+  { key: 'all',      label: 'All' },
+  { key: 'linked',    label: 'Linked' },
+  { key: 'unlinked', label: 'Not Linked' },
+];
+
 function ClientRail({
   clients, loadingClients, selectedClientId, onSelect, isDark, isAdmin,
   selectMode, onToggleSelectMode, selectedIds, onToggleSelect, onBulkRemove, removing,
 }) {
   const [search, setSearch] = useState('');
-  const [linkedSort, setLinkedSort] = useState('name_asc');
-  const [unlinkedSort, setUnlinkedSort] = useState('name_asc');
+  const [tab, setTab] = useState('all');
+  const [sort, setSort] = useState('name_asc');
+  const searchRef = useRef(null);
 
-  const filtered = clients.filter((c) =>
-    clientName(c).toLowerCase().includes(search.toLowerCase())
-  );
-  const linked = sortClients(filtered.filter((c) => c.has_portal), linkedSort);
-  const unlinked = sortClients(filtered.filter((c) => !c.has_portal), unlinkedSort);
+  // Modern quick-access: press "/" anywhere on the page to jump into the
+  // client search box (same pattern as Linear/Notion/Slack), Escape clears it.
+  useEffect(() => {
+    const handler = (e) => {
+      const tag = document.activeElement?.tagName;
+      const typing = tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable;
+      if (e.key === '/' && !typing) {
+        e.preventDefault();
+        searchRef.current?.focus();
+      } else if (e.key === 'Escape' && document.activeElement === searchRef.current) {
+        setSearch('');
+        searchRef.current?.blur();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  const linkedCount   = useMemo(() => clients.filter((c) => c.has_portal).length, [clients]);
+  const unlinkedCount = clients.length - linkedCount;
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    let list = clients;
+    if (tab === 'linked')   list = list.filter((c) => c.has_portal);
+    if (tab === 'unlinked') list = list.filter((c) => !c.has_portal);
+    if (q) list = list.filter((c) => clientName(c).toLowerCase().includes(q));
+    return sortClients(list, sort);
+  }, [clients, tab, search, sort]);
+
+  const tabCount = { all: clients.length, linked: linkedCount, unlinked: unlinkedCount };
 
   return (
     <div className={`rounded-2xl border shadow-sm flex flex-col overflow-hidden h-full ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
       {/* Header */}
       <div className={`px-4 py-3.5 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-        <div className="flex items-center gap-2 mb-2.5">
+        <div className="flex items-center gap-2 mb-3">
           <div className="p-1.5 rounded-lg" style={{ background: `${COLORS.deepBlue}12` }}>
             <Users className="h-4 w-4" style={{ color: COLORS.deepBlue }} />
           </div>
           <div className="min-w-0 flex-1">
             <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100 leading-none">Clients</h3>
-            <p className="text-[11px] text-slate-400 mt-0.5">{clients.length} total · {linked.length} linked</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">{clients.length} total · {linkedCount} linked</p>
           </div>
           {isAdmin && (
             <button
@@ -210,15 +250,56 @@ function ClientRail({
             </button>
           )}
         </div>
-        <div className="relative">
+
+        <div className="relative mb-2.5">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
           <input
+            ref={searchRef}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search clients…"
-            className={`w-full pl-8 pr-3 py-2 rounded-lg text-xs border focus:outline-none focus:ring-2 focus:ring-indigo-400 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+            className={`w-full pl-8 pr-7 py-2 rounded-lg text-xs border focus:outline-none focus:ring-2 focus:ring-indigo-400 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
           />
+          {!search && (
+            <kbd className={`absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-semibold px-1 py-0.5 rounded border pointer-events-none ${isDark ? 'border-slate-600 text-slate-500' : 'border-slate-300 text-slate-400'}`}>/</kbd>
+          )}
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              title="Clear search"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
+
+        {/* Tab filter — every row gets full panel height, no split-pane glitch */}
+        <div className={`flex items-center gap-1 p-1 rounded-xl ${isDark ? 'bg-slate-900/40' : 'bg-slate-100'}`}>
+          {CLIENT_TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`flex-1 flex items-center justify-center gap-1 text-[11px] font-semibold px-2 py-1.5 rounded-lg transition-all ${
+                tab === t.key
+                  ? 'text-white shadow-sm'
+                  : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'
+              }`}
+              style={tab === t.key ? { background: GRADIENT } : {}}
+            >
+              {t.label}
+              <span className={`text-[10px] ${tab === t.key ? 'text-white/75' : 'text-slate-400'}`}>
+                {tabCount[t.key]}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center justify-between mt-2.5">
+          <p className="text-[10.5px] text-slate-400">{filtered.length} shown</p>
+          {filtered.length > 1 && <SortSelect value={sort} onChange={setSort} isDark={isDark} />}
+        </div>
+
         {selectMode && selectedIds.size > 0 && (
           <button
             disabled={removing}
@@ -231,66 +312,27 @@ function ClientRail({
         )}
       </div>
 
+      {/* Single, fully-scrollable list — always gets the entire remaining height */}
       {loadingClients ? (
-        <div className="flex-1 flex items-center justify-center py-14 gap-2 text-slate-400">
+        <div className="flex-1 flex flex-col items-center justify-center py-14 gap-2 text-slate-400">
           <Loader2 className="h-4 w-4 animate-spin" /><span className="text-xs">Loading clients…</span>
         </div>
       ) : filtered.length === 0 ? (
-        <p className="text-center text-xs text-slate-400 py-14 px-4">No clients match your search.</p>
+        <div className="flex-1 flex flex-col items-center justify-center py-14 px-4 text-center">
+          <Users className="h-7 w-7 text-slate-300 mb-2" />
+          <p className="text-xs text-slate-400">
+            {search ? 'No clients match your search.' : tab === 'linked' ? 'No clients linked to the portal yet.' : tab === 'unlinked' ? 'Every client is linked. 🎉' : 'No clients found.'}
+          </p>
+        </div>
       ) : (
-        // Two equal-height halves — Linked always on top, each independently
-        // scrollable and sortable, so a short list never leaves dead space
-        // while the other half is packed.
-        <div className="flex-1 min-h-0 flex flex-col">
-          <div className="flex-1 basis-0 min-h-0 flex flex-col">
-            <div className={`flex items-center justify-between gap-2 px-4 py-2 sticky top-0 z-10 ${isDark ? 'bg-slate-800/95' : 'bg-white/95'} backdrop-blur border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-              <div className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                <h4 className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Linked to Portal</h4>
-                <span className="text-[10px] font-semibold text-slate-400">({linked.length})</span>
-              </div>
-              {linked.length > 1 && <SortSelect value={linkedSort} onChange={setLinkedSort} isDark={isDark} />}
-            </div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-1">
-              {linked.length === 0 ? (
-                <p className="text-center text-[11px] text-slate-400 py-8 px-4">No clients linked to the portal yet.</p>
-              ) : (
-                linked.map((c) => (
-                  <ClientListRow
-                    key={c.id} c={c} active={selectedClientId === c.id}
-                    selectMode={selectMode} selectedIds={selectedIds}
-                    onToggleSelect={onToggleSelect} onSelect={onSelect} isDark={isDark}
-                  />
-                ))
-              )}
-            </div>
-          </div>
-
-          <div className={`border-t-2 ${isDark ? 'border-slate-700' : 'border-slate-100'}`} />
-
-          <div className="flex-1 basis-0 min-h-0 flex flex-col">
-            <div className={`flex items-center justify-between gap-2 px-4 py-2 sticky top-0 z-10 ${isDark ? 'bg-slate-800/95' : 'bg-white/95'} backdrop-blur border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-              <div className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
-                <h4 className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Not Linked</h4>
-                <span className="text-[10px] font-semibold text-slate-400">({unlinked.length})</span>
-              </div>
-              {unlinked.length > 1 && <SortSelect value={unlinkedSort} onChange={setUnlinkedSort} isDark={isDark} />}
-            </div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-1">
-              {unlinked.length === 0 ? (
-                <p className="text-center text-[11px] text-slate-400 py-8 px-4">Every client is linked. 🎉</p>
-              ) : (
-                unlinked.map((c) => (
-                  <ClientListRow
-                    key={c.id} c={c} active={selectedClientId === c.id}
-                    selectMode={selectMode} selectedIds={selectedIds}
-                    onToggleSelect={onToggleSelect} onSelect={onSelect} isDark={isDark}
-                  />
-                ))
-              )}
-            </div>
-          </div>
+        <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
+          {filtered.map((c) => (
+            <ClientListRow
+              key={c.id} c={c} active={selectedClientId === c.id}
+              selectMode={selectMode} selectedIds={selectedIds}
+              onToggleSelect={onToggleSelect} onSelect={onSelect} isDark={isDark}
+            />
+          ))}
         </div>
       )}
     </div>
