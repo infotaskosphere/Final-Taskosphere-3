@@ -176,7 +176,7 @@ def _get_drive_service():
             scopes=DRIVE_SCOPES,
         )
         creds.refresh(Request())
-        return build("drive", "v3", credentials=creds)
+        return build("drive", "v3", credentials=creds, cache_discovery=False)
 
     def _fetch_db_token_sync():
         import asyncio
