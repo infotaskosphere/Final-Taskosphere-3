@@ -1785,7 +1785,7 @@ export default function Dashboard() {
         <React.Fragment key="metrics">
         {/* KEY METRICS — 6 EQUAL CARDS */}
         <motion.div
-          className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-3 [&>*]:min-w-0"
+          className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 [&>*]:min-w-0"
           variants={itemVariants}
         >
 
@@ -1963,39 +1963,8 @@ export default function Dashboard() {
             </CardContent>
           </motion.div>
 
-          {/* 6. Completion */}
-          <motion.div
-            whileHover={{ y: -3, transition: springPhysics.card }}
-            whileTap={{ scale: 0.985 }}
-            onClick={() => navigate('/tasks')}
-            className={`${metricCardCls} ${metricCardDefault}`}
-          >
-            <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
-              <div className="flex items-start justify-between">
-                <div className="min-w-0 flex-1 mr-2">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Completion</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.emeraldGreen }}>
-                    {completionRate}%
-                  </p>
-                </div>
-                <div
-                  className="p-2 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
-                  style={{ backgroundColor: `${COLORS.emeraldGreen}12` }}
-                >
-                  <TrendingUp className="h-4 w-4" style={{ color: COLORS.emeraldGreen }} />
-                </div>
-              </div>
-              <div className={`mt-2.5 h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-                <div
-                  className="h-full rounded-full transition-all duration-700"
-                  style={{
-                    width: `${completionRate}%`,
-                    background: `linear-gradient(90deg, ${COLORS.emeraldGreen}, ${COLORS.lightGreen})`,
-                  }}
-                />
-              </div>
-            </CardContent>
-          </motion.div>
+
+
 
           {/* 7. Team Task */}
           <motion.div
@@ -2057,7 +2026,7 @@ export default function Dashboard() {
 
         {/* TASK OVERVIEW / TASKS BY TYPE — INTERACTIVE DONUT CARDS */}
         <motion.div
-          className="grid grid-cols-1 md:grid-cols-2 gap-4 [&>*]:min-w-0 items-stretch"
+          className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 [&>*]:min-w-0 items-stretch"
           variants={itemVariants}
         >
           {(() => {
@@ -2108,6 +2077,21 @@ export default function Dashboard() {
                     { name: 'My Tasks',   value: myTasksCt,   color: COLORS.mediumBlue },
                     { name: 'Team Tasks', value: teamTasksCt, color: '#22D3EE' },
                     { name: 'To Do',      value: todoCt,      color: '#8B5CF6' },
+                  ]}
+                />
+                <DonutMetricCard
+                  isDark={isDark}
+                  title="Task Completion"
+                  centerValue={`${completionRate}%`}
+                  centerLabel="Completed"
+                  onCardClick={() => goTasks()}
+                  onSegmentClick={(d) => {
+                    const map = { Completed: 'completed', Remaining: 'pending' };
+                    goTasks(map[d.name]);
+                  }}
+                  data={[
+                    { name: 'Completed', value: completedCt, color: COLORS.emeraldGreen },
+                    { name: 'Remaining', value: Math.max(0, totalTasks - completedCt), color: isDark ? '#334155' : '#E2E8F0' },
                   ]}
                 />
               </>
