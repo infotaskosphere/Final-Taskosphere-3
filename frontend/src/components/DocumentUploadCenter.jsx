@@ -1027,8 +1027,10 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4">
-      {/* ── Left rail: clients ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4 lg:h-[calc(100vh-230px)] lg:min-h-[560px]">
+      {/* ── Left rail: clients — capped height on mobile, fills the row on desktop.
+          Internal list scrolls (see ClientRail) instead of growing the whole page. */}
+      <div className="max-h-[65vh] lg:max-h-none lg:h-full">
       <ClientRail
         clients={clients}
         loadingClients={loadingClients}
@@ -1043,9 +1045,11 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
         onBulkRemove={bulkRemoveClients}
         removing={removingClients}
       />
+      </div>
 
-      {/* ── Right: workspace ── */}
-      <div className="min-w-0">
+      {/* ── Right: workspace — scrolls independently on desktop so a big
+          document grid doesn't stretch the page past the client rail either. */}
+      <div className="min-w-0 lg:h-full lg:overflow-y-auto lg:pr-1 slim-scroll">
         {!selectedClient ? (
           <div className={`rounded-2xl border shadow-sm h-full flex flex-col items-center justify-center text-center py-24 px-6 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4" style={{ background: `${COLORS.deepBlue}10` }}>
