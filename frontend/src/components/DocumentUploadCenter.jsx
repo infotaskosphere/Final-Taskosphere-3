@@ -181,8 +181,8 @@ function ClientListRow({ c, active, selectMode, selectedIds, onToggleSelect, onS
 // tab-filtered list gives every row the full height of the panel, every time.
 const CLIENT_TABS = [
   { key: 'all',      label: 'All' },
-  { key: 'linked',    label: 'Linked' },
-  { key: 'unlinked', label: 'Not Linked' },
+  { key: 'linked',   label: 'Linked' },
+  { key: 'unlinked', label: 'Unlinked' },
 ];
 
 function ClientRail({
@@ -274,22 +274,25 @@ function ClientRail({
           )}
         </div>
 
-        {/* Tab filter — every row gets full panel height, no split-pane glitch */}
-        <div className={`flex items-center gap-1 p-1 rounded-xl ${isDark ? 'bg-slate-900/40' : 'bg-slate-100'}`}>
+        {/* Tab filter — grid-cols-3 keeps all three exactly equal width;
+            count stacked above label so a 3-digit number never wraps mid-digit */}
+        <div className={`grid grid-cols-3 gap-1 p-1 rounded-xl ${isDark ? 'bg-slate-900/40' : 'bg-slate-100'}`}>
           {CLIENT_TABS.map((t) => (
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`flex-1 flex items-center justify-center gap-1 text-[11px] font-semibold px-2 py-1.5 rounded-lg transition-all ${
+              className={`flex flex-col items-center justify-center gap-0.5 px-1 py-1.5 rounded-lg transition-all ${
                 tab === t.key
                   ? 'text-white shadow-sm'
                   : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'
               }`}
               style={tab === t.key ? { background: GRADIENT } : {}}
             >
-              {t.label}
-              <span className={`text-[10px] ${tab === t.key ? 'text-white/75' : 'text-slate-400'}`}>
+              <span className="text-xs font-bold leading-none tabular-nums whitespace-nowrap">
                 {tabCount[t.key]}
+              </span>
+              <span className={`text-[9.5px] font-semibold uppercase tracking-wide leading-none whitespace-nowrap ${tab === t.key ? 'text-white/80' : 'text-slate-400'}`}>
+                {t.label}
               </span>
             </button>
           ))}
@@ -1027,7 +1030,7 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4 lg:h-[calc(100vh-230px)] lg:min-h-[560px]">
+      <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4 lg:h-[calc(100vh-230px)] lg:min-h-[560px]">
       {/* ── Left rail: clients — capped height on mobile, fills the row on desktop.
           Internal list scrolls (see ClientRail) instead of growing the whole page. */}
       <div className="max-h-[65vh] lg:max-h-none lg:h-full">
