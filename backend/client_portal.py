@@ -13,6 +13,9 @@ import uuid
 import logging
 import re
 import random
+import asyncio
+import os
+import tempfile
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 
@@ -32,6 +35,11 @@ from backend.auth_password_reset import _send_otp_email
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/client-portal", tags=["client-portal"])
+
+# Google Drive calls are synchronous under the hood. Keep them capped so a
+# folder upload cannot exhaust Render memory/threads and restart the instance.
+DRIVE_LIST_SEMAPHORE = asyncio.Semaphore(3)
+DRIVE_UPLOAD_SEMAPHORE = asyncio.Semaphore(1)
 
 # ── password hashing ──────────────────────────────────────────────────────
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -741,7 +749,9 @@ async def admin_list_drive_files(
     # Browse the requested subfolder or fall back to root
     browse_id = folder_id if folder_id else root_folder_id
 
-    files = _fetch_drive_files_raw(browse_id)
+    loop = asyncio.get_running_loop()
+    async with DRIVE_LIST_SEMAPHORE:
+        files = await loop.run_in_executor(None, _fetch_drive_files_raw, browse_id)
 
     # Load existing visibility config
     vis_doc = await db.client_drive_visibility.find_one(
@@ -2345,6 +2355,29 @@ def _upload_file_to_drive_sync(service, folder_id: str, filename: str, file_byte
     ).execute()
 
 
+def _upload_file_path_to_drive_sync(service, folder_id: str, filename: str, file_path: str, mime_type: str, existing_file_id: str = None) -> dict:
+    """Upload a local temp file to Drive without loading the whole file into RAM."""
+    from googleapiclient.http import MediaFileUpload
+
+    media = MediaFileUpload(
+        file_path,
+        mimetype=mime_type or "application/octet-stream",
+        chunksize=8 * 1024 * 1024,
+        resumable=True,
+    )
+    if existing_file_id:
+        return service.files().update(
+            fileId=existing_file_id,
+            media_body=media,
+            fields="id,name,webViewLink,mimeType,size,modifiedTime,iconLink",
+        ).execute()
+    return service.files().create(
+        body={"name": filename, "parents": [folder_id]},
+        media_body=media,
+        fields="id,name,webViewLink,mimeType,size,modifiedTime,iconLink",
+    ).execute()
+
+
 @router.post("/drive/ensure-root-folder")
 async def ensure_root_folder(
     client_id: str = Form(...),
@@ -2444,7 +2477,7 @@ async def simple_upload_file(
         raise HTTPException(403, "Insufficient permissions")
 
     from backend.invoicing import _get_drive_service, _drive_configured
-    import asyncio, mimetypes
+    import mimetypes
 
     if not _drive_configured():
         raise HTTPException(503, "Google Drive not configured.")
@@ -2457,54 +2490,77 @@ async def simple_upload_file(
     if not target_folder:
         raise HTTPException(400, "This client has no Drive folder yet. Create one first.")
 
-    # Guard against a single huge file blowing up process memory (the whole
-    # file is read into RAM below, then handed to Drive) — a handful of
-    # large files uploading in parallel is what was crashing the backend
-    # process outright, which the browser then reported as a confusing
-    # "CORS policy" error since the crashed process never got to attach
-    # CORS headers to the response.
+    # Guard against a single huge file and spool to disk instead of keeping
+    # the entire file in RAM. The previous in-memory upload path could restart
+    # a small Render instance during folder uploads, which the browser reports
+    # as "interrupted before a response came back".
     MAX_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB per file
-    file_bytes = await file.read()
-    if len(file_bytes) > MAX_UPLOAD_BYTES:
-        raise HTTPException(413, f"\"{file.filename}\" is larger than the 100 MB per-file limit.")
+    tmp_path = None
+    total_bytes = 0
+    try:
+        with tempfile.NamedTemporaryFile(prefix="portal-upload-", suffix=".tmp", delete=False) as tmp:
+            tmp_path = tmp.name
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                if total_bytes > MAX_UPLOAD_BYTES:
+                    raise HTTPException(413, f"\"{file.filename}\" is larger than the 100 MB per-file limit.")
+                tmp.write(chunk)
+    except HTTPException:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        raise
+
     mime = file.content_type or mimetypes.guess_type(file.filename)[0] or "application/octet-stream"
 
-    service = _get_drive_service()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     try:
-        existing = await loop.run_in_executor(None, _find_existing_file_sync, service, target_folder, file.filename)
+        async with DRIVE_UPLOAD_SEMAPHORE:
+            service = _get_drive_service()
+            existing = await loop.run_in_executor(None, _find_existing_file_sync, service, target_folder, file.filename)
 
-        existing_file_id = None
-        upload_filename = file.filename
+            existing_file_id = None
+            upload_filename = file.filename
 
-        if existing and conflict_action in (None, "ask"):
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "detail": {
-                        "conflict": True,
-                        "existing_file_id": existing["id"],
-                        "existing_modified_time": existing.get("modifiedTime"),
-                        "filename": file.filename,
-                        "message": f"\"{file.filename}\" already exists in this folder.",
-                    }
-                },
+            if existing and conflict_action in (None, "ask"):
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "detail": {
+                            "conflict": True,
+                            "existing_file_id": existing["id"],
+                            "existing_modified_time": existing.get("modifiedTime"),
+                            "filename": file.filename,
+                            "message": f"\"{file.filename}\" already exists in this folder.",
+                        }
+                    },
+                )
+            elif existing and conflict_action == "overwrite":
+                existing_file_id = existing["id"]
+            elif existing and conflict_action == "keep_both":
+                upload_filename = await loop.run_in_executor(None, _unique_filename_sync, service, target_folder, file.filename)
+            # else: no existing file with this name — proceed as a normal create
+
+            uploaded = await loop.run_in_executor(
+                None, _upload_file_path_to_drive_sync, service, target_folder, upload_filename, tmp_path, mime, existing_file_id,
             )
-        elif existing and conflict_action == "overwrite":
-            existing_file_id = existing["id"]
-        elif existing and conflict_action == "keep_both":
-            upload_filename = await loop.run_in_executor(None, _unique_filename_sync, service, target_folder, file.filename)
-        # else: no existing file with this name — proceed as a normal create
-
-        uploaded = await loop.run_in_executor(
-            None, _upload_file_to_drive_sync, service, target_folder, upload_filename, file_bytes, mime, existing_file_id,
-        )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Simple upload failed: {e}", exc_info=True)
         raise HTTPException(500, f"Upload failed: {e}")
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
     return {
         "success": True,
