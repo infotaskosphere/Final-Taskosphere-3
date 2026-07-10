@@ -25,10 +25,12 @@ const COLORS = {
   lightGreen:   '#5CCB5F',
   // Sidebar is always this dark-navy palette, independent of the app's
   // light/dark theme toggle (which only affects the header + page content).
-  sidebarBg:      '#0A1E3A',
-  sidebarBgSoft:  '#0F2847',
+  // Tied to the same brand blue used in the header/logo (deepBlue/mediumBlue)
+  // so the header and sidebar read as one unified colour family.
+  sidebarBg:      '#0D3B66',
+  sidebarBgSoft:  '#0A2E52',
   sidebarBorder:  'rgba(255,255,255,0.08)',
-  sidebarActive:  '#2E8BE6',
+  sidebarActive:  '#2B8CD1',
 };
 
 const SIDEBAR_EXPANDED  = 280;
@@ -416,14 +418,14 @@ const DashboardLayout = ({ children }) => {
         >
           <Link
             to="/dashboard"
-            className={`relative flex items-center gap-2.5 min-w-0 ${collapsed && isDesktop ? 'justify-center w-full' : 'pl-4 sm:pl-5'}`}
+            className={`relative flex items-center min-w-0 ${collapsed && isDesktop ? 'justify-center w-full' : 'pl-4 sm:pl-5'}`}
           >
             <div className="relative flex-shrink-0">
               <img
-                src="/logo.png"
+                src="/icon-192.png"
                 alt="Task-O-Sphere"
                 className="object-contain block"
-                style={{ height: 30, width: 30 }}
+                style={{ height: 34, width: 34 }}
               />
               {hasUnread && (
                 <span
@@ -432,13 +434,6 @@ const DashboardLayout = ({ children }) => {
                 />
               )}
             </div>
-            {(!collapsed || !isDesktop) && (
-              <span className="whitespace-nowrap font-extrabold tracking-tight text-[15px] sm:text-base">
-                <span style={{ color: isDark ? '#e2e8f0' : COLORS.deepBlue }}>TASK</span>
-                <span style={{ color: COLORS.emeraldGreen }}>-O-</span>
-                <span style={{ color: isDark ? '#e2e8f0' : COLORS.deepBlue }}>SPHERE</span>
-              </span>
-            )}
           </Link>
         </div>
 
