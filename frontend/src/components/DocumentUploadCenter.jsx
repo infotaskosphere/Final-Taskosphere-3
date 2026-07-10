@@ -26,7 +26,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useDocumentUploads } from '@/contexts/DocumentUploadContext.jsx';
 import {
   Search, Users, FolderOpen, Folder, FolderPlus, FileText, UploadCloud, Plus, Trash2,
-  ChevronRight, ChevronUp, Home, Loader2, CheckCircle2, XCircle, Eye, EyeOff, X,
+  ChevronRight, ChevronUp, ChevronDown, Home, Loader2, CheckCircle2, XCircle, Eye, EyeOff, X,
   ExternalLink, RefreshCw, KeyRound, Copy, Check, AlertCircle, CloudCog,
   FileImage, FileSpreadsheet, FileType2, Square, CheckSquare, Sparkles, ListChecks,
 } from 'lucide-react';
