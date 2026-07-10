@@ -185,14 +185,21 @@ const CLIENT_TABS = [
   { key: 'unlinked', label: 'Unlinked' },
 ];
 
+// Roughly 10 client rows worth of scroll height (row ~48px + 4px gap, plus
+// a little breathing room) — keeps the card compact instead of stretching
+// to fill the page; anything beyond that scrolls.
+const CLIENT_LIST_MAX_H = 540;
+
 function ClientRail({
   clients, loadingClients, selectedClientId, onSelect, isDark, isAdmin,
-  selectMode, onToggleSelectMode, selectedIds, onToggleSelect, onBulkRemove, removing,
+  selectMode, onToggleSelectMode, selectedIds, onToggleSelect,
+  onBulkRemove, onBulkProvision, removing, provisioning,
 }) {
   const [search, setSearch] = useState('');
   const [tab, setTab] = useState('all');
   const [sort, setSort] = useState('name_asc');
   const searchRef = useRef(null);
+  const listRef = useRef(null);
 
   // Modern quick-access: press "/" anywhere on the page to jump into the
   // client search box (same pattern as Linear/Notion/Slack), Escape clears it.
@@ -226,8 +233,18 @@ function ClientRail({
 
   const tabCount = { all: clients.length, linked: linkedCount, unlinked: unlinkedCount };
 
+  // How many of the current selection are/aren't already linked — decides
+  // which bulk action button(s) to show.
+  const selectedLinkedCount = useMemo(
+    () => clients.filter((c) => selectedIds.has(c.id) && c.has_portal).length,
+    [clients, selectedIds]
+  );
+  const selectedUnlinkedCount = selectedIds.size - selectedLinkedCount;
+
+  const scrollList = (dir) => listRef.current?.scrollBy({ top: dir * 260, behavior: 'smooth' });
+
   return (
-    <div className={`rounded-2xl border shadow-sm flex flex-col overflow-hidden h-full ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+    <div className={`rounded-2xl border shadow-sm flex flex-col overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
       {/* Header */}
       <div className={`px-4 py-3.5 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
         <div className="flex items-center gap-2 mb-3">
@@ -241,7 +258,7 @@ function ClientRail({
           {isAdmin && (
             <button
               onClick={onToggleSelectMode}
-              title="Select multiple clients to remove from portal"
+              title="Select multiple clients to set up or remove from the portal"
               className={`text-[10px] font-semibold px-2 py-1 rounded-lg border transition flex-shrink-0 ${
                 selectMode ? 'bg-red-50 text-red-600 border-red-200' : isDark ? 'border-slate-600 text-slate-400 hover:bg-slate-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'
               }`}
@@ -303,39 +320,79 @@ function ClientRail({
           {filtered.length > 1 && <SortSelect value={sort} onChange={setSort} isDark={isDark} />}
         </div>
 
+        {/* Bulk actions — set up portal logins for several unlinked clients
+            at once, and/or remove several linked ones, from a single selection. */}
         {selectMode && selectedIds.size > 0 && (
-          <button
-            disabled={removing}
-            onClick={onBulkRemove}
-            className="mt-2.5 w-full flex items-center justify-center gap-1.5 text-xs font-semibold bg-red-50 text-red-600 border border-red-200 rounded-lg py-1.5 hover:bg-red-100 transition disabled:opacity-60"
-          >
-            {removing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-            Remove {selectedIds.size} client{selectedIds.size > 1 ? 's' : ''} from Portal
-          </button>
+          <div className="mt-2.5 space-y-1.5">
+            {selectedUnlinkedCount > 0 && (
+              <button
+                disabled={provisioning}
+                onClick={onBulkProvision}
+                className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold text-white rounded-lg py-1.5 hover:opacity-90 transition disabled:opacity-60"
+                style={{ background: GRADIENT }}
+              >
+                {provisioning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                Set up {selectedUnlinkedCount} client{selectedUnlinkedCount > 1 ? 's' : ''}
+              </button>
+            )}
+            {selectedLinkedCount > 0 && (
+              <button
+                disabled={removing}
+                onClick={onBulkRemove}
+                className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold bg-red-50 text-red-600 border border-red-200 rounded-lg py-1.5 hover:bg-red-100 transition disabled:opacity-60"
+              >
+                {removing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                Remove {selectedLinkedCount} from Portal
+              </button>
+            )}
+          </div>
         )}
       </div>
 
-      {/* Single, fully-scrollable list — always gets the entire remaining height */}
+      {/* Client list — capped to ~10 rows tall so the card stays compact;
+          scroll with the wheel/trackpad, drag, or the up/down arrows. */}
       {loadingClients ? (
-        <div className="flex-1 flex flex-col items-center justify-center py-14 gap-2 text-slate-400">
+        <div className="flex flex-col items-center justify-center py-14 gap-2 text-slate-400">
           <Loader2 className="h-4 w-4 animate-spin" /><span className="text-xs">Loading clients…</span>
         </div>
       ) : filtered.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center justify-center py-14 px-4 text-center">
+        <div className="flex flex-col items-center justify-center py-14 px-4 text-center">
           <Users className="h-7 w-7 text-slate-300 mb-2" />
           <p className="text-xs text-slate-400">
             {search ? 'No clients match your search.' : tab === 'linked' ? 'No clients linked to the portal yet.' : tab === 'unlinked' ? 'Every client is linked. 🎉' : 'No clients found.'}
           </p>
         </div>
       ) : (
-        <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
-          {filtered.map((c) => (
-            <ClientListRow
-              key={c.id} c={c} active={selectedClientId === c.id}
-              selectMode={selectMode} selectedIds={selectedIds}
-              onToggleSelect={onToggleSelect} onSelect={onSelect} isDark={isDark}
-            />
-          ))}
+        <div className="relative">
+          <div ref={listRef} className="overflow-y-auto slim-scroll p-2 space-y-1" style={{ maxHeight: CLIENT_LIST_MAX_H }}>
+            {filtered.map((c) => (
+              <ClientListRow
+                key={c.id} c={c} active={selectedClientId === c.id}
+                selectMode={selectMode} selectedIds={selectedIds}
+                onToggleSelect={onToggleSelect} onSelect={onSelect} isDark={isDark}
+              />
+            ))}
+          </div>
+          {/* Up/down scroll nudge buttons — handy for long lists on trackpads without momentum scroll */}
+          {filtered.length > 6 && (
+            <div className="absolute right-2 bottom-2 flex flex-col rounded-lg overflow-hidden shadow-md border" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+              <button
+                onClick={() => scrollList(-1)}
+                className={`p-1.5 ${isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
+                title="Scroll up"
+              >
+                <ChevronUp className="h-3.5 w-3.5" />
+              </button>
+              <div className={`h-px ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
+              <button
+                onClick={() => scrollList(1)}
+                className={`p-1.5 ${isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
+                title="Scroll down"
+              >
+                <ChevronDown className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -371,6 +428,58 @@ function CredentialsCard({ username, password, onDismiss }) {
         <p className="text-[11px] text-emerald-600 dark:text-emerald-500 mt-1">Share these with the client so they can log in. This is shown once — copy it now.</p>
       </div>
       <button onClick={onDismiss} className="text-emerald-400 hover:text-emerald-600 flex-shrink-0"><X className="h-4 w-4" /></button>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Bulk credentials reveal card — shown after creating portal logins for
+// several clients at once. Each password is generated once and never shown
+// again, so this list (with a copy-all) is the only chance to grab them.
+// ═══════════════════════════════════════════════════════════════════════════
+function BulkCredentialsCard({ credentials, onDismiss, isDark }) {
+  const [copiedAll, setCopiedAll] = useState(false);
+  if (!credentials || credentials.length === 0) return null;
+
+  const copyAll = async () => {
+    const text = credentials
+      .map((c) => `${c.name}\n  Username: ${c.username}\n  Password: ${c.password}`)
+      .join('\n\n');
+    try {
+      await navigator.clipboard.writeText(`Client Portal logins — ${window.location.origin}/client-portal\n\n${text}`);
+      setCopiedAll(true);
+      setTimeout(() => setCopiedAll(false), 2000);
+    } catch {}
+  };
+
+  return (
+    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-800 p-4 mb-4">
+      <div className="flex items-start gap-3 mb-3">
+        <div className="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 flex-shrink-0">
+          <Sparkles className="h-4 w-4 text-emerald-700 dark:text-emerald-400" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-300">
+            {credentials.length} portal login{credentials.length > 1 ? 's' : ''} created
+          </p>
+          <p className="text-[11px] text-emerald-600 dark:text-emerald-500 mt-0.5">
+            These passwords are shown once — copy them now and share with each client.
+          </p>
+        </div>
+        <button onClick={copyAll} className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400 bg-white dark:bg-slate-800 border border-emerald-200 dark:border-emerald-800 rounded-lg px-2.5 py-1.5 hover:bg-emerald-50 flex-shrink-0">
+          {copiedAll ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />} {copiedAll ? 'Copied!' : 'Copy all'}
+        </button>
+        <button onClick={onDismiss} className="text-emerald-400 hover:text-emerald-600 flex-shrink-0"><X className="h-4 w-4" /></button>
+      </div>
+      <div className="max-h-56 overflow-y-auto slim-scroll space-y-1.5 pr-1">
+        {credentials.map((c, i) => (
+          <div key={i} className="flex flex-wrap items-center gap-2 bg-white dark:bg-slate-800 border border-emerald-100 dark:border-emerald-900 rounded-lg px-3 py-2 text-xs">
+            <span className="font-semibold text-slate-700 dark:text-slate-200 min-w-0 truncate flex-1">{c.name}</span>
+            <code className="bg-slate-50 dark:bg-slate-700 px-1.5 py-0.5 rounded font-mono text-[11px]">{c.username}</code>
+            <code className="bg-slate-50 dark:bg-slate-700 px-1.5 py-0.5 rounded font-mono text-[11px]">{c.password}</code>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1012,10 +1121,53 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
     }
   };
 
+  // ── bulk provisioning: create portal logins for several clients at once ──
+  const [bulkProvisioning, setBulkProvisioning] = useState(false);
+  const [bulkNewCreds, setBulkNewCreds] = useState(null); // [{name, username, password}] | null
+
+  const bulkProvisionClients = async () => {
+    const targets = clients.filter((c) => selectedClientIds.has(c.id) && !c.has_portal);
+    if (targets.length === 0) { toast.error('None of the selected clients need a new portal login.'); return; }
+    if (!window.confirm(`Create portal logins for ${targets.length} client(s)? Each gets its own username & password.`)) return;
+
+    setBulkProvisioning(true);
+    const created = [];
+    let failed = 0;
+    for (const c of targets) {
+      try {
+        const form = new FormData();
+        form.append('client_id', c.id);
+        form.append('client_name', clientName(c));
+        const res = await api.post('/client-portal/drive/ensure-root-folder', form, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        if (res.data?.generated_password) {
+          created.push({ name: clientName(c), username: res.data.portal_username, password: res.data.generated_password });
+        }
+      } catch {
+        failed += 1;
+      }
+    }
+    setBulkProvisioning(false);
+    setSelectedClientIds(new Set());
+    setClientSelectMode(false);
+    await loadClients();
+
+    if (created.length > 0) setBulkNewCreds(created);
+    if (failed === 0) toast.success(`Portal logins created for ${created.length} client(s).`);
+    else toast.error(`${created.length} created, ${failed} failed — select the failed ones and retry.`);
+  };
+
   const isProvisioned = !!(portalUser?.google_drive_folder_id);
 
   return (
     <div className="space-y-4">
+      <AnimatePresence>
+        {bulkNewCreds && (
+          <BulkCredentialsCard credentials={bulkNewCreds} onDismiss={() => setBulkNewCreds(null)} isDark={isDark} />
+        )}
+      </AnimatePresence>
+
       {/* ── Simple 3-step guide ── */}
       <div className={`rounded-2xl border shadow-sm p-4 flex flex-wrap items-center gap-x-8 gap-y-3 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         {[
@@ -1030,10 +1182,9 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4 lg:h-[calc(100vh-230px)] lg:min-h-[560px]">
-      {/* ── Left rail: clients — capped height on mobile, fills the row on desktop.
-          Internal list scrolls (see ClientRail) instead of growing the whole page. */}
-      <div className="max-h-[65vh] lg:max-h-none lg:h-full">
+      <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4 items-start">
+      {/* ── Left rail: clients — fixed, compact height (~10 rows visible),
+          scrolls internally with wheel/drag or the up/down arrow buttons. */}
       <ClientRail
         clients={clients}
         loadingClients={loadingClients}
@@ -1046,13 +1197,13 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
         selectedIds={selectedClientIds}
         onToggleSelect={toggleClientSelect}
         onBulkRemove={bulkRemoveClients}
+        onBulkProvision={bulkProvisionClients}
         removing={removingClients}
+        provisioning={bulkProvisioning}
       />
-      </div>
 
-      {/* ── Right: workspace — scrolls independently on desktop so a big
-          document grid doesn't stretch the page past the client rail either. */}
-      <div className="min-w-0 lg:h-full lg:overflow-y-auto lg:pr-1 slim-scroll">
+      {/* ── Right: workspace ── */}
+      <div className="min-w-0">
         {!selectedClient ? (
           <div className={`rounded-2xl border shadow-sm h-full flex flex-col items-center justify-center text-center py-24 px-6 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4" style={{ background: `${COLORS.deepBlue}10` }}>
