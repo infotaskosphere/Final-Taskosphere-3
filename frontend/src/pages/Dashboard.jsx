@@ -10,6 +10,7 @@ import { format, parseISO, isToday, isTomorrow, startOfDay } from 'date-fns';
 import { formatInTimeZone } from 'date-fns-tz';
 import { toast } from 'sonner';
 
+import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -698,6 +699,67 @@ const SectionCard = memo(function SectionCard({ children, className = '' }) {
   return (
     <div className={`bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm min-w-0 w-full ${className}`}>
       {children}
+    </div>
+  );
+});
+
+const DonutMetricCard = memo(function DonutMetricCard({ isDark, title, centerValue, centerLabel, data, footer }) {
+  const total   = data.reduce((sum, d) => sum + (d.value || 0), 0);
+  const pieData = total > 0
+    ? data.filter(d => d.value > 0)
+    : [{ name: 'empty', value: 1, color: isDark ? '#334155' : '#e2e8f0' }];
+
+  return (
+    <div
+      className={`rounded-2xl shadow-sm border p-4 min-w-0 flex flex-col ${
+        isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'
+      }`}
+    >
+      <h3 className={`text-sm font-semibold mb-2 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{title}</h3>
+      <div className="flex items-center gap-4 flex-1">
+        <div className="relative flex-shrink-0" style={{ width: 96, height: 96 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie
+                data={pieData}
+                dataKey="value"
+                nameKey="name"
+                innerRadius={30}
+                outerRadius={46}
+                startAngle={90}
+                endAngle={-270}
+                paddingAngle={total > 0 && pieData.length > 1 ? 2 : 0}
+                stroke="none"
+                isAnimationActive={true}
+              >
+                {pieData.map((d, i) => (
+                  <Cell key={i} fill={d.color} />
+                ))}
+              </Pie>
+            </PieChart>
+          </ResponsiveContainer>
+          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+            <span className={`text-lg font-bold leading-none ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+              {centerValue}
+            </span>
+            <span className={`text-[9px] mt-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{centerLabel}</span>
+          </div>
+        </div>
+        <div className="flex-1 min-w-0 space-y-1.5">
+          {data.map((d, i) => (
+            <div key={i} className="flex items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: d.color }} />
+                <span className={`truncate ${isDark ? 'text-slate-300' : 'text-slate-500'}`}>{d.name}</span>
+              </div>
+              <span className={`font-semibold flex-shrink-0 ${isDark ? 'text-slate-100' : 'text-slate-700'}`}>
+                {d.value}{d.suffix || ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+      {footer}
     </div>
   );
 });
@@ -1941,6 +2003,68 @@ export default function Dashboard() {
               </div>
             </CardContent>
           </motion.div>
+        </motion.div>
+
+        {/* TASK OVERVIEW / TASKS BY TYPE / TASK COMPLETION — DONUT CARDS */}
+        <motion.div
+          className="grid grid-cols-1 md:grid-cols-3 gap-3 [&>*]:min-w-0"
+          variants={itemVariants}
+        >
+          {(() => {
+            const totalTasks   = stats?.total_tasks ?? tasks.length;
+            const completedCt  = stats?.completed_tasks ?? 0;
+            const overdueCt    = overdueTaskCount;
+            const todoCt       = pendingTodos.length;
+            const pendingCt    = Math.max(0, totalTasks - completedCt - overdueCt);
+
+            const myTasksCt    = myTaskCount;
+            const teamTasksCt  = hasCrossVisibility ? teamTaskTotal : 0;
+
+            const remainingCt  = Math.max(0, totalTasks - completedCt);
+
+            return (
+              <>
+                <DonutMetricCard
+                  isDark={isDark}
+                  title="Task Overview"
+                  centerValue={totalTasks}
+                  centerLabel="Total Tasks"
+                  data={[
+                    { name: 'Pending',   value: pendingCt,   color: COLORS.mediumBlue },
+                    { name: 'Completed', value: completedCt, color: COLORS.emeraldGreen },
+                    { name: 'Overdue',   value: overdueCt,   color: COLORS.coral },
+                    { name: 'To Do',     value: todoCt,      color: '#8B5CF6' },
+                  ]}
+                />
+                <DonutMetricCard
+                  isDark={isDark}
+                  title="Tasks by Type"
+                  centerValue={myTasksCt + teamTasksCt + todoCt}
+                  centerLabel="Total"
+                  data={[
+                    { name: 'My Tasks',   value: myTasksCt,   color: COLORS.mediumBlue },
+                    { name: 'Team Tasks', value: teamTasksCt, color: '#22D3EE' },
+                    { name: 'To Do',      value: todoCt,      color: '#8B5CF6' },
+                  ]}
+                />
+                <DonutMetricCard
+                  isDark={isDark}
+                  title="Task Completion"
+                  centerValue={`${completionRate}%`}
+                  centerLabel="Completed"
+                  data={[
+                    { name: 'Completed', value: completedCt, color: COLORS.emeraldGreen },
+                    { name: 'Remaining', value: remainingCt, color: COLORS.mediumBlue },
+                  ]}
+                  footer={
+                    <p className={`mt-3 text-[11px] font-medium ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                      {completionRate >= 100 && totalTasks > 0 ? 'All tasks completed! 🎉' : 'Keep up the great work! 🎉'}
+                    </p>
+                  }
+                />
+              </>
+            );
+          })()}
         </motion.div>
         </React.Fragment>
           );
