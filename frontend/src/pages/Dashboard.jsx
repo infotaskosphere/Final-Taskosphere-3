@@ -10,7 +10,7 @@ import { format, parseISO, isToday, isTomorrow, startOfDay } from 'date-fns';
 import { formatInTimeZone } from 'date-fns-tz';
 import { toast } from 'sonner';
 
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -767,16 +767,8 @@ const DonutMetricCard = memo(function DonutMetricCard({ isDark, title, centerVal
                   />
                 ))}
               </Pie>
-              <Tooltip
-                contentStyle={{
-                  background: isDark ? '#1e293b' : '#ffffff',
-                  border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
-                  borderRadius: 10,
-                  fontSize: 12,
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                }}
-                formatter={(value, name) => [value, name]}
-              />
+              {/* Tooltip removed: side legend already shows values,
+                  and the floating tooltip overlapped the centered total. */}
             </PieChart>
           </ResponsiveContainer>
           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
