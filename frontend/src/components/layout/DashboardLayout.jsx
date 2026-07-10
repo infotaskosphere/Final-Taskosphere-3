@@ -421,12 +421,21 @@ const DashboardLayout = ({ children }) => {
             className={`relative flex items-center min-w-0 ${collapsed && isDesktop ? 'justify-center w-full' : 'pl-4 sm:pl-5'}`}
           >
             <div className="relative flex-shrink-0">
-              <img
-                src="/icon-192.png"
-                alt="Task-O-Sphere"
-                className="object-contain block"
-                style={{ height: 34, width: 34 }}
-              />
+              {collapsed && isDesktop ? (
+                <img
+                  src="/icon-192.png"
+                  alt="Task-O-Sphere"
+                  className="object-contain block"
+                  style={{ height: 34, width: 34 }}
+                />
+              ) : (
+                <img
+                  src="/logo-transparent.png"
+                  alt="Task-O-Sphere"
+                  className="object-contain block"
+                  style={{ height: 34, maxWidth: isDesktop ? sidebarPx - 24 : 160 }}
+                />
+              )}
               {hasUnread && (
                 <span
                   className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full border-2"
