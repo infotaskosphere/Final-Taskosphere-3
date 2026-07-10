@@ -24,7 +24,7 @@ from bson import ObjectId
 import logging
 import uuid
 
-from backend.dependencies import get_current_user, get_db, admin_required
+from backend.dependencies import get_current_user, get_db, admin_required, db
 from backend.models import User
 from pydantic import BaseModel, Field, ConfigDict
 
