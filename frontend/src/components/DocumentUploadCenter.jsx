@@ -742,6 +742,9 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
   const [breadcrumb, setBreadcrumb] = useState([]); // [{id, name}]
   const [items, setItems] = useState([]);
   const [loadingItems, setLoadingItems] = useState(false);
+  const [refreshingItems, setRefreshingItems] = useState(false);
+  const [itemsLoaded, setItemsLoaded] = useState(false);
+  const [itemsLoadError, setItemsLoadError] = useState('');
   const [selectedItemIds, setSelectedItemIds] = useState(new Set());
   const [busyIds, setBusyIds] = useState(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -779,6 +782,8 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
     setNewCreds(null);
     setBreadcrumb([]);
     setItems([]);
+    setItemsLoaded(false);
+    setItemsLoadError('');
     setSelectedItemIds(new Set());
     const pu = (c.portal_users || [])[0] || null;
     setPortalUser(pu);
@@ -787,22 +792,35 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
   const currentFolderId = breadcrumb.length ? breadcrumb[breadcrumb.length - 1].id : portalUser?.google_drive_folder_id;
 
   // ── load items in current folder ────────────────────────────────────
-  const loadItems = useCallback(async () => {
-    if (!portalUser?.id || !portalUser?.google_drive_folder_id) { setItems([]); return; }
-    setLoadingItems(true);
+  const loadItems = useCallback(async ({ silent = false } = {}) => {
+    if (!portalUser?.id || !portalUser?.google_drive_folder_id) {
+      setItems([]);
+      setItemsLoaded(false);
+      setItemsLoadError('');
+      return;
+    }
+    if (silent) setRefreshingItems(true);
+    else setLoadingItems(true);
     try {
       const params = currentFolderId ? { folder_id: currentFolderId } : {};
       const res = await api.get(`/client-portal/drive/admin/files/${portalUser.id}`, { params });
       setItems(res.data?.files ?? []);
+      setItemsLoaded(true);
+      setItemsLoadError('');
     } catch (err) {
-      toast.error(extractErrorMessage(err, 'Failed to load documents'));
-      setItems([]);
+      const msg = extractErrorMessage(err, 'Failed to load documents');
+      setItemsLoadError(msg);
+      if (!silent) {
+        toast.error(msg);
+        setItems([]);
+      }
     } finally {
-      setLoadingItems(false);
+      if (silent) setRefreshingItems(false);
+      else setLoadingItems(false);
     }
-  }, [portalUser, currentFolderId]);
+  }, [portalUser?.id, portalUser?.google_drive_folder_id, currentFolderId]);
 
-  useEffect(() => { loadItems(); }, [loadItems]);
+  useEffect(() => { setItemsLoaded(false); loadItems(); }, [loadItems]);
 
   // ── provision (create portal login only) ─────────────────────────
   const provision = async () => {
@@ -970,13 +988,17 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
     clientName: selectedClient ? clientName(selectedClient) : undefined,
   }), [portalUser?.id, currentFolderId, selectedClient]);
 
+  const refreshItemsSilently = useCallback(() => {
+    loadItems({ silent: true });
+  }, [loadItems]);
+
   const queueUploads = useCallback((entries) => {
     if (!portalUser?.google_drive_folder_id) {
       toast.error('Set up this client\'s Drive folder first.');
       return;
     }
-    queueUploadsCtx(entries, uploadTarget, loadItems);
-  }, [portalUser, uploadTarget, queueUploadsCtx, loadItems]);
+    queueUploadsCtx(entries, uploadTarget, refreshItemsSilently);
+  }, [portalUser, uploadTarget, queueUploadsCtx, refreshItemsSilently]);
 
   // Kept for the plain "Choose Files" input, which never carries folder info.
   const uploadFiles = useCallback((fileList) => {
@@ -985,16 +1007,24 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
   }, [queueUploads]);
 
   const retryUpload = useCallback((item) => {
-    retryItem(item, loadItems);
-  }, [retryItem, loadItems]);
+    retryItem(item, refreshItemsSilently);
+  }, [retryItem, refreshItemsSilently]);
 
   const resolveUploadConflict = useCallback((item, action) => {
-    resolveConflict(item, action, loadItems);
-  }, [resolveConflict, loadItems]);
+    resolveConflict(item, action, refreshItemsSilently);
+  }, [resolveConflict, refreshItemsSilently]);
 
   const resolveAllUploadConflicts = useCallback((action) => {
-    resolveAllConflicts(action, loadItems);
-  }, [resolveAllConflicts, loadItems]);
+    resolveAllConflicts(action, refreshItemsSilently, { portalUserId: portalUser?.id });
+  }, [resolveAllConflicts, refreshItemsSilently, portalUser?.id]);
+
+  const clearClientFinishedUploads = useCallback(() => {
+    clearFinished({ portalUserId: portalUser?.id });
+  }, [clearFinished, portalUser?.id]);
+
+  const clearClientUploads = useCallback(() => {
+    clearAll({ portalUserId: portalUser?.id });
+  }, [clearAll, portalUser?.id]);
 
   // Only this client's uploads are shown in the status card while a client
   // is selected — switching clients doesn't lose other clients' progress,
@@ -1003,6 +1033,26 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
     () => allUploadItems.filter((it) => it.portalUserId === portalUser?.id),
     [allUploadItems, portalUser?.id],
   );
+
+  const documentStats = useMemo(() => {
+    const folders = items.filter((it) => isFolderMime(it.mimeType)).length;
+    const files = items.length - folders;
+    const visible = items.filter((it) => it.is_visible).length;
+    const hidden = Math.max(0, items.length - visible);
+    const bytes = items.reduce((sum, it) => sum + (Number(it.size) || 0), 0);
+    const activeUploads = clientUploadItems.filter((it) => ['queued', 'uploading', 'conflict'].includes(it.status)).length;
+    const failedUploads = clientUploadItems.filter((it) => it.status === 'error').length;
+    return {
+      folders,
+      files,
+      visible,
+      hidden,
+      size: fmtSize(bytes) || '0 B',
+      selected: selectedItemIds.size,
+      activeUploads,
+      failedUploads,
+    };
+  }, [items, selectedItemIds.size, clientUploadItems]);
 
   // ── recursively read a dropped folder into a flat file list ─────────
   // Browsers only expose real folder contents via the drag-and-drop
@@ -1296,6 +1346,32 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
 
             {isProvisioned && (
               <>
+                {/* At-a-glance workspace summary */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+                  {[
+                    { label: 'Folders', value: documentStats.folders, Icon: Folder, tone: 'amber' },
+                    { label: 'Files', value: documentStats.files, Icon: FileText, tone: 'blue' },
+                    { label: 'Visible', value: documentStats.visible, Icon: Eye, tone: 'emerald' },
+                    { label: 'Hidden', value: documentStats.hidden, Icon: EyeOff, tone: 'slate' },
+                    { label: 'Selected', value: documentStats.selected, Icon: CheckSquare, tone: 'indigo' },
+                    { label: 'Upload issues', value: documentStats.failedUploads, Icon: AlertCircle, tone: documentStats.failedUploads ? 'red' : 'emerald' },
+                  ].map(({ label, value, Icon, tone }) => (
+                    <div key={label} className={`rounded-2xl border shadow-sm p-3 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</span>
+                        <Icon className={`h-3.5 w-3.5 ${
+                          tone === 'amber' ? 'text-amber-500' :
+                          tone === 'blue' ? 'text-blue-500' :
+                          tone === 'emerald' ? 'text-emerald-500' :
+                          tone === 'red' ? 'text-red-500' :
+                          tone === 'indigo' ? 'text-indigo-500' : 'text-slate-400'
+                        }`} />
+                      </div>
+                      <p className="mt-1 text-lg font-bold text-slate-800 dark:text-slate-100 tabular-nums">{value}</p>
+                    </div>
+                  ))}
+                </div>
+
                 {/* Toolbar: breadcrumb + actions */}
                 <div className={`rounded-2xl border shadow-sm px-4 py-3 flex items-center gap-2 flex-wrap ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
                   <button onClick={jumpToRoot} className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
@@ -1326,6 +1402,13 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
                         <button onClick={selectAllItems} className="text-xs font-semibold text-slate-500 hover:underline">Select all</button>
                       )
                     )}
+                    <button
+                      onClick={() => loadItems()}
+                      disabled={loadingItems || refreshingItems}
+                      className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition disabled:opacity-60 ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${refreshingItems ? 'animate-spin' : ''}`} /> Refresh
+                    </button>
                     <button
                       onClick={() => setShowNewFolder((v) => !v)}
                       className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
@@ -1392,11 +1475,66 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
                   <p className="text-[11px] text-slate-400">Files upload in the background — you can keep working while they finish. Folder structure is recreated on Drive automatically.</p>
                 </div>
 
+                {/* Upload status — shown before the Drive grid so conflict
+                    choices and failed uploads stay visible while work runs. */}
+                <AnimatePresence>
+                  {clientUploadItems.length > 0 && (
+                    <UploadStatusCard
+                      items={clientUploadItems}
+                      onRetry={retryUpload}
+                      onResolveConflict={resolveUploadConflict}
+                      onResolveAllConflicts={resolveAllUploadConflicts}
+                      onClearFinished={clearClientFinishedUploads}
+                      onClearAll={clearClientUploads}
+                      onRemove={removeItem}
+                      isDark={isDark}
+                    />
+                  )}
+                </AnimatePresence>
+
                 {/* Items grid */}
                 <div className={`rounded-2xl border shadow-sm p-4 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                  {loadingItems ? (
+                  <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">Drive contents</p>
+                      <p className="text-[11px] text-slate-400">
+                        {breadcrumb.length ? breadcrumb.map((b) => b.name).join(' / ') : (portalUser.google_drive_folder_name || 'Root')}
+                        {' · '}
+                        {documentStats.files} file{documentStats.files === 1 ? '' : 's'}, {documentStats.folders} folder{documentStats.folders === 1 ? '' : 's'}
+                        {' · '}
+                        {documentStats.size}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {itemsLoadError && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg bg-red-50 text-red-600 border border-red-100">
+                          <AlertCircle className="h-3 w-3" /> Refresh failed
+                        </span>
+                      )}
+                      {refreshingItems && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg bg-blue-50 text-blue-600 border border-blue-100">
+                          <Loader2 className="h-3 w-3 animate-spin" /> Updating list
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {loadingItems && !itemsLoaded ? (
                     <div className="flex items-center justify-center py-14 gap-2 text-slate-400">
                       <Loader2 className="h-4 w-4 animate-spin" /><span className="text-xs">Loading…</span>
+                    </div>
+                  ) : itemsLoadError && items.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-14 text-center">
+                      <AlertCircle className="h-8 w-8 text-red-300 mb-2" />
+                      <p className="text-xs font-semibold text-red-500">Could not load this folder.</p>
+                      <p className="text-[11px] text-slate-400 mt-1 max-w-md">{itemsLoadError}</p>
+                      <button
+                        onClick={() => loadItems()}
+                        className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-white px-3 py-1.5 rounded-lg"
+                        style={{ background: GRADIENT }}
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" /> Try again
+                      </button>
                     </div>
                   ) : items.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-14 text-center">
@@ -1424,23 +1562,6 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
                   )}
                 </div>
 
-                {/* Upload status — persists across navigation; keeps showing
-                    progress for this client even if a batch was started,
-                    the admin left the page, and came back later. */}
-                <AnimatePresence>
-                  {clientUploadItems.length > 0 && (
-                    <UploadStatusCard
-                      items={clientUploadItems}
-                      onRetry={retryUpload}
-                      onResolveConflict={resolveUploadConflict}
-                      onResolveAllConflicts={resolveAllUploadConflicts}
-                      onClearFinished={clearFinished}
-                      onClearAll={clearAll}
-                      onRemove={removeItem}
-                      isDark={isDark}
-                    />
-                  )}
-                </AnimatePresence>
               </>
             )}
           </div>
