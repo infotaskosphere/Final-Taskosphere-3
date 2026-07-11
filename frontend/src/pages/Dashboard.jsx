@@ -1524,7 +1524,7 @@ export default function Dashboard() {
           <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-xs font-bold ${isPodium ? 'bg-black/20 text-white' : isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-200 text-slate-600'}`}>
             {medal || `#${index + 1}`}
           </div>
-          <div className={`w-9 h-9 rounded-xl overflow-hidden flex-shrink-0 ring-2 ${isGold ? 'ring-yellow-300/60' : isSilver ? 'ring-slate-300/60' : isBronze ? 'ring-orange-300/60' : isDark ? 'ring-slate-600' : 'ring-slate-200'}`}>
+          <div className={`w-9 h-9 rounded-full overflow-hidden flex-shrink-0 ring-2 ${isGold ? 'ring-yellow-300/60' : isSilver ? 'ring-slate-300/60' : isBronze ? 'ring-orange-300/60' : isDark ? 'ring-slate-600' : 'ring-slate-200'}`}>
             {member.profile_picture
               ? <img src={member.profile_picture} alt={member.user_name} className="w-full h-full object-cover" />
               : <div className="w-full h-full flex items-center justify-center font-bold text-sm"
