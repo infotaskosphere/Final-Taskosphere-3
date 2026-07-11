@@ -1003,10 +1003,11 @@ export default function Dashboard() {
   const [selectedTodo,      setSelectedTodo]      = useState(null);
   const [selectedPerformer, setSelectedPerformer] = useState(null);
   const [showCustomize,     setShowCustomize]     = useState(false);
-  const DASHBOARD_SECTIONS = ['metrics','tasks_row','assigned_tasks','performers','quick_access'];
+  const DASHBOARD_SECTIONS = ['metrics','pie_charts','tasks_row','assigned_tasks','performers','quick_access'];
   const DASHBOARD_LABELS = {
     metrics:         { name:'Key Metrics',          icon:'📊', desc:'6 stat cards — tasks, todos, overdue, DSC…' },
-    tasks_row:       { name:'Tasks & Deadlines',    icon:'📋', desc:'Recent tasks, compliance deadlines, attendance' },
+    pie_charts:      { name:'Pie Charts',           icon:'🥧', desc:'Task overview, tasks by type, completion donuts' },
+    tasks_row:       { name:'Tasks & Deadlines',    icon:'📋', desc:'Recent tasks and compliance deadlines' },
     assigned_tasks:  { name:'Assigned Tasks',       icon:'✅', desc:'Tasks assigned to you and by you' },
     performers:      { name:'Performers & Todos',   icon:'🌟', desc:'Star performers, to-do list and client visits' },
     quick_access:    { name:'Quick Access',         icon:'⚡', desc:'Leads, clients, DSC, compliance tiles' },
@@ -1627,10 +1628,13 @@ export default function Dashboard() {
 
       <motion.div className="space-y-4 sm:space-y-5 w-full min-w-0 overflow-x-hidden" variants={containerVariants} initial="hidden" animate="visible">
 
-        {/* WELCOME BANNER */}
+        {/* WELCOME BANNER + ATTENDANCE (side by side, matched height) */}
         <motion.div variants={itemVariants}>
+          <div className="flex flex-col lg:flex-row gap-3 items-stretch">
+
+          {/* Header banner — width reduced to make room for the Attendance card */}
           <div
-            className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4"
+            className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4 flex-1 min-w-0"
             style={{
               background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)`,
               boxShadow: `0 8px 32px rgba(13,59,102,0.28)`,
@@ -1721,27 +1725,104 @@ export default function Dashboard() {
 
                   <LiveClock compact />
                 </div>
-
-                {!todayIsHoliday && todayAttendance?.punch_in && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl flex-shrink-0"
-                    style={{ background: 'rgba(31,175,90,0.18)', border: '1px solid rgba(31,175,90,0.3)' }}
-                  >
-                    <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <div>
-                      <p className="text-[9px] font-semibold uppercase tracking-wider text-emerald-300">Clocked In</p>
-                      <p className="text-sm font-bold text-white leading-none mt-0.5">
-                        {formatToLocalTime(todayAttendance.punch_in)}
-                      </p>
-                    </div>
-                  </motion.div>
-                )}
               </div>
 
 
             </div>
+          </div>
+
+          {/* Attendance — moved up beside the header banner, same height, recolored to match */}
+          <div
+            className="relative overflow-hidden rounded-2xl w-full lg:w-[300px] flex-shrink-0 flex flex-col"
+            style={{
+              background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)`,
+              boxShadow: `0 8px 32px rgba(13,59,102,0.28)`,
+            }}
+          >
+            <div className="absolute right-0 top-0 w-40 h-40 rounded-full -mr-16 -mt-16 opacity-10"
+              style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
+
+            <div className="relative flex items-center justify-between px-4 pt-4 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.15)' }}>
+                  <Activity className="h-4 w-4 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-sm text-white leading-tight">Attendance</h3>
+                  <p className="text-xs text-white/50">Daily work hours</p>
+                </div>
+              </div>
+              <button
+                onClick={() => navigate('/attendance')}
+                className="text-xs h-7 px-2.5 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors font-medium flex-shrink-0"
+              >
+                View Log
+              </button>
+            </div>
+
+            <div className="relative px-4 pb-4 flex-1 flex flex-col justify-center">
+              {todayIsHoliday ? (
+                <div className="rounded-xl px-4 py-4 text-center"
+                  style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.18)' }}>
+                  <p className="text-2xl mb-1 text-white">—</p>
+                  <p className="font-bold text-sm text-white">{todayHolidayName || 'Holiday Today'}</p>
+                  <p className="text-xs mt-1 text-white/60">Office is closed today.</p>
+                  {!todayAttendance?.punch_in && (
+                    <button onClick={() => handlePunchAction('punch_in')} disabled={loading}
+                      className="mt-3 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors text-white border border-white/30 hover:bg-white/10">
+                      Working today? Punch In
+                    </button>
+                  )}
+                  {todayAttendance?.punch_in && !todayAttendance?.punch_out && (
+                    <div className="mt-3 space-y-2">
+                      <p className="text-xs font-medium text-white/60">Clocked in at {formatToLocalTime(todayAttendance.punch_in)}</p>
+                      <Button onClick={() => handlePunchAction('punch_out')} className="w-full bg-red-500 hover:bg-red-600 rounded-xl h-8 text-xs font-semibold" disabled={loading}>Punch Out</Button>
+                    </div>
+                  )}
+                  {todayAttendance?.punch_out && <p className="mt-2 text-xs font-medium text-white/60">Worked {getTodayDuration()} today</p>}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {todayAttendance?.punch_in ? (
+                    <>
+                      <div className="flex items-center justify-between px-3 py-2.5 rounded-xl"
+                        style={{ background: 'rgba(31,175,90,0.18)', border: '1px solid rgba(31,175,90,0.3)' }}>
+                        <div className="flex items-center gap-2 text-sm text-white/85">
+                          <LogIn className="h-4 w-4 text-emerald-300" />
+                          <span className="font-medium">Punch In</span>
+                        </div>
+                        <span className="font-bold text-sm text-white">{formatToLocalTime(todayAttendance.punch_in)}</span>
+                      </div>
+                      {todayAttendance.punch_out ? (
+                        <div className="flex items-center justify-between px-3 py-2.5 rounded-xl"
+                          style={{ background: 'rgba(248,113,113,0.18)', border: '1px solid rgba(248,113,113,0.3)' }}>
+                          <div className="flex items-center gap-2 text-sm text-white/85">
+                            <LogOut className="h-4 w-4 text-red-300" />
+                            <span className="font-medium">Punch Out</span>
+                          </div>
+                          <span className="font-bold text-sm text-white">{formatToLocalTime(todayAttendance.punch_out)}</span>
+                        </div>
+                      ) : (
+                        <Button onClick={() => handlePunchAction('punch_out')} className="w-full bg-red-500 hover:bg-red-600 rounded-xl h-9 text-sm font-semibold" disabled={loading}>
+                          Punch Out
+                        </Button>
+                      )}
+                      <div className="text-center py-3 rounded-xl"
+                        style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.18)' }}>
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-white/55">Total Today</p>
+                        <p className="text-2xl font-bold mt-0.5 tracking-tight text-white">{getTodayDuration()}</p>
+                      </div>
+                    </>
+                  ) : (
+                    <Button onClick={() => handlePunchAction('punch_in')} className="w-full bg-emerald-500 hover:bg-emerald-600 rounded-xl h-10 text-sm font-semibold" disabled={loading}>
+                      Punch In
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
           </div>
         </motion.div>
 
@@ -2015,7 +2096,10 @@ export default function Dashboard() {
             </CardContent>
           </motion.div>
         </motion.div>
-
+        </React.Fragment>
+          );
+          if (sectionId === 'pie_charts') return (
+        <React.Fragment key="pie_charts">
         {/* TASK OVERVIEW / TASKS BY TYPE — INTERACTIVE DONUT CARDS */}
         <motion.div
           className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 [&>*]:min-w-0 items-stretch"
@@ -2094,8 +2178,8 @@ export default function Dashboard() {
           );
           if (sectionId === 'tasks_row') return (
         <React.Fragment key="tasks_row">
-        {/* RECENT TASKS + DEADLINES + ATTENDANCE */}
-        <motion.div className="grid grid-cols-1 lg:grid-cols-3 gap-3 min-w-0" variants={itemVariants}>
+        {/* RECENT TASKS + DEADLINES — 2 EQUAL COLUMNS */}
+        <motion.div className="grid grid-cols-1 lg:grid-cols-2 gap-3 min-w-0 items-stretch [&>*]:h-full" variants={itemVariants}>
 
           {/* Recent Tasks */}
           <SectionCard>
@@ -2186,82 +2270,6 @@ export default function Dashboard() {
                     </AnimatePresence>
                   </div>
                 )}
-            </div>
-          </SectionCard>
-
-          {/* Attendance Card */}
-          <SectionCard>
-            <CardHeaderRow
-              iconBg={isDark ? 'bg-purple-900/40' : 'bg-purple-50'}
-              icon={<Activity className="h-4 w-4 text-purple-500" />}
-              title="Attendance"
-              subtitle="Daily work hours"
-              action={<Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-purple-400 hover:text-purple-300' : 'text-purple-500'}`} onClick={() => navigate('/attendance')}>View Log</Button>}
-            />
-            <div className="p-3">
-              {todayIsHoliday ? (
-                <div className="rounded-xl px-4 py-4 text-center"
-                  style={{
-                    background: isDark ? 'linear-gradient(135deg, rgba(245,158,11,0.15), rgba(245,158,11,0.05))' : 'linear-gradient(135deg, #FFFBEB, #FEF3C7)',
-                    border: isDark ? '1px solid rgba(245,158,11,0.25)' : '1px solid #FDE68A',
-                  }}>
-                  <p className="text-2xl mb-1">—</p>
-                  <p className={`font-bold text-sm ${isDark ? 'text-amber-300' : 'text-amber-800'}`}>{todayHolidayName || 'Holiday Today'}</p>
-                  <p className={`text-xs mt-1 ${isDark ? 'text-amber-400/70' : 'text-amber-600'}`}>Office is closed today.</p>
-                  {!todayAttendance?.punch_in && (
-                    <button onClick={() => handlePunchAction('punch_in')} disabled={loading}
-                      className={`mt-3 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors ${isDark ? 'text-amber-300 border border-amber-700 hover:bg-amber-900/30' : 'text-amber-700 border border-amber-300 hover:bg-amber-50'}`}>
-                      Working today? Punch In
-                    </button>
-                  )}
-                  {todayAttendance?.punch_in && !todayAttendance?.punch_out && (
-                    <div className="mt-3 space-y-2">
-                      <p className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Clocked in at {formatToLocalTime(todayAttendance.punch_in)}</p>
-                      <Button onClick={() => handlePunchAction('punch_out')} className="w-full bg-red-500 hover:bg-red-600 rounded-xl h-8 text-xs font-semibold" disabled={loading}>Punch Out</Button>
-                    </div>
-                  )}
-                  {todayAttendance?.punch_out && <p className={`mt-2 text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Worked {getTodayDuration()} today</p>}
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {todayAttendance?.punch_in ? (
-                    <>
-                      <div className={`flex items-center justify-between px-3 py-2.5 rounded-xl border ${isDark ? 'bg-emerald-900/20 border-emerald-800' : 'bg-green-50 border-green-200'}`}>
-                        <div className={`flex items-center gap-2 text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                          <LogIn className="h-4 w-4 text-green-500" />
-                          <span className="font-medium">Punch In</span>
-                        </div>
-                        <span className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{formatToLocalTime(todayAttendance.punch_in)}</span>
-                      </div>
-                      {todayAttendance.punch_out ? (
-                        <div className={`flex items-center justify-between px-3 py-2.5 rounded-xl border ${isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50 border-red-200'}`}>
-                          <div className={`flex items-center gap-2 text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                            <LogOut className="h-4 w-4 text-red-500" />
-                            <span className="font-medium">Punch Out</span>
-                          </div>
-                          <span className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{formatToLocalTime(todayAttendance.punch_out)}</span>
-                        </div>
-                      ) : (
-                        <Button onClick={() => handlePunchAction('punch_out')} className="w-full bg-red-500 hover:bg-red-600 rounded-xl h-9 text-sm font-semibold" disabled={loading}>
-                          Punch Out
-                        </Button>
-                      )}
-                      <div className="text-center py-3 rounded-xl"
-                        style={{
-                          background: isDark ? 'rgba(96,165,250,0.08)' : `linear-gradient(135deg, ${COLORS.deepBlue}08, ${COLORS.mediumBlue}12)`,
-                          border: isDark ? '1px solid rgba(96,165,250,0.15)' : `1px solid ${COLORS.deepBlue}15`,
-                        }}>
-                        <p className={`text-[10px] font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>Total Today</p>
-                        <p className="text-2xl font-bold mt-0.5 tracking-tight" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>{getTodayDuration()}</p>
-                      </div>
-                    </>
-                  ) : (
-                    <Button onClick={() => handlePunchAction('punch_in')} className="w-full bg-emerald-600 hover:bg-emerald-700 rounded-xl h-10 text-sm font-semibold" disabled={loading}>
-                      Punch In
-                    </Button>
-                  )}
-                </div>
-              )}
             </div>
           </SectionCard>
         </motion.div>
