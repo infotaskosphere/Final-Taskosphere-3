@@ -806,21 +806,21 @@ const DonutMetricCard = memo(function DonutMetricCard({ isDark, title, centerVal
   );
 });
 
-const CardHeaderRow = memo(function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
+const CardHeaderRow = memo(function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge, compact = false }) {
   return (
-    <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700 min-w-0 gap-2">
-      <div className="flex items-center gap-2.5">
-        <div className={`p-1.5 rounded-lg ${iconBg}`}>{icon}</div>
+    <div className={`flex items-center justify-between border-b border-slate-100 dark:border-slate-700 min-w-0 gap-2 ${compact ? 'px-3 py-2' : 'px-4 py-3'}`}>
+      <div className={`flex items-center ${compact ? 'gap-2' : 'gap-2.5'}`}>
+        <div className={`rounded-lg ${iconBg} ${compact ? 'p-1' : 'p-1.5'}`}>{icon}</div>
         <div>
           <div className="flex items-center gap-2">
-            <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">{title}</h3>
+            <h3 className={`font-semibold text-slate-800 dark:text-slate-100 ${compact ? 'text-xs' : 'text-sm'}`}>{title}</h3>
             {badge !== undefined && badge > 0 && (
               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500 text-white leading-none">
                 {badge}
               </span>
             )}
           </div>
-          <p className="text-xs text-slate-400 dark:text-slate-500">{subtitle}</p>
+          {subtitle && <p className={`text-slate-400 dark:text-slate-500 ${compact ? 'text-[10px] leading-tight' : 'text-xs'}`}>{subtitle}</p>}
         </div>
       </div>
       {action}
@@ -1634,7 +1634,7 @@ export default function Dashboard() {
 
           {/* Header banner — width reduced to make room for the Attendance card */}
           <div
-            className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-4 sm:pt-5 pb-4 flex-1 min-w-0"
+            className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-3 sm:pt-4 pb-3 flex-1 min-w-0"
             style={{
               background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)`,
               boxShadow: `0 8px 32px rgba(13,59,102,0.28)`,
@@ -1648,7 +1648,7 @@ export default function Dashboard() {
               style={{ background: 'white' }} />
 
             <div className="relative">
-              <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+              <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-1 flex items-center gap-1.5">
                     <GreetIcon className="h-3 w-3" />
@@ -1664,14 +1664,14 @@ export default function Dashboard() {
                   )}
                 </div>
 
-                <div className="hidden md:flex items-center gap-4 flex-shrink-0">
+                <div className="hidden md:flex items-center gap-3 flex-shrink-0">
                   {isAdmin && (
                     <>
                       <motion.button
                         whileHover={{ scale: 1.04, y: -1, transition: springPhysics.card }}
                         whileTap={{ scale: 0.97 }}
                         onClick={() => navigate('/tasks')}
-                        className="flex flex-col items-center justify-center px-4 py-2 rounded-xl cursor-pointer transition-all"
+                        className="flex flex-col items-center justify-center px-3.5 py-1.5 rounded-xl cursor-pointer transition-all"
                         style={{
                           background: 'rgba(255,255,255,0.12)',
                           border: '1px solid rgba(255,255,255,0.2)',
@@ -1681,14 +1681,14 @@ export default function Dashboard() {
                       >
                         <span
                           className="font-black leading-none tracking-tight text-white"
-                          style={{ fontSize: '2rem', fontFamily: "'Roboto Mono', monospace" }}
+                          style={{ fontSize: '1.75rem', fontFamily: "'Roboto Mono', monospace" }}
                         >
                           {stats?.total_tasks ?? tasks.length}
                         </span>
                         <span className="text-white/60 text-[10px] font-semibold uppercase tracking-widest mt-1">
                           Total Tasks
                         </span>
-                        <div className="mt-1.5 flex flex-col gap-0.5 w-full">
+                        <div className="mt-1 flex flex-col gap-0.5 w-full">
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-white/50 text-[9px] font-semibold">Pending</span>
                             <span className="text-white/90 text-[9px] font-black tabular-nums">
@@ -1703,7 +1703,7 @@ export default function Dashboard() {
                           </div>
                         </div>
                         <span
-                          className="mt-1.5 flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full"
+                          className="mt-1 flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full"
                           style={{ background: 'rgba(31,175,90,0.25)', color: '#5CCB5F' }}
                         >
                           <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#5CCB5F', display: 'inline-block' }} />
@@ -1742,79 +1742,79 @@ export default function Dashboard() {
             <div className="absolute right-0 top-0 w-40 h-40 rounded-full -mr-16 -mt-16 opacity-10"
               style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
 
-            <div className="relative flex items-center justify-between px-4 pt-4 pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="p-1.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.15)' }}>
-                  <Activity className="h-4 w-4 text-white" />
+            <div className="relative flex items-center justify-between px-3 pt-3 pb-2">
+              <div className="flex items-center gap-2">
+                <div className="p-1 rounded-lg" style={{ background: 'rgba(255,255,255,0.15)' }}>
+                  <Activity className="h-3.5 w-3.5 text-white" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-sm text-white leading-tight">Attendance</h3>
-                  <p className="text-xs text-white/50">Daily work hours</p>
+                  <h3 className="font-semibold text-xs text-white leading-tight">Attendance</h3>
+                  <p className="text-[10px] text-white/50 leading-tight">Daily work hours</p>
                 </div>
               </div>
               <button
                 onClick={() => navigate('/attendance')}
-                className="text-xs h-7 px-2.5 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors font-medium flex-shrink-0"
+                className="text-xs h-6 px-2 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors font-medium flex-shrink-0"
               >
                 View Log
               </button>
             </div>
 
-            <div className="relative px-4 pb-4 flex-1 flex flex-col justify-center">
+            <div className="relative px-3 pb-3 flex-1 flex flex-col justify-center">
               {todayIsHoliday ? (
-                <div className="rounded-xl px-4 py-4 text-center"
+                <div className="rounded-xl px-3 py-3 text-center"
                   style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.18)' }}>
-                  <p className="text-2xl mb-1 text-white">—</p>
+                  <p className="text-xl mb-0.5 text-white">—</p>
                   <p className="font-bold text-sm text-white">{todayHolidayName || 'Holiday Today'}</p>
-                  <p className="text-xs mt-1 text-white/60">Office is closed today.</p>
+                  <p className="text-xs mt-0.5 text-white/60">Office is closed today.</p>
                   {!todayAttendance?.punch_in && (
                     <button onClick={() => handlePunchAction('punch_in')} disabled={loading}
-                      className="mt-3 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors text-white border border-white/30 hover:bg-white/10">
+                      className="mt-2 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors text-white border border-white/30 hover:bg-white/10">
                       Working today? Punch In
                     </button>
                   )}
                   {todayAttendance?.punch_in && !todayAttendance?.punch_out && (
-                    <div className="mt-3 space-y-2">
+                    <div className="mt-2 space-y-1.5">
                       <p className="text-xs font-medium text-white/60">Clocked in at {formatToLocalTime(todayAttendance.punch_in)}</p>
-                      <Button onClick={() => handlePunchAction('punch_out')} className="w-full bg-red-500 hover:bg-red-600 rounded-xl h-8 text-xs font-semibold" disabled={loading}>Punch Out</Button>
+                      <Button onClick={() => handlePunchAction('punch_out')} className="w-full bg-red-500 hover:bg-red-600 rounded-xl h-7 text-xs font-semibold" disabled={loading}>Punch Out</Button>
                     </div>
                   )}
-                  {todayAttendance?.punch_out && <p className="mt-2 text-xs font-medium text-white/60">Worked {getTodayDuration()} today</p>}
+                  {todayAttendance?.punch_out && <p className="mt-1.5 text-xs font-medium text-white/60">Worked {getTodayDuration()} today</p>}
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   {todayAttendance?.punch_in ? (
                     <>
-                      <div className="flex items-center justify-between px-3 py-2.5 rounded-xl"
+                      <div className="flex items-center justify-between px-2.5 py-2 rounded-lg"
                         style={{ background: 'rgba(31,175,90,0.18)', border: '1px solid rgba(31,175,90,0.3)' }}>
-                        <div className="flex items-center gap-2 text-sm text-white/85">
-                          <LogIn className="h-4 w-4 text-emerald-300" />
+                        <div className="flex items-center gap-1.5 text-xs text-white/85">
+                          <LogIn className="h-3.5 w-3.5 text-emerald-300" />
                           <span className="font-medium">Punch In</span>
                         </div>
-                        <span className="font-bold text-sm text-white">{formatToLocalTime(todayAttendance.punch_in)}</span>
+                        <span className="font-bold text-xs text-white">{formatToLocalTime(todayAttendance.punch_in)}</span>
                       </div>
                       {todayAttendance.punch_out ? (
-                        <div className="flex items-center justify-between px-3 py-2.5 rounded-xl"
+                        <div className="flex items-center justify-between px-2.5 py-2 rounded-lg"
                           style={{ background: 'rgba(248,113,113,0.18)', border: '1px solid rgba(248,113,113,0.3)' }}>
-                          <div className="flex items-center gap-2 text-sm text-white/85">
-                            <LogOut className="h-4 w-4 text-red-300" />
+                          <div className="flex items-center gap-1.5 text-xs text-white/85">
+                            <LogOut className="h-3.5 w-3.5 text-red-300" />
                             <span className="font-medium">Punch Out</span>
                           </div>
-                          <span className="font-bold text-sm text-white">{formatToLocalTime(todayAttendance.punch_out)}</span>
+                          <span className="font-bold text-xs text-white">{formatToLocalTime(todayAttendance.punch_out)}</span>
                         </div>
                       ) : (
-                        <Button onClick={() => handlePunchAction('punch_out')} className="w-full bg-red-500 hover:bg-red-600 rounded-xl h-9 text-sm font-semibold" disabled={loading}>
+                        <Button onClick={() => handlePunchAction('punch_out')} className="w-full bg-red-500 hover:bg-red-600 rounded-lg h-8 text-xs font-semibold" disabled={loading}>
                           Punch Out
                         </Button>
                       )}
-                      <div className="text-center py-3 rounded-xl"
+                      <div className="text-center py-2 rounded-lg"
                         style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.18)' }}>
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-white/55">Total Today</p>
-                        <p className="text-2xl font-bold mt-0.5 tracking-tight text-white">{getTodayDuration()}</p>
+                        <p className="text-[9px] font-semibold uppercase tracking-wider text-white/55">Total Today</p>
+                        <p className="text-lg font-bold mt-0.5 tracking-tight text-white">{getTodayDuration()}</p>
                       </div>
                     </>
                   ) : (
-                    <Button onClick={() => handlePunchAction('punch_in')} className="w-full bg-emerald-500 hover:bg-emerald-600 rounded-xl h-10 text-sm font-semibold" disabled={loading}>
+                    <Button onClick={() => handlePunchAction('punch_in')} className="w-full bg-emerald-500 hover:bg-emerald-600 rounded-lg h-9 text-sm font-semibold" disabled={loading}>
                       Punch In
                     </Button>
                   )}
@@ -2184,19 +2184,19 @@ export default function Dashboard() {
           {/* Recent Tasks */}
           <SectionCard>
             <CardHeaderRow
+              compact
               iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
-              icon={<Target className="h-4 w-4 text-blue-500" />}
+              icon={<Target className="h-3.5 w-3.5 text-blue-500" />}
               title="Recent Tasks"
               subtitle="Newest first · completed yesterday+ hidden"
               badge={recentTasks.length}
-              action={<Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-500'}`} onClick={() => navigate('/tasks')}>View All</Button>}
+              action={<Button variant="ghost" size="sm" className={`text-xs h-6 px-2.5 ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-500'}`} onClick={() => navigate('/tasks')}>View All</Button>}
             />
-            <div className="p-3">
+            <div className="p-2.5">
               {recentTasks.length === 0
-                ? <div className={`text-center py-7 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No recent tasks</div>
+                ? <div className={`text-center py-5 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No recent tasks</div>
                 : (
-                  // ── CHANGED: max-h-[220px] → max-h-[260px] ──
-                  <div className="slim-scroll space-y-2 max-h-[260px]" style={slimScroll}>
+                  <div className="slim-scroll space-y-1.5 max-h-[190px]" style={slimScroll}>
                     <AnimatePresence>
                       {recentTasks.map(task => {
                         const statusStyle   = getStatusStyle(task.status);
@@ -2204,9 +2204,9 @@ export default function Dashboard() {
                         const isNew = task.created_at && (Date.now() - new Date(task.created_at).getTime()) < 86_400_000;
                         return (
                           <motion.div key={task.id} variants={itemVariants} layout whileHover={{ y:-1 }}
-                            className={`py-2.5 px-3 rounded-xl border cursor-pointer hover:shadow-sm transition-all ${priorityStyle.bg} ${priorityStyle.border}`}
+                            className={`py-2 px-2.5 rounded-lg border cursor-pointer hover:shadow-sm transition-all ${priorityStyle.bg} ${priorityStyle.border}`}
                             onClick={() => setSelectedTask(task)}>
-                            <div className="flex items-center justify-between mb-1 gap-2">
+                            <div className="flex items-center justify-between mb-0.5 gap-2">
                               <div className="flex items-center gap-1.5 flex-1 min-w-0">
                                 {isNew && (
                                   <span className="flex-shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-blue-500 text-white leading-none">NEW</span>
@@ -2233,27 +2233,28 @@ export default function Dashboard() {
           {/* Upcoming Deadlines */}
           <SectionCard>
             <CardHeaderRow
+              compact
               iconBg={isDark ? 'bg-orange-900/40' : 'bg-orange-50'}
-              icon={<CalendarIcon className="h-4 w-4 text-orange-500" />}
+              icon={<CalendarIcon className="h-3.5 w-3.5 text-orange-500" />}
               title="Upcoming Deadlines"
               subtitle="Overdue pinned · Next 30 days"
               badge={overdueDeadlineCount || undefined}
-              action={<Button variant="ghost" size="sm" className={`text-xs h-7 px-3 ${isDark ? 'text-orange-400 hover:text-orange-300' : 'text-orange-500'}`} onClick={() => navigate('/compliance')}>View All</Button>}
+              action={<Button variant="ghost" size="sm" className={`text-xs h-6 px-2.5 ${isDark ? 'text-orange-400 hover:text-orange-300' : 'text-orange-500'}`} onClick={() => navigate('/compliance')}>View All</Button>}
             />
-            <div className="p-3">
+            <div className="p-2.5">
               {sortedDueDates.length === 0
-                ? <div className={`text-center py-7 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No upcoming deadlines</div>
+                ? <div className={`text-center py-5 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No upcoming deadlines</div>
                 : (
-                  <div className="slim-scroll space-y-2 max-h-[260px]" style={slimScroll}>
+                  <div className="slim-scroll space-y-1.5 max-h-[190px]" style={slimScroll}>
                     <AnimatePresence>
                       {sortedDueDates.map(due => {
                         const dl    = due.days_remaining ?? 0;
                         const color = deadlineUrgency(dl);
                         return (
                           <motion.div key={due.id} variants={itemVariants} layout whileHover={{ y:-1 }}
-                            className={`py-2.5 px-3 rounded-xl border cursor-pointer hover:shadow-sm transition-all ${color.bg}`}
+                            className={`py-2 px-2.5 rounded-lg border cursor-pointer hover:shadow-sm transition-all ${color.bg}`}
                             onClick={() => setSelectedDeadline(due)}>
-                            <div className="flex items-center justify-between mb-1">
+                            <div className="flex items-center justify-between mb-0.5">
                               <p className={`font-medium text-sm truncate flex-1 mr-2 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{due.title || 'Untitled Deadline'}</p>
                               <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${color.badge} whitespace-nowrap`}>
                                 {dl < 0 ? `${Math.abs(dl)}d overdue` : dl === 0 ? 'Due today' : `${dl}d left`}
