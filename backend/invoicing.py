@@ -442,11 +442,22 @@ async def _next_invoice_no(
     fy_format: str = "short",
     include_month: bool = False,
     number_padding: int = 3,
+    invoice_type: str = None,
 ) -> str:
     """
     Generate the next available invoice number using the exact format from
     Invoice Settings (prefix, separator, FY label, month, padding).
     MAX-based scan so deletions/renames never cause collisions.
+
+    FIX: also scoped by ``invoice_type`` (when provided), not just by the
+    text prefix. Previously the scan matched ANY document whose invoice_no
+    happened to start with the given prefix, regardless of its actual
+    invoice_type. Since the invoice_no field is user-editable, a Proforma
+    or Estimate that was manually saved with a custom "INV/..." style
+    number (instead of its own PRO/EST prefix) would silently inflate the
+    Tax Invoice sequence for that company — the numbers would "exist" in
+    the scan but never show up when filtering the list to Tax Invoice
+    only. Scoping by invoice_type as well closes that gap.
     """
     today = date.today()
     fy_start = today.year if today.month >= 4 else today.year - 1
@@ -473,6 +484,8 @@ async def _next_invoice_no(
     query: dict = {"invoice_no": {"$regex": f"^{re.escape(prefix)}"}}
     if company_id:
         query["company_id"] = company_id
+    if invoice_type:
+        query["invoice_type"] = invoice_type
 
     cursor = db.invoices.find(query, {"_id": 0, "invoice_no": 1})
     max_seq = 0
@@ -495,7 +508,10 @@ async def _next_invoice_no(
     candidate_seq = max_seq + 1
     for _ in range(50):
         candidate = _build(candidate_seq)
-        taken = await db.invoices.find_one({"invoice_no": candidate})
+        dup_filter: dict = {"invoice_no": candidate}
+        if company_id:
+            dup_filter["company_id"] = company_id
+        taken = await db.invoices.find_one(dup_filter)
         if not taken:
             return candidate
         candidate_seq += 1
@@ -2640,6 +2656,7 @@ async def create_invoice(data: InvoiceCreate, current_user: User = Depends(check
             fy_format="short",
             include_month=False,
             number_padding=3,
+            invoice_type=data.invoice_type,
         )
 
     inv_date = data.invoice_date or date.today().isoformat()
@@ -2893,6 +2910,7 @@ async def get_next_invoice_number(
         fy_format=fy_format,
         include_month=include_month,
         number_padding=number_padding,
+        invoice_type=invoice_type,
     )
     return {"invoice_no": next_no}
 
@@ -3031,6 +3049,7 @@ async def update_invoice(inv_id: str, data: dict, current_user: User = Depends(c
             fy_format="short",
             include_month=False,
             number_padding=3,
+            invoice_type=invoice_type,
         )
 
         if new_invoice_no and new_invoice_no != old_invoice_no:
@@ -3366,7 +3385,9 @@ async def generate_recurring(inv_id: str, current_user: User = Depends(check_mod
     template = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
     if not template: raise HTTPException(404, "Template invoice not found")
     now = datetime.now(timezone.utc).isoformat()
-    new_inv = {**template, "id": str(uuid.uuid4()), "invoice_no": await _next_invoice_no("INV", template.get("company_id")),
+    _rec_type = template.get("invoice_type", "tax_invoice")
+    _rec_prefix = {"proforma": "PRO", "estimate": "EST", "credit_note": "CN", "debit_note": "DN"}.get(_rec_type, "INV")
+    new_inv = {**template, "id": str(uuid.uuid4()), "invoice_no": await _next_invoice_no(_rec_prefix, template.get("company_id"), invoice_type=_rec_type),
                "invoice_date": date.today().isoformat(),
                "due_date": (date.today() + timedelta(days=30)).isoformat(),
                "status": "draft", "amount_paid": 0.0, "amount_due": template.get("grand_total", 0),
@@ -3424,7 +3445,7 @@ async def delete_payment(pid: str, current_user: User = Depends(check_module_per
 @router.post("/credit-notes")
 async def create_credit_note(data: CreditNoteCreate, current_user: User = Depends(check_module_permission("invoicing", "create"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
-    inv_no = await _next_invoice_no("CN", data.company_id)
+    inv_no = await _next_invoice_no("CN", data.company_id, invoice_type="credit_note")
     now = datetime.now(timezone.utc).isoformat()
     raw = {"id": str(uuid.uuid4()), "invoice_no": inv_no, "invoice_type": "credit_note",
            **data.model_dump(), "invoice_date": date.today().isoformat(), "due_date": date.today().isoformat(),
