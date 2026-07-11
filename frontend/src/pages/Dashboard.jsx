@@ -992,6 +992,7 @@ export default function Dashboard() {
   const [loading,           setLoading]           = useState(false);
   const [rankings,          setRankings]          = useState([]);
   const [rankingPeriod,     setRankingPeriod]     = useState('monthly');
+  const [rankingsLoading,   setRankingsLoading]   = useState(false);
   const [newTodo,           setNewTodo]           = useState('');
   const [showDueDatePicker, setShowDueDatePicker] = useState(false);
   const [selectedDueDate,   setSelectedDueDate]   = useState(undefined);
@@ -1116,10 +1117,18 @@ export default function Dashboard() {
   }, [fetchDashboardData]);
 
   // Re-fetch rankings when period changes
+  const rankingsReqId = useRef(0);
   useEffect(() => {
+    const reqId = ++rankingsReqId.current;
+    setRankingsLoading(true);
     const fetchRankings = async () => {
-      const data = await apiFetch(`/reports/performance-rankings?period=${rankingPeriod}`);
-      if (Array.isArray(data)) setRankings(data);
+      try {
+        const data = await apiFetch(`/reports/performance-rankings?period=${rankingPeriod}`);
+        // Ignore this response if a newer period switch has already started
+        if (reqId === rankingsReqId.current && Array.isArray(data)) setRankings(data);
+      } finally {
+        if (reqId === rankingsReqId.current) setRankingsLoading(false);
+      }
     };
     fetchRankings();
   }, [rankingPeriod, apiFetch]);
@@ -2519,7 +2528,15 @@ export default function Dashboard() {
               }
             />
             <div className="p-3">
-              {rankings.length === 0
+              {rankingsLoading
+                ? (
+                  <div className="space-y-2">
+                    {Array.from({ length: Math.max(rankings.length, 4) }).map((_, i) => (
+                      <div key={i} className={`h-[60px] rounded-xl animate-pulse ${isDark ? 'bg-slate-700/40' : 'bg-slate-100'}`} />
+                    ))}
+                  </div>
+                )
+                : rankings.length === 0
                 ? <div className={`text-center py-8 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No ranking data</div>
                 : (
                   <div className="slim-scroll space-y-2 max-h-[240px]" style={slimScroll}>
