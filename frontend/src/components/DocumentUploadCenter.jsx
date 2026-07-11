@@ -193,7 +193,7 @@ const CLIENT_TABS = [
 function ClientRail({
   clients, loadingClients, selectedClientId, onSelect, isDark, isAdmin,
   selectMode, onToggleSelectMode, selectedIds, onToggleSelect,
-  onBulkRemove, onBulkProvision, removing, provisioning,
+  onBulkRemove, onBulkProvision, removing, provisioning, heightPx,
 }) {
   const [search, setSearch] = useState('');
   const [tab, setTab] = useState('all');
@@ -244,7 +244,10 @@ function ClientRail({
   const scrollList = (dir) => listRef.current?.scrollBy({ top: dir * 260, behavior: 'smooth' });
 
   return (
-    <div className={`h-full rounded-2xl border shadow-sm flex flex-col overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+    <div
+      className={`rounded-2xl border shadow-sm flex flex-col overflow-hidden ${heightPx ? '' : 'h-full'} ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
+      style={heightPx ? { height: heightPx } : undefined}
+    >
       {/* Header */}
       <div className={`px-4 py-3.5 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
         <div className="flex items-center gap-2 mb-3">
@@ -1013,6 +1016,27 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
   // clients never re-expands it by accident.
   const [uploadsMinimized, setUploadsMinimized] = useState(false);
 
+  // ── measure the right column's real rendered height ─────────────────
+  // CSS grid `items-stretch` alone doesn't reliably clamp a long scrolling
+  // list to a sibling's height (an `auto` grid row sizes to content, and a
+  // 895-row list's content height wins). To make the client card's bottom
+  // edge land on *exactly* the same line as wherever the right column's
+  // last card ends — no matter how much content is on the right — we
+  // measure the right column with a ResizeObserver and apply that exact
+  // pixel height to the client card, whose own list then scrolls inside it.
+  const rightColRef = useRef(null);
+  const [rightColHeight, setRightColHeight] = useState(null);
+  useEffect(() => {
+    const el = rightColRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const h = entries[0]?.contentRect?.height;
+      if (h) setRightColHeight(Math.round(h));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [selectedClient?.id]);
+
   // ── load clients (from the same source as the Clients page) ────────────
   const loadClients = useCallback(async () => {
     setLoadingClients(true);
@@ -1641,8 +1665,10 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4 items-stretch">
-      {/* ── Left rail: clients — fixed, compact height (~10 rows visible),
-          scrolls internally with wheel/drag or the up/down arrow buttons. */}
+      {/* ── Left rail: clients — height is pixel-matched to the right
+          column (see rightColHeight above), scrolling internally with
+          wheel/drag or the up/down arrow buttons so its bottom edge always
+          lands exactly where the right column's content ends. */}
       <ClientRail
         clients={clients}
         loadingClients={loadingClients}
@@ -1658,10 +1684,11 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
         onBulkProvision={bulkProvisionClients}
         removing={removingClients}
         provisioning={bulkProvisioning}
+        heightPx={rightColHeight}
       />
 
       {/* ── Right: workspace ── */}
-      <div className="min-w-0">
+      <div ref={rightColRef} className="min-w-0">
         {!selectedClient ? (
           <div className={`rounded-2xl border shadow-sm h-full flex flex-col items-center justify-center text-center py-24 px-6 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4" style={{ background: `${COLORS.deepBlue}10` }}>
