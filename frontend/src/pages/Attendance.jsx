@@ -2095,8 +2095,18 @@ export default function Attendance() {
           if (e?.response?.status === 403) toast.error("You don't have permission to view performance rankings.");
           return { data: [] };
         }),
+        // PERF FIX: these three used to run AFTER the batch above finished
+        // (a sequential waterfall — /users, then /companies/list, then, for
+        // admins, /attendance/absent-summary), adding 2-3 extra full
+        // round-trips on top of the initial load. They don't depend on any
+        // of the other responses, so they now fire in the same batch.
+        api.get('/users').catch(() => ({ data: [] })),
+        api.get('/companies/list').catch(() => ({ data: [] })),
+        isAdmin
+          ? api.get(`/attendance/absent-summary?month=${format(new Date(), 'yyyy-MM')}`).catch(() => ({ data: { data: [] } }))
+          : Promise.resolve({ data: { data: [] } }),
       ];
-      const [historyRes, summaryRes, todayRes, tasksRes, holidaysRes, rankingRes] = await Promise.all(requests);
+      const [historyRes, summaryRes, todayRes, tasksRes, holidaysRes, rankingRes, usersRes, companiesRes, absentRes] = await Promise.all(requests);
 
       const allHolidays = holidaysRes.data || [];
       // Show holidays that are confirmed OR have no status (manually added holidays
@@ -2115,9 +2125,8 @@ export default function Attendance() {
       }
       if (isAdmin) setPendingHolidays((Array.isArray(allHolidays) ? allHolidays : []).filter(h => h.status === 'pending'));
 
-      // Always fetch users — backend already filters by cross-visibility for non-admins
+      // Always process users — backend already filters by cross-visibility for non-admins
       try {
-        const usersRes = await api.get('/users');
         const fetchedUsers = usersRes.data || [];
         if (isAdmin) {
           setAllUsers(fetchedUsers);
@@ -2132,11 +2141,8 @@ export default function Attendance() {
         }
       } catch {}
 
-      // Fetch companies for report filter
-      try {
-        const companiesRes = await api.get('/companies/list');
-        setAllCompanies(Array.isArray(companiesRes.data) ? companiesRes.data : []);
-      } catch {}
+      // Process companies for report filter
+      setAllCompanies(Array.isArray(companiesRes.data) ? companiesRes.data : []);
 
       const history = historyRes.data || [];
       setAttendanceHistory(Array.isArray(history) ? history : []);
@@ -2182,10 +2188,7 @@ export default function Attendance() {
       setMyRank(myEntry ? `#${myEntry.rank}` : isEveryoneReq ? 'N/A' : '—');
 
       if (isAdmin) {
-        try {
-          const absentRes = await api.get(`/attendance/absent-summary?month=${format(new Date(), 'yyyy-MM')}`);
-          setAbsentSummary(absentRes.data?.data || []);
-        } catch { setAbsentSummary([]); }
+        setAbsentSummary(absentRes.data?.data || []);
       }
     } catch (error) {
       const msg = error?.response?.data?.detail || error?.message || 'Network error';
