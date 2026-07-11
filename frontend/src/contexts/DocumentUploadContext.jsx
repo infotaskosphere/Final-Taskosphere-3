@@ -90,7 +90,7 @@ function loadPersisted() {
     // lost its File object on reload — flag it so the UI can ask the
     // admin to re-add just those, instead of pretending it's still moving.
     return parsed.map((it) =>
-      it.status === 'queued' || it.status === 'uploading'
+      it.status === 'queued' || it.status === 'uploading' || it.status === 'paused'
         ? { ...it, status: 'interrupted', file: null }
         : { ...it, file: null }
     );
@@ -118,6 +118,32 @@ export function DocumentUploadProvider({ children }) {
   //          clientId, clientName, size, addedAt, finishedAt, conflict }
   const [items, setItems] = useState(loadPersisted);
   const folderIdCacheRef = useRef(new Map()); // per-(portalUser+folder) subfolder-path cache
+
+  // Always-current mirror of `items`, readable from inside async worker
+  // loops without the staleness a captured closure would have.
+  const itemsRef = useRef(items);
+  useEffect(() => { itemsRef.current = items; }, [items]);
+
+  // One AbortController per in-flight upload request, keyed by item id —
+  // lets Stop cancel a request that's already mid-transfer. Never
+  // persisted (it isn't serializable and wouldn't survive a reload anyway).
+  const abortControllersRef = useRef(new Map());
+
+  // Which clients (by portalUserId) currently have their queue paused.
+  // Pausing never interrupts a file that's already mid-upload — it just
+  // stops the NEXT queued file from starting, so nothing gets cut off
+  // half-way. Kept as both state (for re-renders) and a ref (for
+  // synchronous reads inside the async worker loops below).
+  const [pausedScopes, setPausedScopes] = useState(new Set());
+  const pausedScopesRef = useRef(pausedScopes);
+  const setScopePaused = useCallback((portalUserId, paused) => {
+    setPausedScopes((prev) => {
+      const next = new Set(prev);
+      if (paused) next.add(portalUserId); else next.delete(portalUserId);
+      pausedScopesRef.current = next;
+      return next;
+    });
+  }, []);
 
   // Persist metadata (not file bytes) on every change so a reload mid-batch
   // is recoverable instead of silently wiping the tray.
@@ -170,16 +196,28 @@ export function DocumentUploadProvider({ children }) {
     if (conflictAction) form.append('conflict_action', conflictAction);
     form.append('file', file);
 
+    const controller = new AbortController();
+    abortControllersRef.current.set(itemId, controller);
+
     updateItem(itemId, { status: 'uploading', file, folderId, errorMsg: null, conflict: null });
 
     try {
       const res = await api.post('/client-portal/drive/upload-file', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        signal: controller.signal,
       });
+      abortControllersRef.current.delete(itemId);
       const overwritten = !!res?.data?.overwritten;
       updateItem(itemId, { status: 'done', finishedAt: Date.now(), overwritten });
       onDone?.();
     } catch (err) {
+      abortControllersRef.current.delete(itemId);
+      // Cancelled via the Stop button — not a real failure, so it gets its
+      // own status rather than being reported as an error.
+      if (err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError') {
+        updateItem(itemId, { status: 'stopped', file, folderId, errorMsg: null });
+        return;
+      }
       if (isConflictError(err)) {
         const detail = err.response.data.detail;
         updateItem(itemId, {
@@ -240,6 +278,18 @@ export function DocumentUploadProvider({ children }) {
 
     const processEntry = async (entry, idx) => {
       const item = newItems[idx];
+
+      // Paused: hold here (before this file's upload even starts) until the
+      // admin resumes or stops this client's queue. Whatever's already
+      // mid-upload elsewhere is unaffected — only the *next* file waits.
+      while (pausedScopesRef.current.has(target.portalUserId)) {
+        await sleep(400);
+        if (itemsRef.current.find((i) => i.id === item.id)?.status === 'stopped') return;
+      }
+      // Stopped (either just now, or while this item was still queued
+      // behind others) — skip it without ever sending a request.
+      if (itemsRef.current.find((i) => i.id === item.id)?.status === 'stopped') return;
+
       try {
         const folderId = entry.pathParts?.length
           ? await resolveTargetFolder(target.portalUserId, target.folderId, entry.pathParts)
@@ -320,10 +370,46 @@ export function DocumentUploadProvider({ children }) {
     for (let i = 0; i < workerCount; i++) runWorker();
   }, [items, uploadOne, updateItem]);
 
+  // Pause: stop starting new files for this client. Anything already
+  // mid-upload keeps going to completion (never interrupted half-way);
+  // queued files just wait — flip their status so the UI reflects it.
+  const pauseScope = useCallback((portalUserId) => {
+    if (!portalUserId) return;
+    setScopePaused(portalUserId, true);
+    setItems((prev) => prev.map((it) => (
+      it.portalUserId === portalUserId && it.status === 'queued' ? { ...it, status: 'paused' } : it
+    )));
+  }, [setScopePaused]);
+
+  const resumeScope = useCallback((portalUserId) => {
+    if (!portalUserId) return;
+    setScopePaused(portalUserId, false);
+    setItems((prev) => prev.map((it) => (
+      it.portalUserId === portalUserId && it.status === 'paused' ? { ...it, status: 'queued' } : it
+    )));
+  }, [setScopePaused]);
+
+  // Stop: cancel whatever's mid-upload right now for this client, and drop
+  // everything still waiting in line. Kept as 'stopped' (with the file
+  // reference intact) rather than deleted, so a single Resume click per
+  // file can re-send it without having to re-drag it in.
+  const stopScope = useCallback((portalUserId) => {
+    if (!portalUserId) return;
+    itemsRef.current
+      .filter((it) => it.portalUserId === portalUserId && it.status === 'uploading')
+      .forEach((it) => abortControllersRef.current.get(it.id)?.abort());
+    setItems((prev) => prev.map((it) => (
+      it.portalUserId === portalUserId && (it.status === 'queued' || it.status === 'paused')
+        ? { ...it, status: 'stopped' }
+        : it
+    )));
+    setScopePaused(portalUserId, false);
+  }, [setScopePaused]);
+
   const clearFinished = useCallback((scope = {}) => {
     setItems((prev) => prev.filter((it) => {
       if (scope.portalUserId && it.portalUserId !== scope.portalUserId) return true;
-      return it.status === 'queued' || it.status === 'uploading' || it.status === 'conflict';
+      return it.status === 'queued' || it.status === 'uploading' || it.status === 'conflict' || it.status === 'paused' || it.status === 'stopped';
     }));
   }, []);
 
@@ -344,6 +430,10 @@ export function DocumentUploadProvider({ children }) {
     clearFinished,
     clearAll,
     removeItem,
+    pausedScopes,
+    pauseScope,
+    resumeScope,
+    stopScope,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
