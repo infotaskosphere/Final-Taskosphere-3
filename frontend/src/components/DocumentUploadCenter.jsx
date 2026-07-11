@@ -29,7 +29,7 @@ import {
   ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Home, Loader2, CheckCircle2, XCircle, Eye, EyeOff, X,
   ExternalLink, RefreshCw, KeyRound, Copy, Check, AlertCircle, CloudCog,
   FileImage, FileSpreadsheet, FileType2, Square, CheckSquare, Sparkles, ListChecks,
-  Pause, PlayCircle, StopCircle, Minimize2, Maximize2,
+  Pause, PlayCircle, StopCircle, Minimize2, Maximize2, Download,
 } from 'lucide-react';
 
 const COLORS = {
@@ -1159,6 +1159,47 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
     }
   };
 
+  // ── download every file in the current folder ───────────────────────
+  // New quick action: pulls each non-folder item (or just the selected
+  // ones, if any are checked) through the admin Drive-download proxy and
+  // saves it straight to the browser's downloads folder — one click
+  // instead of opening every file's Drive tab individually.
+  const [downloadingAll, setDownloadingAll] = useState(false);
+  const downloadAllItems = async () => {
+    const pool = selectedItemIds.size > 0 ? items.filter((i) => selectedItemIds.has(i.id)) : items;
+    const files = pool.filter((i) => !isFolderMime(i.mimeType));
+    if (files.length === 0) {
+      toast.error('No files to download in this folder.');
+      return;
+    }
+    setDownloadingAll(true);
+    let ok = 0;
+    try {
+      for (const file of files) {
+        try {
+          const res = await api.get('/client-portal/drive/admin/download', {
+            params: { file_id: file.id },
+            responseType: 'blob',
+          });
+          const url = window.URL.createObjectURL(res.data);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = file.name || 'download';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          window.URL.revokeObjectURL(url);
+          ok += 1;
+        } catch (err) {
+          toast.error(extractErrorMessage(err, `Failed to download "${file.name}"`));
+        }
+      }
+      if (ok > 0) toast.success(`Downloaded ${ok} file${ok === 1 ? '' : 's'}.`);
+    } finally {
+      setDownloadingAll(false);
+    }
+  };
+
   // ── new folder ────────────────────────────────────────────────────────
   const createFolder = async () => {
     if (!newFolderName.trim()) return;
@@ -1593,15 +1634,6 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
 
                 {/* Toolbar: breadcrumb + actions */}
                 <div className={`rounded-2xl border shadow-sm px-4 py-3 flex items-center gap-2 flex-wrap ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                  {breadcrumb.length > 0 && (
-                    <button
-                      onClick={goBack}
-                      title="Back one folder"
-                      className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 -ml-1 mr-1 rounded-lg border transition ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-600 hover:bg-slate-100'}`}
-                    >
-                      <ChevronLeft className="h-3.5 w-3.5" /> Back
-                    </button>
-                  )}
                   <button onClick={jumpToRoot} className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
                     <Home className="h-3.5 w-3.5" /> {portalUser.google_drive_folder_name || 'Root'}
                   </button>
@@ -1613,6 +1645,15 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
                   ))}
 
                   <div className="ml-auto flex items-center gap-2">
+                    {breadcrumb.length > 0 && (
+                      <button
+                        onClick={goBack}
+                        title="Back one folder"
+                        className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-lg border transition ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-600 hover:bg-slate-100'}`}
+                      >
+                        <ChevronLeft className="h-3.5 w-3.5" /> Back
+                      </button>
+                    )}
                     {selectedItemIds.size > 0 ? (
                       <>
                         <span className="text-xs text-slate-400">{selectedItemIds.size} selected</span>
@@ -1832,6 +1873,37 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
                           >
                             or new folder
                           </button>
+                        </motion.button>
+
+                        {/* Second quick-action tile, right next to "Add
+                            files" — one click downloads every file in this
+                            folder (or just the checked ones) straight to
+                            the admin's computer, instead of opening each
+                            file's Drive tab one by one. */}
+                        <motion.button
+                          key="download-all-tile"
+                          layout
+                          type="button"
+                          disabled={downloadingAll}
+                          onClick={downloadAllItems}
+                          className={`group rounded-xl border-2 border-dashed p-3 flex flex-col items-center justify-center gap-1.5 text-center min-h-[132px] transition-colors disabled:opacity-60 ${
+                            isDark ? 'border-slate-700 hover:border-slate-500 hover:bg-slate-700/30' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                          }`}
+                          title={selectedItemIds.size > 0 ? 'Download the selected files' : 'Download every file in this folder'}
+                        >
+                          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: `${COLORS.emeraldGreen}12` }}>
+                            {downloadingAll
+                              ? <Loader2 className="h-4 w-4 animate-spin" style={{ color: COLORS.emeraldGreen }} />
+                              : <Download className="h-4 w-4" style={{ color: COLORS.emeraldGreen }} />}
+                          </div>
+                          <p className="text-[11px] font-semibold text-slate-500 group-hover:text-slate-700 dark:group-hover:text-slate-200">
+                            {downloadingAll ? 'Downloading…' : selectedItemIds.size > 0 ? 'Download selected' : 'Download all'}
+                          </p>
+                          <span className="text-[10px] font-medium text-slate-400">
+                            {selectedItemIds.size > 0
+                              ? `${selectedItemIds.size} file${selectedItemIds.size === 1 ? '' : 's'}`
+                              : 'to your computer'}
+                          </span>
                         </motion.button>
                       </AnimatePresence>
                     </div>
