@@ -29,7 +29,7 @@ import {
   ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Home, Loader2, CheckCircle2, XCircle, Eye, EyeOff, X,
   ExternalLink, RefreshCw, KeyRound, Copy, Check, AlertCircle, CloudCog,
   FileImage, FileSpreadsheet, FileType2, Square, CheckSquare, Sparkles, ListChecks,
-  Pause, PlayCircle, StopCircle, Minimize2, Maximize2, Download,
+  Pause, PlayCircle, StopCircle, Minimize2, Maximize2, Download, Clock,
 } from 'lucide-react';
 
 const COLORS = {
@@ -189,7 +189,6 @@ const CLIENT_TABS = [
 // Roughly 10 client rows worth of scroll height (row ~48px + 4px gap, plus
 // a little breathing room) — keeps the card compact instead of stretching
 // to fill the page; anything beyond that scrolls.
-const CLIENT_LIST_MAX_H = 540;
 
 function ClientRail({
   clients, loadingClients, selectedClientId, onSelect, isDark, isAdmin,
@@ -245,7 +244,7 @@ function ClientRail({
   const scrollList = (dir) => listRef.current?.scrollBy({ top: dir * 260, behavior: 'smooth' });
 
   return (
-    <div className={`rounded-2xl border shadow-sm flex flex-col overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+    <div className={`h-full rounded-2xl border shadow-sm flex flex-col overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
       {/* Header */}
       <div className={`px-4 py-3.5 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
         <div className="flex items-center gap-2 mb-3">
@@ -353,19 +352,19 @@ function ClientRail({
       {/* Client list — capped to ~10 rows tall so the card stays compact;
           scroll with the wheel/trackpad, drag, or the up/down arrows. */}
       {loadingClients ? (
-        <div className="flex flex-col items-center justify-center py-14 gap-2 text-slate-400">
+        <div className="flex-1 min-h-0 flex flex-col items-center justify-center py-14 gap-2 text-slate-400">
           <Loader2 className="h-4 w-4 animate-spin" /><span className="text-xs">Loading clients…</span>
         </div>
       ) : filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-14 px-4 text-center">
+        <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-4 text-center">
           <Users className="h-7 w-7 text-slate-300 mb-2" />
           <p className="text-xs text-slate-400">
             {search ? 'No clients match your search.' : tab === 'linked' ? 'No clients linked to the portal yet.' : tab === 'unlinked' ? 'Every client is linked. 🎉' : 'No clients found.'}
           </p>
         </div>
       ) : (
-        <div className="relative">
-          <div ref={listRef} className="overflow-y-auto slim-scroll p-2 space-y-1" style={{ maxHeight: CLIENT_LIST_MAX_H }}>
+        <div className="relative flex-1 min-h-0">
+          <div ref={listRef} className="h-full overflow-y-auto slim-scroll p-2 space-y-1">
             {filtered.map((c) => (
               <ClientListRow
                 key={c.id} c={c} active={selectedClientId === c.id}
@@ -798,6 +797,60 @@ function UploadStatusCard({ items, onRetry, onResolveConflict, onResolveAllConfl
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Transfer timing card — always-visible little card that answers two things
+// admins keep asking about: "when did this last happen?" (upload/download
+// dates) and, while something is actively moving, "how much longer?" (a
+// live ETA computed from real byte progress).
+// ═══════════════════════════════════════════════════════════════════════════
+function TransferTimingCard({
+  isDark, lastUploadAt, lastDownloadAt, uploadingNow, downloadingNow,
+  uploadEta, downloadEta, fmtEtaSeconds, fmtWhen,
+}) {
+  return (
+    <div className={`rounded-2xl border shadow-sm p-4 flex flex-col gap-3 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+      <div className="flex items-center gap-2">
+        <div className="p-1.5 rounded-lg flex-shrink-0" style={{ background: `${COLORS.mediumBlue}12` }}>
+          <Clock className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />
+        </div>
+        <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">Transfer timing</p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className={`rounded-xl border px-3 py-2.5 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Last upload</p>
+          <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 mt-0.5">{fmtWhen(lastUploadAt)}</p>
+        </div>
+        <div className={`rounded-xl border px-3 py-2.5 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Last download</p>
+          <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 mt-0.5">{fmtWhen(lastDownloadAt)}</p>
+        </div>
+      </div>
+
+      {(uploadingNow || downloadingNow) && (
+        <div className={`space-y-2 pt-2 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+          {uploadingNow && (
+            <div className="flex items-center gap-2 text-xs">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500 flex-shrink-0" />
+              <span className="text-slate-600 dark:text-slate-300 font-medium">
+                Uploading {uploadEta?.filesLeft > 1 ? `${uploadEta.filesLeft} files` : '1 file'} — {fmtEtaSeconds(uploadEta?.seconds)}
+              </span>
+            </div>
+          )}
+          {downloadingNow && (
+            <div className="flex items-center gap-2 text-xs">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-500 flex-shrink-0" />
+              <span className="text-slate-600 dark:text-slate-300 font-medium">
+                Downloading — {fmtEtaSeconds(downloadEta?.seconds)}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Minimized upload bar — a small floating pill (bottom-right of the page)
 // shown in place of the full UploadStatusCard once minimized. Unlike the
 // full card, it deliberately reports on EVERY client's uploads at once
@@ -1165,6 +1218,23 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
   // saves it straight to the browser's downloads folder — one click
   // instead of opening every file's Drive tab individually.
   const [downloadingAll, setDownloadingAll] = useState(false);
+  // { loadedBytes, totalBytes, startedAt } while active, else null — feeds
+  // the "time remaining" line in the timing/activity card below.
+  const [downloadProgress, setDownloadProgress] = useState(null);
+  // Last successful "Download all/selected" run for this client — Drive
+  // itself doesn't track viewer downloads, so this is tracked locally and
+  // persisted so it survives a page reload.
+  const [lastDownloadAt, setLastDownloadAt] = useState(null);
+  useEffect(() => {
+    if (!portalUser?.id) { setLastDownloadAt(null); return; }
+    try {
+      const raw = localStorage.getItem(`taskosphere:lastDownloadAt:${portalUser.id}`);
+      setLastDownloadAt(raw ? Number(raw) : null);
+    } catch {
+      setLastDownloadAt(null);
+    }
+  }, [portalUser?.id]);
+
   const downloadAllItems = async () => {
     const pool = selectedItemIds.size > 0 ? items.filter((i) => selectedItemIds.has(i.id)) : items;
     const files = pool.filter((i) => !isFolderMime(i.mimeType));
@@ -1173,6 +1243,9 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
       return;
     }
     setDownloadingAll(true);
+    const totalBytes = files.reduce((sum, f) => sum + (Number(f.size) || 0), 0);
+    let cumulativeLoaded = 0;
+    setDownloadProgress({ loadedBytes: 0, totalBytes, startedAt: Date.now() });
     let ok = 0;
     try {
       for (const file of files) {
@@ -1180,7 +1253,11 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
           const res = await api.get('/client-portal/drive/admin/download', {
             params: { file_id: file.id },
             responseType: 'blob',
+            onDownloadProgress: (evt) => {
+              setDownloadProgress((prev) => (prev ? { ...prev, loadedBytes: cumulativeLoaded + evt.loaded } : prev));
+            },
           });
+          cumulativeLoaded += Number(file.size) || res.data?.size || 0;
           const url = window.URL.createObjectURL(res.data);
           const a = document.createElement('a');
           a.href = url;
@@ -1194,9 +1271,17 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
           toast.error(extractErrorMessage(err, `Failed to download "${file.name}"`));
         }
       }
-      if (ok > 0) toast.success(`Downloaded ${ok} file${ok === 1 ? '' : 's'}.`);
+      if (ok > 0) {
+        toast.success(`Downloaded ${ok} file${ok === 1 ? '' : 's'}.`);
+        const now = Date.now();
+        setLastDownloadAt(now);
+        if (portalUser?.id) {
+          try { localStorage.setItem(`taskosphere:lastDownloadAt:${portalUser.id}`, String(now)); } catch { /* storage unavailable — non-fatal */ }
+        }
+      }
     } finally {
       setDownloadingAll(false);
+      setDownloadProgress(null);
     }
   };
 
@@ -1313,6 +1398,69 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
       failedUploads,
     };
   }, [items, selectedItemIds.size, clientUploadItems]);
+
+  // ── "when did this last happen" + "how long is this going to take" ────
+  // Last upload: Drive's own modifiedTime on the most recently touched item
+  // in the current folder — real, persisted, no extra bookkeeping needed.
+  const lastUploadAt = useMemo(() => {
+    let latest = 0;
+    for (const it of items) {
+      const t = it.modifiedTime ? new Date(it.modifiedTime).getTime() : 0;
+      if (t > latest) latest = t;
+    }
+    return latest || null;
+  }, [items]);
+
+  const uploadingNow = clientUploadItems.some((it) => it.status === 'uploading');
+  const downloadingNow = !!downloadProgress;
+
+  // Ticks once a second only while a transfer is actually running, so the
+  // "~Ns remaining" estimate visibly counts down instead of only updating
+  // whenever a progress event happens to arrive.
+  const [nowTick, setNowTick] = useState(Date.now());
+  useEffect(() => {
+    if (!uploadingNow && !downloadingNow) return;
+    const t = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [uploadingNow, downloadingNow]);
+
+  const uploadEta = useMemo(() => {
+    const active = clientUploadItems.filter((it) => it.status === 'uploading');
+    const queued = clientUploadItems.filter((it) => it.status === 'queued');
+    if (active.length === 0) return null;
+    const cur = active[0];
+    const elapsedSec = cur.uploadStartedAt ? (nowTick - cur.uploadStartedAt) / 1000 : 0;
+    const bps = cur.loadedBytes && elapsedSec > 0.75 ? cur.loadedBytes / elapsedSec : null;
+    const filesLeft = 1 + queued.length;
+    if (!bps) return { seconds: null, filesLeft };
+    const remainingCurrent = Math.max(0, (cur.totalBytes || cur.size || 0) - (cur.loadedBytes || 0));
+    const remainingQueued = queued.reduce((sum, q) => sum + (q.size || 0), 0);
+    return { seconds: (remainingCurrent + remainingQueued) / bps, filesLeft };
+  }, [clientUploadItems, nowTick]);
+
+  const downloadEta = useMemo(() => {
+    if (!downloadProgress) return null;
+    const elapsedSec = (nowTick - downloadProgress.startedAt) / 1000;
+    const bps = downloadProgress.loadedBytes && elapsedSec > 0.75 ? downloadProgress.loadedBytes / elapsedSec : null;
+    if (!bps) return { seconds: null };
+    const remaining = Math.max(0, downloadProgress.totalBytes - downloadProgress.loadedBytes);
+    return { seconds: remaining / bps };
+  }, [downloadProgress, nowTick]);
+
+  const fmtEtaSeconds = (secs) => {
+    if (secs == null) return 'estimating…';
+    if (secs < 1) return 'almost done';
+    if (secs < 60) return `~${Math.ceil(secs)}s left`;
+    return `~${Math.ceil(secs / 60)}m left`;
+  };
+
+  const fmtWhen = (ts) => {
+    if (!ts) return 'No activity yet';
+    const d = new Date(ts);
+    const sameDay = d.toDateString() === new Date().toDateString();
+    const time = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+    return sameDay ? `Today, ${time}` : `${d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}, ${time}`;
+  };
 
   // ── recursively read a dropped folder into a flat file list ─────────
   // Browsers only expose real folder contents via the drag-and-drop
@@ -1492,7 +1640,7 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4 items-stretch">
       {/* ── Left rail: clients — fixed, compact height (~10 rows visible),
           scrolls internally with wheel/drag or the up/down arrow buttons. */}
       <ClientRail
@@ -1604,9 +1752,12 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
               )}
             </div>
 
-            {isProvisioned && (
+            {(
               <>
-                {/* At-a-glance workspace summary */}
+                {/* At-a-glance workspace summary — always visible (even
+                    before a Drive folder exists) so the shape of the page
+                    never jumps once setup finishes; values are simply 0
+                    until there's something to count. */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
                   {[
                     { label: 'Folders', value: documentStats.folders, Icon: Folder, tone: 'amber' },
@@ -1632,12 +1783,32 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
                   ))}
                 </div>
 
-                {/* Toolbar: breadcrumb + actions */}
+                {/* Transfer timing — last upload/download dates, plus a
+                    live ETA while something is actively transferring. */}
+                <TransferTimingCard
+                  isDark={isDark}
+                  lastUploadAt={lastUploadAt}
+                  lastDownloadAt={lastDownloadAt}
+                  uploadingNow={uploadingNow}
+                  downloadingNow={downloadingNow}
+                  uploadEta={uploadEta}
+                  downloadEta={downloadEta}
+                  fmtEtaSeconds={fmtEtaSeconds}
+                  fmtWhen={fmtWhen}
+                />
+
+                {/* Toolbar: breadcrumb + actions — kept visible even when
+                    Drive isn't connected yet, just disabled, so the admin
+                    always sees this "Drive connect" card in the same spot. */}
                 <div className={`rounded-2xl border shadow-sm px-4 py-3 flex items-center gap-2 flex-wrap ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                  <button onClick={jumpToRoot} className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
-                    <Home className="h-3.5 w-3.5" /> {portalUser.google_drive_folder_name || 'Root'}
+                  <button
+                    onClick={jumpToRoot}
+                    disabled={!isProvisioned}
+                    className={`flex items-center gap-1 text-xs font-semibold ${isProvisioned ? 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200' : 'text-slate-300 dark:text-slate-600 cursor-not-allowed'}`}
+                  >
+                    <Home className="h-3.5 w-3.5" /> {isProvisioned ? (portalUser.google_drive_folder_name || 'Root') : 'Not connected'}
                   </button>
-                  {breadcrumb.map((b, i) => (
+                  {isProvisioned && breadcrumb.map((b, i) => (
                     <React.Fragment key={b.id}>
                       <ChevronRight className="h-3 w-3 text-slate-300" />
                       <button onClick={() => jumpTo(i)} className="text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">{b.name}</button>
@@ -1645,7 +1816,7 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
                   ))}
 
                   <div className="ml-auto flex items-center gap-2">
-                    {breadcrumb.length > 0 && (
+                    {isProvisioned && breadcrumb.length > 0 && (
                       <button
                         onClick={goBack}
                         title="Back one folder"
@@ -1667,27 +1838,30 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
                         </button>
                       </>
                     ) : (
-                      items.length > 0 && (
+                      isProvisioned && items.length > 0 && (
                         <button onClick={selectAllItems} className="text-xs font-semibold text-slate-500 hover:underline">Select all</button>
                       )
                     )}
                     <button
                       onClick={() => loadItems()}
-                      disabled={loadingItems || refreshingItems}
-                      className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition disabled:opacity-60 ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                      disabled={!isProvisioned || loadingItems || refreshingItems}
+                      title={!isProvisioned ? 'Connect this client\'s Drive folder first' : 'Refresh'}
+                      className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition disabled:opacity-40 disabled:cursor-not-allowed ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
                     >
                       <RefreshCw className={`h-3.5 w-3.5 ${refreshingItems ? 'animate-spin' : ''}`} /> Refresh
                     </button>
                     <button
                       onClick={() => setShowNewFolder((v) => !v)}
-                      className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                      disabled={!isProvisioned}
+                      title={!isProvisioned ? 'Connect this client\'s Drive folder first' : 'New Folder'}
+                      className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition disabled:opacity-40 disabled:cursor-not-allowed ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
                     >
                       <Plus className="h-3.5 w-3.5" /> New Folder
                     </button>
                   </div>
                 </div>
 
-                {showNewFolder && (
+                {isProvisioned && showNewFolder && (
                   <div className={`rounded-2xl border shadow-sm p-4 flex items-center gap-2 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
                     <input
                       autoFocus
@@ -1704,6 +1878,8 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
                   </div>
                 )}
 
+                {isProvisioned ? (
+                <>
                 {/* Drop zone */}
                 <div
                   onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -1909,6 +2085,16 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
                     </div>
                   )}
                 </div>
+                </>
+                ) : (
+                  <div className={`rounded-2xl border shadow-sm py-14 px-6 flex flex-col items-center justify-center text-center gap-2 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                    <div className="w-12 h-12 rounded-2xl flex items-center justify-center mb-1" style={{ background: `${COLORS.mediumBlue}12` }}>
+                      <CloudCog className="h-6 w-6" style={{ color: COLORS.mediumBlue }} />
+                    </div>
+                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Drive isn't connected for this client yet</p>
+                    <p className="text-xs text-slate-400 max-w-sm">Finish the setup step above — create the portal login and Drive folder — and this card will fill up with their files automatically.</p>
+                  </div>
+                )}
 
               </>
             )}
