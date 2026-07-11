@@ -14,6 +14,7 @@ import httpx
 import shutil
 import pandas as pd
 from datetime import datetime, date, timezone, timedelta
+from collections import Counter
 
 # --- FIXED ROUTER IMPORTS ---
 # Added 'backend.' to invoicing to match the others
@@ -899,12 +900,18 @@ async def create_audit_log(
     await db.audit_logs.insert_one(log_entry.model_dump())
 
 
-async def calculate_expected_hours(
+def _expected_hours_pure(
     start_date_str: str,
     end_date_str: str,
-    shift_start: str = "10:30",
-    shift_end: str = "19:00",
+    shift_start: str,
+    shift_end: str,
+    holidays: set,
 ):
+    """Same calculation as calculate_expected_hours(), but takes an
+    already-fetched holidays set instead of querying the DB. Lets callers
+    that need this for many users (e.g. a staff report) fetch holidays
+    ONCE and reuse it, instead of re-querying db.holidays on every
+    iteration of a loop."""
     try:
         start = date.fromisoformat(start_date_str)
         end = date.fromisoformat(end_date_str)
@@ -918,8 +925,6 @@ async def calculate_expected_hours(
         hrs_per_day = (t2 - t1).total_seconds() / 3600
     except Exception:
         hrs_per_day = 8.5
-    holidays_cursor = db.holidays.find({"status": "confirmed"})
-    holidays = [h["date"] for h in await holidays_cursor.to_list(length=None)]
     total_hours = 0
     current_date = start
     while current_date <= end:
@@ -927,6 +932,17 @@ async def calculate_expected_hours(
             total_hours += hrs_per_day
         current_date += timedelta(days=1)
     return round(total_hours, 2)
+
+
+async def calculate_expected_hours(
+    start_date_str: str,
+    end_date_str: str,
+    shift_start: str = "10:30",
+    shift_end: str = "19:00",
+):
+    holidays_cursor = db.holidays.find({"status": "confirmed"})
+    holidays = {h["date"] for h in await holidays_cursor.to_list(length=None)}
+    return _expected_hours_pure(start_date_str, end_date_str, shift_start, shift_end, holidays)
 
 
 def fetch_indian_holidays_task():
@@ -3396,7 +3412,7 @@ async def get_staff_attendance_report(
 ):
     now = datetime.now(IST)
     target_month = month or now.strftime("%Y-%m")
-    users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(1000)
+    users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(length=None)
     user_map = {u["id"]: u for u in users}
 
     # SCOPE enforcement
@@ -3412,7 +3428,7 @@ async def get_staff_attendance_report(
         attendance_query["user_id"] = {"$in": visible_ids}
 
     attendance_list = await db.attendance.find(attendance_query, {"_id": 0}).to_list(
-        5000
+        length=None
     )
     staff_report = {}
     for attendance in attendance_list:
@@ -3453,6 +3469,13 @@ async def get_staff_attendance_report(
             }
         )
     result = []
+    # PERF FIX: calculate_expected_hours() used to re-query db.holidays on
+    # every single iteration of this loop (one full collection scan per
+    # staff member). Fetching the holiday set once, up front, and reusing it
+    # turns N DB round trips into 1 — this was the main reason the Attendance
+    # page got slower as headcount grew.
+    holidays_cursor = db.holidays.find({"status": "confirmed"})
+    holidays_set = {h["date"] for h in await holidays_cursor.to_list(length=None)}
     for uid, data in staff_report.items():
         total_minutes = data["total_minutes"]
         hours = total_minutes // 60
@@ -3467,11 +3490,12 @@ async def get_staff_attendance_report(
         user_data = user_map.get(uid, {})
         year, month_val = map(int, target_month.split("-"))
         _, last_day = calendar.monthrange(year, month_val)
-        expected_hours = await calculate_expected_hours(
+        expected_hours = _expected_hours_pure(
             f"{target_month}-01",
             f"{target_month}-{last_day}",
             user_data.get("punch_in_time", "10:30"),
             user_data.get("punch_out_time", "19:00"),
+            holidays_set,
         )
         data["expected_hours"] = expected_hours
         result.append(data)
@@ -4436,7 +4460,21 @@ async def import_tasks_from_csv(
 @api_router.get("/tasks")
 async def get_tasks(
     current_user: User = Depends(check_module_permission("tasks", "view")),
+    page: Optional[int] = Query(None, ge=1, description="Optional: page number for paginated response"),
+    page_size: Optional[int] = Query(None, ge=1, le=500, description="Optional: results per page (only used if `page` is set)"),
 ):
+    """
+    BUG FIX: this used to hard-cap at .to_list(1000) — any company with more
+    than 1000 tasks silently lost the rest with no error or indication.
+    Now fetches everything the (permission-scoped) query matches.
+
+    Pagination is opt-in and backward compatible: existing callers that don't
+    pass `page` get the same shape as before (a plain array, unpaginated) —
+    nothing breaks. Pass `page` (and optionally `page_size`, default 100) to
+    get back a paginated {tasks, total, page, page_size, total_pages} object
+    instead, for future adoption by list views that don't need the whole
+    dataset client-side at once.
+    """
     query = {"type": {"$ne": "todo"}}
     if current_user.role == "admin":
         pass
@@ -4456,13 +4494,28 @@ async def get_tasks(
             or_clauses.append({"assigned_to": {"$in": allowed_users}})
             or_clauses.append({"created_by": {"$in": allowed_users}})
         query["$or"] = or_clauses
-    tasks = await db.tasks.find(query, {"_id": 0}).to_list(1000)
+
+    total = None
+    if page is not None:
+        page_size = page_size or 100
+        total = await db.tasks.count_documents(query)
+        skip = (page - 1) * page_size
+        tasks = (
+            await db.tasks.find(query, {"_id": 0})
+            .sort("created_at", -1)
+            .skip(skip)
+            .limit(page_size)
+            .to_list(page_size)
+        )
+    else:
+        tasks = await db.tasks.find(query, {"_id": 0}).to_list(length=None)
+
     user_ids = {
         task.get("assigned_to") for task in tasks if task.get("assigned_to")
     } | {task.get("created_by") for task in tasks if task.get("created_by")}
     users = await db.users.find(
         {"id": {"$in": list(user_ids)}}, {"_id": 0, "password": 0}
-    ).to_list(1000)
+    ).to_list(length=None)
     user_map = {u["id"]: u["full_name"] for u in users}
     for task in tasks:
         task["created_at"] = safe_dt(task.get("created_at"))
@@ -4474,7 +4527,17 @@ async def get_tasks(
             task["sub_assignees"] = []
         if not isinstance(task.get("comments"), list):
             task["comments"] = []
+
+    if page is not None:
+        return {
+            "tasks": tasks,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": max(1, -(-total // page_size)),
+        }
     return tasks
+
 
 
 @api_router.get("/tasks/{task_id}/detail")
@@ -6728,17 +6791,78 @@ async def get_performance_rankings(
 
     users = await db.users.find(
         {"role": {"$ne": "admin"}}, {"id": 1, "full_name": 1, "profile_picture": 1}
-    ).to_list(100)
+    ).to_list(length=None)
+    uids = [u["id"] for u in users]
+
+    # PERF FIX: this endpoint used to run ~8 separate DB queries PER USER
+    # inside the loop below (attendance, desktop-activity, 4x count_documents,
+    # due-tasks, completed-todos) — for 30 staff that's 240+ sequential round
+    # trips on every cache miss. It's called by both the Tasks page and the
+    # Attendance page, so that N+1 pattern was the single biggest cause of lag
+    # on both. Fixed by batch-fetching each collection ONCE with an `$in` on
+    # all user ids, then grouping the results in Python per user below —
+    # same math, 8 queries total instead of 8 x N.
+    (
+        all_attendance,
+        all_agent_logs,
+        all_due_tasks,
+        all_completed_todos,
+        all_tasks_assigned,
+        all_completed_tasks,
+        all_todos_assigned,
+        all_completed_todos_count,
+    ) = await asyncio.gather(
+        db.attendance.find(
+            {"user_id": {"$in": uids}, "date": {"$gte": start_date_str, "$lte": end_date_str}},
+            {"_id": 0, "user_id": 1, "duration_minutes": 1, "is_late": 1, "status": 1},
+        ).to_list(100000),
+        db.desktop_activity.find(
+            {"user_id": {"$in": uids}, "date": {"$gte": start_date_str, "$lte": end_date_str}},
+            {"_id": 0, "user_id": 1, "activeSeconds": 1},
+        ).to_list(100000),
+        db.tasks.find(
+            {"assigned_to": {"$in": uids}, "status": "completed", "due_date": {"$ne": None}},
+            {"_id": 0, "assigned_to": 1, "due_date": 1, "completed_at": 1, "updated_at": 1},
+        ).to_list(100000),
+        db.todos.find(
+            {"user_id": {"$in": uids}, "is_completed": True},
+            {"_id": 0, "user_id": 1, "due_date": 1, "completed_at": 1},
+        ).to_list(100000),
+        db.tasks.find(
+            {"assigned_to": {"$in": uids}}, {"_id": 0, "assigned_to": 1}
+        ).to_list(100000),
+        db.tasks.find(
+            {"assigned_to": {"$in": uids}, "status": "completed"}, {"_id": 0, "assigned_to": 1}
+        ).to_list(100000),
+        db.todos.find(
+            {"user_id": {"$in": uids}}, {"_id": 0, "user_id": 1}
+        ).to_list(100000),
+        db.todos.find(
+            {"user_id": {"$in": uids}, "is_completed": True}, {"_id": 0, "user_id": 1}
+        ).to_list(100000),
+    )
+
+    def _group_by(docs, key):
+        out = {}
+        for d in docs:
+            out.setdefault(d.get(key), []).append(d)
+        return out
+
+    attendance_by_uid = _group_by(all_attendance, "user_id")
+    agent_logs_by_uid = _group_by(all_agent_logs, "user_id")
+    due_tasks_by_uid = _group_by(all_due_tasks, "assigned_to")
+    completed_todos_by_uid = _group_by(all_completed_todos, "user_id")
+    tasks_assigned_count = Counter(d.get("assigned_to") for d in all_tasks_assigned)
+    completed_tasks_count = Counter(d.get("assigned_to") for d in all_completed_tasks)
+    todos_assigned_count = Counter(d.get("user_id") for d in all_todos_assigned)
+    completed_todos_count_map = Counter(d.get("user_id") for d in all_completed_todos_count)
 
     rankings = []
     for user in users:
         uid = user["id"]
 
         # ---------------- Attendance & punctuality ----------------
-        att_records = await db.attendance.find(
-            {"user_id": uid, "date": {"$gte": start_date_str, "$lte": end_date_str}},
-            {"_id": 0, "duration_minutes": 1, "is_late": 1, "status": 1},
-        ).to_list(1000)
+        att_records = attendance_by_uid.get(uid, [])
         # FIX: this used to count EVERY attendance document as a "present" day —
         # including the auto-marked "absent" record the system inserts each night
         # for anyone who never punched in. That silently counted absences as
@@ -6764,10 +6888,7 @@ async def get_performance_rankings(
         # the ranking calculation. Where the agent is installed and has reported
         # data for this period, its measured active time now drives "Duration of
         # working"; otherwise we fall back to punch-in/punch-out duration.
-        agent_logs = await db.desktop_activity.find(
-            {"user_id": uid, "date": {"$gte": start_date_str, "$lte": end_date_str}},
-            {"_id": 0, "activeSeconds": 1},
-        ).to_list(2000)
+        agent_logs = agent_logs_by_uid.get(uid, [])
         agent_hours = round(sum(a.get("activeSeconds", 0) or 0 for a in agent_logs) / 3600, 1)
         effective_hours = agent_hours if agent_logs else total_hours
 
@@ -6784,14 +6905,10 @@ async def get_performance_rankings(
         # ratio (tasks + todos), independent of the period filter. Attendance,
         # hours and punctuality below remain correctly period-scoped, since
         # those genuinely are about "this week/month" specifically.
-        tasks_assigned = await db.tasks.count_documents({"assigned_to": uid})
-        completed_tasks = await db.tasks.count_documents(
-            {"assigned_to": uid, "status": "completed"}
-        )
-        todos_assigned = await db.todos.count_documents({"user_id": uid})
-        completed_todos = await db.todos.count_documents(
-            {"user_id": uid, "is_completed": True}
-        )
+        tasks_assigned = tasks_assigned_count.get(uid, 0)
+        completed_tasks = completed_tasks_count.get(uid, 0)
+        todos_assigned = todos_assigned_count.get(uid, 0)
+        completed_todos = completed_todos_count_map.get(uid, 0)
         total_assigned = tasks_assigned + todos_assigned
         total_completed = completed_tasks + completed_todos
         task_completion_percent = (
@@ -6808,10 +6925,7 @@ async def get_performance_rankings(
         # rarely touches the separate To-Do widget always scored 0% here, losing
         # 15 guaranteed points. This is now a lifetime on-time ratio across both
         # tasks and todos that have a due date, not reset every period.
-        due_tasks = await db.tasks.find(
-            {"assigned_to": uid, "status": "completed", "due_date": {"$ne": None}},
-            {"_id": 0, "due_date": 1, "completed_at": 1, "updated_at": 1},
-        ).to_list(2000)
+        due_tasks = due_tasks_by_uid.get(uid, [])
         ontime_tasks = 0
         for t in due_tasks:
             due = safe_dt(t.get("due_date"))
@@ -6819,10 +6933,7 @@ async def get_performance_rankings(
             if due and completed_at and completed_at <= due:
                 ontime_tasks += 1
 
-        completed_todos_docs = await db.todos.find(
-            {"user_id": uid, "is_completed": True},
-            {"_id": 0, "due_date": 1, "completed_at": 1},
-        ).to_list(1000)
+        completed_todos_docs = completed_todos_by_uid.get(uid, [])
         ontime_todos = 0
         todos_with_due = 0
         for t in completed_todos_docs:
@@ -11203,7 +11314,58 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
                 {"assigned_to": {"$in": allowed_users}},
             ]
 
-    tasks = await db.tasks.find(task_query, {"_id": 0}).to_list(1000)
+    # PERF FIX: these six queries are independent of one another (none depends
+    # on another's result), but were previously awaited one-at-a-time in series
+    # — each round trip to Mongo adds its own latency, so six serial calls take
+    # roughly 6x as long as they need to. Firing them concurrently with
+    # asyncio.gather cuts dashboard load time down to the slowest single query
+    # instead of the sum of all of them.
+    if current_user.role == "admin":
+        client_query = {}
+    else:
+        permissions_for_clients = get_user_permissions(current_user)
+        extra_clients = permissions_for_clients.get("assigned_clients", []) or []
+        or_clauses = [
+            {"assigned_to": current_user.id},
+            {"created_by": current_user.id},
+            {"assignments": {"$elemMatch": {"user_id": current_user.id}}},
+        ]
+        if extra_clients:
+            or_clauses.append({"id": {"$in": extra_clients}})
+        client_query = {"$or": or_clauses}
+
+    due_date_query = {"status": "pending"}
+    if current_user.role != "admin" and current_user.departments:
+        due_date_query["department"] = {"$in": current_user.departments}
+
+    async def _empty_list():
+        return []
+
+    (
+        tasks,
+        dsc_list,
+        clients,
+        closed_masters_stat,
+        due_dates,
+        users_for_workload,
+    ) = await asyncio.gather(
+        # BUG FIX: these were all capped at .to_list(1000) / .to_list(100).
+        # Since the counts/lists here feed the dashboard's actual numbers
+        # (total_tasks, total_clients, etc.), a company that grew past 1000
+        # tasks or clients wasn't just experiencing slowness — the dashboard
+        # was silently showing an undercount. Fetching everything the
+        # (already permission-scoped) query matches fixes both.
+        db.tasks.find(task_query, {"_id": 0}).to_list(length=None),
+        db.dsc_register.find({}, {"_id": 0}).to_list(length=None),
+        db.clients.find(client_query, {"_id": 0}).to_list(length=None),
+        db.compliance_masters.find(
+            {"is_closed": True}, {"_id": 0, "name": 1, "calendar_due_date_id": 1}
+        ).to_list(length=None),
+        db.due_dates.find(due_date_query, {"_id": 0}).to_list(length=None),
+        db.users.find({}, {"_id": 0, "password": 0}).to_list(length=None)
+        if current_user.role != "staff"
+        else _empty_list(),
+    )
     total_tasks = len(tasks)
     completed_tasks = len([t for t in tasks if t["status"] == "completed"])
     pending_tasks = len([t for t in tasks if t["status"] == "pending"])
@@ -11223,7 +11385,6 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
             except (ValueError, TypeError):
                 continue
 
-    dsc_list = await db.dsc_register.find({}, {"_id": 0}).to_list(1000)
     total_dsc = len(dsc_list)
     expiring_dsc_count = 0
     expired_dsc_count = 0
@@ -11253,23 +11414,6 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         except (ValueError, TypeError):
             continue
 
-    if current_user.role == "admin":
-        client_query = {}
-    else:
-        # SCOPE: OWN (assigned_to) + created_by + per-service assignments[] + explicit assigned_clients permission
-        # This ensures non-admin users see all clients they are actually working on
-        permissions = get_user_permissions(current_user)
-        extra_clients = permissions.get("assigned_clients", []) or []
-        or_clauses = [
-            {"assigned_to": current_user.id},
-            {"created_by": current_user.id},
-            {"assignments": {"$elemMatch": {"user_id": current_user.id}}},
-        ]
-        if extra_clients:
-            or_clauses.append({"id": {"$in": extra_clients}})
-        client_query = {"$or": or_clauses}
-
-    clients = await db.clients.find(client_query, {"_id": 0}).to_list(1000)
     total_clients = len(clients)
     today = date.today()
     upcoming_birthdays = 0
@@ -11298,14 +11442,8 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
                 continue
 
     upcoming_due_dates_count = 0
-    due_date_query = {"status": "pending"}
-    if current_user.role != "admin" and current_user.departments:
-        due_date_query["department"] = {"$in": current_user.departments}
 
     # Exclude due_dates whose compliance master is marked closed
-    closed_masters_stat = await db.compliance_masters.find(
-        {"is_closed": True}, {"_id": 0, "name": 1, "calendar_due_date_id": 1}
-    ).to_list(1000)
     closed_names_stat = {
         m["name"].strip().lower() for m in closed_masters_stat if m.get("name")
     }
@@ -11315,7 +11453,6 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         if m.get("calendar_due_date_id")
     }
 
-    due_dates = await db.due_dates.find(due_date_query, {"_id": 0}).to_list(1000)
     for dd in due_dates:
         if dd.get("id") in closed_cal_ids_stat:
             continue
@@ -11335,8 +11472,7 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
 
     team_workload = []
     if current_user.role != "staff":
-        users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(100)
-        for user in users:
+        for user in users_for_workload:
             user_tasks = [t for t in tasks if t.get("assigned_to") == user["id"]]
             team_workload.append(
                 {
