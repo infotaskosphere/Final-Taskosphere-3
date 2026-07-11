@@ -26,9 +26,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useDocumentUploads } from '@/contexts/DocumentUploadContext.jsx';
 import {
   Search, Users, FolderOpen, Folder, FolderPlus, FileText, UploadCloud, Plus, Trash2,
-  ChevronRight, ChevronUp, ChevronDown, Home, Loader2, CheckCircle2, XCircle, Eye, EyeOff, X,
+  ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Home, Loader2, CheckCircle2, XCircle, Eye, EyeOff, X,
   ExternalLink, RefreshCw, KeyRound, Copy, Check, AlertCircle, CloudCog,
   FileImage, FileSpreadsheet, FileType2, Square, CheckSquare, Sparkles, ListChecks,
+  Pause, PlayCircle, StopCircle, Minimize2, Maximize2,
 } from 'lucide-react';
 
 const COLORS = {
@@ -499,8 +500,12 @@ const fmtElapsed = (ts) => {
   return `${Math.round(mins / 60)}h ago`;
 };
 
-function UploadStatusCard({ items, onRetry, onResolveConflict, onResolveAllConflicts, onClearFinished, onClearAll, onRemove, isDark }) {
-  if (!items.length) return null;
+function UploadStatusCard({ items, onRetry, onResolveConflict, onResolveAllConflicts, onClearFinished, onClearAll, onRemove, onMinimize, paused, onPause, onResume, onStop, isDark }) {
+  // "Apply to all" — mirrors the checkbox pattern used by OS-level file
+  // transfer/delete dialogs: tick it once, then the very next Overwrite /
+  // Keep both decision (whether clicked on the summary bar or on a single
+  // row below) is applied to every remaining conflict instead of just one.
+  const [applyToAll, setApplyToAll] = useState(false);
 
   const queued      = items.filter((i) => i.status === 'queued').length;
   const uploading    = items.filter((i) => i.status === 'uploading').length;
@@ -508,13 +513,49 @@ function UploadStatusCard({ items, onRetry, onResolveConflict, onResolveAllConfl
   const errored        = items.filter((i) => i.status === 'error').length;
   const conflicted       = items.filter((i) => i.status === 'conflict').length;
   const interrupted        = items.filter((i) => i.status === 'interrupted').length;
+  const pausedCount         = items.filter((i) => i.status === 'paused').length;
+  const stoppedCount        = items.filter((i) => i.status === 'stopped').length;
   const total     = items.length;
   const finished  = done + errored;
   const pct       = total ? Math.round((finished / total) * 100) : 0;
   const allDone   = finished === total;
+  const canPause  = !paused && (queued > 0 || uploading > 0);
+  const canResume = paused && pausedCount > 0;
+  const canStop   = queued > 0 || uploading > 0 || pausedCount > 0;
+
+  // Nothing left to apply a blanket decision to — reset quietly so the box
+  // doesn't stay checked (and misleadingly "armed") for the next batch.
+  useEffect(() => {
+    if (conflicted === 0 && applyToAll) setApplyToAll(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conflicted]);
+
+  const handleConflictAction = (item, action) => {
+    if (applyToAll) {
+      onResolveAllConflicts(action);
+      setApplyToAll(false);
+    } else {
+      onResolveConflict(item, action);
+    }
+  };
+
+  if (!items.length) return null;
 
   // Newest first so the most recently dropped files are easy to find.
   const ordered = [...items].sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+
+  const StatChip = ({ tone = 'neutral', children }) => (
+    <span
+      className={`text-[10.5px] font-semibold px-2 py-0.5 rounded-full border ${
+        tone === 'success' ? 'bg-emerald-400/15 border-emerald-300/30 text-emerald-50'
+        : tone === 'warning' ? 'bg-amber-400/15 border-amber-300/30 text-amber-50'
+        : tone === 'danger'  ? 'bg-red-400/20 border-red-300/30 text-red-50'
+        : 'bg-white/10 border-white/15 text-white/85'
+      }`}
+    >
+      {children}
+    </span>
+  );
 
   return (
     <motion.div
@@ -522,29 +563,82 @@ function UploadStatusCard({ items, onRetry, onResolveConflict, onResolveAllConfl
       initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
       className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
     >
-      {/* Header + overall progress */}
+      {/* Header + overall progress ─────────────────────────────────────── */}
       <div className="px-5 py-4" style={{ background: GRADIENT }}>
-        <div className="flex items-center justify-between gap-3 flex-wrap">
+
+        {/* Row 1 — status + minimize/dismiss */}
+        <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="p-1.5 rounded-lg bg-white/15 flex-shrink-0">
-              {allDone ? <ListChecks className="h-4 w-4 text-white" /> : <UploadCloud className="h-4 w-4 text-white animate-pulse" />}
+              {allDone ? <ListChecks className="h-4 w-4 text-white" /> : paused ? <Pause className="h-4 w-4 text-white" /> : <UploadCloud className="h-4 w-4 text-white animate-pulse" />}
             </div>
             <div className="min-w-0">
               <p className="text-sm font-semibold text-white leading-none">
-                {allDone ? 'Upload complete' : 'Uploading in background'}
+                {allDone ? 'Upload complete' : paused ? 'Uploads paused' : 'Uploading in background'}
               </p>
-              <p className="text-[11px] text-white/70 mt-0.5">
-                {finished}/{total} finished
-                {uploading > 0 && ` · ${uploading} uploading`}
-                {queued > 0 && ` · ${queued} queued`}
-                {errored > 0 && ` · ${errored} failed`}
-                {conflicted > 0 && ` · ${conflicted} need a decision`}
-                {interrupted > 0 && ` · ${interrupted} interrupted by a reload`}
-                {allDone && conflicted === 0 && ' · safe to leave this page'}
+              <p className="text-[10.5px] text-white/60 mt-1 uppercase tracking-wide font-medium">
+                Document transfer status
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-3 flex-shrink-0">
+            <span className="text-sm font-bold text-white tabular-nums">{pct}%</span>
+            {onMinimize && (
+              <button onClick={onMinimize} className="text-white/70 hover:text-white" title="Minimize — keep uploading while you work on another company">
+                <Minimize2 className="h-4 w-4" />
+              </button>
+            )}
+            {allDone && conflicted === 0 && (
+              <button onClick={onClearAll} className="text-white/70 hover:text-white" title="Dismiss">
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Row 2 — stat chips */}
+        <div className="flex flex-wrap items-center gap-1.5 mt-3">
+          <StatChip tone="success">{finished}/{total} finished</StatChip>
+          {uploading > 0 && <StatChip>{uploading} uploading</StatChip>}
+          {queued > 0 && <StatChip>{queued} queued</StatChip>}
+          {pausedCount > 0 && <StatChip tone="warning">{pausedCount} paused</StatChip>}
+          {stoppedCount > 0 && <StatChip tone="danger">{stoppedCount} stopped</StatChip>}
+          {errored > 0 && <StatChip tone="danger">{errored} failed</StatChip>}
+          {conflicted > 0 && <StatChip tone="warning">{conflicted} need a decision</StatChip>}
+          {interrupted > 0 && <StatChip>{interrupted} interrupted by reload</StatChip>}
+          {allDone && conflicted === 0 && <StatChip tone="success">Safe to leave this page</StatChip>}
+        </div>
+
+        {/* Row 3 — bulk actions */}
+        {(canPause || canResume || canStop || conflicted > 1 || (errored > 0 && !uploading && !queued) || finished > 0) && (
+          <div className="flex items-center justify-end gap-2 flex-wrap mt-3 pt-3 border-t border-white/15">
+            {canResume && (
+              <button
+                onClick={onResume}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-white bg-emerald-500/70 hover:bg-emerald-500 px-2.5 py-1.5 rounded-lg transition"
+                title="Resume uploading the next file for this company"
+              >
+                <PlayCircle className="h-3.5 w-3.5" /> Resume
+              </button>
+            )}
+            {canPause && (
+              <button
+                onClick={onPause}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-white bg-white/15 hover:bg-white/25 px-2.5 py-1.5 rounded-lg transition"
+                title="Pause after the file currently in progress finishes — nothing is cut off half-way"
+              >
+                <Pause className="h-3.5 w-3.5" /> Pause
+              </button>
+            )}
+            {canStop && (
+              <button
+                onClick={onStop}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-white bg-red-500/70 hover:bg-red-500 px-2.5 py-1.5 rounded-lg transition"
+                title="Cancel the file in progress and drop everything still queued for this company"
+              >
+                <StopCircle className="h-3.5 w-3.5" /> Stop
+              </button>
+            )}
             {conflicted > 1 && (
               <>
                 <button
@@ -579,13 +673,31 @@ function UploadStatusCard({ items, onRetry, onResolveConflict, onResolveAllConfl
                 Clear finished
               </button>
             )}
-            {allDone && conflicted === 0 && (
-              <button onClick={onClearAll} className="text-white/70 hover:text-white flex-shrink-0" title="Dismiss">
-                <X className="h-4 w-4" />
-              </button>
-            )}
           </div>
-        </div>
+        )}
+
+        {/* Row 4 — "apply to all" checkbox, directly under the bulk-action
+            row, exactly like the batch prompt in a native file transfer or
+            delete dialog. Ticking it means the next per-row Overwrite /
+            Keep both click below is applied to every remaining conflict. */}
+        {conflicted > 0 && (
+          <label className={`flex items-center gap-2 mt-2.5 cursor-pointer select-none group ${conflicted <= 1 ? 'pt-3 border-t border-white/15' : ''}`}>
+            <input
+              type="checkbox"
+              checked={applyToAll}
+              onChange={(e) => setApplyToAll(e.target.checked)}
+              className="sr-only"
+            />
+            {applyToAll
+              ? <CheckSquare className="h-3.5 w-3.5 text-white flex-shrink-0" />
+              : <Square className="h-3.5 w-3.5 text-white/50 group-hover:text-white/80 flex-shrink-0" />}
+            <span className="text-[11px] font-medium text-white/85 group-hover:text-white">
+              Apply to all {conflicted} conflicting file{conflicted === 1 ? '' : 's'}
+              <span className="text-white/60 font-normal"> — next Overwrite / Keep both choice below applies to every one</span>
+            </span>
+          </label>
+        )}
+
         {/* progress bar */}
         <div className="mt-3 h-1.5 rounded-full bg-white/20 overflow-hidden">
           <motion.div
@@ -598,6 +710,10 @@ function UploadStatusCard({ items, onRetry, onResolveConflict, onResolveAllConfl
       </div>
 
       {/* Detailed file-by-file list */}
+      <div className={`flex items-center px-5 py-1.5 text-[10px] font-semibold uppercase tracking-wide ${isDark ? 'bg-slate-900/40 text-slate-500' : 'bg-slate-50 text-slate-400'}`}>
+        <span className="flex-1">File</span>
+        <span className="flex-shrink-0">Action</span>
+      </div>
       <div className="max-h-80 overflow-y-auto divide-y divide-slate-50 dark:divide-slate-700">
         {ordered.map((it) => (
           <div key={it.id} className="px-5 py-2.5 flex items-center gap-3 flex-wrap">
@@ -608,6 +724,8 @@ function UploadStatusCard({ items, onRetry, onResolveConflict, onResolveAllConfl
               {it.status === 'error'       && <XCircle className="h-4 w-4 text-red-500" />}
               {it.status === 'conflict'    && <AlertCircle className="h-4 w-4 text-amber-500" />}
               {it.status === 'interrupted' && <AlertCircle className="h-4 w-4 text-slate-400" />}
+              {it.status === 'paused'      && <Pause className="h-4 w-4 text-amber-500" />}
+              {it.status === 'stopped'     && <StopCircle className="h-4 w-4 text-red-400" />}
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
@@ -625,6 +743,8 @@ function UploadStatusCard({ items, onRetry, onResolveConflict, onResolveAllConfl
                 {it.status === 'error' && (it.errorMsg || 'Upload failed')}
                 {it.status === 'conflict' && (it.conflict?.message || 'A file with this name already exists.')}
                 {it.status === 'interrupted' && 'Page was reloaded mid-upload — re-drag this file to continue.'}
+                {it.status === 'paused' && 'Paused — click Resume above to continue.'}
+                {it.status === 'stopped' && 'Stopped before it uploaded.'}
                 {it.size ? ` · ${fmtSize(it.size)}` : ''}
               </p>
             </div>
@@ -632,16 +752,16 @@ function UploadStatusCard({ items, onRetry, onResolveConflict, onResolveAllConfl
               {it.status === 'conflict' && (
                 <>
                   <button
-                    onClick={() => onResolveConflict(it, 'overwrite')}
+                    onClick={() => handleConflictAction(it, 'overwrite')}
                     className="text-[11px] font-semibold text-white bg-amber-500 hover:bg-amber-600 px-2.5 py-1 rounded-lg transition"
-                    title="Replace the existing file's content"
+                    title={applyToAll ? 'Replace this and every remaining conflicting file' : "Replace the existing file's content"}
                   >
                     Overwrite
                   </button>
                   <button
-                    onClick={() => onResolveConflict(it, 'keep_both')}
+                    onClick={() => handleConflictAction(it, 'keep_both')}
                     className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition ${isDark ? 'border-slate-600 text-slate-200 hover:bg-slate-700' : 'border-slate-300 text-slate-600 hover:bg-slate-50'}`}
-                    title="Upload alongside the existing file (renamed to avoid an exact-name clash)"
+                    title={applyToAll ? 'Keep both for this and every remaining conflicting file' : 'Upload alongside the existing file (renamed to avoid an exact-name clash)'}
                   >
                     Keep both
                   </button>
@@ -655,7 +775,16 @@ function UploadStatusCard({ items, onRetry, onResolveConflict, onResolveAllConfl
                   <RefreshCw className="h-3 w-3" /> Retry
                 </button>
               )}
-              {(it.status === 'done' || it.status === 'error' || it.status === 'interrupted') && (
+              {it.status === 'stopped' && (
+                <button
+                  onClick={() => onRetry(it)}
+                  className="text-[11px] font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                  title="Send this file again"
+                >
+                  <PlayCircle className="h-3 w-3" /> Resume
+                </button>
+              )}
+              {(it.status === 'done' || it.status === 'error' || it.status === 'interrupted' || it.status === 'stopped') && (
                 <button onClick={() => onRemove(it.id)} className="text-slate-300 hover:text-slate-500" title="Remove from list">
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -665,6 +794,65 @@ function UploadStatusCard({ items, onRetry, onResolveConflict, onResolveAllConfl
         ))}
       </div>
     </motion.div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Minimized upload bar — a small floating pill (bottom-right of the page)
+// shown in place of the full UploadStatusCard once minimized. Unlike the
+// full card, it deliberately reports on EVERY client's uploads at once
+// (not just the one currently selected), because the whole point of
+// minimizing is to free the admin up to pick a different company and start
+// a second batch — this pill is the only thing keeping both in view.
+// ═══════════════════════════════════════════════════════════════════════════
+function MinimizedUploadBar({ allItems, onExpand, isDark }) {
+  if (!allItems.length) return null;
+
+  const total      = allItems.length;
+  const done       = allItems.filter((i) => i.status === 'done').length;
+  const errored    = allItems.filter((i) => i.status === 'error').length;
+  const finished   = done + errored;
+  const uploading  = allItems.filter((i) => i.status === 'uploading').length;
+  const conflicted = allItems.filter((i) => i.status === 'conflict').length;
+  const pct        = total ? Math.round((finished / total) * 100) : 0;
+  const allDone    = finished === total;
+
+  // Companies with something still in motion — the number the admin most
+  // wants at a glance while this is minimized.
+  const activeClients = new Set(
+    allItems
+      .filter((i) => ['queued', 'uploading', 'paused', 'conflict'].includes(i.status))
+      .map((i) => i.clientName || 'Client')
+  );
+
+  return (
+    <motion.button
+      type="button"
+      onClick={onExpand}
+      layout
+      initial={{ opacity: 0, y: 14, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 14, scale: 0.95 }}
+      className="fixed bottom-5 right-5 z-40 flex items-center gap-3 rounded-full shadow-xl pl-2 pr-4 py-2 hover:brightness-110 transition"
+      style={{ background: GRADIENT }}
+      title="Expand upload status"
+    >
+      <div className="w-9 h-9 rounded-full bg-white/15 flex items-center justify-center flex-shrink-0">
+        {allDone ? <ListChecks className="h-4 w-4 text-white" /> : <UploadCloud className="h-4 w-4 text-white animate-pulse" />}
+      </div>
+      <div className="min-w-0 text-left">
+        <p className="text-xs font-semibold text-white leading-none">
+          {allDone ? 'Uploads complete' : `Uploading… ${pct}%`}
+        </p>
+        <p className="text-[10.5px] text-white/70 mt-1 whitespace-nowrap">
+          {finished}/{total} done
+          {activeClients.size > 1 && ` · ${activeClients.size} companies`}
+          {conflicted > 0 && ` · ${conflicted} need a decision`}
+          {allDone && conflicted === 0 && activeClients.size <= 1 && ' · tap to view'}
+        </p>
+      </div>
+      <Maximize2 className="h-3.5 w-3.5 text-white/70 flex-shrink-0" />
+    </motion.button>
   );
 }
 
@@ -756,10 +944,21 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
 
   // uploads — actual queueing/progress lives in DocumentUploadContext so it
   // survives navigating away from this page; we just read+trigger it here.
-  const { items: allUploadItems, queueUploads: queueUploadsCtx, retryItem, resolveConflict, resolveAllConflicts, clearFinished, clearAll, removeItem } = useDocumentUploads();
+  const {
+    items: allUploadItems, queueUploads: queueUploadsCtx, retryItem, resolveConflict, resolveAllConflicts,
+    clearFinished, clearAll, removeItem, pausedScopes, pauseScope, resumeScope, stopScope,
+  } = useDocumentUploads();
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
+
+  // Minimising the tray shrinks it to a small floating pill (bottom-right)
+  // that keeps ticking over while the admin does other things on this page —
+  // most usefully, picking a DIFFERENT company from the list on the left and
+  // starting a second upload for them without losing sight of the first.
+  // Lives here (not tied to whichever client is selected) so switching
+  // clients never re-expands it by accident.
+  const [uploadsMinimized, setUploadsMinimized] = useState(false);
 
   // ── load clients (from the same source as the Clients page) ────────────
   const loadClients = useCallback(async () => {
@@ -893,6 +1092,12 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
     setSelectedItemIds(new Set());
   };
   const jumpToRoot = () => { setBreadcrumb([]); setSelectedItemIds(new Set()); };
+  // One level up — pops the last breadcrumb entry. No-op (and hidden in the
+  // UI) once already at the root, since there's nowhere further back to go.
+  const goBack = () => {
+    setBreadcrumb((b) => b.slice(0, -1));
+    setSelectedItemIds(new Set());
+  };
 
   // ── toggle visibility ────────────────────────────────────────────────
   const toggleVisible = async (item) => {
@@ -1025,6 +1230,20 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
   const clearClientUploads = useCallback(() => {
     clearAll({ portalUserId: portalUser?.id });
   }, [clearAll, portalUser?.id]);
+
+  const pauseClientUploads = useCallback(() => {
+    if (portalUser?.id) pauseScope(portalUser.id);
+  }, [pauseScope, portalUser?.id]);
+
+  const resumeClientUploads = useCallback(() => {
+    if (portalUser?.id) resumeScope(portalUser.id);
+  }, [resumeScope, portalUser?.id]);
+
+  const stopClientUploads = useCallback(() => {
+    if (portalUser?.id) stopScope(portalUser.id);
+  }, [stopScope, portalUser?.id]);
+
+  const isClientPaused = !!(portalUser?.id && pausedScopes.has(portalUser.id));
 
   // Only this client's uploads are shown in the status card while a client
   // is selected — switching clients doesn't lose other clients' progress,
@@ -1374,6 +1593,15 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
 
                 {/* Toolbar: breadcrumb + actions */}
                 <div className={`rounded-2xl border shadow-sm px-4 py-3 flex items-center gap-2 flex-wrap ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                  {breadcrumb.length > 0 && (
+                    <button
+                      onClick={goBack}
+                      title="Back one folder"
+                      className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 -ml-1 mr-1 rounded-lg border transition ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-600 hover:bg-slate-100'}`}
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" /> Back
+                    </button>
+                  )}
                   <button onClick={jumpToRoot} className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
                     <Home className="h-3.5 w-3.5" /> {portalUser.google_drive_folder_name || 'Root'}
                   </button>
@@ -1476,9 +1704,12 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
                 </div>
 
                 {/* Upload status — shown before the Drive grid so conflict
-                    choices and failed uploads stay visible while work runs. */}
+                    choices and failed uploads stay visible while work runs.
+                    Minimizing swaps this for a floating pill (see below)
+                    that keeps tracking every client's uploads at once, so
+                    switching to another company never loses progress. */}
                 <AnimatePresence>
-                  {clientUploadItems.length > 0 && (
+                  {!uploadsMinimized && clientUploadItems.length > 0 && (
                     <UploadStatusCard
                       items={clientUploadItems}
                       onRetry={retryUpload}
@@ -1487,6 +1718,25 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
                       onClearFinished={clearClientFinishedUploads}
                       onClearAll={clearClientUploads}
                       onRemove={removeItem}
+                      onMinimize={() => setUploadsMinimized(true)}
+                      paused={isClientPaused}
+                      onPause={pauseClientUploads}
+                      onResume={resumeClientUploads}
+                      onStop={stopClientUploads}
+                      isDark={isDark}
+                    />
+                  )}
+                </AnimatePresence>
+
+                {/* Floating minimized pill — visible regardless of which
+                    company is currently selected, so it keeps reporting
+                    combined progress for every client uploading in the
+                    background while the admin browses/selects another one. */}
+                <AnimatePresence>
+                  {uploadsMinimized && allUploadItems.length > 0 && (
+                    <MinimizedUploadBar
+                      allItems={allUploadItems}
+                      onExpand={() => setUploadsMinimized(false)}
                       isDark={isDark}
                     />
                   )}
@@ -1557,6 +1807,32 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
                             busy={busyIds.has(item.id)}
                           />
                         ))}
+                        {/* Trailing quick-add tile — sits wherever the grid's
+                            last row runs out of items, so the leftover empty
+                            cell(s) always do something useful instead of
+                            sitting blank. */}
+                        <motion.button
+                          key="add-tile"
+                          layout
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className={`group rounded-xl border-2 border-dashed p-3 flex flex-col items-center justify-center gap-1.5 text-center min-h-[132px] transition-colors ${
+                            isDark ? 'border-slate-700 hover:border-slate-500 hover:bg-slate-700/30' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                          }`}
+                          title="Add files to this folder"
+                        >
+                          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: `${COLORS.mediumBlue}12` }}>
+                            <Plus className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />
+                          </div>
+                          <p className="text-[11px] font-semibold text-slate-500 group-hover:text-slate-700 dark:group-hover:text-slate-200">Add files</p>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setShowNewFolder(true); }}
+                            className="text-[10px] font-medium text-slate-400 hover:text-slate-600 hover:underline"
+                          >
+                            or new folder
+                          </button>
+                        </motion.button>
                       </AnimatePresence>
                     </div>
                   )}
