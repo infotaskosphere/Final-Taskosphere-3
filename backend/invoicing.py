@@ -225,13 +225,22 @@ def _get_drive_service():
     except google.auth.exceptions.RefreshError as e:
         err_msg = str(e).lower()
 
-        if "invalid_grant" not in err_msg:
+        # Both mean the same thing from the admin's point of view: the
+        # cached refresh token no longer works with the currently configured
+        # GOOGLE_CLIENT_ID/SECRET (invalid_grant = token was revoked/expired;
+        # unauthorized_client = token was issued for a *different* OAuth
+        # client than the one currently configured, e.g. after rotating
+        # credentials in Google Cloud Console or Render's env vars).
+        # Either way the fix is the same: reconnect Drive.
+        is_stale_credential = "invalid_grant" in err_msg or "unauthorized_client" in err_msg
+
+        if not is_stale_credential:
             logger.error(f"DRIVE REFRESH ERROR: {e}", exc_info=True)
             raise HTTPException(500, f"Google Drive auth failed: {str(e)}")
 
-        # --- invalid_grant: cached token is stale or revoked ---
+        # --- stale/mismatched credentials: cached token is unusable ---
         logger.warning(
-            "Google Drive refresh token is invalid (invalid_grant). "
+            f"Google Drive refresh token rejected ({err_msg}). "
             "Clearing env cache and checking DB for a newer token."
         )
 
@@ -257,9 +266,10 @@ def _get_drive_service():
 
         raise HTTPException(
             500,
-            "Google Drive refresh token has expired or been revoked. "
-            "Please go to Settings -> General Settings -> Google Drive "
-            "and click Reconnect to re-authorize.",
+            "Google Drive's connection has stopped working (the saved token no "
+            "longer matches this app's Google credentials). Please go to "
+            "Settings -> General Settings -> Google Drive and click Reconnect "
+            "to re-authorize.",
         )
 
     except HTTPException:
