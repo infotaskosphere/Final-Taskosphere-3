@@ -35,7 +35,7 @@ const COLORS = {
 
 const SIDEBAR_EXPANDED  = 280;
 const SIDEBAR_COLLAPSED = 80;
-const HEADER_H          = 68;
+const HEADER_H          = 76;
 
 // NAV_GROUPS: items with no `permission` key are visible to ALL authenticated users
 // (matching <Protected> routes). Items with a `permission` key are only shown
@@ -429,7 +429,7 @@ const DashboardLayout = ({ children }) => {
                   src="/icon-192.png"
                   alt="Task-O-Sphere"
                   className="object-contain block"
-                  style={{ height: 48, width: 48 }}
+                  style={{ height: 56, width: 56 }}
                 />
               ) : (
                 <img
@@ -437,7 +437,7 @@ const DashboardLayout = ({ children }) => {
                   src={isDark ? '/logo-dark.png' : '/logo-lite.png'}
                   alt="Task-O-Sphere"
                   className="object-contain block mx-auto transition-opacity duration-150"
-                  style={{ height: 44, maxWidth: isDesktop ? sidebarPx - 32 : 180 }}
+                  style={{ height: 60, maxWidth: isDesktop ? sidebarPx - 24 : 200 }}
                 />
               )}
               {hasUnread && (
@@ -464,7 +464,7 @@ const DashboardLayout = ({ children }) => {
             <AnimatePresence mode="wait">
               <motion.h1
                 key={location.pathname}
-                className={`text-sm sm:text-base font-bold truncate min-w-0 ${
+                className={`text-xs sm:text-sm font-semibold truncate min-w-0 tracking-tight ${
                   isDark ? 'text-slate-100' : 'text-slate-800'
                 }`}
                 initial={{ opacity: 0, y: 8 }}
