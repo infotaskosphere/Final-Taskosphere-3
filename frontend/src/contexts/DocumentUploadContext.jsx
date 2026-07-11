@@ -199,12 +199,18 @@ export function DocumentUploadProvider({ children }) {
     const controller = new AbortController();
     abortControllersRef.current.set(itemId, controller);
 
-    updateItem(itemId, { status: 'uploading', file, folderId, errorMsg: null, conflict: null });
+    updateItem(itemId, {
+      status: 'uploading', file, folderId, errorMsg: null, conflict: null,
+      loadedBytes: 0, totalBytes: file.size, uploadStartedAt: Date.now(),
+    });
 
     try {
       const res = await api.post('/client-portal/drive/upload-file', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
         signal: controller.signal,
+        onUploadProgress: (evt) => {
+          updateItem(itemId, { loadedBytes: evt.loaded, totalBytes: evt.total || file.size });
+        },
       });
       abortControllersRef.current.delete(itemId);
       const overwritten = !!res?.data?.overwritten;
