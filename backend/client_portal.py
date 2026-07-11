@@ -1777,6 +1777,64 @@ async def portal_drive_download(
         logger.error(f"Drive download error for file {file_id}: {e}", exc_info=True)
         raise HTTPException(500, "Failed to download file from Google Drive.")
 
+
+@router.get("/drive/admin/download")
+async def admin_drive_download(
+    file_id: str = Query(..., description="Drive file ID to download"),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Admin/manager equivalent of /drive/download — lets Client Portal Manager
+    pull a file's bytes straight through the server's Drive credentials
+    (used by the "Download all" quick action so staff don't have to open
+    every file one-by-one in a new Drive tab).
+    """
+    if current_user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Insufficient permissions")
+
+    from backend.invoicing import _get_drive_service, _drive_configured
+    if not _drive_configured():
+        raise HTTPException(503, "Google Drive not configured.")
+
+    try:
+        service = _get_drive_service()
+        meta = service.files().get(fileId=file_id, fields="id,name,mimeType,size").execute()
+        mime_type = meta.get("mimeType", "application/octet-stream")
+        file_name = meta.get("name", file_id)
+
+        if mime_type in EXPORT_MIME_MAP:
+            export_mime, ext = EXPORT_MIME_MAP[mime_type]
+            request = service.files().export_media(fileId=file_id, mimeType=export_mime)
+            if not file_name.endswith(ext):
+                file_name += ext
+            content_type = export_mime
+        else:
+            request = service.files().get_media(fileId=file_id)
+            content_type = mime_type
+
+        import googleapiclient.http as gapi_http
+        buf = io.BytesIO()
+        downloader = gapi_http.MediaIoBaseDownload(buf, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+        buf.seek(0)
+
+        safe_name = file_name.replace('"', "'")
+        return StreamingResponse(
+            buf,
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{safe_name}"',
+                "Cache-Control": "no-store",
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Admin drive download error for file {file_id}: {e}", exc_info=True)
+        raise HTTPException(500, "Failed to download file from Google Drive.")
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Portal Messages  –  Admin sends, Client reads
 # ═══════════════════════════════════════════════════════════════════════════
