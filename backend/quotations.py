@@ -285,6 +285,10 @@ class QuotationCreate(BaseModel):
     invoice_id: Optional[str] = None
     invoice_no: Optional[str] = None
     converted_at: Optional[str] = None
+    # If provided by the frontend (pre-fetched via /quotations/next-number,
+    # scoped to the selected company), use it after a duplicate check;
+    # otherwise the backend auto-generates one scoped to company_id.
+    quotation_no: Optional[str] = None
 
 
 class QuotationOut(QuotationCreate):
@@ -343,12 +347,91 @@ def _permission_ok(user: User) -> bool:
     return bool(perms.get("can_create_quotations", False))
 
 
-async def _next_qtn_number() -> str:
-    year = datetime.now().year
-    count = await db.quotations.count_documents(
-        {"quotation_no": {"$regex": f"/{year}$"}}
-    )
-    return f"QTN-{count + 1:03d}/{year}"
+async def _next_qtn_number(
+    company_id: str = None,
+    prefix: str = "QTN",
+    separator: str = "/",
+    include_fy: bool = True,
+    fy_format: str = "short",
+    include_month: bool = False,
+    number_padding: int = 3,
+) -> str:
+    """Generate the next available quotation number.
+
+    FIX (numbering continuity bug): the previous implementation used
+    count_documents on a global (not per-company) query, which caused
+    two problems:
+      1. It was NOT scoped per company, so every company created in the
+         system shared one single counter instead of each company having
+         its own continuing sequence (unlike invoice numbering, which was
+         already correctly scoped per company).
+      2. It used a plain COUNT instead of scanning for the MAX existing
+         sequence number, so deleting/renaming any quotation would cause
+         the counter to fall out of sync and could mint a duplicate
+         number the next time a quotation was created.
+
+    This version mirrors the (correct) invoice numbering logic in
+    invoicing.py::_next_invoice_no -- it is scoped per company_id and is
+    MAX-based (scans existing quotation numbers for that company and picks
+    the highest sequence + 1), so numbering always continues correctly
+    from the previous quotation for that company, regardless of
+    deletions, renames, or how many other companies exist.
+    """
+    today = date.today()
+    fy_start = today.year if today.month >= 4 else today.year - 1
+
+    if fy_format == "long":
+        fy_label = f"{fy_start}-{fy_start + 1}"
+    else:
+        fy_label = f"{fy_start % 100:02d}-{(fy_start + 1) % 100:02d}"
+
+    month_str = f"{today.month:02d}"
+    sep = separator if separator and separator.lower() != "none" else ""
+
+    # Build regex to scan existing quotations with this exact format
+    scan_parts = [re.escape(prefix)]
+    if include_fy:
+        scan_parts.append(re.escape(fy_label))
+    if include_month:
+        scan_parts.append(re.escape(month_str))
+    scan_parts.append(r"(\d+)")
+    pattern = re.escape(sep).join(scan_parts)
+    pattern = f"^{pattern}$"
+
+    query: dict = {"quotation_no": {"$regex": f"^{re.escape(prefix)}"}}
+    if company_id:
+        query["company_id"] = company_id
+
+    cursor = db.quotations.find(query, {"_id": 0, "quotation_no": 1})
+    max_seq = 0
+    async for doc in cursor:
+        m = re.match(pattern, doc.get("quotation_no", ""))
+        if m:
+            seq = int(m.group(1))
+            if seq > max_seq:
+                max_seq = seq
+
+    def _build(seq: int) -> str:
+        parts = [prefix]
+        if include_fy:
+            parts.append(fy_label)
+        if include_month:
+            parts.append(month_str)
+        parts.append(str(seq).zfill(number_padding))
+        return sep.join(parts)
+
+    candidate_seq = max_seq + 1
+    for _ in range(50):
+        candidate = _build(candidate_seq)
+        dup_filter: dict = {"quotation_no": candidate}
+        if company_id:
+            dup_filter["company_id"] = company_id
+        taken = await db.quotations.find_one(dup_filter)
+        if not taken:
+            return candidate
+        candidate_seq += 1
+
+    return _build(candidate_seq)
 
 
 async def _update_lead_status_for_quotation(lead_id: str, new_status: str):
@@ -1556,9 +1639,32 @@ async def delete_company(
 
 @router.get("/quotations/next-number")
 async def get_next_quotation_number(
+    company_id: str = Query(..., description="Company ID to scope the numbering"),
+    prefix: str = Query("QTN", description="Custom prefix from Quotation Settings"),
+    separator: str = Query("/", description="Separator character"),
+    include_fy: bool = Query(True, description="Include financial year in number"),
+    fy_format: str = Query("short", description="FY format: short=25-26, long=2025-2026"),
+    include_month: bool = Query(False, description="Include month in number"),
+    number_padding: int = Query(3, description="Zero-pad width for sequential number"),
     current_user: User = Depends(check_module_permission("quotations", "view")),
 ):
-    return {"number": await _next_qtn_number()}
+    """
+    Returns the next available quotation number, scoped per company and
+    MAX-based (scans existing quotation numbers for that company) so it
+    always continues correctly from the previous quotation for that
+    company -- regardless of deletions/renames or how many other companies
+    exist in the system.
+    """
+    next_no = await _next_qtn_number(
+        company_id=company_id,
+        prefix=prefix,
+        separator=separator,
+        include_fy=include_fy,
+        fy_format=fy_format,
+        include_month=include_month,
+        number_padding=number_padding,
+    )
+    return {"number": next_no}
 
 
 @router.get("/quotations/services")
@@ -1581,13 +1687,30 @@ async def create_quotation(
 
     subtotal, gst_amount, total = _compute_totals(computed_items, data.gst_rate)
     now = datetime.now(timezone.utc).isoformat()
-    qtn_no = await _next_qtn_number()
+
+    # Use frontend-supplied number if provided (after a duplicate check,
+    # scoped to the same company); otherwise auto-generate one that
+    # continues correctly from this company's previous quotation.
+    requested_no = (data.quotation_no or "").strip()
+    if requested_no:
+        dup_filter: dict = {"quotation_no": requested_no}
+        if data.company_id:
+            dup_filter["company_id"] = data.company_id
+        conflict = await db.quotations.find_one(dup_filter)
+        if conflict:
+            raise HTTPException(400, f"Quotation number '{requested_no}' is already in use. Please choose a different number.")
+        qtn_no = requested_no
+    else:
+        # Fallback: auto-generate scoped to this company. This path is a
+        # safety net for callers that don't pre-fetch a number via
+        # /quotations/next-number.
+        qtn_no = await _next_qtn_number(company_id=data.company_id)
 
     doc = {
         "id": str(uuid.uuid4()),
         "quotation_no": qtn_no,
         "date": date.today().isoformat(),
-        **data.model_dump(),
+        **data.model_dump(exclude={"quotation_no"}),
         "items": [i.model_dump() for i in computed_items],
         "subtotal": subtotal,
         "gst_amount": gst_amount,
