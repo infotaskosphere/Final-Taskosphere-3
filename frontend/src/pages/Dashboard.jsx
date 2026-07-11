@@ -57,6 +57,7 @@ import {
   Bell,
   BellRing,
   Pencil,
+  Power,
 } from 'lucide-react';
 
 const API_BASE = api.defaults.baseURL;
@@ -1393,6 +1394,23 @@ export default function Dashboard() {
     return `${Math.floor(diffMs / 3600000)}h ${Math.floor((diffMs % 3600000) / 60000)}m`;
   }, [todayAttendance]);
 
+  // ── Worked minutes (numeric, used for the Attendance goal progress bar) ────
+  const getTodayDurationMinutes = useCallback(() => {
+    if (!todayAttendance?.punch_in) return 0;
+    if (todayAttendance.punch_out) return todayAttendance.duration_minutes || 0;
+    const punchInStr  = todayAttendance.punch_in;
+    const punchInDate = new Date(
+      punchInStr.endsWith('Z') ? punchInStr : punchInStr + 'Z'
+    );
+    return Math.floor((Date.now() - punchInDate.getTime()) / 60000);
+  }, [todayAttendance]);
+
+  const ATTENDANCE_GOAL_MINUTES = 8 * 60 + 30; // 8h 30m daily goal
+  const attendanceGoalPercent = Math.min(
+    100,
+    Math.round((getTodayDurationMinutes() / ATTENDANCE_GOAL_MINUTES) * 100)
+  );
+
   const myCompletedTasks = useMemo(
     () => myTasks.filter(t => t.status === 'completed').length,
     [myTasks]
@@ -1731,94 +1749,130 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Attendance — moved up beside the header banner, same height, recolored to match */}
+          {/* Attendance — Pill Style card (Option 2) */}
           <div
-            className="relative overflow-hidden rounded-2xl w-full lg:w-[280px] flex-shrink-0 flex flex-col"
-            style={{
-              background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)`,
-              boxShadow: `0 8px 32px rgba(13,59,102,0.28)`,
-            }}
+            className={`relative overflow-hidden rounded-2xl w-full lg:w-[280px] flex-shrink-0 flex flex-col border shadow-sm hover:shadow-lg transition-all ${
+              isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'
+            }`}
           >
-            <div className="absolute right-0 top-0 w-40 h-40 rounded-full -mr-16 -mt-16 opacity-10"
-              style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
-
-            <div className="relative flex items-center justify-between px-3 pt-2 pb-1.5">
+            {/* Header */}
+            <div className="flex items-center justify-between px-3 pt-3 pb-2">
               <div className="flex items-center gap-2">
-                <div className="p-1 rounded-lg" style={{ background: 'rgba(255,255,255,0.15)' }}>
-                  <Activity className="h-3.5 w-3.5 text-white" />
+                <div className="p-1.5 rounded-lg flex items-center justify-center"
+                  style={{ background: isDark ? 'rgba(31,175,90,0.15)' : 'rgba(31,175,90,0.12)' }}>
+                  <Activity className="h-3.5 w-3.5" style={{ color: COLORS.emeraldGreen }} />
                 </div>
-                <div>
-                  <h3 className="font-semibold text-xs text-white leading-tight">Attendance</h3>
-                  <p className="text-[10px] text-white/50 leading-tight">Daily work hours</p>
-                </div>
+                <h3 className={`font-semibold text-xs ${isDark ? 'text-white' : 'text-slate-800'}`}>Attendance</h3>
               </div>
               <button
                 onClick={() => navigate('/attendance')}
-                className="text-xs h-6 px-2 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors font-medium flex-shrink-0"
+                className={`flex items-center gap-0.5 text-xs font-semibold transition-colors flex-shrink-0 ${
+                  isDark ? 'text-blue-400 hover:text-blue-300' : 'hover:opacity-75'
+                }`}
+                style={isDark ? {} : { color: COLORS.deepBlue }}
               >
-                View Log
+                View Log <ChevronRight className="h-3 w-3" />
               </button>
             </div>
 
-            <div className="relative px-3 pb-2 flex-1 flex flex-col justify-center">
+            <div className="px-3 pb-3 flex-1 flex flex-col justify-center gap-2.5">
               {todayIsHoliday ? (
-                <div className="rounded-xl px-3 py-3 text-center"
-                  style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.18)' }}>
-                  <p className="text-xl mb-0.5 text-white">—</p>
-                  <p className="font-bold text-sm text-white">{todayHolidayName || 'Holiday Today'}</p>
-                  <p className="text-xs mt-0.5 text-white/60">Office is closed today.</p>
+                <div className={`rounded-2xl px-3 py-3 text-center border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                  <p className={`font-bold text-sm ${isDark ? 'text-white' : 'text-slate-800'}`}>{todayHolidayName || 'Holiday Today'}</p>
+                  <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Office is closed today.</p>
                   {!todayAttendance?.punch_in && (
                     <button onClick={() => handlePunchAction('punch_in')} disabled={loading}
-                      className="mt-2 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors text-white border border-white/30 hover:bg-white/10">
+                      className="mt-2 text-xs font-semibold px-3 py-1.5 rounded-full transition-colors text-white bg-emerald-500 hover:bg-emerald-600">
                       Working today? Punch In
                     </button>
                   )}
                   {todayAttendance?.punch_in && !todayAttendance?.punch_out && (
                     <div className="mt-2 space-y-1.5">
-                      <p className="text-xs font-medium text-white/60">Clocked in at {formatToLocalTime(todayAttendance.punch_in)}</p>
-                      <Button onClick={() => handlePunchAction('punch_out')} className="w-full bg-red-500 hover:bg-red-600 rounded-xl h-7 text-xs font-semibold" disabled={loading}>Punch Out</Button>
+                      <p className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Clocked in at {formatToLocalTime(todayAttendance.punch_in)}</p>
+                      <Button onClick={() => handlePunchAction('punch_out')} className="w-full bg-red-500 hover:bg-red-600 rounded-full h-7 text-xs font-semibold" disabled={loading}>Punch Out</Button>
                     </div>
                   )}
-                  {todayAttendance?.punch_out && <p className="mt-1.5 text-xs font-medium text-white/60">Worked {getTodayDuration()} today</p>}
+                  {todayAttendance?.punch_out && <p className={`mt-1.5 text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Worked {getTodayDuration()} today</p>}
                 </div>
               ) : (
-                <div className="space-y-1">
-                  {todayAttendance?.punch_in ? (
-                    <>
-                      <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg"
-                        style={{ background: 'rgba(31,175,90,0.18)', border: '1px solid rgba(31,175,90,0.3)' }}>
-                        <div className="flex items-center gap-1.5 text-xs text-white/85">
-                          <LogIn className="h-3.5 w-3.5 text-emerald-300" />
-                          <span className="font-medium">Punch In</span>
-                        </div>
-                        <span className="font-bold text-xs text-white">{formatToLocalTime(todayAttendance.punch_in)}</span>
+                <>
+                  {/* Status pill row */}
+                  <div className={`flex items-center justify-between gap-2 rounded-2xl px-2.5 py-2 border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                    {todayAttendance?.punch_in ? (
+                      todayAttendance.punch_out ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full bg-slate-200/70 text-slate-500 dark:bg-slate-600/50 dark:text-slate-300 flex-shrink-0">
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-400 inline-block" /> Done
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/30 flex-shrink-0">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" /> Working
+                        </span>
+                      )
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full bg-slate-200/70 text-slate-500 dark:bg-slate-600/50 dark:text-slate-300 flex-shrink-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-400 inline-block" /> Not Started
+                      </span>
+                    )}
+
+                    {todayAttendance?.punch_in && (
+                      <div className="text-center min-w-0">
+                        <p className={`text-xs font-bold leading-tight ${isDark ? 'text-white' : 'text-slate-800'}`}>
+                          {formatToLocalTime(todayAttendance.punch_in)}
+                        </p>
                       </div>
-                      {todayAttendance.punch_out ? (
-                        <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg"
-                          style={{ background: 'rgba(248,113,113,0.18)', border: '1px solid rgba(248,113,113,0.3)' }}>
-                          <div className="flex items-center gap-1.5 text-xs text-white/85">
-                            <LogOut className="h-3.5 w-3.5 text-red-300" />
-                            <span className="font-medium">Punch Out</span>
-                          </div>
-                          <span className="font-bold text-xs text-white">{formatToLocalTime(todayAttendance.punch_out)}</span>
+                    )}
+
+                    {todayAttendance?.punch_in && (
+                      <div className="text-center min-w-0">
+                        <p className={`text-xs font-bold leading-tight tabular-nums ${isDark ? 'text-white' : 'text-slate-800'}`}>
+                          {getTodayDuration()}
+                        </p>
+                        <p className={`text-[9px] leading-tight ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>Worked</p>
+                      </div>
+                    )}
+
+                    {todayAttendance?.punch_in ? (
+                      todayAttendance.punch_out ? (
+                        <div className="p-1.5 rounded-full bg-emerald-500/10 flex-shrink-0">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
                         </div>
                       ) : (
-                        <Button onClick={() => handlePunchAction('punch_out')} className="w-full bg-red-500 hover:bg-red-600 rounded-lg h-8 text-xs font-semibold" disabled={loading}>
-                          Punch Out
-                        </Button>
-                      )}
-                      <div className="flex items-center justify-between px-2.5 py-1 rounded-lg"
-                        style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.18)' }}>
-                        <p className="text-[9px] font-semibold uppercase tracking-wider text-white/55">Total Today</p>
-                        <p className="text-sm font-bold tracking-tight text-white tabular-nums">{getTodayDuration()}</p>
-                      </div>
-                    </>
-                  ) : (
-                    <Button onClick={() => handlePunchAction('punch_in')} className="w-full bg-emerald-500 hover:bg-emerald-600 rounded-lg h-9 text-sm font-semibold" disabled={loading}>
-                      Punch In
-                    </Button>
-                  )}
-                </div>
+                        <button
+                          onClick={() => handlePunchAction('punch_out')}
+                          disabled={loading}
+                          className="p-1.5 rounded-full bg-red-500 hover:bg-red-600 transition-colors flex-shrink-0 disabled:opacity-60"
+                          title="Punch Out"
+                        >
+                          <Power className="h-3.5 w-3.5 text-white" />
+                        </button>
+                      )
+                    ) : (
+                      <Button
+                        onClick={() => handlePunchAction('punch_in')}
+                        disabled={loading}
+                        className="bg-emerald-500 hover:bg-emerald-600 rounded-full h-7 px-3 text-[11px] font-semibold flex-shrink-0"
+                      >
+                        Punch In
+                      </Button>
+                    )}
+                  </div>
+
+                  {/* Goal progress row */}
+                  <div className="flex items-center gap-2 px-0.5">
+                    <span className={`text-[10px] font-medium whitespace-nowrap ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      Goal: 8h 30m
+                    </span>
+                    <div className={`flex-1 h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                      <div
+                        className="h-full rounded-full bg-emerald-500 transition-all duration-500"
+                        style={{ width: `${attendanceGoalPercent}%` }}
+                      />
+                    </div>
+                    <span className={`text-[10px] font-semibold tabular-nums ${isDark ? 'text-slate-300' : 'text-slate-500'}`}>
+                      {attendanceGoalPercent}%
+                    </span>
+                  </div>
+                </>
               )}
             </div>
           </div>
