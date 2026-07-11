@@ -1768,6 +1768,7 @@ async def portal_drive_download(
             headers={
                 "Content-Disposition": f'{disposition_value}; filename="{safe_name}"',
                 "Cache-Control": "no-store",
+                "Content-Length": str(buf.getbuffer().nbytes),
             },
         )
 
@@ -1827,6 +1828,7 @@ async def admin_drive_download(
             headers={
                 "Content-Disposition": f'attachment; filename="{safe_name}"',
                 "Cache-Control": "no-store",
+                "Content-Length": str(buf.getbuffer().nbytes),
             },
         )
     except HTTPException:
