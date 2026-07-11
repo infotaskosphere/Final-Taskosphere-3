@@ -35,7 +35,7 @@ const COLORS = {
 
 const SIDEBAR_EXPANDED  = 280;
 const SIDEBAR_COLLAPSED = 80;
-const HEADER_H          = 84;
+const HEADER_H          = 68;
 
 // NAV_GROUPS: items with no `permission` key are visible to ALL authenticated users
 // (matching <Protected> routes). Items with a `permission` key are only shown
@@ -421,19 +421,23 @@ const DashboardLayout = ({ children }) => {
             className="relative flex items-center justify-center w-full min-w-0"
           >
             <div className="relative flex-shrink-0 flex items-center justify-center">
+              {/* Preload both variants so the theme swap is instant, no flicker. */}
+              <img src="/logo-lite.png" alt="" aria-hidden="true" style={{ display: 'none' }} />
+              <img src="/logo-dark.png" alt="" aria-hidden="true" style={{ display: 'none' }} />
               {collapsed && isDesktop ? (
                 <img
                   src="/icon-192.png"
                   alt="Task-O-Sphere"
                   className="object-contain block"
-                  style={{ height: 56, width: 56 }}
+                  style={{ height: 48, width: 48 }}
                 />
               ) : (
                 <img
-                  src="/logo-transparent.png"
+                  key={isDark ? 'dark' : 'lite'}
+                  src={isDark ? '/logo-dark.png' : '/logo-lite.png'}
                   alt="Task-O-Sphere"
-                  className="object-contain block mx-auto"
-                  style={{ height: 56, maxWidth: isDesktop ? sidebarPx - 32 : 200 }}
+                  className="object-contain block mx-auto transition-opacity duration-150"
+                  style={{ height: 44, maxWidth: isDesktop ? sidebarPx - 32 : 180 }}
                 />
               )}
               {hasUnread && (
@@ -480,8 +484,10 @@ const DashboardLayout = ({ children }) => {
             {/* Theme toggle */}
             <motion.button
               onClick={() => setIsDark(!isDark)}
-              className={`relative flex-shrink-0 w-[52px] h-7 rounded-full flex items-center border transition-colors ${
-                isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-200 border-slate-300'
+              className={`relative flex-shrink-0 w-[54px] h-7 rounded-full flex items-center border transition-colors shadow-inner ${
+                isDark
+                  ? 'bg-gradient-to-r from-slate-800 to-slate-700 border-slate-600'
+                  : 'bg-gradient-to-r from-sky-100 to-slate-100 border-slate-300'
               }`}
               whileTap={{ scale: 0.93 }}
               transition={springMed}
@@ -527,12 +533,23 @@ const DashboardLayout = ({ children }) => {
                 whileTap={{ scale: 0.98 }}
                 aria-label="Open user menu"
               >
-                <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg overflow-hidden flex-shrink-0 ring-1 ring-slate-200 dark:ring-slate-600">
+                <div
+                  className="w-7 h-7 sm:w-8 sm:h-8 rounded-full overflow-hidden flex-shrink-0 ring-2 ring-offset-2 transition-shadow"
+                  style={{
+                    boxShadow: isDark
+                      ? '0 0 0 1px rgba(31,175,90,0.35), 0 2px 8px rgba(0,0,0,0.35)'
+                      : '0 0 0 1px rgba(13,59,102,0.15), 0 2px 8px rgba(13,59,102,0.12)',
+                    // ring-offset color follows the header background
+                    // (Tailwind ring-offset requires --tw-ring-offset-color; we set it via inline style)
+                    ['--tw-ring-color']: isDark ? '#1FAF5A' : '#0D3B66',
+                    ['--tw-ring-offset-color']: isDark ? '#0f172a' : '#ffffff',
+                  }}
+                >
                   {user?.profile_picture ? (
                     <img src={user.profile_picture} alt={user.full_name} className="w-full h-full object-cover" />
                   ) : (
                     <div
-                      className="w-full h-full flex items-center justify-center text-white font-semibold text-xs"
+                      className="w-full h-full flex items-center justify-center text-white font-bold text-xs"
                       style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
                     >
                       {user?.full_name?.[0]?.toUpperCase() || 'U'}
