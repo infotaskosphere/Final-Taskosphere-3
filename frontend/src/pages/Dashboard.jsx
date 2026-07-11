@@ -199,7 +199,7 @@ const LiveClock = memo(function LiveClock({ compact = false }) {
         <div className="flex items-end gap-1.5">
           <span
             className="font-black leading-none tracking-tight text-white"
-            style={{ fontSize: '1.75rem', fontFamily: "'Roboto Mono', monospace" }}
+            style={{ fontSize: '1.35rem', fontFamily: "'Roboto Mono', monospace" }}
           >
             {timeStr}
           </span>
@@ -1634,7 +1634,7 @@ export default function Dashboard() {
 
           {/* Header banner — width reduced to make room for the Attendance card */}
           <div
-            className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-3 sm:pt-4 pb-3 flex-1 min-w-0"
+            className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-2 sm:pt-2.5 pb-2 sm:pb-2.5 flex-1 min-w-0"
             style={{
               background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)`,
               boxShadow: `0 8px 32px rgba(13,59,102,0.28)`,
@@ -1654,7 +1654,7 @@ export default function Dashboard() {
                     <GreetIcon className="h-3 w-3" />
                     {format(new Date(), 'EEEE, MMMM d, yyyy')}
                   </p>
-                  <h1 className="text-2xl font-bold text-white tracking-tight leading-tight">
+                  <h1 className="text-xl sm:text-[22px] font-bold text-white tracking-tight leading-tight">
                     {getGreeting()}, {user?.full_name?.split(' ')[0] || 'User'}!
                   </h1>
                   {todayIsHoliday && (
@@ -1671,17 +1671,17 @@ export default function Dashboard() {
                         whileHover={{ scale: 1.04, y: -1, transition: springPhysics.card }}
                         whileTap={{ scale: 0.97 }}
                         onClick={() => navigate('/tasks')}
-                        className="flex flex-col items-center justify-center px-3.5 py-1.5 rounded-xl cursor-pointer transition-all"
+                        className="flex flex-col items-center justify-center px-3 py-1 rounded-xl cursor-pointer transition-all"
                         style={{
                           background: 'rgba(255,255,255,0.12)',
                           border: '1px solid rgba(255,255,255,0.2)',
                           backdropFilter: 'blur(8px)',
-                          minWidth: 90,
+                          minWidth: 84,
                         }}
                       >
                         <span
                           className="font-black leading-none tracking-tight text-white"
-                          style={{ fontSize: '1.75rem', fontFamily: "'Roboto Mono', monospace" }}
+                          style={{ fontSize: '1.35rem', fontFamily: "'Roboto Mono', monospace" }}
                         >
                           {stats?.total_tasks ?? tasks.length}
                         </span>
@@ -1733,7 +1733,7 @@ export default function Dashboard() {
 
           {/* Attendance — moved up beside the header banner, same height, recolored to match */}
           <div
-            className="relative overflow-hidden rounded-2xl w-full lg:w-[300px] flex-shrink-0 flex flex-col"
+            className="relative overflow-hidden rounded-2xl w-full lg:w-[280px] flex-shrink-0 flex flex-col"
             style={{
               background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)`,
               boxShadow: `0 8px 32px rgba(13,59,102,0.28)`,
@@ -1742,7 +1742,7 @@ export default function Dashboard() {
             <div className="absolute right-0 top-0 w-40 h-40 rounded-full -mr-16 -mt-16 opacity-10"
               style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
 
-            <div className="relative flex items-center justify-between px-3 pt-3 pb-2">
+            <div className="relative flex items-center justify-between px-3 pt-2 pb-1.5">
               <div className="flex items-center gap-2">
                 <div className="p-1 rounded-lg" style={{ background: 'rgba(255,255,255,0.15)' }}>
                   <Activity className="h-3.5 w-3.5 text-white" />
@@ -1760,7 +1760,7 @@ export default function Dashboard() {
               </button>
             </div>
 
-            <div className="relative px-3 pb-3 flex-1 flex flex-col justify-center">
+            <div className="relative px-3 pb-2 flex-1 flex flex-col justify-center">
               {todayIsHoliday ? (
                 <div className="rounded-xl px-3 py-3 text-center"
                   style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.18)' }}>
@@ -1782,10 +1782,10 @@ export default function Dashboard() {
                   {todayAttendance?.punch_out && <p className="mt-1.5 text-xs font-medium text-white/60">Worked {getTodayDuration()} today</p>}
                 </div>
               ) : (
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   {todayAttendance?.punch_in ? (
                     <>
-                      <div className="flex items-center justify-between px-2.5 py-2 rounded-lg"
+                      <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg"
                         style={{ background: 'rgba(31,175,90,0.18)', border: '1px solid rgba(31,175,90,0.3)' }}>
                         <div className="flex items-center gap-1.5 text-xs text-white/85">
                           <LogIn className="h-3.5 w-3.5 text-emerald-300" />
@@ -1794,7 +1794,7 @@ export default function Dashboard() {
                         <span className="font-bold text-xs text-white">{formatToLocalTime(todayAttendance.punch_in)}</span>
                       </div>
                       {todayAttendance.punch_out ? (
-                        <div className="flex items-center justify-between px-2.5 py-2 rounded-lg"
+                        <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg"
                           style={{ background: 'rgba(248,113,113,0.18)', border: '1px solid rgba(248,113,113,0.3)' }}>
                           <div className="flex items-center gap-1.5 text-xs text-white/85">
                             <LogOut className="h-3.5 w-3.5 text-red-300" />
@@ -1807,10 +1807,10 @@ export default function Dashboard() {
                           Punch Out
                         </Button>
                       )}
-                      <div className="text-center py-2 rounded-lg"
+                      <div className="flex items-center justify-between px-2.5 py-1 rounded-lg"
                         style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.18)' }}>
                         <p className="text-[9px] font-semibold uppercase tracking-wider text-white/55">Total Today</p>
-                        <p className="text-lg font-bold mt-0.5 tracking-tight text-white">{getTodayDuration()}</p>
+                        <p className="text-sm font-bold tracking-tight text-white tabular-nums">{getTodayDuration()}</p>
                       </div>
                     </>
                   ) : (
