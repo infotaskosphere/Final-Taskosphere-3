@@ -38,6 +38,7 @@ import { Input }    from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch }   from '@/components/ui/switch';
 import api from '@/lib/api';
+import { mirrorBankToSettings, bankFromCompany } from '@/lib/bankSync';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
@@ -305,16 +306,16 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
     if (open) {
       const id = cid || companies[0]?.id || '';
       setCid(id);
-      if (id) setForm(getInvSettings(id));
+      if (id) setForm({ ...getInvSettings(id), ...bankFromCompany(companies.find(c => c.id === id)) });
       setTab('numbering');
       setSaved(false);
     }
   }, [open]); // eslint-disable-line
 
   useEffect(() => {
-    if (cid) setForm(getInvSettings(cid));
+    if (cid) setForm({ ...getInvSettings(cid), ...bankFromCompany(companies.find(c => c.id === cid)) });
     setSaved(false);
-  }, [cid]);
+  }, [cid, companies]);
 
   useEffect(() => {
     if (tab !== 'preview' || !cid) return;
@@ -354,12 +355,18 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
 
     try {
       await api.put(`/companies/${cid}`, {
-        bank_name:       form.bank_name,
-        bank_account_no: form.bank_account_no,
-        bank_ifsc:       form.bank_ifsc,
-        bank_branch:     form.bank_branch,
-        upi_id:          form.upi_id,
+        bank_account_name:  form.bank_account_holder,
+        bank_account_holder:form.bank_account_holder,
+        bank_name:          form.bank_name,
+        bank_account_no:    form.bank_account_no,
+        bank_ifsc:          form.bank_ifsc,
+        bank_branch:        form.bank_branch,
+        bank_account_type:  form.bank_account_type,
+        upi_id:             form.upi_id,
       });
+      // Mirror the same bank details into the Quotation settings (and back
+      // into Invoice settings) so all three places stay in sync instantly.
+      mirrorBankToSettings(cid, form);
     } catch (err) {
       toast.warning('Settings saved locally but failed to sync bank/UPI to server');
     }
