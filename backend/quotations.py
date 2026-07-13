@@ -1533,6 +1533,9 @@ async def create_company(
         "bank_name": data.get("bank_name", ""),
         "bank_account_no": data.get("bank_account_no", ""),
         "bank_ifsc": data.get("bank_ifsc", ""),
+        "bank_branch": data.get("bank_branch", ""),
+        "bank_account_type": data.get("bank_account_type", "Current"),
+        "upi_id": data.get("upi_id", ""),
         "logo_base64": data.get("logo_base64"),
         "tm_logo_base64": data.get("tm_logo_base64"),
         "signature_base64": data.get("signature_base64"),
@@ -1598,6 +1601,10 @@ async def update_company(
         "bank_name",
         "bank_account_no",
         "bank_ifsc",
+        "bank_branch",
+        "bank_account_type",
+        "upi_id",
+        "bank_account_holder",
         "logo_base64",
         "tm_logo_base64",
         "signature_base64",
@@ -1615,6 +1622,14 @@ async def update_company(
     }
     await db.companies.update_one({"id": company_id}, {"$set": update})
     updated = await db.companies.find_one({"id": company_id}, {"_id": 0})
+    # Keep the Bank Accounts page in sync: mirror the company's primary
+    # bank details into the bank_accounts collection whenever they change
+    # here (Invoice/Quotation settings both save through this endpoint).
+    try:
+        from backend.bank_accounts import sync_company_primary_bank_account
+        await sync_company_primary_bank_account(updated)
+    except Exception:
+        pass
     return updated
 
 
