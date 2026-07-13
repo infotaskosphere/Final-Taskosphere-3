@@ -7,6 +7,7 @@ import { Input }    from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch }   from '@/components/ui/switch';
 import api from '@/lib/api';
+import { mirrorBankToSettings, bankFromCompany } from '@/lib/bankSync';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
@@ -210,16 +211,16 @@ export default function QuotationSettings({ open, onClose, companies = [], isDar
     if (open) {
       const id = cid || companies[0]?.id || '';
       setCid(id);
-      if (id) setForm(getQtnSettings(id));
+      if (id) setForm({ ...getQtnSettings(id), ...bankFromCompany(companies.find(c => c.id === id)) });
       setTab('numbering');
       setSaved(false);
     }
   }, [open]); // eslint-disable-line
 
   useEffect(() => {
-    if (cid) setForm(getQtnSettings(cid));
+    if (cid) setForm({ ...getQtnSettings(cid), ...bankFromCompany(companies.find(c => c.id === cid)) });
     setSaved(false);
-  }, [cid]);
+  }, [cid, companies]);
 
   useEffect(() => {
     if (tab !== 'preview' || !cid) return;
@@ -268,13 +269,19 @@ export default function QuotationSettings({ open, onClose, companies = [], isDar
         : ((COLOR_THEMES || []).find(t => t.id === form.theme)?.primary || form.custom_color || '#0D3B66');
 
       await api.put(`/companies/${cid}`, {
+        bank_account_name:    form.bank_account_holder,
+        bank_account_holder:  form.bank_account_holder,
         bank_name:            form.bank_name,
         bank_account_no:      form.bank_account_no,
         bank_ifsc:            form.bank_ifsc,
         bank_branch:          form.bank_branch,
+        bank_account_type:    form.bank_account_type,
         upi_id:               form.upi_id,
         invoice_custom_color: resolvedSaveColor,
       });
+      // Mirror the same bank details into the Invoice settings (and back into
+      // Quotation settings) so all three places stay in sync instantly.
+      mirrorBankToSettings(cid, form);
     } catch (err) {
       toast.warning('Settings saved locally but failed to sync bank/UPI to server');
     }
