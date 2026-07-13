@@ -954,6 +954,11 @@ export default function LeadsPage() {
   };
   const [form, setForm] = useState(emptyForm);
 
+  // ── Smart Document Import (Auto-fill from Documents) — New Lead only ────
+  const [leadSmartFiles,   setLeadSmartFiles]   = useState({ gst: null, udyam: null, mca: null });
+  const [leadSmartLoading, setLeadSmartLoading] = useState(false);
+  const [leadSmartError,   setLeadSmartError]   = useState('');
+
   const fetchLeads = async () => {
     try {
       const r = await api.get('/leads');
@@ -999,8 +1004,53 @@ export default function LeadsPage() {
 
   const userNameById = id => { const u = allUsers.find(u => u.id === id); return u ? u.full_name : id || '—'; };
 
-  const resetForm = () => { setForm(emptyForm); setErrors({}); };
+  const resetForm = () => { setForm(emptyForm); setErrors({}); setLeadSmartFiles({ gst: null, udyam: null, mca: null }); setLeadSmartError(''); };
   const handleChange = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+  // ── Extract & fill lead form from uploaded GST / Udyam / MCA documents ──
+  const handleLeadSmartExtract = async () => {
+    const anyFile = leadSmartFiles.gst || leadSmartFiles.udyam || leadSmartFiles.mca;
+    if (!anyFile) return;
+    setLeadSmartLoading(true);
+    setLeadSmartError('');
+    try {
+      const fd = new FormData();
+      if (leadSmartFiles.gst)   fd.append('files', leadSmartFiles.gst);
+      if (leadSmartFiles.udyam) fd.append('files', leadSmartFiles.udyam);
+      if (leadSmartFiles.mca)   fd.append('files', leadSmartFiles.mca);
+      const res = await api.post('/clients/parse-multi-documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const parsed = res.data;
+      const firstContact = (parsed.contact_persons || [])[0];
+
+      const extraNotesParts = [];
+      if (parsed.gstin)        extraNotesParts.push(`GSTIN: ${parsed.gstin}`);
+      if (parsed.pan)          extraNotesParts.push(`PAN: ${parsed.pan}`);
+      if (parsed.udyam_number) extraNotesParts.push(`Udyam No: ${parsed.udyam_number}`);
+      const addrParts = [parsed.address, parsed.city, parsed.state].filter(Boolean);
+      if (addrParts.length)    extraNotesParts.push(`Address: ${addrParts.join(', ')}`);
+      const extraNotes = extraNotesParts.join(' | ');
+
+      setForm(prev => ({
+        ...prev,
+        company_name: parsed.company_name || prev.company_name,
+        contact_name: firstContact?.name  || prev.contact_name,
+        email:        parsed.email        || prev.email,
+        phone:        parsed.phone        || prev.phone,
+        notes:        [prev.notes, extraNotes].filter(Boolean).join('\n'),
+      }));
+      setLeadSmartFiles({ gst: null, udyam: null, mca: null });
+      toast.success(
+        `Data extracted from ${parsed.doc_types_found?.join(' + ') || 'document(s)'}! Review and save.`,
+        { duration: 5000 }
+      );
+    } catch (err) {
+      const msg = err?.response?.data?.detail || err.message || 'Failed to parse documents';
+      setLeadSmartError(msg);
+      toast.error(msg);
+    } finally {
+      setLeadSmartLoading(false);
+    }
+  };
 
   // ── Draft persistence for add-lead form ──────────────────────────────────
   const LEADS_DRAFT_KEY = 'taskosphere_leads_add_draft';
@@ -1768,6 +1818,110 @@ export default function LeadsPage() {
               {editingLead ? 'Update lead details.' : 'Fill in the details to add a new lead.'}
             </DialogDescription>
           </DialogHeader>
+
+          {/* ── Smart Document Import — only when creating a brand-new lead ── */}
+          {!editingLead && (
+            <div className="border-2 rounded-2xl p-4 bg-gradient-to-br from-blue-50/80 to-indigo-50/50 border-blue-100 mt-1">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white flex-shrink-0 shadow-sm" style={{ background: 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>
+                  <FileText className="h-4 w-4" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-slate-800">Auto-fill from Documents</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Upload GST Certificate, Udyam Certificate, or MCA Master Data — form fills automatically</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-3 mb-3">
+                {/* GST */}
+                <div
+                  className={cn('relative border-2 border-dashed rounded-xl p-3 flex flex-col items-center gap-1.5 cursor-pointer transition-all hover:border-blue-400 hover:bg-blue-50/60', leadSmartFiles.gst ? 'border-emerald-400 bg-emerald-50/60' : 'border-slate-200 bg-white/60')}
+                  onClick={() => document.getElementById('_lead_si_gst')?.click()}
+                >
+                  {leadSmartFiles.gst ? (
+                    <>
+                      <Check className="h-5 w-5 text-emerald-600" />
+                      <p className="text-[10px] font-bold text-emerald-700 text-center leading-tight truncate max-w-full">{leadSmartFiles.gst.name}</p>
+                      <button type="button" onClick={e => { e.stopPropagation(); setLeadSmartFiles(p => ({ ...p, gst: null })); }} className="text-[9px] text-red-400 hover:text-red-600 font-medium">Remove</button>
+                    </>
+                  ) : (
+                    <>
+                      <FileText className="h-5 w-5 text-blue-600" />
+                      <p className="text-[10px] font-bold text-slate-600 text-center">GST Certificate</p>
+                      <p className="text-[9px] text-slate-400 text-center">Form GST REG-06 PDF</p>
+                    </>
+                  )}
+                  <input id="_lead_si_gst" type="file" accept=".pdf" className="hidden" onChange={e => { if (e.target.files[0]) setLeadSmartFiles(p => ({ ...p, gst: e.target.files[0] })); e.target.value = ''; }} />
+                </div>
+                {/* Udyam */}
+                <div
+                  className={cn('relative border-2 border-dashed rounded-xl p-3 flex flex-col items-center gap-1.5 cursor-pointer transition-all hover:border-orange-400 hover:bg-orange-50/60', leadSmartFiles.udyam ? 'border-emerald-400 bg-emerald-50/60' : 'border-slate-200 bg-white/60')}
+                  onClick={() => document.getElementById('_lead_si_udyam')?.click()}
+                >
+                  {leadSmartFiles.udyam ? (
+                    <>
+                      <Check className="h-5 w-5 text-emerald-600" />
+                      <p className="text-[10px] font-bold text-emerald-700 text-center leading-tight truncate max-w-full">{leadSmartFiles.udyam.name}</p>
+                      <button type="button" onClick={e => { e.stopPropagation(); setLeadSmartFiles(p => ({ ...p, udyam: null })); }} className="text-[9px] text-red-400 hover:text-red-600 font-medium">Remove</button>
+                    </>
+                  ) : (
+                    <>
+                      <Layers className="h-5 w-5 text-orange-600" />
+                      <p className="text-[10px] font-bold text-slate-600 text-center">Udyam Certificate</p>
+                      <p className="text-[9px] text-slate-400 text-center">Udyam Registration PDF</p>
+                    </>
+                  )}
+                  <input id="_lead_si_udyam" type="file" accept=".pdf" className="hidden" onChange={e => { if (e.target.files[0]) setLeadSmartFiles(p => ({ ...p, udyam: e.target.files[0] })); e.target.value = ''; }} />
+                </div>
+                {/* MCA */}
+                <div
+                  className={cn('relative border-2 border-dashed rounded-xl p-3 flex flex-col items-center gap-1.5 cursor-pointer transition-all hover:border-violet-400 hover:bg-violet-50/60', leadSmartFiles.mca ? 'border-emerald-400 bg-emerald-50/60' : 'border-slate-200 bg-white/60')}
+                  onClick={() => document.getElementById('_lead_si_mca')?.click()}
+                >
+                  {leadSmartFiles.mca ? (
+                    <>
+                      <Check className="h-5 w-5 text-emerald-600" />
+                      <p className="text-[10px] font-bold text-emerald-700 text-center leading-tight truncate max-w-full">{leadSmartFiles.mca.name}</p>
+                      <button type="button" onClick={e => { e.stopPropagation(); setLeadSmartFiles(p => ({ ...p, mca: null })); }} className="text-[9px] text-red-400 hover:text-red-600 font-medium">Remove</button>
+                    </>
+                  ) : (
+                    <>
+                      <Building2 className="h-5 w-5 text-violet-600" />
+                      <p className="text-[10px] font-bold text-slate-600 text-center">MCA Master Data</p>
+                      <p className="text-[9px] text-slate-400 text-center">Excel (.xlsx) or MCA PDF</p>
+                    </>
+                  )}
+                  <input id="_lead_si_mca" type="file" accept=".xlsx,.xls,.pdf" className="hidden" onChange={e => { if (e.target.files[0]) setLeadSmartFiles(p => ({ ...p, mca: e.target.files[0] })); e.target.value = ''; }} />
+                </div>
+              </div>
+              {(leadSmartFiles.gst || leadSmartFiles.udyam || leadSmartFiles.mca) && (
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    disabled={leadSmartLoading}
+                    onClick={handleLeadSmartExtract}
+                    className="h-9 px-5 text-sm rounded-xl text-white font-semibold shadow-sm disabled:opacity-50 flex items-center gap-2 transition-all"
+                    style={{ background: leadSmartLoading ? '#94a3b8' : 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}
+                  >
+                    {leadSmartLoading ? (
+                      <><div className="w-3.5 h-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" /> Extracting…</>
+                    ) : (
+                      <><Zap className="h-3.5 w-3.5" /> Extract &amp; Fill Form</>
+                    )}
+                  </button>
+                  <p className="text-[10px] text-slate-400">
+                    {[leadSmartFiles.gst && 'GST', leadSmartFiles.udyam && 'Udyam', leadSmartFiles.mca && 'MCA'].filter(Boolean).join(' + ')} ready
+                  </p>
+                </div>
+              )}
+              {leadSmartError && (
+                <div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-xl border border-red-200 bg-red-50">
+                  <AlertTriangle className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />
+                  <p className="text-xs text-red-700 font-medium">{leadSmartError}</p>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-2">
             <SectionLabel icon={Building2}>Company Info</SectionLabel>
             <div className="md:col-span-2 space-y-1.5">
