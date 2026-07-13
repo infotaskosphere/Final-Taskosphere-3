@@ -8,7 +8,7 @@ import {
   PanelLeftClose, PanelLeftOpen, Target, Sun, Moon, MapPin,
   Settings, Mail, Receipt, X, KeyRound, BrainCircuit,
   CreditCard, Fingerprint, Bell, Shield, ShieldCheck, ArrowLeftRight, MessageCircle,
-  Building2, Zap, Briefcase,
+  Building2, Zap, Briefcase, ShoppingCart,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -86,10 +86,22 @@ const NAV_GROUPS = [
     items: [
       { path: '/leads',      icon: Target,   label: 'Lead Management', permission: 'can_view_all_leads'    },
       { path: '/quotations', icon: Receipt,  label: 'Quotations',      permission: 'can_create_quotations' },
+    ],
+  },
+  {
+    id: 'accounts',
+    dividerLabel: 'Accounts',
+    items: [
       {
         path:       '/invoicing',
         icon:       CreditCard,
-        label:      'Invoicing',
+        label:      'Sale',
+        permission: ['can_manage_invoices', 'can_create_quotations'],
+      },
+      {
+        path:       '/purchase',
+        icon:       ShoppingCart,
+        label:      'Purchase',
         permission: ['can_manage_invoices', 'can_create_quotations'],
       },
     ],
