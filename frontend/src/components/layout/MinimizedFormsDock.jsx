@@ -31,7 +31,8 @@ const PAGE_LABELS = {
   '/clients': 'Clients',
   '/users': 'Users',
   '/compliance': 'Compliance',
-  '/invoicing': 'Invoicing',
+  '/invoicing': 'Sale',
+  '/purchase': 'Purchase',
   '/trademark-sphere': 'Trademark Sphere',
 };
 
