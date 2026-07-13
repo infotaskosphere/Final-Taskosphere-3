@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
+import { mirrorBankToSettings, bankFromAccount } from '@/lib/bankSync';
 
 const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2', emeraldGreen: '#1FAF5A', amber: '#F59E0B', coral: '#FF6B6B' };
 const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
@@ -31,7 +32,7 @@ function BankAccountsInner() {
   const [uploading, setUploading] = useState(false);
   const [file, setFile] = useState(null);
   const [showNewAccount, setShowNewAccount] = useState(false);
-  const [form, setForm] = useState({ bank_name: '', account_holder: '', account_number: '', ifsc: '', account_type: 'current', opening_balance: 0, company_id: '' });
+  const [form, setForm] = useState({ bank_name: '', account_holder: '', account_number: '', ifsc: '', branch: '', account_type: 'current', opening_balance: 0, upi_id: '', company_id: '' });
   const [savingAccount, setSavingAccount] = useState(false);
 
   const fetchAccounts = async () => {
@@ -77,9 +78,12 @@ function BankAccountsInner() {
     setSavingAccount(true);
     try {
       await api.post('/bank-accounts', form);
-      toast.success('Bank account added');
+      // Sync this account into Invoice + Quotation settings for the linked
+      // company so the same bank details appear in all three places.
+      if (form.company_id) mirrorBankToSettings(form.company_id, bankFromAccount(form));
+      toast.success(form.company_id ? 'Bank account added & synced to invoice/quotation settings' : 'Bank account added');
       setShowNewAccount(false);
-      setForm({ bank_name: '', account_holder: '', account_number: '', ifsc: '', account_type: 'current', opening_balance: 0, company_id: '' });
+      setForm({ bank_name: '', account_holder: '', account_number: '', ifsc: '', branch: '', account_type: 'current', opening_balance: 0, upi_id: '', company_id: '' });
       await fetchAccounts();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to add bank account');
@@ -305,6 +309,8 @@ function BankAccountsInner() {
             <Input placeholder="Account holder name" value={form.account_holder} onChange={e => setForm(f => ({ ...f, account_holder: e.target.value }))} />
             <Input placeholder="Account number" value={form.account_number} onChange={e => setForm(f => ({ ...f, account_number: e.target.value }))} />
             <Input placeholder="IFSC code" value={form.ifsc} onChange={e => setForm(f => ({ ...f, ifsc: e.target.value.toUpperCase() }))} />
+            <Input placeholder="Branch (optional)" value={form.branch} onChange={e => setForm(f => ({ ...f, branch: e.target.value }))} />
+            <Input placeholder="UPI ID (optional)" value={form.upi_id} onChange={e => setForm(f => ({ ...f, upi_id: e.target.value }))} />
             <Input type="number" placeholder="Opening balance" value={form.opening_balance} onChange={e => setForm(f => ({ ...f, opening_balance: e.target.value }))} />
             <div className="space-y-1">
               <Label className="text-xs font-semibold text-slate-600">Link to Company (optional)</Label>
