@@ -134,6 +134,44 @@ async def _get_permitted_user_ids() -> List[str]:
     return [u["id"] for u in permitted if "id" in u]
 
 
+async def notify_admins_leave(
+    applicant_name: str,
+    detail: str = "",
+    exclude_user_id: Optional[str] = None,
+) -> None:
+    """Notify all admins when a user applies for / marks leave.
+
+    Uses type="leave" so the frontend can colour-code and count leave
+    notifications separately from regular ones.
+    """
+    admin_ids = await _get_admin_user_ids()
+    recipient_ids = list({uid for uid in admin_ids if uid != exclude_user_id})
+    if not recipient_ids:
+        return
+
+    now = datetime.now(timezone.utc)
+    message = f"{applicant_name} applied for leave."
+    if detail:
+        message = f"{message} {detail}".strip()
+    docs = [
+        {
+            "id": str(uuid.uuid4()),
+            "user_id": uid,
+            "title": "Leave Application",
+            "message": message,
+            "type": "leave",
+            "is_read": False,
+            "created_at": now,
+        }
+        for uid in recipient_ids
+    ]
+    try:
+        if docs:
+            await db.notifications.insert_many(docs, ordered=False)
+    except Exception as e:
+        logger.error(f"[Notification] leave insert failed: {e}")
+
+
 async def notify_admins_and_permitted(
     title: str,
     message: str,
