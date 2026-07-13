@@ -53,8 +53,10 @@ class BankAccountCreate(BaseModel):
     account_holder: str = ""
     account_number: str = ""   # stored masked (last 4 shown) — full number never returned by list endpoints
     ifsc: str = ""
+    branch: str = ""
     account_type: str = "current"  # current | savings | od | cc
     opening_balance: float = 0.0
+    upi_id: str = ""
     notes: str = ""
 
 
@@ -65,20 +67,100 @@ def _mask_account_number(acc_no: str) -> str:
     return "•" * (len(acc_no) - 4) + acc_no[-4:]
 
 
+# ── Cross-place sync helpers ────────────────────────────────────────────────
+# Bank details are entered in three places: this Bank Accounts page, Invoice
+# Settings and Quotation Settings. The company record holds the single source
+# of truth for the firm's primary bank account; these helpers mirror changes
+# between the company record and the bank_accounts collection so a bank account
+# added/updated in any one place shows up in the other two automatically.
+
+async def sync_bank_account_to_company(account: dict, full_account_number: str = ""):
+    """Push a bank account's details onto its linked company record."""
+    company_id = account.get("company_id")
+    if not company_id:
+        return
+    update = {
+        "bank_name": account.get("bank_name", ""),
+        "bank_account_name": account.get("account_holder", ""),
+        "bank_account_holder": account.get("account_holder", ""),
+        "bank_account_no": full_account_number or account.get("account_number_full", ""),
+        "bank_ifsc": account.get("ifsc", ""),
+        "bank_branch": account.get("branch", ""),
+        "bank_account_type": (account.get("account_type", "current") or "current").capitalize(),
+    }
+    if account.get("upi_id"):
+        update["upi_id"] = account["upi_id"]
+    await db.companies.update_one({"id": company_id}, {"$set": update})
+
+
+async def sync_company_primary_bank_account(company: dict):
+    """Upsert the primary bank_accounts doc for a company from its bank fields."""
+    if not company:
+        return
+    company_id = company.get("id")
+    if not company_id:
+        return
+    bank_name = (company.get("bank_name") or "").strip()
+    acc_no = (company.get("bank_account_no") or "").strip()
+    if not bank_name and not acc_no:
+        return  # nothing meaningful to sync yet
+    now = datetime.now(timezone.utc).isoformat()
+    fields = {
+        "company_id": company_id,
+        "bank_name": bank_name,
+        "account_holder": (company.get("bank_account_name") or company.get("bank_account_holder") or "").strip(),
+        "account_number_masked": _mask_account_number(acc_no),
+        "account_number_full": acc_no,
+        "ifsc": (company.get("bank_ifsc") or "").strip().upper(),
+        "branch": (company.get("bank_branch") or "").strip(),
+        "account_type": (company.get("bank_account_type") or "current").lower(),
+        "upi_id": (company.get("upi_id") or "").strip(),
+        "is_primary": True,
+        "updated_at": now,
+    }
+    existing = await db.bank_accounts.find_one({"company_id": company_id, "is_primary": True})
+    if existing:
+        await db.bank_accounts.update_one({"id": existing["id"]}, {"$set": fields})
+    else:
+        fields.update({
+            "id": str(uuid.uuid4()),
+            "opening_balance": 0.0,
+            "notes": "Synced from Invoice / Quotation settings",
+            "created_by": company.get("created_by", ""),
+            "created_at": now,
+        })
+        await db.bank_accounts.insert_one(fields)
+
+
 @router.post("/bank-accounts")
 async def create_bank_account(payload: BankAccountCreate, current_user: User = Depends(get_current_user)):
     if not _perm_view_bank(current_user):
         raise HTTPException(403, "Access denied. Request access from your admin in Permission Governance.")
     now = datetime.now(timezone.utc).isoformat()
+    full_acc_no = re.sub(r"\s+", "", payload.account_number or "")
     doc = {
         "id": str(uuid.uuid4()), "company_id": payload.company_id, "bank_name": payload.bank_name.strip(),
         "account_holder": payload.account_holder.strip(), "account_number_masked": _mask_account_number(payload.account_number),
-        "ifsc": payload.ifsc.strip().upper(), "account_type": payload.account_type,
-        "opening_balance": float(payload.opening_balance or 0), "notes": payload.notes.strip(),
+        "account_number_full": full_acc_no,
+        "ifsc": payload.ifsc.strip().upper(), "branch": payload.branch.strip(), "account_type": payload.account_type,
+        "opening_balance": float(payload.opening_balance or 0), "upi_id": payload.upi_id.strip(),
+        "is_primary": True, "notes": payload.notes.strip(),
         "created_by": current_user.id, "created_at": now,
     }
+    # A newly added account becomes this company's primary — clear the flag on
+    # any previous primary so exactly one stays marked.
+    if payload.company_id:
+        await db.bank_accounts.update_many(
+            {"company_id": payload.company_id, "is_primary": True}, {"$set": {"is_primary": False}}
+        )
     await db.bank_accounts.insert_one(doc)
+    # Mirror onto the company record so Invoice + Quotation settings pick it up.
+    try:
+        await sync_bank_account_to_company(doc, full_acc_no)
+    except Exception:
+        pass
     doc.pop("_id", None)
+    doc.pop("account_number_full", None)
     return doc
 
 
@@ -87,7 +169,7 @@ async def list_bank_accounts(company_id: Optional[str] = Query(None), current_us
     if not _perm_view_bank(current_user):
         raise HTTPException(403, "Access denied. Request access from your admin in Permission Governance.")
     q = {"company_id": company_id} if company_id else {}
-    accounts = await db.bank_accounts.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
+    accounts = await db.bank_accounts.find(q, {"_id": 0, "account_number_full": 0}).sort("created_at", -1).to_list(500)
     for a in accounts:
         txns = await db.bank_transactions.find({"bank_account_id": a["id"]}, {"_id": 0, "debit": 1, "credit": 1}).to_list(100000)
         balance = a["opening_balance"] + sum(t.get("credit", 0) for t in txns) - sum(t.get("debit", 0) for t in txns)
