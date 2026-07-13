@@ -33,7 +33,7 @@ from backend.dependencies import (
     get_team_user_ids,
     create_audit_log,
 )
-from backend.models import User
+from backend.models import User, DEFAULT_ROLE_PERMISSIONS
 
 router = APIRouter(tags=["Permission Governance"])
 
@@ -398,3 +398,59 @@ async def update_user_permissions(
         return {"message": "Permissions updated successfully"}
 
     raise HTTPException(status_code=403, detail="Admin access required")
+
+
+# =============================================================================
+# PERMISSION SYNC — POST /auth/sync-permissions
+# Moved here from server.py.  Called by AuthContext on every session restore
+# to back-fill any permission flags that were added to DEFAULT_ROLE_PERMISSIONS
+# after the user account was created, without requiring a DB migration.
+# =============================================================================
+
+@router.post("/auth/sync-permissions")
+async def sync_my_permissions(current_user: User = Depends(get_current_user)):
+    """
+    Back-fills any permission flags that were absent from this user's DB record
+    (e.g. flags added to DEFAULT_ROLE_PERMISSIONS after the user was created).
+
+    Called automatically by AuthContext on every session restore; can also be
+    triggered manually from Settings.  Returns the updated user object.
+
+    Logic:
+      - Load DEFAULT_ROLE_PERMISSIONS for the user's role.
+      - For each key in the template that is MISSING from the stored permissions,
+        set it to the template default.  Existing DB values are never overwritten.
+    """
+    role = (
+        current_user.role
+        if isinstance(current_user.role, str)
+        else current_user.role.value
+    )
+    template = DEFAULT_ROLE_PERMISSIONS.get(role, {})
+
+    # Get the raw permissions dict from DB
+    user_doc = await db.users.find_one(
+        {"id": current_user.id}, {"_id": 0, "password": 0}
+    )
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    stored_perms = user_doc.get("permissions", {})
+    if hasattr(stored_perms, "model_dump"):
+        stored_perms = stored_perms.model_dump()
+    elif not isinstance(stored_perms, dict):
+        stored_perms = {}
+
+    # Only fill keys that are entirely absent (never overwrite explicit DB values)
+    missing_keys = {k: v for k, v in template.items() if k not in stored_perms}
+
+    if missing_keys:
+        merged = {**stored_perms, **missing_keys}
+        await db.users.update_one(
+            {"id": current_user.id}, {"$set": {"permissions": merged}}
+        )
+        user_doc["permissions"] = merged
+
+    user_doc.pop("_id", None)
+    user_doc.pop("password", None)
+    return user_doc
