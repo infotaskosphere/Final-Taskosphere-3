@@ -37,7 +37,7 @@ from backend.visits import router as visits_router
 from backend.leads import router as leads_router
 from backend.interviews import router as interviews_router
 from backend.telegram import router as telegram_router
-from backend.notifications import router as notification_router, create_notification
+from backend.notifications import router as notification_router, create_notification, notify_admins_leave
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2914,6 +2914,15 @@ async def mark_leave_today(current_user: User = Depends(get_current_user)):
         },
         upsert=True,
     )
+    # Notify admins that this user marked themselves on leave today.
+    try:
+        await notify_admins_leave(
+            applicant_name=(current_user.full_name or current_user.email),
+            detail=f"full day · {today_str} · Marked on leave today",
+            exclude_user_id=current_user.id,
+        )
+    except Exception:
+        pass
     return {"message": "Marked on leave today"}
 
 
@@ -3084,6 +3093,21 @@ async def apply_leave(data: dict, current_user: User = Depends(get_current_user)
                 upsert=True,
             )
             current += timedelta(days=1)
+
+        # Notify admins that a leave application was submitted.
+        try:
+            span = (
+                from_date.isoformat()
+                if from_date == to_date
+                else f"{from_date.isoformat()} → {to_date.isoformat()}"
+            )
+            await notify_admins_leave(
+                applicant_name=(current_user.full_name or current_user.email),
+                detail=f"{leave_type.replace('_', ' ')} · {span} · {reason}",
+                exclude_user_id=current_user.id,
+            )
+        except Exception:
+            pass
 
         return {"message": "Leave applied successfully", "leave_type": leave_type}
     except HTTPException:
