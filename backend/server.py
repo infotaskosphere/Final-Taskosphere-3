@@ -2239,58 +2239,8 @@ async def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
-# ── Permission Sync ───────────────────────────────────────────────────────────
-@api_router.post("/auth/sync-permissions")
-async def sync_my_permissions(current_user: User = Depends(get_current_user)):
-    """
-    Back-fills any permission flags that were absent from this user's DB record
-    (e.g. flags added to DEFAULT_ROLE_PERMISSIONS after the user was created).
-
-    Called automatically by AuthContext on every session restore; can also be
-    triggered manually from Settings.  Returns the updated user object.
-
-    Logic:
-      - Load DEFAULT_ROLE_PERMISSIONS for the user's role.
-      - For each key in the template that is MISSING from the stored permissions,
-        set it to the template default.  Existing DB values are never overwritten.
-    """
-    role = (
-        current_user.role
-        if isinstance(current_user.role, str)
-        else current_user.role.value
-    )
-    template = DEFAULT_ROLE_PERMISSIONS.get(role, {})
-
-    # Get the raw permissions dict from DB
-    user_doc = await db.users.find_one(
-        {"id": current_user.id}, {"_id": 0, "password": 0}
-    )
-    if not user_doc:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    stored_perms = user_doc.get("permissions", {})
-    if hasattr(stored_perms, "model_dump"):
-        stored_perms = stored_perms.model_dump()
-    elif not isinstance(stored_perms, dict):
-        stored_perms = {}
-
-    # Only fill keys that are entirely absent (never overwrite explicit DB values)
-    missing_keys = {k: v for k, v in template.items() if k not in stored_perms}
-
-    if missing_keys:
-        merged = {**stored_perms, **missing_keys}
-        await db.users.update_one(
-            {"id": current_user.id}, {"$set": {"permissions": merged}}
-        )
-        # Return the fully merged user
-        user_doc["permissions"] = merged
-
-    user_doc.pop("_id", None)
-    user_doc.pop("password", None)
-    return user_doc
-
-
 # ── Forgot / Reset Password → moved to backend/auth_password_reset.py ─────────
+# NOTE: POST /auth/sync-permissions moved to permission_governance.py
 
 
 @api_router.post("/users/{user_id}/approve")
