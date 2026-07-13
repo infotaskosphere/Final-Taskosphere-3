@@ -41,7 +41,6 @@ const BankAccounts       = lazyWithRetry(() => import("@/pages/BankAccounts.jsx"
 const ChartOfAccounts    = lazyWithRetry(() => import("@/pages/ChartOfAccounts.jsx"), "ChartOfAccounts");
 const JournalEntries     = lazyWithRetry(() => import("@/pages/JournalEntries.jsx"), "JournalEntries");
 const AccountingReports  = lazyWithRetry(() => import("@/pages/AccountingReports.jsx"), "AccountingReports");
-const PermissionGovernance = lazyWithRetry(() => import("@/pages/PermissionGovernance.jsx"), "PermissionGovernance");
 const Reminders         = lazyWithRetry(() => import("@/pages/Reminders.jsx"), "Reminders");
 const CompliancePage    = lazyWithRetry(() => import("@/pages/CompliancePage.jsx"), "CompliancePage");
 const GSTReconciliation = lazyWithRetry(() => import("@/pages/GSTReconciliation.jsx"), "GSTReconciliation");
@@ -192,7 +191,6 @@ function AppRoutes() {
       <Route path="/chart-of-accounts"   element={<Protected><PageLoader><ChartOfAccounts /></PageLoader></Protected>} />
       <Route path="/journal-entries"     element={<Protected><PageLoader><JournalEntries /></PageLoader></Protected>} />
       <Route path="/accounting-reports"  element={<Protected><PageLoader><AccountingReports /></PageLoader></Protected>} />
-      <Route path="/permission-governance" element={<AdminOnly><PageLoader><PermissionGovernance /></PageLoader></AdminOnly>} />
       <Route path="/task-audit" element={<Permission permission="can_view_audit_logs"><PageLoader><TaskAudit /></PageLoader></Permission>} />
       <Route path="/users"          element={<Permission permission="can_view_user_page"><PageLoader><Users /></PageLoader></Permission>} />
       <Route path="/interviews"     element={<Permission permission="can_view_interviews"><PageLoader><Interviews /></PageLoader></Permission>} />
