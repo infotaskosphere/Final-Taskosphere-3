@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { BarChart3, RefreshCw, CheckCircle2, AlertTriangle } from 'lucide-react';
-import GifLoader from '@/components/ui/GifLoader.jsx';
+import GifLoader, { ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import api from '@/lib/api';
@@ -57,7 +57,7 @@ function AccountingReportsInner() {
   };
   useEffect(() => { fetchAll(); }, []);
 
-  if (loading) return <GifLoader />;
+  if (loading) return <ContentLoader />;
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
