@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Plus, Edit, Trash2, Download, Search, Building2, FileText,
+  Plus, Edit, Trash2, Download, Search, Building2, FileText, Landmark,
   ChevronRight, ChevronLeft, Check, X, Loader2, Receipt,
   Phone, Mail, Globe, CreditCard, User, Tag, Info,
   IndianRupee, Percent, Hash, Calendar, Link, Link2, ExternalLink,
@@ -350,10 +350,12 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
     name: '', address: '', phone: '', email: '', website: '', gstin: '', pan: '',
     has_gst: true,
     bank_account_name: '', bank_name: '', bank_account_no: '', bank_ifsc: '',
+    linked_bank_account_id: '',
     logo_base64: null, tm_logo_base64: null, signature_base64: null,
     smtp_host: '', smtp_port: 587, smtp_user: '', smtp_password: '', smtp_from_name: '',
   });
   const [saving, setSaving] = useState(false);
+  const [bankAccounts, setBankAccounts] = useState([]);
   const logoInputRef = useRef(null);
   const tmLogoInputRef = useRef(null);
   const sigInputRef  = useRef(null);
@@ -373,6 +375,7 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
         bank_name: editingCompany.bank_name || '',
         bank_account_no: editingCompany.bank_account_no || '',
         bank_ifsc: editingCompany.bank_ifsc || '',
+        linked_bank_account_id: editingCompany.linked_bank_account_id || '',
         logo_base64: editingCompany.logo_base64 || null,
         tm_logo_base64: editingCompany.tm_logo_base64 || null,
         signature_base64: editingCompany.signature_base64 || null,
@@ -384,6 +387,12 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
       });
     }
   }, [editingCompany]);
+
+  useEffect(() => {
+    api.get('/bank-accounts/picker-list')
+      .then(r => setBankAccounts(r.data || []))
+      .catch(() => {}); // silently ignore if user has no bank access
+  }, []);
 
   const handleChange = e => setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
 
@@ -476,6 +485,53 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
           {/* ── Right column ── */}
           <div className="space-y-3">
             <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2"><CreditCard className="h-4 w-4" />Bank Details</h4>
+
+            {/* ── Link to a bank account from the Bank Accounts page ── */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold flex items-center gap-1.5">
+                <Landmark className="h-3.5 w-3.5" />Link Bank Account
+                <span className="text-[10px] font-normal text-slate-400">(auto-fills fields below)</span>
+              </Label>
+              <Select
+                value={form.linked_bank_account_id || '__none__'}
+                onValueChange={v => {
+                  if (v === '__none__') {
+                    setForm(p => ({ ...p, linked_bank_account_id: '' }));
+                    return;
+                  }
+                  const ba = bankAccounts.find(b => b.id === v);
+                  if (ba) {
+                    setForm(p => ({
+                      ...p,
+                      linked_bank_account_id: v,
+                      bank_name:         ba.bank_name         || p.bank_name,
+                      bank_account_name: ba.account_holder    || p.bank_account_name,
+                      bank_account_no:   ba.account_number_masked || p.bank_account_no,
+                      bank_ifsc:         ba.ifsc               || p.bank_ifsc,
+                    }));
+                  }
+                }}
+              >
+                <SelectTrigger className="h-9 rounded-xl text-sm">
+                  <SelectValue placeholder={bankAccounts.length ? 'Select a bank account…' : 'No bank accounts yet — add one in Bank Accounts page'} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">— Not linked —</SelectItem>
+                  {bankAccounts.map(ba => (
+                    <SelectItem key={ba.id} value={ba.id}>
+                      {ba.bank_name}{ba.account_number_masked ? ` · ${ba.account_number_masked}` : ''}{ba.account_holder ? ` (${ba.account_holder})` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {form.linked_bank_account_id && (
+                <p className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  Linked — bank fields auto-populated from Bank Accounts page
+                </p>
+              )}
+            </div>
+
             {[
               { label: 'Account Name', name: 'bank_account_name' },
               { label: 'Bank Name',    name: 'bank_name'         },
