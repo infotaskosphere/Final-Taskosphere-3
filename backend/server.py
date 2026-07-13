@@ -193,6 +193,7 @@ from backend.dependencies import (
     verify_client_access,
     get_team_user_ids,
     get_cross_visibility_union,
+    get_user_permissions,   # moved to dependencies — single source of truth
 )
 
 # External Services
@@ -872,14 +873,6 @@ def convert_objectids(data):
     if isinstance(data, date) and not isinstance(data, datetime):
         return data.isoformat()
     return data
-
-
-def get_user_permissions(current_user: User) -> dict:
-    if isinstance(current_user.permissions, dict):
-        return current_user.permissions
-    if current_user.permissions:
-        return current_user.permissions.model_dump()
-    return {}
 
 
 def is_own_record(current_user: User, record: dict) -> bool:
@@ -2776,174 +2769,6 @@ async def offboard_user(
         "transfer_summary": transfer_summary,
     }
 
-
-@api_router.get("/users/{user_id}/permissions")
-async def get_permissions(user_id: str, current_user: User = Depends(get_current_user)):
-    """
-    Retrieve permissions for a user.
-    - Admin: can fetch any user's permissions
-    - Manager with can_manage_users: can fetch permissions of staff in their department
-    - Staff: can only fetch their own permissions (read-only display)
-    """
-    # Admin always allowed
-    if current_user.role == "admin":
-        user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        return user.get("permissions", {})
-
-    # Any user can always fetch their OWN permissions
-    if user_id == current_user.id:
-        user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        return user.get("permissions", {})
-
-    # Manager with can_manage_users can fetch their team's permissions
-    perms = get_user_permissions(current_user)
-    if current_user.role == "manager" and perms.get("can_manage_users", False):
-        team_ids = await get_team_user_ids(current_user.id)
-        if user_id not in team_ids:
-            raise HTTPException(status_code=403, detail="User is not in your team")
-        target_user = await db.users.find_one(
-            {"id": user_id}, {"_id": 0, "password": 0}
-        )
-        if not target_user:
-            raise HTTPException(status_code=404, detail="User not found")
-        # Manager cannot view admin/manager permissions — only staff
-        if target_user.get("role") in ("admin", "manager"):
-            raise HTTPException(
-                status_code=403,
-                detail="Managers can only view permissions of staff members",
-            )
-        return target_user.get("permissions", {})
-
-    raise HTTPException(status_code=403, detail="Not allowed")
-
-
-@api_router.put("/users/{user_id}/permissions")
-async def update_user_permissions(
-    user_id: str, permissions: dict, current_user: User = Depends(get_current_user)
-):
-    """
-    Update permissions for a user.
-    - Admin: can update any user's permissions
-    - Manager with can_manage_users: can update permissions of staff in their department only
-      (cannot escalate permissions beyond their own permission level)
-    - Staff: not allowed
-    """
-    # Admin always allowed
-    if current_user.role == "admin":
-        existing = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
-        if not existing:
-            raise HTTPException(status_code=404, detail="User not found")
-        old_permissions = existing.get("permissions", {})
-        await db.users.update_one(
-            {"id": user_id}, {"$set": {"permissions": permissions}}
-        )
-        await create_audit_log(
-            current_user,
-            "UPDATE_PERMISSIONS",
-            "user",
-            record_id=user_id,
-            old_data=old_permissions,
-            new_data=permissions,
-        )
-        return {"message": "Permissions updated successfully"}
-
-    # Manager with can_manage_users can update their team staff permissions (not admin/manager)
-    perms = get_user_permissions(current_user)
-    if current_user.role == "manager" and perms.get("can_manage_users", False):
-        team_ids = await get_team_user_ids(current_user.id)
-        if user_id not in team_ids:
-            raise HTTPException(status_code=403, detail="User is not in your team")
-        existing = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
-        if not existing:
-            raise HTTPException(status_code=404, detail="User not found")
-        if existing.get("role") in ("admin", "manager"):
-            raise HTTPException(
-                status_code=403,
-                detail="Managers can only update permissions of staff members",
-            )
-
-        # Managers CANNOT grant permissions they do not themselves possess
-        # Strip any elevated permission flags that the manager doesn't have
-        manager_perms = get_user_permissions(current_user)
-        safe_permissions = {}
-        BOOLEAN_PERM_KEYS = [
-            "can_view_all_tasks",
-            "can_view_all_clients",
-            "can_view_all_dsc",
-            "can_view_documents",
-            "can_view_all_duedates",
-            "can_view_reports",
-            "can_view_attendance",
-            "can_view_all_leads",
-            "can_edit_tasks",
-            "can_edit_clients",
-            "can_edit_dsc",
-            "can_edit_documents",
-            "can_edit_due_dates",
-            "can_edit_users",
-            "can_download_reports",
-            "can_manage_users",
-            "can_manage_settings",
-            "can_assign_tasks",
-            "can_assign_clients",
-            "can_view_staff_activity",
-            "can_view_user_page",
-            "can_view_audit_logs",
-            "can_view_selected_users_reports",
-            "can_view_todo_dashboard",
-            "can_use_chat",
-            "can_view_staff_rankings",
-            "can_connect_email",
-            "can_view_own_data",
-            "can_create_quotations",
-            "can_manage_invoices",
-            "can_view_passwords",
-            "can_edit_passwords",
-            "can_view_compliance",
-            "can_manage_compliance",
-            "can_view_all_visits",
-            "can_edit_visits",
-        ]
-        # Flags only admin can grant — managers cannot escalate these
-        ADMIN_ONLY_GRANTS = {
-            "can_delete_data",
-            "can_delete_tasks",
-            "can_delete_visits",
-            "can_send_reminders",
-        }
-        for key, val in permissions.items():
-            if key in ADMIN_ONLY_GRANTS:
-                # Manager cannot grant admin-only permissions
-                safe_permissions[key] = existing.get("permissions", {}).get(key, False)
-            elif key in BOOLEAN_PERM_KEYS and isinstance(val, bool):
-                # Manager can only grant a permission they themselves have
-                if val and not manager_perms.get(key, False):
-                    safe_permissions[key] = False
-                else:
-                    safe_permissions[key] = val
-            else:
-                # Non-boolean keys (lists) passed through as-is
-                safe_permissions[key] = val
-
-        old_permissions = existing.get("permissions", {})
-        await db.users.update_one(
-            {"id": user_id}, {"$set": {"permissions": safe_permissions}}
-        )
-        await create_audit_log(
-            current_user,
-            "UPDATE_PERMISSIONS",
-            "user",
-            record_id=user_id,
-            old_data=old_permissions,
-            new_data=safe_permissions,
-        )
-        return {"message": "Permissions updated successfully"}
-
-    raise HTTPException(status_code=403, detail="Admin access required")
 
 
 # ====================================================================================
