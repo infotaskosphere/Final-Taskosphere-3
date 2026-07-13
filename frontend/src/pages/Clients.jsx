@@ -2758,6 +2758,8 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
   }, [selectedClient?.id]);
   const [clientInvoices, setClientInvoices] = React.useState([]);
   const [invoicesLoading, setInvoicesLoading] = React.useState(false);
+  const [clientPurchaseInvoices, setClientPurchaseInvoices] = React.useState([]);
+  const [purchaseLoading, setPurchaseLoading] = React.useState(false);
 
   // ── Assign Task tab state ──
   const TASK_EMPTY = { title: '', description: '', assigned_to: 'unassigned', sub_assignees: [], due_date: '', priority: 'medium', status: 'pending', category: 'other', is_recurring: false, recurrence_pattern: 'monthly', recurrence_interval: 1 };
@@ -2840,6 +2842,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
   React.useEffect(() => {
     setActiveTab('details');
     setClientInvoices([]);
+    setClientPurchaseInvoices([]);
     setGstSessions([]);
     setGovtFees([]);
     setGovtFeesDraft({});
@@ -2865,6 +2868,15 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
       })
       .catch(() => {})
       .finally(() => setInvoicesLoading(false));
+  }, [activeTab, selectedClient]);
+
+  React.useEffect(() => {
+    if (activeTab !== 'purchases' || !selectedClient?.id) return;
+    setPurchaseLoading(true);
+    api.get('/purchase-invoices', { params: { client_id: selectedClient.id, page_size: 100 } })
+      .then(r => setClientPurchaseInvoices(r.data?.purchase_invoices || []))
+      .catch(() => setClientPurchaseInvoices([]))
+      .finally(() => setPurchaseLoading(false));
   }, [activeTab, selectedClient]);
 
   // Fetch GST reconciliation sessions for this client
@@ -2993,6 +3005,8 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
   const hasTaxInfo = selectedClient.gstin || selectedClient.pan || selectedClient.gst_treatment || selectedClient.website || selectedClient.msme_number || selectedClient.credit_limit || selectedClient.opening_balance || selectedClient.tally_ledger_name;
   const totalInvValue = clientInvoices.reduce((s, i) => s + (i.grand_total || 0), 0);
   const totalOutstanding = clientInvoices.reduce((s, i) => s + (i.amount_due || 0), 0);
+  const totalPurchaseValue = clientPurchaseInvoices.reduce((s, i) => s + (i.grand_total || 0), 0);
+  const totalPurchaseGst = clientPurchaseInvoices.reduce((s, i) => s + (i.total_gst || 0), 0);
 
   return (
     <Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
@@ -3031,6 +3045,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
           {[
             { key: 'details',        label: 'Details',     icon: <User className="h-3.5 w-3.5" /> },
             { key: 'invoices',       label: 'Invoices',    icon: <FileText className="h-3.5 w-3.5" /> },
+            { key: 'purchases',      label: 'Purchases',   icon: <IndianRupee className="h-3.5 w-3.5" /> },
             { key: 'reconciliation', label: 'GST Recon',   icon: <ArrowLeftRight className="h-3.5 w-3.5" /> },
             { key: 'govtfees',       label: 'Govt Fees',   icon: <IndianRupee className="h-3.5 w-3.5" /> },
             { key: 'portal',         label: 'Portal',      icon: <Globe className="h-3.5 w-3.5" /> },
@@ -3051,6 +3066,11 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
               {tab.key === 'invoices' && clientInvoices.length > 0 && (
                 <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold" style={{ background: activeTab === 'invoices' ? 'rgba(255,255,255,0.25)' : '#e2e8f0', color: activeTab === 'invoices' ? '#fff' : '#64748b' }}>
                   {clientInvoices.length}
+                </span>
+              )}
+              {tab.key === 'purchases' && clientPurchaseInvoices.length > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold" style={{ background: activeTab === 'purchases' ? 'rgba(255,255,255,0.25)' : '#dcfce7', color: activeTab === 'purchases' ? '#fff' : '#166534' }}>
+                  {clientPurchaseInvoices.length}
                 </span>
               )}
               {tab.key === 'reconciliation' && gstSessions.length > 0 && (
@@ -3276,6 +3296,72 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                     {clientInvoices.length > 15 && (
                       <p className="text-xs text-slate-400 text-center py-2">
                         +{clientInvoices.length - 15} more invoices
+                      </p>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ════════════════ PURCHASES TAB ════════════════ */}
+          {activeTab === 'purchases' && (
+            <div className="p-6 space-y-4">
+              {purchaseLoading ? (
+                <MiniLoader height={120} />
+              ) : clientPurchaseInvoices.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-slate-400">
+                  <IndianRupee className="h-10 w-10 mb-3 opacity-25" />
+                  <p className="text-sm font-medium">No purchase invoices found</p>
+                  <p className="text-xs mt-1 text-slate-300">Upload purchase invoices from Accounts → Purchase to see them here</p>
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-3 gap-3">
+                    {[
+                      { label: 'Purchase Invoices', value: clientPurchaseInvoices.length, color: '#1F6FB2' },
+                      { label: 'Total Purchase', value: `₹${totalPurchaseValue.toLocaleString('en-IN')}`, color: '#059669' },
+                      { label: 'Input GST', value: `₹${totalPurchaseGst.toLocaleString('en-IN')}`, color: '#7C3AED' },
+                    ].map((s, i) => (
+                      <div key={i} className={`rounded-xl p-3 border text-center ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">{s.label}</p>
+                        <p className="text-sm font-bold" style={{ color: s.color }}>{s.value}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="space-y-2">
+                    {clientPurchaseInvoices.slice(0, 15).map(inv => (
+                      <div key={inv.id} className={`border rounded-xl p-3.5 transition-colors ${isDark ? 'bg-slate-700 border-slate-600 hover:bg-slate-600/60' : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{inv.invoice_no || 'No invoice no.'}</p>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">
+                                Purchase
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                              {inv.supplier_name || 'Unknown supplier'}
+                              {inv.supplier_gstin && <span className="ml-1 opacity-60">· {inv.supplier_gstin}</span>}
+                              {inv.invoice_date && <span className="ml-1 opacity-60">· {inv.invoice_date}</span>}
+                            </p>
+                            <p className="text-[10px] text-slate-400 mt-1 truncate">{inv.file_name}</p>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                              ₹{(inv.grand_total || 0).toLocaleString('en-IN')}
+                            </p>
+                            <p className="text-xs text-violet-500 font-semibold">
+                              GST ₹{(inv.total_gst || 0).toLocaleString('en-IN')}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {clientPurchaseInvoices.length > 15 && (
+                      <p className="text-xs text-slate-400 text-center py-2">
+                        +{clientPurchaseInvoices.length - 15} more purchase invoices
                       </p>
                     )}
                   </div>
@@ -4158,6 +4244,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 {[
                   { key: 'details',        label: 'Details',     icon: <User className="h-3 w-3" /> },
                   { key: 'invoices',       label: 'Invoices',    icon: <FileText className="h-3 w-3" /> },
+                  { key: 'purchases',      label: 'Purchases',   icon: <IndianRupee className="h-3 w-3" /> },
                   { key: 'reconciliation', label: 'GST Recon',   icon: <ArrowLeftRight className="h-3 w-3" /> },
                   { key: 'govtfees',       label: 'Govt Fees',   icon: <IndianRupee className="h-3 w-3" /> },
                   { key: 'portal',         label: 'Portal',      icon: <Globe className="h-3 w-3" /> },
