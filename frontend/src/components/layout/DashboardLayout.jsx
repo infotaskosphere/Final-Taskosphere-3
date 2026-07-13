@@ -8,7 +8,7 @@ import {
   PanelLeftClose, PanelLeftOpen, Target, Sun, Moon, MapPin,
   Settings, Mail, Receipt, X, KeyRound, BrainCircuit,
   CreditCard, Fingerprint, Bell, Shield, ShieldCheck, ArrowLeftRight, MessageCircle,
-  Building2, Zap, Briefcase, ShoppingCart,
+  Building2, Zap, Briefcase, ShoppingBag,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -100,7 +100,7 @@ const NAV_GROUPS = [
       },
       {
         path:       '/purchase',
-        icon:       ShoppingCart,
+        icon:       ShoppingBag,
         label:      'Purchase',
         permission: ['can_manage_invoices', 'can_create_quotations'],
       },
