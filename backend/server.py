@@ -30,6 +30,9 @@ from backend.attendance_identix import identix_router
 from backend.google_auth import router as google_auth_router
 from backend.website_tracking import router as website_tracking_router
 from backend.invoicing import router as invoicing_router
+from backend.accounting_core import router as accounting_router
+from backend.bank_accounts import router as bank_accounts_router
+from backend.permission_governance import router as permission_governance_router
 from backend.visits import router as visits_router
 from backend.leads import router as leads_router
 from backend.interviews import router as interviews_router
@@ -547,6 +550,16 @@ async def startup_event():
         await db.quotations.create_index("service")
         await db.companies.create_index("created_by")
         await db.companies.create_index("name")
+        # Bank / Accounting / Permission Governance (added for AI accounting features)
+        await db.bank_accounts.create_index("company_id")
+        await db.bank_transactions.create_index([("bank_account_id", 1), ("date", -1)])
+        await db.bank_transactions.create_index("matched_type")
+        await db.chart_of_accounts.create_index([("company_id", 1), ("code", 1)], unique=True)
+        await db.journal_entries.create_index([("company_id", 1), ("entry_date", -1)])
+        await db.journal_lines.create_index("entry_id")
+        await db.journal_lines.create_index("account_id")
+        await db.access_requests.create_index([("user_id", 1), ("status", 1)])
+        await db.access_requests.create_index("status")
         await db.staff_activity.create_index("type")
         await db.staff_activity.create_index("domain")
         await db.staff_activity.create_index([("user_id", 1), ("timestamp", -1)])
@@ -13626,6 +13639,9 @@ async def universal_exception_handler(request: Request, exc: Exception):
 
 # Api Router
 api_router.include_router(invoicing_router)
+api_router.include_router(accounting_router)
+api_router.include_router(bank_accounts_router)
+api_router.include_router(permission_governance_router)
 app.include_router(ai_document_reader_router)
 api_router.include_router(trademark_sphere_router)
 app.include_router(trademark_portals_router)  # already has /api/... prefix
