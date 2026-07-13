@@ -37,6 +37,11 @@ const Passvault         = lazyWithRetry(() => import("@/pages/Passvault.jsx"), "
 const WhatsAppHub       = lazyWithRetry(() => import("@/pages/WhatsAppHub.jsx"), "WhatsAppHub");
 const Invoicing         = lazyWithRetry(() => import("@/pages/Invoicing.jsx"), "Invoicing");
 const Purchase          = lazyWithRetry(() => import("@/pages/Purchase.jsx"), "Purchase");
+const BankAccounts       = lazyWithRetry(() => import("@/pages/BankAccounts.jsx"), "BankAccounts");
+const ChartOfAccounts    = lazyWithRetry(() => import("@/pages/ChartOfAccounts.jsx"), "ChartOfAccounts");
+const JournalEntries     = lazyWithRetry(() => import("@/pages/JournalEntries.jsx"), "JournalEntries");
+const AccountingReports  = lazyWithRetry(() => import("@/pages/AccountingReports.jsx"), "AccountingReports");
+const PermissionGovernance = lazyWithRetry(() => import("@/pages/PermissionGovernance.jsx"), "PermissionGovernance");
 const Reminders         = lazyWithRetry(() => import("@/pages/Reminders.jsx"), "Reminders");
 const CompliancePage    = lazyWithRetry(() => import("@/pages/CompliancePage.jsx"), "CompliancePage");
 const GSTReconciliation = lazyWithRetry(() => import("@/pages/GSTReconciliation.jsx"), "GSTReconciliation");
@@ -178,6 +183,16 @@ function AppRoutes() {
       <Route path="/invoicing"  element={<Permission permission={["can_manage_invoices", "can_create_quotations"]}><PageLoader><Invoicing /></PageLoader></Permission>} />
       <Route path="/sale"       element={<Navigate to="/invoicing" replace />} />
       <Route path="/purchase"   element={<Permission permission={["can_manage_invoices", "can_create_quotations"]}><PageLoader><Purchase /></PageLoader></Permission>} />
+      {/* Bank / Chart of Accounts / Journal / Reports are gated INSIDE the page
+          (RequestAccessGate) rather than at the route level: admin sees the
+          page immediately, everyone else sees a "request access" screen and
+          can ask their admin from there — so any logged-in user can load the
+          route, but only approved users see the real content. */}
+      <Route path="/bank-accounts"       element={<Protected><PageLoader><BankAccounts /></PageLoader></Protected>} />
+      <Route path="/chart-of-accounts"   element={<Protected><PageLoader><ChartOfAccounts /></PageLoader></Protected>} />
+      <Route path="/journal-entries"     element={<Protected><PageLoader><JournalEntries /></PageLoader></Protected>} />
+      <Route path="/accounting-reports"  element={<Protected><PageLoader><AccountingReports /></PageLoader></Protected>} />
+      <Route path="/permission-governance" element={<AdminOnly><PageLoader><PermissionGovernance /></PageLoader></AdminOnly>} />
       <Route path="/task-audit" element={<Permission permission="can_view_audit_logs"><PageLoader><TaskAudit /></PageLoader></Permission>} />
       <Route path="/users"          element={<Permission permission="can_view_user_page"><PageLoader><Users /></PageLoader></Permission>} />
       <Route path="/interviews"     element={<Permission permission="can_view_interviews"><PageLoader><Interviews /></PageLoader></Permission>} />
