@@ -76,7 +76,8 @@ function Purchase() {
     const total = purchaseInvoices.reduce((s, inv) => s + Number(inv.grand_total || 0), 0);
     const linked = purchaseInvoices.filter(inv => inv.client_id).length;
     const suppliers = new Set(purchaseInvoices.map(inv => inv.supplier_name).filter(Boolean)).size;
-    return { total, linked, suppliers, count: purchaseInvoices.length, unmatched: purchaseInvoices.length - linked };
+    const reviewCount = purchaseInvoices.filter(inv => !inv.client_id || inv.needs_amount_review).length;
+    return { total, linked, suppliers, count: purchaseInvoices.length, unmatched: reviewCount };
   }, [purchaseInvoices]);
 
   const handleUpload = async () => {
@@ -240,6 +241,11 @@ function Purchase() {
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Linked</span>
                         ) : (
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Review</span>
+                        )}
+                        {inv.needs_amount_review && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200" title="The totals read from this invoice didn't reconcile — please verify the amount against the file.">
+                            Verify amount
+                          </span>
                         )}
                       </div>
                       <p className="text-sm text-slate-500 mt-1 truncate">
