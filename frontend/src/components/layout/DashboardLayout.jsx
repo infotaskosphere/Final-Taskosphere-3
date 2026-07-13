@@ -141,7 +141,6 @@ const NAV_GROUPS = [
       { path: '/staff-activity', icon: Activity,   label: 'Staff Activity',   adminOnly: true                    },
       { path: '/client-portal-manager', icon: Building2, label: 'Client Portal', permission: 'can_view_client_portal' },
       { path: '/whatsapp-hub', icon: MessageCircle, label: 'Unified Inbox', permission: 'can_access_whatsapp_hub' },
-      { path: '/permission-governance', icon: ShieldCheck, label: 'Permission Governance', adminOnly: true },
     ],
   },
   {
