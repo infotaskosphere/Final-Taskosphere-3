@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { BookOpen, Plus, RefreshCw, Trash2, Layers } from 'lucide-react';
-import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
+import GifLoader, { MiniLoader, ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -72,7 +72,7 @@ function ChartOfAccountsInner() {
     }
   };
 
-  if (loading) return <GifLoader />;
+  if (loading) return <ContentLoader />;
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
