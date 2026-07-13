@@ -79,6 +79,18 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
                     "can_access_whatsapp_hub": False,     # ADMIN_GRANTED_ONLY
           "can_view_interviews": True,          # Admin always has interview access
           "assigned_clients": [],
+          # ── Accounts module governance (Bank / Chart of Accounts / Journal) ──
+          # Admin has full access by default. Manager/staff must be granted
+          # these explicitly by an admin via the Permission Governance portal
+          # (Users → Permission Governance → approve an access request).
+          "can_view_purchase": True,
+          "can_view_sale": True,
+          "can_view_bank": True,
+          "can_view_chart_of_accounts": True,
+          "can_manage_chart_of_accounts": True,
+          "can_view_journal_entries": True,
+          "can_post_journal_entries": True,
+          "can_view_accounting_reports": True,
       },
       "manager": {
           # Manager: SCOPE = OWN + SAME_DEPARTMENT (Own + Team)
@@ -141,6 +153,15 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
                     "can_access_whatsapp_hub": False,     # ADMIN_GRANTED_ONLY
           "can_view_interviews": False,         # ADMIN_GRANTED_ONLY
           "assigned_clients": [],
+          # Accounts module governance — ADMIN_GRANTED_ONLY, request via Permission Governance
+          "can_view_purchase": False,
+          "can_view_sale": False,
+          "can_view_bank": False,
+          "can_view_chart_of_accounts": False,
+          "can_manage_chart_of_accounts": False,
+          "can_view_journal_entries": False,
+          "can_post_journal_entries": False,
+          "can_view_accounting_reports": False,
       },
       "staff": {
           # Staff: SCOPE = OWN only
@@ -201,6 +222,15 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
                     "can_access_whatsapp_hub": False,     # ADMIN_GRANTED_ONLY
           "can_view_interviews": False,         # ADMIN_GRANTED_ONLY
           "assigned_clients": [],
+          # Accounts module governance — ADMIN_GRANTED_ONLY, request via Permission Governance
+          "can_view_purchase": False,
+          "can_view_sale": False,
+          "can_view_bank": False,
+          "can_view_chart_of_accounts": False,
+          "can_manage_chart_of_accounts": False,
+          "can_view_journal_entries": False,
+          "can_post_journal_entries": False,
+          "can_view_accounting_reports": False,
       },
   }
 
@@ -286,6 +316,20 @@ class UserPermissions(BaseModel):
     # can_view_interviews → access the Employee Interviews page
     #   Admin always has access. Grant explicitly to HR managers/staff.
     can_view_interviews: bool = False
+    # ── Accounts module governance ───────────────────────────────────────────
+    # Purchase / Sale / Bank / Chart of Accounts / Journal Entries / Reports.
+    # Admin has all of these True by default (see DEFAULT_ROLE_PERMISSIONS).
+    # Manager/staff default to False and must be granted access by an admin
+    # via the Permission Governance portal (Users → Permission Governance),
+    # normally after the user submits an access request from the gated page.
+    can_view_purchase: bool = False
+    can_view_sale: bool = False
+    can_view_bank: bool = False
+    can_view_chart_of_accounts: bool = False
+    can_manage_chart_of_accounts: bool = False
+    can_view_journal_entries: bool = False
+    can_post_journal_entries: bool = False
+    can_view_accounting_reports: bool = False
 
     model_config = ConfigDict(extra="ignore")
 
