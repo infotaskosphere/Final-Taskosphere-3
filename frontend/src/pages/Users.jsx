@@ -2360,6 +2360,13 @@ export default function Users() {
   const [salaryDialogAmount,  setSalaryDialogAmount]  = useState('');
   const [salaryDialogSaving,  setSalaryDialogSaving]  = useState(false);
 
+  // ── Access Requests (Permission Governance) tab ────────────────────────────
+  const [pgRequests, setPgRequests] = useState([]);
+  const [pgGrants,   setPgGrants]   = useState([]);
+  const [pgModules,  setPgModules]  = useState([]);
+  const [pgLoading,  setPgLoading]  = useState(false);
+  const [pgReqTab,   setPgReqTab]   = useState('pending'); // 'pending' | 'history' | 'grants'
+
 
   const [users,                setUsers]                = useState([]);
   const [clients,              setClients]              = useState([]);
@@ -2464,6 +2471,42 @@ export default function Users() {
       setSalaryDetail({});
     }
   }, [mainTab, isAdmin, salaryMonth, fetchSalaryReports]);
+
+  const fetchPermGovData = useCallback(async () => {
+    if (!isAdmin) return;
+    setPgLoading(true);
+    try {
+      const [reqR, grantsR, modsR] = await Promise.allSettled([
+        api.get('/permission-governance/requests'),
+        api.get('/permission-governance/grants'),
+        api.get('/permission-governance/modules'),
+      ]);
+      setPgRequests(reqR.status === 'fulfilled' ? (reqR.value.data || []) : []);
+      setPgGrants(grantsR.status === 'fulfilled' ? (grantsR.value.data || []) : []);
+      setPgModules(modsR.status === 'fulfilled' ? (modsR.value.data || []) : []);
+    } catch { toast.error('Failed to load access requests'); }
+    finally { setPgLoading(false); }
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (mainTab === 'access_requests' && isAdmin) fetchPermGovData();
+  }, [mainTab, isAdmin, fetchPermGovData]);
+
+  const pgDecide = useCallback(async (id, action) => {
+    try {
+      await api.post(`/permission-governance/requests/${id}/${action}`, { note: '' });
+      toast.success(action === 'approve' ? 'Access granted' : 'Request rejected');
+      fetchPermGovData();
+    } catch (err) { toast.error(err.response?.data?.detail || 'Action failed'); }
+  }, [fetchPermGovData]);
+
+  const pgRevoke = useCallback(async (userId, moduleKey) => {
+    if (!window.confirm('Revoke this access?')) return;
+    try {
+      await api.post(`/permission-governance/users/${userId}/revoke?module=${moduleKey}`);
+      toast.success('Access revoked'); fetchPermGovData();
+    } catch { toast.error('Failed to revoke'); }
+  }, [fetchPermGovData]);
 
   const toggleSalaryDetail = useCallback(async (userId) => {
     if (expandedSalaryId === userId) { setExpandedSalaryId(null); return; }
@@ -2756,7 +2799,9 @@ export default function Users() {
                   ? <Fingerprint className="h-6 w-6 text-white" />
                   : mainTab === 'salary'
                     ? <Wallet className="h-6 w-6 text-white" />
-                    : <UsersIcon className="h-6 w-6 text-white" />}
+                    : mainTab === 'access_requests'
+                      ? <ShieldCheck className="h-6 w-6 text-white" />
+                      : <UsersIcon className="h-6 w-6 text-white" />}
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2 mb-1">
@@ -2766,14 +2811,16 @@ export default function Users() {
                   </span>
                 </div>
                 <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight leading-tight">
-                  {mainTab === 'identix' ? 'Identix Machine Integration' : mainTab === 'salary' ? 'Salary & Payroll' : 'User Directory'}
+                  {mainTab === 'identix' ? 'Identix Machine Integration' : mainTab === 'salary' ? 'Salary & Payroll' : mainTab === 'access_requests' ? 'Access Requests' : 'User Directory'}
                 </h1>
                 <p className="text-white/70 text-xs sm:text-sm mt-1 max-w-md">
                   {mainTab === 'identix'
                     ? 'Manage biometric devices, enrollments, and attendance logs.'
                     : mainTab === 'salary'
                       ? 'Attendance-based salary due, calculated automatically from punch records.'
-                      : `Organize roles, track access, and onboard new members — ${users.length} ${users.length === 1 ? 'member' : 'members'} in your team.`}
+                      : mainTab === 'access_requests'
+                        ? 'Approve or reject account module access requests from staff members.'
+                        : `Organize roles, track access, and onboard new members — ${users.length} ${users.length === 1 ? 'member' : 'members'} in your team.`}
                 </p>
               </div>
             </div>
@@ -2785,6 +2832,7 @@ export default function Users() {
                   { id: 'identix',         label: 'Identix',         icon: Fingerprint },
                   ...(isAdmin ? [{ id: 'password_resets', label: 'Password Resets', icon: KeyRound }] : []),
                   ...(isAdmin ? [{ id: 'salary',          label: 'Salary',          icon: Wallet   }] : []),
+                  ...(isAdmin ? [{ id: 'access_requests', label: 'Access Requests', icon: ShieldCheck }] : []),
                 ].map(t => {
                   const Icon = t.icon;
                   return (
@@ -3275,6 +3323,162 @@ export default function Users() {
               )}
             </div>
           </div>
+        </motion.div>
+      )}
+
+
+      {/* ════ ACCESS REQUESTS TAB (Permission Governance) ════ */}
+      {mainTab === 'access_requests' && isAdmin && (
+        <motion.div variants={itemVariants} className="space-y-5">
+          {/* Sub-tab selector */}
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {[
+              { id: 'pending', label: 'Pending', icon: Clock },
+              { id: 'history', label: 'History', icon: CheckCircle },
+              { id: 'grants',  label: 'Active Grants', icon: ShieldCheck },
+            ].map(t => {
+              const Icon = t.icon;
+              const count = t.id === 'pending' ? pgRequests.filter(r => r.status === 'pending').length : undefined;
+              return (
+                <button key={t.id} onClick={() => setPgReqTab(t.id)}
+                  className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all whitespace-nowrap ${
+                    pgReqTab === t.id ? 'text-white shadow-md' : isDark ? 'bg-slate-800 text-slate-400 border border-slate-700 hover:border-slate-600 hover:text-slate-200' : 'bg-white text-slate-600 border border-slate-200 hover:border-slate-300'
+                  }`}
+                  style={pgReqTab === t.id ? { background: GRADIENT } : {}}>
+                  <Icon className="h-4 w-4" />{t.label}
+                  {count > 0 && <span className="ml-1 text-[10px] font-bold bg-white/30 text-white px-1.5 py-0.5 rounded-full">{count}</span>}
+                </button>
+              );
+            })}
+            <button onClick={fetchPermGovData} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all ml-auto border ${isDark ? 'bg-slate-800 text-slate-400 border-slate-700 hover:border-slate-600' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
+              <RefreshCw className={`h-4 w-4 ${pgLoading ? 'animate-spin' : ''}`} /> Refresh
+            </button>
+          </div>
+
+          {pgLoading ? (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+            </div>
+          ) : (
+            <>
+              {/* PENDING REQUESTS */}
+              {pgReqTab === 'pending' && (() => {
+                const pending = pgRequests.filter(r => r.status === 'pending');
+                return (
+                  <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                    {pending.length === 0 ? (
+                      <div className="py-20 text-center">
+                        <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: `${COLORS.emeraldGreen}15` }}>
+                          <CheckCircle className="h-7 w-7" style={{ color: COLORS.emeraldGreen }} />
+                        </div>
+                        <p className="font-bold text-slate-700 dark:text-slate-200">No pending requests</p>
+                        <p className="text-sm text-slate-400 mt-1">All access requests have been decided.</p>
+                      </div>
+                    ) : (
+                      <div className="divide-y" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                        {pending.map(r => (
+                          <div key={r.id} className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{r.user_name}</p>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Pending</span>
+                              </div>
+                              <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+                                Requesting access to <span className="font-semibold text-slate-700 dark:text-slate-200">{r.module_label}</span>
+                              </p>
+                              {r.reason && <p className="text-xs text-slate-400 mt-1 italic">"{r.reason}"</p>}
+                            </div>
+                            <div className="flex gap-2 shrink-0">
+                              <Button onClick={() => pgDecide(r.id, 'approve')}
+                                className="h-9 px-5 rounded-xl font-semibold text-sm text-white shadow-sm"
+                                style={{ background: GRAD_GREEN }}>
+                                <CheckCircle className="h-3.5 w-3.5 mr-1.5" /> Approve
+                              </Button>
+                              <Button onClick={() => pgDecide(r.id, 'reject')} variant="outline"
+                                className="h-9 px-5 rounded-xl font-semibold text-sm border-red-200 text-red-600 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950">
+                                <XCircle className="h-3.5 w-3.5 mr-1.5" /> Reject
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* HISTORY */}
+              {pgReqTab === 'history' && (() => {
+                const decided = pgRequests.filter(r => r.status !== 'pending');
+                return (
+                  <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                    {decided.length === 0 ? (
+                      <div className="py-20 text-center">
+                        <p className="font-bold text-slate-400">No decisions yet</p>
+                      </div>
+                    ) : (
+                      <div className="divide-y" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                        {decided.map(r => (
+                          <div key={r.id} className="p-4 flex items-center justify-between gap-4">
+                            <div className="min-w-0">
+                              <p className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                                {r.user_name} — <span className="font-medium">{r.module_label}</span>
+                              </p>
+                              <p className="text-xs text-slate-400 mt-0.5">
+                                Decided by {r.decided_by_name || '—'}
+                              </p>
+                            </div>
+                            <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${r.status === 'approved' ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800' : 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-800'}`}>
+                              {r.status}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* ACTIVE GRANTS */}
+              {pgReqTab === 'grants' && (() => {
+                const activeUsers = pgGrants.filter(u => u.role !== 'admin' && pgModules.some(m => u.permissions?.[m.flag]));
+                return (
+                  <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                    {activeUsers.length === 0 ? (
+                      <div className="py-20 text-center">
+                        <p className="font-bold text-slate-400">No active grants</p>
+                        <p className="text-sm text-slate-400 mt-1">No non-admin users have been granted account module access yet.</p>
+                      </div>
+                    ) : (
+                      <div className="divide-y" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                        {activeUsers.map(u => {
+                          const activeModules = pgModules.filter(m => u.permissions?.[m.flag]);
+                          return (
+                            <div key={u.id} className="p-4">
+                              <p className={`font-bold text-sm mb-2 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{u.full_name || u.email}</p>
+                              <div className="flex flex-wrap gap-2">
+                                {activeModules.map(m => (
+                                  <span key={m.module}
+                                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border"
+                                    style={{ background: `${COLORS.mediumBlue}10`, color: COLORS.mediumBlue, borderColor: `${COLORS.mediumBlue}30` }}>
+                                    {m.label}
+                                    <button onClick={() => pgRevoke(u.id, m.module)} title="Revoke access"
+                                      className="hover:text-red-500 transition-colors ml-0.5">
+                                      <UserX className="h-3 w-3" />
+                                    </button>
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </>
+          )}
         </motion.div>
       )}
 
