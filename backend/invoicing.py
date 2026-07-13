@@ -26,6 +26,7 @@ from fastapi import (
     BackgroundTasks,
     UploadFile,
     File,
+    Form,
 )
 from fastapi.responses import StreamingResponse
 
@@ -2632,6 +2633,317 @@ async def delete_product(pid: str, current_user: User = Depends(check_module_per
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     await db.products.delete_one({"id": pid})
     return {"message": "Product deleted"}
+
+
+
+# ═══════════════════════════════════════════════════════════
+# PURCHASE INVOICE UPLOAD + CLIENT LINKING
+# ═══════════════════════════════════════════════════════════
+
+_GSTIN_RE = re.compile(r"\b[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]\b", re.I)
+_MONEY_RE = re.compile(r"(?:₹|Rs\.?|INR)?\s*([0-9]{1,3}(?:,[0-9]{2,3})+(?:\.\d{1,2})?|[0-9]+(?:\.\d{1,2})?)", re.I)
+_DATE_RE = re.compile(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4})\b")
+
+def _money_to_float(value: Any, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    try:
+        txt = str(value).replace(",", "").replace("₹", "").replace("Rs.", "").replace("Rs", "").replace("INR", "").strip()
+        return round(float(txt), 2)
+    except Exception:
+        return default
+
+def _normalise_invoice_date(value: str | None) -> str:
+    if not value:
+        return ""
+    raw = str(value).strip().replace(".", "-")
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%d-%m-%y", "%Y-%m-%d", "%Y/%m/%d", "%d %b %Y", "%d %B %Y", "%d %b %y", "%d %B %y"):
+        try:
+            return datetime.strptime(raw, fmt).date().isoformat()
+        except Exception:
+            pass
+    return raw
+
+def _clean_party_line(line: str) -> str:
+    line = re.sub(r"^[\s:;\-–—]+", "", line or "")
+    line = re.sub(r"\s{2,}", " ", line).strip(" :-\t")
+    return line[:160]
+
+def _find_value_near_labels(text: str, labels: list[str], max_len: int = 80) -> str:
+    for label in labels:
+        m = re.search(rf"{label}\s*[:#\-]?\s*([^\n]{{1,{max_len}}})", text, re.I)
+        if m:
+            val = _clean_party_line(m.group(1))
+            val = re.split(r"\s{3,}|\t|\|", val)[0].strip()
+            if val:
+                return val
+    return ""
+
+def _find_amount_by_labels(text: str, labels: list[str]) -> float:
+    for label in labels:
+        m = re.search(label, text, re.I)
+        if not m:
+            continue
+        window = text[m.end():m.end() + 180]
+        amounts = [_money_to_float(x) for x in _MONEY_RE.findall(window)]
+        amounts = [a for a in amounts if a > 0]
+        if amounts:
+            return max(amounts)
+    return 0.0
+
+def _guess_party_after_label(lines: list[str], labels: tuple[str, ...]) -> str:
+    for i, line in enumerate(lines):
+        low = line.lower()
+        if any(lbl in low for lbl in labels):
+            if ":" in line:
+                val = _clean_party_line(line.split(":", 1)[1])
+                if val and not _GSTIN_RE.search(val) and len(val) > 2:
+                    return val
+            for nxt in lines[i + 1:i + 5]:
+                val = _clean_party_line(nxt)
+                if not val or _GSTIN_RE.search(val):
+                    continue
+                if re.search(r"address|gstin|state|phone|email|invoice|date", val, re.I):
+                    continue
+                return val
+    return ""
+
+def _parse_purchase_invoice_text(text: str, filename: str = "") -> dict:
+    compact = re.sub(r"[ \t]+", " ", text or "")
+    lines = [_clean_party_line(x) for x in compact.splitlines() if _clean_party_line(x)]
+    gstins = []
+    for g in _GSTIN_RE.findall(compact):
+        g = g.upper()
+        if g not in gstins:
+            gstins.append(g)
+    invoice_no = _find_value_near_labels(compact, [r"invoice\s*(?:no|number|#)", r"bill\s*(?:no|number)", r"tax\s*invoice\s*(?:no|number)", r"document\s*(?:no|number)", r"voucher\s*(?:no|number)"], 50)
+    if invoice_no:
+        invoice_no = re.split(r"\s+(?:date|dt|dated|gstin|place)\b", invoice_no, flags=re.I)[0].strip(" :-#")
+    date_value = _find_value_near_labels(compact, [r"invoice\s*date", r"bill\s*date", r"dated", r"date"], 40)
+    dm = _DATE_RE.search(date_value or "") or _DATE_RE.search(compact)
+    invoice_date = _normalise_invoice_date(dm.group(1) if dm else "")
+    grand_total = _find_amount_by_labels(compact, [r"grand\s+total", r"invoice\s+total", r"total\s+amount", r"amount\s+payable", r"net\s+amount", r"total\s+value", r"bill\s+amount"])
+    taxable = _find_amount_by_labels(compact, [r"taxable\s+(?:amount|value)", r"sub\s*total", r"subtotal"])
+    cgst = _find_amount_by_labels(compact, [r"cgst"])
+    sgst = _find_amount_by_labels(compact, [r"sgst"])
+    igst = _find_amount_by_labels(compact, [r"igst"])
+    total_gst = round(cgst + sgst + igst, 2) if any([cgst, sgst, igst]) else _find_amount_by_labels(compact, [r"total\s+gst", r"tax\s+amount", r"gst\s+amount"])
+    if not grand_total:
+        amounts = [_money_to_float(x) for x in _MONEY_RE.findall(compact)]
+        amounts = [a for a in amounts if 1 <= a <= 10_00_00_000]
+        if amounts:
+            grand_total = max(amounts)
+    buyer_name = _guess_party_after_label(lines, ("bill to", "billed to", "buyer", "customer", "recipient", "consignee"))
+    supplier_name = _guess_party_after_label(lines, ("supplier", "seller", "from", "vendor"))
+    if not supplier_name:
+        for line in lines[:12]:
+            if re.search(r"tax invoice|invoice|original|duplicate|gstin|phone|email|date|bill to|buyer", line, re.I):
+                continue
+            if len(line) >= 4:
+                supplier_name = line
+                break
+    return {
+        "file_name": filename,
+        "invoice_no": invoice_no or "",
+        "invoice_date": invoice_date,
+        "supplier_name": supplier_name or "",
+        "supplier_gstin": gstins[0] if gstins else "",
+        "buyer_name": buyer_name or "",
+        "buyer_gstin": gstins[1] if len(gstins) > 1 else "",
+        "all_gstins": gstins,
+        "taxable_amount": taxable,
+        "total_gst": total_gst,
+        "grand_total": grand_total,
+        "currency": "INR",
+        "parse_confidence": 0.68 if (invoice_no or grand_total or gstins) else 0.25,
+        "raw_text_excerpt": compact[:5000],
+    }
+
+def _extract_json_object(text: str) -> dict:
+    if not text:
+        return {}
+    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.I | re.S).strip()
+    m = re.search(r"\{.*\}", cleaned, re.S)
+    if m:
+        cleaned = m.group(0)
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        return {}
+
+async def _ai_extract_purchase_invoice(contents: bytes, filename: str, ext: str, mime_type: str) -> dict:
+    prompt = ("Read this supplier purchase invoice and return ONLY valid JSON with these keys: supplier_name, supplier_gstin, buyer_name, buyer_gstin, invoice_no, invoice_date, taxable_amount, total_gst, grand_total, currency, parse_confidence. Use ISO yyyy-mm-dd for invoice_date when possible. Use numbers only for amounts.")
+    try:
+        from backend.ai_document_reader import _groq_vision, _groq_vision_multipage
+        if ext == "pdf":
+            import pdfplumber
+            page_images_b64 = []
+            with pdfplumber.open(BytesIO(contents)) as pdf:
+                for page in pdf.pages[:4]:
+                    pil_img = page.to_image(resolution=150).original
+                    if pil_img.mode not in ("RGB", "L"):
+                        pil_img = pil_img.convert("RGB")
+                    buf = BytesIO()
+                    pil_img.save(buf, format="JPEG", quality=85)
+                    page_images_b64.append((base64.b64encode(buf.getvalue()).decode(), "image/jpeg"))
+            if not page_images_b64:
+                return {}
+            answer = await _groq_vision_multipage(page_images_b64, prompt)
+        else:
+            from PIL import Image as PILImage
+            img = PILImage.open(BytesIO(contents))
+            if img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
+            buf = BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            answer = await _groq_vision(base64.b64encode(buf.getvalue()).decode(), "image/jpeg", prompt)
+        parsed = _extract_json_object(answer)
+        if parsed:
+            parsed["invoice_date"] = _normalise_invoice_date(parsed.get("invoice_date"))
+            for key in ("taxable_amount", "total_gst", "grand_total"):
+                parsed[key] = _money_to_float(parsed.get(key))
+            parsed["all_gstins"] = [g.upper() for g in _GSTIN_RE.findall(" ".join(str(v) for v in parsed.values()))]
+            parsed["raw_text_excerpt"] = ""
+            return parsed
+    except Exception as e:
+        logger.warning(f"Purchase invoice AI extraction failed for {filename}: {e}")
+    return {}
+
+async def _extract_purchase_invoice(contents: bytes, filename: str, content_type: str = "") -> dict:
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    text = ""
+    if ext == "pdf":
+        try:
+            import pdfplumber
+            pages = []
+            with pdfplumber.open(BytesIO(contents)) as pdf:
+                for i, page in enumerate(pdf.pages[:12]):
+                    page_text = page.extract_text() or ""
+                    if page_text.strip():
+                        pages.append(f"--- Page {i + 1} ---\n{page_text.strip()}")
+            text = "\n\n".join(pages)
+        except Exception as e:
+            logger.warning(f"Purchase invoice PDF text extraction failed for {filename}: {e}")
+    elif ext in {"txt", "csv"}:
+        text = contents.decode("utf-8", errors="replace")
+    parsed = _parse_purchase_invoice_text(text, filename) if text.strip() else {}
+    needs_ocr = not parsed or (not parsed.get("invoice_no") and not parsed.get("grand_total") and not parsed.get("all_gstins"))
+    if needs_ocr and ext in {"pdf", "png", "jpg", "jpeg", "webp"}:
+        ai_parsed = await _ai_extract_purchase_invoice(contents, filename, ext, content_type or "application/octet-stream")
+        parsed = {**parsed, **{k: v for k, v in ai_parsed.items() if v not in (None, "", [], 0)}} if parsed else ai_parsed
+    if not parsed:
+        parsed = {"file_name": filename, "raw_text_excerpt": text[:5000]}
+    parsed.setdefault("file_name", filename)
+    parsed.setdefault("all_gstins", [g.upper() for g in _GSTIN_RE.findall(text or "")])
+    parsed.setdefault("parse_confidence", 0.3)
+    return parsed
+
+def _client_access_query_for_purchase(current_user: User) -> dict:
+    if getattr(current_user, "role", None) == "admin":
+        return {}
+    assigned_clients = []
+    perms = getattr(current_user, "permissions", None)
+    try:
+        assigned_clients = getattr(perms, "assigned_clients", []) or []
+    except Exception:
+        if isinstance(perms, dict):
+            assigned_clients = perms.get("assigned_clients", []) or []
+    clauses = [{"created_by": current_user.id}, {"assigned_to": current_user.id}, {"assignments.user_id": current_user.id}]
+    if assigned_clients:
+        clauses.append({"id": {"$in": assigned_clients}})
+    return {"$or": clauses}
+
+async def _match_purchase_client(parsed: dict, current_user: User, client_id: str | None = None) -> dict | None:
+    access = _client_access_query_for_purchase(current_user)
+    if client_id:
+        q = {"id": client_id}
+        if access:
+            q = {"$and": [access, q]}
+        return await db.clients.find_one(q, {"_id": 0})
+    gstins = []
+    for g in [parsed.get("buyer_gstin"), *(parsed.get("all_gstins") or [])]:
+        if g and str(g).upper() not in gstins:
+            gstins.append(str(g).upper())
+    for gst in gstins:
+        gst_q = {"$or": [{"gstin": {"$regex": f"^{re.escape(gst)}$", "$options": "i"}}, {"client_gstin": {"$regex": f"^{re.escape(gst)}$", "$options": "i"}}]}
+        q = {"$and": [access, gst_q]} if access else gst_q
+        client = await db.clients.find_one(q, {"_id": 0})
+        if client:
+            return client
+    haystack = (parsed.get("raw_text_excerpt") or "").lower()
+    buyer_name = (parsed.get("buyer_name") or "").lower()
+    if not haystack and not buyer_name:
+        return None
+    clients = await db.clients.find(access, {"_id": 0, "id": 1, "company_name": 1, "gstin": 1, "client_gstin": 1}).to_list(5000)
+    for c in clients:
+        name = (c.get("company_name") or "").strip().lower()
+        if len(name) >= 4 and (name in haystack or name in buyer_name or buyer_name in name):
+            return c
+    return None
+
+def _purchase_scope_query(current_user: User) -> dict:
+    return {} if getattr(current_user, "role", None) == "admin" else {"created_by": current_user.id}
+
+@router.get("/purchase-invoices")
+async def list_purchase_invoices(client_id: Optional[str] = Query(None), search: Optional[str] = Query(None), page: int = Query(1, ge=1), page_size: int = Query(100, ge=1, le=1000), current_user: User = Depends(get_current_user)):
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+    q = _purchase_scope_query(current_user)
+    if client_id:
+        q["client_id"] = client_id
+    if search:
+        q["$or"] = [{"client_name": {"$regex": search, "$options": "i"}}, {"supplier_name": {"$regex": search, "$options": "i"}}, {"invoice_no": {"$regex": search, "$options": "i"}}, {"supplier_gstin": {"$regex": search, "$options": "i"}}]
+    total = await db.purchase_invoices.count_documents(q)
+    skip = (page - 1) * page_size
+    items = await db.purchase_invoices.find(q, {"_id": 0}).sort("created_at", -1).skip(skip).limit(page_size).to_list(page_size)
+    return {"purchase_invoices": items, "total": total, "page": page, "page_size": page_size}
+
+@router.post("/purchase-invoices/upload")
+async def upload_purchase_invoice(file: UploadFile = File(...), client_id: Optional[str] = Form(None), company_id: Optional[str] = Form(None), current_user: User = Depends(get_current_user)):
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+    filename = file.filename or "purchase-invoice"
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext not in {"pdf", "png", "jpg", "jpeg", "webp", "txt", "csv"}:
+        raise HTTPException(400, "Unsupported file type. Upload PDF, image, TXT, or CSV invoices.")
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(400, "Uploaded file is empty")
+    parsed = await _extract_purchase_invoice(contents, filename, file.content_type or "")
+    matched_client = await _match_purchase_client(parsed, current_user, client_id)
+    gstins = [g.upper() for g in (parsed.get("all_gstins") or []) if g]
+    client_gstin = ((matched_client or {}).get("gstin") or (matched_client or {}).get("client_gstin") or "").upper()
+    supplier_gstin = (parsed.get("supplier_gstin") or "").upper()
+    buyer_gstin = (parsed.get("buyer_gstin") or "").upper()
+    if matched_client and client_gstin:
+        buyer_gstin = client_gstin
+        supplier_gstin = next((g for g in gstins if g != client_gstin), supplier_gstin)
+    elif len(gstins) >= 2 and not buyer_gstin:
+        buyer_gstin = gstins[1]
+    now = datetime.now(timezone.utc).isoformat()
+    invoice_no = (parsed.get("invoice_no") or f"PUR-{str(uuid.uuid4())[:8].upper()}").strip()
+    duplicate_q = {"invoice_no": invoice_no, "created_by": current_user.id}
+    if matched_client:
+        duplicate_q["client_id"] = matched_client.get("id")
+    if supplier_gstin:
+        duplicate_q["supplier_gstin"] = supplier_gstin
+    existing = await db.purchase_invoices.find_one(duplicate_q, {"_id": 0}) if invoice_no else None
+    if existing:
+        return {"purchase_invoice": existing, "matched_client": matched_client, "duplicate": True}
+    doc = {
+        "id": str(uuid.uuid4()), "company_id": company_id or "", "client_id": (matched_client or {}).get("id", client_id or ""),
+        "client_name": (matched_client or {}).get("company_name", parsed.get("buyer_name", "")), "supplier_name": parsed.get("supplier_name", ""),
+        "supplier_gstin": supplier_gstin, "buyer_name": parsed.get("buyer_name", ""), "buyer_gstin": buyer_gstin, "invoice_no": invoice_no,
+        "invoice_date": parsed.get("invoice_date") or date.today().isoformat(), "taxable_amount": _money_to_float(parsed.get("taxable_amount")),
+        "total_gst": _money_to_float(parsed.get("total_gst")), "grand_total": _money_to_float(parsed.get("grand_total")), "currency": parsed.get("currency") or "INR",
+        "file_name": filename, "file_size": len(contents), "content_type": file.content_type or "application/octet-stream", "parse_confidence": float(parsed.get("parse_confidence") or 0),
+        "raw_text_excerpt": parsed.get("raw_text_excerpt", "")[:5000], "created_by": current_user.id, "created_at": now, "updated_at": now,
+    }
+    await db.purchase_invoices.insert_one(doc)
+    if matched_client:
+        await db.clients.update_one({"id": matched_client["id"]}, {"$set": {"last_purchase_invoice_at": now}, "$inc": {"purchase_invoice_count": 1}})
+    doc.pop("_id", None)
+    return {"purchase_invoice": doc, "matched_client": matched_client, "duplicate": False}
 
 
 # ═══════════════════════════════════════════════════════════
