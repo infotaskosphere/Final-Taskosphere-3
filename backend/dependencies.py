@@ -1069,6 +1069,25 @@ async def create_audit_log(
     )
     await db.audit_logs.insert_one(log_entry.model_dump())
 
+
+# ==========================================================
+# PERMISSIONS DICT HELPER
+# Extracts the permissions dict from a User regardless of
+# whether it is stored as a Pydantic model or a plain dict.
+# Centralised here so server.py and permission_governance.py
+# both import from the same place without circular imports.
+# ==========================================================
+def get_user_permissions(current_user: User) -> dict:
+    """Return the permissions dict for a User (Pydantic model or dict)."""
+    perms = getattr(current_user, "permissions", None)
+    if perms is None:
+        return {}
+    if isinstance(perms, dict):
+        return perms
+    if hasattr(perms, "model_dump"):
+        return perms.model_dump()
+    return {}
+
 # ==========================================================
 # COMPATIBILITY ALIASES
 # ==========================================================
