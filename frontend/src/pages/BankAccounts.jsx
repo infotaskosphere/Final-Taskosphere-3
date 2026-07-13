@@ -9,6 +9,8 @@ import GifLoader, { MiniLoader, ContentLoader } from '@/components/ui/GifLoader.
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
@@ -22,13 +24,14 @@ function BankAccountsInner() {
   const fileRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState([]);
+  const [companies, setCompanies] = useState([]);
   const [selected, setSelected] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [txnLoading, setTxnLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [file, setFile] = useState(null);
   const [showNewAccount, setShowNewAccount] = useState(false);
-  const [form, setForm] = useState({ bank_name: '', account_holder: '', account_number: '', ifsc: '', account_type: 'current', opening_balance: 0 });
+  const [form, setForm] = useState({ bank_name: '', account_holder: '', account_number: '', ifsc: '', account_type: 'current', opening_balance: 0, company_id: '' });
   const [savingAccount, setSavingAccount] = useState(false);
 
   const fetchAccounts = async () => {
@@ -57,7 +60,10 @@ function BankAccountsInner() {
     }
   };
 
-  useEffect(() => { fetchAccounts(); }, []);
+  useEffect(() => {
+    fetchAccounts();
+    api.get('/companies/list').then(r => setCompanies(r.data || [])).catch(() => {});
+  }, []);
   useEffect(() => { if (selected) fetchTransactions(selected.id); }, [selected?.id]);
 
   const stats = useMemo(() => {
@@ -73,7 +79,7 @@ function BankAccountsInner() {
       await api.post('/bank-accounts', form);
       toast.success('Bank account added');
       setShowNewAccount(false);
-      setForm({ bank_name: '', account_holder: '', account_number: '', ifsc: '', account_type: 'current', opening_balance: 0 });
+      setForm({ bank_name: '', account_holder: '', account_number: '', ifsc: '', account_type: 'current', opening_balance: 0, company_id: '' });
       await fetchAccounts();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to add bank account');
@@ -194,6 +200,11 @@ function BankAccountsInner() {
                 <div className="min-w-0">
                   <p className={`font-bold text-sm truncate ${isDark && selected?.id !== a.id ? 'text-slate-100' : 'text-slate-900'}`}>{a.bank_name}</p>
                   <p className="text-xs text-slate-400 truncate">{a.account_number_masked || a.account_holder}</p>
+                  {a.company_id && companies.find(c => c.id === a.company_id) && (
+                    <p className="text-[10px] text-blue-500 font-semibold truncate mt-0.5">
+                      {companies.find(c => c.id === a.company_id)?.name}
+                    </p>
+                  )}
                   <p className="text-sm font-bold mt-1" style={{ color: COLORS.emeraldGreen }}>{fmtC(a.current_balance)}</p>
                 </div>
                 <div className="flex flex-col items-end gap-1">
@@ -295,6 +306,17 @@ function BankAccountsInner() {
             <Input placeholder="Account number" value={form.account_number} onChange={e => setForm(f => ({ ...f, account_number: e.target.value }))} />
             <Input placeholder="IFSC code" value={form.ifsc} onChange={e => setForm(f => ({ ...f, ifsc: e.target.value.toUpperCase() }))} />
             <Input type="number" placeholder="Opening balance" value={form.opening_balance} onChange={e => setForm(f => ({ ...f, opening_balance: e.target.value }))} />
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold text-slate-600">Link to Company (optional)</Label>
+              <Select value={form.company_id || '__none__'} onValueChange={v => setForm(f => ({ ...f, company_id: v === '__none__' ? '' : v }))}>
+                <SelectTrigger className="rounded-xl text-sm"><SelectValue placeholder="Select company…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">— Not linked —</SelectItem>
+                  {companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-slate-400">Links this bank account to a company so Sale &amp; Quotation PDFs can use the same bank details.</p>
+            </div>
             <Button onClick={createAccount} disabled={savingAccount} className="w-full rounded-xl">
               {savingAccount ? <MiniLoader height={18} /> : 'Save bank account'}
             </Button>
