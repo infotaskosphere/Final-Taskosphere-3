@@ -36,6 +36,7 @@ const WhatsAppSettings  = lazyWithRetry(() => import("@/pages/WhatsAppSettings.j
 const Passvault         = lazyWithRetry(() => import("@/pages/Passvault.jsx"), "Passvault");
 const WhatsAppHub       = lazyWithRetry(() => import("@/pages/WhatsAppHub.jsx"), "WhatsAppHub");
 const Invoicing         = lazyWithRetry(() => import("@/pages/Invoicing.jsx"), "Invoicing");
+const Purchase          = lazyWithRetry(() => import("@/pages/Purchase.jsx"), "Purchase");
 const Reminders         = lazyWithRetry(() => import("@/pages/Reminders.jsx"), "Reminders");
 const CompliancePage    = lazyWithRetry(() => import("@/pages/CompliancePage.jsx"), "CompliancePage");
 const GSTReconciliation = lazyWithRetry(() => import("@/pages/GSTReconciliation.jsx"), "GSTReconciliation");
@@ -175,6 +176,8 @@ function AppRoutes() {
       <Route path="/leads"      element={<Permission permission="can_view_all_leads"><PageLoader><LeadsPage /></PageLoader></Permission>} />
       <Route path="/quotations" element={<Permission permission={["can_create_quotations", "can_manage_invoices"]}><PageLoader><Quotations /></PageLoader></Permission>} />
       <Route path="/invoicing"  element={<Permission permission={["can_manage_invoices", "can_create_quotations"]}><PageLoader><Invoicing /></PageLoader></Permission>} />
+      <Route path="/sale"       element={<Navigate to="/invoicing" replace />} />
+      <Route path="/purchase"   element={<Permission permission={["can_manage_invoices", "can_create_quotations"]}><PageLoader><Purchase /></PageLoader></Permission>} />
       <Route path="/task-audit" element={<Permission permission="can_view_audit_logs"><PageLoader><TaskAudit /></PageLoader></Permission>} />
       <Route path="/users"          element={<Permission permission="can_view_user_page"><PageLoader><Users /></PageLoader></Permission>} />
       <Route path="/interviews"     element={<Permission permission="can_view_interviews"><PageLoader><Interviews /></PageLoader></Permission>} />
