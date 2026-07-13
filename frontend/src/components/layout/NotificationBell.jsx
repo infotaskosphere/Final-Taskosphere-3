@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
   Bell, CheckCheck, Trash2, Info,
-  CheckSquare, ClipboardList, Users,
+  CheckSquare, ClipboardList, Users, CalendarOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,6 +18,7 @@ const TYPE_META = {
   task:   { icon: ClipboardList, color: "text-indigo-500",  bg: "bg-indigo-50"  },
   todo:   { icon: CheckSquare,   color: "text-emerald-500", bg: "bg-emerald-50" },
   lead:   { icon: Users,         color: "text-amber-500",   bg: "bg-amber-50"   },
+  leave:  { icon: CalendarOff,   color: "text-rose-600",    bg: "bg-rose-50"    },
   system: { icon: Info,          color: "text-slate-500",   bg: "bg-slate-100"  },
   dsc:    { icon: Info,          color: "text-purple-500",  bg: "bg-purple-50"  },
 };
@@ -134,6 +135,10 @@ export const NotificationBell = () => {
     }
   };
 
+  // ── Split leave vs regular so leave shows a distinct colour + count ─────────
+  const leaveUnread   = notifications.filter((n) => !n.is_read && n.type === "leave").length;
+  const regularUnread = unreadCount - leaveUnread;
+
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -146,16 +151,28 @@ export const NotificationBell = () => {
           data-testid="notification-bell"
         >
           <Bell className="h-[18px] w-[18px]" />
-          {unreadCount > 0 && (
+          {/* Regular notifications — orange/rose badge (top-right) */}
+          {regularUnread > 0 && (
             <span
               className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-gradient-to-br from-orange-500 to-rose-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center leading-none ring-2 ring-white dark:ring-slate-900 shadow"
               data-testid="notification-count"
             >
-              {unreadCount > 99 ? "99+" : unreadCount}
+              {regularUnread > 99 ? "99+" : regularUnread}
+            </span>
+          )}
+          {/* Leave notifications — distinct rose/pink badge (top-left) */}
+          {leaveUnread > 0 && (
+            <span
+              className="absolute -top-1 -left-1 min-w-[18px] h-[18px] px-1 bg-gradient-to-br from-rose-600 to-pink-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center leading-none ring-2 ring-white dark:ring-slate-900 shadow"
+              data-testid="notification-leave-count"
+              title={`${leaveUnread} leave application${leaveUnread !== 1 ? "s" : ""}`}
+            >
+              {leaveUnread > 99 ? "99+" : leaveUnread}
             </span>
           )}
         </Button>
       </PopoverTrigger>
+
 
       {/* ── Popover panel ── */}
       <PopoverContent
@@ -164,12 +181,17 @@ export const NotificationBell = () => {
       >
         {/* Header */}
         <div className="px-4 py-3 bg-white border-b border-slate-100 flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Bell className="h-4 w-4 text-slate-600" />
             <h3 className="font-semibold text-slate-900 text-sm">Notifications</h3>
-            {unreadCount > 0 && (
+            {regularUnread > 0 && (
               <span className="bg-indigo-100 text-indigo-700 text-xs font-semibold px-2 py-0.5 rounded-full">
-                {unreadCount} new
+                {regularUnread} new
+              </span>
+            )}
+            {leaveUnread > 0 && (
+              <span className="bg-rose-100 text-rose-700 text-xs font-semibold px-2 py-0.5 rounded-full">
+                {leaveUnread} leave
               </span>
             )}
           </div>
@@ -213,13 +235,20 @@ export const NotificationBell = () => {
               {notifications.map((n) => {
                 const meta = getMeta(n.type);
                 const Icon = meta.icon;
+                const isLeave = n.type === "leave";
 
                 return (
                   <div
                     key={n.id}
-                    className={`group relative flex gap-3 px-4 py-3.5 cursor-pointer transition-colors hover:bg-white ${
+                    className={`group relative flex gap-3 px-4 py-3.5 cursor-pointer transition-colors ${
+                      isLeave ? "hover:bg-rose-50/70" : "hover:bg-white"
+                    } ${
                       !n.is_read
-                        ? "bg-white border-l-2 border-l-indigo-500"
+                        ? isLeave
+                          ? "bg-rose-50 border-l-4 border-l-rose-500"
+                          : "bg-white border-l-2 border-l-indigo-500"
+                        : isLeave
+                        ? "bg-rose-50/40"
                         : "bg-slate-50"
                     }`}
                     onClick={() => !n.is_read && markAsRead(n.id)}
@@ -236,7 +265,11 @@ export const NotificationBell = () => {
                     <div className="flex-1 min-w-0">
                       <p
                         className={`text-sm font-medium truncate ${
-                          !n.is_read ? "text-slate-900" : "text-slate-600"
+                          isLeave
+                            ? "text-rose-700"
+                            : !n.is_read
+                            ? "text-slate-900"
+                            : "text-slate-600"
                         }`}
                       >
                         {n.title}
@@ -251,8 +284,13 @@ export const NotificationBell = () => {
 
                     {/* Unread dot */}
                     {!n.is_read && (
-                      <div className="flex-shrink-0 w-2 h-2 bg-indigo-500 rounded-full mt-1.5" />
+                      <div
+                        className={`flex-shrink-0 w-2 h-2 rounded-full mt-1.5 ${
+                          isLeave ? "bg-rose-500" : "bg-indigo-500"
+                        }`}
+                      />
                     )}
+
 
                     {/* Delete button — visible on hover */}
                     <button
