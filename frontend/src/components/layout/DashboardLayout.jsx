@@ -8,7 +8,7 @@ import {
   PanelLeftClose, PanelLeftOpen, Target, Sun, Moon, MapPin,
   Settings, Mail, Receipt, X, KeyRound, BrainCircuit,
   CreditCard, Fingerprint, Bell, Shield, ShieldCheck, ArrowLeftRight, MessageCircle,
-  Building2, Zap, Briefcase, ShoppingBag,
+  Building2, Zap, Briefcase, ShoppingBag, Landmark, BookOpen, NotebookPen,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -104,6 +104,29 @@ const NAV_GROUPS = [
         label:      'Purchase',
         permission: ['can_manage_invoices', 'can_create_quotations'],
       },
+      {
+        path:       '/bank-accounts',
+        icon:       Landmark,
+        label:      'Bank Accounts',
+        // No permission gate here — the page itself shows either the real
+        // content (admin, or an approved user) or a request-access screen,
+        // so it must stay reachable for everyone to be able to ask.
+      },
+      {
+        path:       '/chart-of-accounts',
+        icon:       BookOpen,
+        label:      'Chart of Accounts',
+      },
+      {
+        path:       '/journal-entries',
+        icon:       NotebookPen,
+        label:      'Journal Entries',
+      },
+      {
+        path:       '/accounting-reports',
+        icon:       BarChart3,
+        label:      'Accounting Reports',
+      },
     ],
   },
   {
@@ -118,6 +141,7 @@ const NAV_GROUPS = [
       { path: '/staff-activity', icon: Activity,   label: 'Staff Activity',   adminOnly: true                    },
       { path: '/client-portal-manager', icon: Building2, label: 'Client Portal', permission: 'can_view_client_portal' },
       { path: '/whatsapp-hub', icon: MessageCircle, label: 'Unified Inbox', permission: 'can_access_whatsapp_hub' },
+      { path: '/permission-governance', icon: ShieldCheck, label: 'Permission Governance', adminOnly: true },
     ],
   },
   {
