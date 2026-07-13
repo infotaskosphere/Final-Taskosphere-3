@@ -24,6 +24,7 @@ import {
   Monitor, Wifi, WifiOff, RefreshCw, Radar, Loader2,
   Network, Save, ClipboardList, LayoutDashboard, AlertTriangle, MapPin, UserMinus, ArrowRight,
   Building2, MessageSquare, MessageCircle, Wallet, IndianRupee, ChevronDown, ChevronUp,
+  Landmark, CreditCard, ShoppingBag, BookOpen, NotebookPen, BarChart3,
   TrendingDown, CalendarClock, CalendarX2, CalendarCheck2, CalendarOff,
   Minimize2,
 } from 'lucide-react';
@@ -484,7 +485,7 @@ const ModuleAccessBadges = ({ userData }) => {
 
 const PermissionMatrixSummary = ({ permissions }) => {
   // Include module-level perms (managed from the Modules tab) so coverage % is accurate
-  const MODULE_PERM_KEYS = ['can_manage_invoices', 'can_view_passwords', 'can_edit_passwords', 'can_view_gst_reconciliation', 'can_view_trademark_sphere', 'can_view_client_portal', 'can_manage_whatsapp'];
+  const MODULE_PERM_KEYS = ['can_manage_invoices', 'can_view_sale', 'can_view_purchase', 'can_view_bank', 'can_view_chart_of_accounts', 'can_view_journal_entries', 'can_view_accounting_reports', 'can_view_passwords', 'can_edit_passwords', 'can_view_gst_reconciliation', 'can_view_trademark_sphere', 'can_view_client_portal', 'can_manage_whatsapp'];
   const allPerms = [...GLOBAL_PERMS, ...OPS_PERMS, ...EDIT_PERMS];
   const granted  = allPerms.filter(p => permissions[p.key]).length
                  + MODULE_PERM_KEYS.filter(k => permissions[k]).length;
@@ -590,6 +591,111 @@ const SectionHeader = ({ icon: Icon, title, count, color }) => (
     )}
   </div>
 );
+
+// ════════════════════════════════════════════════════════════════════════════════
+// ACCOUNTS MODULE — governs every page under the "Accounts" section. Admins can
+// grant/revoke all accounts pages at once (master toggle) or manage each page
+// individually below.
+// ════════════════════════════════════════════════════════════════════════════════
+const ACCOUNT_PAGE_PERMS = [
+  { permKey: 'can_manage_invoices',         label: 'Sale & Purchase Invoicing', desc: 'Create GST invoices, record payments, manage product catalog', icon: FileText },
+  { permKey: 'can_view_sale',               label: 'Sale',                      desc: 'View the Sale invoices page',                          icon: CreditCard },
+  { permKey: 'can_view_purchase',           label: 'Purchase',                  desc: 'View the Purchase invoices page',                      icon: ShoppingBag },
+  { permKey: 'can_view_bank',               label: 'Bank Accounts',             desc: 'Upload statements, view bank accounts & balances',     icon: Landmark },
+  { permKey: 'can_view_chart_of_accounts',  label: 'Chart of Accounts',         desc: 'View the chart of accounts',                           icon: BookOpen },
+  { permKey: 'can_view_journal_entries',    label: 'Journal Entries',           desc: 'View journal entries',                                 icon: NotebookPen },
+  { permKey: 'can_view_accounting_reports', label: 'Accounting Reports',        desc: 'View P&L, Balance Sheet, ledgers & other reports',     icon: BarChart3 },
+];
+
+// Write / manage sub-permissions shown nested under their parent page.
+const ACCOUNT_WRITE_PERMS = [
+  { parent: 'can_view_chart_of_accounts', permKey: 'can_manage_chart_of_accounts', label: 'Manage Chart of Accounts', desc: 'Create and edit ledger accounts',           icon: Pencil },
+  { parent: 'can_view_journal_entries',   permKey: 'can_post_journal_entries',     label: 'Post Journal Entries',     desc: 'Create and post manual journal entries',    icon: Pencil },
+];
+
+const ACCOUNTS_ACCENT = '#1FAF5A';
+
+const AccountsModuleAccess = ({ permissions, setPermissions }) => {
+  const pageKeys     = ACCOUNT_PAGE_PERMS.map(p => p.permKey);
+  const enabledCount = pageKeys.filter(k => permissions[k]).length;
+  const allOn        = enabledCount === pageKeys.length;
+  const accent       = ACCOUNTS_ACCENT;
+
+  const setAll = (val) => setPermissions(p => {
+    const next = { ...p };
+    pageKeys.forEach(k => { next[k] = val; });
+    // Turning the whole module off also revokes the nested write rights.
+    if (!val) ACCOUNT_WRITE_PERMS.forEach(w => { next[w.permKey] = false; });
+    return next;
+  });
+
+  return (
+    <div className="space-y-3">
+      {/* Master card — grants/revokes ALL accounts pages at once */}
+      <div
+        onClick={() => setAll(!allOn)}
+        className="flex gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all hover:shadow-md"
+        style={enabledCount > 0
+          ? { borderColor: `${accent}40`, background: `${accent}06` }
+          : {}}
+      >
+        <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition-all ${
+          enabledCount > 0 ? 'text-white shadow-md' : 'bg-slate-100 dark:bg-slate-700 text-slate-400'
+        }`}
+          style={enabledCount > 0 ? { background: `linear-gradient(135deg, ${accent}, ${accent}cc)` } : {}}>
+          <Wallet className="h-5 w-5" />
+        </div>
+        <div className="flex-1 min-w-0 pt-0.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className={`font-semibold text-sm ${enabledCount > 0 ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300'}`}>Accounts</p>
+            {enabledCount > 0 && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md"
+                style={{ background: `${accent}15`, color: accent }}>
+                {allOn ? 'All pages' : `${enabledCount}/${pageKeys.length} pages`}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
+            All accounts pages — Sale, Purchase, Bank, Chart of Accounts, Journal Entries &amp; Reports
+          </p>
+        </div>
+        <div className="flex-shrink-0 flex items-center" onClick={e => e.stopPropagation()}>
+          <Switch checked={allOn} onCheckedChange={setAll} />
+        </div>
+      </div>
+
+      {/* Individual page governance */}
+      <div className="ml-5 space-y-2">
+        <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 pt-1">All Accounts pages</p>
+        {ACCOUNT_PAGE_PERMS.map(pg => (
+          <React.Fragment key={pg.permKey}>
+            <PermToggleRow
+              permKey={pg.permKey}
+              label={pg.label}
+              desc={pg.desc}
+              icon={pg.icon}
+              permissions={permissions}
+              setPermissions={setPermissions}
+            />
+            {permissions[pg.permKey] && ACCOUNT_WRITE_PERMS.filter(w => w.parent === pg.permKey).map(w => (
+              <div className="ml-5" key={w.permKey}>
+                <PermToggleRow
+                  permKey={w.permKey}
+                  label={w.label}
+                  desc={w.desc}
+                  icon={w.icon}
+                  permissions={permissions}
+                  setPermissions={setPermissions}
+                />
+              </div>
+            ))}
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 
 // ════════════════════════════════════════════════════════════════════════════════
 // IDENTIX — LAN SCANNER
@@ -3772,7 +3878,7 @@ export default function Users() {
                 <div className="grid grid-cols-1 gap-3">
                   <ModuleAccessCard icon={Target} title="Leads Pipeline" desc="Access and manage the global leads dashboard" permKey="can_view_all_leads" permissions={permissions} setPermissions={setPermissions} accentColor="#3B82F6" />
                   <ModuleAccessCard icon={Receipt} title="Quotations" desc="Create, edit, export and send quotations to clients" permKey="can_create_quotations" permissions={permissions} setPermissions={setPermissions} accentColor="#8B5CF6" />
-                  <ModuleAccessCard icon={FileText} title="Invoicing & Billing" desc="Create GST invoices, record payments, manage product catalog" permKey="can_manage_invoices" permissions={permissions} setPermissions={setPermissions} accentColor={COLORS.emeraldGreen} badge={permissions.can_manage_invoices ? 'Full Access' : undefined} />
+                  <AccountsModuleAccess permissions={permissions} setPermissions={setPermissions} />
                   <ModuleAccessCard icon={KeyRound} title="Password Vault" desc="Access the secure portal credentials repository" permKey="can_view_passwords" permissions={permissions} setPermissions={setPermissions} accentColor="#F59E0B" badge={permissions.can_edit_passwords ? 'Read / Write' : permissions.can_view_passwords ? 'Read Only' : undefined} />
                   {permissions.can_view_passwords && (
                     <div className="ml-5 space-y-3">
