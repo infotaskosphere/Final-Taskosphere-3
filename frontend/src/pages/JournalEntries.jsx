@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { toast } from 'sonner';
 import { NotebookPen, Plus, RefreshCw, Trash2, X } from 'lucide-react';
-import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
+import GifLoader, { MiniLoader, ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -88,7 +88,7 @@ function JournalEntriesInner() {
     }
   };
 
-  if (loading) return <GifLoader />;
+  if (loading) return <ContentLoader />;
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
