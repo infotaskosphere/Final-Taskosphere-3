@@ -96,36 +96,37 @@ const NAV_GROUPS = [
         path:       '/invoicing',
         icon:       CreditCard,
         label:      'Sale',
-        permission: ['can_manage_invoices', 'can_create_quotations'],
+        permission: ['can_manage_invoices', 'can_create_quotations', 'can_view_sale'],
       },
       {
         path:       '/purchase',
         icon:       ShoppingBag,
         label:      'Purchase',
-        permission: ['can_manage_invoices', 'can_create_quotations'],
+        permission: ['can_manage_invoices', 'can_create_quotations', 'can_view_purchase'],
       },
       {
         path:       '/bank-accounts',
         icon:       Landmark,
         label:      'Bank Accounts',
-        // No permission gate here — the page itself shows either the real
-        // content (admin, or an approved user) or a request-access screen,
-        // so it must stay reachable for everyone to be able to ask.
+        permission: 'can_view_bank',
       },
       {
         path:       '/chart-of-accounts',
         icon:       BookOpen,
         label:      'Chart of Accounts',
+        permission: ['can_view_chart_of_accounts', 'can_manage_chart_of_accounts'],
       },
       {
         path:       '/journal-entries',
         icon:       NotebookPen,
         label:      'Journal Entries',
+        permission: ['can_view_journal_entries', 'can_post_journal_entries'],
       },
       {
         path:       '/accounting-reports',
         icon:       BarChart3,
         label:      'Accounting Reports',
+        permission: 'can_view_accounting_reports',
       },
     ],
   },
