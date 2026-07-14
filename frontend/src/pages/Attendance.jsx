@@ -2288,9 +2288,8 @@ export default function Attendance() {
         (isAdmin || hasCrossVisAttendance)
           ? api.get(`/attendance/leave-summary?month=${format(new Date(), 'yyyy-MM')}`).catch(() => ({ data: { data: [] } }))
           : Promise.resolve({ data: { data: [] } }),
-        (isAdmin || hasCrossVisAttendance)
-          ? api.get(`/attendance/location-summary?month=${format(new Date(), 'yyyy-MM')}`).catch(() => ({ data: { data: [] } }))
-          : Promise.resolve({ data: { data: [] } }),
+        // Location History is visible to ALL users (not gated by admin/cross-visibility)
+        api.get(`/attendance/location-summary?month=${format(new Date(), 'yyyy-MM')}`).catch(() => ({ data: { data: [] } })),
       ];
       const [historyRes, summaryRes, todayRes, tasksRes, holidaysRes, rankingRes, usersRes, companiesRes, absentRes, leaveRes, locationRes] = await Promise.all(requests);
 
@@ -2376,8 +2375,9 @@ export default function Attendance() {
       if (isAdmin || hasCrossVisAttendance) {
         setAbsentSummary(absentRes.data?.data || []);
         setLeaveSummary(leaveRes.data?.data || []);
-        setLocationSummary(locationRes.data?.data || []);
       }
+      // Location History is visible to everyone, so it's set regardless of role/cross-vis
+      setLocationSummary(locationRes.data?.data || []);
     } catch (error) {
       const msg = error?.response?.data?.detail || error?.message || 'Network error';
       setDataError(msg);
@@ -4024,11 +4024,11 @@ export default function Attendance() {
           </motion.div>
         )}
 
-        {/* ══ LOCATION HISTORY (admin, or non-admin with cross-visibility) ════════ */}
-        {/* Same visibility rule as Absent This Month / Applied Leave above. */}
-        {/* Clicking a user opens punch-in/out locations for every day this */}
-        {/* month that captured GPS data. */}
-        {(isAdmin || hasCrossVisAttendance) && Array.isArray(locationSummary) && locationSummary.length > 0 && (
+        {/* ══ LOCATION HISTORY (visible to ALL users) ═════════════════════════ */}
+        {/* Unlike Absent This Month / Applied Leave (admin or cross-vis only), */}
+        {/* Location History is shown to every user. Clicking a user opens */}
+        {/* punch-in/out locations for every day this month that captured GPS data. */}
+        {Array.isArray(locationSummary) && locationSummary.length > 0 && (
           <motion.div variants={itemVariants}>
             <SectionCard>
               <CardHeaderRow
