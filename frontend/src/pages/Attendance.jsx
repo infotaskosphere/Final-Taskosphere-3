@@ -76,6 +76,8 @@ import {
   Download,
   MoonStar,
   Coffee,
+  ChevronDown,
+  CalendarOff,
 } from 'lucide-react';
 import LayoutCustomizer from '../components/layout/LayoutCustomizer';
 import { usePageLayout } from '../hooks/usePageLayout';
@@ -773,6 +775,128 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
               </button>
             </div>
           ) : <div />}
+          <Button variant="ghost" onClick={onClose} className="font-semibold rounded-xl text-sm h-8" style={{ color: isDark ? D.muted : undefined }}>Close</Button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ATTENDANCE USER DETAIL MODAL — full drill-down for a single user's
+// "Absent This Month" or "Applied Leave" card. Shown to admins, and to
+// non-admin users who have cross-visibility permission for attendance.
+// ─────────────────────────────────────────────────────────────────────────────
+const LEAVE_TYPE_LABELS = {
+  full_day: 'Full Day',
+  half_day_morning: 'Half Day (Morning Off)',
+  half_day_afternoon: 'Half Day (Afternoon Off)',
+  early_leave: 'Early Leave',
+};
+
+function AttendanceUserDetailModal({ detail, onClose, isDark }) {
+  if (!detail) return null;
+  const { type, item } = detail;
+  const isLeave = type === 'leave';
+  const accent = isLeave ? COLORS.amber || '#F59E0B' : COLORS.red;
+  const records = isLeave ? (item.records || []) : (item.dates || []).map(d => ({ date: d }));
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        className="w-full max-w-md rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
+        style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0' }}
+        initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }}
+        transition={{ type: 'spring', stiffness: 220, damping: 22 }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div
+          className="px-6 py-5 text-white relative overflow-hidden flex-shrink-0"
+          style={{ background: isLeave ? `linear-gradient(135deg, #F59E0B, #B45309)` : `linear-gradient(135deg, ${COLORS.red}, #B91C1C)` }}
+        >
+          <div className="absolute top-0 right-0 w-32 h-32 rounded-full opacity-10" style={{ background: 'white', transform: 'translate(30%,-30%)' }} />
+          <div className="relative flex items-start justify-between">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center flex-shrink-0">
+                {isLeave ? <CalendarOff className="w-6 h-6 text-white" /> : <UserX className="w-6 h-6 text-white" />}
+              </div>
+              <div className="min-w-0">
+                <p className="text-white/60 text-[10px] font-bold uppercase tracking-widest mb-0.5">
+                  {isLeave ? 'Applied Leave' : 'Absent This Month'}
+                </p>
+                <h2 className="text-lg font-black leading-tight pr-2 break-words">{item.user_name || 'Unknown'}</h2>
+              </div>
+            </div>
+            <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center active:scale-90 transition-all flex-shrink-0 mt-0.5">
+              <X className="w-4 h-4 text-white" />
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="p-6 space-y-3 overflow-y-auto slim-scroll flex-1" style={slimScroll}>
+          <div className="flex items-center gap-3 p-3.5 rounded-xl border"
+            style={{
+              backgroundColor: isDark ? `${accent}1F` : `${accent}0C`,
+              borderColor: `${accent}30`,
+            }}>
+            {isLeave ? <CalendarOff className="w-4 h-4 flex-shrink-0" style={{ color: accent }} /> : <UserX className="w-4 h-4 flex-shrink-0" style={{ color: accent }} />}
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-0.5">
+                {isLeave ? 'Total Leave Days' : 'Total Absent Days'}
+              </p>
+              <p className="font-semibold text-sm" style={{ color: isDark ? D.text : '#1e293b' }}>
+                {isLeave ? item.leave_days : item.absent_days} day{(isLeave ? item.leave_days : item.absent_days) !== 1 ? 's' : ''} this month
+              </p>
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-xl border" style={{ backgroundColor: isDark ? D.raised : '#f8fafc', borderColor: isDark ? D.border : '#e2e8f0' }}>
+            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2">
+              {isLeave ? 'Leave Records' : 'Absent Dates'}
+            </p>
+            <div className="space-y-2.5">
+              {records.length === 0 && (
+                <p className="text-sm" style={{ color: isDark ? D.muted : '#64748b' }}>No details available.</p>
+              )}
+              {records.map((rec, i) => (
+                <div key={i} className="p-3 rounded-lg border"
+                  style={{ backgroundColor: isDark ? D.card : '#ffffff', borderColor: isDark ? D.border : '#e2e8f0' }}>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="text-sm font-semibold" style={{ color: isDark ? D.text : '#1e293b' }}>
+                      {(() => { try { return format(parseISO(rec.date), 'EEE, MMM d, yyyy'); } catch { return rec.date; } })()}
+                    </span>
+                    {isLeave && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: `${accent}20`, color: accent }}>
+                        {LEAVE_TYPE_LABELS[rec.leave_type] || rec.leave_type || 'Full Day'}
+                      </span>
+                    )}
+                  </div>
+                  {isLeave && rec.reason && (
+                    <p className="text-xs" style={{ color: isDark ? D.muted : '#475569' }}>
+                      <span className="font-semibold">Reason: </span>{rec.reason}
+                    </p>
+                  )}
+                  {isLeave && rec.leave_type === 'early_leave' && rec.early_leave_time && (
+                    <p className="text-xs mt-1" style={{ color: isDark ? D.muted : '#475569' }}>
+                      <span className="font-semibold">Left at: </span>{rec.early_leave_time}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 flex justify-end items-center flex-shrink-0 border-t"
+          style={{ borderColor: isDark ? D.border : '#f1f5f9', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
           <Button variant="ghost" onClick={onClose} className="font-semibold rounded-xl text-sm h-8" style={{ color: isDark ? D.muted : undefined }}>Close</Button>
         </div>
       </motion.div>
@@ -1734,6 +1858,15 @@ export default function Attendance() {
   const [locationCache,      setLocationCache]      = useState({});
   const [absentLoading,      setAbsentLoading]      = useState(false);
   const [absentSummary,      setAbsentSummary]      = useState([]);
+  const [leaveSummary,       setLeaveSummary]       = useState([]);
+  // Both "Absent This Month" and "Applied Leave" are collapsed dropdown
+  // cards — the per-user grid only renders once the admin/permitted
+  // viewer expands the section.
+  const [showAbsentDropdown, setShowAbsentDropdown] = useState(false);
+  const [showLeaveDropdown,  setShowLeaveDropdown]  = useState(false);
+  // Holds { type: 'absent' | 'leave', item } for the detail popup shown
+  // when a specific user's card is clicked.
+  const [selectedAttendanceDetail, setSelectedAttendanceDetail] = useState(null);
   const [dataError,          setDataError]          = useState(null);
   const absentWarningShownRef = useRef(false);
   const [leaveType,          setLeaveType]          = useState('full_day');
@@ -2102,11 +2235,14 @@ export default function Attendance() {
         // of the other responses, so they now fire in the same batch.
         api.get('/users').catch(() => ({ data: [] })),
         api.get('/companies/list').catch(() => ({ data: [] })),
-        isAdmin
+        (isAdmin || hasCrossVisAttendance)
           ? api.get(`/attendance/absent-summary?month=${format(new Date(), 'yyyy-MM')}`).catch(() => ({ data: { data: [] } }))
           : Promise.resolve({ data: { data: [] } }),
+        (isAdmin || hasCrossVisAttendance)
+          ? api.get(`/attendance/leave-summary?month=${format(new Date(), 'yyyy-MM')}`).catch(() => ({ data: { data: [] } }))
+          : Promise.resolve({ data: { data: [] } }),
       ];
-      const [historyRes, summaryRes, todayRes, tasksRes, holidaysRes, rankingRes, usersRes, companiesRes, absentRes] = await Promise.all(requests);
+      const [historyRes, summaryRes, todayRes, tasksRes, holidaysRes, rankingRes, usersRes, companiesRes, absentRes, leaveRes] = await Promise.all(requests);
 
       const allHolidays = holidaysRes.data || [];
       // Show holidays that are confirmed OR have no status (manually added holidays
@@ -2187,14 +2323,15 @@ export default function Attendance() {
       const myEntry     = (!isEveryoneReq && rankUserId) ? rankingList.find(r => r.user_id === rankUserId) : null;
       setMyRank(myEntry ? `#${myEntry.rank}` : isEveryoneReq ? 'N/A' : '—');
 
-      if (isAdmin) {
+      if (isAdmin || hasCrossVisAttendance) {
         setAbsentSummary(absentRes.data?.data || []);
+        setLeaveSummary(leaveRes.data?.data || []);
       }
     } catch (error) {
       const msg = error?.response?.data?.detail || error?.message || 'Network error';
       setDataError(msg);
     } finally { setLoading(false); _fetchingRef.current = false; }
-  }, [selectedUserId, isAdmin, canViewRankings, user?.id, allUsers.length]); // eslint-disable-line
+  }, [selectedUserId, isAdmin, canViewRankings, user?.id, allUsers.length, hasCrossVisAttendance]); // eslint-disable-line
 
   const fetchReminders = useCallback(async (overrideUserId = undefined, signal = undefined) => {
     try {
@@ -3065,6 +3202,17 @@ export default function Attendance() {
         )}
       </AnimatePresence>
 
+      {/* ── Absent / Applied Leave user detail ── */}
+      <AnimatePresence>
+        {selectedAttendanceDetail && (
+          <AttendanceUserDetailModal
+            detail={selectedAttendanceDetail}
+            isDark={isDark}
+            onClose={() => setSelectedAttendanceDetail(null)}
+          />
+        )}
+      </AnimatePresence>
+
       {/* ── Edit Attendance Modal ──────────────────────────────────────────── */}
       {showEditAttendanceModal && (
         <EditAttendanceModal
@@ -3701,36 +3849,122 @@ export default function Attendance() {
           </motion.div>
         )}
 
-        {/* ══ ABSENT SUMMARY ═══════════════════════════════════════════════════ */}
-        {isAdmin && Array.isArray(absentSummary) && absentSummary.length > 0 && (
+        {/* ══ ABSENT SUMMARY (admin, or non-admin with cross-visibility) ══════════ */}
+        {/* Visible only to admins, or to a non-admin user who has been */}
+        {/* explicitly granted "view_other_attendance" cross-visibility. */}
+        {(isAdmin || hasCrossVisAttendance) && Array.isArray(absentSummary) && absentSummary.length > 0 && (
           <motion.div variants={itemVariants}>
             <SectionCard>
               <CardHeaderRow
                 iconBg={isDark ? 'bg-red-900/40' : 'bg-red-50'}
                 icon={<UserX className="h-4 w-4 text-red-500" />}
                 title={`Absent This Month — ${absentSummary.length} Users`}
-                subtitle="Auto-marked at 7:00 PM IST"
+                subtitle="Auto-marked at 7:00 PM IST · tap to expand"
                 badge={absentSummary.length}
+                action={
+                  <button
+                    onClick={() => setShowAbsentDropdown(v => !v)}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-slate-100 dark:hover:bg-slate-700"
+                    aria-label={showAbsentDropdown ? 'Collapse' : 'Expand'}
+                  >
+                    <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${showAbsentDropdown ? 'rotate-180' : ''}`} />
+                  </button>
+                }
               />
-              <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                {absentSummary.map(item => (
-                  <motion.div key={item.user_id} whileHover={{ scale: 1.02 }}
-                    className="flex items-center gap-2.5 p-3 rounded-xl border"
-                    style={{
-                      backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2',
-                      borderColor: isDark ? '#7f1d1d' : '#fecaca',
-                    }}>
-                    <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
-                      style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.20)' : '#fecaca' }}>
-                      <span className="font-bold text-sm text-red-500">{(item.user_name || '?')[0]}</span>
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold truncate" style={{ color: isDark ? D.text : '#1e293b' }}>{item.user_name || 'Unknown'}</p>
-                      <p className="text-xs font-semibold text-red-500">{item.absent_days} day{item.absent_days !== 1 ? 's' : ''} absent</p>
+              <AnimatePresence initial={false}>
+                {showAbsentDropdown && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.22 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                      {absentSummary.map(item => (
+                        <motion.button
+                          type="button"
+                          key={item.user_id} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                          onClick={() => setSelectedAttendanceDetail({ type: 'absent', item })}
+                          className="flex items-center gap-2.5 p-3 rounded-xl border text-left cursor-pointer"
+                          style={{
+                            backgroundColor: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2',
+                            borderColor: isDark ? '#7f1d1d' : '#fecaca',
+                          }}>
+                          <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+                            style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.20)' : '#fecaca' }}>
+                            <span className="font-bold text-sm text-red-500">{(item.user_name || '?')[0]}</span>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold truncate" style={{ color: isDark ? D.text : '#1e293b' }}>{item.user_name || 'Unknown'}</p>
+                            <p className="text-xs font-semibold text-red-500">{item.absent_days} day{item.absent_days !== 1 ? 's' : ''} absent</p>
+                          </div>
+                        </motion.button>
+                      ))}
                     </div>
                   </motion.div>
-                ))}
-              </div>
+                )}
+              </AnimatePresence>
+            </SectionCard>
+          </motion.div>
+        )}
+
+        {/* ══ APPLIED LEAVE (admin, or non-admin with cross-visibility) ═══════════ */}
+        {/* Same visibility rule as Absent This Month above. Clicking a user */}
+        {/* opens the full leave detail (reason, type, dates). */}
+        {(isAdmin || hasCrossVisAttendance) && Array.isArray(leaveSummary) && leaveSummary.length > 0 && (
+          <motion.div variants={itemVariants}>
+            <SectionCard>
+              <CardHeaderRow
+                iconBg={isDark ? 'bg-amber-900/40' : 'bg-amber-50'}
+                icon={<CalendarOff className="h-4 w-4 text-amber-500" />}
+                title={`Applied Leave — ${leaveSummary.length} Users`}
+                subtitle="Leave applications this month · tap to expand"
+                badge={leaveSummary.length}
+                action={
+                  <button
+                    onClick={() => setShowLeaveDropdown(v => !v)}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-slate-100 dark:hover:bg-slate-700"
+                    aria-label={showLeaveDropdown ? 'Collapse' : 'Expand'}
+                  >
+                    <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${showLeaveDropdown ? 'rotate-180' : ''}`} />
+                  </button>
+                }
+              />
+              <AnimatePresence initial={false}>
+                {showLeaveDropdown && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.22 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                      {leaveSummary.map(item => (
+                        <motion.button
+                          type="button"
+                          key={item.user_id} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                          onClick={() => setSelectedAttendanceDetail({ type: 'leave', item })}
+                          className="flex items-center gap-2.5 p-3 rounded-xl border text-left cursor-pointer"
+                          style={{
+                            backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb',
+                            borderColor: isDark ? '#78350f' : '#fde68a',
+                          }}>
+                          <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+                            style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.20)' : '#fde68a' }}>
+                            <span className="font-bold text-sm text-amber-600">{(item.user_name || '?')[0]}</span>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold truncate" style={{ color: isDark ? D.text : '#1e293b' }}>{item.user_name || 'Unknown'}</p>
+                            <p className="text-xs font-semibold text-amber-600">{item.leave_days} day{item.leave_days !== 1 ? 's' : ''} leave</p>
+                          </div>
+                        </motion.button>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </SectionCard>
           </motion.div>
         )}
