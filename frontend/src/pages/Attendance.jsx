@@ -104,19 +104,22 @@ const COLORS = {
 // ── Attendance status colour tokens (single source of truth) ──────────────
 // present=green  holiday=dark-blue  late=dark-orange  absent=red
 const ATT_COLORS = {
-  present:      { fg: '#16a34a', bg: '#f0fdf4',         bgDark: 'rgba(22,163,74,0.10)',  border: '#bbf7d0', borderDark: '#14532d' },
-  holiday:      { fg: '#1e3a8a', bg: '#eff6ff',         bgDark: 'rgba(30,58,138,0.18)',  border: '#bfdbfe', borderDark: '#1e40af' },
-  late:         { fg: '#ea580c', bg: '#fff7ed',         bgDark: 'rgba(234,88,12,0.12)',  border: '#fed7aa', borderDark: '#7c2d12' },
-  absent:       { fg: '#dc2626', bg: '#fef2f2',         bgDark: 'rgba(220,38,38,0.10)',  border: '#fecaca', borderDark: '#7f1d1d' },
-  leave:        { fg: '#dc2626', bg: '#fef2f2',         bgDark: 'rgba(220,38,38,0.10)',  border: '#fecaca', borderDark: '#7f1d1d' },
-  ongoing:      { fg: '#F59E0B', bg: '#fffbeb',         bgDark: 'rgba(245,158,11,0.10)', border: '#fde68a', borderDark: '#92400e' },
+  present:      { fg: '#16a34a', bg: '#f0fdf4',         bgDark: 'rgba(22,163,74,0.10)',   border: '#bbf7d0', borderDark: '#14532d' },
+  holiday:      { fg: '#1e3a8a', bg: '#eff6ff',         bgDark: 'rgba(30,58,138,0.18)',   border: '#bfdbfe', borderDark: '#1e40af' },
+  half_day:     { fg: '#7c3aed', bg: '#f5f3ff',         bgDark: 'rgba(124,58,237,0.12)', border: '#ddd6fe', borderDark: '#4c1d95' },
+  late:         { fg: '#ea580c', bg: '#fff7ed',         bgDark: 'rgba(234,88,12,0.12)',   border: '#fed7aa', borderDark: '#7c2d12' },
+  absent:       { fg: '#dc2626', bg: '#fef2f2',         bgDark: 'rgba(220,38,38,0.10)',   border: '#fecaca', borderDark: '#7f1d1d' },
+  leave:        { fg: '#dc2626', bg: '#fef2f2',         bgDark: 'rgba(220,38,38,0.10)',   border: '#fecaca', borderDark: '#7f1d1d' },
+  ongoing:      { fg: '#F59E0B', bg: '#fffbeb',         bgDark: 'rgba(245,158,11,0.10)',  border: '#fde68a', borderDark: '#92400e' },
 };
 
 const LEAVE_TYPES = [
-  { value: 'full_day',           label: 'Full Day',           icon: '🗓️', desc: 'Absent the entire day' },
-  { value: 'half_day',           label: 'Half Day',           icon: '🌗', desc: 'Off for half the day' },
-  { value: 'early_leave',        label: 'Early Leave',        icon: '🚪', desc: 'Present but leaving before office hours end' },
+  { value: 'full_day',           label: 'Full Day',                 icon: '🗓️', desc: 'Absent the entire day' },
+  { value: 'half_day_morning',   label: 'Half Day (Morning Off)',   icon: '🌅', desc: 'Off for the morning session' },
+  { value: 'half_day_afternoon', label: 'Half Day (Afternoon Off)', icon: '🌇', desc: 'Off for the afternoon session' },
+  { value: 'early_leave',        label: 'Early Leave',              icon: '🚪', desc: 'Present but leaving before office hours end' },
 ];
+const HALF_DAY_LEAVE_TYPES = ['half_day_morning', 'half_day_afternoon'];
 
 
 // Dark palette (mirrors Dashboard)
@@ -415,8 +418,15 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
   const dayRecord = attendance[dateStr];
   const holiday  = (Array.isArray(holidays) ? holidays : []).find(h => h.date === dateStr);
 
+  const isHalfDayHoliday  = holiday?.type === 'half_day';
+  const isFullHoliday     = holiday && !isHalfDayHoliday;
+  const isHalfDayLeave    = dayRecord?.status === 'leave' && HALF_DAY_LEAVE_TYPES.includes(dayRecord?.leave_type);
+  const isHalfDayPresent  = !!dayRecord?.is_half_day;
+
   let ringColor = null, bgColor = null, isSpecial = false;
-  if (holiday)                                        { ringColor = '#1e3a8a'; bgColor = 'rgba(30, 58, 138, 0.15)'; isSpecial = true; }
+  if (isFullHoliday)                                  { ringColor = '#1e3a8a';              bgColor = 'rgba(30, 58, 138, 0.15)';  isSpecial = true; }
+  else if (isHalfDayHoliday || isHalfDayLeave || isHalfDayPresent)
+                                                      { ringColor = ATT_COLORS.half_day.fg; bgColor = ATT_COLORS.half_day.bgDark; isSpecial = true; }
   else if (dayRecord?.status === 'leave')             { ringColor = ATT_COLORS.absent.fg;  bgColor = `${ATT_COLORS.absent.fg}18`;  isSpecial = true; }
   else if (dayRecord?.status === 'absent')            { ringColor = ATT_COLORS.absent.fg;  bgColor = `${ATT_COLORS.absent.fg}18`;  isSpecial = true; }
   else if (dayRecord?.punch_in && dayRecord?.is_late) { ringColor = ATT_COLORS.late.fg;    bgColor = `${ATT_COLORS.late.fg}14`;    isSpecial = true; }
@@ -453,8 +463,14 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
       </TooltipTrigger>
       <TooltipContent side="top" className="text-xs max-w-[180px]">
         <p className="font-bold mb-1">{format(date, 'MMM d, yyyy')}</p>
-        {holiday
+        {isHalfDayHoliday
+          ? <p className="font-medium" style={{ color: ATT_COLORS.half_day.fg }}>🌗 Half Day{holiday.name ? ` — ${holiday.name}` : ''}</p>
+          : isFullHoliday
           ? <p className="font-medium" style={{ color: ATT_COLORS.holiday.fg }}>{holiday.name}</p>
+          : isHalfDayLeave
+          ? <p className="font-medium" style={{ color: ATT_COLORS.half_day.fg }}>🌗 Half Day Leave{dayRecord.leave_reason ? ` — ${dayRecord.leave_reason}` : ''}</p>
+          : isHalfDayPresent
+          ? <p className="font-medium" style={{ color: ATT_COLORS.half_day.fg }}>🌗 Half Day</p>
           : dayRecord?.status === 'leave'
             ? <p className="font-medium" style={{ color: ATT_COLORS.absent.fg }}>On Leave{dayRecord.leave_reason ? ` — ${dayRecord.leave_reason}` : ''}</p>
           : dayRecord?.status === 'absent'
@@ -590,7 +606,9 @@ function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete, isDar
                 <CalendarIcon className="w-6 h-6 text-white" />
               </div>
               <div>
-                <p className="text-amber-100 text-[10px] font-bold uppercase tracking-widest mb-0.5">Public Holiday</p>
+                <p className="text-amber-100 text-[10px] font-bold uppercase tracking-widest mb-0.5">
+                  {holiday.type === 'half_day' ? '🌗 Half Day' : 'Public Holiday'}
+                </p>
                 <h2 className="text-xl font-black leading-tight">{holiday.name}</h2>
               </div>
             </div>
@@ -626,7 +644,9 @@ function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete, isDar
               <Info className="w-4 h-4 flex-shrink-0 text-slate-400" />
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-0.5">Type</p>
-                <p className="font-semibold text-sm capitalize" style={{ color: isDark ? D.text : '#374151' }}>{holiday.type}</p>
+                <p className="font-semibold text-sm capitalize" style={{ color: isDark ? D.text : '#374151' }}>
+                  {holiday.type === 'half_day' ? 'Half Day' : holiday.type}
+                </p>
               </div>
             </div>
           )}
@@ -2034,12 +2054,22 @@ export default function Attendance() {
   const todayDateStr   = format(new Date(), 'yyyy-MM-dd');
 
   const todayIsHoliday = useMemo(() =>
-    (Array.isArray(holidays) ? holidays : []).some(h => h.date === todayDateStr && h.status === 'confirmed'),
+    (Array.isArray(holidays) ? holidays : []).some(h => h.date === todayDateStr && h.status === 'confirmed' && h.type !== 'half_day'),
     [holidays, todayDateStr]
   );
 
   const todayHolidayName = useMemo(() =>
-    (Array.isArray(holidays) ? holidays : []).find(h => h.date === todayDateStr && h.status === 'confirmed')?.name || '',
+    (Array.isArray(holidays) ? holidays : []).find(h => h.date === todayDateStr && h.status === 'confirmed' && h.type !== 'half_day')?.name || '',
+    [holidays, todayDateStr]
+  );
+
+  const todayIsHalfDayHoliday = useMemo(() =>
+    (Array.isArray(holidays) ? holidays : []).some(h => h.date === todayDateStr && h.status === 'confirmed' && h.type === 'half_day'),
+    [holidays, todayDateStr]
+  );
+
+  const todayHalfDayHolidayName = useMemo(() =>
+    (Array.isArray(holidays) ? holidays : []).find(h => h.date === todayDateStr && h.status === 'confirmed' && h.type === 'half_day')?.name || '',
     [holidays, todayDateStr]
   );
 
@@ -3616,6 +3646,17 @@ export default function Attendance() {
                   </div>
                 )}
 
+                {/* Half-Day Holiday notice */}
+                {todayIsHalfDayHoliday && (
+                  <div className="mb-4 flex items-center gap-3 px-4 py-3 rounded-xl border"
+                    style={{ backgroundColor: isDark ? ATT_COLORS.half_day.bgDark : ATT_COLORS.half_day.bg, borderColor: isDark ? ATT_COLORS.half_day.borderDark : ATT_COLORS.half_day.border }}>
+                    <span className="text-lg flex-shrink-0">🌗</span>
+                    <p className="text-sm font-semibold" style={{ color: isDark ? '#c4b5fd' : '#7c3aed' }}>
+                      Today is a half day{todayHalfDayHolidayName ? ` — ${todayHalfDayHolidayName}` : ''}
+                    </p>
+                  </div>
+                )}
+
                 {/* Absent notice */}
                 {displayTodayAttendance?.status === 'absent' && (
                   <div className="mb-4 flex items-center gap-3 px-4 py-3 rounded-xl border"
@@ -4444,14 +4485,29 @@ export default function Attendance() {
                     whileHover={{ backgroundColor: isDark ? 'rgba(245,158,11,0.12)' : `${COLORS.amber}10`, y: -1 }}
                     onClick={() => setSelectedHolidayDetail(h)}
                   >
-                    <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.deepBlue }} />
+                    <div className="absolute left-0 top-0 h-full w-1"
+                      style={{ backgroundColor: h.type === 'half_day' ? ATT_COLORS.half_day.fg : COLORS.deepBlue }} />
                     <div className="w-9 h-9 rounded-lg flex flex-col items-center justify-center flex-shrink-0 text-white shadow-sm"
-                      style={{ background: `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}>
-                      <span className="text-[7px] leading-none uppercase">{safeFormatDate(h.date, 'MMM', '')}</span>
-                      <span className="text-xs leading-none font-black">{safeFormatDate(h.date, 'd', '?')}</span>
+                      style={{ background: h.type === 'half_day'
+                        ? `linear-gradient(135deg, ${ATT_COLORS.half_day.fg}, #5b21b6)`
+                        : `linear-gradient(135deg, ${COLORS.amber}, #D97706)` }}>
+                      {h.type === 'half_day'
+                        ? <span className="text-base leading-none">🌗</span>
+                        : <>
+                            <span className="text-[7px] leading-none uppercase">{safeFormatDate(h.date, 'MMM', '')}</span>
+                            <span className="text-xs leading-none font-black">{safeFormatDate(h.date, 'd', '?')}</span>
+                          </>}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold truncate" style={{ color: isDark ? D.text : '#1e293b' }}>{h.name}</p>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="text-xs font-semibold truncate" style={{ color: isDark ? D.text : '#1e293b' }}>{h.name || 'Half Day'}</p>
+                        {h.type === 'half_day' && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0"
+                            style={{ backgroundColor: isDark ? ATT_COLORS.half_day.bgDark : ATT_COLORS.half_day.bg, color: ATT_COLORS.half_day.fg }}>
+                            Half Day
+                          </span>
+                        )}
+                      </div>
                       <p className="text-[11px]" style={{ color: isDark ? D.muted : '#64748b' }}>
                         {safeFormatDate(h.date, 'EEEE', '—')}
                       </p>
@@ -4630,10 +4686,11 @@ export default function Attendance() {
                         />
                         <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 text-xs justify-center">
                           {[
-                            { color: COLORS.emeraldGreen,  label: 'Present'      },
-                            { color: ATT_COLORS.late.fg,   label: 'Late'         },
-                            { color: '#1e3a8a',            label: 'Holiday'      },
-                            { color: ATT_COLORS.absent.fg, label: 'Leave/Absent' },
+                            { color: COLORS.emeraldGreen,      label: 'Present'      },
+                            { color: ATT_COLORS.late.fg,       label: 'Late'         },
+                            { color: '#1e3a8a',                label: 'Holiday'      },
+                            { color: ATT_COLORS.half_day.fg,   label: 'Half Day'     },
+                            { color: ATT_COLORS.absent.fg,     label: 'Leave/Absent' },
                           ].map(({ color, label }) => (
                             <div key={label} className="flex items-center gap-1.5">
                               <span className="w-3.5 h-3.5 rounded-full border-2 flex-shrink-0"
@@ -4663,6 +4720,13 @@ export default function Attendance() {
                               {format(selectedDate, 'EEEE, MMM d, yyyy')}
                             </p>
                             <div className="space-y-1.5 text-xs">
+                              {selectedAttendance.is_half_day && (
+                                <div className="flex justify-between items-center">
+                                  <span className="font-medium text-slate-400">Type</span>
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded"
+                                    style={{ backgroundColor: isDark ? ATT_COLORS.half_day.bgDark : ATT_COLORS.half_day.bg, color: ATT_COLORS.half_day.fg }}>🌗 Half Day</span>
+                                </div>
+                              )}
                               <div className="flex justify-between items-center">
                                 <span className="font-medium text-slate-400">Punch In</span>
                                 <span className="font-bold font-mono" style={{ color: isDark ? D.text : '#1e293b' }}>
@@ -4694,16 +4758,32 @@ export default function Attendance() {
                           </div>
                         ) : selectedAttendance?.status === 'leave' ? (
                           <div className="relative p-4 pl-5 rounded-xl overflow-hidden"
-                            style={{ backgroundColor: isDark ? ATT_COLORS.absent.bgDark : ATT_COLORS.absent.bg }}>
-                            <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: ATT_COLORS.absent.fg }} />
-                            <p className="font-bold text-sm mb-0.5" style={{ color: ATT_COLORS.absent.fg }}>On Leave</p>
+                            style={{
+                              backgroundColor: HALF_DAY_LEAVE_TYPES.includes(selectedAttendance?.leave_type)
+                                ? (isDark ? ATT_COLORS.half_day.bgDark : ATT_COLORS.half_day.bg)
+                                : (isDark ? ATT_COLORS.absent.bgDark : ATT_COLORS.absent.bg),
+                            }}>
+                            <div className="absolute left-0 top-0 h-full w-1"
+                              style={{ backgroundColor: HALF_DAY_LEAVE_TYPES.includes(selectedAttendance?.leave_type) ? ATT_COLORS.half_day.fg : ATT_COLORS.absent.fg }} />
+                            <p className="font-bold text-sm mb-0.5"
+                              style={{ color: HALF_DAY_LEAVE_TYPES.includes(selectedAttendance?.leave_type) ? ATT_COLORS.half_day.fg : ATT_COLORS.absent.fg }}>
+                              {LEAVE_TYPE_LABELS[selectedAttendance.leave_type] || 'On Leave'}
+                            </p>
                             <p className="text-xs text-slate-400">{format(selectedDate, 'EEEE, MMM d, yyyy')}</p>
                           </div>
                         ) : selectedHoliday ? (
                           <div className="relative p-4 pl-5 rounded-xl overflow-hidden"
-                            style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.06)' : '#fffbeb' }}>
-                            <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.amber }} />
-                            <p className="font-bold text-sm mb-0.5" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>Public Holiday</p>
+                            style={{
+                              backgroundColor: selectedHoliday.type === 'half_day'
+                                ? (isDark ? ATT_COLORS.half_day.bgDark : ATT_COLORS.half_day.bg)
+                                : (isDark ? 'rgba(245,158,11,0.06)' : '#fffbeb'),
+                            }}>
+                            <div className="absolute left-0 top-0 h-full w-1"
+                              style={{ backgroundColor: selectedHoliday.type === 'half_day' ? ATT_COLORS.half_day.fg : COLORS.amber }} />
+                            <p className="font-bold text-sm mb-0.5"
+                              style={{ color: selectedHoliday.type === 'half_day' ? ATT_COLORS.half_day.fg : (isDark ? '#fbbf24' : '#92400e') }}>
+                              {selectedHoliday.type === 'half_day' ? '🌗 Half Day' : 'Public Holiday'}
+                            </p>
                             <p className="text-xs font-medium" style={{ color: isDark ? D.muted : '#78716c' }}>{selectedHoliday.name}</p>
                           </div>
                         ) : (
@@ -4776,7 +4856,7 @@ export default function Attendance() {
                         <div className="grid grid-cols-2 gap-2">
                           <motion.button
                             whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}
-                            onClick={() => { setLeaveType('half_day'); setShowLeaveForm(true); }}
+                            onClick={() => { setLeaveType('half_day_morning'); setShowLeaveForm(true); }}
                             className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all border"
                             style={{
                               borderColor: isDark ? 'rgba(139,92,246,0.3)' : '#ddd6fe',
@@ -4899,7 +4979,7 @@ export default function Attendance() {
                               </p>
                               <p className="text-[11px] font-mono mt-0.5" style={{ color: isDark ? D.muted : '#64748b' }}>
                                 {isAbsent ? `Absent${record.auto_marked ? ' (auto)' : ''}`
-                                  : isLeave ? 'On Leave'
+                                  : isLeave ? (LEAVE_TYPE_LABELS[record.leave_type] || 'On Leave')
                                   : record.punch_in
                                     ? `${formatAttendanceTime(record.punch_in)} → ${record.punch_out ? formatAttendanceTime(record.punch_out) : '⏳ Ongoing'}`
                                   : '—'}
@@ -4921,15 +5001,30 @@ export default function Attendance() {
                                   style={{ color: ATT_COLORS.absent.fg, backgroundColor: isDark ? ATT_COLORS.absent.bgDark : ATT_COLORS.absent.bg }}>Absent</span>
                               ) : isLeave ? (
                                 <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded"
-                                  style={{ color: ATT_COLORS.absent.fg, backgroundColor: isDark ? ATT_COLORS.absent.bgDark : ATT_COLORS.absent.bg }}>Leave/Absent</span>
-                              ) : (
-                                <span className="text-[11px] font-bold px-1.5 py-0.5 rounded font-mono"
                                   style={{
-                                    backgroundColor: record.duration_minutes > 0 ? isDark ? ATT_COLORS.present.bgDark : `${ATT_COLORS.present.fg}15` : isDark ? D.raised : '#f1f5f9',
-                                    color: record.duration_minutes > 0 ? ATT_COLORS.present.fg : isDark ? D.muted : COLORS.deepBlue,
+                                    color: HALF_DAY_LEAVE_TYPES.includes(record.leave_type) ? ATT_COLORS.half_day.fg : ATT_COLORS.absent.fg,
+                                    backgroundColor: HALF_DAY_LEAVE_TYPES.includes(record.leave_type)
+                                      ? (isDark ? ATT_COLORS.half_day.bgDark : ATT_COLORS.half_day.bg)
+                                      : (isDark ? ATT_COLORS.absent.bgDark : ATT_COLORS.absent.bg),
                                   }}>
-                                  {formatDuration(record.duration_minutes)}
+                                  {HALF_DAY_LEAVE_TYPES.includes(record.leave_type) ? '🌗 Half Day' : 'Leave/Absent'}
                                 </span>
+                              ) : (
+                                <>
+                                  {record.is_half_day && (
+                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded"
+                                      style={{ color: ATT_COLORS.half_day.fg, backgroundColor: isDark ? ATT_COLORS.half_day.bgDark : ATT_COLORS.half_day.bg }}>
+                                      🌗 Half Day
+                                    </span>
+                                  )}
+                                  <span className="text-[11px] font-bold px-1.5 py-0.5 rounded font-mono"
+                                    style={{
+                                      backgroundColor: record.duration_minutes > 0 ? isDark ? ATT_COLORS.present.bgDark : `${ATT_COLORS.present.fg}15` : isDark ? D.raised : '#f1f5f9',
+                                      color: record.duration_minutes > 0 ? ATT_COLORS.present.fg : isDark ? D.muted : COLORS.deepBlue,
+                                    }}>
+                                    {formatDuration(record.duration_minutes)}
+                                  </span>
+                                </>
                               )}
                               {record.location_verified === false && !isAbsent && !isLeave && (
                                 <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded"
