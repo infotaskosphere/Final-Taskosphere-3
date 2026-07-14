@@ -3491,7 +3491,8 @@ async def get_absent_summary(
 ):
     """
     Returns per-user absent day counts for the given month.
-    Admin sees all users; others see only their own data.
+    Admin sees all users; non-admins see themselves plus any user
+    covered by their "view_other_attendance" cross-visibility permission.
     """
     now = datetime.now(IST)
     target_month = month or now.strftime("%Y-%m")
@@ -3499,8 +3500,14 @@ async def get_absent_summary(
     if current_user.role == "admin":
         query = {"date": {"$regex": f"^{target_month}"}, "status": "absent"}
     else:
+        # Non-admins may see this card only for users explicitly granted to
+        # them via the "view_other_attendance" cross-visibility permission,
+        # in addition to their own record.
+        perms = get_user_permissions(current_user)
+        cross_ids = list(perms.get("view_other_attendance") or [])
+        visible_ids = list(set(cross_ids + [current_user.id]))
         query = {
-            "user_id": current_user.id,
+            "user_id": {"$in": visible_ids},
             "date": {"$regex": f"^{target_month}"},
             "status": "absent",
         }
@@ -3514,8 +3521,71 @@ async def get_absent_summary(
         summary[uid]["absent_days"] += 1
         summary[uid]["dates"].append(rec["date"])
 
+    # Attach display names for every user in the summary (admin or
+    # cross-visibility-permitted viewer), not just admins.
+    user_ids = list(summary.keys())
+    if user_ids:
+        users = await db.users.find(
+            {"id": {"$in": user_ids}}, {"_id": 0, "id": 1, "full_name": 1}
+        ).to_list(1000)
+        name_map = {u["id"]: u["full_name"] for u in users}
+        for uid in summary:
+            summary[uid]["user_name"] = name_map.get(uid, "Unknown")
+
+    return {"month": target_month, "data": list(summary.values())}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /api/attendance/leave-summary?month=YYYY-MM
+# Mirrors /attendance/absent-summary but for users on applied leave.
+# Admin sees everyone; non-admins see only users covered by their
+# "view_other_attendance" cross-visibility permission (plus themselves).
+# ─────────────────────────────────────────────────────────────────────────────
+@api_router.get("/attendance/leave-summary")
+async def get_leave_summary(
+    month: Optional[str] = None, current_user: User = Depends(get_current_user)
+):
+    """
+    Returns per-user applied-leave details for the given month, including
+    the reason, leave type, and dates for each leave record — so an admin
+    (or a permitted cross-visibility viewer) can drill into why someone
+    applied for leave.
+    """
+    now = datetime.now(IST)
+    target_month = month or now.strftime("%Y-%m")
+
     if current_user.role == "admin":
-        user_ids = list(summary.keys())
+        query = {"date": {"$regex": f"^{target_month}"}, "status": "leave"}
+    else:
+        perms = get_user_permissions(current_user)
+        cross_ids = list(perms.get("view_other_attendance") or [])
+        visible_ids = list(set(cross_ids + [current_user.id]))
+        query = {
+            "user_id": {"$in": visible_ids},
+            "date": {"$regex": f"^{target_month}"},
+            "status": "leave",
+        }
+
+    leave_records = await db.attendance.find(query, {"_id": 0}).to_list(5000)
+    summary: dict = {}
+    for rec in leave_records:
+        uid = rec["user_id"]
+        if uid not in summary:
+            summary[uid] = {"user_id": uid, "leave_days": 0, "records": []}
+        summary[uid]["leave_days"] += 1
+        summary[uid]["records"].append(
+            {
+                "date": rec.get("date"),
+                "leave_type": rec.get("leave_type", "full_day"),
+                "reason": rec.get("leave_reason"),
+                "early_leave_time": rec.get("early_leave_time"),
+                "punch_in": rec.get("punch_in"),
+                "punch_out": rec.get("punch_out"),
+            }
+        )
+
+    user_ids = list(summary.keys())
+    if user_ids:
         users = await db.users.find(
             {"id": {"$in": user_ids}}, {"_id": 0, "id": 1, "full_name": 1}
         ).to_list(1000)
