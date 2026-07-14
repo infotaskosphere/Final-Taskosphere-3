@@ -794,12 +794,22 @@ const LEAVE_TYPE_LABELS = {
   early_leave: 'Early Leave',
 };
 
-function AttendanceUserDetailModal({ detail, onClose, isDark }) {
+function AttendanceUserDetailModal({ detail, onClose, isDark, resolveLocation }) {
   if (!detail) return null;
   const { type, item } = detail;
-  const isLeave = type === 'leave';
-  const accent = isLeave ? COLORS.amber || '#F59E0B' : COLORS.red;
-  const records = isLeave ? (item.records || []) : (item.dates || []).map(d => ({ date: d }));
+  const isLeave    = type === 'leave';
+  const isLocation = type === 'location';
+  const accent = isLocation ? (COLORS.deepBlue || '#2563EB') : isLeave ? (COLORS.amber || '#F59E0B') : COLORS.red;
+  const headerGradient = isLocation
+    ? `linear-gradient(135deg, ${COLORS.deepBlue || '#2563EB'}, #1D4ED8)`
+    : isLeave
+      ? `linear-gradient(135deg, #F59E0B, #B45309)`
+      : `linear-gradient(135deg, ${COLORS.red}, #B91C1C)`;
+  const records = isLocation || isLeave ? (item.records || []) : (item.dates || []).map(d => ({ date: d }));
+  const HeaderIcon = isLocation ? MapPin : isLeave ? CalendarOff : UserX;
+  const eyebrow = isLocation ? 'Location History' : isLeave ? 'Applied Leave' : 'Absent This Month';
+  const totalLabel = isLocation ? 'Days With Location Data' : isLeave ? 'Total Leave Days' : 'Total Absent Days';
+  const totalValue = isLocation ? item.location_days : isLeave ? item.leave_days : item.absent_days;
 
   return (
     <motion.div
@@ -817,17 +827,17 @@ function AttendanceUserDetailModal({ detail, onClose, isDark }) {
         {/* Header */}
         <div
           className="px-6 py-5 text-white relative overflow-hidden flex-shrink-0"
-          style={{ background: isLeave ? `linear-gradient(135deg, #F59E0B, #B45309)` : `linear-gradient(135deg, ${COLORS.red}, #B91C1C)` }}
+          style={{ background: headerGradient }}
         >
           <div className="absolute top-0 right-0 w-32 h-32 rounded-full opacity-10" style={{ background: 'white', transform: 'translate(30%,-30%)' }} />
           <div className="relative flex items-start justify-between">
             <div className="flex items-center gap-3 flex-1 min-w-0">
               <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center flex-shrink-0">
-                {isLeave ? <CalendarOff className="w-6 h-6 text-white" /> : <UserX className="w-6 h-6 text-white" />}
+                <HeaderIcon className="w-6 h-6 text-white" />
               </div>
               <div className="min-w-0">
                 <p className="text-white/60 text-[10px] font-bold uppercase tracking-widest mb-0.5">
-                  {isLeave ? 'Applied Leave' : 'Absent This Month'}
+                  {eyebrow}
                 </p>
                 <h2 className="text-lg font-black leading-tight pr-2 break-words">{item.user_name || 'Unknown'}</h2>
               </div>
@@ -845,26 +855,29 @@ function AttendanceUserDetailModal({ detail, onClose, isDark }) {
               backgroundColor: isDark ? `${accent}1F` : `${accent}0C`,
               borderColor: `${accent}30`,
             }}>
-            {isLeave ? <CalendarOff className="w-4 h-4 flex-shrink-0" style={{ color: accent }} /> : <UserX className="w-4 h-4 flex-shrink-0" style={{ color: accent }} />}
+            <HeaderIcon className="w-4 h-4 flex-shrink-0" style={{ color: accent }} />
             <div>
               <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-0.5">
-                {isLeave ? 'Total Leave Days' : 'Total Absent Days'}
+                {totalLabel}
               </p>
               <p className="font-semibold text-sm" style={{ color: isDark ? D.text : '#1e293b' }}>
-                {isLeave ? item.leave_days : item.absent_days} day{(isLeave ? item.leave_days : item.absent_days) !== 1 ? 's' : ''} this month
+                {totalValue} day{totalValue !== 1 ? 's' : ''} this month
               </p>
             </div>
           </div>
 
           <div className="p-3.5 rounded-xl border" style={{ backgroundColor: isDark ? D.raised : '#f8fafc', borderColor: isDark ? D.border : '#e2e8f0' }}>
             <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2">
-              {isLeave ? 'Leave Records' : 'Absent Dates'}
+              {isLocation ? 'Location Records' : isLeave ? 'Leave Records' : 'Absent Dates'}
             </p>
             <div className="space-y-2.5">
               {records.length === 0 && (
                 <p className="text-sm" style={{ color: isDark ? D.muted : '#64748b' }}>No details available.</p>
               )}
-              {records.map((rec, i) => (
+              {records.map((rec, i) => {
+                const inLabel  = isLocation ? resolveLocation?.(rec.punch_in_location) : null;
+                const outLabel = isLocation ? resolveLocation?.(rec.punch_out_location) : null;
+                return (
                 <div key={i} className="p-3 rounded-lg border"
                   style={{ backgroundColor: isDark ? D.card : '#ffffff', borderColor: isDark ? D.border : '#e2e8f0' }}>
                   <div className="flex items-center justify-between gap-2 mb-1">
@@ -888,8 +901,29 @@ function AttendanceUserDetailModal({ detail, onClose, isDark }) {
                       <span className="font-semibold">Left at: </span>{rec.early_leave_time}
                     </p>
                   )}
+                  {isLocation && (
+                    <div className="space-y-1 mt-0.5">
+                      <div className="flex items-start gap-1.5">
+                        <LogIn className="w-3 h-3 mt-0.5 flex-shrink-0 text-emerald-500" />
+                        <p className="text-xs break-words" style={{ color: isDark ? D.muted : '#475569' }}>
+                          <span className="font-semibold">Punch In: </span>
+                          {rec.punch_in ? `${formatAttendanceTime(rec.punch_in)} · ` : ''}
+                          {inLabel || 'No location captured'}
+                        </p>
+                      </div>
+                      <div className="flex items-start gap-1.5">
+                        <LogOut className="w-3 h-3 mt-0.5 flex-shrink-0 text-red-400" />
+                        <p className="text-xs break-words" style={{ color: isDark ? D.muted : '#475569' }}>
+                          <span className="font-semibold">Punch Out: </span>
+                          {rec.punch_out ? `${formatAttendanceTime(rec.punch_out)} · ` : ''}
+                          {outLabel || 'No location captured'}
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -1859,13 +1893,15 @@ export default function Attendance() {
   const [absentLoading,      setAbsentLoading]      = useState(false);
   const [absentSummary,      setAbsentSummary]      = useState([]);
   const [leaveSummary,       setLeaveSummary]       = useState([]);
-  // Both "Absent This Month" and "Applied Leave" are collapsed dropdown
-  // cards — the per-user grid only renders once the admin/permitted
-  // viewer expands the section.
+  const [locationSummary,    setLocationSummary]    = useState([]);
+  // "Absent This Month", "Applied Leave" and "Location History" are all
+  // collapsed dropdown cards — the per-user grid only renders once the
+  // admin/permitted viewer expands the section.
   const [showAbsentDropdown, setShowAbsentDropdown] = useState(false);
   const [showLeaveDropdown,  setShowLeaveDropdown]  = useState(false);
-  // Holds { type: 'absent' | 'leave', item } for the detail popup shown
-  // when a specific user's card is clicked.
+  const [showLocationDropdown, setShowLocationDropdown] = useState(false);
+  // Holds { type: 'absent' | 'leave' | 'location', item } for the detail
+  // popup shown when a specific user's card is clicked.
   const [selectedAttendanceDetail, setSelectedAttendanceDetail] = useState(null);
   const [dataError,          setDataError]          = useState(null);
   const absentWarningShownRef = useRef(false);
@@ -2099,14 +2135,25 @@ export default function Attendance() {
   useEffect(() => {
     const resolveLocations = async () => {
       const toResolve = [];
-      for (const record of (Array.isArray(attendanceHistory) ? attendanceHistory : []).slice(0, 50)) {
-        if (record.location?.latitude && record.location?.longitude) {
-          const key = `${record.location.latitude},${record.location.longitude}`;
-          if (!locationCache[key]) toResolve.push({ key, lat: record.location.latitude, lng: record.location.longitude });
+      const pushLoc = (loc) => {
+        if (loc?.latitude && loc?.longitude) {
+          const key = `${loc.latitude},${loc.longitude}`;
+          if (!locationCache[key] && !toResolve.some(r => r.key === key)) {
+            toResolve.push({ key, lat: loc.latitude, lng: loc.longitude });
+          }
         }
-        if (record.punch_out_location?.latitude && record.punch_out_location?.longitude) {
-          const key = `${record.punch_out_location.latitude},${record.punch_out_location.longitude}`;
-          if (!locationCache[key]) toResolve.push({ key, lat: record.punch_out_location.latitude, lng: record.punch_out_location.longitude });
+      };
+      for (const record of (Array.isArray(attendanceHistory) ? attendanceHistory : []).slice(0, 50)) {
+        pushLoc(record.location);
+        pushLoc(record.punch_out_location);
+      }
+      // Also resolve locations surfaced in the admin/cross-vis "Location
+      // History" card, so the drill-down modal shows human-readable
+      // addresses instead of raw coordinates.
+      for (const userEntry of (Array.isArray(locationSummary) ? locationSummary : [])) {
+        for (const rec of (userEntry.records || []).slice(0, 50)) {
+          pushLoc(rec.punch_in_location);
+          pushLoc(rec.punch_out_location);
         }
       }
       if (toResolve.length === 0) return;
@@ -2115,7 +2162,7 @@ export default function Attendance() {
       setLocationCache(prev => ({ ...prev, ...results }));
     };
     resolveLocations();
-  }, [attendanceHistory]); // eslint-disable-line
+  }, [attendanceHistory, locationSummary]); // eslint-disable-line
 
   useEffect(() => {
     if (isViewingOther || isEveryoneView) return;
@@ -2241,8 +2288,11 @@ export default function Attendance() {
         (isAdmin || hasCrossVisAttendance)
           ? api.get(`/attendance/leave-summary?month=${format(new Date(), 'yyyy-MM')}`).catch(() => ({ data: { data: [] } }))
           : Promise.resolve({ data: { data: [] } }),
+        (isAdmin || hasCrossVisAttendance)
+          ? api.get(`/attendance/location-summary?month=${format(new Date(), 'yyyy-MM')}`).catch(() => ({ data: { data: [] } }))
+          : Promise.resolve({ data: { data: [] } }),
       ];
-      const [historyRes, summaryRes, todayRes, tasksRes, holidaysRes, rankingRes, usersRes, companiesRes, absentRes, leaveRes] = await Promise.all(requests);
+      const [historyRes, summaryRes, todayRes, tasksRes, holidaysRes, rankingRes, usersRes, companiesRes, absentRes, leaveRes, locationRes] = await Promise.all(requests);
 
       const allHolidays = holidaysRes.data || [];
       // Show holidays that are confirmed OR have no status (manually added holidays
@@ -2326,6 +2376,7 @@ export default function Attendance() {
       if (isAdmin || hasCrossVisAttendance) {
         setAbsentSummary(absentRes.data?.data || []);
         setLeaveSummary(leaveRes.data?.data || []);
+        setLocationSummary(locationRes.data?.data || []);
       }
     } catch (error) {
       const msg = error?.response?.data?.detail || error?.message || 'Network error';
@@ -2894,12 +2945,16 @@ export default function Attendance() {
     return map;
   }, [allUsers]);
 
-  const getLocationLabel = useCallback((record, type = 'in') => {
-    const loc = type === 'in' ? record.location : record.punch_out_location;
+  const formatLocationObj = useCallback((loc) => {
     if (!loc?.latitude || !loc?.longitude) return null;
     const key = `${loc.latitude},${loc.longitude}`;
     return locationCache[key] || `${Number(loc.latitude).toFixed(4)}, ${Number(loc.longitude).toFixed(4)}`;
   }, [locationCache]);
+
+  const getLocationLabel = useCallback((record, type = 'in') => {
+    const loc = type === 'in' ? record.location : record.punch_out_location;
+    return formatLocationObj(loc);
+  }, [formatLocationObj]);
 
   const absentCountdown = useMemo(() => {
     if (isViewingOther || isEveryoneView || todayAttendance === null) return null;
@@ -3958,6 +4013,67 @@ export default function Attendance() {
                           <div className="min-w-0">
                             <p className="text-sm font-semibold truncate" style={{ color: isDark ? D.text : '#1e293b' }}>{item.user_name || 'Unknown'}</p>
                             <p className="text-xs font-semibold text-amber-600">{item.leave_days} day{item.leave_days !== 1 ? 's' : ''} leave</p>
+                          </div>
+                        </motion.button>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </SectionCard>
+          </motion.div>
+        )}
+
+        {/* ══ LOCATION HISTORY (admin, or non-admin with cross-visibility) ════════ */}
+        {/* Same visibility rule as Absent This Month / Applied Leave above. */}
+        {/* Clicking a user opens punch-in/out locations for every day this */}
+        {/* month that captured GPS data. */}
+        {(isAdmin || hasCrossVisAttendance) && Array.isArray(locationSummary) && locationSummary.length > 0 && (
+          <motion.div variants={itemVariants}>
+            <SectionCard>
+              <CardHeaderRow
+                iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
+                icon={<MapPin className="h-4 w-4 text-blue-500" />}
+                title={`Location History — ${locationSummary.length} Users`}
+                subtitle="Punch-in/out locations this month · tap to expand"
+                badge={locationSummary.length}
+                action={
+                  <button
+                    onClick={() => setShowLocationDropdown(v => !v)}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-slate-100 dark:hover:bg-slate-700"
+                    aria-label={showLocationDropdown ? 'Collapse' : 'Expand'}
+                  >
+                    <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${showLocationDropdown ? 'rotate-180' : ''}`} />
+                  </button>
+                }
+              />
+              <AnimatePresence initial={false}>
+                {showLocationDropdown && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.22 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                      {locationSummary.map(item => (
+                        <motion.button
+                          type="button"
+                          key={item.user_id} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                          onClick={() => setSelectedAttendanceDetail({ type: 'location', item })}
+                          className="flex items-center gap-2.5 p-3 rounded-xl border text-left cursor-pointer"
+                          style={{
+                            backgroundColor: isDark ? 'rgba(59,130,246,0.08)' : '#eff6ff',
+                            borderColor: isDark ? '#1e3a8a' : '#bfdbfe',
+                          }}>
+                          <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+                            style={{ backgroundColor: isDark ? 'rgba(59,130,246,0.20)' : '#bfdbfe' }}>
+                            <span className="font-bold text-sm text-blue-500">{(item.user_name || '?')[0]}</span>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold truncate" style={{ color: isDark ? D.text : '#1e293b' }}>{item.user_name || 'Unknown'}</p>
+                            <p className="text-xs font-semibold text-blue-500">{item.location_days} day{item.location_days !== 1 ? 's' : ''} tracked</p>
                           </div>
                         </motion.button>
                       ))}
