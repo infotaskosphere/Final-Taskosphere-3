@@ -3254,11 +3254,11 @@ export default function Attendance() {
       />
 
       <motion.div
-        className="min-h-screen p-3 sm:p-4 md:p-6 lg:p-8 overflow-x-hidden"
+        className="min-h-screen p-3 sm:p-4 md:p-5 lg:p-6 overflow-x-hidden"
         style={{ background: isDark ? D.bg : '#f8fafc' }}
         variants={containerVariants} initial="hidden" animate="visible"
       >
-        <div className="max-w-[1600px] mx-auto w-full space-y-6">
+        <div className="max-w-[1600px] mx-auto w-full space-y-4">
         {/* ══ PAGE HEADER ══════════════════════════════════════════════════════ */}
         <motion.div variants={itemVariants}>
           <div
@@ -4049,9 +4049,9 @@ export default function Attendance() {
           if (sectionId === 'holidays_reminders') return (
             <React.Fragment key="holidays_reminders">
               {!isEveryoneView && (
-          <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
+          <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-stretch">
             {/* HOLIDAYS CARD */}
-            <SectionCard className="flex flex-col" style={{ minHeight: 420 }}>
+            <SectionCard className="flex flex-col">
               <CardHeaderRow
                 iconBg={isDark ? 'bg-blue-900/40' : 'bg-blue-50'}
                 icon={<CalendarIcon className="h-4 w-4 text-blue-500" />}
@@ -4087,7 +4087,7 @@ export default function Attendance() {
                   </div>
                 )}
               />
-              <div className="flex-1 overflow-y-auto slim-scroll p-2.5 space-y-1" style={{ ...slimScroll, maxHeight: 360 }}>
+              <div className="flex-1 overflow-y-auto slim-scroll p-2 space-y-1" style={{ ...slimScroll, maxHeight: 300 }}>
                 {monthHolidaysGrid.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-16">
                     <CalendarIcon className="w-8 h-8 mb-2 text-slate-300 dark:text-slate-600" />
@@ -4138,7 +4138,7 @@ export default function Attendance() {
               const onTimeCount = monthDaysPresent - totalDaysLateThisMonth;
               const onTimePct   = monthDaysPresent > 0 ? Math.round((onTimeCount / monthDaysPresent) * 100) : 0;
               return (
-              <SectionCard className="flex flex-col" style={{ minHeight: 420 }}>
+              <SectionCard className="flex flex-col">
                 <CardHeaderRow
                   iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
                   icon={<BarChart3 className="h-4 w-4 text-emerald-500" />}
@@ -4156,27 +4156,27 @@ export default function Attendance() {
                     </span>
                   }
                 />
-                <div className="flex-1 p-4 overflow-y-auto slim-scroll" style={slimScroll}>
+                <div className="flex-1 p-3 overflow-y-auto slim-scroll" style={slimScroll}>
                   <div className="grid grid-cols-3 gap-2">
-                    <div className="flex flex-col items-center justify-center px-2 py-3 rounded-xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
                       style={{ backgroundColor: isDark ? ATT_COLORS.present.bgDark : ATT_COLORS.present.bg, borderColor: isDark ? ATT_COLORS.present.borderDark : ATT_COLORS.present.border }}>
                       <CheckCircle2 className="w-4 h-4 mb-1" style={{ color: ATT_COLORS.present.fg }} />
                       <p className="text-xl font-black tabular-nums" style={{ color: ATT_COLORS.present.fg }}>{monthDaysPresent}</p>
                       <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Present</p>
                     </div>
-                    <div className="flex flex-col items-center justify-center px-2 py-3 rounded-xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
                       style={{ backgroundColor: isDark ? ATT_COLORS.absent.bgDark : ATT_COLORS.absent.bg, borderColor: isDark ? ATT_COLORS.absent.borderDark : ATT_COLORS.absent.border }}>
                       <UserX className="w-4 h-4 mb-1" style={{ color: ATT_COLORS.absent.fg }} />
                       <p className="text-xl font-black tabular-nums" style={{ color: ATT_COLORS.absent.fg }}>{monthDaysAbsent}</p>
                       <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Absent</p>
                     </div>
-                    <div className="flex flex-col items-center justify-center px-2 py-3 rounded-xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
                       style={{ backgroundColor: isDark ? ATT_COLORS.late.bgDark : ATT_COLORS.late.bg, borderColor: isDark ? ATT_COLORS.late.borderDark : ATT_COLORS.late.border }}>
                       <AlarmClock className="w-4 h-4 mb-1" style={{ color: ATT_COLORS.late.fg }} />
                       <p className="text-xl font-black tabular-nums" style={{ color: ATT_COLORS.late.fg }}>{totalDaysLateThisMonth}</p>
                       <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Late</p>
                     </div>
-                    <div className="flex flex-col items-center justify-center px-2 py-3 rounded-xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
                       style={{ backgroundColor: isDark ? `${COLORS.deepBlue}18` : `${COLORS.deepBlue}08`, borderColor: isDark ? '#1d4ed8' : '#bfdbfe' }}>
                       <Clock className="w-4 h-4 mb-1" style={{ color: COLORS.deepBlue }} />
                       <p className="text-xl font-black tabular-nums font-mono" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
@@ -4184,13 +4184,13 @@ export default function Attendance() {
                       </p>
                       <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">{monthTotalMinutes % 60}m total</p>
                     </div>
-                    <div className="flex flex-col items-center justify-center px-2 py-3 rounded-xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
                       style={{ backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : '#f5f3ff', borderColor: isDark ? '#4c1d95' : '#ddd6fe' }}>
                       <BarChart3 className="w-4 h-4 mb-1 text-purple-500" />
                       <p className="text-xl font-black tabular-nums" style={{ color: COLORS.purple }}>{avgDailyHours}h</p>
                       <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Avg/Day</p>
                     </div>
-                    <div className="flex flex-col items-center justify-center px-2 py-3 rounded-xl border text-center"
+                    <div className="flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border text-center"
                       style={{ backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb', borderColor: isDark ? '#92400e' : '#fde68a' }}>
                       <Flame className="w-4 h-4 mb-1 text-amber-400" />
                       <p className="text-xl font-black tabular-nums" style={{ color: COLORS.amber }}>{attendanceStreak}</p>
@@ -4248,13 +4248,13 @@ export default function Attendance() {
                   RIGHT: Recent Attendance  (height = left column height exactly, scrolls inside)
                   ══════════════════════════════════════════════════════════════ */}
               <motion.div
-                className={`grid gap-6 items-start ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-2'}`}
+                className={`grid gap-4 items-start ${isEveryoneView ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-2'}`}
                 variants={itemVariants}
               >
 
                 {/* ── LEFT COLUMN ─────────────────────────────────────────── */}
                 {!isEveryoneView && (
-                  <div ref={leftColRef} className="flex flex-col gap-4">
+                  <div ref={leftColRef} className="flex flex-col gap-3">
 
                     {/* Calendar card */}
                     <SectionCard className="flex flex-col">
@@ -4270,24 +4270,24 @@ export default function Attendance() {
                           </Button>
                         }
                       />
-                      <div className="p-3">
+                      <div className="p-2.5">
                         <Calendar
                           mode="single" selected={selectedDate}
                           onSelect={date => date && setSelectedDate(date)}
                           disabled={date => isAfter(date, new Date())}
                           className="rounded-xl border-0 w-full"
                           classNames={{
-                            months: 'w-full', month: 'w-full space-y-3', table: 'w-full border-collapse',
-                            head_row: 'flex w-full justify-between mb-2',
+                            months: 'w-full', month: 'w-full space-y-2', table: 'w-full border-collapse',
+                            head_row: 'flex w-full justify-between mb-1.5',
                             head_cell: 'rounded-lg w-9 font-bold text-[0.7rem] text-center text-slate-400',
-                            row: 'flex w-full mt-2 justify-between',
+                            row: 'flex w-full mt-1.5 justify-between',
                             cell: 'relative p-0 text-center text-sm focus-within:relative focus-within:z-20',
-                            day: 'h-10 w-10 p-0 font-semibold rounded-full transition-all',
+                            day: 'h-9 w-9 p-0 font-semibold rounded-full transition-all',
                             day_today: 'font-black',
                           }}
                           components={{ Day: props => <CustomDay {...props} attendance={attendanceMap} holidays={holidays} /> }}
                         />
-                        <div className="flex flex-wrap gap-x-3 gap-y-1 mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 text-xs justify-center">
+                        <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 text-xs justify-center">
                           {[
                             { color: COLORS.emeraldGreen,  label: 'Present'      },
                             { color: ATT_COLORS.late.fg,   label: 'Late'         },
