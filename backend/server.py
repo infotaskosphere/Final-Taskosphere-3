@@ -3092,6 +3092,34 @@ async def apply_leave(data: dict, current_user: User = Depends(get_current_user)
                 {"$set": update_fields},
                 upsert=True,
             )
+
+            # ── Half-Day ↔ Holiday sync ───────────────────────────────────
+            # When a half-day leave is applied, add (or confirm) a 'half_day'
+            # entry in the holidays collection so it is visible on the
+            # Holiday Card and Attendance Calendar.
+            # When a non-half-day leave overrides a previous half-day for the
+            # same date, remove any auto-created 'half_day' holiday entry.
+            if leave_type in ("half_day_morning", "half_day_afternoon"):
+                try:
+                    await _upsert_half_day_holiday(current_str)
+                except Exception as _hd_err:
+                    logger.warning(f"Half-day holiday sync failed for {current_str}: {_hd_err}")
+            elif leave_type in ("full_day", "early_leave"):
+                # Only remove if the existing attendance was a half-day (i.e.
+                # this call is replacing a half-day with a different leave type).
+                prev_was_half_day = bool(
+                    existing and (
+                        existing.get("is_half_day")
+                        or existing.get("leave_type") in ("half_day_morning", "half_day_afternoon")
+                    )
+                )
+                if prev_was_half_day:
+                    try:
+                        await _remove_half_day_holiday(current_str)
+                    except Exception as _rd_err:
+                        logger.warning(f"Half-day holiday removal failed for {current_str}: {_rd_err}")
+            # ─────────────────────────────────────────────────────────────
+
             current += timedelta(days=1)
 
         # Notify admins that a leave application was submitted.
@@ -3420,11 +3448,13 @@ async def edit_attendance_record(
         update_fields["punch_in"] = None
         update_fields["punch_out"] = None
         update_fields["duration_minutes"] = 0
+        update_fields["is_half_day"] = False
     elif status == "leave":
         update_fields["punch_in"] = None
         update_fields["punch_out"] = None
         update_fields["duration_minutes"] = 0
         update_fields["leave_reason"] = note or "Admin marked leave"
+        update_fields["is_half_day"] = False
     elif status == "half_day":
         update_fields["is_half_day"] = True
     elif status == "late":
@@ -3435,6 +3465,30 @@ async def edit_attendance_record(
     await db.attendance.update_one(
         {"user_id": user_id, "date": date_str}, {"$set": update_fields}, upsert=True
     )
+
+    # ── Half-Day ↔ Holiday sync ───────────────────────────────────────────
+    # When admin sets status='half_day', upsert a half_day holiday entry so
+    # it appears on the Holiday Card and Attendance Calendar.
+    # When admin overrides a previous half_day with another status, remove
+    # the auto-created half_day holiday entry.
+    prev_was_half_day = bool(
+        existing and (
+            existing.get("is_half_day")
+            or existing.get("status") == "half_day"
+            or existing.get("leave_type") in ("half_day_morning", "half_day_afternoon")
+        )
+    )
+    if status == "half_day":
+        try:
+            await _upsert_half_day_holiday(date_str)
+        except Exception as _hd_err:
+            logger.warning(f"Half-day holiday sync (edit-record) failed for {date_str}: {_hd_err}")
+    elif prev_was_half_day:
+        try:
+            await _remove_half_day_holiday(date_str)
+        except Exception as _rd_err:
+            logger.warning(f"Half-day holiday removal (edit-record) failed for {date_str}: {_rd_err}")
+    # ─────────────────────────────────────────────────────────────────────
 
     await create_audit_log(
         current_user,
@@ -3887,9 +3941,21 @@ def _hhmm_to_minutes(value: Optional[str], default: str) -> int:
 
 
 async def _compute_salary_report_for_user(
-    user: dict, year: int, mon: int, holiday_dates: set
+    user: dict, year: int, mon: int, holiday_data: dict
 ) -> dict:
-    """Builds the salary-due breakdown for a single user for a given month."""
+    """Builds the salary-due breakdown for a single user for a given month.
+
+    Priority rule (per date, only one status may affect salary):
+      Holiday (full) → Leave → Half-Day → Present/Absent → Early Leave
+
+    holiday_data: dict of {date_str: holiday_doc} for ALL confirmed holidays,
+    including type='half_day' entries.  Full holidays (type != 'half_day')
+    give 0.0 deduction; half-day holidays give 0.5 deduction.
+
+    When a date is marked as Half-Day (via attendance record OR holiday type),
+    Early Leave is completely ignored for that date — no early-leave deduction
+    is applied.
+    """
     first_day = date(year, mon, 1)
     last_day_num = calendar.monthrange(year, mon)[1]
     last_day = date(year, mon, last_day_num)
@@ -3918,6 +3984,18 @@ async def _compute_salary_report_for_user(
         user.get("punch_in_time"), "10:30"
     ) + (_hhmm_to_minutes(user.get("grace_time"), "00:10"))
 
+    # Derive separate date sets from holiday_data for clarity:
+    #   full_holiday_dates  — paid day off, 0.0 deduction (type != 'half_day')
+    #   half_day_holiday_dates — company half-day, 0.5 deduction (type == 'half_day')
+    full_holiday_dates = {
+        d for d, h in holiday_data.items() if h.get("type") != "half_day"
+    }
+    half_day_holiday_dates = {
+        d for d, h in holiday_data.items() if h.get("type") == "half_day"
+    }
+    # All holiday dates (used for Sunday continuation-leave check)
+    all_holiday_dates = set(holiday_data.keys())
+
     # Fetch with a 1-day buffer on each side so a Sunday that falls on the
     # 1st or last day of the month can still look at the adjacent Sat/Mon
     # attendance record when deciding whether it's a "continuing holiday".
@@ -3930,7 +4008,10 @@ async def _compute_salary_report_for_user(
     att_by_date = {r["date"]: r for r in att_records}
 
     def _is_absent_on(iso_date: str) -> bool:
-        """True if the given date counts as a full absence (no half-day)."""
+        """True if the given date counts as a full absence (no half-day).
+        A date that is any kind of holiday (full or half_day) is never absent."""
+        if iso_date in all_holiday_dates:
+            return False
         rec = att_by_date.get(iso_date)
         if not rec:
             return True
@@ -3954,8 +4035,8 @@ async def _compute_salary_report_for_user(
     while d <= effective_last_day:
         iso = d.isoformat()
 
-        # Confirmed/declared company holiday → always a paid day off.
-        if iso in holiday_dates:
+        # ── Priority 1: Full confirmed company holiday → paid day off (0.0) ──
+        if iso in full_holiday_dates:
             days.append({
                 "date": iso, "status": "holiday", "deduction": 0.0,
                 "is_late": False, "early_out": False,
@@ -3964,10 +4045,9 @@ async def _compute_salary_report_for_user(
             d += timedelta(days=1)
             continue
 
-        # Sunday → weekly holiday by default. Only deducted as an absent
+        # ── Sunday → weekly holiday by default. Only deducted as an absent
         # day when it's a "continuing holiday" — the employee was also
-        # absent on the Saturday before AND the Monday after, i.e. the
-        # leave spans straight across the weekend.
+        # absent on the Saturday before AND the Monday after.
         if d.weekday() == 6:
             monday = d + timedelta(days=1)
             saturday_iso = (d - timedelta(days=1)).isoformat()
@@ -3994,31 +4074,63 @@ async def _compute_salary_report_for_user(
             d += timedelta(days=1)
             continue
 
-        # Monday–Saturday → normal working day.
+        # ── Monday–Saturday → normal working day ──
         working_days_elapsed += 1
         rec = att_by_date.get(iso)
         status = (rec or {}).get("status") or "absent"
+
+        # ── Priority 2: Company-declared half-day (in holidays collection) ──
+        # Treat as half-day; Early Leave is completely ignored.
+        if iso in half_day_holiday_dates:
+            days.append({
+                "date": iso, "status": "half_day", "deduction": 0.5,
+                "is_late": False, "early_out": False,
+                "half_day_source": "holiday",
+            })
+            half_days += 1
+            total_deduction_days += 0.5
+            d += timedelta(days=1)
+            continue
+
+        # Check if attendance record marks this as a half-day
         is_half_day = bool(rec and (rec.get("is_half_day") or status == "half_day"))
+
         day_info = {
             "date": iso, "status": "absent", "deduction": 1.0,
             "is_late": False, "early_out": False,
         }
 
+        # ── Priority 3: Absent / Leave (full day) ──
         if not rec or (status in ("absent",) and not is_half_day) or (
             status == "leave" and not is_half_day
         ):
             day_info["status"] = "absent"
             day_info["deduction"] = 1.0
             absent_days += 1
+
+        # ── Priority 4: Half-Day (attendance record) ──
+        # Early Leave is completely ignored when half-day is in effect.
         elif is_half_day:
             day_info["status"] = "half_day"
             day_info["deduction"] = 0.5
             half_days += 1
+
+        # ── Priority 5: Present — check Late and Early Leave ──
         else:
             is_late = bool(rec.get("is_late"))
+
+            # Early Leave is only evaluated when there is NO half-day on this date.
+            # If the attendance record carries leave_type='early_leave' but the
+            # date is already a half-day, Early Leave is suppressed entirely.
+            is_early_leave_record = rec.get("leave_type") == "early_leave" or bool(
+                rec.get("is_early_leave")
+            )
+            # is_half_day already False here; double-guard at record level.
+            suppress_early_leave = is_half_day  # always False in this branch — kept for clarity
+
             early_out = False
             punch_out = rec.get("punch_out")
-            if punch_out:
+            if punch_out and not suppress_early_leave:
                 try:
                     pout_dt = (
                         punch_out if isinstance(punch_out, datetime)
@@ -4085,11 +4197,70 @@ async def _compute_salary_report_for_user(
 
 
 async def _get_confirmed_holiday_dates(start_str: str, end_str: str) -> set:
+    """Returns set of FULL confirmed holiday dates (excludes half_day type)."""
     holiday_docs = await db.holidays.find(
-        {"date": {"$gte": start_str, "$lte": end_str}, "status": "confirmed"},
+        {
+            "date": {"$gte": start_str, "$lte": end_str},
+            "status": "confirmed",
+            "type": {"$ne": "half_day"},
+        },
         {"_id": 0, "date": 1},
     ).to_list(500)
     return {h["date"] for h in holiday_docs}
+
+
+async def _get_confirmed_holiday_data(start_str: str, end_str: str) -> dict:
+    """Returns dict of {date: holiday_doc} for all confirmed holidays (including half_day type).
+    Full holidays (type != 'half_day') → 0.0 deduction (paid day off).
+    Half-day holidays (type == 'half_day') → 0.5 deduction."""
+    holiday_docs = await db.holidays.find(
+        {"date": {"$gte": start_str, "$lte": end_str}, "status": "confirmed"},
+        {"_id": 0, "date": 1, "name": 1, "type": 1},
+    ).to_list(500)
+    return {h["date"]: h for h in holiday_docs}
+
+
+async def _upsert_half_day_holiday(date_str: str) -> None:
+    """Upsert a 'half_day' type entry into the holidays collection for display
+    on the Holiday Card and Attendance Calendar.  Only writes if no full
+    (non-half_day) confirmed holiday already exists for that date."""
+    existing = await db.holidays.find_one({"date": date_str}, {"_id": 0, "type": 1, "status": 1})
+    if existing:
+        if existing.get("status") == "confirmed" and existing.get("type") != "half_day":
+            # A real full holiday already owns this date — leave it untouched.
+            return
+        # Update existing pending/half_day entry → confirm as half_day
+        await db.holidays.update_one(
+            {"date": date_str},
+            {
+                "$set": {
+                    "name": "Half Day",
+                    "status": "confirmed",
+                    "type": "half_day",
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            },
+        )
+    else:
+        try:
+            await db.holidays.insert_one(
+                {
+                    "date": date_str,
+                    "name": "Half Day",
+                    "status": "confirmed",
+                    "type": "half_day",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+        except Exception:
+            # Race condition — another request inserted it; ignore.
+            pass
+
+
+async def _remove_half_day_holiday(date_str: str) -> None:
+    """Remove a 'half_day' holiday entry when the half-day attendance is
+    overridden or removed.  Never removes real full holidays."""
+    await db.holidays.delete_one({"date": date_str, "type": "half_day"})
 
 
 def _parse_month_param(month: Optional[str]) -> tuple:
@@ -4120,7 +4291,9 @@ async def get_salary_report_all(
     year, mon = _parse_month_param(month)
     first_day = date(year, mon, 1)
     last_day = date(year, mon, calendar.monthrange(year, mon)[1])
-    holiday_dates = await _get_confirmed_holiday_dates(
+    # Use full holiday_data (includes type info) so _compute_salary_report_for_user
+    # can distinguish full holidays from half-day holidays.
+    holiday_data = await _get_confirmed_holiday_data(
         first_day.isoformat(), last_day.isoformat()
     )
 
@@ -4137,7 +4310,7 @@ async def get_salary_report_all(
     for u in users:
         if u.get("monthly_salary") in (None, 0):
             continue
-        report = await _compute_salary_report_for_user(u, year, mon, holiday_dates)
+        report = await _compute_salary_report_for_user(u, year, mon, holiday_data)
         report.pop("days", None)  # keep the summary list lightweight
         reports.append(report)
 
@@ -4162,10 +4335,11 @@ async def get_salary_report_for_user(
     year, mon = _parse_month_param(month)
     first_day = date(year, mon, 1)
     last_day = date(year, mon, calendar.monthrange(year, mon)[1])
-    holiday_dates = await _get_confirmed_holiday_dates(
+    # Use full holiday_data (includes type info) so priority logic is applied correctly.
+    holiday_data = await _get_confirmed_holiday_data(
         first_day.isoformat(), last_day.isoformat()
     )
-    return await _compute_salary_report_for_user(user, year, mon, holiday_dates)
+    return await _compute_salary_report_for_user(user, year, mon, holiday_data)
 
 
 async def get_top_performers_data(period: str = "monthly", limit: int = 5, db=None):
