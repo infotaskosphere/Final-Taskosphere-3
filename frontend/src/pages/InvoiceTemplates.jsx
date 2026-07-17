@@ -180,11 +180,26 @@ function getLogoHTML(company, theme, size, shape, variant) {
 function buildUpiUrl(company, inv) {
   if (!company || !company.upi_id) return '';
   const pendingAmount = parseFloat((inv && inv.amount_due != null ? inv.amount_due : (inv && inv.grand_total)) || 0);
-  const name = encodeURIComponent((company && (company.company_name || company.name)) || 'Merchant');
-  const pa   = encodeURIComponent(company.upi_id);
-  const tn   = encodeURIComponent('Invoice ' + ((inv && inv.invoice_no) || ''));
-  const am   = pendingAmount > 0 ? '&am=' + pendingAmount.toFixed(2) : '';
-  return 'upi://pay?pa=' + pa + '&pn=' + name + am + '&tn=' + tn + '&cu=INR';
+  
+  // Clean payee name: replace '&' with 'and', allow only letters, numbers, spaces, dots, and hyphens.
+  // UPI apps do not URL-decode parameters scanned from QR codes, so having double-encoded or % encoded
+  // characters (like %20 or %26) in the URI causes validation to fail with "Payment is restricted".
+  let rawName = (company && (company.company_name || company.name)) || 'Merchant';
+  rawName = rawName.replace(/&/g, 'and');
+  rawName = rawName.replace(/[^a-zA-Z0-9\s.\-]/g, '');
+  rawName = rawName.replace(/\s+/g, ' ').trim();
+  
+  const pa = company.upi_id.trim();
+  
+  // Clean transaction note (short invoice number, standard alphanumeric/spaces/hyphens)
+  let rawTn = 'Invoice ' + ((inv && inv.invoice_no) || '');
+  rawTn = rawTn.replace(/[^a-zA-Z0-9\s.\-]/g, '').replace(/\s+/g, ' ').trim();
+  
+  const am = pendingAmount > 0 ? '&am=' + pendingAmount.toFixed(2) : '';
+  
+  // Return raw UPI link with literal spaces. It will be encoded ONCE when converted to QR image URL,
+  // meaning scanning devices will decode it to standard spaces (no %20 or % symbol issues).
+  return 'upi://pay?pa=' + pa + '&pn=' + rawName + am + '&tn=' + rawTn + '&cu=INR';
 }
 
 function getQrHTML(upiUrl, size, label) {
