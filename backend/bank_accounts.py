@@ -241,39 +241,95 @@ def _parse_stmt_date(val) -> str:
     return s
 
 
-def _parse_tabular_statement(contents: bytes, filename: str) -> List[dict]:
-    """CSV / XLSX statements — the overwhelming majority of real-world bank
-    exports. Auto-detects the date / narration / debit / credit / balance
-    columns regardless of exact header wording or bank."""
+def _looks_like_real_excel(contents: bytes) -> bool:
+    """XLSX/XLSM files are ZIP archives (start with 'PK'); legacy binary XLS
+    files are OLE2 Compound Documents (start with the D0CF11E0 magic bytes).
+    Several Indian bank portals (SBI among them) label a plain tab-delimited
+    text report with a '.xls' extension — that content matches neither
+    signature, and must be parsed as text instead of handed to
+    `pandas.read_excel`, which would raise 'Excel file format cannot be
+    determined' on it."""
+    return contents[:4] == b"PK\x03\x04" or contents[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+
+
+def _read_tabular(contents: bytes, ext: str, header_row: Optional[int] = None):
+    """Reads CSV, genuine XLS/XLSX, or a text report mislabeled '.xls'/'.xlsx'
+    (tab- or comma-delimited, common from Indian bank statement downloads)
+    into a DataFrame, all dtype=str so amounts/dates are parsed by our own
+    logic rather than pandas' locale-dependent guessing."""
     import pandas as pd
-
-    ext = filename.rsplit(".", 1)[-1].lower()
     if ext == "csv":
-        df = pd.read_csv(BytesIO(contents), dtype=str, keep_default_na=False)
-    else:
-        df = pd.read_excel(BytesIO(contents), dtype=str)
+        return pd.read_csv(BytesIO(contents), dtype=str, keep_default_na=False, skiprows=header_row or 0)
+    if _looks_like_real_excel(contents):
+        return pd.read_excel(BytesIO(contents), dtype=str, skiprows=header_row or 0)
+    # Mislabeled plain-text export — sniff the delimiter from the first line.
+    text = contents.decode("utf-8", errors="replace")
+    first_line = text.splitlines()[0] if text.splitlines() else ""
+    sep = "\t" if "\t" in first_line else ("," if "," in first_line else r"\s{2,}")
+    return pd.read_csv(
+        BytesIO(contents), dtype=str, keep_default_na=False,
+        sep=sep, engine="python", skiprows=header_row or 0,
+    )
 
-    columns = list(df.columns)
-    date_col = _pick_col(columns, _DATE_COL_HINTS)
+
+def _parse_tabular_statement(contents: bytes, filename: str) -> List[dict]:
+    """CSV / XLSX / mislabeled-text statements — the overwhelming majority of
+    real-world bank exports. Auto-detects the date / narration / debit /
+    credit / balance columns regardless of exact header wording or bank."""
+    ext = filename.rsplit(".", 1)[-1].lower()
+    is_real_excel = ext != "csv" and _looks_like_real_excel(contents)
+
+    df, date_col, columns = None, None, []
+    try:
+        df = _read_tabular(contents, ext)
+        columns = list(df.columns)
+        date_col = _pick_col(columns, _DATE_COL_HINTS)
+    except Exception:
+        df, date_col = None, None
+
     if not date_col:
-        # Some bank exports have a few banner rows before the real header row
-        # — scan the first 15 rows for one that looks like a header.
-        raw = pd.read_excel(BytesIO(contents), header=None) if ext != "csv" else pd.read_csv(BytesIO(contents), header=None, dtype=str)
+        # Some bank exports have several banner rows (account details,
+        # address, opening balance, etc. — exactly what SBI's export
+        # includes) before the real transaction-table header, and/or aren't
+        # a genuine binary spreadsheet at all despite the extension. Scan
+        # raw rows for the one that looks like the real header (has both a
+        # date-ish and a debit/credit-ish cell), then re-read from there.
         header_row_idx = None
-        for i in range(min(15, len(raw))):
-            row_vals = [str(v).strip().lower() for v in raw.iloc[i].tolist()]
-            if any(any(h in v for h in _DATE_COL_HINTS) for v in row_vals):
-                header_row_idx = i
-                break
-        if header_row_idx is not None:
-            if ext == "csv":
-                df = pd.read_csv(BytesIO(contents), skiprows=header_row_idx, dtype=str, keep_default_na=False)
-            else:
-                df = pd.read_excel(BytesIO(contents), skiprows=header_row_idx, dtype=str)
-            columns = list(df.columns)
-            date_col = _pick_col(columns, _DATE_COL_HINTS)
+        if is_real_excel:
+            import pandas as pd
+            try:
+                raw = pd.read_excel(BytesIO(contents), header=None, dtype=str)
+                for i in range(min(30, len(raw))):
+                    cells = [str(v).strip().lower() for v in raw.iloc[i].tolist()]
+                    if _row_looks_like_stmt_header(cells):
+                        header_row_idx = i
+                        break
+            except Exception:
+                pass
+        else:
+            # Plain text (real CSV, or a report mislabeled .xls/.xlsx) — scan
+            # raw lines directly rather than trusting pandas with a file that
+            # has ragged row widths (banner rows have far fewer delimited
+            # fields than the transaction table), which is what trips up a
+            # naive pandas.read_csv over the whole file in one pass.
+            text = contents.decode("utf-8", errors="replace")
+            lines = text.splitlines()
+            sep = "\t" if any("\t" in l for l in lines[:5]) else ","
+            for i, line in enumerate(lines[:30]):
+                cells = [c.strip().lower() for c in line.split(sep)]
+                if _row_looks_like_stmt_header(cells):
+                    header_row_idx = i
+                    break
 
-    if not date_col:
+        if header_row_idx is not None:
+            try:
+                df = _read_tabular(contents, ext, header_row=header_row_idx)
+                columns = list(df.columns)
+                date_col = _pick_col(columns, _DATE_COL_HINTS)
+            except Exception as e:
+                raise ValueError(f"Found a header row but could not read the transaction table beneath it: {e}")
+
+    if not date_col or df is None:
         raise ValueError("Could not find a date column in this statement. Check the file has a header row with a 'Date' column.")
 
     desc_col = _pick_col(columns, _DESC_COL_HINTS) or ""
@@ -358,9 +414,13 @@ async def _match_transaction(company_id: str, txn: dict) -> Optional[dict]:
       2) an AI Zero-Touch Entry Engine document (Module 1) that already posted
          an Accounts Payable/Receivable entry and is waiting to be settled —
     by amount within a small tolerance and date within a window either side
-    of the invoice date. Zero-Touch entries are checked first for a debit
-    line since they carry the AI-extracted vendor name, which gives a better
-    match than the generic purchase_invoices collection when both exist."""
+    of the invoice date, scoped to the bank account's own company so a
+    multi-company setup never matches one company's payment against another
+    company's invoice. Already-settled/paid records are excluded so the same
+    invoice can't be closed twice by two different statement lines. Zero-Touch
+    entries are checked first for a debit line since they carry the
+    AI-extracted vendor name, which gives a better match than the generic
+    purchase_invoices collection when both exist."""
     txn_date = txn["date"]
     try:
         dt = datetime.strptime(txn_date, "%Y-%m-%d")
@@ -387,11 +447,16 @@ async def _match_transaction(company_id: str, txn: dict) -> Optional[dict]:
                 return {"type": "zte_purchase", "id": c["id"], "label": vendor, "ap_amount": inr_total}
 
         candidates = await db.purchase_invoices.find(
-            {"invoice_date": {"$gte": window_from, "$lte": window_to}}, {"_id": 0}
+            {
+                "company_id": company_id, "payment_status": {"$ne": "paid"},
+                "invoice_date": {"$gte": window_from, "$lte": window_to},
+            },
+            {"_id": 0},
         ).to_list(2000)
         for c in candidates:
-            if abs(float(c.get("grand_total") or 0) - amount) <= max(1.0, amount * 0.01):
-                return {"type": "purchase", "id": c["id"], "label": c.get("supplier_name") or c.get("invoice_no") or "Purchase invoice"}
+            gt = float(c.get("grand_total") or 0)
+            if gt and abs(gt - amount) <= max(1.0, amount * 0.01):
+                return {"type": "purchase", "id": c["id"], "label": c.get("supplier_name") or c.get("invoice_no") or "Purchase invoice", "grand_total": gt}
 
     elif txn["credit"] > 0:
         amount = txn["credit"]
@@ -411,12 +476,18 @@ async def _match_transaction(company_id: str, txn: dict) -> Optional[dict]:
                 return {"type": "zte_sale", "id": c["id"], "label": customer, "ar_amount": inr_total}
 
         candidates = await db.invoices.find(
-            {"invoice_date": {"$gte": window_from, "$lte": window_to}}, {"_id": 0}
+            {
+                "company_id": company_id, "status": {"$nin": ["paid", "cancelled"]},
+                "invoice_date": {"$gte": window_from, "$lte": window_to},
+            },
+            {"_id": 0},
         ).to_list(2000)
         for c in candidates:
             total = float(c.get("grand_total") or c.get("total_amount") or c.get("total") or 0)
-            if total and abs(total - amount) <= max(1.0, amount * 0.01):
-                return {"type": "sale", "id": c.get("id"), "label": c.get("client_name") or c.get("invoice_no") or "Sale invoice"}
+            due = c.get("amount_due")
+            match_amount = float(due) if due is not None else total
+            if match_amount and abs(match_amount - amount) <= max(1.0, amount * 0.01):
+                return {"type": "sale", "id": c.get("id"), "label": c.get("client_name") or c.get("invoice_no") or "Sale invoice", "grand_total": total}
     return None
 
 
@@ -478,6 +549,18 @@ async def _auto_post_for_match(company_id: str, txn: dict, match: dict, created_
             ],
             "bank", txn["id"], created_by,
         )
+        if entry:
+            # Close the purchase invoice itself — this is what actually makes
+            # it disappear from an "outstanding purchases" view, not just the
+            # bank_transactions row.
+            await db.purchase_invoices.update_one(
+                {"id": match["id"]},
+                {"$set": {
+                    "payment_status": "paid", "paid_amount": txn["debit"], "paid_date": txn["date"],
+                    "paid_bank_txn_id": txn["id"], "journal_entry_id": entry["id"],
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }},
+            )
     else:
         sales_acct_id = await get_default_account_id(company_id, "4000")  # Sales / Fee Income
         if not sales_acct_id:
@@ -490,7 +573,29 @@ async def _auto_post_for_match(company_id: str, txn: dict, match: dict, created_
             ],
             "bank", txn["id"], created_by,
         )
+        if entry:
+            # Same convention as PATCH /invoices/{id}/status when a user
+            # manually marks an invoice paid, so reports/status filters agree
+            # regardless of which path closed the invoice.
+            grand_total = match.get("grand_total") or txn["credit"]
+            history_entry = {
+                "status": "paid", "changed_at": datetime.now(timezone.utc).isoformat(),
+                "changed_by": "system (bank reconciliation)",
+            }
+            await db.invoices.update_one(
+                {"id": match["id"]},
+                {
+                    "$set": {
+                        "status": "paid", "amount_paid": round(float(grand_total), 2), "amount_due": 0.0,
+                        "paid_bank_txn_id": txn["id"], "journal_entry_id": entry["id"],
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                    "$push": {"status_history": history_entry},
+                },
+            )
     return entry["id"] if entry else None
+
+
 
 
 @router.post("/bank-accounts/{bank_account_id}/upload-statement")
