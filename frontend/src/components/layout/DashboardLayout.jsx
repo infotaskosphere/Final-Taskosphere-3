@@ -9,6 +9,7 @@ import {
   Settings, Mail, Receipt, X, KeyRound, BrainCircuit,
   CreditCard, Fingerprint, Bell, Shield, ShieldCheck, ArrowLeftRight, MessageCircle,
   Building2, Zap, Briefcase, ShoppingBag, Landmark, BookOpen, NotebookPen,
+  ScanLine, Lock,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -127,6 +128,24 @@ const NAV_GROUPS = [
         icon:       BarChart3,
         label:      'Accounting Reports',
         permission: 'can_view_accounting_reports',
+      },
+      {
+        path:       '/zero-touch-entry',
+        icon:       ScanLine,
+        label:      'Zero-Touch Entry (AI)',
+        permission: 'can_post_journal_entries',
+      },
+      {
+        path:       '/gst-portal-sync',
+        icon:       Landmark,
+        label:      'Live GST Portal Sync',
+        permission: 'can_view_accounting_reports',
+      },
+      {
+        path:       '/accounting-integrity',
+        icon:       Lock,
+        label:      'Accounting Integrity',
+        permission: 'can_manage_chart_of_accounts',
       },
     ],
   },
