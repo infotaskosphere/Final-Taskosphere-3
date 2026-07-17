@@ -33,6 +33,7 @@ import { generateQuotationHTML } from './QuotationTemplates';
 import QuotationSettings, { getQtnSettings } from './QuotationSettings';
 import WhatsAppSendDialog from '@/components/ui/WhatsAppSendDialog';
 import { getWASettings } from '@/hooks/useWhatsApp';
+import { mirrorBankToSettings } from '@/lib/bankSync';
 
 // ─── Brand Colors ─────────────────────────────────────────────────────────────
 const COLORS = {
@@ -421,9 +422,20 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
     if (!form.name.trim()) { toast.error('Company name is required'); return; }
     setSaving(true);
     try {
-      editingCompany
+      const res = editingCompany
         ? await api.put(`/companies/${editingCompany.id}`, form)
         : await api.post('/companies', form);
+
+      const companyId = editingCompany?.id || res.data?.id;
+      if (companyId) {
+        mirrorBankToSettings(companyId, {
+          bank_account_holder: form.bank_account_name,
+          bank_name: form.bank_name,
+          bank_account_no: form.bank_account_no,
+          bank_ifsc: form.bank_ifsc,
+        });
+      }
+
       toast.success(editingCompany ? 'Company updated' : 'Company created');
       onSaved(); onClose();
     } catch (err) { toast.error(getErrMsg(err, 'Failed to save company')); }
