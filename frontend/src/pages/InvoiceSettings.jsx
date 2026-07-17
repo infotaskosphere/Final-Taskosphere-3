@@ -117,6 +117,7 @@ export const DEFAULT_INV_SETTINGS = {
   bank_branch:         '',
   bank_account_type:   'Current',
   upi_id:              '',
+  lock_invoice_bank:   false,
 
   // Design
   template:     'classic',
@@ -351,22 +352,24 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
 
   const handleSave = useCallback(async () => {
     if (!cid) { toast.error('Select a company first'); return; }
-    saveInvSettings(cid, form);
+    const updatedForm = { ...form, lock_invoice_bank: true };
+    setForm(updatedForm);
+    saveInvSettings(cid, updatedForm);
 
     try {
       await api.put(`/companies/${cid}`, {
-        bank_account_name:  form.bank_account_holder,
-        bank_account_holder:form.bank_account_holder,
-        bank_name:          form.bank_name,
-        bank_account_no:    form.bank_account_no,
-        bank_ifsc:          form.bank_ifsc,
-        bank_branch:        form.bank_branch,
-        bank_account_type:  form.bank_account_type,
-        upi_id:             form.upi_id,
+        bank_account_name:  updatedForm.bank_account_holder,
+        bank_account_holder:updatedForm.bank_account_holder,
+        bank_name:          updatedForm.bank_name,
+        bank_account_no:    updatedForm.bank_account_no,
+        bank_ifsc:          updatedForm.bank_ifsc,
+        bank_branch:        updatedForm.bank_branch,
+        bank_account_type:  updatedForm.bank_account_type,
+        upi_id:             updatedForm.upi_id,
       });
       // Mirror the same bank details into the Quotation settings (and back
       // into Invoice settings) so all three places stay in sync instantly.
-      mirrorBankToSettings(cid, form);
+      mirrorBankToSettings(cid, updatedForm);
     } catch (err) {
       toast.warning('Settings saved locally but failed to sync bank/UPI to server');
     }
@@ -906,6 +909,14 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                       <p className="text-xs text-amber-700 dark:text-amber-300">
                         Bank details are printed on invoices. Verify the account number and IFSC before saving.
                       </p>
+                    </div>
+
+                    <div className={`flex items-center justify-between p-3.5 rounded-2xl border ${D ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'} mt-3 mb-1`}>
+                      <div>
+                        <p className={`text-xs font-semibold ${D ? 'text-slate-200' : 'text-slate-700'}`}>Lock Invoice Bank Details</p>
+                        <p className="text-[10px] text-slate-400">Prevent other pages (Bank Accounts or Quotation settings) from overwriting these details</p>
+                      </div>
+                      <Switch checked={!!form.lock_invoice_bank} onCheckedChange={v => set('lock_invoice_bank', v)} />
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
