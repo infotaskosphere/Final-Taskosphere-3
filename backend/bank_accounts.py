@@ -241,24 +241,72 @@ def _parse_stmt_date(val) -> str:
     return s
 
 
+
+def _load_as_df(contents: bytes, filename: str, header_mode: str = "infer", skiprows: int = None) -> tuple:
+    import pandas as pd
+    from io import BytesIO
+
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    modes = []
+    if ext == "csv":
+        modes = ["csv", "excel", "html"]
+    else:
+        modes = ["excel", "html", "csv"]
+
+    errors = {}
+    for mode in modes:
+        try:
+            if mode == "excel":
+                h = None if header_mode == "none" else 0
+                df = pd.read_excel(BytesIO(contents), header=h, skiprows=skiprows, dtype=str)
+                return df, "excel"
+            elif mode == "html":
+                dfs = pd.read_html(BytesIO(contents), keep_default_na=False)
+                if not dfs:
+                    raise ValueError("No tables found in HTML content")
+                best_df = None
+                for candidate_df in dfs:
+                    if len(candidate_df) > 0 and len(candidate_df.columns) >= 3:
+                        best_df = candidate_df.astype(str)
+                        break
+                if best_df is None:
+                    raise ValueError("No valid table candidate in HTML")
+                
+                if header_mode == "none":
+                    col_row = pd.DataFrame([best_df.columns.tolist()], columns=best_df.columns)
+                    best_df = pd.concat([col_row, best_df], ignore_index=True)
+
+                if skiprows is not None and skiprows > 0:
+                    best_df = best_df.iloc[skiprows:].reset_index(drop=True)
+
+                return best_df, "html"
+            elif mode == "csv":
+                h = None if header_mode == "none" else 0
+                df = pd.read_csv(BytesIO(contents), header=h, skiprows=skiprows, dtype=str, keep_default_na=False)
+                return df, "csv"
+        except Exception as e:
+            errors[mode] = str(e)
+            continue
+
+    raise ValueError(f"Could not parse with any engine (excel, html, csv). Errors: {errors}")
+
+
 def _parse_tabular_statement(contents: bytes, filename: str) -> List[dict]:
     """CSV / XLSX statements — the overwhelming majority of real-world bank
     exports. Auto-detects the date / narration / debit / credit / balance
     columns regardless of exact header wording or bank."""
     import pandas as pd
+    from io import BytesIO
 
-    ext = filename.rsplit(".", 1)[-1].lower()
-    if ext == "csv":
-        df = pd.read_csv(BytesIO(contents), dtype=str, keep_default_na=False)
-    else:
-        df = pd.read_excel(BytesIO(contents), dtype=str)
+    df, mode_used = _load_as_df(contents, filename, header_mode="infer")
 
     columns = list(df.columns)
     date_col = _pick_col(columns, _DATE_COL_HINTS)
     if not date_col:
         # Some bank exports have a few banner rows before the real header row
         # — scan the first 15 rows for one that looks like a header.
-        raw = pd.read_excel(BytesIO(contents), header=None) if ext != "csv" else pd.read_csv(BytesIO(contents), header=None, dtype=str)
+        raw, _ = _load_as_df(contents, filename, header_mode="none")
         header_row_idx = None
         for i in range(min(15, len(raw))):
             row_vals = [str(v).strip().lower() for v in raw.iloc[i].tolist()]
@@ -266,10 +314,7 @@ def _parse_tabular_statement(contents: bytes, filename: str) -> List[dict]:
                 header_row_idx = i
                 break
         if header_row_idx is not None:
-            if ext == "csv":
-                df = pd.read_csv(BytesIO(contents), skiprows=header_row_idx, dtype=str, keep_default_na=False)
-            else:
-                df = pd.read_excel(BytesIO(contents), skiprows=header_row_idx, dtype=str)
+            df, _ = _load_as_df(contents, filename, header_mode="infer", skiprows=header_row_idx)
             columns = list(df.columns)
             date_col = _pick_col(columns, _DATE_COL_HINTS)
 
