@@ -41,6 +41,9 @@ const BankAccounts       = lazyWithRetry(() => import("@/pages/BankAccounts.jsx"
 const ChartOfAccounts    = lazyWithRetry(() => import("@/pages/ChartOfAccounts.jsx"), "ChartOfAccounts");
 const JournalEntries     = lazyWithRetry(() => import("@/pages/JournalEntries.jsx"), "JournalEntries");
 const AccountingReports  = lazyWithRetry(() => import("@/pages/AccountingReports.jsx"), "AccountingReports");
+const ZeroTouchEntry = lazyWithRetry(() => import("@/pages/ZeroTouchEntry.jsx"), "ZeroTouchEntry");
+const GSTPortalSync = lazyWithRetry(() => import("@/pages/GSTPortalSync.jsx"), "GSTPortalSync");
+const AccountingIntegrity = lazyWithRetry(() => import("@/pages/AccountingIntegrity.jsx"), "AccountingIntegrity");
 const Reminders         = lazyWithRetry(() => import("@/pages/Reminders.jsx"), "Reminders");
 const CompliancePage    = lazyWithRetry(() => import("@/pages/CompliancePage.jsx"), "CompliancePage");
 const GSTReconciliation = lazyWithRetry(() => import("@/pages/GSTReconciliation.jsx"), "GSTReconciliation");
@@ -191,6 +194,9 @@ function AppRoutes() {
       <Route path="/chart-of-accounts"   element={<Protected><PageLoader><ChartOfAccounts /></PageLoader></Protected>} />
       <Route path="/journal-entries"     element={<Protected><PageLoader><JournalEntries /></PageLoader></Protected>} />
       <Route path="/accounting-reports"  element={<Protected><PageLoader><AccountingReports /></PageLoader></Protected>} />
+      <Route path="/zero-touch-entry"     element={<Protected><PageLoader><ZeroTouchEntry /></PageLoader></Protected>} />
+      <Route path="/gst-portal-sync"      element={<Protected><PageLoader><GSTPortalSync /></PageLoader></Protected>} />
+      <Route path="/accounting-integrity" element={<Protected><PageLoader><AccountingIntegrity /></PageLoader></Protected>} />
       <Route path="/task-audit" element={<Permission permission="can_view_audit_logs"><PageLoader><TaskAudit /></PageLoader></Permission>} />
       <Route path="/users"          element={<Permission permission="can_view_user_page"><PageLoader><Users /></PageLoader></Permission>} />
       <Route path="/interviews"     element={<Permission permission="can_view_interviews"><PageLoader><Interviews /></PageLoader></Permission>} />
