@@ -10,6 +10,8 @@ import {
   CreditCard, Fingerprint, Bell, Shield, ShieldCheck, ArrowLeftRight, MessageCircle,
   Building2, Zap, Briefcase, ShoppingBag, Landmark, BookOpen, NotebookPen,
   ScanLine, Lock,
+  // ── Accounting Extended icons ──────────────────────────────────────────────
+  TrendingDown, TrendingUp, Scale, Upload, CalendarRange, AlertTriangle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -54,7 +56,7 @@ const NAV_GROUPS = [
       { path: '/reminders',  icon: Bell,            label: 'Reminders' },
       { path: '/action-center', icon: Zap, label: 'Action Center' },
       { path: '/visits',     icon: MapPin,          label: 'Client Visits' },
-      { path: '/ai-reader',      icon: BrainCircuit,  label: 'AI Document Reader' },  // ← ADD THIS
+      { path: '/ai-reader',      icon: BrainCircuit,  label: 'AI Document Reader' },
     ],
   },
   {
@@ -75,8 +77,6 @@ const NAV_GROUPS = [
       { path: '/dsc',       icon: FileText,  label: 'DSC Register',      permission: 'can_view_all_dsc'     },
       { path: '/documents', icon: FileText,  label: 'Document Register', permission: 'can_view_documents'   },
       // Clients — always visible to all authenticated users.
-      // "Assigned + Permission" model: can_view_all_clients controls DATA SCOPE (all vs assigned),
-      // not page access. Users without the flag still see their own assigned clients.
       { path: '/clients',   icon: Users,     label: 'Clients' },
       { path: '/passwords', icon: KeyRound,  label: 'Password Vault',    permission: 'can_view_passwords'   },
     ],
@@ -93,6 +93,7 @@ const NAV_GROUPS = [
     id: 'accounts',
     dividerLabel: 'Accounts',
     items: [
+      // ── Core Accounting ───────────────────────────────────────────────────
       {
         path:       '/invoicing',
         icon:       CreditCard,
@@ -145,6 +146,85 @@ const NAV_GROUPS = [
         path:       '/accounting-integrity',
         icon:       Lock,
         label:      'Accounting Integrity',
+        permission: 'can_manage_chart_of_accounts',
+      },
+      // ── Accounting Extended ───────────────────────────────────────────────
+      {
+        path:       '/day-book',
+        icon:       BookOpen,
+        label:      'Day Book',
+        permission: 'can_view_accounting_reports',
+      },
+      {
+        path:       '/cash-bank-book',
+        icon:       Landmark,
+        label:      'Cash / Bank Book',
+        permission: 'can_view_accounting_reports',
+      },
+      {
+        path:       '/cash-flow',
+        icon:       Activity,
+        label:      'Cash Flow',
+        permission: 'can_view_accounting_reports',
+      },
+      {
+        path:       '/outstanding-report',
+        icon:       AlertTriangle,
+        label:      'Outstanding',
+        permission: 'can_view_accounting_reports',
+      },
+      {
+        path:       '/bank-reconciliation',
+        icon:       ArrowLeftRight,
+        label:      'Bank Reconciliation',
+        permission: 'can_view_accounting_reports',
+      },
+      {
+        path:       '/depreciation',
+        icon:       TrendingDown,
+        label:      'Depreciation',
+        permission: 'can_view_accounting_reports',
+      },
+      {
+        path:       '/tds-tcs',
+        icon:       Shield,
+        label:      'TDS / TCS',
+        permission: 'can_view_accounting_reports',
+      },
+      {
+        path:       '/financial-ratios',
+        icon:       BarChart3,
+        label:      'Financial Ratios',
+        permission: 'can_view_accounting_reports',
+      },
+      {
+        path:       '/comparative-report',
+        icon:       TrendingUp,
+        label:      'Comparative Report',
+        permission: 'can_view_accounting_reports',
+      },
+      {
+        path:       '/yearly-report',
+        icon:       CalendarRange,
+        label:      'Year-wise Report',
+        permission: 'can_view_accounting_reports',
+      },
+      {
+        path:       '/opening-balances',
+        icon:       Scale,
+        label:      'Opening Balances',
+        permission: 'can_manage_chart_of_accounts',
+      },
+      {
+        path:       '/accounting-audit-trail',
+        icon:       ShieldCheck,
+        label:      'Accounting Audit Trail',
+        permission: 'can_view_accounting_reports',
+      },
+      {
+        path:       '/bulk-import',
+        icon:       Upload,
+        label:      'Bulk Journal Import',
         permission: 'can_manage_chart_of_accounts',
       },
     ],
@@ -309,8 +389,6 @@ const DashboardLayout = ({ children }) => {
   /* ── Nav Item ─────────────────────────────────────────────────────── */
   const NavItem = ({ item }) => {
     if (!checkNavPermission(item)) return null;
-    // exact:true items only highlight on a precise path match
-    // (prevents /settings matching when the user is on /settings/email)
     const isActive = location.pathname === item.path ||
       (!item.exact && location.pathname.startsWith(item.path + '/') && item.path !== '/');
     const Icon = item.icon;
@@ -594,8 +672,6 @@ const DashboardLayout = ({ children }) => {
                     boxShadow: isDark
                       ? '0 0 0 1px rgba(31,175,90,0.35), 0 2px 8px rgba(0,0,0,0.35)'
                       : '0 0 0 1px rgba(13,59,102,0.15), 0 2px 8px rgba(13,59,102,0.12)',
-                    // ring-offset color follows the header background
-                    // (Tailwind ring-offset requires --tw-ring-offset-color; we set it via inline style)
                     ['--tw-ring-color']: isDark ? '#1FAF5A' : '#0D3B66',
                     ['--tw-ring-offset-color']: isDark ? '#0f172a' : '#ffffff',
                   }}
