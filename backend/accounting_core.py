@@ -280,6 +280,12 @@ async def delete_journal_entry(entry_id: str, current_user: User = Depends(get_c
         raise HTTPException(404, "Journal entry not found.")
     if entry.get("source") != "manual" and current_user.role != "admin":
         raise HTTPException(400, "Auto-posted entries can only be reversed by an admin.")
+    # Module 4 integrity guard: entries with adjustment-note history, or
+    # entries posted by an autonomous pipeline (AI zero-touch entry, GST
+    # portal sync, etc.), can never be hard-deleted — only corrected via an
+    # Adjustment Note Override. Imported lazily to avoid a circular import.
+    from backend.accounting_lock import guard_deletion
+    await guard_deletion(entry_id)
     await db.journal_lines.delete_many({"entry_id": entry_id})
     await db.journal_entries.delete_one({"id": entry_id})
     return {"success": True}
