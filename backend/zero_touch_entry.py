@@ -9,13 +9,27 @@ Pipeline:
                  decoupled from the HTTP trigger so either wiring is a thin shim.
   2. EXTRACT   : Vision LLM (reuses the Groq vision client already configured in
                  ai_document_reader.py) called in JSON-schema / forced-JSON mode —
-                 no static template, works off any invoice layout.
-  3. ROUTE     : `classify_and_map()` inspects the extracted vendor/line-items and
-                 the firm's own learned category rules to pick ledger accounts,
+                 no static template, works off any invoice layout. Also extracts
+                 the invoice currency and who the document is billed to, so the
+                 pipeline can convert foreign-currency invoices to INR and figure
+                 out which of the firm's companies the invoice belongs to.
+  3. RESOLVE   : `resolve_company()` matches the extracted "billed to" details
+                 (GSTIN → billing email → company name, in that priority order)
+                 against Company Profiles (`db.companies`) so a multi-company
+                 setup posts each invoice into the correct company's books
+                 instead of a blank/default one. Unmatched documents are held
+                 as `needs_review` rather than guessed.
+  4. CONVERT   : if the extracted currency isn't INR, `get_historical_fx_rate()`
+                 fetches the ECB reference rate for that invoice's date (via the
+                 free Frankfurter API, cached) and every amount is converted to
+                 INR before anything is posted — so a $8.02 receipt is booked at
+                 that day's actual rate, not booked as "₹8.02".
+  5. ROUTE     : `classify_expense_account()` inspects the vendor name and the
+                 firm's own learned category rules to pick a ledger account,
                  then posts a balanced double-entry voucher via
                  `accounting_core.post_journal_entry` (reused, not re-implemented,
                  so trial balance / P&L / balance sheet reports stay consistent).
-  4. AUDIT     : Every AI-posted entry is flagged `source="ai_zero_touch"` and is
+  6. AUDIT     : Every AI-posted entry is flagged `source="ai_zero_touch"` and is
                  immutable (see accounting_lock.py, Module 4) — corrections must
                  go through an Adjustment Note Override rather than editing the
                  original voucher.
@@ -32,7 +46,7 @@ import os
 import re
 import uuid
 from datetime import datetime, date, timezone
-from typing import Optional, List, Literal
+from typing import Optional, List, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from pydantic import BaseModel, Field
@@ -60,8 +74,11 @@ Read the attached invoice/receipt image and return ONLY a single JSON object
 
 {
   "document_type": "SALE" | "PURCHASE" | "UNKNOWN",
-  "vendor_or_customer_name": string,
-  "tax_registration_number": string,      // GSTIN/PAN, "" if not visible
+  "vendor_or_customer_name": string,      // the OTHER party — who this business is transacting with
+  "tax_registration_number": string,      // vendor/customer GSTIN/PAN, "" if not visible
+  "billed_to_name": string,               // the name/company this document is addressed TO ("Bill To" / "Ship To" / recipient letterhead)
+  "billed_to_email": string,              // the "Bill To" email address if shown, else ""
+  "billed_to_gstin": string,              // the recipient's own GSTIN if shown, else ""
   "invoice_number": string,
   "invoice_date": "YYYY-MM-DD",
   "line_items": [
@@ -71,14 +88,15 @@ Read the attached invoice/receipt image and return ONLY a single JSON object
   "tax_breakup": {"cgst": number, "sgst": number, "igst": number},
   "total_tax": number,
   "total_invoice_value": number,
-  "currency": string,                     // ISO code, default "INR"
+  "currency": string,                     // 3-letter ISO 4217 code the amounts are actually denominated in (e.g. "USD", "EUR", "INR") — read the currency symbol/code on the document, do not assume INR
   "confidence": number                    // 0-1, your own confidence in this read
 }
 
 Rules:
 - document_type = "SALE" if this business is the one issuing/selling; "PURCHASE" if
   this business is the buyer/recipient. Infer from letterhead/"Bill To" vs "From".
-- All numeric fields must be plain numbers (no currency symbols, no commas).
+- All numeric fields must be plain numbers (no currency symbols, no commas), in the
+  document's OWN currency — do not convert currency yourself, just report what's printed.
 - If a field is unreadable, use 0 for numbers or "" for strings — never omit a key.
 - Do not invent data that is not visible in the document.
 """
@@ -126,7 +144,7 @@ async def _groq_extract_json(image_b64: str, mime_type: str) -> dict:
         raise HTTPException(422, f"Model did not return valid JSON: {e}. Raw: {raw[:300]}")
 
 
-def _file_to_image_b64(contents: bytes, filename: str) -> tuple[str, str]:
+def _file_to_image_b64(contents: bytes, filename: str) -> Tuple[str, str]:
     """Returns (base64, mime_type). Rasterises page 1 for PDFs."""
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if ext == "pdf":
@@ -150,15 +168,106 @@ def _file_to_image_b64(contents: bytes, filename: str) -> tuple[str, str]:
         return base64.b64encode(buf.getvalue()).decode(), "image/jpeg"
 
 
+# ── Multi-currency: historical FX conversion to INR ──────────────────────────
+async def get_historical_fx_rate(from_ccy: str, to_ccy: str, on_date: str) -> float:
+    """Historical daily FX rate via the free Frankfurter API (ECB reference
+    rates — no API key required, https://www.frankfurter.app). Cached in
+    `db.fx_rate_cache` so the same currency-pair/date is never looked up twice.
+    Raises HTTPException rather than guessing if the rate can't be fetched —
+    a wrong FX rate is worse than a document waiting for manual review."""
+    from_ccy = (from_ccy or "").upper().strip()
+    to_ccy = (to_ccy or "INR").upper().strip()
+    if not from_ccy or from_ccy == to_ccy:
+        return 1.0
+
+    cache_key = f"{from_ccy}_{to_ccy}_{on_date}"
+    cached = await db.fx_rate_cache.find_one({"id": cache_key}, {"_id": 0})
+    if cached:
+        return cached["rate"]
+
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(f"https://api.frankfurter.app/{on_date}", params={"from": from_ccy, "to": to_ccy})
+    except Exception as e:
+        raise HTTPException(502, f"FX rate lookup failed for {from_ccy}->{to_ccy} on {on_date}: {e}")
+    if resp.status_code != 200:
+        raise HTTPException(502, f"FX rate lookup failed ({resp.status_code}) for {from_ccy}->{to_ccy} on {on_date}.")
+    data = resp.json()
+    rate = (data.get("rates") or {}).get(to_ccy)
+    if not rate:
+        raise HTTPException(502, f"No FX rate returned for {from_ccy}->{to_ccy} on {on_date}.")
+
+    await db.fx_rate_cache.replace_one(
+        {"id": cache_key},
+        {
+            "id": cache_key, "from": from_ccy, "to": to_ccy, "date": on_date, "rate": rate,
+            "source": "frankfurter.app (ECB reference rates)",
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+        },
+        upsert=True,
+    )
+    return rate
+
+
+# ── Multi-company: match the invoice to one of the firm's companies ─────────
+async def resolve_company(current_user: User, extracted: dict) -> Tuple[Optional[str], str, List[dict]]:
+    """Matches the extracted 'billed to' details against Company Profiles
+    (`db.companies`, the same collection used by Quotations/Invoicing) to
+    figure out which of the firm's companies this document belongs to.
+    Priority: GSTIN match > billing-email match > fuzzy name match.
+    Returns (company_id or None, human-readable reason, all_candidate_companies)."""
+    companies = await db.companies.find(
+        {} if current_user.role == "admin" else {"created_by": current_user.id},
+        {"_id": 0, "id": 1, "name": 1, "gstin": 1, "email": 1},
+    ).to_list(500)
+
+    if not companies:
+        return None, "No companies are configured in Company Profiles yet.", []
+    if len(companies) == 1:
+        return companies[0]["id"], f"Only one company configured ('{companies[0]['name']}').", companies
+
+    billed_gstin = (extracted.get("billed_to_gstin") or "").upper().strip()
+    billed_email = (extracted.get("billed_to_email") or "").lower().strip()
+    billed_name = (extracted.get("billed_to_name") or "").lower().strip()
+
+    if billed_gstin:
+        for c in companies:
+            if (c.get("gstin") or "").upper().strip() == billed_gstin:
+                return c["id"], f"Matched by GSTIN ({billed_gstin}) to '{c['name']}'.", companies
+
+    if billed_email:
+        for c in companies:
+            if (c.get("email") or "").lower().strip() == billed_email:
+                return c["id"], f"Matched by billing email ({billed_email}) to '{c['name']}'.", companies
+
+    if billed_name:
+        for c in companies:
+            cname = (c.get("name") or "").lower().strip()
+            if cname and (billed_name in cname or cname in billed_name):
+                return c["id"], f"Matched by company name to '{c['name']}'.", companies
+
+    return None, (
+        "Could not match this document's 'Bill To' details to any of your "
+        f"{len(companies)} configured companies — assign the company manually."
+    ), companies
+
+
 # ── Contextual vendor → ledger-account categorisation rules ─────────────────
 # Learned/curated per firm; seed with common SaaS/vendor patterns and let
 # admins extend it via /api/zte/category-rules (below) instead of redeploying.
+# Account codes here MUST correspond to real Chart of Accounts codes
+# (see accounting_core.DEFAULT_ACCOUNTS) — mismatched labels/codes were a bug
+# in an earlier version of this file and have been corrected.
 DEFAULT_CATEGORY_RULES: List[dict] = [
-    {"match": r"amazon\s*web\s*services|aws\b", "account_code": "5300", "label": "Software & Cloud Expenses"},
-    {"match": r"google\s*cloud|gcp\b", "account_code": "5300", "label": "Software & Cloud Expenses"},
-    {"match": r"microsoft|azure|office\s*365", "account_code": "5300", "label": "Software & Cloud Expenses"},
-    {"match": r"zoom|slack|notion|figma|canva", "account_code": "5300", "label": "Software & Cloud Expenses"},
-    {"match": r"indian\s*railways|irctc|ola|uber|indigo|spicejet|air\s*india", "account_code": "5500", "label": "Shipping & Freight / Travel"},
+    {"match": r"amazon\s*web\s*services|\baws\b", "account_code": "5250", "label": "Software & Cloud Expenses"},
+    {"match": r"google\s*cloud|\bgcp\b", "account_code": "5250", "label": "Software & Cloud Expenses"},
+    {"match": r"microsoft|azure|office\s*365", "account_code": "5250", "label": "Software & Cloud Expenses"},
+    {"match": r"\brender\b|render\.com|render\s*services", "account_code": "5250", "label": "Software & Cloud Expenses"},
+    {"match": r"zoom|slack|notion|figma|canva|vercel|netlify|heroku|digitalocean|github|gitlab|openai|anthropic|\bgroq\b",
+     "account_code": "5250", "label": "Software & Cloud Expenses"},
+    {"match": r"indian\s*railways|irctc|\bola\b|\buber\b|indigo|spicejet|air\s*india|makemytrip|goibibo",
+     "account_code": "5600", "label": "Travel & Conveyance"},
     {"match": r"electricity|power\s*corp|discom", "account_code": "5300", "label": "Office & Admin Expenses"},
 ]
 
@@ -168,7 +277,7 @@ async def _get_category_rules(company_id: str) -> List[dict]:
     return rows if rows else DEFAULT_CATEGORY_RULES
 
 
-async def classify_expense_account(company_id: str, vendor_name: str) -> tuple[str, str]:
+async def classify_expense_account(company_id: str, vendor_name: str) -> Tuple[str, str]:
     """Returns (account_code, category_label) for a PURCHASE line, falling back
     to the generic 'Purchases' account when no rule matches."""
     rules = await _get_category_rules(company_id)
@@ -208,8 +317,8 @@ async def add_category_rule(rule: CategoryRule, current_user: User = Depends(get
 async def process_document(
     contents: bytes,
     filename: str,
-    company_id: str,
-    created_by: str,
+    current_user: User,
+    company_id: Optional[str] = None,   # None/"" = auto-detect from the document; a value = explicit override
     auto_post: bool = True,
 ) -> dict:
     img_b64, mime = _file_to_image_b64(contents, filename)
@@ -217,26 +326,47 @@ async def process_document(
 
     record_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
+
+    resolved_company_id = company_id or None
+    company_match_reason = "Company set manually." if company_id else ""
+    if not resolved_company_id:
+        resolved_company_id, company_match_reason, _ = await resolve_company(current_user, extracted)
+
     record = {
         "id": record_id,
-        "company_id": company_id,
+        "company_id": resolved_company_id or "",
+        "company_match_reason": company_match_reason,
         "filename": filename,
         "extracted": extracted,
+        "fx": None,
+        "amount_inr": None,
         "status": "extracted",
         "journal_entry_id": None,
         "posting_error": None,
-        "created_by": created_by,
+        # Bank-reconciliation state (Module 3-of-the-brief / bank_accounts.py
+        # closes this out automatically once a matching bank-statement line
+        # is found — see bank_accounts._match_transaction).
+        "settled": False,
+        "settled_bank_txn_id": None,
+        "settled_journal_entry_id": None,
+        "created_by": current_user.id,
         "created_at": now,
     }
 
-    if auto_post:
+    if not resolved_company_id:
+        record["status"] = "needs_review"
+        record["posting_error"] = company_match_reason
+    elif auto_post:
         try:
-            entry = await route_to_ledger(company_id, extracted, created_by, source_id=record_id)
+            entry, fx_meta = await route_to_ledger(resolved_company_id, extracted, current_user.id, source_id=record_id)
             record["journal_entry_id"] = entry["id"]
+            record["fx"] = fx_meta
+            record["amount_inr"] = round(fx_meta["original_total_value"] * fx_meta["rate_to_inr"], 2) if fx_meta \
+                else float(extracted.get("total_invoice_value") or 0)
             record["status"] = "posted"
         except ValueError as e:
-            # Amount/data didn't balance or was unusable — leave for human review
-            # rather than silently posting something wrong.
+            # Amount/currency/data didn't balance or was unusable — leave for
+            # human review rather than silently posting something wrong.
             record["status"] = "needs_review"
             record["posting_error"] = str(e)
 
@@ -245,8 +375,9 @@ async def process_document(
     return record
 
 
-async def route_to_ledger(company_id: str, extracted: dict, created_by: str, source_id: str) -> dict:
-    """Autonomous double-entry routing (Module 1 step 3)."""
+async def route_to_ledger(company_id: str, extracted: dict, created_by: str, source_id: str) -> Tuple[dict, Optional[dict]]:
+    """Autonomous double-entry routing (Module 1 steps 4-5).
+    Returns (posted_journal_entry, fx_conversion_metadata_or_None)."""
     doc_type = (extracted.get("document_type") or "").upper()
     taxable_value = float(extracted.get("taxable_value") or 0)
     tax_breakup = extracted.get("tax_breakup") or {}
@@ -257,11 +388,33 @@ async def route_to_ledger(company_id: str, extracted: dict, created_by: str, sou
     vendor = extracted.get("vendor_or_customer_name") or "Unknown Party"
     inv_no = extracted.get("invoice_number") or ""
     inv_date = extracted.get("invoice_date") or date.today().isoformat()
+    currency = (extracted.get("currency") or "INR").upper().strip() or "INR"
 
     if total_value <= 0:
         raise ValueError("Extracted invoice value is 0 — cannot post; needs manual review.")
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", inv_date):
         inv_date = date.today().isoformat()
+
+    # ── Multi-currency conversion (Module 1 step 4) ─────────────────────────
+    fx_meta = None
+    if currency != "INR":
+        try:
+            fx_rate = await get_historical_fx_rate(currency, "INR", inv_date)
+        except HTTPException as e:
+            raise ValueError(f"Could not fetch {currency}->INR exchange rate for {inv_date}: {e.detail}")
+        fx_meta = {
+            "original_currency": currency,
+            "original_taxable_value": taxable_value,
+            "original_total_tax": round(cgst + sgst + igst, 2),
+            "original_total_value": total_value,
+            "rate_to_inr": fx_rate,
+            "rate_date": inv_date,
+        }
+        taxable_value = round(taxable_value * fx_rate, 2)
+        cgst = round(cgst * fx_rate, 2)
+        sgst = round(sgst * fx_rate, 2)
+        igst = round(igst * fx_rate, 2)
+        total_value = round(total_value * fx_rate, 2)
 
     total_tax = round(cgst + sgst + igst, 2)
     if taxable_value <= 0:
@@ -272,6 +425,8 @@ async def route_to_ledger(company_id: str, extracted: dict, created_by: str, sou
     sales_id = await ac.get_default_account_id(company_id, "4000")  # Sales Income
     output_tax_id = await ac.get_default_account_id(company_id, "2100")  # GST Output Payable
     input_tax_id = await ac.get_default_account_id(company_id, "1200")   # GST Input Credit
+
+    fx_suffix = f" [{fx_meta['original_currency']} {fx_meta['original_total_value']} @ {fx_meta['rate_to_inr']:.4f} on {inv_date}]" if fx_meta else ""
 
     lines: list
     if doc_type == "SALE":
@@ -284,7 +439,7 @@ async def route_to_ledger(company_id: str, extracted: dict, created_by: str, sou
         if total_tax > 0:
             lines.append({"account_id": output_tax_id, "account_name": "GST Output Payable",
                            "debit": 0, "credit": total_tax, "memo": f"Output tax on Inv {inv_no}"})
-        narration = f"AI zero-touch entry — Sale to {vendor}, Invoice {inv_no}"
+        narration = f"AI zero-touch entry — Sale to {vendor}, Invoice {inv_no}{fx_suffix}"
 
     elif doc_type == "PURCHASE":
         expense_code, category_label = await classify_expense_account(company_id, vendor)
@@ -298,13 +453,16 @@ async def route_to_ledger(company_id: str, extracted: dict, created_by: str, sou
                            "debit": total_tax, "credit": 0, "memo": f"ITC on Inv {inv_no}"})
         lines.append({"account_id": ap_id, "account_name": "Accounts Payable",
                        "debit": 0, "credit": total_value, "memo": vendor})
-        narration = f"AI zero-touch entry — Purchase from {vendor} ({category_label}), Invoice {inv_no}"
+        narration = f"AI zero-touch entry — Purchase from {vendor} ({category_label}), Invoice {inv_no}{fx_suffix}"
 
     else:
         raise ValueError(f"Could not classify document as SALE or PURCHASE (got '{doc_type}').")
 
     if any(l["account_id"] is None for l in lines):
-        raise ValueError("One or more default ledger accounts are missing for this company.")
+        raise ValueError(
+            "One or more default ledger accounts are missing for this company — "
+            "open Chart of Accounts once to seed them, then retry."
+        )
 
     entry = await ac.post_journal_entry(
         company_id=company_id,
@@ -315,14 +473,14 @@ async def route_to_ledger(company_id: str, extracted: dict, created_by: str, sou
         source_id=source_id,
         created_by=created_by,
     )
-    return entry
+    return entry, fx_meta
 
 
 # ── HTTP trigger (manual upload; swap/augment with bucket or email webhook) ─
 @router.post("/upload")
 async def upload_and_process(
     file: UploadFile = File(...),
-    company_id: str = Form(""),
+    company_id: str = Form(""),   # leave blank to auto-detect from the document
     auto_post: bool = Form(True),
     current_user: User = Depends(get_current_user),
 ):
@@ -334,8 +492,8 @@ async def upload_and_process(
     record = await process_document(
         contents=contents,
         filename=file.filename or "upload",
-        company_id=company_id,
-        created_by=current_user.id,
+        current_user=current_user,
+        company_id=company_id or None,
         auto_post=auto_post,
     )
     return record
@@ -343,15 +501,53 @@ async def upload_and_process(
 
 @router.get("/documents")
 async def list_processed_documents(
-    company_id: str = Query(""),
+    company_id: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user),
 ):
-    q: dict = {"company_id": company_id}
+    q: dict = {}
+    if company_id is not None:
+        q["company_id"] = company_id
     if status:
         q["status"] = status
     docs = await db.zte_processed_documents.find(q, {"_id": 0}).sort("created_at", -1).to_list(1000)
+
+    company_ids = {d["company_id"] for d in docs if d.get("company_id")}
+    companies = await db.companies.find(
+        {"id": {"$in": list(company_ids)}}, {"_id": 0, "id": 1, "name": 1}
+    ).to_list(500) if company_ids else []
+    name_by_id = {c["id"]: c["name"] for c in companies}
+    for d in docs:
+        d["company_name"] = name_by_id.get(d.get("company_id"), "")
     return docs
+
+
+@router.get("/companies")
+async def list_companies_for_zte(current_user: User = Depends(get_current_user)):
+    """Company picker for the manual-override dropdown in the upload UI."""
+    query = {} if current_user.role == "admin" else {"created_by": current_user.id}
+    return await db.companies.find(query, {"_id": 0, "id": 1, "name": 1, "gstin": 1}).to_list(500)
+
+
+class AssignCompanyBody(BaseModel):
+    company_id: str
+
+
+@router.post("/documents/{doc_id}/assign-company")
+async def assign_company(doc_id: str, body: AssignCompanyBody, current_user: User = Depends(get_current_user)):
+    if not _perm_post(current_user):
+        raise HTTPException(403, "Access denied.")
+    doc = await db.zte_processed_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Document not found.")
+    if doc["status"] == "posted":
+        raise HTTPException(400, "Already posted.")
+    await db.zte_processed_documents.update_one(
+        {"id": doc_id},
+        {"$set": {"company_id": body.company_id, "company_match_reason": "Company assigned manually.", "posting_error": None}},
+    )
+    doc["company_id"] = body.company_id
+    return await _post_document(doc, current_user)
 
 
 @router.post("/documents/{doc_id}/retry-posting")
@@ -363,14 +559,24 @@ async def retry_posting(doc_id: str, current_user: User = Depends(get_current_us
         raise HTTPException(404, "Document not found.")
     if doc["status"] == "posted":
         raise HTTPException(400, "Already posted.")
+    return await _post_document(doc, current_user)
+
+
+async def _post_document(doc: dict, current_user: User) -> dict:
+    if not doc.get("company_id"):
+        raise HTTPException(400, "No company assigned to this document yet — assign one first.")
     try:
-        entry = await route_to_ledger(doc["company_id"], doc["extracted"], current_user.id, source_id=doc_id)
+        entry, fx_meta = await route_to_ledger(doc["company_id"], doc["extracted"], current_user.id, source_id=doc["id"])
+        amount_inr = round(fx_meta["original_total_value"] * fx_meta["rate_to_inr"], 2) if fx_meta \
+            else float((doc.get("extracted") or {}).get("total_invoice_value") or 0)
         await db.zte_processed_documents.update_one(
-            {"id": doc_id},
-            {"$set": {"status": "posted", "journal_entry_id": entry["id"], "posting_error": None}},
+            {"id": doc["id"]},
+            {"$set": {"status": "posted", "journal_entry_id": entry["id"], "fx": fx_meta,
+                      "amount_inr": amount_inr, "posting_error": None}},
         )
-        return {"success": True, "journal_entry_id": entry["id"]}
+        return {"success": True, "journal_entry_id": entry["id"], "fx": fx_meta}
     except ValueError as e:
+        await db.zte_processed_documents.update_one({"id": doc["id"]}, {"$set": {"posting_error": str(e)}})
         raise HTTPException(400, str(e))
 
 
@@ -378,3 +584,4 @@ async def create_zte_indexes():
     await db.zte_processed_documents.create_index("company_id")
     await db.zte_processed_documents.create_index("status")
     await db.zte_category_rules.create_index("company_id")
+    await db.fx_rate_cache.create_index("id", unique=True)
