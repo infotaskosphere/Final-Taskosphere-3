@@ -178,6 +178,22 @@ async def list_bank_accounts(company_id: Optional[str] = Query(None), current_us
     return accounts
 
 
+@router.get("/bank-accounts/picker-list")
+async def picker_list_bank_accounts(current_user: User = Depends(get_current_user)):
+    # Lightweight list of bank accounts for select dropdowns
+    projection = {
+        "_id": 0,
+        "id": 1,
+        "bank_name": 1,
+        "account_holder": 1,
+        "account_number_masked": 1,
+        "company_id": 1,
+    }
+    accounts = await db.bank_accounts.find({}, projection).sort("created_at", -1).to_list(500)
+    return accounts
+
+
+
 @router.delete("/bank-accounts/{bank_account_id}")
 async def delete_bank_account(bank_account_id: str, current_user: User = Depends(get_current_user)):
     if not _perm_view_bank(current_user):
