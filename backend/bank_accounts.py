@@ -178,22 +178,6 @@ async def list_bank_accounts(company_id: Optional[str] = Query(None), current_us
     return accounts
 
 
-@router.get("/bank-accounts/picker-list")
-async def picker_list_bank_accounts(current_user: User = Depends(get_current_user)):
-    # Lightweight list of bank accounts for select dropdowns
-    projection = {
-        "_id": 0,
-        "id": 1,
-        "bank_name": 1,
-        "account_holder": 1,
-        "account_number_masked": 1,
-        "company_id": 1,
-    }
-    accounts = await db.bank_accounts.find({}, projection).sort("created_at", -1).to_list(500)
-    return accounts
-
-
-
 @router.delete("/bank-accounts/{bank_account_id}")
 async def delete_bank_account(bank_account_id: str, current_user: User = Depends(get_current_user)):
     if not _perm_view_bank(current_user):
@@ -257,72 +241,24 @@ def _parse_stmt_date(val) -> str:
     return s
 
 
-
-def _load_as_df(contents: bytes, filename: str, header_mode: str = "infer", skiprows: int = None) -> tuple:
-    import pandas as pd
-    from io import BytesIO
-
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-
-    modes = []
-    if ext == "csv":
-        modes = ["csv", "excel", "html"]
-    else:
-        modes = ["excel", "html", "csv"]
-
-    errors = {}
-    for mode in modes:
-        try:
-            if mode == "excel":
-                h = None if header_mode == "none" else 0
-                df = pd.read_excel(BytesIO(contents), header=h, skiprows=skiprows, dtype=str)
-                return df, "excel"
-            elif mode == "html":
-                dfs = pd.read_html(BytesIO(contents), keep_default_na=False)
-                if not dfs:
-                    raise ValueError("No tables found in HTML content")
-                best_df = None
-                for candidate_df in dfs:
-                    if len(candidate_df) > 0 and len(candidate_df.columns) >= 3:
-                        best_df = candidate_df.astype(str)
-                        break
-                if best_df is None:
-                    raise ValueError("No valid table candidate in HTML")
-                
-                if header_mode == "none":
-                    col_row = pd.DataFrame([best_df.columns.tolist()], columns=best_df.columns)
-                    best_df = pd.concat([col_row, best_df], ignore_index=True)
-
-                if skiprows is not None and skiprows > 0:
-                    best_df = best_df.iloc[skiprows:].reset_index(drop=True)
-
-                return best_df, "html"
-            elif mode == "csv":
-                h = None if header_mode == "none" else 0
-                df = pd.read_csv(BytesIO(contents), header=h, skiprows=skiprows, dtype=str, keep_default_na=False)
-                return df, "csv"
-        except Exception as e:
-            errors[mode] = str(e)
-            continue
-
-    raise ValueError(f"Could not parse with any engine (excel, html, csv). Errors: {errors}")
-
-
 def _parse_tabular_statement(contents: bytes, filename: str) -> List[dict]:
     """CSV / XLSX statements — the overwhelming majority of real-world bank
     exports. Auto-detects the date / narration / debit / credit / balance
     columns regardless of exact header wording or bank."""
     import pandas as pd
-    from io import BytesIO
 
-    df, mode_used = _load_as_df(contents, filename, header_mode="infer")
+    ext = filename.rsplit(".", 1)[-1].lower()
+    if ext == "csv":
+        df = pd.read_csv(BytesIO(contents), dtype=str, keep_default_na=False)
+    else:
+        df = pd.read_excel(BytesIO(contents), dtype=str)
 
     columns = list(df.columns)
     date_col = _pick_col(columns, _DATE_COL_HINTS)
     if not date_col:
         # Some bank exports have a few banner rows before the real header row
         # — scan the first 15 rows for one that looks like a header.
-        raw, _ = _load_as_df(contents, filename, header_mode="none")
+        raw = pd.read_excel(BytesIO(contents), header=None) if ext != "csv" else pd.read_csv(BytesIO(contents), header=None, dtype=str)
         header_row_idx = None
         for i in range(min(15, len(raw))):
             row_vals = [str(v).strip().lower() for v in raw.iloc[i].tolist()]
@@ -330,7 +266,10 @@ def _parse_tabular_statement(contents: bytes, filename: str) -> List[dict]:
                 header_row_idx = i
                 break
         if header_row_idx is not None:
-            df, _ = _load_as_df(contents, filename, header_mode="infer", skiprows=header_row_idx)
+            if ext == "csv":
+                df = pd.read_csv(BytesIO(contents), skiprows=header_row_idx, dtype=str, keep_default_na=False)
+            else:
+                df = pd.read_excel(BytesIO(contents), skiprows=header_row_idx, dtype=str)
             columns = list(df.columns)
             date_col = _pick_col(columns, _DATE_COL_HINTS)
 
@@ -413,9 +352,15 @@ async def _parse_pdf_statement_via_ai(contents: bytes, filename: str) -> List[di
 
 # ── Matching + auto journal posting ───────────────────────────────────────
 async def _match_transaction(company_id: str, txn: dict) -> Optional[dict]:
-    """Try to match one bank line against a Purchase invoice (if it's a
-    debit) or a Sale invoice (if it's a credit) by amount within a small
-    tolerance and date within a window either side of the invoice date."""
+    """Try to match one bank line against:
+      1) a Purchase invoice / Sale invoice (the standalone Purchases/Invoicing
+         modules), or
+      2) an AI Zero-Touch Entry Engine document (Module 1) that already posted
+         an Accounts Payable/Receivable entry and is waiting to be settled —
+    by amount within a small tolerance and date within a window either side
+    of the invoice date. Zero-Touch entries are checked first for a debit
+    line since they carry the AI-extracted vendor name, which gives a better
+    match than the generic purchase_invoices collection when both exist."""
     txn_date = txn["date"]
     try:
         dt = datetime.strptime(txn_date, "%Y-%m-%d")
@@ -426,14 +371,45 @@ async def _match_transaction(company_id: str, txn: dict) -> Optional[dict]:
 
     if txn["debit"] > 0:
         amount = txn["debit"]
+
+        zte_candidates = await db.zte_processed_documents.find(
+            {
+                "company_id": company_id, "status": "posted", "settled": {"$ne": True},
+                "extracted.document_type": "PURCHASE",
+                "extracted.invoice_date": {"$gte": window_from, "$lte": window_to},
+            },
+            {"_id": 0},
+        ).to_list(2000)
+        for c in zte_candidates:
+            inr_total = c.get("amount_inr") or float((c.get("extracted") or {}).get("total_invoice_value") or 0)
+            if inr_total and abs(inr_total - amount) <= max(1.0, amount * 0.01):
+                vendor = (c.get("extracted") or {}).get("vendor_or_customer_name") or "Zero-Touch purchase"
+                return {"type": "zte_purchase", "id": c["id"], "label": vendor, "ap_amount": inr_total}
+
         candidates = await db.purchase_invoices.find(
             {"invoice_date": {"$gte": window_from, "$lte": window_to}}, {"_id": 0}
         ).to_list(2000)
         for c in candidates:
             if abs(float(c.get("grand_total") or 0) - amount) <= max(1.0, amount * 0.01):
                 return {"type": "purchase", "id": c["id"], "label": c.get("supplier_name") or c.get("invoice_no") or "Purchase invoice"}
+
     elif txn["credit"] > 0:
         amount = txn["credit"]
+
+        zte_candidates = await db.zte_processed_documents.find(
+            {
+                "company_id": company_id, "status": "posted", "settled": {"$ne": True},
+                "extracted.document_type": "SALE",
+                "extracted.invoice_date": {"$gte": window_from, "$lte": window_to},
+            },
+            {"_id": 0},
+        ).to_list(2000)
+        for c in zte_candidates:
+            inr_total = c.get("amount_inr") or float((c.get("extracted") or {}).get("total_invoice_value") or 0)
+            if inr_total and abs(inr_total - amount) <= max(1.0, amount * 0.01):
+                customer = (c.get("extracted") or {}).get("vendor_or_customer_name") or "Zero-Touch sale"
+                return {"type": "zte_sale", "id": c["id"], "label": customer, "ar_amount": inr_total}
+
         candidates = await db.invoices.find(
             {"invoice_date": {"$gte": window_from, "$lte": window_to}}, {"_id": 0}
         ).to_list(2000)
@@ -448,6 +424,48 @@ async def _auto_post_for_match(company_id: str, txn: dict, match: dict, created_
     bank_acct_id = await get_default_account_id(company_id, "1010")  # Bank Accounts
     if not bank_acct_id:
         return None
+
+    if match["type"] == "zte_purchase":
+        # This invoice already posted Dr Expense / Dr ITC / Cr Accounts
+        # Payable via the Zero-Touch Entry Engine — settle that payable
+        # rather than booking the expense a second time.
+        ap_acct_id = await get_default_account_id(company_id, "2000")  # Accounts Payable
+        if not ap_acct_id:
+            return None
+        entry = await try_auto_post(
+            company_id, txn["date"], f"Payment to {match['label']} — settles Zero-Touch Entry invoice (bank statement)",
+            [
+                {"account_id": ap_acct_id, "account_name": "Accounts Payable", "debit": txn["debit"], "credit": 0},
+                {"account_id": bank_acct_id, "account_name": "Bank Accounts", "debit": 0, "credit": txn["debit"]},
+            ],
+            "bank", txn["id"], created_by,
+        )
+        if entry:
+            await db.zte_processed_documents.update_one(
+                {"id": match["id"]},
+                {"$set": {"settled": True, "settled_bank_txn_id": txn["id"], "settled_journal_entry_id": entry["id"]}},
+            )
+        return entry["id"] if entry else None
+
+    if match["type"] == "zte_sale":
+        ar_acct_id = await get_default_account_id(company_id, "1100")  # Accounts Receivable
+        if not ar_acct_id:
+            return None
+        entry = await try_auto_post(
+            company_id, txn["date"], f"Receipt from {match['label']} — settles Zero-Touch Entry invoice (bank statement)",
+            [
+                {"account_id": bank_acct_id, "account_name": "Bank Accounts", "debit": txn["credit"], "credit": 0},
+                {"account_id": ar_acct_id, "account_name": "Accounts Receivable", "debit": 0, "credit": txn["credit"]},
+            ],
+            "bank", txn["id"], created_by,
+        )
+        if entry:
+            await db.zte_processed_documents.update_one(
+                {"id": match["id"]},
+                {"$set": {"settled": True, "settled_bank_txn_id": txn["id"], "settled_journal_entry_id": entry["id"]}},
+            )
+        return entry["id"] if entry else None
+
     if match["type"] == "purchase":
         purchases_acct_id = await get_default_account_id(company_id, "5000")  # Purchases
         if not purchases_acct_id:
