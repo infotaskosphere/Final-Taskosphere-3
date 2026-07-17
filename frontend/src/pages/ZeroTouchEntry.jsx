@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { toast } from 'sonner';
 import {
   ScanLine, UploadCloud, RefreshCw, CheckCircle2, AlertTriangle,
-  Sparkles, FileText, Settings2, Plus,
+  Sparkles, FileText, Settings2, Plus, Building2, Banknote,
 } from 'lucide-react';
 import { ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
@@ -17,14 +17,35 @@ import RequestAccessGate from '@/components/RequestAccessGate.jsx';
 const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2', emeraldGreen: '#1FAF5A', amber: '#F59E0B', coral: '#FF6B6B' };
 const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 
-function StatusBadge({ status }) {
+function StatusBadge({ status, settled }) {
+  if (status === 'posted' && settled) {
+    return <Badge className="bg-emerald-600 hover:bg-emerald-600">Posted &amp; Settled</Badge>;
+  }
   const map = {
-    posted:       { variant: 'default',     label: 'Posted',        className: 'bg-emerald-600 hover:bg-emerald-600' },
-    needs_review: { variant: 'destructive', label: 'Needs Review',  className: '' },
-    extracted:    { variant: 'secondary',   label: 'Extracted',     className: '' },
+    posted:       { label: 'Posted',       className: 'bg-blue-600 hover:bg-blue-600' },
+    needs_review: { label: 'Needs Review', className: '' },
+    extracted:    { label: 'Extracted',    className: '' },
   };
-  const cfg = map[status] || { variant: 'outline', label: status };
-  return <Badge variant={cfg.variant} className={cfg.className}>{cfg.label}</Badge>;
+  const cfg = map[status] || { label: status, className: '' };
+  const variant = status === 'needs_review' ? 'destructive' : (status === 'posted' ? 'default' : 'secondary');
+  return <Badge variant={variant} className={cfg.className}>{cfg.label}</Badge>;
+}
+
+function CompanyPicker({ companies, onAssign, isDark }) {
+  const [selected, setSelected] = useState('');
+  return (
+    <div className="flex items-center gap-1">
+      <select
+        className={`text-xs rounded-md border px-2 py-1 ${isDark ? 'bg-slate-900 border-slate-600 text-slate-200' : 'bg-white border-slate-300'}`}
+        value={selected}
+        onChange={(e) => setSelected(e.target.value)}
+      >
+        <option value="">Assign company…</option>
+        {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+      </select>
+      <Button size="sm" variant="outline" disabled={!selected} onClick={() => onAssign(selected)}>Post</Button>
+    </div>
+  );
 }
 
 function ZeroTouchEntryInner() {
@@ -34,6 +55,8 @@ function ZeroTouchEntryInner() {
   const [uploading, setUploading] = useState(false);
   const [docs, setDocs] = useState([]);
   const [rules, setRules] = useState([]);
+  const [companies, setCompanies] = useState([]);
+  const [uploadCompanyId, setUploadCompanyId] = useState('');
   const [newRule, setNewRule] = useState({ match: '', account_code: '', label: '' });
 
   const fetchDocs = async () => {
@@ -49,14 +72,19 @@ function ZeroTouchEntryInner() {
     try {
       const { data } = await api.get('/zte/category-rules');
       setRules(data || []);
-    } catch {
-      // non-fatal
-    }
+    } catch { /* non-fatal */ }
+  };
+
+  const fetchCompanies = async () => {
+    try {
+      const { data } = await api.get('/zte/companies');
+      setCompanies(data || []);
+    } catch { /* non-fatal */ }
   };
 
   const fetchAll = async () => {
     setLoading(true);
-    await Promise.allSettled([fetchDocs(), fetchRules()]);
+    await Promise.allSettled([fetchDocs(), fetchRules(), fetchCompanies()]);
     setLoading(false);
   };
 
@@ -69,15 +97,16 @@ function ZeroTouchEntryInner() {
     try {
       const form = new FormData();
       form.append('file', file);
-      form.append('company_id', '');
+      form.append('company_id', uploadCompanyId); // blank = auto-detect from the document
       form.append('auto_post', 'true');
       const { data } = await api.post('/zte/upload', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       if (data.status === 'posted') {
-        toast.success(`Extracted & posted — Journal entry ${data.journal_entry_id?.slice(0, 8)}…`);
+        const fxNote = data.fx ? ` (${data.fx.original_currency} ${data.fx.original_total_value} @ ${data.fx.rate_to_inr.toFixed(4)} → ${fmtC(data.amount_inr)})` : '';
+        toast.success(`Extracted & posted to ${data.company_name || 'company'}${fxNote}`);
       } else if (data.status === 'needs_review') {
-        toast.warning(`Extracted but needs review: ${data.posting_error}`);
+        toast.warning(`Needs review: ${data.posting_error}`);
       } else {
         toast.info('Document extracted.');
       }
@@ -100,6 +129,16 @@ function ZeroTouchEntryInner() {
     }
   };
 
+  const assignCompany = async (docId, companyId) => {
+    try {
+      await api.post(`/zte/documents/${docId}/assign-company`, { company_id: companyId });
+      toast.success('Company assigned — posted to ledger.');
+      await fetchDocs();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Could not assign company');
+    }
+  };
+
   const addRule = async () => {
     if (!newRule.match.trim() || !newRule.account_code.trim()) {
       toast.error('Vendor pattern and account code are required.');
@@ -119,10 +158,11 @@ function ZeroTouchEntryInner() {
 
   const posted = docs.filter(d => d.status === 'posted').length;
   const review = docs.filter(d => d.status === 'needs_review').length;
+  const settled = docs.filter(d => d.settled).length;
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
-      <div className="p-4 md:p-6 space-y-5 max-w-[1200px] mx-auto">
+      <div className="p-4 md:p-6 space-y-5 max-w-[1300px] mx-auto">
         {/* Header */}
         <div className="rounded-3xl overflow-hidden shadow-xl" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
           <div className="p-6 md:p-7 flex flex-col lg:flex-row lg:items-center justify-between gap-5 text-white">
@@ -133,27 +173,41 @@ function ZeroTouchEntryInner() {
               <div>
                 <p className="text-xs uppercase tracking-[0.25em] text-blue-100 font-bold">AI Accounting · Module 1</p>
                 <h1 className="text-2xl md:text-3xl font-bold tracking-tight mt-1">Zero-Touch Entry Engine</h1>
-                <p className="text-sm text-blue-100 mt-1 max-w-2xl">Upload an invoice or receipt — an AI reads it, classifies it, and posts a balanced journal entry automatically.</p>
+                <p className="text-sm text-blue-100 mt-1 max-w-2xl">Upload an invoice or receipt — an AI reads it, detects the company &amp; currency, converts to INR, classifies it, and posts a balanced journal entry automatically.</p>
               </div>
             </div>
-            <div className="flex gap-2">
-              <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden" onChange={handleFileChange} />
-              <Button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="bg-white text-blue-900 hover:bg-blue-50">
-                {uploading ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <UploadCloud className="h-4 w-4 mr-2" />}
-                {uploading ? 'Reading document…' : 'Upload Invoice / Receipt'}
-              </Button>
-              <Button onClick={fetchAll} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20">
-                <RefreshCw className="h-4 w-4" />
-              </Button>
+            <div className="flex flex-col gap-2 items-end">
+              <div className="flex gap-2">
+                <select
+                  className="text-sm rounded-md border border-white/25 bg-white/10 text-white px-2 py-2"
+                  value={uploadCompanyId}
+                  onChange={(e) => setUploadCompanyId(e.target.value)}
+                >
+                  <option value="" className="text-slate-900">Auto-detect company</option>
+                  {companies.map((c) => <option key={c.id} value={c.id} className="text-slate-900">{c.name}</option>)}
+                </select>
+                <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden" onChange={handleFileChange} />
+                <Button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="bg-white text-blue-900 hover:bg-blue-50">
+                  {uploading ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <UploadCloud className="h-4 w-4 mr-2" />}
+                  {uploading ? 'Reading document…' : 'Upload Invoice / Receipt'}
+                </Button>
+                <Button onClick={fetchAll} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20">
+                  <RefreshCw className="h-4 w-4" />
+                </Button>
+              </div>
+              {companies.length > 1 && (
+                <p className="text-xs text-blue-100 flex items-center gap-1"><Building2 className="h-3 w-3" /> {companies.length} companies configured — leave blank to auto-match by "Bill To"</p>
+              )}
             </div>
           </div>
         </div>
 
         {/* Summary strip */}
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
             { label: 'Documents Processed', value: docs.length, icon: FileText, color: COLORS.mediumBlue },
             { label: 'Auto-Posted', value: posted, icon: CheckCircle2, color: COLORS.emeraldGreen },
+            { label: 'Settled (Bank Matched)', value: settled, icon: Banknote, color: COLORS.mediumBlue },
             { label: 'Needs Review', value: review, icon: AlertTriangle, color: COLORS.amber },
           ].map((s) => (
             <div key={s.label} className={`rounded-2xl border p-4 flex items-center gap-3 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
@@ -186,11 +240,12 @@ function ZeroTouchEntryInner() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>File</TableHead>
+                      <TableHead>Company</TableHead>
                       <TableHead>Vendor / Customer</TableHead>
                       <TableHead>Type</TableHead>
-                      <TableHead>Invoice #</TableHead>
                       <TableHead>Date</TableHead>
-                      <TableHead className="text-right">Total Value</TableHead>
+                      <TableHead className="text-right">Original</TableHead>
+                      <TableHead className="text-right">Posted (INR)</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead></TableHead>
                     </TableRow>
@@ -198,19 +253,28 @@ function ZeroTouchEntryInner() {
                   <TableBody>
                     {docs.map((d) => {
                       const ex = d.extracted || {};
+                      const ccy = ex.currency || 'INR';
                       return (
                         <TableRow key={d.id}>
-                          <TableCell className="max-w-[160px] truncate">{d.filename}</TableCell>
-                          <TableCell>{ex.vendor_or_customer_name || '—'}</TableCell>
+                          <TableCell className="max-w-[140px] truncate">{d.filename}</TableCell>
                           <TableCell>
-                            <Badge variant="outline">{ex.document_type || '—'}</Badge>
+                            {d.company_name
+                              ? <span className="text-sm">{d.company_name}</span>
+                              : <span className={`text-xs italic ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>unassigned</span>}
                           </TableCell>
-                          <TableCell>{ex.invoice_number || '—'}</TableCell>
+                          <TableCell>{ex.vendor_or_customer_name || '—'}</TableCell>
+                          <TableCell><Badge variant="outline">{ex.document_type || '—'}</Badge></TableCell>
                           <TableCell>{ex.invoice_date || '—'}</TableCell>
-                          <TableCell className="text-right font-mono">{fmtC(ex.total_invoice_value)}</TableCell>
-                          <TableCell><StatusBadge status={d.status} /></TableCell>
+                          <TableCell className="text-right font-mono text-xs">
+                            {ccy !== 'INR' ? `${ccy} ${Number(ex.total_invoice_value || 0).toLocaleString()}` : '—'}
+                          </TableCell>
+                          <TableCell className="text-right font-mono">{fmtC(d.amount_inr ?? ex.total_invoice_value)}</TableCell>
+                          <TableCell><StatusBadge status={d.status} settled={d.settled} /></TableCell>
                           <TableCell>
-                            {d.status === 'needs_review' && (
+                            {d.status === 'needs_review' && !d.company_id && (
+                              <CompanyPicker companies={companies} isDark={isDark} onAssign={(cid) => assignCompany(d.id, cid)} />
+                            )}
+                            {d.status === 'needs_review' && d.company_id && (
                               <Button size="sm" variant="outline" onClick={() => retryPosting(d.id)}>Retry Post</Button>
                             )}
                           </TableCell>
@@ -229,12 +293,12 @@ function ZeroTouchEntryInner() {
                 <Settings2 className="h-4 w-4" /> Add Vendor → Ledger Rule
               </h3>
               <p className={`text-xs mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                When a PURCHASE invoice's vendor name matches this pattern (regex, case-insensitive), the expense auto-posts to the given Chart of Accounts code instead of the generic "Purchases" account.
+                When a PURCHASE invoice's vendor name matches this pattern (regex, case-insensitive), the expense auto-posts to the given Chart of Accounts code instead of the generic "Purchases" account. Codes must match real Chart of Accounts codes (e.g. 5250 = Software &amp; Cloud Expenses, 5600 = Travel &amp; Conveyance).
               </p>
               <div className="grid md:grid-cols-4 gap-2">
-                <Input placeholder="Vendor pattern e.g. amazon web services|aws" value={newRule.match}
+                <Input placeholder="Vendor pattern e.g. render|render.com" value={newRule.match}
                   onChange={(e) => setNewRule({ ...newRule, match: e.target.value })} />
-                <Input placeholder="Account code e.g. 5300" value={newRule.account_code}
+                <Input placeholder="Account code e.g. 5250" value={newRule.account_code}
                   onChange={(e) => setNewRule({ ...newRule, account_code: e.target.value })} />
                 <Input placeholder="Label e.g. Software & Cloud Expenses" value={newRule.label}
                   onChange={(e) => setNewRule({ ...newRule, label: e.target.value })} />
