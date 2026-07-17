@@ -34,6 +34,8 @@ from backend.google_auth import router as google_auth_router
 from backend.website_tracking import router as website_tracking_router
 from backend.invoicing import router as invoicing_router
 from backend.accounting_core import router as accounting_router
+from backend.accounting_extended import router as accounting_ext_router
+from backend.accounting_extended import create_accounting_extended_indexes
 from backend.bank_accounts import router as bank_accounts_router
 from backend.permission_governance import router as permission_governance_router
 from backend.visits import router as visits_router
@@ -524,6 +526,7 @@ async def startup_event():
         await create_zte_indexes()
         await create_gst_portal_sync_indexes()
         await create_accounting_integrity_indexes()
+        await create_accounting_extended_indexes()
         await db.tasks.create_index("created_by")
         await db.tasks.create_index("due_date")
         await db.users.create_index("email")
@@ -13689,6 +13692,7 @@ async def universal_exception_handler(request: Request, exc: Exception):
 # Api Router
 api_router.include_router(invoicing_router)
 api_router.include_router(accounting_router)
+api_router.include_router(accounting_ext_router)  # Accounting Extended: Day Book, Cash Flow, Depreciation, TDS/TCS, Bank Recon, etc.
 app.include_router(zero_touch_entry_router)     # already has /api/zte prefix
 app.include_router(gst_portal_sync_router)       # already has /api/gst-portal prefix
 app.include_router(accounting_lock_router)       # already has /api/accounting-integrity prefix
