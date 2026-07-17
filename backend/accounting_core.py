@@ -77,18 +77,31 @@ DEFAULT_ACCOUNTS = [
     ("4000", "Sales / Fee Income",      "income",    "operating_income"),
     ("4100", "Other Income",            "income",    "other_income"),
     ("5000", "Purchases",               "expense",   "cost_of_service"),
-    ("5100", "Salaries & Wages",        "expense",   "operating_expense"),
-    ("5200", "Rent Expense",            "expense",   "operating_expense"),
+    ("5100", "Salaries & Wages",         "expense",   "operating_expense"),
+    ("5200", "Rent Expense",             "expense",   "operating_expense"),
+    ("5250", "Software & Cloud Expenses","expense",   "operating_expense"),
     ("5300", "Office & Admin Expenses", "expense",   "operating_expense"),
-    ("5400", "Bank Charges",            "expense",   "operating_expense"),
-    ("5500", "Shipping & Freight",      "expense",   "operating_expense"),
+    ("5400", "Bank Charges",             "expense",   "operating_expense"),
+    ("5500", "Shipping & Freight",       "expense",   "operating_expense"),
+    ("5600", "Travel & Conveyance",      "expense",   "operating_expense"),
+    ("5700", "Foreign Exchange Loss / Gain", "expense", "operating_expense"),
     ("5900", "Round Off",               "expense",   "operating_expense"),
 ]
 
 
 async def ensure_default_chart_of_accounts(company_id: str, created_by: str):
-    existing = await db.chart_of_accounts.count_documents({"company_id": company_id})
-    if existing:
+    """Insert any DEFAULT_ACCOUNTS codes this company doesn't have yet.
+    Deliberately per-code (not 'skip entirely if any account exists') so that
+    when new system accounts are added to DEFAULT_ACCOUNTS later (e.g. a new
+    expense category), companies that were seeded before that change still
+    pick it up automatically the next time their Chart of Accounts loads."""
+    existing_codes = set(
+        r["code"] for r in await db.chart_of_accounts.find(
+            {"company_id": company_id}, {"_id": 0, "code": 1}
+        ).to_list(2000)
+    )
+    missing = [(code, name, typ, sub) for code, name, typ, sub in DEFAULT_ACCOUNTS if code not in existing_codes]
+    if not missing:
         return
     now = datetime.now(timezone.utc).isoformat()
     docs = [
@@ -97,7 +110,7 @@ async def ensure_default_chart_of_accounts(company_id: str, created_by: str):
             "type": typ, "sub_type": sub, "is_system": True, "is_active": True,
             "created_by": created_by, "created_at": now,
         }
-        for code, name, typ, sub in DEFAULT_ACCOUNTS
+        for code, name, typ, sub in missing
     ]
     await db.chart_of_accounts.insert_many(docs)
 
