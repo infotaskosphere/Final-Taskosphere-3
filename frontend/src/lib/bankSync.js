@@ -47,7 +47,15 @@ export function pickBankFields(obj = {}) {
 export function mirrorBankToSettings(companyId, bank) {
   if (!companyId) return;
   const clean = pickBankFields(bank);
-  writeBankInto(INV_KEY, companyId, clean);
+
+  // Check if invoice settings for this company have locked bank details
+  const allInv = readAll(INV_KEY);
+  const companyInvSettings = allInv[companyId] || {};
+  const isInvoiceLocked = companyInvSettings.lock_invoice_bank === true;
+
+  if (!isInvoiceLocked) {
+    writeBankInto(INV_KEY, companyId, clean);
+  }
   writeBankInto(QUO_KEY, companyId, clean);
 }
 
