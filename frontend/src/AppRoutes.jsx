@@ -41,8 +41,8 @@ const BankAccounts       = lazyWithRetry(() => import("@/pages/BankAccounts.jsx"
 const ChartOfAccounts    = lazyWithRetry(() => import("@/pages/ChartOfAccounts.jsx"), "ChartOfAccounts");
 const JournalEntries     = lazyWithRetry(() => import("@/pages/JournalEntries.jsx"), "JournalEntries");
 const AccountingReports  = lazyWithRetry(() => import("@/pages/AccountingReports.jsx"), "AccountingReports");
-const ZeroTouchEntry = lazyWithRetry(() => import("@/pages/ZeroTouchEntry.jsx"), "ZeroTouchEntry");
-const GSTPortalSync = lazyWithRetry(() => import("@/pages/GSTPortalSync.jsx"), "GSTPortalSync");
+const ZeroTouchEntry     = lazyWithRetry(() => import("@/pages/ZeroTouchEntry.jsx"), "ZeroTouchEntry");
+const GSTPortalSync      = lazyWithRetry(() => import("@/pages/GSTPortalSync.jsx"), "GSTPortalSync");
 const AccountingIntegrity = lazyWithRetry(() => import("@/pages/AccountingIntegrity.jsx"), "AccountingIntegrity");
 const Reminders         = lazyWithRetry(() => import("@/pages/Reminders.jsx"), "Reminders");
 const CompliancePage    = lazyWithRetry(() => import("@/pages/CompliancePage.jsx"), "CompliancePage");
@@ -53,6 +53,21 @@ const ActionCenter      = lazyWithRetry(() => import("@/pages/ActionCenter.jsx")
 const ClientPortalLogin        = lazyWithRetry(() => import("@/pages/ClientPortalLogin.jsx"), "ClientPortalLogin");
 const ClientPortalDashboard    = lazyWithRetry(() => import("@/pages/ClientPortalDashboard.jsx"), "ClientPortalDashboard");
 const ClientPortalManagerPage  = lazyWithRetry(() => import("@/pages/ClientPortalManagerPage.jsx"), "ClientPortalManagerPage");
+
+/* ── Accounting Extended Pages ─────────────────────────────────────────── */
+const DayBook              = lazyWithRetry(() => import("@/pages/DayBook.jsx"), "DayBook");
+const CashBankBook         = lazyWithRetry(() => import("@/pages/CashBankBook.jsx"), "CashBankBook");
+const CashFlow             = lazyWithRetry(() => import("@/pages/CashFlow.jsx"), "CashFlow");
+const OutstandingReport    = lazyWithRetry(() => import("@/pages/OutstandingReport.jsx"), "OutstandingReport");
+const BankReconciliation   = lazyWithRetry(() => import("@/pages/BankReconciliation.jsx"), "BankReconciliation");
+const DepreciationSchedule = lazyWithRetry(() => import("@/pages/DepreciationSchedule.jsx"), "DepreciationSchedule");
+const TDSTCSReport         = lazyWithRetry(() => import("@/pages/TDSTCSReport.jsx"), "TDSTCSReport");
+const FinancialRatios      = lazyWithRetry(() => import("@/pages/FinancialRatios.jsx"), "FinancialRatios");
+const ComparativeReport    = lazyWithRetry(() => import("@/pages/ComparativeReport.jsx"), "ComparativeReport");
+const OpeningBalances      = lazyWithRetry(() => import("@/pages/OpeningBalances.jsx"), "OpeningBalances");
+const YearlyReport         = lazyWithRetry(() => import("@/pages/YearlyReport.jsx"), "YearlyReport");
+const AuditTrail           = lazyWithRetry(() => import("@/pages/AuditTrail.jsx"), "AuditTrail");
+const BulkImport           = lazyWithRetry(() => import("@/pages/BulkImport.jsx"), "BulkImport");
 
 /* ── Route Guards ───────────────────────────────────────────────────────── */
 
@@ -185,18 +200,31 @@ function AppRoutes() {
       <Route path="/invoicing"  element={<Permission permission={["can_manage_invoices", "can_create_quotations"]}><PageLoader><Invoicing /></PageLoader></Permission>} />
       <Route path="/sale"       element={<Navigate to="/invoicing" replace />} />
       <Route path="/purchase"   element={<Permission permission={["can_manage_invoices", "can_create_quotations"]}><PageLoader><Purchase /></PageLoader></Permission>} />
-      {/* Bank / Chart of Accounts / Journal / Reports are gated INSIDE the page
-          (RequestAccessGate) rather than at the route level: admin sees the
-          page immediately, everyone else sees a "request access" screen and
-          can ask their admin from there — so any logged-in user can load the
-          route, but only approved users see the real content. */}
+
+      {/* ── CORE ACCOUNTING ── (gated inside page via RequestAccessGate) */}
       <Route path="/bank-accounts"       element={<Protected><PageLoader><BankAccounts /></PageLoader></Protected>} />
       <Route path="/chart-of-accounts"   element={<Protected><PageLoader><ChartOfAccounts /></PageLoader></Protected>} />
       <Route path="/journal-entries"     element={<Protected><PageLoader><JournalEntries /></PageLoader></Protected>} />
       <Route path="/accounting-reports"  element={<Protected><PageLoader><AccountingReports /></PageLoader></Protected>} />
-      <Route path="/zero-touch-entry"     element={<Protected><PageLoader><ZeroTouchEntry /></PageLoader></Protected>} />
-      <Route path="/gst-portal-sync"      element={<Protected><PageLoader><GSTPortalSync /></PageLoader></Protected>} />
+      <Route path="/zero-touch-entry"    element={<Protected><PageLoader><ZeroTouchEntry /></PageLoader></Protected>} />
+      <Route path="/gst-portal-sync"     element={<Protected><PageLoader><GSTPortalSync /></PageLoader></Protected>} />
       <Route path="/accounting-integrity" element={<Protected><PageLoader><AccountingIntegrity /></PageLoader></Protected>} />
+
+      {/* ── ACCOUNTING EXTENDED ── (all gated inside page via RequestAccessGate) */}
+      <Route path="/day-book"               element={<Protected><PageLoader><DayBook /></PageLoader></Protected>} />
+      <Route path="/cash-bank-book"         element={<Protected><PageLoader><CashBankBook /></PageLoader></Protected>} />
+      <Route path="/cash-flow"              element={<Protected><PageLoader><CashFlow /></PageLoader></Protected>} />
+      <Route path="/outstanding-report"     element={<Protected><PageLoader><OutstandingReport /></PageLoader></Protected>} />
+      <Route path="/bank-reconciliation"    element={<Protected><PageLoader><BankReconciliation /></PageLoader></Protected>} />
+      <Route path="/depreciation"           element={<Protected><PageLoader><DepreciationSchedule /></PageLoader></Protected>} />
+      <Route path="/tds-tcs"                element={<Protected><PageLoader><TDSTCSReport /></PageLoader></Protected>} />
+      <Route path="/financial-ratios"       element={<Protected><PageLoader><FinancialRatios /></PageLoader></Protected>} />
+      <Route path="/comparative-report"     element={<Protected><PageLoader><ComparativeReport /></PageLoader></Protected>} />
+      <Route path="/opening-balances"       element={<Protected><PageLoader><OpeningBalances /></PageLoader></Protected>} />
+      <Route path="/yearly-report"          element={<Protected><PageLoader><YearlyReport /></PageLoader></Protected>} />
+      <Route path="/accounting-audit-trail" element={<Protected><PageLoader><AuditTrail /></PageLoader></Protected>} />
+      <Route path="/bulk-import"            element={<Protected><PageLoader><BulkImport /></PageLoader></Protected>} />
+
       <Route path="/task-audit" element={<Permission permission="can_view_audit_logs"><PageLoader><TaskAudit /></PageLoader></Permission>} />
       <Route path="/users"          element={<Permission permission="can_view_user_page"><PageLoader><Users /></PageLoader></Permission>} />
       <Route path="/interviews"     element={<Permission permission="can_view_interviews"><PageLoader><Interviews /></PageLoader></Permission>} />
