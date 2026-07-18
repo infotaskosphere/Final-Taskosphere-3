@@ -169,6 +169,31 @@ async def gemini_extract_json(
     except Exception as e:
         # Never crash the server — surface as HTTP 500 with the original text.
         logger.exception("Gemini generate_content failed")
+        err_text = str(e)
+        if "PERMISSION_DENIED" in err_text or "403" in err_text:
+            # This specific message ("Your project has been denied access.
+            # Please contact support.") comes straight from Google's Gemini
+            # API servers rejecting the whole GCP project behind the API
+            # key — it is not something this app's code can fix. It has been
+            # showing up widely across unrelated Gemini projects/accounts
+            # (see https://discuss.ai.google.dev, search "project has been
+            # denied access"), including brand-new keys with no usage
+            # history, so it isn't necessarily specific to this project's
+            # configuration either. The full Google error is still logged
+            # above for support/debugging.
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Gemini is rejecting every request from this API key's Google Cloud "
+                    "project (\"Your project has been denied access. Please contact "
+                    "support.\"). This is a block on Google's side, not a bug in "
+                    "Taskosphere — generate a fresh API key in a different Google Cloud "
+                    "project at aistudio.google.com/apikey, confirm billing is attached, "
+                    "and if it persists, report it on the Google AI developer forum "
+                    "(discuss.ai.google.dev) as this has been affecting many unrelated "
+                    "projects recently."
+                ),
+            ) from e
         raise HTTPException(status_code=500, detail=f"Gemini API error: {e}") from e
 
     raw_text = getattr(response, "text", None)
