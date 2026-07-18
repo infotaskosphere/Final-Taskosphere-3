@@ -141,7 +141,7 @@ pyzk==0.9
 # =========================
 # DSC Token / PKCS#11
 # =========================
-PyKCS11==1.5.13
+# PyKCS11==1.5.13 (optional, excluded to avoid native swig build dependency)
 cryptography>=42.0.0
 
 # =========================
