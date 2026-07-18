@@ -452,8 +452,8 @@ async def update_journal_entry(entry_id: str, payload: JournalEntryCreate, curre
     entry = await db.journal_entries.find_one({"id": entry_id})
     if not entry:
         raise HTTPException(404, "Journal entry not found.")
-    if entry.get("source") != "manual":
-        raise HTTPException(400, "Auto-posted entries can't be edited here. Edit the source document (invoice, bill, payment) instead.")
+    # Note: editing auto-posted entries (Sale/Purchase/Bank) is allowed;
+    # the ledger is updated in place. Source document totals are not re-synced.
 
     lines = [l.model_dump() for l in payload.lines]
     total_debit = round(sum(float(l.get("debit") or 0) for l in lines), 2)
