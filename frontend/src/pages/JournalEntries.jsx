@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { toast } from 'sonner';
-import { NotebookPen, Plus, RefreshCw, Trash2, X, CheckSquare, Square, XCircle, Building2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { NotebookPen, Plus, RefreshCw, Trash2, X, CheckSquare, Square, XCircle, Building2, ChevronLeft, ChevronRight, Pencil } from 'lucide-react';
 import GifLoader, { MiniLoader, ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,6 +40,14 @@ function JournalEntriesInner() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  // Edit state — only manual entries can be edited; auto-posted entries
+  // must be corrected at the source document (invoice/bill/payment).
+  const [editingEntry, setEditingEntry] = useState(null);
+  const [editDate, setEditDate] = useState('');
+  const [editNarration, setEditNarration] = useState('');
+  const [editLines, setEditLines] = useState([]);
+  const [editSaving, setEditSaving] = useState(false);
 
   const fetchCompanies = async () => {
     try {
@@ -136,6 +144,65 @@ function JournalEntriesInner() {
       toast.error(err.response?.data?.detail || 'Failed to delete');
     }
   };
+
+  const openEdit = (entry) => {
+    if (entry.source && entry.source !== 'manual') {
+      toast.error('Auto-posted entries must be corrected at the source document (invoice, bill, or payment).');
+      return;
+    }
+    setEditingEntry(entry);
+    setEditDate(entry.entry_date || new Date().toISOString().slice(0, 10));
+    setEditNarration(entry.narration || '');
+    setEditLines((entry.lines || []).map(l => ({
+      account_id: l.account_id || '',
+      account_name: l.account_name || '',
+      debit: l.debit ? String(l.debit) : '',
+      credit: l.credit ? String(l.credit) : '',
+      memo: l.memo || '',
+    })));
+  };
+
+  const closeEdit = () => {
+    setEditingEntry(null);
+    setEditLines([]);
+    setEditNarration('');
+  };
+
+  const updateEditLine = (idx, patch) => {
+    setEditLines(ls => ls.map((l, i) => i === idx ? { ...l, ...patch } : l));
+  };
+
+  const editTotals = useMemo(() => {
+    const debit = editLines.reduce((s, l) => s + Number(l.debit || 0), 0);
+    const credit = editLines.reduce((s, l) => s + Number(l.credit || 0), 0);
+    return { debit, credit, balanced: Math.abs(debit - credit) < 0.01 && debit > 0 };
+  }, [editLines]);
+
+  const saveEdit = async () => {
+    if (!editingEntry) return;
+    const validLines = editLines
+      .filter(l => l.account_id && (Number(l.debit) > 0 || Number(l.credit) > 0))
+      .map(l => ({ account_id: l.account_id, account_name: l.account_name, debit: Number(l.debit || 0), credit: Number(l.credit || 0), memo: l.memo }));
+    if (validLines.length < 2) { toast.error('Add at least two lines'); return; }
+    if (!editTotals.balanced) { toast.error('Debit total must equal credit total'); return; }
+    setEditSaving(true);
+    try {
+      await api.put(`/journal-entries/${editingEntry.id}`, {
+        company_id: editingEntry.company_id || '',
+        entry_date: editDate,
+        narration: editNarration,
+        lines: validLines,
+      });
+      toast.success('Journal entry updated');
+      closeEdit();
+      await fetchAll();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to update journal entry');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
 
   const toggleSelected = (id) => {
     setSelectedIds(prev => {
@@ -283,8 +350,11 @@ function JournalEntriesInner() {
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
                     <p className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{fmtC(e.total_debit)}</p>
+                    {!selectMode && (e.source === 'manual' || !e.source) && (
+                      <button onClick={() => openEdit(e)} title="Edit entry" className="text-slate-300 hover:text-blue-500"><Pencil className="h-4 w-4" /></button>
+                    )}
                     {!selectMode && (
-                      <button onClick={() => deleteEntry(e.id)} className="text-slate-300 hover:text-rose-500"><Trash2 className="h-4 w-4" /></button>
+                      <button onClick={() => deleteEntry(e.id)} title="Delete entry" className="text-slate-300 hover:text-rose-500"><Trash2 className="h-4 w-4" /></button>
                     )}
                   </div>
                 </div>
@@ -354,6 +424,46 @@ function JournalEntriesInner() {
             </div>
             <Button onClick={submit} disabled={saving || !totals.balanced} className="w-full" style={{ background: COLORS.mediumBlue }}>
               {saving ? <MiniLoader height={18} /> : 'Post entry'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editingEntry} onOpenChange={(o) => !o && closeEdit()}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader><DialogTitle>Edit journal entry</DialogTitle></DialogHeader>
+          <div className="space-y-3 mt-2">
+            <div className="grid grid-cols-2 gap-3">
+              <Input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} />
+              <Input placeholder="Narration" value={editNarration} onChange={e => setEditNarration(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              {editLines.map((l, idx) => (
+                <div key={idx} className="grid grid-cols-[1fr_90px_90px_28px] gap-2 items-center">
+                  <Select value={l.account_id} onValueChange={(v) => {
+                    const acct = accounts.find(a => a.id === v);
+                    updateEditLine(idx, { account_id: v, account_name: acct ? `${acct.code} ${acct.name}` : l.account_name });
+                  }}>
+                    <SelectTrigger className="h-9"><SelectValue placeholder={l.account_name || 'Account'} /></SelectTrigger>
+                    <SelectContent>
+                      {accounts.map(a => <SelectItem key={a.id} value={a.id}>{a.code} — {a.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Input type="number" placeholder="Debit" className="h-9" value={l.debit} onChange={e => updateEditLine(idx, { debit: e.target.value, credit: '' })} />
+                  <Input type="number" placeholder="Credit" className="h-9" value={l.credit} onChange={e => updateEditLine(idx, { credit: e.target.value, debit: '' })} />
+                  <button onClick={() => setEditLines(ls => ls.filter((_, i) => i !== idx))} className="text-slate-300 hover:text-rose-500"><X className="h-4 w-4" /></button>
+                </div>
+              ))}
+              <Button variant="outline" size="sm" onClick={() => setEditLines(ls => [...ls, emptyLine()])}><Plus className="h-4 w-4 mr-2" /> Add line</Button>
+            </div>
+            <div className="flex items-center justify-between text-sm border-t pt-3">
+              <span>Debit: <span className="font-mono font-bold">{fmtC(editTotals.debit)}</span> · Credit: <span className="font-mono font-bold">{fmtC(editTotals.credit)}</span></span>
+              <span className={editTotals.balanced ? 'text-emerald-600 font-bold' : 'text-rose-500 font-bold'}>
+                {editTotals.balanced ? 'Balanced' : 'Not balanced'}
+              </span>
+            </div>
+            <Button onClick={saveEdit} disabled={editSaving || !editTotals.balanced} className="w-full" style={{ background: COLORS.mediumBlue }}>
+              {editSaving ? <MiniLoader height={18} /> : 'Save changes'}
             </Button>
           </div>
         </DialogContent>
