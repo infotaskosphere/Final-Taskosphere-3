@@ -106,7 +106,7 @@ function AdjustmentDrawer({ entry, accounts, isDark, onClose, onSaved }) {
         reason: reason.trim(),
         correcting_lines: builtLines,
       });
-      toast.success('Adjustment posted — the original entry is untouched and both stay visible.');
+      toast.success('Entry updated — the previous values are kept in Adjustment Note History for audit.');
       onSaved();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Could not post adjustment note');
@@ -125,8 +125,8 @@ function AdjustmentDrawer({ entry, accounts, isDark, onClose, onSaved }) {
           <Button variant="ghost" size="icon" onClick={onClose}><X className="h-4 w-4" /></Button>
         </div>
         <p className={`text-sm mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-          Correcting <span className="font-semibold">{entry.narration}</span> ({fmtC(entry.total_debit)}) — this adds a new
-          correcting note next to the original. Nothing is deleted or silently changed.
+          Correcting <span className="font-semibold">{entry.narration}</span> ({fmtC(entry.total_debit)}) — this updates the
+          entry's own lines directly. The values it had before are kept in the Adjustment Note History below for the audit trail.
         </p>
 
         {/* Mode toggle */}
@@ -361,8 +361,9 @@ function AccountingIntegrityInner() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Raised At</TableHead>
-                  <TableHead>Original Entry</TableHead>
-                  <TableHead>Correcting Entry</TableHead>
+                  <TableHead>Entry</TableHead>
+                  <TableHead>Before</TableHead>
+                  <TableHead>After</TableHead>
                   <TableHead>Reason</TableHead>
                 </TableRow>
               </TableHeader>
@@ -371,7 +372,8 @@ function AccountingIntegrityInner() {
                   <TableRow key={n.id}>
                     <TableCell className="text-xs">{new Date(n.raised_at).toLocaleString('en-IN')}</TableCell>
                     <TableCell className="font-mono text-xs">{n.original_entry_id.slice(0, 8)}…</TableCell>
-                    <TableCell className="font-mono text-xs">{n.correcting_entry_id.slice(0, 8)}…</TableCell>
+                    <TableCell className="font-mono text-xs">{fmtC(n.previous_total_debit ?? n.previous_total_credit)}</TableCell>
+                    <TableCell className="font-mono text-xs">{fmtC(n.new_total_debit ?? n.new_total_credit)}</TableCell>
                     <TableCell className="max-w-[320px] truncate">{n.reason}</TableCell>
                   </TableRow>
                 ))}
