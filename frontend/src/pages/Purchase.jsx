@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
+import { GuidanceNote } from '@/components/ui/GuidanceNote.jsx';
 
 const COLORS = {
   deepBlue: '#0D3B66',
@@ -128,6 +129,8 @@ function Purchase() {
             </Button>
           </div>
         </div>
+
+        <GuidanceNote pageKey="purchase" isDark={isDark} />
 
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
           {[
