@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   BarChart3, RefreshCw, CheckCircle2, AlertTriangle, Download, Building2,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, Scale,
 } from 'lucide-react';
 import { ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
@@ -71,6 +72,7 @@ function downloadCsv(filename, rows) {
 
 function AccountingReportsInner() {
   const isDark = useDark();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [trialBalance, setTrialBalance] = useState(null);
   const [pnl, setPnl] = useState(null);
@@ -300,6 +302,18 @@ function AccountingReportsInner() {
             </Button>
             <Button onClick={downloadGeneralLedger} size="sm" variant="outline" className="h-8 bg-white/10 border-white/25 text-white hover:bg-white/20 text-xs">
               <Download className="h-3.5 w-3.5 mr-1" /> General Ledger
+            </Button>
+            <Button
+              onClick={() => {
+                const fyLabel = fyOptions.find((f) => f.value === fyKey)?.label?.replace(/^FY\s*/i, '') || '';
+                const params = new URLSearchParams();
+                if (companyId) params.set('company_id', companyId);
+                if (fyLabel) params.set('fy', fyLabel);
+                navigate(`/opening-balances${params.toString() ? `?${params.toString()}` : ''}`);
+              }}
+              size="sm" variant="outline" className="h-8 bg-white/10 border-white/25 text-white hover:bg-white/20 text-xs"
+            >
+              <Scale className="h-3.5 w-3.5 mr-1" /> Add Opening Balance
             </Button>
             <Button onClick={() => fetchAll()} size="sm" variant="outline" className="h-8 bg-white/10 border-white/25 text-white hover:bg-white/20 text-xs">
               <RefreshCw className="h-3.5 w-3.5" />
