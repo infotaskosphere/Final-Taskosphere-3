@@ -14,6 +14,7 @@ company_id="" to use a single default book if the firm only operates one.
 """
 
 import uuid
+import asyncio
 from datetime import datetime, date, timezone
 from typing import Optional, List
 
@@ -89,30 +90,43 @@ DEFAULT_ACCOUNTS = [
 ]
 
 
+_ensured_coa_companies: set = set()
+
+
 async def ensure_default_chart_of_accounts(company_id: str, created_by: str):
     """Insert any DEFAULT_ACCOUNTS codes this company doesn't have yet.
     Deliberately per-code (not 'skip entirely if any account exists') so that
     when new system accounts are added to DEFAULT_ACCOUNTS later (e.g. a new
     expense category), companies that were seeded before that change still
-    pick it up automatically the next time their Chart of Accounts loads."""
+    pick it up automatically the next time their Chart of Accounts loads.
+
+    This gets called for every account lookup during invoice/payment sync
+    (2-3 times per invoice), so once a company's default accounts have been
+    confirmed present in this process, skip re-scanning the whole
+    chart_of_accounts collection on every subsequent call — that repeated
+    full scan was the main remaining cost behind slow report loads even
+    after debouncing the outer reconcile pass. A fresh deploy/restart clears
+    this cache, so newly added DEFAULT_ACCOUNTS codes still get seeded."""
+    if company_id in _ensured_coa_companies:
+        return
     existing_codes = set(
         r["code"] for r in await db.chart_of_accounts.find(
             {"company_id": company_id}, {"_id": 0, "code": 1}
         ).to_list(2000)
     )
     missing = [(code, name, typ, sub) for code, name, typ, sub in DEFAULT_ACCOUNTS if code not in existing_codes]
-    if not missing:
-        return
-    now = datetime.now(timezone.utc).isoformat()
-    docs = [
-        {
-            "id": str(uuid.uuid4()), "company_id": company_id, "code": code, "name": name,
-            "type": typ, "sub_type": sub, "is_system": True, "is_active": True,
-            "created_by": created_by, "created_at": now,
-        }
-        for code, name, typ, sub in missing
-    ]
-    await db.chart_of_accounts.insert_many(docs)
+    if missing:
+        now = datetime.now(timezone.utc).isoformat()
+        docs = [
+            {
+                "id": str(uuid.uuid4()), "company_id": company_id, "code": code, "name": name,
+                "type": typ, "sub_type": sub, "is_system": True, "is_active": True,
+                "created_by": created_by, "created_at": now,
+            }
+            for code, name, typ, sub in missing
+        ]
+        await db.chart_of_accounts.insert_many(docs)
+    _ensured_coa_companies.add(company_id)
 
 
 # ── Models ────────────────────────────────────────────────────────────────
@@ -255,11 +269,16 @@ async def _all_book_ids() -> List[str]:
     return list(ids)
 
 
-async def _reconcile_all_books(book_ids: List[str]):
+async def _reconcile_one_book(company_id: str):
     from backend.invoicing import reconcile_and_sync_all_sales_and_payments, reconcile_and_sync_all_purchases_and_payments
-    for cid in book_ids:
-        await reconcile_and_sync_all_sales_and_payments(cid)
-        await reconcile_and_sync_all_purchases_and_payments(cid)
+    await asyncio.gather(
+        reconcile_and_sync_all_sales_and_payments(company_id),
+        reconcile_and_sync_all_purchases_and_payments(company_id),
+    )
+
+
+async def _reconcile_all_books(book_ids: List[str]):
+    await asyncio.gather(*(_reconcile_one_book(cid) for cid in book_ids))
 
 
 @router.post("/journal-entries")
@@ -336,9 +355,7 @@ async def get_ledger(
         raise HTTPException(404, "Account not found.")
     
     # Auto-reconcile and sync sales invoices, purchase bills, and payments to general ledger
-    from backend.invoicing import reconcile_and_sync_all_sales_and_payments, reconcile_and_sync_all_purchases_and_payments
-    await reconcile_and_sync_all_sales_and_payments(acct.get("company_id") or "")
-    await reconcile_and_sync_all_purchases_and_payments(acct.get("company_id") or "")
+    await _reconcile_one_book(acct.get("company_id") or "")
 
     q: dict = {"account_id": account_id}
     if date_from or date_to:
@@ -370,9 +387,7 @@ async def trial_balance(company_id: str = Query(""), as_of: Optional[str] = Quer
     if all_companies:
         await _reconcile_all_books(await _all_book_ids())
     else:
-        from backend.invoicing import reconcile_and_sync_all_sales_and_payments, reconcile_and_sync_all_purchases_and_payments
-        await reconcile_and_sync_all_sales_and_payments(company_id)
-        await reconcile_and_sync_all_purchases_and_payments(company_id)
+        await _reconcile_one_book(company_id)
 
     acct_q = {} if all_companies else {"company_id": company_id}
     accounts = await db.chart_of_accounts.find(acct_q, {"_id": 0}).sort("code", 1).to_list(20000)
@@ -433,9 +448,7 @@ async def profit_and_loss(
     if all_companies:
         await _reconcile_all_books(await _all_book_ids())
     else:
-        from backend.invoicing import reconcile_and_sync_all_sales_and_payments, reconcile_and_sync_all_purchases_and_payments
-        await reconcile_and_sync_all_sales_and_payments(company_id)
-        await reconcile_and_sync_all_purchases_and_payments(company_id)
+        await _reconcile_one_book(company_id)
 
     acct_q = {"type": {"$in": ["income", "expense"]}}
     if not all_companies:
@@ -488,9 +501,7 @@ async def balance_sheet(company_id: str = Query(""), as_of: Optional[str] = Quer
     if all_companies:
         await _reconcile_all_books(await _all_book_ids())
     else:
-        from backend.invoicing import reconcile_and_sync_all_sales_and_payments, reconcile_and_sync_all_purchases_and_payments
-        await reconcile_and_sync_all_sales_and_payments(company_id)
-        await reconcile_and_sync_all_purchases_and_payments(company_id)
+        await _reconcile_one_book(company_id)
 
     as_of = as_of or date.today().isoformat()
     acct_q = {"type": {"$in": ["asset", "liability", "equity"]}}
