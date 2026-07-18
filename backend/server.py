@@ -34,6 +34,7 @@ from backend.google_auth import router as google_auth_router
 from backend.website_tracking import router as website_tracking_router
 from backend.invoicing import router as invoicing_router
 from backend.accounting_core import router as accounting_router
+from backend.party_ledgers import router as party_ledgers_router
 from backend.accounting_extended import router as accounting_ext_router
 from backend.accounting_extended import create_accounting_extended_indexes
 from backend.bank_accounts import router as bank_accounts_router
@@ -13701,6 +13702,7 @@ async def universal_exception_handler(request: Request, exc: Exception):
 # Api Router
 api_router.include_router(invoicing_router)
 api_router.include_router(accounting_router)
+api_router.include_router(party_ledgers_router)   # Customer/Vendor sub-ledgers under AR/AP control accounts
 api_router.include_router(accounting_ext_router)  # Accounting Extended: Day Book, Cash Flow, Depreciation, TDS/TCS, Bank Recon, etc.
 app.include_router(zero_touch_entry_router)     # already has /api/zte prefix
 app.include_router(gst_portal_sync_router)       # already has /api/gst-portal prefix
