@@ -2,6 +2,8 @@ import uuid
 import sqlite3
 import logging
 import re
+import asyncio
+import time
 import base64
 import tempfile
 import os
@@ -4307,7 +4309,42 @@ async def sync_purchase_payment_journal_entry(payment_id: str):
         logging.error(f"Error posting purchase payment journal entry: {e}")
 
 
+# ── Reconciliation debounce ──────────────────────────────────────────────
+# Trial Balance, P&L, Balance Sheet, and Ledger each independently call the
+# two reconcile_and_sync_all_* functions below, and the Accounting Reports
+# page loads all three reports at once. That used to mean 6 full
+# invoices/payments/journal_entries scans firing concurrently on every page
+# load or company switch, which is what made the page slow to render.
+#
+# Invoice/bill/payment create-edit-delete flows already call the targeted
+# sync_*_journal_entry() functions directly and immediately, so these
+# all-company scans only exist as a backfill safety net (e.g. for bills that
+# existed before auto-posting was added). It's safe to skip a re-scan if one
+# already ran for this company very recently.
+_RECONCILE_TTL_SECONDS = 20
+_reconcile_last_run: Dict[str, float] = {}
+_reconcile_locks: Dict[str, "asyncio.Lock"] = {}
+
+
+async def _run_reconcile_debounced(cache_key: str, fn, *args):
+    lock = _reconcile_locks.setdefault(cache_key, asyncio.Lock())
+    async with lock:
+        last = _reconcile_last_run.get(cache_key, 0.0)
+        if time.monotonic() - last < _RECONCILE_TTL_SECONDS:
+            return
+        await fn(*args)
+        _reconcile_last_run[cache_key] = time.monotonic()
+
+
 async def reconcile_and_sync_all_sales_and_payments(company_id: str):
+    await _run_reconcile_debounced(f"sales:{company_id}", _reconcile_and_sync_all_sales_and_payments_impl, company_id)
+
+
+async def reconcile_and_sync_all_purchases_and_payments(company_id: str):
+    await _run_reconcile_debounced(f"purchases:{company_id}", _reconcile_and_sync_all_purchases_and_payments_impl, company_id)
+
+
+async def _reconcile_and_sync_all_sales_and_payments_impl(company_id: str):
     try:
         # 1. Fetch all invoices for this company from the database
         invoices = await db.invoices.find({"company_id": company_id}).to_list(10000)
@@ -4375,12 +4412,14 @@ async def reconcile_and_sync_all_sales_and_payments(company_id: str):
         logging.error(f"Error in reconcile_and_sync_all_sales_and_payments: {e}")
 
 
-async def reconcile_and_sync_all_purchases_and_payments(company_id: str):
+async def _reconcile_and_sync_all_purchases_and_payments_impl(company_id: str):
     """Purchase-side mirror of reconcile_and_sync_all_sales_and_payments.
     Runs on every report view (Trial Balance, P&L, Balance Sheet, Ledger) so
     any purchase bill or vendor payment that isn't yet reflected in the
     ledger — including bills uploaded before this automation existed — gets
-    backfilled automatically, no manual "resync" step required."""
+    backfilled automatically, no manual "resync" step required. Debounced by
+    the public reconcile_and_sync_all_purchases_and_payments wrapper above so
+    it doesn't re-run on every single tab/report load."""
     try:
         invoices = await db.purchase_invoices.find({"company_id": company_id}).to_list(10000)
         invoice_ids = {inv["id"] for inv in invoices}
@@ -4429,4 +4468,3 @@ async def reconcile_and_sync_all_purchases_and_payments(company_id: str):
 
     except Exception as e:
         logging.error(f"Error in reconcile_and_sync_all_purchases_and_payments: {e}")
-
