@@ -3266,13 +3266,12 @@ async def invoice_stats(year: Optional[int] = None, month: Optional[int] = None,
     if current_user.role != "admin": q["created_by"] = current_user.id
     every_inv = await db.invoices.find(q, {"_id": 0, "grand_total": 1, "amount_paid": 1,
         "amount_due": 1, "status": 1, "invoice_date": 1, "client_name": 1, "total_gst": 1}).to_list(5000)
-    # Revenue/outstanding/trend figures must only reflect invoices actually
-    # posted to the books — sync_invoice_journal_entry() never posts a
-    # journal entry for a draft invoice, so counting drafts here would make
-    # this endpoint permanently disagree with Trial Balance / P&L / Balance
-    # Sheet. total_invoices and draft_count below intentionally still use
-    # every_inv, since those two are meant to reflect the full invoice list.
-    all_inv = [i for i in every_inv if i.get("status") != "draft"]
+    # Revenue/outstanding/trend figures now include draft invoices as well —
+    # per business rule, a draft (renamed "Invoiced" in the UI) is recognised
+    # revenue immediately. sync_invoice_journal_entry() also posts drafts so
+    # that Trial Balance / P&L / Balance Sheet remain consistent with the
+    # figures reported here. Only cancelled invoices are excluded.
+    all_inv = list(every_inv)
     today = date.today()
     cur_year = year or today.year
     cur_mon = month or today.month
@@ -4072,9 +4071,13 @@ async def sync_invoice_journal_entry(invoice_id: str):
     if not inv:
         return
         
-    # 3. If invoice is draft or cancelled, we don't post a journal entry
+    # 3. If invoice is cancelled we don't post a journal entry. Draft
+    # invoices ARE now posted to the books — per business rule, a raised
+    # invoice (even in "draft"/"Invoiced" state) is recognised revenue so
+    # that Accounting Reports (Trial Balance / P&L / Balance Sheet) reflect
+    # the same figure as the Sales/Invoicing page.
     status = inv.get("status", "draft")
-    if status in ("draft", "cancelled"):
+    if status == "cancelled":
         return
         
     # 4. Extract required fields
@@ -4402,7 +4405,9 @@ async def _reconcile_and_sync_all_sales_and_payments_impl(company_id: str):
         # 1. Fetch all invoices for this company from the database
         invoices = await db.invoices.find({"company_id": company_id}).to_list(10000)
         invoice_ids = {inv["id"] for inv in invoices}
-        active_invoices = [inv for inv in invoices if inv.get("status", "draft") not in ("draft", "cancelled")]
+        # Drafts (renamed "Invoiced" in the UI) are now considered active for
+        # journal-entry purposes — only cancelled invoices are skipped.
+        active_invoices = [inv for inv in invoices if inv.get("status", "draft") != "cancelled"]
         active_invoice_ids = {inv["id"] for inv in active_invoices}
         
         # 2. Fetch all existing journal entries with source "sale" for this company
