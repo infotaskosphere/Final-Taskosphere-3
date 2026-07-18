@@ -66,6 +66,14 @@ function AccountingReportsInner() {
   const [companies, setCompanies] = useState([]);
   const [companyId, setCompanyId] = useState('');   // '' = default/all-companies book
   const [activeTab, setActiveTab] = useState('trial-balance');
+  const [asOfDate, setAsOfDate] = useState('');       // Trial Balance & Balance Sheet
+  const [dateFrom, setDateFrom] = useState('');        // P&L range
+  const [dateTo, setDateTo] = useState('');
+  const [parties, setParties] = useState({ customers: [], vendors: [] });
+  const [partyType, setPartyType] = useState('customer');
+  const [partyName, setPartyName] = useState('');
+  const [partyLedger, setPartyLedger] = useState(null);
+  const [partyLoading, setPartyLoading] = useState(false);
 
   const fetchCompanies = async () => {
     try {
@@ -74,13 +82,20 @@ function AccountingReportsInner() {
     } catch { /* non-fatal — selector just shows the default book */ }
   };
 
+  const fetchParties = async (cid = companyId) => {
+    try {
+      const { data } = await api.get('/reports/parties', { params: { company_id: cid } });
+      setParties(data || { customers: [], vendors: [] });
+    } catch { /* non-fatal */ }
+  };
+
   const fetchAll = async (cid = companyId) => {
     setLoading(true);
     try {
       const [tbR, pnlR, bsR] = await Promise.allSettled([
-        api.get('/reports/trial-balance', { params: { company_id: cid } }),
-        api.get('/reports/profit-loss', { params: { company_id: cid } }),
-        api.get('/reports/balance-sheet', { params: { company_id: cid } }),
+        api.get('/reports/trial-balance', { params: { company_id: cid, as_of: asOfDate || undefined } }),
+        api.get('/reports/profit-loss', { params: { company_id: cid, date_from: dateFrom || undefined, date_to: dateTo || undefined } }),
+        api.get('/reports/balance-sheet', { params: { company_id: cid, as_of: asOfDate || undefined } }),
       ]);
       setTrialBalance(tbR.status === 'fulfilled' ? tbR.value.data : null);
       setPnl(pnlR.status === 'fulfilled' ? pnlR.value.data : null);
@@ -91,15 +106,59 @@ function AccountingReportsInner() {
       setLoading(false);
     }
   };
-  useEffect(() => { fetchCompanies(); fetchAll(''); }, []);
+  useEffect(() => { fetchCompanies(); fetchParties(''); fetchAll(''); }, []);
+
+  const fetchPartyLedger = async () => {
+    if (!partyName) { toast.error('Pick a customer or vendor first'); return; }
+    setPartyLoading(true);
+    try {
+      const { data } = await api.get('/reports/party-ledger', {
+        params: { party_name: partyName, party_type: partyType, company_id: companyId, date_from: dateFrom || undefined, date_to: dateTo || undefined },
+      });
+      setPartyLedger(data);
+    } catch {
+      toast.error('Failed to load party ledger');
+    } finally {
+      setPartyLoading(false);
+    }
+  };
 
   const onCompanyChange = (cid) => {
     const val = cid === '__all__' ? '' : cid;
     setCompanyId(val);
     fetchAll(val);
+    fetchParties(val);
+    setPartyLedger(null);
+    setPartyName('');
   };
 
+  const applyDateFilters = () => { fetchAll(); if (partyLedger) fetchPartyLedger(); };
+
   const companyLabel = companies.find((c) => c.id === companyId)?.name || 'All Companies';
+
+  const downloadPartyLedger = () => {
+    if (!partyLedger || partyLedger.rows.length === 0) { toast.error('Nothing to download yet.'); return; }
+    const safeParty = partyName.replace(/[^a-z0-9]+/gi, '_');
+    const rows = [['Date', 'Narration', 'Source', 'Debit', 'Credit', 'Balance']];
+    partyLedger.rows.forEach((r) => rows.push([r.date, r.narration, r.source, r.debit || '', r.credit || '', r.balance]));
+    rows.push(['', '', '', '', 'Closing Balance', partyLedger.closing_balance]);
+    downloadCsv(`Party_Ledger_${safeParty}.csv`, rows);
+  };
+
+  const downloadGeneralLedger = async () => {
+    try {
+      const { data } = await api.get('/journal-entries', {
+        params: { company_id: companyId, date_from: dateFrom || undefined, date_to: dateTo || undefined },
+      });
+      if (!data || data.length === 0) { toast.error('Nothing to download yet.'); return; }
+      const rows = [['Date', 'Narration', 'Source', 'Account', 'Debit', 'Credit']];
+      data.forEach((e) => (e.lines || []).forEach((l) => rows.push([e.entry_date, e.narration, e.source, l.account_name, l.debit || '', l.credit || ''])));
+      const safeCompany = companyLabel.replace(/[^a-z0-9]+/gi, '_');
+      downloadCsv(`General_Ledger_${safeCompany}.csv`, rows);
+    } catch {
+      toast.error('Failed to download general ledger');
+    }
+  };
 
   const downloadActiveReport = () => {
     const safeCompany = companyLabel.replace(/[^a-z0-9]+/gi, '_');
@@ -167,9 +226,28 @@ function AccountingReportsInner() {
                 <Button onClick={downloadActiveReport} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20">
                   <Download className="h-4 w-4 mr-2" /> Download
                 </Button>
+                <Button onClick={downloadGeneralLedger} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20">
+                  <Download className="h-4 w-4 mr-2" /> General Ledger
+                </Button>
                 <Button onClick={() => fetchAll()} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20">
                   <RefreshCw className="h-4 w-4" />
                 </Button>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-blue-100">
+                {activeTab === 'pnl' ? (
+                  <>
+                    <span>From</span>
+                    <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="h-8 rounded-lg px-2 bg-white/10 border border-white/25 text-white" />
+                    <span>To</span>
+                    <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-8 rounded-lg px-2 bg-white/10 border border-white/25 text-white" />
+                  </>
+                ) : (
+                  <>
+                    <span>As of</span>
+                    <input type="date" value={asOfDate} onChange={(e) => setAsOfDate(e.target.value)} className="h-8 rounded-lg px-2 bg-white/10 border border-white/25 text-white" />
+                  </>
+                )}
+                <Button onClick={applyDateFilters} size="sm" variant="outline" className="h-8 bg-white/10 border-white/25 text-white hover:bg-white/20">Apply</Button>
               </div>
             </div>
           </div>
@@ -183,6 +261,7 @@ function AccountingReportsInner() {
             <TabsTrigger value="trial-balance">Trial Balance</TabsTrigger>
             <TabsTrigger value="pnl">Profit &amp; Loss</TabsTrigger>
             <TabsTrigger value="balance-sheet">Balance Sheet</TabsTrigger>
+            <TabsTrigger value="party-ledger">Party Ledger</TabsTrigger>
           </TabsList>
 
           {/* ── Trial Balance ── */}
@@ -261,6 +340,54 @@ function AccountingReportsInner() {
               Assets {fmtC(balanceSheet?.total_assets)} = Liabilities + Equity {fmtC((balanceSheet?.total_liabilities || 0) + (balanceSheet?.total_equity || 0))}
             </div>
           </TabsContent>
+          {/* ── Party Ledger ── */}
+          <TabsContent value="party-ledger" className="mt-4">
+            <ReportCard title="Party Ledger" isDark={isDark}>
+              <div className="flex flex-wrap gap-2 items-end mb-4">
+                <Select value={partyType} onValueChange={(v) => { setPartyType(v); setPartyName(''); setPartyLedger(null); }}>
+                  <SelectTrigger className="h-9 w-[140px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="customer">Customer</SelectItem>
+                    <SelectItem value="vendor">Vendor</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={partyName || undefined} onValueChange={setPartyName}>
+                  <SelectTrigger className="h-9 min-w-[220px]"><SelectValue placeholder={partyType === 'vendor' ? 'Select vendor' : 'Select customer'} /></SelectTrigger>
+                  <SelectContent>
+                    {(partyType === 'vendor' ? parties.vendors : parties.customers).map((name) => (
+                      <SelectItem key={name} value={name}>{name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button onClick={fetchPartyLedger} disabled={partyLoading}>{partyLoading ? 'Loading…' : 'Load Ledger'}</Button>
+                <Button onClick={downloadPartyLedger} variant="outline"><Download className="h-4 w-4 mr-2" /> Download</Button>
+              </div>
+              {!partyLedger ? (
+                <p className="text-sm text-slate-400 py-6 text-center">Pick a customer or vendor and load their ledger.</p>
+              ) : partyLedger.rows.length === 0 ? (
+                <p className="text-sm text-slate-400 py-6 text-center">No transactions found for {partyLedger.party_name}.</p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-[100px_1fr_100px_100px_110px] gap-2 text-[11px] uppercase font-bold text-slate-400 pb-2 border-b" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                    <span>Date</span><span>Narration</span><span className="text-right">Debit</span><span className="text-right">Credit</span><span className="text-right">Balance</span>
+                  </div>
+                  {partyLedger.rows.map((r, i) => (
+                    <div key={i} className="grid grid-cols-[100px_1fr_100px_100px_110px] gap-2 py-1.5 text-sm">
+                      <span className={isDark ? 'text-slate-300' : 'text-slate-600'}>{r.date}</span>
+                      <span className={isDark ? 'text-slate-200' : 'text-slate-700'}>{r.narration}</span>
+                      <span className="text-right font-mono">{r.debit ? fmtC(r.debit) : ''}</span>
+                      <span className="text-right font-mono">{r.credit ? fmtC(r.credit) : ''}</span>
+                      <span className="text-right font-mono font-semibold">{fmtC(r.balance)}</span>
+                    </div>
+                  ))}
+                  <div className="mt-3 flex items-center justify-end gap-2 text-sm font-bold">
+                    Closing Balance: {fmtC(partyLedger.closing_balance)}
+                  </div>
+                </>
+              )}
+            </ReportCard>
+          </TabsContent>
+
         </Tabs>
 
       </div>
