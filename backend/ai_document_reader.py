@@ -32,7 +32,7 @@ async def _groq_vision(image_b64: str, mime_type: str, prompt: str) -> str:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY is not configured on the server.")
 
     payload = {
-        "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+        "model": "meta-llama/llama-4-maverick-17b-128e-instruct",
         "messages": [{
             "role": "user",
             "content": [
@@ -68,7 +68,7 @@ async def _groq_vision_multipage(page_images_b64: list, prompt: str) -> str:
     content.append({"type": "text", "text": prompt})
 
     payload = {
-        "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+        "model": "meta-llama/llama-4-maverick-17b-128e-instruct",
         "messages": [{"role": "user", "content": content}],
         "max_tokens": 2048,
     }
