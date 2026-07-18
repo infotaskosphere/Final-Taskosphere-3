@@ -316,9 +316,10 @@ async def get_ledger(
     if not acct:
         raise HTTPException(404, "Account not found.")
     
-    # Auto-reconcile and sync sales invoices and payments to general ledger
-    from backend.invoicing import reconcile_and_sync_all_sales_and_payments
+    # Auto-reconcile and sync sales invoices, purchase bills, and payments to general ledger
+    from backend.invoicing import reconcile_and_sync_all_sales_and_payments, reconcile_and_sync_all_purchases_and_payments
     await reconcile_and_sync_all_sales_and_payments(acct.get("company_id") or "")
+    await reconcile_and_sync_all_purchases_and_payments(acct.get("company_id") or "")
 
     q: dict = {"account_id": account_id}
     if date_from or date_to:
@@ -343,9 +344,10 @@ async def trial_balance(company_id: str = Query(""), as_of: Optional[str] = Quer
     if not _perm_reports(current_user):
         raise HTTPException(403, "Access denied. Request access from your admin in Permission Governance.")
     
-    # Auto-reconcile and sync sales invoices and payments to general ledger
-    from backend.invoicing import reconcile_and_sync_all_sales_and_payments
+    # Auto-reconcile and sync sales invoices, purchase bills, and payments to general ledger
+    from backend.invoicing import reconcile_and_sync_all_sales_and_payments, reconcile_and_sync_all_purchases_and_payments
     await reconcile_and_sync_all_sales_and_payments(company_id)
+    await reconcile_and_sync_all_purchases_and_payments(company_id)
 
     accounts = await db.chart_of_accounts.find({"company_id": company_id}, {"_id": 0}).sort("code", 1).to_list(2000)
     q: dict = {"company_id": company_id}
@@ -384,9 +386,10 @@ async def profit_and_loss(
     if not _perm_reports(current_user):
         raise HTTPException(403, "Access denied. Request access from your admin in Permission Governance.")
     
-    # Auto-reconcile and sync sales invoices and payments to general ledger
-    from backend.invoicing import reconcile_and_sync_all_sales_and_payments
+    # Auto-reconcile and sync sales invoices, purchase bills, and payments to general ledger
+    from backend.invoicing import reconcile_and_sync_all_sales_and_payments, reconcile_and_sync_all_purchases_and_payments
     await reconcile_and_sync_all_sales_and_payments(company_id)
+    await reconcile_and_sync_all_purchases_and_payments(company_id)
 
     accounts = await db.chart_of_accounts.find({"company_id": company_id, "type": {"$in": ["income", "expense"]}}, {"_id": 0}).to_list(2000)
     acct_by_id = {a["id"]: a for a in accounts}
@@ -424,9 +427,10 @@ async def balance_sheet(company_id: str = Query(""), as_of: Optional[str] = Quer
     if not _perm_reports(current_user):
         raise HTTPException(403, "Access denied. Request access from your admin in Permission Governance.")
     
-    # Auto-reconcile and sync sales invoices and payments to general ledger
-    from backend.invoicing import reconcile_and_sync_all_sales_and_payments
+    # Auto-reconcile and sync sales invoices, purchase bills, and payments to general ledger
+    from backend.invoicing import reconcile_and_sync_all_sales_and_payments, reconcile_and_sync_all_purchases_and_payments
     await reconcile_and_sync_all_sales_and_payments(company_id)
+    await reconcile_and_sync_all_purchases_and_payments(company_id)
 
     as_of = as_of or date.today().isoformat()
     accounts = await db.chart_of_accounts.find({"company_id": company_id, "type": {"$in": ["asset", "liability", "equity"]}}, {"_id": 0}).to_list(2000)
