@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { BookOpen, Plus, RefreshCw, Trash2, Layers } from 'lucide-react';
+import { BookOpen, Plus, RefreshCw, Trash2, Layers, AlertTriangle } from 'lucide-react';
 import GifLoader, { MiniLoader, ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -62,6 +62,34 @@ function ChartOfAccountsInner() {
     }
   };
 
+  const [showReview, setShowReview] = useState(false);
+  const [suspectAccounts, setSuspectAccounts] = useState([]);
+  const [reviewLoading, setReviewLoading] = useState(false);
+
+  const loadSuspectAccounts = async () => {
+    setReviewLoading(true);
+    try {
+      const { data } = await api.get('/chart-of-accounts/review-imports');
+      setSuspectAccounts(data?.accounts || []);
+    } catch {
+      toast.error('Failed to load imported-account review');
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
+  const purgeAccount = async (id, name) => {
+    if (!window.confirm(`Delete "${name}" and every journal entry posted against it? This cannot be undone — if this balance is real, re-enter it via Accounting Reports → Add Opening Balance afterwards.`)) return;
+    try {
+      await api.delete(`/chart-of-accounts/${id}`, { params: { purge: true } });
+      toast.success('Account and its entries removed');
+      setSuspectAccounts(prev => prev.filter(a => a.account_id !== id));
+      await fetchAccounts();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to delete');
+    }
+  };
+
   const deleteAccount = async (id) => {
     if (!window.confirm('Delete this account?')) return;
     try {
@@ -91,6 +119,7 @@ function ChartOfAccountsInner() {
               </div>
             </div>
             <div className="flex gap-2">
+              {canManage && <Button onClick={() => { setShowReview(true); loadSuspectAccounts(); }} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20"><AlertTriangle className="h-4 w-4 mr-2" /> Review imported balances</Button>}
               {canManage && <Button onClick={() => setShowNew(true)} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20"><Plus className="h-4 w-4 mr-2" /> Add account</Button>}
               <Button onClick={fetchAccounts} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20"><RefreshCw className="h-4 w-4 mr-2" /> Refresh</Button>
             </div>
@@ -149,6 +178,37 @@ function ChartOfAccountsInner() {
             <Input placeholder="Sub-type (optional, e.g. operating_expense)" value={form.sub_type} onChange={e => setForm(f => ({ ...f, sub_type: e.target.value }))} />
             <Button onClick={createAccount} disabled={saving} className="w-full rounded-xl">{saving ? <MiniLoader height={18} /> : 'Save account'}</Button>
           </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={showReview} onOpenChange={setShowReview}>
+        <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Review imported / backup balances</DialogTitle></DialogHeader>
+          <p className="text-xs text-slate-500 -mt-1">
+            These accounts have at least one entry that wasn't posted by a real sale, purchase, or payment in the app —
+            typically ledgers created while importing old-system/backup data to set up clients. If a balance here isn't
+            real, delete it below. If it is real prior-period data, re-enter it cleanly via
+            <span className="font-semibold"> Accounting Reports → Add Opening Balance</span> instead, so Sales-report
+            figures stay separate from historical carry-forward balances.
+          </p>
+          {reviewLoading ? <MiniLoader height={40} /> : suspectAccounts.length === 0 ? (
+            <p className="text-sm text-slate-400 py-6 text-center">No flagged accounts — every balance in the ledger traces back to a real sale, purchase, payment, or a properly-recorded opening balance.</p>
+          ) : (
+            <div className="divide-y" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+              {suspectAccounts.map(a => (
+                <div key={a.account_id} className="py-3 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{a.name}</p>
+                    <p className="text-xs text-slate-400">
+                      {a.code} · {a.type} · sources: {a.sources.join(', ')} · Dr ₹{a.debit.toLocaleString('en-IN')} / Cr ₹{a.credit.toLocaleString('en-IN')}
+                    </p>
+                  </div>
+                  <Button size="sm" variant="outline" className="text-rose-600 border-rose-200 flex-shrink-0" onClick={() => purgeAccount(a.account_id, a.name)}>
+                    <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Delete
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
