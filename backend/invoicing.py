@@ -383,6 +383,7 @@ GST_RATES = [0.0, 5.0, 12.0, 18.0, 28.0]
 UNITS = ["service", "nos", "kg", "ltr", "mtr", "sqft", "hr", "day", "month", "year", "set", "lot", "pcs", "box"]
 PAYMENT_MODES = ["cash", "cheque", "neft", "rtgs", "imps", "upi", "card", "other"]
 INV_STATUS = ["draft", "sent", "partially_paid", "paid", "overdue", "cancelled", "credit_note"]
+PURCHASE_STATUS = ["outstanding", "partially_paid", "paid", "cancelled"]
 
 KB_TXN_TYPES = {
     1: "tax_invoice", 2: "purchase", 3: "payment_received", 4: "payment_made",
@@ -2930,18 +2931,25 @@ async def upload_purchase_invoice(file: UploadFile = File(...), client_id: Optio
     existing = await db.purchase_invoices.find_one(duplicate_q, {"_id": 0}) if invoice_no else None
     if existing:
         return {"purchase_invoice": existing, "matched_client": matched_client, "duplicate": True}
+    grand_total_val = _money_to_float(parsed.get("grand_total"))
     doc = {
         "id": str(uuid.uuid4()), "company_id": company_id or "", "client_id": (matched_client or {}).get("id", client_id or ""),
         "client_name": (matched_client or {}).get("company_name", parsed.get("buyer_name", "")), "supplier_name": parsed.get("supplier_name", ""),
         "supplier_gstin": supplier_gstin, "buyer_name": parsed.get("buyer_name", ""), "buyer_gstin": buyer_gstin, "invoice_no": invoice_no,
         "invoice_date": parsed.get("invoice_date") or date.today().isoformat(), "taxable_amount": _money_to_float(parsed.get("taxable_amount")),
-        "total_gst": _money_to_float(parsed.get("total_gst")), "grand_total": _money_to_float(parsed.get("grand_total")), "currency": parsed.get("currency") or "INR",
+        "total_gst": _money_to_float(parsed.get("total_gst")), "grand_total": grand_total_val, "currency": parsed.get("currency") or "INR",
         "file_name": filename, "file_size": len(contents), "content_type": file.content_type or "application/octet-stream", "parse_confidence": float(parsed.get("parse_confidence") or 0),
         "raw_text_excerpt": parsed.get("raw_text_excerpt", "")[:5000], "created_by": current_user.id, "created_at": now, "updated_at": now,
+        # Ledger automation: every saved purchase invoice is a real bill the moment it's
+        # confirmed, so it starts "outstanding" (unlike Sales, there's no draft step here)
+        # and immediately posts to the ledger — mirroring the Dr Purchases/GST Input,
+        # Cr Accounts Payable entry an accountant would make by hand.
+        "status": "outstanding", "amount_paid": 0.0, "amount_due": round(grand_total_val, 2),
     }
     await db.purchase_invoices.insert_one(doc)
     if matched_client:
         await db.clients.update_one({"id": matched_client["id"]}, {"$set": {"last_purchase_invoice_at": now}, "$inc": {"purchase_invoice_count": 1}})
+    await sync_purchase_journal_entry(doc["id"])
     doc.pop("_id", None)
     return {"purchase_invoice": doc, "matched_client": matched_client, "duplicate": False}
 
@@ -2972,7 +2980,14 @@ async def update_purchase_invoice(invoice_id: str, data: PurchaseInvoiceUpdate, 
     
     update_data = {k: v for k, v in data.model_dump().items() if v is not None}
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    
+
+    # If the grand total changed, amount_due should move with it (unless the
+    # invoice was already fully paid — don't silently reopen a paid bill).
+    if "grand_total" in update_data and existing.get("status") != "paid":
+        new_total = float(update_data["grand_total"] or 0)
+        paid_so_far = float(existing.get("amount_paid") or 0)
+        update_data["amount_due"] = round(max(new_total - paid_so_far, 0), 2)
+
     # If client_id is changed, update client names/counters if needed
     if "client_id" in update_data and update_data["client_id"] != existing.get("client_id"):
         new_client_id = update_data["client_id"]
@@ -2986,6 +3001,7 @@ async def update_purchase_invoice(invoice_id: str, data: PurchaseInvoiceUpdate, 
             await db.clients.update_one({"id": old_client_id}, {"$inc": {"purchase_invoice_count": -1}})
 
     await db.purchase_invoices.update_one({"id": invoice_id}, {"$set": update_data})
+    await sync_purchase_journal_entry(invoice_id)
     updated = await db.purchase_invoices.find_one({"id": invoice_id}, {"_id": 0})
     return updated
 
@@ -2997,12 +3013,146 @@ async def delete_purchase_invoice(invoice_id: str, current_user: User = Depends(
     existing = await db.purchase_invoices.find_one({"id": invoice_id})
     if not existing:
         raise HTTPException(404, "Purchase invoice not found")
-    
+
+    # Clean up any payments recorded against this bill (and their journal entries)
+    # before deleting the bill's own journal entry, so nothing dangles in the ledger.
+    payments = await db.purchase_payments.find({"purchase_invoice_id": invoice_id}, {"_id": 0, "id": 1}).to_list(500)
+    for p in payments:
+        existing_pe = await db.journal_entries.find_one({"source": "purchase_payment", "source_id": p["id"]})
+        if existing_pe:
+            await db.journal_lines.delete_many({"entry_id": existing_pe["id"]})
+            await db.journal_entries.delete_one({"id": existing_pe["id"]})
+    await db.purchase_payments.delete_many({"purchase_invoice_id": invoice_id})
+
+    existing_entry = await db.journal_entries.find_one({"source": "purchase", "source_id": invoice_id})
+    if existing_entry:
+        await db.journal_lines.delete_many({"entry_id": existing_entry["id"]})
+        await db.journal_entries.delete_one({"id": existing_entry["id"]})
+
     await db.purchase_invoices.delete_one({"id": invoice_id})
     client_id = existing.get("client_id")
     if client_id:
         await db.clients.update_one({"id": client_id}, {"$inc": {"purchase_invoice_count": -1}})
     return {"success": True}
+
+
+@router.patch("/purchase-invoices/{invoice_id}/status")
+async def update_purchase_invoice_status(
+    invoice_id: str,
+    payload: dict,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Change a purchase bill's payment status — the Purchase-page equivalent of
+    the Sale page's status dropdown. Accepted: outstanding | partially_paid | paid | cancelled
+
+    Unlike the Sale-side status endpoint (which only adjusts the amount fields
+    and leaves recording the actual receipt to a separate /payments call),
+    marking a purchase bill 'paid' or 'partially_paid' here *also* records the
+    cash/bank payment itself and posts its journal entry — matching the
+    one-step "flip the status, the payment entry is done" flow that was asked for.
+
+    Optional payload fields (used only for paid/partially_paid):
+      amount        — payment amount. Defaults to the full amount_due for 'paid'.
+      payment_date  — defaults to today.
+      payment_mode  — 'cash' | 'bank' (default 'bank').
+      reference_no, notes
+    """
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+
+    new_status = (payload.get("status") or "").strip().lower()
+    if new_status not in PURCHASE_STATUS:
+        raise HTTPException(400, f"Invalid status. Must be one of: {PURCHASE_STATUS}")
+
+    inv = await db.purchase_invoices.find_one({"id": invoice_id})
+    if not inv:
+        raise HTTPException(404, "Purchase invoice not found")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    grand_total = float(inv.get("grand_total") or 0)
+    already_paid = float(inv.get("amount_paid") or 0)
+
+    if new_status in ("paid", "partially_paid"):
+        amount = float(payload.get("amount") or 0)
+        if new_status == "paid" and amount <= 0:
+            amount = round(max(grand_total - already_paid, 0), 2)
+        if amount <= 0:
+            raise HTTPException(400, "Payment amount must be greater than zero.")
+
+        payment_doc = {
+            "id": str(uuid.uuid4()), "purchase_invoice_id": invoice_id,
+            "company_id": inv.get("company_id") or "", "amount": amount,
+            "payment_date": (payload.get("payment_date") or "").strip() or date.today().isoformat(),
+            "payment_mode": (payload.get("payment_mode") or "bank").strip().lower(),
+            "reference_no": (payload.get("reference_no") or "").strip(),
+            "notes": (payload.get("notes") or "").strip(),
+            "created_by": current_user.id, "created_at": now_iso,
+        }
+        await db.purchase_payments.insert_one(dict(payment_doc))
+        await sync_purchase_payment_journal_entry(payment_doc["id"])
+
+        all_payments = await db.purchase_payments.find({"purchase_invoice_id": invoice_id}, {"_id": 0}).to_list(500)
+        total_paid = round(sum(float(p.get("amount", 0)) for p in all_payments), 2)
+        amount_due = round(max(grand_total - total_paid, 0), 2)
+        final_status = "paid" if amount_due <= 0 else "partially_paid"
+        await db.purchase_invoices.update_one({"id": invoice_id}, {"$set": {
+            "amount_paid": total_paid, "amount_due": amount_due, "status": final_status, "updated_at": now_iso,
+        }})
+        return {"id": invoice_id, "status": final_status, "amount_paid": total_paid, "amount_due": amount_due,
+                "payment_id": payment_doc["id"]}
+
+    if new_status == "cancelled":
+        await db.purchase_invoices.update_one({"id": invoice_id}, {"$set": {
+            "status": "cancelled", "amount_due": 0.0, "updated_at": now_iso,
+        }})
+        await sync_purchase_journal_entry(invoice_id)  # removes the bill's journal entry
+        return {"id": invoice_id, "status": "cancelled", "amount_paid": inv.get("amount_paid", 0), "amount_due": 0.0}
+
+    # new_status == "outstanding" — manual revert, doesn't touch already-recorded payments
+    await db.purchase_invoices.update_one({"id": invoice_id}, {"$set": {"status": "outstanding", "updated_at": now_iso}})
+    await sync_purchase_journal_entry(invoice_id)
+    return {"id": invoice_id, "status": "outstanding", "amount_paid": already_paid, "amount_due": inv.get("amount_due", grand_total)}
+
+
+@router.get("/purchase-payments")
+async def list_purchase_payments(purchase_invoice_id: Optional[str] = None, current_user: User = Depends(get_current_user)):
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+    q: dict = {}
+    if purchase_invoice_id:
+        q["purchase_invoice_id"] = purchase_invoice_id
+    return await db.purchase_payments.find(q, {"_id": 0}).sort("created_at", -1).to_list(1000)
+
+
+@router.delete("/purchase-payments/{payment_id}")
+async def delete_purchase_payment(payment_id: str, current_user: User = Depends(get_current_user)):
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+    payment = await db.purchase_payments.find_one({"id": payment_id})
+    if not payment:
+        raise HTTPException(404, "Payment not found")
+    invoice_id = payment.get("purchase_invoice_id")
+
+    result = await db.purchase_payments.delete_one({"id": payment_id})
+    if result.deleted_count == 0:
+        raise HTTPException(404, f"Payment {payment_id} not found")
+    await sync_purchase_payment_journal_entry(payment_id)  # cleans up its journal entry (payment doc is gone)
+
+    if invoice_id:
+        inv = await db.purchase_invoices.find_one({"id": invoice_id})
+        if inv:
+            all_payments = await db.purchase_payments.find({"purchase_invoice_id": invoice_id}, {"_id": 0}).to_list(500)
+            total_paid = round(sum(float(p.get("amount", 0)) for p in all_payments), 2)
+            grand_total = float(inv.get("grand_total") or 0)
+            amount_due = round(max(grand_total - total_paid, 0), 2)
+            new_status = "paid" if amount_due <= 0 else ("partially_paid" if total_paid > 0 else "outstanding")
+            await db.purchase_invoices.update_one({"id": invoice_id}, {"$set": {
+                "amount_paid": total_paid, "amount_due": amount_due, "status": new_status,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }})
+
+    return {"message": f"Payment {payment_id} deleted"}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -4033,6 +4183,130 @@ async def sync_payment_journal_entry(payment_id: str):
         logging.error(f"Error posting payment journal entry: {e}")
 
 
+async def sync_purchase_journal_entry(invoice_id: str):
+    """Purchase-side mirror of sync_invoice_journal_entry: Dr Purchases (+ Dr GST
+    Input Credit if any), Cr Accounts Payable. Posted the moment a purchase bill
+    is saved/edited (no draft gate — a saved purchase bill is already a real
+    liability), and removed again if the bill is cancelled or deleted."""
+    from backend.accounting_core import get_default_account_id, post_journal_entry
+
+    # 1. Clean up any existing journal entry for this purchase bill
+    existing_entry = await db.journal_entries.find_one({"source": "purchase", "source_id": invoice_id})
+    if existing_entry:
+        await db.journal_lines.delete_many({"entry_id": existing_entry["id"]})
+        await db.journal_entries.delete_one({"id": existing_entry["id"]})
+
+    # 2. Fetch the current purchase invoice document
+    inv = await db.purchase_invoices.find_one({"id": invoice_id})
+    if not inv:
+        return
+
+    # 3. Cancelled bills don't sit in the ledger
+    if inv.get("status") == "cancelled":
+        return
+
+    company_id = inv.get("company_id") or ""
+    invoice_no = inv.get("invoice_no") or ""
+    supplier_name = inv.get("supplier_name") or "Supplier"
+    invoice_date = inv.get("invoice_date") or date.today().isoformat()
+
+    grand_total = round(float(inv.get("grand_total") or 0), 2)
+    total_gst = round(float(inv.get("total_gst") or 0), 2)
+
+    if grand_total <= 0:
+        return
+
+    # 4. Get default ledger account IDs
+    payable_id = await get_default_account_id(company_id, "2000")   # Accounts Payable
+    purchases_id = await get_default_account_id(company_id, "5000")  # Purchases (expense)
+    gst_input_id = await get_default_account_id(company_id, "1200")  # GST Input Credit
+
+    if not payable_id or not purchases_id or not gst_input_id:
+        return
+
+    purchase_amount = round(grand_total - total_gst, 2)
+
+    lines = [
+        {"account_id": purchases_id, "account_name": "Purchases", "debit": purchase_amount, "credit": 0.0, "memo": f"Purchase Bill {invoice_no} from {supplier_name}"},
+        {"account_id": payable_id, "account_name": "Accounts Payable", "debit": 0.0, "credit": grand_total, "memo": f"Bill {invoice_no} payable to {supplier_name}"},
+    ]
+    if total_gst > 0:
+        lines.append({"account_id": gst_input_id, "account_name": "GST Input Credit", "debit": total_gst, "credit": 0.0, "memo": f"GST Input on Purchase {invoice_no}"})
+    narration = f"Purchase Bill {invoice_no} from {supplier_name}"
+
+    try:
+        await post_journal_entry(
+            company_id=company_id,
+            entry_date=invoice_date,
+            narration=narration,
+            lines=lines,
+            source="purchase",
+            source_id=invoice_id,
+            created_by=inv.get("created_by", "system"),
+        )
+    except Exception as e:
+        logging.error(f"Error posting purchase journal entry: {e}")
+
+
+async def sync_purchase_payment_journal_entry(payment_id: str):
+    """Purchase-side mirror of sync_payment_journal_entry: Dr Accounts Payable,
+    Cr Cash/Bank — the entry for actually paying a vendor bill."""
+    from backend.accounting_core import get_default_account_id, post_journal_entry
+
+    # 1. Clean up any existing journal entry for this payment
+    existing_entry = await db.journal_entries.find_one({"source": "purchase_payment", "source_id": payment_id})
+    if existing_entry:
+        await db.journal_lines.delete_many({"entry_id": existing_entry["id"]})
+        await db.journal_entries.delete_one({"id": existing_entry["id"]})
+
+    # 2. Fetch the current payment document
+    payment = await db.purchase_payments.find_one({"id": payment_id})
+    if not payment:
+        return
+
+    invoice_id = payment.get("purchase_invoice_id")
+    inv = await db.purchase_invoices.find_one({"id": invoice_id})
+    invoice_no = inv.get("invoice_no") if inv else "Unknown"
+    supplier_name = inv.get("supplier_name") if inv else "Supplier"
+
+    company_id = payment.get("company_id") or (inv.get("company_id") if inv else "")
+    amount = round(float(payment.get("amount") or 0), 2)
+    payment_date = payment.get("payment_date") or date.today().isoformat()
+    payment_mode = str(payment.get("payment_mode") or "bank").strip().lower()
+
+    if amount <= 0:
+        return
+
+    payable_id = await get_default_account_id(company_id, "2000")  # Accounts Payable
+    cash_id = await get_default_account_id(company_id, "1000")     # Cash in Hand
+    bank_id = await get_default_account_id(company_id, "1010")     # Bank Accounts
+
+    if not payable_id or not cash_id or not bank_id:
+        return
+
+    credit_acct_id = cash_id if payment_mode == "cash" else bank_id
+    credit_acct_name = "Cash in Hand" if payment_mode == "cash" else "Bank Accounts"
+
+    lines = [
+        {"account_id": payable_id, "account_name": "Accounts Payable", "debit": amount, "credit": 0.0, "memo": f"Bill {invoice_no} paid to {supplier_name}"},
+        {"account_id": credit_acct_id, "account_name": credit_acct_name, "debit": 0.0, "credit": amount, "memo": f"Payment for Bill {invoice_no} via {payment_mode.upper()}"},
+    ]
+    narration = f"Payment to {supplier_name} for Bill {invoice_no} ({payment_mode.upper()})"
+
+    try:
+        await post_journal_entry(
+            company_id=company_id,
+            entry_date=payment_date,
+            narration=narration,
+            lines=lines,
+            source="purchase_payment",
+            source_id=payment_id,
+            created_by=payment.get("created_by", "system"),
+        )
+    except Exception as e:
+        logging.error(f"Error posting purchase payment journal entry: {e}")
+
+
 async def reconcile_and_sync_all_sales_and_payments(company_id: str):
     try:
         # 1. Fetch all invoices for this company from the database
@@ -4099,4 +4373,60 @@ async def reconcile_and_sync_all_sales_and_payments(company_id: str):
                 
     except Exception as e:
         logging.error(f"Error in reconcile_and_sync_all_sales_and_payments: {e}")
+
+
+async def reconcile_and_sync_all_purchases_and_payments(company_id: str):
+    """Purchase-side mirror of reconcile_and_sync_all_sales_and_payments.
+    Runs on every report view (Trial Balance, P&L, Balance Sheet, Ledger) so
+    any purchase bill or vendor payment that isn't yet reflected in the
+    ledger — including bills uploaded before this automation existed — gets
+    backfilled automatically, no manual "resync" step required."""
+    try:
+        invoices = await db.purchase_invoices.find({"company_id": company_id}).to_list(10000)
+        invoice_ids = {inv["id"] for inv in invoices}
+        active_invoices = [inv for inv in invoices if inv.get("status", "outstanding") != "cancelled"]
+        active_invoice_ids = {inv["id"] for inv in active_invoices}
+
+        existing_purchase_entries = await db.journal_entries.find({"company_id": company_id, "source": "purchase"}).to_list(10000)
+        entry_by_source_id = {e["source_id"]: e for e in existing_purchase_entries if e.get("source_id")}
+
+        stale_ids = [e["id"] for source_id, e in entry_by_source_id.items() if source_id not in active_invoice_ids]
+        if stale_ids:
+            await db.journal_lines.delete_many({"entry_id": {"$in": stale_ids}})
+            await db.journal_entries.delete_many({"id": {"$in": stale_ids}})
+
+        for inv in active_invoices:
+            inv_id = inv["id"]
+            e = entry_by_source_id.get(inv_id)
+            if not e or abs(float(e.get("total_debit", 0)) - float(inv.get("grand_total", 0))) > 0.01:
+                await sync_purchase_journal_entry(inv_id)
+
+        payments = await db.purchase_payments.find({"company_id": company_id}).to_list(10000)
+        if invoice_ids:
+            missing_payments = await db.purchase_payments.find({
+                "purchase_invoice_id": {"$in": list(invoice_ids)},
+                "company_id": {"$exists": False},
+            }).to_list(10000)
+            pay_id_set = {p["id"] for p in payments}
+            for mp in missing_payments:
+                if mp["id"] not in pay_id_set:
+                    payments.append(mp)
+        payment_ids = {p["id"] for p in payments}
+
+        existing_pay_entries = await db.journal_entries.find({"company_id": company_id, "source": "purchase_payment"}).to_list(10000)
+        pay_entry_by_source_id = {pe["source_id"]: pe for pe in existing_pay_entries if pe.get("source_id")}
+
+        stale_pay_ids = [pe["id"] for source_id, pe in pay_entry_by_source_id.items() if source_id not in payment_ids]
+        if stale_pay_ids:
+            await db.journal_lines.delete_many({"entry_id": {"$in": stale_pay_ids}})
+            await db.journal_entries.delete_many({"id": {"$in": stale_pay_ids}})
+
+        for p in payments:
+            p_id = p["id"]
+            pe = pay_entry_by_source_id.get(p_id)
+            if not pe or abs(float(pe.get("total_debit", 0)) - float(p.get("amount", 0))) > 0.01:
+                await sync_purchase_payment_journal_entry(p_id)
+
+    except Exception as e:
+        logging.error(f"Error in reconcile_and_sync_all_purchases_and_payments: {e}")
 
