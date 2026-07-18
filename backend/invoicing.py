@@ -2946,6 +2946,65 @@ async def upload_purchase_invoice(file: UploadFile = File(...), client_id: Optio
     return {"purchase_invoice": doc, "matched_client": matched_client, "duplicate": False}
 
 
+class PurchaseInvoiceUpdate(BaseModel):
+    client_id: Optional[str] = None
+    client_name: Optional[str] = None
+    company_id: Optional[str] = None
+    supplier_name: Optional[str] = None
+    supplier_gstin: Optional[str] = None
+    buyer_name: Optional[str] = None
+    buyer_gstin: Optional[str] = None
+    invoice_no: Optional[str] = None
+    invoice_date: Optional[str] = None
+    taxable_amount: Optional[float] = None
+    total_gst: Optional[float] = None
+    grand_total: Optional[float] = None
+    currency: Optional[str] = None
+
+
+@router.put("/purchase-invoices/{invoice_id}")
+async def update_purchase_invoice(invoice_id: str, data: PurchaseInvoiceUpdate, current_user: User = Depends(get_current_user)):
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+    existing = await db.purchase_invoices.find_one({"id": invoice_id})
+    if not existing:
+        raise HTTPException(404, "Purchase invoice not found")
+    
+    update_data = {k: v for k, v in data.model_dump().items() if v is not None}
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    
+    # If client_id is changed, update client names/counters if needed
+    if "client_id" in update_data and update_data["client_id"] != existing.get("client_id"):
+        new_client_id = update_data["client_id"]
+        if new_client_id:
+            client = await db.clients.find_one({"id": new_client_id})
+            if client:
+                update_data["client_name"] = client.get("company_name", "")
+                await db.clients.update_one({"id": new_client_id}, {"$set": {"last_purchase_invoice_at": update_data["updated_at"]}, "$inc": {"purchase_invoice_count": 1}})
+        old_client_id = existing.get("client_id")
+        if old_client_id:
+            await db.clients.update_one({"id": old_client_id}, {"$inc": {"purchase_invoice_count": -1}})
+
+    await db.purchase_invoices.update_one({"id": invoice_id}, {"$set": update_data})
+    updated = await db.purchase_invoices.find_one({"id": invoice_id}, {"_id": 0})
+    return updated
+
+
+@router.delete("/purchase-invoices/{invoice_id}")
+async def delete_purchase_invoice(invoice_id: str, current_user: User = Depends(get_current_user)):
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+    existing = await db.purchase_invoices.find_one({"id": invoice_id})
+    if not existing:
+        raise HTTPException(404, "Purchase invoice not found")
+    
+    await db.purchase_invoices.delete_one({"id": invoice_id})
+    client_id = existing.get("client_id")
+    if client_id:
+        await db.clients.update_one({"id": client_id}, {"$inc": {"purchase_invoice_count": -1}})
+    return {"success": True}
+
+
 # ═══════════════════════════════════════════════════════════
 # INVOICE CRUD
 # ═══════════════════════════════════════════════════════════
