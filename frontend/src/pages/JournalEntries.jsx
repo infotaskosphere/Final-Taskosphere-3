@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { toast } from 'sonner';
-import { NotebookPen, Plus, RefreshCw, Trash2, X } from 'lucide-react';
+import { NotebookPen, Plus, RefreshCw, Trash2, X, CheckSquare, Square, XCircle } from 'lucide-react';
 import GifLoader, { MiniLoader, ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,6 +29,11 @@ function JournalEntriesInner() {
   const [narration, setNarration] = useState('');
   const [lines, setLines] = useState([emptyLine(), emptyLine()]);
   const [saving, setSaving] = useState(false);
+
+  // Bulk delete state
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -89,6 +94,40 @@ function JournalEntriesInner() {
     }
   };
 
+  const toggleSelected = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedIds(prev => (prev.size === entries.length ? new Set() : new Set(entries.map(e => e.id))));
+  };
+
+  const exitSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()); };
+
+  const bulkDelete = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) { toast.error('Select at least one entry first'); return; }
+    if (!window.confirm(`Delete ${ids.length} journal ${ids.length === 1 ? 'entry' : 'entries'}? This cannot be undone.`)) return;
+    setBulkDeleting(true);
+    try {
+      const { data } = await api.post('/journal-entries/bulk-delete', { entry_ids: ids });
+      if (data.deleted_count > 0) toast.success(`Deleted ${data.deleted_count} ${data.deleted_count === 1 ? 'entry' : 'entries'}`);
+      if (data.failed?.length) {
+        toast.error(`${data.failed.length} entr${data.failed.length === 1 ? 'y' : 'ies'} couldn't be deleted — ${data.failed[0].reason}`);
+      }
+      exitSelectMode();
+      await fetchAll();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Bulk delete failed');
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   if (loading) return <ContentLoader />;
 
   return (
@@ -108,12 +147,38 @@ function JournalEntriesInner() {
             </div>
             <div className="flex gap-2">
               <Button onClick={() => setShowNew(true)} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20"><Plus className="h-4 w-4 mr-2" /> New entry</Button>
+              <Button onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20">
+                {selectMode ? <><XCircle className="h-4 w-4 mr-2" /> Cancel select</> : <><CheckSquare className="h-4 w-4 mr-2" /> Select</>}
+              </Button>
               <Button onClick={fetchAll} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20"><RefreshCw className="h-4 w-4 mr-2" /> Refresh</Button>
             </div>
           </div>
         </div>
 
         <GuidanceNote pageKey="journal-entries" isDark={isDark} />
+
+        {selectMode && (
+          <div className={`sticky top-2 z-10 rounded-2xl border shadow-sm px-4 py-3 flex items-center justify-between gap-3 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <button onClick={toggleSelectAll} className={`flex items-center gap-2 text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+              {selectedIds.size === entries.length && entries.length > 0
+                ? <CheckSquare className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />
+                : <Square className="h-4 w-4 text-slate-400" />}
+              {selectedIds.size > 0 ? `${selectedIds.size} selected` : 'Select all'}
+            </button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={exitSelectMode} className="rounded-lg">Cancel</Button>
+              <Button
+                size="sm"
+                onClick={bulkDelete}
+                disabled={bulkDeleting || selectedIds.size === 0}
+                className="rounded-lg text-white"
+                style={{ background: COLORS.coral }}
+              >
+                {bulkDeleting ? <MiniLoader height={16} /> : <><Trash2 className="h-3.5 w-3.5 mr-1.5" /> Delete selected</>}
+              </Button>
+            </div>
+          </div>
+        )}
 
         <div className={`rounded-3xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <div className="divide-y" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
@@ -123,27 +188,38 @@ function JournalEntriesInner() {
                 <p className="text-sm font-semibold text-slate-400">No journal entries yet</p>
               </div>
             ) : entries.map(e => (
-              <div key={e.id} className="p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{e.narration || 'No narration'}</p>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">{SOURCE_LABEL[e.source] || e.source}</span>
+              <div key={e.id} className={`p-4 flex gap-3 ${selectMode && selectedIds.has(e.id) ? (isDark ? 'bg-blue-950/30' : 'bg-blue-50/60') : ''}`}>
+                {selectMode && (
+                  <button onClick={() => toggleSelected(e.id)} className="mt-0.5 flex-shrink-0">
+                    {selectedIds.has(e.id)
+                      ? <CheckSquare className="h-5 w-5" style={{ color: COLORS.mediumBlue }} />
+                      : <Square className="h-5 w-5 text-slate-300" />}
+                  </button>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{e.narration || 'No narration'}</p>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">{SOURCE_LABEL[e.source] || e.source}</span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1">{fmtDate(e.entry_date)}</p>
                     </div>
-                    <p className="text-xs text-slate-400 mt-1">{fmtDate(e.entry_date)}</p>
-                  </div>
-                  <div className="flex items-center gap-3 flex-shrink-0">
-                    <p className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{fmtC(e.total_debit)}</p>
-                    <button onClick={() => deleteEntry(e.id)} className="text-slate-300 hover:text-rose-500"><Trash2 className="h-4 w-4" /></button>
-                  </div>
-                </div>
-                <div className="mt-2 pl-1 space-y-1">
-                  {(e.lines || []).map(l => (
-                    <div key={l.id} className="flex items-center justify-between text-xs text-slate-500">
-                      <span>{l.account_name}</span>
-                      <span className="font-mono">{l.debit ? `Dr ${fmtC(l.debit)}` : `Cr ${fmtC(l.credit)}`}</span>
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      <p className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{fmtC(e.total_debit)}</p>
+                      {!selectMode && (
+                        <button onClick={() => deleteEntry(e.id)} className="text-slate-300 hover:text-rose-500"><Trash2 className="h-4 w-4" /></button>
+                      )}
                     </div>
-                  ))}
+                  </div>
+                  <div className="mt-2 pl-1 space-y-1">
+                    {(e.lines || []).map(l => (
+                      <div key={l.id} className="flex items-center justify-between text-xs text-slate-500">
+                        <span>{l.account_name}</span>
+                        <span className="font-mono">{l.debit ? `Dr ${fmtC(l.debit)}` : `Cr ${fmtC(l.credit)}`}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             ))}
