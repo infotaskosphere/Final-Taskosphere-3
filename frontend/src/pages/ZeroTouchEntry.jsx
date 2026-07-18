@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import {
   ScanLine, UploadCloud, RefreshCw, CheckCircle2, AlertTriangle,
   Sparkles, FileText, Settings2, Plus, Building2, Banknote,
+  Eye, ThumbsUp, ThumbsDown, Clock, Bot,
 } from 'lucide-react';
 import { ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
@@ -10,6 +11,10 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
 import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
@@ -22,12 +27,15 @@ function StatusBadge({ status, settled }) {
     return <Badge className="bg-emerald-600 hover:bg-emerald-600">Posted &amp; Settled</Badge>;
   }
   const map = {
-    posted:       { label: 'Posted',       className: 'bg-blue-600 hover:bg-blue-600' },
-    needs_review: { label: 'Needs Review', className: '' },
-    extracted:    { label: 'Extracted',    className: '' },
+    posted:            { label: 'Posted',              className: 'bg-blue-600 hover:bg-blue-600' },
+    pending_approval:  { label: 'Awaiting Approval',    className: 'bg-amber-500 hover:bg-amber-500' },
+    needs_review:      { label: 'Needs Review',         className: '' },
+    rejected:          { label: 'Rejected',             className: '' },
+    extracted:         { label: 'Extracted',            className: '' },
   };
   const cfg = map[status] || { label: status, className: '' };
-  const variant = status === 'needs_review' ? 'destructive' : (status === 'posted' ? 'default' : 'secondary');
+  const variant = status === 'needs_review' || status === 'rejected' ? 'destructive'
+    : (status === 'posted' || status === 'pending_approval' ? 'default' : 'secondary');
   return <Badge variant={variant} className={cfg.className}>{cfg.label}</Badge>;
 }
 
@@ -58,6 +66,11 @@ function ZeroTouchEntryInner() {
   const [companies, setCompanies] = useState([]);
   const [uploadCompanyId, setUploadCompanyId] = useState('');
   const [newRule, setNewRule] = useState({ match: '', account_code: '', label: '' });
+  const [previewDoc, setPreviewDoc] = useState(null);       // doc shown in the review dialog
+  const [approving, setApproving] = useState(false);
+  const [rejectDoc, setRejectDoc] = useState(null);         // doc being rejected
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejecting, setRejecting] = useState(false);
 
   const fetchDocs = async () => {
     try {
@@ -97,14 +110,12 @@ function ZeroTouchEntryInner() {
     try {
       const form = new FormData();
       form.append('file', file);
-      form.append('company_id', uploadCompanyId); // blank = auto-detect from the document
-      form.append('auto_post', 'true');
+      form.append('company_id', uploadCompanyId); // blank = auto-detect (deterministic, then AI)
       const { data } = await api.post('/zte/upload', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      if (data.status === 'posted') {
-        const fxNote = data.fx ? ` (${data.fx.original_currency} ${data.fx.original_total_value} @ ${data.fx.rate_to_inr.toFixed(4)} → ${fmtC(data.amount_inr)})` : '';
-        toast.success(`Extracted & posted to ${data.company_name || 'company'}${fxNote}`);
+      if (data.status === 'pending_approval') {
+        toast.success(`Drafted for ${data.company_name || 'company'} — review & approve below.`);
       } else if (data.status === 'needs_review') {
         toast.warning(`Needs review: ${data.posting_error}`);
       } else {
@@ -119,23 +130,59 @@ function ZeroTouchEntryInner() {
     }
   };
 
-  const retryPosting = async (docId) => {
+  const retryDraft = async (docId) => {
     try {
       await api.post(`/zte/documents/${docId}/retry-posting`);
-      toast.success('Posted to ledger.');
+      toast.success('Draft ready — review & approve below.');
       await fetchDocs();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Could not post — check extracted data.');
+      toast.error(err.response?.data?.detail || 'Could not draft entry — check extracted data.');
     }
   };
 
   const assignCompany = async (docId, companyId) => {
     try {
       await api.post(`/zte/documents/${docId}/assign-company`, { company_id: companyId });
-      toast.success('Company assigned — posted to ledger.');
+      toast.success('Company assigned — draft ready for approval.');
       await fetchDocs();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Could not assign company');
+    }
+  };
+
+  const openPreview = (doc) => setPreviewDoc(doc);
+
+  const approveDoc = async (docId) => {
+    setApproving(true);
+    try {
+      const { data } = await api.post(`/zte/documents/${docId}/approve`);
+      toast.success(`Posted to ledger (Journal Entry ${data.journal_entry_id?.slice(0, 8)}…).`);
+      setPreviewDoc(null);
+      await fetchDocs();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Could not post — try again.');
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  const submitReject = async () => {
+    if (!rejectDoc || rejectReason.trim().length < 3) {
+      toast.error('Please give a reason (at least a few words).');
+      return;
+    }
+    setRejecting(true);
+    try {
+      await api.post(`/zte/documents/${rejectDoc.id}/reject`, { reason: rejectReason.trim() });
+      toast.success('Draft rejected — nothing was posted.');
+      setRejectDoc(null);
+      setRejectReason('');
+      setPreviewDoc(null);
+      await fetchDocs();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Could not reject');
+    } finally {
+      setRejecting(false);
     }
   };
 
@@ -157,6 +204,7 @@ function ZeroTouchEntryInner() {
   if (loading) return <ContentLoader />;
 
   const posted = docs.filter(d => d.status === 'posted').length;
+  const pending = docs.filter(d => d.status === 'pending_approval').length;
   const review = docs.filter(d => d.status === 'needs_review').length;
   const settled = docs.filter(d => d.settled).length;
 
@@ -196,19 +244,20 @@ function ZeroTouchEntryInner() {
                 </Button>
               </div>
               {companies.length > 1 && (
-                <p className="text-xs text-blue-100 flex items-center gap-1"><Building2 className="h-3 w-3" /> {companies.length} companies configured — leave blank to auto-match by "Bill To"</p>
+                <p className="text-xs text-blue-100 flex items-center gap-1"><Bot className="h-3 w-3" /> {companies.length} companies configured — leave blank for AI to auto-match by GSTIN, billing email, name, or document context</p>
               )}
             </div>
           </div>
         </div>
 
         {/* Summary strip */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {[
             { label: 'Documents Processed', value: docs.length, icon: FileText, color: COLORS.mediumBlue },
-            { label: 'Auto-Posted', value: posted, icon: CheckCircle2, color: COLORS.emeraldGreen },
+            { label: 'Awaiting Approval', value: pending, icon: Clock, color: COLORS.amber },
+            { label: 'Posted', value: posted, icon: CheckCircle2, color: COLORS.emeraldGreen },
             { label: 'Settled (Bank Matched)', value: settled, icon: Banknote, color: COLORS.mediumBlue },
-            { label: 'Needs Review', value: review, icon: AlertTriangle, color: COLORS.amber },
+            { label: 'Needs Review', value: review, icon: AlertTriangle, color: COLORS.coral },
           ].map((s) => (
             <div key={s.label} className={`rounded-2xl border p-4 flex items-center gap-3 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
               <div className="h-10 w-10 rounded-xl flex items-center justify-center" style={{ background: `${s.color}20` }}>
@@ -271,12 +320,30 @@ function ZeroTouchEntryInner() {
                           <TableCell className="text-right font-mono">{fmtC(d.amount_inr ?? ex.total_invoice_value)}</TableCell>
                           <TableCell><StatusBadge status={d.status} settled={d.settled} /></TableCell>
                           <TableCell>
-                            {d.status === 'needs_review' && !d.company_id && (
-                              <CompanyPicker companies={companies} isDark={isDark} onAssign={(cid) => assignCompany(d.id, cid)} />
-                            )}
-                            {d.status === 'needs_review' && d.company_id && (
-                              <Button size="sm" variant="outline" onClick={() => retryPosting(d.id)}>Retry Post</Button>
-                            )}
+                            <div className="flex items-center gap-1.5">
+                              {d.status === 'needs_review' && !d.company_id && (
+                                <CompanyPicker companies={companies} isDark={isDark} onAssign={(cid) => assignCompany(d.id, cid)} />
+                              )}
+                              {d.status === 'needs_review' && d.company_id && (
+                                <Button size="sm" variant="outline" onClick={() => retryDraft(d.id)}>Retry Draft</Button>
+                              )}
+                              {d.status === 'pending_approval' && (
+                                <>
+                                  <Button size="sm" variant="outline" onClick={() => openPreview(d)}>
+                                    <Eye className="h-3.5 w-3.5 mr-1" /> Review
+                                  </Button>
+                                  <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => approveDoc(d.id)}>
+                                    <ThumbsUp className="h-3.5 w-3.5 mr-1" /> Approve
+                                  </Button>
+                                  <Button size="sm" variant="destructive" onClick={() => setRejectDoc(d)}>
+                                    <ThumbsDown className="h-3.5 w-3.5" />
+                                  </Button>
+                                </>
+                              )}
+                              {d.status === 'rejected' && d.rejection_reason && (
+                                <span className={`text-xs italic ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{d.rejection_reason}</span>
+                              )}
+                            </div>
                           </TableCell>
                         </TableRow>
                       );
@@ -329,6 +396,98 @@ function ZeroTouchEntryInner() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Review & Approve dialog — human sees the exact AI-drafted double-entry
+          lines before anything is posted. */}
+      <Dialog open={!!previewDoc} onOpenChange={(open) => !open && setPreviewDoc(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Bot className="h-5 w-5" /> Review AI-Drafted Entry</DialogTitle>
+            <DialogDescription>
+              Nothing is posted until you approve. Check the lines below against the source document before continuing.
+            </DialogDescription>
+          </DialogHeader>
+          {previewDoc && (() => {
+            const ex = previewDoc.extracted || {};
+            const preview = previewDoc.preview || {};
+            const lines = preview.lines || [];
+            const totalDebit = lines.reduce((s, l) => s + Number(l.debit || 0), 0);
+            const totalCredit = lines.reduce((s, l) => s + Number(l.credit || 0), 0);
+            return (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                  <div><span className="text-slate-500">Company: </span>{previewDoc.company_name || '—'}</div>
+                  <div><span className="text-slate-500">Type: </span>{ex.document_type || '—'}</div>
+                  <div><span className="text-slate-500">Vendor / Customer: </span>{ex.vendor_or_customer_name || '—'}</div>
+                  <div><span className="text-slate-500">Invoice #: </span>{ex.invoice_number || '—'}</div>
+                  <div><span className="text-slate-500">Invoice Date: </span>{ex.invoice_date || '—'}</div>
+                  <div><span className="text-slate-500">Company Match: </span>{previewDoc.company_match_reason || '—'}</div>
+                </div>
+                <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Account</TableHead>
+                        <TableHead>Memo</TableHead>
+                        <TableHead className="text-right">Debit</TableHead>
+                        <TableHead className="text-right">Credit</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {lines.map((l, i) => (
+                        <TableRow key={i}>
+                          <TableCell>{l.account_name}</TableCell>
+                          <TableCell className="text-xs">{l.memo}</TableCell>
+                          <TableCell className="text-right font-mono">{l.debit ? fmtC(l.debit) : ''}</TableCell>
+                          <TableCell className="text-right font-mono">{l.credit ? fmtC(l.credit) : ''}</TableCell>
+                        </TableRow>
+                      ))}
+                      <TableRow>
+                        <TableCell colSpan={2} className="font-semibold">Total</TableCell>
+                        <TableCell className="text-right font-mono font-semibold">{fmtC(totalDebit)}</TableCell>
+                        <TableCell className="text-right font-mono font-semibold">{fmtC(totalCredit)}</TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+                {preview.narration && <p className="text-xs text-slate-500">{preview.narration}</p>}
+              </div>
+            );
+          })()}
+          <DialogFooter className="gap-2">
+            <Button variant="destructive" onClick={() => { setRejectDoc(previewDoc); }} disabled={approving}>
+              <ThumbsDown className="h-4 w-4 mr-1" /> Reject
+            </Button>
+            <Button className="bg-emerald-600 hover:bg-emerald-700" onClick={() => approveDoc(previewDoc.id)} disabled={approving}>
+              {approving ? <RefreshCw className="h-4 w-4 mr-1 animate-spin" /> : <ThumbsUp className="h-4 w-4 mr-1" />}
+              {approving ? 'Posting…' : 'Approve & Post to Ledger'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reject dialog — mandatory reason, entry is discarded and never posted. */}
+      <Dialog open={!!rejectDoc} onOpenChange={(open) => { if (!open) { setRejectDoc(null); setRejectReason(''); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reject AI-Drafted Entry</DialogTitle>
+            <DialogDescription>This document will not be posted. Give a short reason for the record.</DialogDescription>
+          </DialogHeader>
+          <Textarea
+            placeholder="e.g. Wrong vendor detected, duplicate of an earlier upload…"
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+            rows={3}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setRejectDoc(null); setRejectReason(''); }} disabled={rejecting}>Cancel</Button>
+            <Button variant="destructive" onClick={submitReject} disabled={rejecting}>
+              {rejecting ? <RefreshCw className="h-4 w-4 mr-1 animate-spin" /> : <ThumbsDown className="h-4 w-4 mr-1" />}
+              {rejecting ? 'Rejecting…' : 'Confirm Reject'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
