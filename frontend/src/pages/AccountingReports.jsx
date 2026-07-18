@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
+import { GuidanceNote } from '@/components/ui/GuidanceNote.jsx';
 
 const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2', emeraldGreen: '#1FAF5A', amber: '#F59E0B', coral: '#FF6B6B' };
 const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
@@ -139,6 +140,8 @@ function AccountingReportsInner() {
             </Button>
           </div>
         </div>
+
+        <GuidanceNote pageKey="accounting-reports" isDark={isDark} />
 
         {/* Tabs */}
         <Tabs defaultValue="trial-balance">
