@@ -5674,22 +5674,30 @@ function Invoicing() {
       if (fy && (inv.invoice_date < fy.from || inv.invoice_date > fy.to)) return false;
       return true;
     });
-    const total_revenue = base.reduce((s, i) => s + (i.grand_total || 0), 0);
-    const total_outstanding = base.reduce((s, i) => s + calcDue(i), 0);
-    const total_gst = base.reduce((s, i) => s + (i.total_gst || 0), 0);
+    // Revenue-bearing figures must only count invoices that are actually
+    // posted to the books (status not 'draft' or 'cancelled') — this mirrors
+    // sync_invoice_journal_entry on the backend, which skips draft/cancelled
+    // invoices entirely when posting to the General Ledger. Without this
+    // filter, this card double-counts unsent drafts as revenue while Trial
+    // Balance / P&L / Balance Sheet correctly exclude them, so the two pages
+    // permanently disagree even when looking at the same company/period.
+    const recognized = base.filter(i => i.status !== 'draft' && i.status !== 'cancelled');
+    const total_revenue = recognized.reduce((s, i) => s + (i.grand_total || 0), 0);
+    const total_outstanding = recognized.reduce((s, i) => s + calcDue(i), 0);
+    const total_gst = recognized.reduce((s, i) => s + (i.total_gst || 0), 0);
     const total_invoices = base.length;
-    const month_revenue = base.filter(i => i.invoice_date?.startsWith(curMonth)).reduce((s, i) => s + (i.grand_total || 0), 0);
-    const month_invoices = base.filter(i => i.invoice_date?.startsWith(curMonth)).length;
-    const overdue_count = base.filter(i => calcDue(i) > 0 && i.due_date && differenceInDays(new Date(), parseISO(i.due_date)) > 0).length;
+    const month_revenue = recognized.filter(i => i.invoice_date?.startsWith(curMonth)).reduce((s, i) => s + (i.grand_total || 0), 0);
+    const month_invoices = recognized.filter(i => i.invoice_date?.startsWith(curMonth)).length;
+    const overdue_count = recognized.filter(i => calcDue(i) > 0 && i.due_date && differenceInDays(new Date(), parseISO(i.due_date)) > 0).length;
     const paid_count = base.filter(i => i.status === 'paid').length;
     const draft_count = base.filter(i => i.status === 'draft').length;
     const monthly_trend = Array.from({ length: 12 }, (_, i) => {
       const d = subMonths(now, 11 - i); const key = format(d, 'yyyy-MM');
-      const monthInvs = base.filter(inv => inv.invoice_date?.startsWith(key));
+      const monthInvs = recognized.filter(inv => inv.invoice_date?.startsWith(key));
       return { label: format(d, 'MMM yy'), revenue: monthInvs.reduce((s, inv) => s + (inv.grand_total || 0), 0), collected: monthInvs.reduce((s, inv) => s + (inv.amount_paid || 0), 0) };
     });
     const clientMap = {};
-    base.forEach(inv => { if (!inv.client_name) return; clientMap[inv.client_name] = (clientMap[inv.client_name] || 0) + (inv.grand_total || 0); });
+    recognized.forEach(inv => { if (!inv.client_name) return; clientMap[inv.client_name] = (clientMap[inv.client_name] || 0) + (inv.grand_total || 0); });
     const top_clients = Object.entries(clientMap).map(([name, revenue]) => ({ name, revenue })).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
     return { total_revenue, total_outstanding, total_gst, total_invoices, month_revenue, month_invoices, overdue_count, paid_count, draft_count, monthly_trend, top_clients };
   }, [invoices, companyFilter, yearFilter]);
