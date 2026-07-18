@@ -15,7 +15,7 @@ import { GuidanceNote } from '@/components/ui/GuidanceNote.jsx';
 const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2', emeraldGreen: '#1FAF5A', amber: '#F59E0B', coral: '#FF6B6B' };
 const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 const fmtDate = (value) => { if (!value) return '—'; try { return format(parseISO(value), 'dd MMM yyyy'); } catch { return value; } };
-const SOURCE_LABEL = { manual: 'Manual', purchase: 'Purchase', sale: 'Sale', bank: 'Bank' };
+const SOURCE_LABEL = { manual: 'Manual', purchase: 'Purchase', sale: 'Sale', bank: 'Bank', payment: 'Receipt', purchase_payment: 'Payment' };
 
 function emptyLine() { return { account_id: '', account_name: '', debit: '', credit: '', memo: '' }; }
 
@@ -202,8 +202,19 @@ function JournalEntriesInner() {
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{e.narration || 'No narration'}</p>
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">{SOURCE_LABEL[e.source] || e.source}</span>
+                        {(e.customer_name || e.vendor_name) && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            {e.customer_name || e.vendor_name}
+                          </span>
+                        )}
                       </div>
-                      <p className="text-xs text-slate-400 mt-1">{fmtDate(e.entry_date)}</p>
+                      <p className="text-xs text-slate-400 mt-1 flex flex-wrap gap-x-3">
+                        <span>{fmtDate(e.entry_date)}</span>
+                        {e.voucher_no && <span>Voucher: {e.voucher_no}</span>}
+                        {e.invoice_no && <span>Inv/Bill: {e.invoice_no}</span>}
+                        {e.reference_no && <span>Ref: {e.reference_no}</span>}
+                        {e.payment_mode && <span>{e.payment_mode}{e.bank_account ? ` · ${e.bank_account}` : ''}</span>}
+                      </p>
                     </div>
                     <div className="flex items-center gap-3 flex-shrink-0">
                       <p className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{fmtC(e.total_debit)}</p>
