@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
+import { GuidanceNote } from '@/components/ui/GuidanceNote.jsx';
 
 const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2', emeraldGreen: '#1FAF5A', amber: '#F59E0B', coral: '#FF6B6B' };
 const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
@@ -111,6 +112,8 @@ function JournalEntriesInner() {
             </div>
           </div>
         </div>
+
+        <GuidanceNote pageKey="journal-entries" isDark={isDark} />
 
         <div className={`rounded-3xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <div className="divide-y" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
