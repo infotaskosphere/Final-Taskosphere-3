@@ -30,15 +30,13 @@ function JournalEntriesInner() {
   const [lines, setLines] = useState([emptyLine(), emptyLine()]);
   const [saving, setSaving] = useState(false);
 
-  // Company + pagination
   const [companies, setCompanies] = useState([]);
-  const [companyId, setCompanyId] = useState('');   // '' = All Companies
+  const [companyId, setCompanyId] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
 
-  // Bulk delete state
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -47,7 +45,7 @@ function JournalEntriesInner() {
     try {
       const { data } = await api.get('/companies/list');
       setCompanies(data || []);
-    } catch { /* non-fatal — selector just shows the default book */ }
+    } catch { /* non-fatal */ }
   };
 
   const fetchAll = async (opts = {}) => {
@@ -175,150 +173,151 @@ function JournalEntriesInner() {
 
   if (loading) return <ContentLoader />;
 
+  // NOTE: DashboardLayout already applies page padding + max-width + background,
+  // so this page must NOT add its own min-h-screen / max-w / p-* wrapper —
+  // doing so shifts the header out of alignment with the Dashboard.
   return (
-    <div className={`min-h-screen ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
-      <div className="p-4 md:p-6 space-y-5 max-w-[1400px] mx-auto">
-        <div className="rounded-3xl overflow-hidden shadow-xl" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-          <div className="p-6 md:p-7 flex flex-col lg:flex-row lg:items-center justify-between gap-5 text-white">
-            <div className="flex items-start gap-4">
-              <div className="h-14 w-14 rounded-2xl bg-white/15 border border-white/20 flex items-center justify-center shadow-lg">
-                <NotebookPen className="h-7 w-7" />
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-[0.25em] text-blue-100 font-bold">Accounts</p>
-                <h1 className="text-2xl md:text-3xl font-bold tracking-tight mt-1">Journal Entries</h1>
-                <p className="text-sm text-blue-100 mt-1 max-w-2xl">Every Purchase, Sale, and matched Bank transaction posts here automatically. Post manual entries for anything else.</p>
-              </div>
+    <div className="space-y-5 w-full min-w-0">
+      <div className="rounded-3xl overflow-hidden shadow-xl" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+        <div className="p-5 md:p-7 flex flex-col lg:flex-row lg:items-center justify-between gap-5 text-white">
+          <div className="flex items-start gap-4 min-w-0">
+            <div className="h-14 w-14 shrink-0 rounded-2xl bg-white/15 border border-white/20 flex items-center justify-center shadow-lg">
+              <NotebookPen className="h-7 w-7" />
             </div>
-            <div className="flex gap-2">
-              <Select value={companyId || '__all__'} onValueChange={onCompanyChange}>
-                <SelectTrigger className="h-9 min-w-[170px] bg-white/10 border-white/25 text-white">
-                  <Building2 className="h-3.5 w-3.5 mr-1.5 shrink-0" />
-                  <SelectValue placeholder="All Companies" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__all__">All Companies</SelectItem>
-                  {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <Select value={String(pageSize)} onValueChange={onPageSizeChange}>
-                <SelectTrigger className="h-9 w-[110px] bg-white/10 border-white/25 text-white">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="10">10 / page</SelectItem>
-                  <SelectItem value="50">50 / page</SelectItem>
-                  <SelectItem value="100">100 / page</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button onClick={() => setShowNew(true)} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20"><Plus className="h-4 w-4 mr-2" /> New entry</Button>
-              <Button onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20">
-                {selectMode ? <><XCircle className="h-4 w-4 mr-2" /> Cancel select</> : <><CheckSquare className="h-4 w-4 mr-2" /> Select</>}
-              </Button>
-              <Button onClick={() => fetchAll()} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20"><RefreshCw className="h-4 w-4 mr-2" /> Refresh</Button>
+            <div className="min-w-0">
+              <p className="text-xs uppercase tracking-[0.25em] text-blue-100 font-bold">Accounts</p>
+              <h1 className="text-2xl md:text-3xl font-bold tracking-tight mt-1 truncate">Journal Entries</h1>
+              <p className="text-sm text-blue-100 mt-1 max-w-2xl">Every Purchase, Sale, and matched Bank transaction posts here automatically. Post manual entries for anything else.</p>
             </div>
+          </div>
+          <div className="flex flex-wrap gap-2 lg:justify-end">
+            <Select value={companyId || '__all__'} onValueChange={onCompanyChange}>
+              <SelectTrigger className="h-9 min-w-[170px] bg-white/10 border-white/25 text-white">
+                <Building2 className="h-3.5 w-3.5 mr-1.5 shrink-0" />
+                <SelectValue placeholder="All Companies" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All Companies</SelectItem>
+                {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={String(pageSize)} onValueChange={onPageSizeChange}>
+              <SelectTrigger className="h-9 w-[110px] bg-white/10 border-white/25 text-white">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="10">10 / page</SelectItem>
+                <SelectItem value="50">50 / page</SelectItem>
+                <SelectItem value="100">100 / page</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button onClick={() => setShowNew(true)} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20"><Plus className="h-4 w-4 mr-2" /> New entry</Button>
+            <Button onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20">
+              {selectMode ? <><XCircle className="h-4 w-4 mr-2" /> Cancel select</> : <><CheckSquare className="h-4 w-4 mr-2" /> Select</>}
+            </Button>
+            <Button onClick={() => fetchAll()} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20"><RefreshCw className="h-4 w-4 mr-2" /> Refresh</Button>
           </div>
         </div>
+      </div>
 
-        <GuidanceNote pageKey="journal-entries" isDark={isDark} />
+      <GuidanceNote pageKey="journal-entries" isDark={isDark} />
 
-        {selectMode && (
-          <div className={`sticky top-2 z-10 rounded-2xl border shadow-sm px-4 py-3 flex items-center justify-between gap-3 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-            <button onClick={toggleSelectAll} className={`flex items-center gap-2 text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
-              {selectedIds.size === entries.length && entries.length > 0
-                ? <CheckSquare className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />
-                : <Square className="h-4 w-4 text-slate-400" />}
-              {selectedIds.size > 0 ? `${selectedIds.size} selected` : 'Select all'}
-            </button>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={exitSelectMode} className="rounded-lg">Cancel</Button>
-              <Button
-                size="sm"
-                onClick={bulkDelete}
-                disabled={bulkDeleting || selectedIds.size === 0}
-                className="rounded-lg text-white"
-                style={{ background: COLORS.coral }}
-              >
-                {bulkDeleting ? <MiniLoader height={16} /> : <><Trash2 className="h-3.5 w-3.5 mr-1.5" /> Delete selected</>}
-              </Button>
-            </div>
+      {selectMode && (
+        <div className={`sticky top-2 z-10 rounded-2xl border shadow-sm px-4 py-3 flex items-center justify-between gap-3 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+          <button onClick={toggleSelectAll} className={`flex items-center gap-2 text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+            {selectedIds.size === entries.length && entries.length > 0
+              ? <CheckSquare className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />
+              : <Square className="h-4 w-4 text-slate-400" />}
+            {selectedIds.size > 0 ? `${selectedIds.size} selected` : 'Select all'}
+          </button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={exitSelectMode} className="rounded-lg">Cancel</Button>
+            <Button
+              size="sm"
+              onClick={bulkDelete}
+              disabled={bulkDeleting || selectedIds.size === 0}
+              className="rounded-lg text-white"
+              style={{ background: COLORS.coral }}
+            >
+              {bulkDeleting ? <MiniLoader height={16} /> : <><Trash2 className="h-3.5 w-3.5 mr-1.5" /> Delete selected</>}
+            </Button>
           </div>
-        )}
+        </div>
+      )}
 
-        <div className={`rounded-3xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-          <div className="divide-y" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
-            {entries.length === 0 ? (
-              <div className="py-20 text-center">
-                <NotebookPen className="h-12 w-12 mx-auto text-slate-300 mb-3" />
-                <p className="text-sm font-semibold text-slate-400">No journal entries yet</p>
-              </div>
-            ) : entries.map(e => (
-              <div key={e.id} className={`p-4 flex gap-3 ${selectMode && selectedIds.has(e.id) ? (isDark ? 'bg-blue-950/30' : 'bg-blue-50/60') : ''}`}>
-                {selectMode && (
-                  <button onClick={() => toggleSelected(e.id)} className="mt-0.5 flex-shrink-0">
-                    {selectedIds.has(e.id)
-                      ? <CheckSquare className="h-5 w-5" style={{ color: COLORS.mediumBlue }} />
-                      : <Square className="h-5 w-5 text-slate-300" />}
-                  </button>
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{e.narration || 'No narration'}</p>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">{SOURCE_LABEL[e.source] || e.source}</span>
-                        {(e.customer_name || e.vendor_name) && (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            {e.customer_name || e.vendor_name}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-slate-400 mt-1 flex flex-wrap gap-x-3">
-                        <span>{fmtDate(e.entry_date)}</span>
-                        {e.voucher_no && <span>Voucher: {e.voucher_no}</span>}
-                        {e.invoice_no && <span>Inv/Bill: {e.invoice_no}</span>}
-                        {e.reference_no && <span>Ref: {e.reference_no}</span>}
-                        {e.payment_mode && <span>{e.payment_mode}{e.bank_account ? ` · ${e.bank_account}` : ''}</span>}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3 flex-shrink-0">
-                      <p className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{fmtC(e.total_debit)}</p>
-                      {!selectMode && (
-                        <button onClick={() => deleteEntry(e.id)} className="text-slate-300 hover:text-rose-500"><Trash2 className="h-4 w-4" /></button>
+      <div className={`rounded-3xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <div className="divide-y" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+          {entries.length === 0 ? (
+            <div className="py-20 text-center">
+              <NotebookPen className="h-12 w-12 mx-auto text-slate-300 mb-3" />
+              <p className="text-sm font-semibold text-slate-400">No journal entries yet</p>
+            </div>
+          ) : entries.map(e => (
+            <div key={e.id} className={`p-4 flex gap-3 ${selectMode && selectedIds.has(e.id) ? (isDark ? 'bg-blue-950/30' : 'bg-blue-50/60') : ''}`}>
+              {selectMode && (
+                <button onClick={() => toggleSelected(e.id)} className="mt-0.5 flex-shrink-0">
+                  {selectedIds.has(e.id)
+                    ? <CheckSquare className="h-5 w-5" style={{ color: COLORS.mediumBlue }} />
+                    : <Square className="h-5 w-5 text-slate-300" />}
+                </button>
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'} break-words`}>{e.narration || 'No narration'}</p>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">{SOURCE_LABEL[e.source] || e.source}</span>
+                      {(e.customer_name || e.vendor_name) && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          {e.customer_name || e.vendor_name}
+                        </span>
                       )}
                     </div>
+                    <p className="text-xs text-slate-400 mt-1 flex flex-wrap gap-x-3">
+                      <span>{fmtDate(e.entry_date)}</span>
+                      {e.voucher_no && <span>Voucher: {e.voucher_no}</span>}
+                      {e.invoice_no && <span>Inv/Bill: {e.invoice_no}</span>}
+                      {e.reference_no && <span>Ref: {e.reference_no}</span>}
+                      {e.payment_mode && <span>{e.payment_mode}{e.bank_account ? ` · ${e.bank_account}` : ''}</span>}
+                    </p>
                   </div>
-                  <div className="mt-2 pl-1 space-y-1">
-                    {(e.lines || []).map(l => (
-                      <div key={l.id} className="flex items-center justify-between text-xs text-slate-500">
-                        <span>{l.account_name}</span>
-                        <span className="font-mono">{l.debit ? `Dr ${fmtC(l.debit)}` : `Cr ${fmtC(l.credit)}`}</span>
-                      </div>
-                    ))}
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <p className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{fmtC(e.total_debit)}</p>
+                    {!selectMode && (
+                      <button onClick={() => deleteEntry(e.id)} className="text-slate-300 hover:text-rose-500"><Trash2 className="h-4 w-4" /></button>
+                    )}
                   </div>
                 </div>
+                <div className="mt-2 pl-1 space-y-1">
+                  {(e.lines || []).map(l => (
+                    <div key={l.id} className="flex items-center justify-between text-xs text-slate-500 gap-3">
+                      <span className="min-w-0 truncate">{l.account_name}</span>
+                      <span className="font-mono shrink-0">{l.debit ? `Dr ${fmtC(l.debit)}` : `Cr ${fmtC(l.credit)}`}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            ))}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {total > 0 && (
+        <div className={`flex flex-wrap items-center justify-between gap-3 px-1 text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+          <span>
+            Showing {((page - 1) * pageSize) + 1}–{Math.min(page * pageSize, total)} of {total} {total === 1 ? 'entry' : 'entries'}
+          </span>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => goToPage(page - 1)} className="rounded-lg">
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-xs font-semibold px-2">Page {page} of {totalPages}</span>
+            <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => goToPage(page + 1)} className="rounded-lg">
+              <ChevronRight className="h-4 w-4" />
+            </Button>
           </div>
         </div>
-
-        {total > 0 && (
-          <div className={`flex flex-wrap items-center justify-between gap-3 px-1 text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-            <span>
-              Showing {((page - 1) * pageSize) + 1}–{Math.min(page * pageSize, total)} of {total} {total === 1 ? 'entry' : 'entries'}
-            </span>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => goToPage(page - 1)} className="rounded-lg">
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <span className="text-xs font-semibold px-2">Page {page} of {totalPages}</span>
-              <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => goToPage(page + 1)} className="rounded-lg">
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        )}
-      </div>
+      )}
 
       <Dialog open={showNew} onOpenChange={setShowNew}>
         <DialogContent className="sm:max-w-2xl">
@@ -345,14 +344,17 @@ function JournalEntriesInner() {
                   <button onClick={() => setLines(ls => ls.filter((_, i) => i !== idx))} className="text-slate-300 hover:text-rose-500"><X className="h-4 w-4" /></button>
                 </div>
               ))}
-              <Button variant="outline" size="sm" onClick={() => setLines(ls => [...ls, emptyLine()])} className="rounded-lg"><Plus className="h-3.5 w-3.5 mr-1" /> Add line</Button>
+              <Button variant="outline" size="sm" onClick={() => setLines(ls => [...ls, emptyLine()])}><Plus className="h-4 w-4 mr-2" /> Add line</Button>
             </div>
-            <div className={`flex items-center justify-between text-sm font-semibold p-3 rounded-xl ${totals.balanced ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-              <span>Debit {fmtC(totals.debit)}</span>
-              <span>Credit {fmtC(totals.credit)}</span>
-              <span>{totals.balanced ? 'Balanced ✓' : 'Not balanced'}</span>
+            <div className="flex items-center justify-between text-sm border-t pt-3">
+              <span>Debit: <span className="font-mono font-bold">{fmtC(totals.debit)}</span> · Credit: <span className="font-mono font-bold">{fmtC(totals.credit)}</span></span>
+              <span className={totals.balanced ? 'text-emerald-600 font-bold' : 'text-rose-500 font-bold'}>
+                {totals.balanced ? 'Balanced' : 'Not balanced'}
+              </span>
             </div>
-            <Button onClick={submit} disabled={saving || !totals.balanced} className="w-full rounded-xl">{saving ? <MiniLoader height={18} /> : 'Post entry'}</Button>
+            <Button onClick={submit} disabled={saving || !totals.balanced} className="w-full" style={{ background: COLORS.mediumBlue }}>
+              {saving ? <MiniLoader height={18} /> : 'Post entry'}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
