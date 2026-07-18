@@ -43,8 +43,8 @@ function AdjustmentDrawer({ entry, accounts, isDark, onClose, onSaved }) {
   const [saving, setSaving] = useState(false);
 
   // ── Simple mode state ────────────────────────────────────────────────
-  const [increaseId, setIncreaseId] = useState('');
-  const [decreaseId, setDecreaseId] = useState('');
+  const [debitAccountId, setDebitAccountId] = useState('');
+  const [creditAccountId, setCreditAccountId] = useState('');
   const [amount, setAmount] = useState('');
 
   // ── Advanced mode state (original multi-line debit/credit table) ─────
@@ -68,36 +68,28 @@ function AdjustmentDrawer({ entry, accounts, isDark, onClose, onSaved }) {
   // mode is active.
   const builtLines = useMemo(() => {
     if (!advanced) {
-      const incAcct = accountById[increaseId];
-      const decAcct = accountById[decreaseId];
+      const dbAcct = accountById[debitAccountId];
+      const crAcct = accountById[creditAccountId];
       const amt = Number(amount || 0);
-      if (!incAcct || !decAcct || !amt) return [];
-      const incSide = sideFor(incAcct.type, 'increase');
-      const decSide = sideFor(decAcct.type, 'decrease');
+      if (!dbAcct || !crAcct || !amt) return [];
       return [
-        { account_id: incAcct.id, account_name: acctLabel(incAcct), debit: incSide === 'debit' ? amt : 0, credit: incSide === 'credit' ? amt : 0, memo: '' },
-        { account_id: decAcct.id, account_name: acctLabel(decAcct), debit: decSide === 'debit' ? amt : 0, credit: decSide === 'credit' ? amt : 0, memo: '' },
+        { account_id: dbAcct.id, account_name: acctLabel(dbAcct), debit: amt, credit: 0, memo: '' },
+        { account_id: crAcct.id, account_name: acctLabel(crAcct), debit: 0, credit: amt, memo: '' },
       ];
     }
     return advLines
       .filter((l) => l.account_id && (Number(l.debit) > 0 || Number(l.credit) > 0))
       .map((l) => ({ account_id: l.account_id, account_name: acctLabel(accountById[l.account_id]), debit: Number(l.debit || 0), credit: Number(l.credit || 0), memo: l.memo }));
-  }, [advanced, increaseId, decreaseId, amount, advLines, accountById]);
+  }, [advanced, debitAccountId, creditAccountId, amount, advLines, accountById]);
 
   const totalDebit = builtLines.reduce((s, l) => s + Number(l.debit || 0), 0);
   const totalCredit = builtLines.reduce((s, l) => s + Number(l.credit || 0), 0);
   const balanced = Math.abs(totalDebit - totalCredit) < 0.01 && totalDebit > 0;
 
-  // Why a simple increase/decrease pair might fail to balance — the two
-  // accounts sit on opposite sides of the accounting equation (e.g. one
-  // asset + one liability). Rare, but worth explaining rather than just
-  // showing a red error.
-  const simpleMismatch = !advanced && increaseId && decreaseId && amount && !balanced;
-
   const submit = async () => {
     if (reason.trim().length < 10) { toast.error('Please add a short reason (at least 10 characters).'); return; }
-    if (builtLines.length < 2) { toast.error(advanced ? 'Add at least two lines.' : 'Pick both an account to increase and one to decrease, plus an amount.'); return; }
-    if (!balanced) { toast.error(advanced ? 'Debits must equal credits.' : "Those two accounts can't be balanced against each other this way — try Advanced mode, or pick two accounts of a similar kind (e.g. both expenses)."); return; }
+    if (builtLines.length < 2) { toast.error(advanced ? 'Add at least two lines.' : 'Pick both a Debit Account and a Credit Account, plus an amount.'); return; }
+    if (!balanced) { toast.error(advanced ? 'Debits must equal credits.' : "Those two accounts can't be balanced against each other this way."); return; }
     setSaving(true);
     try {
       await api.post('/accounting-integrity/adjustment-note', {
@@ -151,10 +143,10 @@ function AdjustmentDrawer({ entry, accounts, isDark, onClose, onSaved }) {
           <div className="space-y-3">
             <div className={`rounded-xl border p-3 ${isDark ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-emerald-50 border-emerald-200'}`}>
               <label className={`text-xs font-bold flex items-center gap-1.5 mb-1.5 ${isDark ? 'text-emerald-300' : 'text-emerald-800'}`}>
-                <ArrowUpCircle className="h-3.5 w-3.5" /> Which account should go UP?
+                <ArrowUpCircle className="h-3.5 w-3.5" /> Debit Account (increases assets / expenses, decreases liabilities)
               </label>
-              <Select value={increaseId} onValueChange={setIncreaseId}>
-                <SelectTrigger className="h-10 bg-white"><SelectValue placeholder="Search for an account…" /></SelectTrigger>
+              <Select value={debitAccountId} onValueChange={setDebitAccountId}>
+                <SelectTrigger className="h-10 bg-white"><SelectValue placeholder="Search for Debit account…" /></SelectTrigger>
                 <SelectContent>
                   {accounts.map((a) => <SelectItem key={a.id} value={a.id}>{acctLabel(a)}</SelectItem>)}
                 </SelectContent>
@@ -163,10 +155,10 @@ function AdjustmentDrawer({ entry, accounts, isDark, onClose, onSaved }) {
 
             <div className={`rounded-xl border p-3 ${isDark ? 'bg-rose-500/10 border-rose-500/30' : 'bg-rose-50 border-rose-200'}`}>
               <label className={`text-xs font-bold flex items-center gap-1.5 mb-1.5 ${isDark ? 'text-rose-300' : 'text-rose-800'}`}>
-                <ArrowDownCircle className="h-3.5 w-3.5" /> Which account should go DOWN?
+                <ArrowDownCircle className="h-3.5 w-3.5" /> Credit Account (increases liabilities / equity / income, decreases assets)
               </label>
-              <Select value={decreaseId} onValueChange={setDecreaseId}>
-                <SelectTrigger className="h-10 bg-white"><SelectValue placeholder="Search for an account…" /></SelectTrigger>
+              <Select value={creditAccountId} onValueChange={setCreditAccountId}>
+                <SelectTrigger className="h-10 bg-white"><SelectValue placeholder="Search for Credit account…" /></SelectTrigger>
                 <SelectContent>
                   {accounts.map((a) => <SelectItem key={a.id} value={a.id}>{acctLabel(a)}</SelectItem>)}
                 </SelectContent>
@@ -174,23 +166,14 @@ function AdjustmentDrawer({ entry, accounts, isDark, onClose, onSaved }) {
             </div>
 
             <div>
-              <label className={`text-xs font-bold mb-1.5 block ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>By how much?</label>
+              <label className={`text-xs font-bold mb-1.5 block ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Amount</label>
               <Input type="number" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} className={inputCls} />
             </div>
 
-            {increaseId && decreaseId && amount > 0 && (
+            {debitAccountId && creditAccountId && amount > 0 && (
               <p className={`text-sm rounded-xl p-3 ${isDark ? 'bg-slate-900/50 text-slate-300' : 'bg-slate-50 text-slate-600'}`}>
-                This will move <span className="font-bold">{fmtC(amount)}</span> — increasing{' '}
-                <span className="font-bold">{acctLabel(accountById[increaseId])}</span> and decreasing{' '}
-                <span className="font-bold">{acctLabel(accountById[decreaseId])}</span>.
-              </p>
-            )}
-
-            {simpleMismatch && (
-              <p className={`text-xs rounded-xl p-3 flex items-start gap-2 ${isDark ? 'bg-amber-500/10 text-amber-300' : 'bg-amber-50 text-amber-800'}`}>
-                <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                These two accounts can't be balanced against each other this way — try picking two accounts of a
-                similar kind (e.g. both expenses, or both assets), or switch to Advanced mode.
+                This will debit <span className="font-bold">{acctLabel(accountById[debitAccountId])}</span> and credit{' '}
+                <span className="font-bold">{acctLabel(accountById[creditAccountId])}</span> by <span className="font-bold">{fmtC(amount)}</span>.
               </p>
             )}
           </div>
