@@ -10,8 +10,6 @@ import {
   CreditCard, Fingerprint, Bell, Shield, ShieldCheck, ArrowLeftRight, MessageCircle,
   Building2, Zap, Briefcase, ShoppingBag, Landmark, BookOpen, NotebookPen,
   ScanLine, Lock,
-  // ── Accounting Extended icons ──────────────────────────────────────────────
-  TrendingDown, TrendingUp, Scale, Upload, CalendarRange, AlertTriangle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -148,84 +146,12 @@ const NAV_GROUPS = [
         label:      'Accounting Integrity',
         permission: 'can_manage_chart_of_accounts',
       },
-      // ── Accounting Extended ───────────────────────────────────────────────
+      // ── Accounting Extended (consolidated single page, tabs inside) ────────
       {
         path:       '/day-book',
-        icon:       BookOpen,
-        label:      'Day Book',
-        permission: 'can_view_accounting_reports',
-      },
-      {
-        path:       '/cash-bank-book',
-        icon:       Landmark,
-        label:      'Cash / Bank Book',
-        permission: 'can_view_accounting_reports',
-      },
-      {
-        path:       '/cash-flow',
-        icon:       Activity,
-        label:      'Cash Flow',
-        permission: 'can_view_accounting_reports',
-      },
-      {
-        path:       '/outstanding-report',
-        icon:       AlertTriangle,
-        label:      'Outstanding',
-        permission: 'can_view_accounting_reports',
-      },
-      {
-        path:       '/bank-reconciliation',
-        icon:       ArrowLeftRight,
-        label:      'Bank Reconciliation',
-        permission: 'can_view_accounting_reports',
-      },
-      {
-        path:       '/depreciation',
-        icon:       TrendingDown,
-        label:      'Depreciation',
-        permission: 'can_view_accounting_reports',
-      },
-      {
-        path:       '/tds-tcs',
-        icon:       Shield,
-        label:      'TDS / TCS',
-        permission: 'can_view_accounting_reports',
-      },
-      {
-        path:       '/financial-ratios',
         icon:       BarChart3,
-        label:      'Financial Ratios',
+        label:      'Extended Reports',
         permission: 'can_view_accounting_reports',
-      },
-      {
-        path:       '/comparative-report',
-        icon:       TrendingUp,
-        label:      'Comparative Report',
-        permission: 'can_view_accounting_reports',
-      },
-      {
-        path:       '/yearly-report',
-        icon:       CalendarRange,
-        label:      'Year-wise Report',
-        permission: 'can_view_accounting_reports',
-      },
-      {
-        path:       '/opening-balances',
-        icon:       Scale,
-        label:      'Opening Balances',
-        permission: 'can_manage_chart_of_accounts',
-      },
-      {
-        path:       '/accounting-audit-trail',
-        icon:       ShieldCheck,
-        label:      'Accounting Audit Trail',
-        permission: 'can_view_accounting_reports',
-      },
-      {
-        path:       '/bulk-import',
-        icon:       Upload,
-        label:      'Bulk Journal Import',
-        permission: 'can_manage_chart_of_accounts',
       },
     ],
   },
