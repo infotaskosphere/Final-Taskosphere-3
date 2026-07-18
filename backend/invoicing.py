@@ -2994,16 +2994,19 @@ async def create_invoice(data: InvoiceCreate, current_user: User = Depends(check
     elif advance > 0:
         raw["status"] = "partially_paid"
     await db.invoices.insert_one({**raw})
+    await sync_invoice_journal_entry(raw["id"])
     # Record advance as a payment entry so history is tracked
     if advance > 0:
+        pay_id = str(uuid.uuid4())
         await db.payments.insert_one({
-            "id": str(uuid.uuid4()), "invoice_id": raw["id"],
+            "id": pay_id, "invoice_id": raw["id"],
             "company_id": data.company_id,
             "amount": advance, "payment_date": inv_date,
             "payment_mode": "advance", "reference_no": "",
             "notes": "Advance received at invoice creation",
             "created_by": current_user.id, "created_at": now,
         })
+        await sync_payment_journal_entry(pay_id)
     raw.pop("_id", None)
     return raw
 
@@ -3326,6 +3329,8 @@ async def update_invoice_status(
     if result.matched_count == 0:
         raise HTTPException(404, "Invoice not found")
 
+    await sync_invoice_journal_entry(inv_id)
+
     return {
         "id":          inv_id,
         "status":      new_status,
@@ -3415,6 +3420,7 @@ async def update_invoice(inv_id: str, data: dict, current_user: User = Depends(c
         f"company_id = {data.get('company_id', 'NOT PRESENT')!r}"
     )
     await db.invoices.update_one({"id": inv_id}, {"$set": data})
+    await sync_invoice_journal_entry(inv_id)
     return await db.invoices.find_one({"id": inv_id}, {"_id": 0})
 
 @router.delete("/invoices/bulk-delete")
@@ -3424,9 +3430,21 @@ async def bulk_delete_invoices(ids: List[str], current_user: User = Depends(chec
     deleted, failed = 0, 0
     for inv_id in ids:
         try:
+            # Delete journal entries for associated payments
+            payments = await db.payments.find({"invoice_id": inv_id}).to_list(1000)
+            for p in payments:
+                existing_pe = await db.journal_entries.find_one({"source": "payment", "source_id": p["id"]})
+                if existing_pe:
+                    await db.journal_lines.delete_many({"entry_id": existing_pe["id"]})
+                    await db.journal_entries.delete_one({"id": existing_pe["id"]})
+            await db.payments.delete_many({"invoice_id": inv_id})
+
             r = await db.invoices.delete_one({"id": inv_id})
-            if r.deleted_count: deleted += 1
-            else: failed += 1
+            if r.deleted_count:
+                deleted += 1
+                await sync_invoice_journal_entry(inv_id)
+            else:
+                failed += 1
         except Exception: failed += 1
     return {"deleted": deleted, "failed": failed, "total": len(ids)}
 
@@ -3434,8 +3452,19 @@ async def bulk_delete_invoices(ids: List[str], current_user: User = Depends(chec
 @router.delete("/invoices/{inv_id}")
 async def delete_invoice(inv_id: str, current_user: User = Depends(check_module_permission("invoicing", "delete"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
+    
+    # Delete journal entries for associated payments
+    payments = await db.payments.find({"invoice_id": inv_id}).to_list(1000)
+    for p in payments:
+        existing_pe = await db.journal_entries.find_one({"source": "payment", "source_id": p["id"]})
+        if existing_pe:
+            await db.journal_lines.delete_many({"entry_id": existing_pe["id"]})
+            await db.journal_entries.delete_one({"id": existing_pe["id"]})
+    await db.payments.delete_many({"invoice_id": inv_id})
+
     result = await db.invoices.delete_one({"id": inv_id})
     if result.deleted_count == 0: raise HTTPException(404, "Invoice not found")
+    await sync_invoice_journal_entry(inv_id)
     return {"message": f"Invoice {inv_id} deleted"}
 
 
@@ -3732,6 +3761,7 @@ async def record_payment(data: PaymentCreate, current_user: User = Depends(check
     payment_data = {**data.model_dump(), "id": str(uuid.uuid4()),
                     "created_by": current_user.id, "created_at": datetime.now(timezone.utc).isoformat()}
     await db.payments.insert_one({**payment_data})
+    await sync_payment_journal_entry(payment_data["id"])
     payment_data.pop("_id", None)
     all_payments = await db.payments.find({"invoice_id": data.invoice_id}, {"_id": 0}).to_list(500)
     total_paid = sum(float(p.get("amount", 0)) for p in all_payments)
@@ -3741,6 +3771,7 @@ async def record_payment(data: PaymentCreate, current_user: User = Depends(check
     await db.invoices.update_one({"id": data.invoice_id},
         {"$set": {"amount_paid": round(total_paid, 2), "amount_due": amount_due, "status": new_status,
                   "updated_at": datetime.now(timezone.utc).isoformat()}})
+    await sync_invoice_journal_entry(data.invoice_id)
     return payment_data
 
 
@@ -3755,8 +3786,31 @@ async def list_payments(invoice_id: Optional[str] = None, current_user: User = D
 @router.delete("/payments/{pid}")
 async def delete_payment(pid: str, current_user: User = Depends(check_module_permission("invoicing", "delete"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
+    payment = await db.payments.find_one({"id": pid})
+    if not payment: raise HTTPException(404, "Payment not found")
+    invoice_id = payment.get("invoice_id")
+
+    # Delete from DB
     result = await db.payments.delete_one({"id": pid})
     if result.deleted_count == 0: raise HTTPException(404, f"Payment {pid} not found")
+
+    # Sync payment to ledger (will delete its journal entry)
+    await sync_payment_journal_entry(pid)
+
+    # Recalculate invoice payments & status
+    if invoice_id:
+        inv = await db.invoices.find_one({"id": invoice_id})
+        if inv:
+            all_payments = await db.payments.find({"invoice_id": invoice_id}, {"_id": 0}).to_list(500)
+            total_paid = sum(float(p.get("amount", 0)) for p in all_payments)
+            grand_total = float(inv.get("grand_total", 0))
+            amount_due = round(max(grand_total - total_paid, 0), 2)
+            new_status = "paid" if amount_due <= 0 else ("partially_paid" if total_paid > 0 else "sent")
+            await db.invoices.update_one({"id": invoice_id},
+                {"$set": {"amount_paid": round(total_paid, 2), "amount_due": amount_due, "status": new_status,
+                          "updated_at": datetime.now(timezone.utc).isoformat()}})
+            await sync_invoice_journal_entry(invoice_id)
+
     return {"message": f"Payment {pid} deleted"}
 
 
@@ -3775,5 +3829,215 @@ async def create_credit_note(data: CreditNoteCreate, current_user: User = Depend
            "status": "credit_note", "amount_paid": 0, "amount_due": 0, "pdf_drive_link": ""}
     raw = _compute_invoice_totals(raw)
     await db.invoices.insert_one({**raw})
+    await sync_invoice_journal_entry(raw["id"])
     raw.pop("_id", None)
     return raw
+
+
+# ═══════════════════════════════════════════════════════════
+# LEDGER SYNC HELPERS (links invoicing and payments to ledger)
+# ═══════════════════════════════════════════════════════════
+
+async def sync_invoice_journal_entry(invoice_id: str):
+    from backend.accounting_core import get_default_account_id, post_journal_entry
+    
+    # 1. Clean up any existing journal entries for this invoice
+    existing_entry = await db.journal_entries.find_one({"source": "sale", "source_id": invoice_id})
+    if existing_entry:
+        await db.journal_lines.delete_many({"entry_id": existing_entry["id"]})
+        await db.journal_entries.delete_one({"id": existing_entry["id"]})
+        
+    # 2. Fetch the current invoice document
+    inv = await db.invoices.find_one({"id": invoice_id})
+    if not inv:
+        return
+        
+    # 3. If invoice is draft or cancelled, we don't post a journal entry
+    status = inv.get("status", "draft")
+    if status in ("draft", "cancelled"):
+        return
+        
+    # 4. Extract required fields
+    company_id = inv.get("company_id") or ""
+    invoice_no = inv.get("invoice_no") or ""
+    client_name = inv.get("client_name") or "Client"
+    invoice_date = inv.get("invoice_date") or date.today().isoformat()
+    invoice_type = inv.get("invoice_type") or "tax_invoice"
+    
+    grand_total = float(inv.get("grand_total") or 0)
+    total_gst = float(inv.get("total_gst") or 0)
+    
+    if grand_total <= 0:
+        return
+        
+    # 5. Get default ledger account IDs
+    ar_id = await get_default_account_id(company_id, "1100")  # Accounts Receivable
+    sales_id = await get_default_account_id(company_id, "4000")  # Sales / Fee Income
+    gst_pay_id = await get_default_account_id(company_id, "2100")  # GST Output Payable
+    
+    if not ar_id or not sales_id or not gst_pay_id:
+        return
+        
+    sales_amount = round(grand_total - total_gst, 2)
+    
+    # Create the double-entry lines
+    if invoice_type == "credit_note" or status == "credit_note":
+        # Credit Note logic: reduces accounts receivable and sales revenue
+        lines = [
+            {"account_id": sales_id, "account_name": "Sales / Fee Income", "debit": sales_amount, "credit": 0.0, "memo": f"Reversal of sales for Credit Note {invoice_no}"},
+            {"account_id": ar_id, "account_name": "Accounts Receivable", "debit": 0.0, "credit": grand_total, "memo": f"Credit Note {invoice_no} to {client_name}"}
+        ]
+        if total_gst > 0:
+            lines.append({"account_id": gst_pay_id, "account_name": "GST Output Payable", "debit": total_gst, "credit": 0.0, "memo": f"GST Reversal on Credit Note {invoice_no}"})
+        narration = f"Credit Note {invoice_no} issued to {client_name}"
+    else:
+        # Standard invoice logic: increases accounts receivable and sales revenue
+        lines = [
+            {"account_id": ar_id, "account_name": "Accounts Receivable", "debit": grand_total, "credit": 0.0, "memo": f"Invoice {invoice_no} to {client_name}"},
+            {"account_id": sales_id, "account_name": "Sales / Fee Income", "debit": 0.0, "credit": sales_amount, "memo": f"Sales revenue from Invoice {invoice_no}"}
+        ]
+        if total_gst > 0:
+            lines.append({"account_id": gst_pay_id, "account_name": "GST Output Payable", "debit": 0.0, "credit": total_gst, "memo": f"GST Output on Invoice {invoice_no}"})
+        narration = f"Sales Invoice {invoice_no} to {client_name}"
+        
+    try:
+        await post_journal_entry(
+            company_id=company_id,
+            entry_date=invoice_date,
+            narration=narration,
+            lines=lines,
+            source="sale",
+            source_id=invoice_id,
+            created_by=inv.get("created_by", "system")
+        )
+    except Exception as e:
+        logging.error(f"Error posting invoice journal entry: {e}")
+
+
+async def sync_payment_journal_entry(payment_id: str):
+    from backend.accounting_core import get_default_account_id, post_journal_entry
+    
+    # 1. Clean up any existing journal entries for this payment
+    existing_entry = await db.journal_entries.find_one({"source": "payment", "source_id": payment_id})
+    if existing_entry:
+        await db.journal_lines.delete_many({"entry_id": existing_entry["id"]})
+        await db.journal_entries.delete_one({"id": existing_entry["id"]})
+        
+    # 2. Fetch the current payment document
+    payment = await db.payments.find_one({"id": payment_id})
+    if not payment:
+        return
+        
+    invoice_id = payment.get("invoice_id")
+    inv = await db.invoices.find_one({"id": invoice_id})
+    invoice_no = inv.get("invoice_no") if inv else "Unknown"
+    client_name = inv.get("client_name") if inv else "Client"
+    
+    company_id = payment.get("company_id") or (inv.get("company_id") if inv else "")
+    amount = float(payment.get("amount") or 0)
+    payment_date = payment.get("payment_date") or date.today().isoformat()
+    payment_mode = str(payment.get("payment_mode") or "bank").strip().lower()
+    
+    if amount <= 0:
+        return
+        
+    # 3. Resolve accounts
+    ar_id = await get_default_account_id(company_id, "1100")  # Accounts Receivable
+    cash_id = await get_default_account_id(company_id, "1000")  # Cash in Hand
+    bank_id = await get_default_account_id(company_id, "1010")  # Bank Accounts
+    
+    if not ar_id or not cash_id or not bank_id:
+        return
+        
+    # Decide debit account based on payment mode
+    debit_acct_id = cash_id if payment_mode == "cash" else bank_id
+    debit_acct_name = "Cash in Hand" if payment_mode == "cash" else "Bank Accounts"
+    
+    lines = [
+        {"account_id": debit_acct_id, "account_name": debit_acct_name, "debit": amount, "credit": 0.0, "memo": f"Receipt for Inv {invoice_no} via {payment_mode.upper()}"},
+        {"account_id": ar_id, "account_name": "Accounts Receivable", "debit": 0.0, "credit": amount, "memo": f"Invoice {invoice_no} payment by {client_name}"}
+    ]
+    
+    narration = f"Receipt from {client_name} for Invoice {invoice_no} ({payment_mode.upper()})"
+    
+    try:
+        await post_journal_entry(
+            company_id=company_id,
+            entry_date=payment_date,
+            narration=narration,
+            lines=lines,
+            source="payment",
+            source_id=payment_id,
+            created_by=payment.get("created_by", "system")
+        )
+    except Exception as e:
+        logging.error(f"Error posting payment journal entry: {e}")
+
+
+async def reconcile_and_sync_all_sales_and_payments(company_id: str):
+    try:
+        # 1. Fetch all invoices for this company from the database
+        invoices = await db.invoices.find({"company_id": company_id}).to_list(10000)
+        invoice_ids = {inv["id"] for inv in invoices}
+        active_invoices = [inv for inv in invoices if inv.get("status", "draft") not in ("draft", "cancelled")]
+        active_invoice_ids = {inv["id"] for inv in active_invoices}
+        
+        # 2. Fetch all existing journal entries with source "sale" for this company
+        existing_sale_entries = await db.journal_entries.find({"company_id": company_id, "source": "sale"}).to_list(10000)
+        sale_entry_by_source_id = {se["source_id"]: se for se in existing_sale_entries if se.get("source_id")}
+        
+        # 3. Clean up stale sale entries (deleted, draft, or cancelled invoices)
+        stale_sale_ids = []
+        for source_id, se in sale_entry_by_source_id.items():
+            if source_id not in active_invoice_ids:
+                stale_sale_ids.append(se["id"])
+                
+        if stale_sale_ids:
+            await db.journal_lines.delete_many({"entry_id": {"$in": stale_sale_ids}})
+            await db.journal_entries.delete_many({"id": {"$in": stale_sale_ids}})
+            
+        # 4. Sync missing/outdated sale entries
+        for inv in active_invoices:
+            inv_id = inv["id"]
+            se = sale_entry_by_source_id.get(inv_id)
+            if not se or abs(float(se.get("total_debit", 0)) - float(inv.get("grand_total", 0))) > 0.01:
+                await sync_invoice_journal_entry(inv_id)
+                
+        # 5. Fetch all payments for this company
+        payments = await db.payments.find({"company_id": company_id}).to_list(10000)
+        if invoice_ids:
+            missing_payments = await db.payments.find({
+                "invoice_id": {"$in": list(invoice_ids)},
+                "company_id": {"$exists": False}
+            }).to_list(10000)
+            pay_id_set = {p["id"] for p in payments}
+            for mp in missing_payments:
+                if mp["id"] not in pay_id_set:
+                    payments.append(mp)
+                    
+        payment_ids = {p["id"] for p in payments}
+        
+        # 6. Fetch existing payment journal entries
+        existing_pay_entries = await db.journal_entries.find({"company_id": company_id, "source": "payment"}).to_list(10000)
+        pay_entry_by_source_id = {pe["source_id"]: pe for pe in existing_pay_entries if pe.get("source_id")}
+        
+        # 7. Clean up stale payment entries (deleted payments)
+        stale_pay_ids = []
+        for source_id, pe in pay_entry_by_source_id.items():
+            if source_id not in payment_ids:
+                stale_pay_ids.append(pe["id"])
+                
+        if stale_pay_ids:
+            await db.journal_lines.delete_many({"entry_id": {"$in": stale_pay_ids}})
+            await db.journal_entries.delete_many({"id": {"$in": stale_pay_ids}})
+            
+        # 8. Sync missing/outdated payment entries
+        for p in payments:
+            p_id = p["id"]
+            pe = pay_entry_by_source_id.get(p_id)
+            if not pe or abs(float(pe.get("total_debit", 0)) - float(p.get("amount", 0))) > 0.01:
+                await sync_payment_journal_entry(p_id)
+                
+    except Exception as e:
+        logging.error(f"Error in reconcile_and_sync_all_sales_and_payments: {e}")
+
