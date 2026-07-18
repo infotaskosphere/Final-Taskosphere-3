@@ -153,22 +153,6 @@ class JournalEntryCreate(BaseModel):
     source: str = "manual"          # manual | purchase | sale | bank
     source_id: Optional[str] = None
     lines: List[JournalLine]
-    # Display/reference metadata (item 12 of the ledger spec) — optional so
-    # existing manual-entry callers keep working unchanged.
-    customer_id: Optional[str] = None
-    customer_name: str = ""
-    vendor_id: Optional[str] = None
-    vendor_name: str = ""
-    voucher_no: str = ""
-    invoice_no: str = ""
-    payment_mode: str = ""
-    bank_account: str = ""
-    reference_no: str = ""
-    linked_documents: List[str] = []
-
-
-class BulkDeleteRequest(BaseModel):
-    entry_ids: List[str]
 
 
 # ── Chart of Accounts routes ─────────────────────────────────────────────
@@ -221,17 +205,11 @@ async def delete_account(account_id: str, current_user: User = Depends(get_curre
 async def post_journal_entry(
     company_id: str, entry_date: str, narration: str, lines: List[dict],
     source: str, source_id: Optional[str], created_by: str,
-    extra: Optional[dict] = None,
 ) -> dict:
     """Core double-entry post. Raises ValueError if debits != credits.
     Used both by the manual Journal Entry endpoint and by auto-posting hooks
     from Purchase/Sale/Bank so every recorded transaction ends up in the
-    same ledger and reports.
-
-    `extra` carries the display/reference metadata used by the Journal
-    Entries UI and party ledgers (customer_name, vendor_name, voucher_no,
-    invoice_no, payment_mode, bank_account, reference_no,
-    linked_documents) — any keys not provided simply aren't set."""
+    same ledger and reports."""
     total_debit = round(sum(float(l.get("debit") or 0) for l in lines), 2)
     total_credit = round(sum(float(l.get("credit") or 0) for l in lines), 2)
     if abs(total_debit - total_credit) > 0.01:
@@ -247,9 +225,6 @@ async def post_journal_entry(
         "total_debit": total_debit, "total_credit": total_credit,
         "created_by": created_by, "created_at": now,
     }
-    for k, v in (extra or {}).items():
-        if v not in (None, "", []):
-            entry_doc[k] = v
     await db.journal_entries.insert_one(entry_doc)
 
     line_docs = []
@@ -266,13 +241,12 @@ async def post_journal_entry(
 
 
 async def try_auto_post(company_id: str, entry_date: str, narration: str, lines: List[dict],
-                         source: str, source_id: Optional[str], created_by: str,
-                         extra: Optional[dict] = None) -> Optional[dict]:
+                         source: str, source_id: Optional[str], created_by: str) -> Optional[dict]:
     """Best-effort wrapper for call sites (Purchase/Sale/Bank) that must
     never fail the parent request just because auto-posting hit an edge
     case (e.g. a missing default account on a brand-new company)."""
     try:
-        return await post_journal_entry(company_id, entry_date, narration, lines, source, source_id, created_by, extra)
+        return await post_journal_entry(company_id, entry_date, narration, lines, source, source_id, created_by)
     except Exception:
         return None
 
@@ -311,69 +285,24 @@ async def _reconcile_all_books(book_ids: List[str]):
 async def create_journal_entry(payload: JournalEntryCreate, current_user: User = Depends(get_current_user)):
     if not _perm_post_journal(current_user):
         raise HTTPException(403, "Access denied. Request access from your admin in Permission Governance.")
-    extra = {
-        "customer_id": payload.customer_id, "customer_name": payload.customer_name,
-        "vendor_id": payload.vendor_id, "vendor_name": payload.vendor_name,
-        "voucher_no": payload.voucher_no, "invoice_no": payload.invoice_no,
-        "payment_mode": payload.payment_mode, "bank_account": payload.bank_account,
-        "reference_no": payload.reference_no, "linked_documents": payload.linked_documents,
-    }
     try:
         doc = await post_journal_entry(
             payload.company_id, payload.entry_date, payload.narration.strip(),
-            [l.model_dump() for l in payload.lines], "manual", None, current_user.id, extra,
+            [l.model_dump() for l in payload.lines], "manual", None, current_user.id,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
     return doc
 
 
-@router.post("/journal-entries/bulk-delete")
-async def bulk_delete_journal_entries(payload: BulkDeleteRequest, current_user: User = Depends(get_current_user)):
-    if not _perm_post_journal(current_user):
-        raise HTTPException(403, "Access denied.")
-    from backend.accounting_lock import guard_deletion
-    deleted_count = 0
-    failed = []
-    for entry_id in payload.entry_ids:
-        entry = await db.journal_entries.find_one({"id": entry_id})
-        if not entry:
-            failed.append({"id": entry_id, "reason": "Not found"})
-            continue
-        if entry.get("source") != "manual" and current_user.role != "admin":
-            failed.append({"id": entry_id, "reason": "Only an admin can delete auto-posted entries"})
-            continue
-        try:
-            await guard_deletion(entry_id, current_user)
-        except HTTPException as e:
-            failed.append({"id": entry_id, "reason": e.detail})
-            continue
-        await db.journal_lines.delete_many({"entry_id": entry_id})
-        await db.journal_entries.delete_one({"id": entry_id})
-        deleted_count += 1
-    return {"deleted_count": deleted_count, "failed": failed}
-
-
 @router.get("/journal-entries")
 async def list_journal_entries(
     company_id: str = Query(""), date_from: Optional[str] = Query(None), date_to: Optional[str] = Query(None),
-    source: Optional[str] = Query(None), page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=500),
-    current_user: User = Depends(get_current_user),
+    source: Optional[str] = Query(None), current_user: User = Depends(get_current_user),
 ):
     if not _perm_view_journal(current_user):
         raise HTTPException(403, "Access denied.")
-
-    all_companies = not company_id
-    # "All Companies" must reconcile every book, not just the empty-company_id
-    # one, or entries tied to a real company never show up (this is also why
-    # the list used to appear to stop dead partway through the year — every
-    # invoice/payment posted under a real company_id was invisible here).
-    if all_companies:
-        await _reconcile_all_books(await _all_book_ids())
-    else:
-        await _reconcile_one_book(company_id)
-
-    q: dict = {} if all_companies else {"company_id": company_id}
+    q: dict = {"company_id": company_id}
     if date_from or date_to:
         q["entry_date"] = {}
         if date_from:
@@ -382,10 +311,7 @@ async def list_journal_entries(
             q["entry_date"]["$lte"] = date_to
     if source:
         q["source"] = source
-
-    total = await db.journal_entries.count_documents(q)
-    skip = (page - 1) * page_size
-    entries = await db.journal_entries.find(q, {"_id": 0}).sort("entry_date", -1).skip(skip).limit(page_size).to_list(page_size)
+    entries = await db.journal_entries.find(q, {"_id": 0}).sort("entry_date", -1).to_list(2000)
     ids = [e["id"] for e in entries]
     lines = await db.journal_lines.find({"entry_id": {"$in": ids}}, {"_id": 0}).to_list(10000)
     by_entry = {}
@@ -393,10 +319,39 @@ async def list_journal_entries(
         by_entry.setdefault(l["entry_id"], []).append(l)
     for e in entries:
         e["lines"] = by_entry.get(e["id"], [])
-    return {
-        "entries": entries, "total": total, "page": page, "page_size": page_size,
-        "total_pages": max(1, (total + page_size - 1) // page_size),
-    }
+    return entries
+
+
+@router.post("/journal-entries/bulk-delete")
+async def bulk_delete_journal_entries(payload: dict, current_user: User = Depends(get_current_user)):
+    if not _perm_post_journal(current_user):
+        raise HTTPException(403, "Access denied.")
+    entry_ids = payload.get("entry_ids") or []
+    if not entry_ids:
+        raise HTTPException(400, "No entry_ids provided.")
+    from backend.accounting_lock import guard_deletion
+    deleted_ids, failed = [], []
+    for entry_id in entry_ids:
+        try:
+            entry = await db.journal_entries.find_one({"id": entry_id})
+            if not entry:
+                failed.append({"id": entry_id, "reason": "Not found"})
+                continue
+            if entry.get("source") != "manual" and current_user.role != "admin":
+                failed.append({"id": entry_id, "reason": "Only an admin can delete auto-posted entries"})
+                continue
+            await guard_deletion(entry_id, current_user)
+            deleted_ids.append(entry_id)
+        except HTTPException as e:
+            failed.append({"id": entry_id, "reason": e.detail})
+        except Exception as e:
+            failed.append({"id": entry_id, "reason": str(e)})
+
+    if deleted_ids:
+        await db.journal_lines.delete_many({"entry_id": {"$in": deleted_ids}})
+        await db.journal_entries.delete_many({"id": {"$in": deleted_ids}})
+
+    return {"deleted_count": len(deleted_ids), "failed": failed}
 
 
 @router.delete("/journal-entries/{entry_id}")
@@ -620,3 +575,108 @@ async def balance_sheet(company_id: str = Query(""), as_of: Optional[str] = Quer
         "total_assets": total_assets, "total_liabilities": total_liabilities, "total_equity": total_equity,
         "balanced": abs(total_assets - (total_liabilities + total_equity)) < 0.02,
     }
+
+
+# ── Party Ledger (Customer / Vendor statement) ──────────────────────────────
+@router.get("/reports/parties")
+async def list_ledger_parties(company_id: str = Query(""), current_user: User = Depends(get_current_user)):
+    """Every distinct client/supplier name that has at least one invoice, bill,
+    or payment — used to populate the Party Ledger picker."""
+    if not _perm_reports(current_user):
+        raise HTTPException(403, "Access denied.")
+    inv_q, pur_q = {}, {}
+    if company_id:
+        inv_q["company_id"] = company_id
+        pur_q["company_id"] = company_id
+    customers = await db.invoices.distinct("client_name", inv_q)
+    vendors = await db.purchase_invoices.distinct("supplier_name", pur_q)
+    return {
+        "customers": sorted([c for c in customers if c]),
+        "vendors": sorted([v for v in vendors if v]),
+    }
+
+
+@router.get("/reports/party-ledger")
+async def party_ledger(
+    party_name: str = Query(...), party_type: str = Query("customer"), company_id: str = Query(""),
+    date_from: Optional[str] = Query(None), date_to: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+):
+    """Statement of every transaction for one customer or vendor — invoices/
+    bills, receipts/payments, and credit/debit notes — with a running
+    balance, drawn from the same journal entries that back the other
+    reports (so it always agrees with Trial Balance / Balance Sheet)."""
+    if not _perm_reports(current_user):
+        raise HTTPException(403, "Access denied.")
+
+    all_companies = not company_id
+    if all_companies:
+        await _reconcile_all_books(await _all_book_ids())
+    else:
+        await _reconcile_one_book(company_id)
+
+    base_q: dict = {} if all_companies else {"company_id": company_id}
+
+    if party_type == "vendor":
+        doc_q = {**base_q, "supplier_name": party_name}
+        bills = await db.purchase_invoices.find(doc_q, {"_id": 0, "id": 1}).to_list(20000)
+        bill_ids = [b["id"] for b in bills]
+        pay_q = {**base_q, "$or": [{"supplier_name": party_name}, {"purchase_invoice_id": {"$in": bill_ids}}]}
+        payments = await db.purchase_payments.find(pay_q, {"_id": 0, "id": 1}).to_list(20000)
+        source_ids = bill_ids + [p["id"] for p in payments]
+        sources = ["purchase", "purchase_payment"]
+        control_code = "2000"  # Accounts Payable
+    else:
+        doc_q = {**base_q, "client_name": party_name}
+        invoices = await db.invoices.find(doc_q, {"_id": 0, "id": 1}).to_list(20000)
+        inv_ids = [i["id"] for i in invoices]
+        pay_q = {**base_q, "$or": [{"client_name": party_name}, {"invoice_id": {"$in": inv_ids}}]}
+        payments = await db.payments.find(pay_q, {"_id": 0, "id": 1}).to_list(20000)
+        source_ids = inv_ids + [p["id"] for p in payments]
+        sources = ["sale", "payment"]
+        control_code = "1100"  # Accounts Receivable
+
+    if not source_ids:
+        return {"party_name": party_name, "party_type": party_type, "rows": [], "closing_balance": 0.0}
+
+    entry_q: dict = {**base_q, "source": {"$in": sources}, "source_id": {"$in": source_ids}}
+    if date_from or date_to:
+        entry_q["entry_date"] = {}
+        if date_from:
+            entry_q["entry_date"]["$gte"] = date_from
+        if date_to:
+            entry_q["entry_date"]["$lte"] = date_to
+    entries = await db.journal_entries.find(entry_q, {"_id": 0}).sort("entry_date", 1).to_list(20000)
+    entry_ids = [e["id"] for e in entries]
+    lines = await db.journal_lines.find({"entry_id": {"$in": entry_ids}}, {"_id": 0}).to_list(50000)
+    lines_by_entry: dict = {}
+    for l in lines:
+        lines_by_entry.setdefault(l["entry_id"], []).append(l)
+
+    # Only the control-account line (AR for customers, AP for vendors)
+    # drives the running balance — the offsetting line (Sales/Bank/etc.) is
+    # informational only, same convention as Tally/Zoho party statements.
+    # Resolve every account id that matches the control code once up front
+    # (there can be more than one across companies when aggregating "All
+    # Companies") rather than querying per entry.
+    coa_q = {"code": control_code}
+    if not all_companies:
+        coa_q["company_id"] = company_id
+    control_acct_ids = {a["id"] for a in await db.chart_of_accounts.find(coa_q, {"_id": 0, "id": 1}).to_list(2000)}
+
+    rows, balance = [], 0.0
+    for e in entries:
+        control_line = next(
+            (l for l in lines_by_entry.get(e["id"], []) if l["account_id"] in control_acct_ids), None
+        )
+        if not control_line:
+            continue
+        movement = control_line["debit"] - control_line["credit"]
+        balance = round(balance + movement, 2)
+        rows.append({
+            "date": e["entry_date"], "narration": e["narration"], "source": e["source"],
+            "debit": round(control_line["debit"], 2), "credit": round(control_line["credit"], 2),
+            "balance": balance,
+        })
+
+    return {"party_name": party_name, "party_type": party_type, "rows": rows, "closing_balance": balance}
