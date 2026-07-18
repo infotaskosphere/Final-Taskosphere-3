@@ -1,49 +1,112 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Lock, RefreshCw, ShieldCheck, PlusCircle, X } from 'lucide-react';
+import { Lock, RefreshCw, ShieldCheck, PlusCircle, X, ArrowUpCircle, ArrowDownCircle, Wand2, SlidersHorizontal, Info } from 'lucide-react';
 import { ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
+import { GuidanceNote } from '@/components/ui/GuidanceNote.jsx';
 
 const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 
-function AdjustmentDrawer({ entry, isDark, onClose, onSaved }) {
+// Accounts whose normal balance goes UP with a debit (asset, expense) vs
+// accounts whose normal balance goes UP with a credit (liability, equity,
+// income). This is what lets the modal ask "should this go up or down?"
+// in plain English and work out the correct debit/credit itself.
+const DEBIT_NORMAL_TYPES = ['asset', 'expense'];
+const isDebitNormal = (type) => DEBIT_NORMAL_TYPES.includes((type || '').toLowerCase());
+
+// direction: 'increase' | 'decrease'  →  returns 'debit' | 'credit'
+function sideFor(accountType, direction) {
+  const debitNormal = isDebitNormal(accountType);
+  if (direction === 'increase') return debitNormal ? 'debit' : 'credit';
+  return debitNormal ? 'credit' : 'debit';
+}
+
+const REASON_PRESETS = [
+  { label: 'Wrong amount', text: 'The amount on this entry was entered incorrectly and needs to be corrected.' },
+  { label: 'Wrong account used', text: 'This was recorded against the wrong account/category and needs to be moved to the correct one.' },
+  { label: 'Duplicate entry', text: 'This entry was posted twice by mistake — this adjustment cancels out the duplicate.' },
+];
+
+function emptyAdvLine() { return { account_id: '', debit: '', credit: '', memo: '' }; }
+
+function AdjustmentDrawer({ entry, accounts, isDark, onClose, onSaved }) {
   const [reason, setReason] = useState('');
-  const [lines, setLines] = useState([
-    { account_id: '', account_name: '', debit: 0, credit: 0, memo: '' },
-    { account_id: '', account_name: '', debit: 0, credit: 0, memo: '' },
-  ]);
+  const [advanced, setAdvanced] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const updateLine = (i, field, value) => {
-    const next = [...lines];
-    next[i] = { ...next[i], [field]: field === 'debit' || field === 'credit' ? Number(value || 0) : value };
-    setLines(next);
+  // ── Simple mode state ────────────────────────────────────────────────
+  const [increaseId, setIncreaseId] = useState('');
+  const [decreaseId, setDecreaseId] = useState('');
+  const [amount, setAmount] = useState('');
+
+  // ── Advanced mode state (original multi-line debit/credit table) ─────
+  const [advLines, setAdvLines] = useState([emptyAdvLine(), emptyAdvLine()]);
+
+  const accountById = useMemo(() => {
+    const m = {};
+    accounts.forEach((a) => { m[a.id] = a; });
+    return m;
+  }, [accounts]);
+
+  const acctLabel = (a) => (a ? `${a.code ? a.code + ' — ' : ''}${a.name}` : '');
+
+  const updateAdvLine = (i, field, value) => {
+    const next = [...advLines];
+    next[i] = { ...next[i], [field]: field === 'debit' || field === 'credit' ? value : value };
+    setAdvLines(next);
   };
 
-  const totalDebit = lines.reduce((s, l) => s + Number(l.debit || 0), 0);
-  const totalCredit = lines.reduce((s, l) => s + Number(l.credit || 0), 0);
+  // Build the actual correcting lines the API expects, from whichever
+  // mode is active.
+  const builtLines = useMemo(() => {
+    if (!advanced) {
+      const incAcct = accountById[increaseId];
+      const decAcct = accountById[decreaseId];
+      const amt = Number(amount || 0);
+      if (!incAcct || !decAcct || !amt) return [];
+      const incSide = sideFor(incAcct.type, 'increase');
+      const decSide = sideFor(decAcct.type, 'decrease');
+      return [
+        { account_id: incAcct.id, account_name: acctLabel(incAcct), debit: incSide === 'debit' ? amt : 0, credit: incSide === 'credit' ? amt : 0, memo: '' },
+        { account_id: decAcct.id, account_name: acctLabel(decAcct), debit: decSide === 'debit' ? amt : 0, credit: decSide === 'credit' ? amt : 0, memo: '' },
+      ];
+    }
+    return advLines
+      .filter((l) => l.account_id && (Number(l.debit) > 0 || Number(l.credit) > 0))
+      .map((l) => ({ account_id: l.account_id, account_name: acctLabel(accountById[l.account_id]), debit: Number(l.debit || 0), credit: Number(l.credit || 0), memo: l.memo }));
+  }, [advanced, increaseId, decreaseId, amount, advLines, accountById]);
+
+  const totalDebit = builtLines.reduce((s, l) => s + Number(l.debit || 0), 0);
+  const totalCredit = builtLines.reduce((s, l) => s + Number(l.credit || 0), 0);
   const balanced = Math.abs(totalDebit - totalCredit) < 0.01 && totalDebit > 0;
 
+  // Why a simple increase/decrease pair might fail to balance — the two
+  // accounts sit on opposite sides of the accounting equation (e.g. one
+  // asset + one liability). Rare, but worth explaining rather than just
+  // showing a red error.
+  const simpleMismatch = !advanced && increaseId && decreaseId && amount && !balanced;
+
   const submit = async () => {
-    if (reason.trim().length < 10) { toast.error('Reason must be at least 10 characters.'); return; }
-    if (!balanced) { toast.error('Correcting lines must balance (debit = credit).'); return; }
-    if (lines.some(l => !l.account_id.trim())) { toast.error('Every line needs an Account ID.'); return; }
+    if (reason.trim().length < 10) { toast.error('Please add a short reason (at least 10 characters).'); return; }
+    if (builtLines.length < 2) { toast.error(advanced ? 'Add at least two lines.' : 'Pick both an account to increase and one to decrease, plus an amount.'); return; }
+    if (!balanced) { toast.error(advanced ? 'Debits must equal credits.' : "Those two accounts can't be balanced against each other this way — try Advanced mode, or pick two accounts of a similar kind (e.g. both expenses)."); return; }
     setSaving(true);
     try {
       await api.post('/accounting-integrity/adjustment-note', {
         original_entry_id: entry.id,
         company_id: entry.company_id || '',
         reason: reason.trim(),
-        correcting_lines: lines,
+        correcting_lines: builtLines,
       });
-      toast.success('Adjustment Note Override posted.');
+      toast.success('Adjustment posted — the original entry is untouched and both stay visible.');
       onSaved();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Could not post adjustment note');
@@ -52,41 +115,137 @@ function AdjustmentDrawer({ entry, isDark, onClose, onSaved }) {
     }
   };
 
+  const inputCls = isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-700';
+
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div className={`w-full max-w-2xl rounded-2xl shadow-2xl p-6 ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className={`font-bold text-lg ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Adjustment Note Override</h3>
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4 overflow-y-auto">
+      <div className={`w-full max-w-2xl rounded-2xl shadow-2xl p-6 my-8 ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+        <div className="flex items-center justify-between mb-1">
+          <h3 className={`font-bold text-lg ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Fix this entry</h3>
           <Button variant="ghost" size="icon" onClick={onClose}><X className="h-4 w-4" /></Button>
         </div>
-        <p className={`text-sm mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-          Correcting entry <span className="font-mono">{entry.id.slice(0, 8)}…</span> ({entry.narration}) — this posts a new,
-          separately-tracked correcting voucher; the original stays untouched and permanently visible.
+        <p className={`text-sm mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+          Correcting <span className="font-semibold">{entry.narration}</span> ({fmtC(entry.total_debit)}) — this adds a new
+          correcting note next to the original. Nothing is deleted or silently changed.
         </p>
-        <Textarea placeholder="Reason for this adjustment (min 10 characters)…" value={reason} onChange={(e) => setReason(e.target.value)} className="mb-4" />
 
-        <div className="space-y-2 mb-2">
-          {lines.map((l, i) => (
-            <div key={i} className="grid grid-cols-5 gap-2">
-              <Input placeholder="Account ID" value={l.account_id} onChange={(e) => updateLine(i, 'account_id', e.target.value)} className="col-span-2" />
-              <Input placeholder="Debit" type="number" value={l.debit} onChange={(e) => updateLine(i, 'debit', e.target.value)} />
-              <Input placeholder="Credit" type="number" value={l.credit} onChange={(e) => updateLine(i, 'credit', e.target.value)} />
-              <Input placeholder="Memo" value={l.memo} onChange={(e) => updateLine(i, 'memo', e.target.value)} />
-            </div>
-          ))}
+        {/* Mode toggle */}
+        <div className={`flex items-center gap-1 rounded-xl border p-1 mb-4 w-fit ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+          <button
+            onClick={() => setAdvanced(false)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${!advanced ? 'text-white' : isDark ? 'text-slate-300' : 'text-slate-600'}`}
+            style={!advanced ? { background: '#1F6FB2' } : {}}
+          >
+            <Wand2 className="h-3.5 w-3.5" /> Simple
+          </button>
+          <button
+            onClick={() => setAdvanced(true)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${advanced ? 'text-white' : isDark ? 'text-slate-300' : 'text-slate-600'}`}
+            style={advanced ? { background: '#1F6FB2' } : {}}
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" /> Advanced
+          </button>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setLines([...lines, { account_id: '', account_name: '', debit: 0, credit: 0, memo: '' }])}>
-          <PlusCircle className="h-4 w-4 mr-1" /> Add Line
-        </Button>
 
-        <div className={`flex items-center justify-between mt-4 text-sm ${balanced ? 'text-emerald-500' : 'text-red-500'}`}>
-          <span>Debit: {fmtC(totalDebit)} · Credit: {fmtC(totalCredit)}</span>
-          <span>{balanced ? 'Balanced ✓' : 'Debits must equal credits'}</span>
+        {!advanced ? (
+          <div className="space-y-3">
+            <div className={`rounded-xl border p-3 ${isDark ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-emerald-50 border-emerald-200'}`}>
+              <label className={`text-xs font-bold flex items-center gap-1.5 mb-1.5 ${isDark ? 'text-emerald-300' : 'text-emerald-800'}`}>
+                <ArrowUpCircle className="h-3.5 w-3.5" /> Which account should go UP?
+              </label>
+              <Select value={increaseId} onValueChange={setIncreaseId}>
+                <SelectTrigger className="h-10 bg-white"><SelectValue placeholder="Search for an account…" /></SelectTrigger>
+                <SelectContent>
+                  {accounts.map((a) => <SelectItem key={a.id} value={a.id}>{acctLabel(a)}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className={`rounded-xl border p-3 ${isDark ? 'bg-rose-500/10 border-rose-500/30' : 'bg-rose-50 border-rose-200'}`}>
+              <label className={`text-xs font-bold flex items-center gap-1.5 mb-1.5 ${isDark ? 'text-rose-300' : 'text-rose-800'}`}>
+                <ArrowDownCircle className="h-3.5 w-3.5" /> Which account should go DOWN?
+              </label>
+              <Select value={decreaseId} onValueChange={setDecreaseId}>
+                <SelectTrigger className="h-10 bg-white"><SelectValue placeholder="Search for an account…" /></SelectTrigger>
+                <SelectContent>
+                  {accounts.map((a) => <SelectItem key={a.id} value={a.id}>{acctLabel(a)}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label className={`text-xs font-bold mb-1.5 block ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>By how much?</label>
+              <Input type="number" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} className={inputCls} />
+            </div>
+
+            {increaseId && decreaseId && amount > 0 && (
+              <p className={`text-sm rounded-xl p-3 ${isDark ? 'bg-slate-900/50 text-slate-300' : 'bg-slate-50 text-slate-600'}`}>
+                This will move <span className="font-bold">{fmtC(amount)}</span> — increasing{' '}
+                <span className="font-bold">{acctLabel(accountById[increaseId])}</span> and decreasing{' '}
+                <span className="font-bold">{acctLabel(accountById[decreaseId])}</span>.
+              </p>
+            )}
+
+            {simpleMismatch && (
+              <p className={`text-xs rounded-xl p-3 flex items-start gap-2 ${isDark ? 'bg-amber-500/10 text-amber-300' : 'bg-amber-50 text-amber-800'}`}>
+                <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                These two accounts can't be balanced against each other this way — try picking two accounts of a
+                similar kind (e.g. both expenses, or both assets), or switch to Advanced mode.
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className={`text-xs rounded-xl p-3 flex items-start gap-2 ${isDark ? 'bg-slate-900/50 text-slate-400' : 'bg-slate-50 text-slate-500'}`}>
+              <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+              Debit increases what you own or spend; Credit increases what you owe or earn. Totals must match below.
+            </p>
+            <div className="space-y-2">
+              {advLines.map((l, i) => (
+                <div key={i} className="grid grid-cols-[1fr_90px_90px_1fr_28px] gap-2 items-center">
+                  <Select value={l.account_id} onValueChange={(v) => updateAdvLine(i, 'account_id', v)}>
+                    <SelectTrigger className="h-9"><SelectValue placeholder="Account" /></SelectTrigger>
+                    <SelectContent>
+                      {accounts.map((a) => <SelectItem key={a.id} value={a.id}>{acctLabel(a)}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Input placeholder="Debit" type="number" value={l.debit} onChange={(e) => updateAdvLine(i, 'debit', e.target.value)} className="h-9" />
+                  <Input placeholder="Credit" type="number" value={l.credit} onChange={(e) => updateAdvLine(i, 'credit', e.target.value)} className="h-9" />
+                  <Input placeholder="Memo (optional)" value={l.memo} onChange={(e) => updateAdvLine(i, 'memo', e.target.value)} className="h-9" />
+                  <button onClick={() => setAdvLines(advLines.filter((_, idx) => idx !== i))} className="text-slate-300 hover:text-rose-500"><X className="h-4 w-4" /></button>
+                </div>
+              ))}
+            </div>
+            <Button variant="outline" size="sm" onClick={() => setAdvLines([...advLines, emptyAdvLine()])}>
+              <PlusCircle className="h-4 w-4 mr-1" /> Add line
+            </Button>
+            <div className={`flex items-center justify-between text-sm ${balanced ? 'text-emerald-500' : 'text-red-500'}`}>
+              <span>Debit: {fmtC(totalDebit)} · Credit: {fmtC(totalCredit)}</span>
+              <span>{balanced ? 'Balanced ✓' : 'Debits must equal credits'}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Reason */}
+        <div className="mt-5">
+          <label className={`text-xs font-bold mb-1.5 block ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Why is this being corrected?</label>
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {REASON_PRESETS.map((p) => (
+              <button
+                key={p.label}
+                onClick={() => setReason(p.text)}
+                className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${isDark ? 'border-slate-700 text-slate-300 hover:bg-slate-700/50' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <Textarea placeholder="Reason for this adjustment (min 10 characters)…" value={reason} onChange={(e) => setReason(e.target.value)} />
         </div>
 
         <div className="flex justify-end gap-2 mt-5">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={submit} disabled={saving}>{saving ? 'Posting…' : 'Post Adjustment Note'}</Button>
+          <Button onClick={submit} disabled={saving}>{saving ? 'Posting…' : 'Post correction'}</Button>
         </div>
       </div>
     </div>
@@ -98,17 +257,20 @@ function AccountingIntegrityInner() {
   const [loading, setLoading] = useState(true);
   const [locked, setLocked] = useState([]);
   const [notes, setNotes] = useState([]);
+  const [accounts, setAccounts] = useState([]);
   const [activeEntry, setActiveEntry] = useState(null);
 
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const [le, an] = await Promise.allSettled([
+      const [le, an, ac] = await Promise.allSettled([
         api.get('/accounting-integrity/locked-entries'),
         api.get('/accounting-integrity/adjustment-notes'),
+        api.get('/chart-of-accounts'),
       ]);
       setLocked(le.status === 'fulfilled' ? le.value.data : []);
       setNotes(an.status === 'fulfilled' ? an.value.data : []);
+      setAccounts(ac.status === 'fulfilled' ? (ac.value.data || []) : []);
     } catch {
       toast.error('Failed to load integrity data');
     } finally {
@@ -142,6 +304,8 @@ function AccountingIntegrityInner() {
             <Button onClick={fetchAll} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20"><RefreshCw className="h-4 w-4 mr-2" /> Refresh</Button>
           </div>
         </div>
+
+        <GuidanceNote pageKey="accounting-integrity" isDark={isDark} />
 
         <div className={`rounded-3xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <div className="p-4 border-b flex items-center gap-2" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
@@ -177,7 +341,7 @@ function AccountingIntegrityInner() {
                         : <span className={isDark ? 'text-slate-500' : 'text-slate-400'}>—</span>}
                     </TableCell>
                     <TableCell>
-                      <Button size="sm" variant="outline" onClick={() => setActiveEntry(e)}>Raise Adjustment</Button>
+                      <Button size="sm" variant="outline" onClick={() => setActiveEntry(e)}>Fix this entry</Button>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -220,6 +384,7 @@ function AccountingIntegrityInner() {
       {activeEntry && (
         <AdjustmentDrawer
           entry={activeEntry}
+          accounts={accounts}
           isDark={isDark}
           onClose={() => setActiveEntry(null)}
           onSaved={() => { setActiveEntry(null); fetchAll(); }}
