@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import {
   ScanLine, UploadCloud, RefreshCw, CheckCircle2, AlertTriangle,
   Sparkles, FileText, Settings2, Plus, Building2, Banknote,
-  Eye, ThumbsUp, ThumbsDown, Clock, Bot,
+  Eye, ThumbsUp, ThumbsDown, Clock, Bot, Pencil, Save, X as XIcon,
 } from 'lucide-react';
 import { ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
@@ -15,6 +15,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
@@ -64,6 +65,7 @@ function ZeroTouchEntryInner() {
   const [docs, setDocs] = useState([]);
   const [rules, setRules] = useState([]);
   const [companies, setCompanies] = useState([]);
+  const [accounts, setAccounts] = useState([]);
   const [uploadCompanyId, setUploadCompanyId] = useState('');
   const [newRule, setNewRule] = useState({ match: '', account_code: '', label: '' });
   const [previewDoc, setPreviewDoc] = useState(null);       // doc shown in the review dialog
@@ -71,6 +73,9 @@ function ZeroTouchEntryInner() {
   const [rejectDoc, setRejectDoc] = useState(null);         // doc being rejected
   const [rejectReason, setRejectReason] = useState('');
   const [rejecting, setRejecting] = useState(false);
+  const [editingLines, setEditingLines] = useState(false);  // review dialog: correcting the AI-picked account(s)
+  const [draftLines, setDraftLines] = useState([]);
+  const [savingLines, setSavingLines] = useState(false);
 
   const fetchDocs = async () => {
     try {
@@ -95,9 +100,16 @@ function ZeroTouchEntryInner() {
     } catch { /* non-fatal */ }
   };
 
+  const fetchAccounts = async () => {
+    try {
+      const { data } = await api.get('/chart-of-accounts');
+      setAccounts(data || []);
+    } catch { /* non-fatal — edit-account controls just won't have options */ }
+  };
+
   const fetchAll = async () => {
     setLoading(true);
-    await Promise.allSettled([fetchDocs(), fetchRules(), fetchCompanies()]);
+    await Promise.allSettled([fetchDocs(), fetchRules(), fetchCompanies(), fetchAccounts()]);
     setLoading(false);
   };
 
@@ -150,7 +162,56 @@ function ZeroTouchEntryInner() {
     }
   };
 
-  const openPreview = (doc) => setPreviewDoc(doc);
+  const openPreview = (doc) => {
+    setPreviewDoc(doc);
+    setEditingLines(false);
+    setDraftLines((doc?.preview?.lines || []).map((l) => ({ ...l })));
+  };
+
+  const startEditingLines = () => {
+    setDraftLines((previewDoc?.preview?.lines || []).map((l) => ({ ...l })));
+    setEditingLines(true);
+  };
+
+  const updateDraftLine = (i, field, value) => {
+    setDraftLines((prev) => {
+      const next = [...prev];
+      if (field === 'account_id') {
+        const acct = accounts.find((a) => a.id === value);
+        next[i] = { ...next[i], account_id: value, account_name: acct ? `${acct.code ? acct.code + ' — ' : ''}${acct.name}` : next[i].account_name };
+      } else {
+        next[i] = { ...next[i], [field]: value };
+      }
+      return next;
+    });
+  };
+
+  const draftTotalDebit = draftLines.reduce((s, l) => s + Number(l.debit || 0), 0);
+  const draftTotalCredit = draftLines.reduce((s, l) => s + Number(l.credit || 0), 0);
+  const draftBalanced = Math.abs(draftTotalDebit - draftTotalCredit) < 0.01 && draftTotalDebit > 0;
+
+  const saveDraftLines = async () => {
+    if (!previewDoc) return;
+    if (!draftBalanced) { toast.error('Debits must equal credits before saving.'); return; }
+    setSavingLines(true);
+    try {
+      const { data } = await api.post(`/zte/documents/${previewDoc.id}/update-preview`, {
+        lines: draftLines.map((l) => ({
+          account_id: l.account_id, account_name: l.account_name || '',
+          debit: Number(l.debit || 0), credit: Number(l.credit || 0), memo: l.memo || '',
+        })),
+      });
+      const updatedDoc = { ...previewDoc, preview: data.preview };
+      setPreviewDoc(updatedDoc);
+      setDocs((prev) => prev.map((d) => (d.id === updatedDoc.id ? updatedDoc : d)));
+      setEditingLines(false);
+      toast.success('Account corrected — review the updated lines below before approving.');
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Could not save the correction.');
+    } finally {
+      setSavingLines(false);
+    }
+  };
 
   const approveDoc = async (docId) => {
     setApproving(true);
@@ -399,7 +460,7 @@ function ZeroTouchEntryInner() {
 
       {/* Review & Approve dialog — human sees the exact AI-drafted double-entry
           lines before anything is posted. */}
-      <Dialog open={!!previewDoc} onOpenChange={(open) => !open && setPreviewDoc(null)}>
+      <Dialog open={!!previewDoc} onOpenChange={(open) => { if (!open) { setPreviewDoc(null); setEditingLines(false); } }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><Bot className="h-5 w-5" /> Review AI-Drafted Entry</DialogTitle>
@@ -410,9 +471,10 @@ function ZeroTouchEntryInner() {
           {previewDoc && (() => {
             const ex = previewDoc.extracted || {};
             const preview = previewDoc.preview || {};
-            const lines = preview.lines || [];
-            const totalDebit = lines.reduce((s, l) => s + Number(l.debit || 0), 0);
-            const totalCredit = lines.reduce((s, l) => s + Number(l.credit || 0), 0);
+            const lines = editingLines ? draftLines : (preview.lines || []);
+            const totalDebit = editingLines ? draftTotalDebit : lines.reduce((s, l) => s + Number(l.debit || 0), 0);
+            const totalCredit = editingLines ? draftTotalCredit : lines.reduce((s, l) => s + Number(l.credit || 0), 0);
+            const acctLabel = (a) => (a ? `${a.code ? a.code + ' — ' : ''}${a.name}` : '');
             return (
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
@@ -436,10 +498,29 @@ function ZeroTouchEntryInner() {
                     <TableBody>
                       {lines.map((l, i) => (
                         <TableRow key={i}>
-                          <TableCell>{l.account_name}</TableCell>
+                          <TableCell className="min-w-[180px]">
+                            {editingLines ? (
+                              <Select value={l.account_id} onValueChange={(v) => updateDraftLine(i, 'account_id', v)}>
+                                <SelectTrigger className="h-9"><SelectValue placeholder="Account…" /></SelectTrigger>
+                                <SelectContent>
+                                  {accounts.map((a) => <SelectItem key={a.id} value={a.id}>{acctLabel(a)}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            ) : l.account_name}
+                          </TableCell>
                           <TableCell className="text-xs">{l.memo}</TableCell>
-                          <TableCell className="text-right font-mono">{l.debit ? fmtC(l.debit) : ''}</TableCell>
-                          <TableCell className="text-right font-mono">{l.credit ? fmtC(l.credit) : ''}</TableCell>
+                          <TableCell className="text-right font-mono">
+                            {editingLines ? (
+                              <Input type="number" className="h-9 text-right" value={l.debit || ''}
+                                onChange={(e) => updateDraftLine(i, 'debit', e.target.value)} />
+                            ) : (l.debit ? fmtC(l.debit) : '')}
+                          </TableCell>
+                          <TableCell className="text-right font-mono">
+                            {editingLines ? (
+                              <Input type="number" className="h-9 text-right" value={l.credit || ''}
+                                onChange={(e) => updateDraftLine(i, 'credit', e.target.value)} />
+                            ) : (l.credit ? fmtC(l.credit) : '')}
+                          </TableCell>
                         </TableRow>
                       ))}
                       <TableRow>
@@ -450,18 +531,40 @@ function ZeroTouchEntryInner() {
                     </TableBody>
                   </Table>
                 </div>
-                {preview.narration && <p className="text-xs text-slate-500">{preview.narration}</p>}
+                {editingLines && !draftBalanced && (
+                  <p className="text-xs text-rose-500">Debits must equal credits before saving.</p>
+                )}
+                {!editingLines && preview.narration && <p className="text-xs text-slate-500">{preview.narration}</p>}
+                {!editingLines && (
+                  <Button size="sm" variant="outline" onClick={startEditingLines}>
+                    <Pencil className="h-3.5 w-3.5 mr-1" /> Wrong account? Edit before approving
+                  </Button>
+                )}
               </div>
             );
           })()}
           <DialogFooter className="gap-2">
-            <Button variant="destructive" onClick={() => { setRejectDoc(previewDoc); }} disabled={approving}>
-              <ThumbsDown className="h-4 w-4 mr-1" /> Reject
-            </Button>
-            <Button className="bg-emerald-600 hover:bg-emerald-700" onClick={() => approveDoc(previewDoc.id)} disabled={approving}>
-              {approving ? <RefreshCw className="h-4 w-4 mr-1 animate-spin" /> : <ThumbsUp className="h-4 w-4 mr-1" />}
-              {approving ? 'Posting…' : 'Approve & Post to Ledger'}
-            </Button>
+            {editingLines ? (
+              <>
+                <Button variant="outline" onClick={() => setEditingLines(false)} disabled={savingLines}>
+                  <XIcon className="h-4 w-4 mr-1" /> Cancel
+                </Button>
+                <Button onClick={saveDraftLines} disabled={savingLines || !draftBalanced}>
+                  {savingLines ? <RefreshCw className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}
+                  {savingLines ? 'Saving…' : 'Save correction'}
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="destructive" onClick={() => { setRejectDoc(previewDoc); }} disabled={approving}>
+                  <ThumbsDown className="h-4 w-4 mr-1" /> Reject
+                </Button>
+                <Button className="bg-emerald-600 hover:bg-emerald-700" onClick={() => approveDoc(previewDoc.id)} disabled={approving}>
+                  {approving ? <RefreshCw className="h-4 w-4 mr-1 animate-spin" /> : <ThumbsUp className="h-4 w-4 mr-1" />}
+                  {approving ? 'Posting…' : 'Approve & Post to Ledger'}
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
