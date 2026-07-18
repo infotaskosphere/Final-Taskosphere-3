@@ -1,219 +1,290 @@
-import React, { useEffect, useState } from 'react';
-import { toast } from 'sonner';
-import {
-  Landmark, RefreshCw, AlertTriangle, CheckCircle2, Wifi, WifiOff, Plus,
-} from 'lucide-react';
-import { ContentLoader } from '@/components/ui/GifLoader.jsx';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
-import api from '@/lib/api';
-import { useDark } from '@/hooks/useDark';
-import RequestAccessGate from '@/components/RequestAccessGate.jsx';
-import { GuidanceNote } from '@/components/ui/GuidanceNote.jsx';
+"""
+AI Accounting — MODULE 3: Live GST Portal Sync
+================================================
+Pulls the Electronic Liability Register (PMT-01) and Electronic Credit
+Ledger (PMT-02) balances for a registered GSTIN from a GST Suvidha
+Provider (GSP), stores each pull as a `Portal Snapshot`, and compares the
+portal's liability figure against what the firm's own books say is owed
+(GST Output Payable minus GST Input Credit, from accounting_core's ledger)
+to flag audit risk when the two diverge beyond tolerance.
 
-const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2', emeraldGreen: '#1FAF5A', amber: '#F59E0B', coral: '#FF6B6B' };
-const fmtC = (n) => (n === null || n === undefined) ? '—' : `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+Endpoints (all under /api/gst-portal):
+  POST /register            Register/activate a GSTIN for a company
+  POST /sync-now            Pull the latest PMT-01/PMT-02 balances from the
+                             GSP and store a snapshot + audit-risk comparison
+  GET  /snapshot            List stored portal snapshots
+  GET  /audit-risk          List stored portal-vs-books comparisons
+  GET  /dashboard-metrics   Rolled-up summary for the page header cards
 
-function MetricCard({ label, value, icon: Icon, color, isDark, sub }) {
-  return (
-    <div className={`rounded-2xl border p-4 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-      <div className="flex items-center justify-between mb-2">
-        <p className={`text-xs font-semibold uppercase tracking-wide ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{label}</p>
-        <div className="h-8 w-8 rounded-lg flex items-center justify-center" style={{ background: `${color}20` }}>
-          <Icon className="h-4 w-4" style={{ color }} />
-        </div>
-      </div>
-      <p className={`text-2xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{value}</p>
-      {sub && <p className={`text-xs mt-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{sub}</p>}
-    </div>
-  );
-}
+GSP connectivity is optional infrastructure: without `GSP_BASE_URL`,
+`GSP_CLIENT_ID` and `GSP_CLIENT_SECRET` set in the environment, this module
+still starts cleanly and reports `portal_configured: false` so the UI can
+show a clear "not connected" state instead of failing silently.
+"""
 
-function GSTPortalSyncInner() {
-  const isDark = useDark();
-  const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
-  const [metrics, setMetrics] = useState(null);
-  const [snapshots, setSnapshots] = useState([]);
-  const [riskRows, setRiskRows] = useState([]);
-  const [gstin, setGstin] = useState('');
+import os
+import uuid
+from datetime import datetime, date, timezone
+from typing import Optional, List
 
-  const fetchAll = async () => {
-    setLoading(true);
-    try {
-      const [m, s, r] = await Promise.allSettled([
-        api.get('/gst-portal/dashboard-metrics'),
-        api.get('/gst-portal/snapshot'),
-        api.get('/gst-portal/audit-risk'),
-      ]);
-      setMetrics(m.status === 'fulfilled' ? m.value.data : null);
-      setSnapshots(s.status === 'fulfilled' ? s.value.data : []);
-      setRiskRows(r.status === 'fulfilled' ? r.value.data : []);
-    } catch {
-      toast.error('Failed to load GST portal data');
-    } finally {
-      setLoading(false);
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+
+from backend.dependencies import db, get_current_user
+from backend.models import User
+from backend import accounting_core as ac
+
+router = APIRouter(prefix="/api/gst-portal", tags=["GST Portal Sync"])
+
+# Tolerance above which a portal-vs-books variance is flagged as an audit risk.
+AUDIT_RISK_TOLERANCE_PCT = 5.0
+
+GSP_BASE_URL = os.environ.get("GSP_BASE_URL", "")
+GSP_CLIENT_ID = os.environ.get("GSP_CLIENT_ID", "")
+GSP_CLIENT_SECRET = os.environ.get("GSP_CLIENT_SECRET", "")
+
+
+def gsp_configured() -> bool:
+    return bool(GSP_BASE_URL and GSP_CLIENT_ID and GSP_CLIENT_SECRET)
+
+
+def _perms(user: User) -> dict:
+    p = user.permissions
+    if isinstance(p, dict):
+        return p
+    return p.model_dump() if p else {}
+
+
+def _can_view(user: User) -> bool:
+    return user.role == "admin" or bool(_perms(user).get("can_view_accounting_reports"))
+
+
+def _can_manage(user: User) -> bool:
+    return user.role == "admin" or bool(_perms(user).get("can_manage_chart_of_accounts"))
+
+
+def _current_period(on_date: Optional[str] = None) -> str:
+    """GST return period as MM-YYYY for the given (or today's) date."""
+    d = date.fromisoformat(on_date) if on_date else date.today()
+    return f"{d.month:02d}-{d.year}"
+
+
+# ── Registration ─────────────────────────────────────────────────────────
+class GSTRegistration(BaseModel):
+    company_id: str = ""
+    gstin: str = Field(..., min_length=15, max_length=15)
+    active: bool = True
+
+
+@router.post("/register")
+async def register_gstin(body: GSTRegistration, current_user: User = Depends(get_current_user)):
+    if not _can_manage(current_user):
+        raise HTTPException(403, "Access denied. Request access from your admin in Permission Governance.")
+    gstin = body.gstin.strip().upper()
+    now = datetime.now(timezone.utc).isoformat()
+    existing = await db.gst_portal_registrations.find_one({"company_id": body.company_id, "gstin": gstin})
+    if existing:
+        await db.gst_portal_registrations.update_one(
+            {"company_id": body.company_id, "gstin": gstin},
+            {"$set": {"active": body.active, "updated_at": now}},
+        )
+    else:
+        await db.gst_portal_registrations.insert_one({
+            "id": str(uuid.uuid4()), "company_id": body.company_id, "gstin": gstin,
+            "active": body.active, "created_by": current_user.id, "created_at": now,
+        })
+    return {"success": True, "gstin": gstin}
+
+
+@router.get("/registrations")
+async def list_registrations(company_id: str = Query(""), current_user: User = Depends(get_current_user)):
+    if not _can_view(current_user):
+        raise HTTPException(403, "Access denied.")
+    return await db.gst_portal_registrations.find({"company_id": company_id}, {"_id": 0}).to_list(500)
+
+
+# ── Internal books liability (for the audit-risk comparison) ──────────────
+async def _internal_liability(company_id: str, period: str) -> float:
+    """Net GST payable per the firm's own ledger for the period:
+    GST Output Payable (2100) balance minus GST Input Credit (1200) balance,
+    both accrued up to the end of that MM-YYYY period."""
+    mm, yyyy = period.split("-")
+    # last day of the month, safe against 28-31 day months
+    if mm == "12":
+        as_of = date(int(yyyy), 12, 31)
+    else:
+        next_month = date(int(yyyy), int(mm) + 1, 1)
+        as_of = date.fromordinal(next_month.toordinal() - 1)
+
+    output_id = await ac.get_default_account_id(company_id, "2100")
+    input_id = await ac.get_default_account_id(company_id, "1200")
+
+    async def _balance(account_id: Optional[str]) -> float:
+        if not account_id:
+            return 0.0
+        lines = await db.journal_lines.find(
+            {"account_id": account_id, "company_id": company_id, "entry_date": {"$lte": as_of.isoformat()}},
+            {"_id": 0, "debit": 1, "credit": 1},
+        ).to_list(50000)
+        return round(sum(l["credit"] - l["debit"] for l in lines), 2)  # liability: credit-normal
+
+    output_bal = await _balance(output_id)
+    input_bal_credit_side = await _balance(input_id)
+    # GST Input Credit is an asset (debit-normal); its "credit-normal" balance
+    # above is naturally negative for a normal debit balance, so subtracting
+    # it (a negative) correctly reduces net payable.
+    return round(output_bal + input_bal_credit_side, 2)
+
+
+async def _bank_balance(company_id: str) -> float:
+    bank_id = await ac.get_default_account_id(company_id, "1010")
+    if not bank_id:
+        return 0.0
+    lines = await db.journal_lines.find(
+        {"account_id": bank_id, "company_id": company_id}, {"_id": 0, "debit": 1, "credit": 1},
+    ).to_list(50000)
+    return round(sum(l["debit"] - l["credit"] for l in lines), 2)
+
+
+# ── GSP call + sync ─────────────────────────────────────────────────────
+async def _fetch_portal_balances(gstin: str, period: str) -> dict:
+    """Calls the configured GSP's liability/credit-ledger endpoints.
+    Raises HTTPException on any failure — callers should not silently swallow
+    a failed sync, since that's exactly the kind of thing this module exists
+    to catch."""
+    if not gsp_configured():
+        raise HTTPException(
+            400,
+            "GSP not connected — set GSP_BASE_URL, GSP_CLIENT_ID and GSP_CLIENT_SECRET on the backend, then sync again.",
+        )
+    try:
+        async with httpx.AsyncClient(base_url=GSP_BASE_URL, timeout=30) as client:
+            auth = await client.post(
+                "/oauth/token",
+                json={"client_id": GSP_CLIENT_ID, "client_secret": GSP_CLIENT_SECRET, "grant_type": "client_credentials"},
+            )
+            auth.raise_for_status()
+            token = auth.json().get("access_token", "")
+            headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+            liability = await client.get(
+                "/returns/electronic-liability-register",
+                params={"gstin": gstin, "period": period}, headers=headers,
+            )
+            liability.raise_for_status()
+            liability_data = liability.json()
+
+            credit = await client.get(
+                "/returns/electronic-credit-ledger",
+                params={"gstin": gstin, "period": period}, headers=headers,
+            )
+            credit.raise_for_status()
+            credit_data = credit.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"GSP request failed: {e}")
+
+    return {
+        "outward_cash_liability": float(liability_data.get("cash_liability", 0) or 0),
+        "outward_total_liability": float(liability_data.get("total_liability", 0) or 0),
+        "available_itc": float(credit_data.get("available_credit", 0) or 0),
     }
-  };
-  useEffect(() => { fetchAll(); }, []);
 
-  const registerAndSync = async () => {
-    if (!gstin.trim()) { toast.error('Enter a GSTIN first'); return; }
-    setSyncing(true);
-    try {
-      await api.post('/gst-portal/register', { company_id: '', gstin: gstin.trim().toUpperCase(), active: true });
-      await api.post(`/gst-portal/sync-now?company_id=&gstin=${encodeURIComponent(gstin.trim().toUpperCase())}`);
-      toast.success('Synced live liability & credit ledger.');
-      await fetchAll();
-    } catch (err) {
-      const detail = err.response?.data?.detail || 'Sync failed';
-      toast.error(detail);
-    } finally {
-      setSyncing(false);
+
+@router.post("/sync-now")
+async def sync_now(
+    company_id: str = Query(""), gstin: str = Query(...),
+    current_user: User = Depends(get_current_user),
+):
+    if not _can_manage(current_user):
+        raise HTTPException(403, "Access denied. Request access from your admin in Permission Governance.")
+    gstin = gstin.strip().upper()
+    period = _current_period()
+    portal = await _fetch_portal_balances(gstin, period)
+
+    now = datetime.now(timezone.utc).isoformat()
+    snapshot = {
+        "id": str(uuid.uuid4()), "company_id": company_id, "gstin": gstin, "period": period,
+        "outward_cash_liability": portal["outward_cash_liability"],
+        "outward_total_liability": portal["outward_total_liability"],
+        "available_itc": portal["available_itc"],
+        "fetched_at": now, "fetched_by": current_user.id,
     }
-  };
+    await db.gst_portal_snapshots.insert_one(dict(snapshot))
+    snapshot.pop("_id", None)
 
-  if (loading) return <ContentLoader />;
+    # Immediately compare against the books for the same period.
+    internal_liability = await _internal_liability(company_id, period)
+    portal_liability = portal["outward_total_liability"]
+    variance = round(portal_liability - internal_liability, 2)
+    variance_pct = round(abs(variance) / portal_liability * 100, 2) if portal_liability else (0.0 if variance == 0 else 100.0)
+    risk_doc = {
+        "id": str(uuid.uuid4()), "company_id": company_id, "gstin": gstin, "period": period,
+        "portal_liability": portal_liability, "internal_liability": internal_liability,
+        "variance": variance, "variance_pct": variance_pct,
+        "is_risk": variance_pct > AUDIT_RISK_TOLERANCE_PCT,
+        "computed_at": now,
+    }
+    await db.gst_portal_audit_risk.update_one(
+        {"company_id": company_id, "gstin": gstin, "period": period},
+        {"$set": risk_doc}, upsert=True,
+    )
+    risk_doc.pop("_id", None)
 
-  const configured = metrics?.portal_configured;
+    return {"success": True, "snapshot": snapshot, "audit_risk": risk_doc}
 
-  return (
-    <div className={`min-h-screen ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
-      <div className="p-4 md:p-6 space-y-5 max-w-[1200px] mx-auto">
-        <div className="rounded-3xl overflow-hidden shadow-xl" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-          <div className="p-6 md:p-7 flex flex-col lg:flex-row lg:items-center justify-between gap-5 text-white">
-            <div className="flex items-start gap-4">
-              <div className="h-14 w-14 rounded-2xl bg-white/15 border border-white/20 flex items-center justify-center shadow-lg">
-                <Landmark className="h-7 w-7" />
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-[0.25em] text-blue-100 font-bold">AI Accounting · Module 3</p>
-                <h1 className="text-2xl md:text-3xl font-bold tracking-tight mt-1">Live Revenue Liabilities &amp; Ledger Fetch</h1>
-                <p className="text-sm text-blue-100 mt-1 max-w-2xl">Live Electronic Liability Register (PMT-01) &amp; Electronic Credit Ledger (PMT-02) balances, synced from the tax portal via your GSP connection.</p>
-              </div>
-            </div>
-            <Button onClick={fetchAll} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20"><RefreshCw className="h-4 w-4 mr-2" /> Refresh</Button>
-          </div>
-        </div>
 
-        <GuidanceNote pageKey="gst-portal-sync" isDark={isDark} />
+@router.get("/snapshot")
+async def list_snapshots(company_id: str = Query(""), gstin: Optional[str] = Query(None), current_user: User = Depends(get_current_user)):
+    if not _can_view(current_user):
+        raise HTTPException(403, "Access denied.")
+    q: dict = {"company_id": company_id}
+    if gstin:
+        q["gstin"] = gstin.strip().upper()
+    return await db.gst_portal_snapshots.find(q, {"_id": 0}).sort("fetched_at", -1).to_list(500)
 
-        {!configured && (
-          <div className={`rounded-2xl border p-4 flex items-start gap-3 ${isDark ? 'bg-amber-950/40 border-amber-800' : 'bg-amber-50 border-amber-200'}`}>
-            <WifiOff className="h-5 w-5 text-amber-500 mt-0.5 shrink-0" />
-            <div>
-              <p className={`font-semibold text-sm ${isDark ? 'text-amber-300' : 'text-amber-800'}`}>GSP not connected</p>
-              <p className={`text-sm ${isDark ? 'text-amber-400/80' : 'text-amber-700'}`}>
-                Live PMT-01/PMT-02 sync needs a licensed GST Suvidha Provider contract. Set <code>GSP_BASE_URL</code>, <code>GSP_CLIENT_ID</code> and <code>GSP_CLIENT_SECRET</code> on the backend, then sync below.
-              </p>
-            </div>
-          </div>
-        )}
 
-        <div className={`rounded-2xl border p-4 flex flex-col md:flex-row md:items-center gap-3 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-          <Input placeholder="Enter GSTIN e.g. 24AAAAA0000A1Z5" value={gstin} onChange={(e) => setGstin(e.target.value)} className="max-w-xs" />
-          <Button onClick={registerAndSync} disabled={syncing}>
-            {syncing ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Plus className="h-4 w-4 mr-2" />}
-            {syncing ? 'Syncing…' : 'Register & Sync Now'}
-          </Button>
-        </div>
+@router.get("/audit-risk")
+async def list_audit_risk(company_id: str = Query(""), gstin: Optional[str] = Query(None), current_user: User = Depends(get_current_user)):
+    if not _can_view(current_user):
+        raise HTTPException(403, "Access denied.")
+    q: dict = {"company_id": company_id}
+    if gstin:
+        q["gstin"] = gstin.strip().upper()
+    return await db.gst_portal_audit_risk.find(q, {"_id": 0}).sort("computed_at", -1).to_list(500)
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <MetricCard label="Total Liability" value={fmtC(metrics?.total_liability)} icon={Landmark} color={COLORS.coral} isDark={isDark} />
-          <MetricCard label="Net Available Credits" value={fmtC(metrics?.net_available_credits)} icon={CheckCircle2} color={COLORS.emeraldGreen} isDark={isDark} />
-          <MetricCard label="Cash Reserves" value={fmtC(metrics?.cash_reserves)} icon={Wifi} color={COLORS.mediumBlue} isDark={isDark} />
-          <MetricCard
-            label="Discrepancy %"
-            value={metrics?.discrepancy_pct === null || metrics?.discrepancy_pct === undefined ? '—' : `${metrics.discrepancy_pct}%`}
-            icon={AlertTriangle}
-            color={metrics?.is_audit_risk ? COLORS.coral : COLORS.emeraldGreen}
-            isDark={isDark}
-            sub={metrics?.is_audit_risk ? 'Above tolerance — review recommended' : metrics?.last_synced_at ? 'Within tolerance' : undefined}
-          />
-        </div>
 
-        <div className={`rounded-3xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-          <div className="p-4 border-b" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
-            <h3 className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Portal Snapshots</h3>
-          </div>
-          {snapshots.length === 0 ? (
-            <p className={`p-6 text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>No snapshots synced yet.</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>GSTIN</TableHead>
-                  <TableHead>Period</TableHead>
-                  <TableHead className="text-right">Cash Liability</TableHead>
-                  <TableHead className="text-right">Total Liability</TableHead>
-                  <TableHead className="text-right">Available ITC</TableHead>
-                  <TableHead>Fetched At</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {snapshots.map((s) => (
-                  <TableRow key={s.id}>
-                    <TableCell className="font-mono text-xs">{s.gstin}</TableCell>
-                    <TableCell>{s.period}</TableCell>
-                    <TableCell className="text-right font-mono">{fmtC(s.outward_cash_liability)}</TableCell>
-                    <TableCell className="text-right font-mono">{fmtC(s.outward_total_liability)}</TableCell>
-                    <TableCell className="text-right font-mono">{fmtC(s.available_itc)}</TableCell>
-                    <TableCell className="text-xs">{new Date(s.fetched_at).toLocaleString('en-IN')}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </div>
+@router.get("/dashboard-metrics")
+async def dashboard_metrics(company_id: str = Query(""), current_user: User = Depends(get_current_user)):
+    if not _can_view(current_user):
+        raise HTTPException(403, "Access denied.")
 
-        <div className={`rounded-3xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-          <div className="p-4 border-b" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
-            <h3 className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Audit Risk — Portal vs Internal Ledger</h3>
-          </div>
-          {riskRows.length === 0 ? (
-            <p className={`p-6 text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>No comparisons run yet.</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Period</TableHead>
-                  <TableHead className="text-right">Portal Liability</TableHead>
-                  <TableHead className="text-right">Internal Ledger</TableHead>
-                  <TableHead className="text-right">Variance</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {riskRows.map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell>{r.period}</TableCell>
-                    <TableCell className="text-right font-mono">{fmtC(r.portal_liability)}</TableCell>
-                    <TableCell className="text-right font-mono">{fmtC(r.internal_liability)}</TableCell>
-                    <TableCell className="text-right font-mono">{fmtC(r.variance)} ({r.variance_pct}%)</TableCell>
-                    <TableCell>
-                      {r.is_risk
-                        ? <Badge variant="destructive">Audit Risk</Badge>
-                        : <Badge className="bg-emerald-600 hover:bg-emerald-600">Clean</Badge>}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
+    latest_snapshot = await db.gst_portal_snapshots.find(
+        {"company_id": company_id}, {"_id": 0}
+    ).sort("fetched_at", -1).to_list(1)
+    latest_risk = await db.gst_portal_audit_risk.find(
+        {"company_id": company_id}, {"_id": 0}
+    ).sort("computed_at", -1).to_list(1)
 
-function GSTPortalSync() {
-  return (
-    <RequestAccessGate module="accounting_reports" moduleLabel="Live GST Portal Sync" permissionFlag="can_view_accounting_reports">
-      <GSTPortalSyncInner />
-    </RequestAccessGate>
-  );
-}
+    snap = latest_snapshot[0] if latest_snapshot else None
+    risk = latest_risk[0] if latest_risk else None
+    cash_reserves = await _bank_balance(company_id)
 
-export default GSTPortalSync;
+    return {
+        "portal_configured": gsp_configured(),
+        "total_liability": snap["outward_total_liability"] if snap else None,
+        "net_available_credits": snap["available_itc"] if snap else None,
+        "cash_reserves": cash_reserves,
+        "discrepancy_pct": risk["variance_pct"] if risk else None,
+        "is_audit_risk": bool(risk["is_risk"]) if risk else False,
+        "last_synced_at": snap["fetched_at"] if snap else None,
+    }
+
+
+async def create_gst_portal_sync_indexes():
+    await db.gst_portal_registrations.create_index("company_id")
+    await db.gst_portal_registrations.create_index([("company_id", 1), ("gstin", 1)], unique=True)
+    await db.gst_portal_snapshots.create_index("company_id")
+    await db.gst_portal_snapshots.create_index("gstin")
+    await db.gst_portal_audit_risk.create_index("company_id")
+    await db.gst_portal_audit_risk.create_index([("company_id", 1), ("gstin", 1), ("period", 1)])
