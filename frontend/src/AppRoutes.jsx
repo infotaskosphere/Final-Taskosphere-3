@@ -1,251 +1,196 @@
-import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
-import {
-  BarChart3, RefreshCw, CheckCircle2, AlertTriangle,
-  BookOpen, Landmark, Activity, TrendingUp, TrendingDown,
-  CalendarRange, Shield, Scale, Upload, ArrowLeftRight, ExternalLink,
-} from 'lucide-react';
-import GifLoader, { ContentLoader } from '@/components/ui/GifLoader.jsx';
-import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import api from '@/lib/api';
-import { useDark } from '@/hooks/useDark';
-import RequestAccessGate from '@/components/RequestAccessGate.jsx';
+import React from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext.jsx';
+import DashboardLayout from '@/components/layout/DashboardLayout.jsx';
+import GifLoader from '@/components/ui/GifLoader.jsx';
 
-const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2', emeraldGreen: '#1FAF5A', amber: '#F59E0B', coral: '#FF6B6B' };
-const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+/* ── Auth pages (no sidebar) ─────────────────────────────────────────── */
+import Login from './pages/Login.jsx';
+import Register from './pages/Register.jsx';
+import ForgotPassword from './pages/ForgotPassword.jsx';
 
-/* ── Shared sub-components ─────────────────────────────────────────────── */
-function ReportCard({ title, children, isDark }) {
-  return (
-    <div className={`rounded-3xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-      <div className="p-4 border-b" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
-        <h3 className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{title}</h3>
-      </div>
-      <div className="p-4">{children}</div>
-    </div>
-  );
+/* ── Client portal (its own auth flow, no admin sidebar) ────────────── */
+import ClientPortalLogin from './pages/ClientPortalLogin.jsx';
+import ClientPortalDashboard from './pages/ClientPortalDashboard.jsx';
+
+/* ── Core ─────────────────────────────────────────────────────────────── */
+import Dashboard from './pages/Dashboard.jsx';
+import Tasks from './pages/Tasks.jsx';
+import TodoDashboard from './pages/TodoDashboard.jsx';
+import Attendance from './pages/Attendance.jsx';
+import Reminders from './pages/Reminders.jsx';
+import ActionCenter from './pages/ActionCenter.jsx';
+import VisitsPage from './pages/VisitsPage.jsx';
+import AIDocumentReader from './pages/AIDocumentReader.jsx';
+
+/* ── Compliance ───────────────────────────────────────────────────────── */
+import CompliancePage from './pages/CompliancePage.jsx';
+import GSTReconciliation from './pages/GSTReconciliation.jsx';
+import TrademarkSphere from './pages/TrademarkSphere.jsx';
+
+/* ── Records ──────────────────────────────────────────────────────────── */
+import DSCRegister from './pages/DSCRegister.jsx';
+import DocumentRegister from './pages/DocumentsRegister.jsx';
+import Clients from './pages/Clients.jsx';
+import PasswordRepository from './pages/Passvault.jsx';
+
+/* ── Client proposals ─────────────────────────────────────────────────── */
+import LeadsPage from './pages/Leads.jsx';
+import Quotations from './pages/Quotations.jsx';
+
+/* ── Accounts (core + extended reports) ──────────────────────────────── */
+import Invoicing from './pages/Invoicing.jsx';
+import Purchase from './pages/Purchase.jsx';
+import BankAccounts from './pages/BankAccounts.jsx';
+import ChartOfAccounts from './pages/ChartOfAccounts.jsx';
+import JournalEntries from './pages/JournalEntries.jsx';
+import AccountingReports from './pages/AccountingReports.jsx';
+import ZeroTouchEntry from './pages/ZeroTouchEntry.jsx';
+import GSTPortalSync from './pages/GSTPortalSync.jsx';
+import AccountingIntegrity from './pages/AccountingIntegrity.jsx';
+import DayBook from './pages/DayBook.jsx';
+import CashBankBook from './pages/CashBankBook.jsx';
+import CashFlow from './pages/CashFlow.jsx';
+import OutstandingReport from './pages/OutstandingReport.jsx';
+import BankReconciliation from './pages/BankReconciliation.jsx';
+import DepreciationSchedule from './pages/DepreciationSchedule.jsx';
+import TDSTCSReport from './pages/TDSTCSReport.jsx';
+import FinancialRatios from './pages/FinancialRatios.jsx';
+import ComparativeReport from './pages/ComparativeReport.jsx';
+import YearlyReport from './pages/YearlyReport.jsx';
+import OpeningBalances from './pages/OpeningBalances.jsx';
+import AuditTrail from './pages/AuditTrail.jsx';
+import BulkImport from './pages/BulkImport.jsx';
+import DueDates from './pages/DueDates.jsx';
+import ImportInvoices from './pages/ImportInvoices.jsx';
+
+/* ── Admin ────────────────────────────────────────────────────────────── */
+import Reports from './pages/Reports.jsx';
+import TaskAudit from './pages/TaskAudit.jsx';
+import Users from './pages/Users.jsx';
+import Interviews from './pages/Interviews.jsx';
+import StaffActivity from './pages/StaffActivity.jsx';
+import ClientPortalManagerPage from './pages/ClientPortalManagerPage.jsx';
+import WhatsAppHub from './pages/WhatsAppHub.jsx';
+
+/* ── Settings ─────────────────────────────────────────────────────────── */
+import GeneralSettings from './pages/GeneralSettings.jsx';
+import WhatsAppSettings from './pages/WhatsAppSettings.jsx';
+import EmailSettings from '@/components/EmailSettings.jsx';
+
+/* ── Route guards ─────────────────────────────────────────────────────── */
+
+// Shown while AuthContext is restoring the session from localStorage/
+// sessionStorage on first load or a hard refresh.
+function AuthLoading() {
+  return <GifLoader />;
 }
 
-function Row({ label, value, isDark, bold }) {
-  return (
-    <div className="flex items-center justify-between py-1.5">
-      <span className={`text-sm ${bold ? 'font-bold' : ''} ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{label}</span>
-      <span className={`text-sm font-mono ${bold ? 'font-bold' : ''} ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{fmtC(value)}</span>
-    </div>
-  );
+// Wraps every internal app page: bounces unauthenticated users to /login
+// and renders the shared sidebar + header (DashboardLayout) around the
+// page. Per-module permission checks (e.g. Accounting Reports, Passwords,
+// Users) are handled inside each page itself via RequestAccessGate /
+// role checks, not here — this guard only enforces "is signed in".
+function Protected({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <AuthLoading />;
+  if (!user) return <Navigate to="/login" replace />;
+  return <DashboardLayout>{children}</DashboardLayout>;
 }
 
-/* ── Quick-link cards for extended reports ─────────────────────────────── */
-const EXTENDED_REPORTS = [
-  { path: '/day-book',            icon: BookOpen,      label: 'Day Book',             desc: 'All transactions grouped by date' },
-  { path: '/cash-bank-book',      icon: Landmark,      label: 'Cash / Bank Book',     desc: 'Running balance ledger per account' },
-  { path: '/cash-flow',           icon: Activity,      label: 'Cash Flow Statement',  desc: 'Indirect method: operating / investing / financing' },
-  { path: '/outstanding-report',  icon: AlertTriangle, label: 'Outstanding',          desc: 'Receivable & payable aging buckets' },
-  { path: '/bank-reconciliation', icon: ArrowLeftRight,label: 'Bank Reconciliation',  desc: 'Upload statement & match to journal lines' },
-  { path: '/depreciation',        icon: TrendingDown,  label: 'Depreciation Schedule',desc: 'Fixed asset register with SLM / WDV schedule' },
-  { path: '/tds-tcs',             icon: Shield,        label: 'TDS / TCS',            desc: 'Deduction ledger with auto journal posting' },
-  { path: '/financial-ratios',    icon: BarChart3,     label: 'Financial Ratios',     desc: 'Liquidity, profitability & solvency ratios' },
-  { path: '/comparative-report',  icon: TrendingUp,    label: 'Comparative Report',   desc: 'Two-year P&L side-by-side with % change' },
-  { path: '/yearly-report',       icon: CalendarRange, label: 'Year-wise Report',     desc: 'Multi-year trend with bar chart' },
-  { path: '/opening-balances',    icon: Scale,         label: 'Opening Balances',     desc: 'Set per-FY opening balances & post journal' },
-  { path: '/accounting-audit-trail', icon: CheckCircle2, label: 'Accounting Audit Trail', desc: 'Immutable log of all accounting actions' },
-  { path: '/bulk-import',         icon: Upload,        label: 'Bulk Journal Import',  desc: 'Import hundreds of entries via JSON, async' },
-];
-
-function ExtendedReportsGrid({ isDark }) {
-  const navigate = useNavigate();
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-      {EXTENDED_REPORTS.map(r => {
-        const Icon = r.icon;
-        return (
-          <button
-            key={r.path}
-            onClick={() => navigate(r.path)}
-            className={`text-left rounded-2xl border p-4 flex items-start gap-3 transition-all hover:shadow-md active:scale-[0.98] ${
-              isDark ? 'bg-slate-800 border-slate-700 hover:border-blue-500/50 hover:bg-slate-700/60' : 'bg-white border-slate-200 hover:border-blue-300 hover:bg-blue-50/40'
-            }`}
-          >
-            <div className="h-9 w-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: `${COLORS.mediumBlue}18` }}>
-              <Icon className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{r.label}</p>
-                <ExternalLink className="h-3 w-3 text-slate-400" />
-              </div>
-              <p className={`text-xs mt-0.5 leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{r.desc}</p>
-            </div>
-          </button>
-        );
-      })}
-    </div>
-  );
+// Wraps /login, /register, /forgot-password: an already-signed-in user
+// skips straight to the dashboard instead of seeing the auth form again.
+function PublicOnly({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <AuthLoading />;
+  if (user) return <Navigate to="/dashboard" replace />;
+  return children;
 }
 
-/* ── Main inner component ──────────────────────────────────────────────── */
-function AccountingReportsInner() {
-  const isDark = useDark();
-  const [loading, setLoading] = useState(true);
-  const [trialBalance, setTrialBalance] = useState(null);
-  const [pnl, setPnl] = useState(null);
-  const [balanceSheet, setBalanceSheet] = useState(null);
-
-  const fetchAll = async () => {
-    setLoading(true);
-    try {
-      const [tbR, pnlR, bsR] = await Promise.allSettled([
-        api.get('/reports/trial-balance'),
-        api.get('/reports/profit-loss'),
-        api.get('/reports/balance-sheet'),
-      ]);
-      setTrialBalance(tbR.status === 'fulfilled' ? tbR.value.data : null);
-      setPnl(pnlR.status === 'fulfilled' ? pnlR.value.data : null);
-      setBalanceSheet(bsR.status === 'fulfilled' ? bsR.value.data : null);
-    } catch {
-      toast.error('Failed to load reports');
-    } finally {
-      setLoading(false);
-    }
-  };
-  useEffect(() => { fetchAll(); }, []);
-
-  if (loading) return <ContentLoader />;
-
+/* ── Router ───────────────────────────────────────────────────────────── */
+export default function AppRoutes() {
   return (
-    <div className={`min-h-screen ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
-      <div className="p-4 md:p-6 space-y-5 max-w-[1200px] mx-auto">
+    <Routes>
+      {/* ── Public / auth ── */}
+      <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
+      <Route path="/register" element={<PublicOnly><Register /></PublicOnly>} />
+      <Route path="/forgot-password" element={<PublicOnly><ForgotPassword /></PublicOnly>} />
 
-        {/* Header */}
-        <div className="rounded-3xl overflow-hidden shadow-xl" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-          <div className="p-6 md:p-7 flex flex-col lg:flex-row lg:items-center justify-between gap-5 text-white">
-            <div className="flex items-start gap-4">
-              <div className="h-14 w-14 rounded-2xl bg-white/15 border border-white/20 flex items-center justify-center shadow-lg">
-                <BarChart3 className="h-7 w-7" />
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-[0.25em] text-blue-100 font-bold">Accounts</p>
-                <h1 className="text-2xl md:text-3xl font-bold tracking-tight mt-1">Accounting Reports</h1>
-                <p className="text-sm text-blue-100 mt-1 max-w-2xl">
-                  Trial Balance, P&amp;L, and Balance Sheet — live from every posted journal entry.
-                  Plus 13 extended reports for day book, cash flow, aging, depreciation, TDS/TCS and more.
-                </p>
-              </div>
-            </div>
-            <Button onClick={fetchAll} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20">
-              <RefreshCw className="h-4 w-4 mr-2" /> Refresh
-            </Button>
-          </div>
-        </div>
+      {/* ── Client portal (separate client-facing auth) ── */}
+      <Route path="/client-portal" element={<Navigate to="/client-portal/login" replace />} />
+      <Route path="/client-portal/login" element={<ClientPortalLogin />} />
+      <Route path="/client-portal/dashboard" element={<ClientPortalDashboard />} />
 
-        {/* Tabs */}
-        <Tabs defaultValue="trial-balance">
-          <TabsList className="flex-wrap h-auto gap-1">
-            <TabsTrigger value="trial-balance">Trial Balance</TabsTrigger>
-            <TabsTrigger value="pnl">Profit &amp; Loss</TabsTrigger>
-            <TabsTrigger value="balance-sheet">Balance Sheet</TabsTrigger>
-            <TabsTrigger value="extended">More Reports ✦</TabsTrigger>
-          </TabsList>
+      {/* ── Core ── */}
+      <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
+      <Route path="/tasks" element={<Protected><Tasks /></Protected>} />
+      <Route path="/todos" element={<Protected><TodoDashboard /></Protected>} />
+      <Route path="/todo" element={<Navigate to="/todos" replace />} />
+      <Route path="/attendance" element={<Protected><Attendance /></Protected>} />
+      <Route path="/reminders" element={<Protected><Reminders /></Protected>} />
+      <Route path="/action-center" element={<Protected><ActionCenter /></Protected>} />
+      <Route path="/visits" element={<Protected><VisitsPage /></Protected>} />
+      <Route path="/ai-reader" element={<Protected><AIDocumentReader /></Protected>} />
 
-          {/* ── Trial Balance ── */}
-          <TabsContent value="trial-balance" className="mt-4">
-            <ReportCard title="Trial Balance" isDark={isDark}>
-              {!trialBalance || trialBalance.rows.length === 0 ? (
-                <p className="text-sm text-slate-400 py-6 text-center">No journal entries posted yet.</p>
-              ) : (
-                <>
-                  <div className="grid grid-cols-[1fr_120px_120px] gap-2 text-[11px] uppercase font-bold text-slate-400 pb-2 border-b" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
-                    <span>Account</span><span className="text-right">Debit</span><span className="text-right">Credit</span>
-                  </div>
-                  {trialBalance.rows.map(r => (
-                    <div key={r.account_id} className="grid grid-cols-[1fr_120px_120px] gap-2 py-1.5 text-sm">
-                      <span className={isDark ? 'text-slate-200' : 'text-slate-700'}>{r.code} — {r.name}</span>
-                      <span className="text-right font-mono">{r.debit ? fmtC(r.debit) : ''}</span>
-                      <span className="text-right font-mono">{r.credit ? fmtC(r.credit) : ''}</span>
-                    </div>
-                  ))}
-                  <div className="grid grid-cols-[1fr_120px_120px] gap-2 pt-2 mt-2 border-t font-bold text-sm" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
-                    <span className={isDark ? 'text-slate-100' : 'text-slate-900'}>Total</span>
-                    <span className="text-right font-mono">{fmtC(trialBalance.total_debit)}</span>
-                    <span className="text-right font-mono">{fmtC(trialBalance.total_credit)}</span>
-                  </div>
-                  <div className={`mt-3 flex items-center gap-2 text-sm font-semibold ${trialBalance.balanced ? 'text-emerald-600' : 'text-amber-600'}`}>
-                    {trialBalance.balanced ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
-                    {trialBalance.balanced ? 'Balanced' : 'Not balanced — check recent entries'}
-                  </div>
-                </>
-              )}
-            </ReportCard>
-          </TabsContent>
+      {/* ── Compliance ── */}
+      <Route path="/compliance" element={<Protected><CompliancePage /></Protected>} />
+      <Route path="/gst-reconciliation" element={<Protected><GSTReconciliation /></Protected>} />
+      <Route path="/trademark-sphere" element={<Protected><TrademarkSphere /></Protected>} />
 
-          {/* ── P&L ── */}
-          <TabsContent value="pnl" className="mt-4">
-            <div className="grid md:grid-cols-2 gap-4">
-              <ReportCard title="Income" isDark={isDark}>
-                {(pnl?.income || []).length === 0 ? <p className="text-sm text-slate-400 py-4">No income posted yet.</p> :
-                  pnl.income.map(r => <Row key={r.code} label={r.name} value={r.amount} isDark={isDark} />)}
-                <Row label="Total Income" value={pnl?.total_income} isDark={isDark} bold />
-              </ReportCard>
-              <ReportCard title="Expenses" isDark={isDark}>
-                {(pnl?.expenses || []).length === 0 ? <p className="text-sm text-slate-400 py-4">No expenses posted yet.</p> :
-                  pnl.expenses.map(r => <Row key={r.code} label={r.name} value={r.amount} isDark={isDark} />)}
-                <Row label="Total Expenses" value={pnl?.total_expense} isDark={isDark} bold />
-              </ReportCard>
-            </div>
-            <div className={`mt-4 rounded-2xl p-5 text-center font-bold text-lg ${pnl?.net_profit >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
-              Net {pnl?.net_profit >= 0 ? 'Profit' : 'Loss'}: {fmtC(Math.abs(pnl?.net_profit || 0))}
-            </div>
-          </TabsContent>
+      {/* ── Records ── */}
+      <Route path="/dsc" element={<Protected><DSCRegister /></Protected>} />
+      <Route path="/documents" element={<Protected><DocumentRegister /></Protected>} />
+      <Route path="/clients" element={<Protected><Clients /></Protected>} />
+      <Route path="/passwords" element={<Protected><PasswordRepository /></Protected>} />
 
-          {/* ── Balance Sheet ── */}
-          <TabsContent value="balance-sheet" className="mt-4">
-            <div className="grid md:grid-cols-2 gap-4">
-              <ReportCard title="Assets" isDark={isDark}>
-                {(balanceSheet?.assets || []).length === 0 ? <p className="text-sm text-slate-400 py-4">No assets posted yet.</p> :
-                  balanceSheet.assets.map(r => <Row key={r.code} label={r.name} value={r.amount} isDark={isDark} />)}
-                <Row label="Total Assets" value={balanceSheet?.total_assets} isDark={isDark} bold />
-              </ReportCard>
-              <div className="space-y-4">
-                <ReportCard title="Liabilities" isDark={isDark}>
-                  {(balanceSheet?.liabilities || []).length === 0 ? <p className="text-sm text-slate-400 py-4">No liabilities posted yet.</p> :
-                    balanceSheet.liabilities.map(r => <Row key={r.code} label={r.name} value={r.amount} isDark={isDark} />)}
-                  <Row label="Total Liabilities" value={balanceSheet?.total_liabilities} isDark={isDark} bold />
-                </ReportCard>
-                <ReportCard title="Equity" isDark={isDark}>
-                  {(balanceSheet?.equity || []).length === 0 ? <p className="text-sm text-slate-400 py-4">No equity posted yet.</p> :
-                    balanceSheet.equity.map(r => <Row key={r.code} label={r.name} value={r.amount} isDark={isDark} />)}
-                  <Row label="Total Equity" value={balanceSheet?.total_equity} isDark={isDark} bold />
-                </ReportCard>
-              </div>
-            </div>
-            <div className={`mt-4 flex items-center justify-center gap-2 text-sm font-semibold p-3 rounded-xl ${balanceSheet?.balanced ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-              {balanceSheet?.balanced ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
-              Assets {fmtC(balanceSheet?.total_assets)} = Liabilities + Equity {fmtC((balanceSheet?.total_liabilities || 0) + (balanceSheet?.total_equity || 0))}
-            </div>
-          </TabsContent>
+      {/* ── Client proposals ── */}
+      <Route path="/leads" element={<Protected><LeadsPage /></Protected>} />
+      <Route path="/quotations" element={<Protected><Quotations /></Protected>} />
 
-          {/* ── Extended Reports ── */}
-          <TabsContent value="extended" className="mt-4">
-            <div className={`mb-4 rounded-2xl px-4 py-3 border text-sm ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-blue-50 border-blue-100 text-blue-800'}`}>
-              These are standalone full-page reports. Click any card to open it — it will open in the same app with its own filters, date pickers, and export options.
-            </div>
-            <ExtendedReportsGrid isDark={isDark} />
-          </TabsContent>
-        </Tabs>
+      {/* ── Accounts ── */}
+      <Route path="/invoicing" element={<Protected><Invoicing /></Protected>} />
+      <Route path="/purchase" element={<Protected><Purchase /></Protected>} />
+      <Route path="/bank-accounts" element={<Protected><BankAccounts /></Protected>} />
+      <Route path="/chart-of-accounts" element={<Protected><ChartOfAccounts /></Protected>} />
+      <Route path="/journal-entries" element={<Protected><JournalEntries /></Protected>} />
+      <Route path="/accounting-reports" element={<Protected><AccountingReports /></Protected>} />
+      <Route path="/zero-touch-entry" element={<Protected><ZeroTouchEntry /></Protected>} />
+      <Route path="/gst-portal-sync" element={<Protected><GSTPortalSync /></Protected>} />
+      <Route path="/accounting-integrity" element={<Protected><AccountingIntegrity /></Protected>} />
+      <Route path="/day-book" element={<Protected><DayBook /></Protected>} />
+      <Route path="/cash-bank-book" element={<Protected><CashBankBook /></Protected>} />
+      <Route path="/cash-flow" element={<Protected><CashFlow /></Protected>} />
+      <Route path="/outstanding-report" element={<Protected><OutstandingReport /></Protected>} />
+      <Route path="/bank-reconciliation" element={<Protected><BankReconciliation /></Protected>} />
+      <Route path="/depreciation" element={<Protected><DepreciationSchedule /></Protected>} />
+      <Route path="/tds-tcs" element={<Protected><TDSTCSReport /></Protected>} />
+      <Route path="/financial-ratios" element={<Protected><FinancialRatios /></Protected>} />
+      <Route path="/comparative-report" element={<Protected><ComparativeReport /></Protected>} />
+      <Route path="/yearly-report" element={<Protected><YearlyReport /></Protected>} />
+      <Route path="/opening-balances" element={<Protected><OpeningBalances /></Protected>} />
+      <Route path="/accounting-audit-trail" element={<Protected><AuditTrail /></Protected>} />
+      <Route path="/bulk-import" element={<Protected><BulkImport /></Protected>} />
+      <Route path="/due-dates" element={<Protected><DueDates /></Protected>} />
+      <Route path="/import-invoices" element={<Protected><ImportInvoices /></Protected>} />
 
-      </div>
-    </div>
+      {/* ── Admin ── */}
+      <Route path="/reports" element={<Protected><Reports /></Protected>} />
+      <Route path="/task-audit" element={<Protected><TaskAudit /></Protected>} />
+      <Route path="/users" element={<Protected><Users /></Protected>} />
+      <Route path="/interviews" element={<Protected><Interviews /></Protected>} />
+      <Route path="/staff-activity" element={<Protected><StaffActivity /></Protected>} />
+      <Route path="/client-portal-manager/*" element={<Protected><ClientPortalManagerPage /></Protected>} />
+      <Route path="/whatsapp-hub" element={<Protected><WhatsAppHub /></Protected>} />
+
+      {/* ── Settings ── */}
+      <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
+      <Route path="/settings/general" element={<Protected><GeneralSettings /></Protected>} />
+      <Route path="/settings/email" element={<Protected><EmailSettings /></Protected>} />
+      <Route path="/settings/whatsapp" element={<Protected><WhatsAppSettings /></Protected>} />
+
+      {/* ── Root & fallback ── */}
+      <Route path="/" element={<Navigate to="/dashboard" replace />} />
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+    </Routes>
   );
 }
-
-function AccountingReports() {
-  return (
-    <RequestAccessGate module="accounting_reports" moduleLabel="Accounting Reports" permissionFlag="can_view_accounting_reports">
-      <AccountingReportsInner />
-    </RequestAccessGate>
-  );
-}
-
-export default AccountingReports;
