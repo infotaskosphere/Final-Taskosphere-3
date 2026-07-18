@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
+import { GuidanceNote } from '@/components/ui/GuidanceNote.jsx';
 import {
   PageHeader, ReportCard, Row, EmptyState, DateFilterBar,
   fmtC, fmtN, fmtPct, currentFYLabel, COLORS,
@@ -1085,6 +1086,8 @@ function ExtendedReportsInner() {
             {activeTab.label}
           </span>
         </div>
+
+        <GuidanceNote pageKey="extended-reports" isDark={isDark} />
 
         <div>
           {tab === 'day-book' && <DayBookSection isDark={isDark} />}
