@@ -4051,7 +4051,6 @@ async def create_credit_note(data: CreditNoteCreate, current_user: User = Depend
 
 async def sync_invoice_journal_entry(invoice_id: str):
     from backend.accounting_core import get_default_account_id, post_journal_entry
-    from backend.party_ledgers import get_or_create_party_account
     
     # 1. Clean up any existing journal entries for this invoice
     existing_entry = await db.journal_entries.find_one({"source": "sale", "source_id": invoice_id})
@@ -4082,19 +4081,8 @@ async def sync_invoice_journal_entry(invoice_id: str):
     if grand_total <= 0:
         return
         
-    # 5. Get default ledger account IDs — post to the customer's own
-    # sub-ledger under Accounts Receivable (Control) when we know who the
-    # customer is; only fall back to the generic control account itself if
-    # we truly don't have a name to key a ledger on.
-    party = None
-    if client_name and client_name != "Client":
-        party = await get_or_create_party_account(
-            company_id, "customer", client_name, external_id=inv.get("client_id"),
-            gstin=inv.get("client_gstin"), email=inv.get("client_email"),
-            mobile=inv.get("client_phone"), created_by=inv.get("created_by", "system"),
-        )
-    ar_id = party["account_id"] if party else await get_default_account_id(company_id, "1100")
-    ar_name = party["account_name"] if party else "Accounts Receivable"
+    # 5. Get default ledger account IDs
+    ar_id = await get_default_account_id(company_id, "1100")  # Accounts Receivable
     sales_id = await get_default_account_id(company_id, "4000")  # Sales / Fee Income
     gst_pay_id = await get_default_account_id(company_id, "2100")  # GST Output Payable
     
@@ -4102,18 +4090,13 @@ async def sync_invoice_journal_entry(invoice_id: str):
         return
         
     sales_amount = round(grand_total - total_gst, 2)
-    extra = {
-        "customer_id": inv.get("client_id"), "customer_name": client_name,
-        "invoice_no": invoice_no, "voucher_no": invoice_no,
-        "reference_no": inv.get("reference_no", ""),
-    }
     
     # Create the double-entry lines
     if invoice_type == "credit_note" or status == "credit_note":
         # Credit Note logic: reduces accounts receivable and sales revenue
         lines = [
             {"account_id": sales_id, "account_name": "Sales / Fee Income", "debit": sales_amount, "credit": 0.0, "memo": f"Reversal of sales for Credit Note {invoice_no}"},
-            {"account_id": ar_id, "account_name": ar_name, "debit": 0.0, "credit": grand_total, "memo": f"Credit Note {invoice_no} to {client_name}"}
+            {"account_id": ar_id, "account_name": "Accounts Receivable", "debit": 0.0, "credit": grand_total, "memo": f"Credit Note {invoice_no} to {client_name}"}
         ]
         if total_gst > 0:
             lines.append({"account_id": gst_pay_id, "account_name": "GST Output Payable", "debit": total_gst, "credit": 0.0, "memo": f"GST Reversal on Credit Note {invoice_no}"})
@@ -4121,7 +4104,7 @@ async def sync_invoice_journal_entry(invoice_id: str):
     else:
         # Standard invoice logic: increases accounts receivable and sales revenue
         lines = [
-            {"account_id": ar_id, "account_name": ar_name, "debit": grand_total, "credit": 0.0, "memo": f"Invoice {invoice_no} to {client_name}"},
+            {"account_id": ar_id, "account_name": "Accounts Receivable", "debit": grand_total, "credit": 0.0, "memo": f"Invoice {invoice_no} to {client_name}"},
             {"account_id": sales_id, "account_name": "Sales / Fee Income", "debit": 0.0, "credit": sales_amount, "memo": f"Sales revenue from Invoice {invoice_no}"}
         ]
         if total_gst > 0:
@@ -4136,8 +4119,7 @@ async def sync_invoice_journal_entry(invoice_id: str):
             lines=lines,
             source="sale",
             source_id=invoice_id,
-            created_by=inv.get("created_by", "system"),
-            extra=extra,
+            created_by=inv.get("created_by", "system")
         )
     except Exception as e:
         logging.error(f"Error posting invoice journal entry: {e}")
@@ -4145,7 +4127,6 @@ async def sync_invoice_journal_entry(invoice_id: str):
 
 async def sync_payment_journal_entry(payment_id: str):
     from backend.accounting_core import get_default_account_id, post_journal_entry
-    from backend.party_ledgers import get_or_create_party_account
     
     # 1. Clean up any existing journal entries for this payment
     existing_entry = await db.journal_entries.find_one({"source": "payment", "source_id": payment_id})
@@ -4175,20 +4156,8 @@ async def sync_payment_journal_entry(payment_id: str):
     if amount <= 0:
         return
         
-    # 3. Resolve accounts — Cr the customer's own AR sub-ledger, not the
-    # generic control account, whenever we know who paid.
-    party = None
-    if client_name and client_name != "Client":
-        party = await get_or_create_party_account(
-            company_id, "customer", client_name,
-            external_id=(inv.get("client_id") if inv else payment.get("client_id")),
-            gstin=(inv.get("client_gstin") if inv else None),
-            email=(inv.get("client_email") if inv else None),
-            mobile=(inv.get("client_phone") if inv else None),
-            created_by=payment.get("created_by", "system"),
-        )
-    ar_id = party["account_id"] if party else await get_default_account_id(company_id, "1100")
-    ar_name = party["account_name"] if party else "Accounts Receivable"
+    # 3. Resolve accounts
+    ar_id = await get_default_account_id(company_id, "1100")  # Accounts Receivable
     cash_id = await get_default_account_id(company_id, "1000")  # Cash in Hand
     bank_id = await get_default_account_id(company_id, "1010")  # Bank Accounts
     
@@ -4199,25 +4168,17 @@ async def sync_payment_journal_entry(payment_id: str):
     debit_acct_id = cash_id if payment_mode == "cash" else bank_id
     debit_acct_name = "Cash in Hand" if payment_mode == "cash" else "Bank Accounts"
     
-    invoice_ref = f"Inv {invoice_no}" if invoice_no else ""
+    invoice_ref = f"Inv {invoice_no}" if invoice_no else "(no invoice linked)"
     lines = [
         {"account_id": debit_acct_id, "account_name": debit_acct_name, "debit": amount, "credit": 0.0, "memo": f"Receipt from {client_name} via {payment_mode.upper()}"},
-        {"account_id": ar_id, "account_name": ar_name, "debit": 0.0, "credit": amount, "memo": f"Payment by {client_name} {invoice_ref}".strip()}
+        {"account_id": ar_id, "account_name": "Accounts Receivable", "debit": 0.0, "credit": amount, "memo": f"Payment by {client_name} {invoice_ref}"}
     ]
     
-    # No more "for Invoice Unknown" — if there's no linked invoice, say so
-    # plainly instead of implying a lookup failed.
     narration = (
-        f"Receipt from {client_name} against Invoice {invoice_no} ({payment_mode.upper()})"
+        f"Receipt from {client_name} for Invoice {invoice_no} ({payment_mode.upper()})"
         if invoice_no else
         f"Receipt from {client_name} ({payment_mode.upper()})"
     )
-    extra = {
-        "customer_id": (inv.get("client_id") if inv else payment.get("client_id")),
-        "customer_name": client_name, "invoice_no": invoice_no or "",
-        "payment_mode": payment_mode.upper(), "bank_account": debit_acct_name,
-        "reference_no": payment.get("reference_no", ""),
-    }
     
     try:
         await post_journal_entry(
@@ -4227,8 +4188,7 @@ async def sync_payment_journal_entry(payment_id: str):
             lines=lines,
             source="payment",
             source_id=payment_id,
-            created_by=payment.get("created_by", "system"),
-            extra=extra,
+            created_by=payment.get("created_by", "system")
         )
     except Exception as e:
         logging.error(f"Error posting payment journal entry: {e}")
@@ -4240,7 +4200,6 @@ async def sync_purchase_journal_entry(invoice_id: str):
     is saved/edited (no draft gate — a saved purchase bill is already a real
     liability), and removed again if the bill is cancelled or deleted."""
     from backend.accounting_core import get_default_account_id, post_journal_entry
-    from backend.party_ledgers import get_or_create_party_account
 
     # 1. Clean up any existing journal entry for this purchase bill
     existing_entry = await db.journal_entries.find_one({"source": "purchase", "source_id": invoice_id})
@@ -4268,16 +4227,8 @@ async def sync_purchase_journal_entry(invoice_id: str):
     if grand_total <= 0:
         return
 
-    # 4. Get default ledger account IDs — post to the vendor's own
-    # sub-ledger under Accounts Payable (Control) whenever we know the vendor.
-    party = None
-    if supplier_name and supplier_name != "Supplier":
-        party = await get_or_create_party_account(
-            company_id, "vendor", supplier_name, gstin=inv.get("supplier_gstin"),
-            created_by=inv.get("created_by", "system"),
-        )
-    payable_id = party["account_id"] if party else await get_default_account_id(company_id, "2000")
-    payable_name = party["account_name"] if party else "Accounts Payable"
+    # 4. Get default ledger account IDs
+    payable_id = await get_default_account_id(company_id, "2000")   # Accounts Payable
     purchases_id = await get_default_account_id(company_id, "5000")  # Purchases (expense)
     gst_input_id = await get_default_account_id(company_id, "1200")  # GST Input Credit
 
@@ -4288,12 +4239,11 @@ async def sync_purchase_journal_entry(invoice_id: str):
 
     lines = [
         {"account_id": purchases_id, "account_name": "Purchases", "debit": purchase_amount, "credit": 0.0, "memo": f"Purchase Bill {invoice_no} from {supplier_name}"},
-        {"account_id": payable_id, "account_name": payable_name, "debit": 0.0, "credit": grand_total, "memo": f"Bill {invoice_no} payable to {supplier_name}"},
+        {"account_id": payable_id, "account_name": "Accounts Payable", "debit": 0.0, "credit": grand_total, "memo": f"Bill {invoice_no} payable to {supplier_name}"},
     ]
     if total_gst > 0:
         lines.append({"account_id": gst_input_id, "account_name": "GST Input Credit", "debit": total_gst, "credit": 0.0, "memo": f"GST Input on Purchase {invoice_no}"})
     narration = f"Purchase Bill {invoice_no} from {supplier_name}"
-    extra = {"vendor_name": supplier_name, "invoice_no": invoice_no, "voucher_no": invoice_no}
 
     try:
         await post_journal_entry(
@@ -4304,7 +4254,6 @@ async def sync_purchase_journal_entry(invoice_id: str):
             source="purchase",
             source_id=invoice_id,
             created_by=inv.get("created_by", "system"),
-            extra=extra,
         )
     except Exception as e:
         logging.error(f"Error posting purchase journal entry: {e}")
@@ -4314,7 +4263,6 @@ async def sync_purchase_payment_journal_entry(payment_id: str):
     """Purchase-side mirror of sync_payment_journal_entry: Dr Accounts Payable,
     Cr Cash/Bank — the entry for actually paying a vendor bill."""
     from backend.accounting_core import get_default_account_id, post_journal_entry
-    from backend.party_ledgers import get_or_create_party_account
 
     # 1. Clean up any existing journal entry for this payment
     existing_entry = await db.journal_entries.find_one({"source": "purchase_payment", "source_id": payment_id})
@@ -4340,14 +4288,7 @@ async def sync_purchase_payment_journal_entry(payment_id: str):
     if amount <= 0:
         return
 
-    party = None
-    if supplier_name and supplier_name != "Supplier":
-        party = await get_or_create_party_account(
-            company_id, "vendor", supplier_name, gstin=(inv.get("supplier_gstin") if inv else None),
-            created_by=payment.get("created_by", "system"),
-        )
-    payable_id = party["account_id"] if party else await get_default_account_id(company_id, "2000")
-    payable_name = party["account_name"] if party else "Accounts Payable"
+    payable_id = await get_default_account_id(company_id, "2000")  # Accounts Payable
     cash_id = await get_default_account_id(company_id, "1000")     # Cash in Hand
     bank_id = await get_default_account_id(company_id, "1010")     # Bank Accounts
 
@@ -4358,15 +4299,10 @@ async def sync_purchase_payment_journal_entry(payment_id: str):
     credit_acct_name = "Cash in Hand" if payment_mode == "cash" else "Bank Accounts"
 
     lines = [
-        {"account_id": payable_id, "account_name": payable_name, "debit": amount, "credit": 0.0, "memo": f"Bill {invoice_no} paid to {supplier_name}"},
+        {"account_id": payable_id, "account_name": "Accounts Payable", "debit": amount, "credit": 0.0, "memo": f"Bill {invoice_no} paid to {supplier_name}"},
         {"account_id": credit_acct_id, "account_name": credit_acct_name, "debit": 0.0, "credit": amount, "memo": f"Payment for Bill {invoice_no} via {payment_mode.upper()}"},
     ]
-    narration = f"Payment to {supplier_name} against Bill {invoice_no} ({payment_mode.upper()})"
-    extra = {
-        "vendor_name": supplier_name, "invoice_no": invoice_no if inv else "",
-        "payment_mode": payment_mode.upper(), "bank_account": credit_acct_name,
-        "reference_no": payment.get("reference_no", ""),
-    }
+    narration = f"Payment to {supplier_name} for Bill {invoice_no} ({payment_mode.upper()})"
 
     try:
         await post_journal_entry(
@@ -4377,7 +4313,6 @@ async def sync_purchase_payment_journal_entry(payment_id: str):
             source="purchase_payment",
             source_id=payment_id,
             created_by=payment.get("created_by", "system"),
-            extra=extra,
         )
     except Exception as e:
         logging.error(f"Error posting purchase payment journal entry: {e}")
@@ -4483,10 +4418,7 @@ async def _reconcile_and_sync_all_sales_and_payments_impl(company_id: str):
         for p in payments:
             p_id = p["id"]
             pe = pay_entry_by_source_id.get(p_id)
-            stale_narration = pe and (
-                "for Invoice Unknown" in (pe.get("narration") or "")
-                or not pe.get("customer_name")
-            ) and (p.get("client_name") or "").strip()
+            stale_narration = pe and "for Invoice Unknown" in (pe.get("narration") or "") and (p.get("client_name") or "").strip()
             if not pe or stale_narration or abs(float(pe.get("total_debit", 0)) - float(p.get("amount", 0))) > 0.01:
                 await sync_payment_journal_entry(p_id)
                 
@@ -4519,8 +4451,7 @@ async def _reconcile_and_sync_all_purchases_and_payments_impl(company_id: str):
         for inv in active_invoices:
             inv_id = inv["id"]
             e = entry_by_source_id.get(inv_id)
-            missing_vendor = e and not e.get("vendor_name") and (inv.get("supplier_name") or "").strip()
-            if not e or missing_vendor or abs(float(e.get("total_debit", 0)) - float(inv.get("grand_total", 0))) > 0.01:
+            if not e or abs(float(e.get("total_debit", 0)) - float(inv.get("grand_total", 0))) > 0.01:
                 await sync_purchase_journal_entry(inv_id)
 
         payments = await db.purchase_payments.find({"company_id": company_id}).to_list(10000)
@@ -4546,7 +4477,7 @@ async def _reconcile_and_sync_all_purchases_and_payments_impl(company_id: str):
         for p in payments:
             p_id = p["id"]
             pe = pay_entry_by_source_id.get(p_id)
-            if not pe or not pe.get("vendor_name") or abs(float(pe.get("total_debit", 0)) - float(p.get("amount", 0))) > 0.01:
+            if not pe or abs(float(pe.get("total_debit", 0)) - float(p.get("amount", 0))) > 0.01:
                 await sync_purchase_payment_journal_entry(p_id)
 
     except Exception as e:
