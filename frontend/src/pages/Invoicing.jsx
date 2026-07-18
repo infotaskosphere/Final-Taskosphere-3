@@ -56,7 +56,7 @@ const INV_TYPES = [
   { value: 'debit_note', label: 'Debit Note' },
 ];
 const STATUS_META = {
-  draft: { label: 'Draft', bg: 'bg-slate-100 dark:bg-slate-700', text: 'text-slate-600 dark:text-slate-300', dot: 'bg-slate-400', hex: '#94A3B8' },
+  draft: { label: 'Invoiced', bg: 'bg-slate-100 dark:bg-slate-700', text: 'text-slate-600 dark:text-slate-300', dot: 'bg-slate-400', hex: '#94A3B8' },
   sent: { label: 'Sent', bg: 'bg-blue-50 dark:bg-blue-900/30', text: 'text-blue-600 dark:text-blue-400', dot: 'bg-blue-500', hex: COLORS.mediumBlue },
   partially_paid: { label: 'Partial', bg: 'bg-amber-50 dark:bg-amber-900/20', text: 'text-amber-600 dark:text-amber-400', dot: 'bg-amber-400', hex: COLORS.amber },
   paid: { label: 'Paid', bg: 'bg-emerald-50 dark:bg-emerald-900/20', text: 'text-emerald-700 dark:text-emerald-400', dot: 'bg-emerald-500', hex: COLORS.emeraldGreen },
@@ -5674,14 +5674,13 @@ function Invoicing() {
       if (fy && (inv.invoice_date < fy.from || inv.invoice_date > fy.to)) return false;
       return true;
     });
-    // Revenue-bearing figures must only count invoices that are actually
-    // posted to the books (status not 'draft' or 'cancelled') — this mirrors
-    // sync_invoice_journal_entry on the backend, which skips draft/cancelled
-    // invoices entirely when posting to the General Ledger. Without this
-    // filter, this card double-counts unsent drafts as revenue while Trial
-    // Balance / P&L / Balance Sheet correctly exclude them, so the two pages
-    // permanently disagree even when looking at the same company/period.
-    const recognized = base.filter(i => i.status !== 'draft' && i.status !== 'cancelled');
+    // Revenue-bearing figures now include 'draft' invoices as well (renamed
+    // to "Invoiced" in the UI) — per business rule, an invoiced document is
+    // recognised revenue immediately even before it is marked as sent. Only
+    // cancelled documents are excluded here. sync_invoice_journal_entry() on
+    // the backend also now posts draft invoices so Trial Balance / P&L /
+    // Balance Sheet stay consistent with what is shown on this page.
+    const recognized = base.filter(i => i.status !== 'cancelled');
     const total_revenue = recognized.reduce((s, i) => s + (i.grand_total || 0), 0);
     const total_outstanding = recognized.reduce((s, i) => s + calcDue(i), 0);
     const total_gst = recognized.reduce((s, i) => s + (i.total_gst || 0), 0);
@@ -6176,7 +6175,7 @@ const fetchAll = useCallback(async () => {
               setFromDate(first); setToDate(last); setStatusFilter('all'); setYearFilter('all');
               setTimeout(() => invoiceListRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
             }} />
-          <StatCard label="Total GST" value={fmtC(localStats.total_gst)} sub={`${localStats.paid_count} paid · ${localStats.draft_count} draft`} icon={Shield} color={COLORS.amber} bg={`${COLORS.amber}12`} isDark={isDark} onClick={() => setGstOpen(true)} />
+          <StatCard label="Total GST" value={fmtC(localStats.total_gst)} sub={`${localStats.paid_count} paid · ${localStats.draft_count} invoiced`} icon={Shield} color={COLORS.amber} bg={`${COLORS.amber}12`} isDark={isDark} onClick={() => setGstOpen(true)} />
         </div>
       )}
 
