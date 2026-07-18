@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { toast } from 'sonner';
-import { NotebookPen, Plus, RefreshCw, Trash2, X, CheckSquare, Square, XCircle } from 'lucide-react';
+import { NotebookPen, Plus, RefreshCw, Trash2, X, CheckSquare, Square, XCircle, Building2, ChevronLeft, ChevronRight } from 'lucide-react';
 import GifLoader, { MiniLoader, ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,19 +30,44 @@ function JournalEntriesInner() {
   const [lines, setLines] = useState([emptyLine(), emptyLine()]);
   const [saving, setSaving] = useState(false);
 
+  // Company + pagination
+  const [companies, setCompanies] = useState([]);
+  const [companyId, setCompanyId] = useState('');   // '' = All Companies
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+
   // Bulk delete state
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
-  const fetchAll = async () => {
+  const fetchCompanies = async () => {
+    try {
+      const { data } = await api.get('/companies/list');
+      setCompanies(data || []);
+    } catch { /* non-fatal — selector just shows the default book */ }
+  };
+
+  const fetchAll = async (opts = {}) => {
+    const cid = opts.companyId !== undefined ? opts.companyId : companyId;
+    const pg = opts.page !== undefined ? opts.page : page;
+    const size = opts.pageSize !== undefined ? opts.pageSize : pageSize;
     setLoading(true);
     try {
       const [entriesR, accountsR] = await Promise.allSettled([
-        api.get('/journal-entries'),
+        api.get('/journal-entries', { params: { company_id: cid, page: pg, page_size: size } }),
         api.get('/chart-of-accounts'),
       ]);
-      setEntries(entriesR.status === 'fulfilled' ? (entriesR.value.data || []) : []);
+      if (entriesR.status === 'fulfilled') {
+        const d = entriesR.value.data || {};
+        setEntries(d.entries || []);
+        setTotal(d.total || 0);
+        setTotalPages(d.total_pages || 1);
+      } else {
+        setEntries([]); setTotal(0); setTotalPages(1);
+      }
       setAccounts(accountsR.status === 'fulfilled' ? (accountsR.value.data || []) : []);
     } catch {
       toast.error('Failed to load journal entries');
@@ -50,7 +75,27 @@ function JournalEntriesInner() {
       setLoading(false);
     }
   };
-  useEffect(() => { fetchAll(); }, []);
+  useEffect(() => { fetchCompanies(); fetchAll({ companyId: '', page: 1, pageSize }); }, []);
+
+  const onCompanyChange = (cid) => {
+    const val = cid === '__all__' ? '' : cid;
+    setCompanyId(val);
+    setPage(1);
+    fetchAll({ companyId: val, page: 1 });
+  };
+
+  const onPageSizeChange = (size) => {
+    const n = Number(size);
+    setPageSize(n);
+    setPage(1);
+    fetchAll({ pageSize: n, page: 1 });
+  };
+
+  const goToPage = (p) => {
+    const clamped = Math.max(1, Math.min(totalPages, p));
+    setPage(clamped);
+    fetchAll({ page: clamped });
+  };
 
   const totals = useMemo(() => {
     const debit = lines.reduce((s, l) => s + Number(l.debit || 0), 0);
@@ -70,7 +115,7 @@ function JournalEntriesInner() {
     if (!totals.balanced) { toast.error('Debit total must equal credit total'); return; }
     setSaving(true);
     try {
-      await api.post('/journal-entries', { entry_date: entryDate, narration, lines: validLines });
+      await api.post('/journal-entries', { company_id: companyId, entry_date: entryDate, narration, lines: validLines });
       toast.success('Journal entry posted');
       setShowNew(false);
       setNarration('');
@@ -146,11 +191,31 @@ function JournalEntriesInner() {
               </div>
             </div>
             <div className="flex gap-2">
+              <Select value={companyId || '__all__'} onValueChange={onCompanyChange}>
+                <SelectTrigger className="h-9 min-w-[170px] bg-white/10 border-white/25 text-white">
+                  <Building2 className="h-3.5 w-3.5 mr-1.5 shrink-0" />
+                  <SelectValue placeholder="All Companies" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">All Companies</SelectItem>
+                  {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={String(pageSize)} onValueChange={onPageSizeChange}>
+                <SelectTrigger className="h-9 w-[110px] bg-white/10 border-white/25 text-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="10">10 / page</SelectItem>
+                  <SelectItem value="50">50 / page</SelectItem>
+                  <SelectItem value="100">100 / page</SelectItem>
+                </SelectContent>
+              </Select>
               <Button onClick={() => setShowNew(true)} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20"><Plus className="h-4 w-4 mr-2" /> New entry</Button>
               <Button onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20">
                 {selectMode ? <><XCircle className="h-4 w-4 mr-2" /> Cancel select</> : <><CheckSquare className="h-4 w-4 mr-2" /> Select</>}
               </Button>
-              <Button onClick={fetchAll} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20"><RefreshCw className="h-4 w-4 mr-2" /> Refresh</Button>
+              <Button onClick={() => fetchAll()} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20"><RefreshCw className="h-4 w-4 mr-2" /> Refresh</Button>
             </div>
           </div>
         </div>
@@ -236,6 +301,23 @@ function JournalEntriesInner() {
             ))}
           </div>
         </div>
+
+        {total > 0 && (
+          <div className={`flex flex-wrap items-center justify-between gap-3 px-1 text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+            <span>
+              Showing {((page - 1) * pageSize) + 1}–{Math.min(page * pageSize, total)} of {total} {total === 1 ? 'entry' : 'entries'}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => goToPage(page - 1)} className="rounded-lg">
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-xs font-semibold px-2">Page {page} of {totalPages}</span>
+              <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => goToPage(page + 1)} className="rounded-lg">
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
       <Dialog open={showNew} onOpenChange={setShowNew}>
