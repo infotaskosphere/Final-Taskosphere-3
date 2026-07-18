@@ -4,7 +4,9 @@ import { useState, useEffect, useRef } from "react";
 // ✅ Normalise: always ensure the base ends with /api
 let _raw =
   import.meta.env.VITE_API_URL ||
-  "https://final-taskosphere-backend.onrender.com";
+  ((typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname.includes(".run.app") || window.location.hostname.includes("emergentagent.com")))
+    ? ""
+    : "https://final-taskosphere-backend.onrender.com");
 
 // Strip trailing slash(es), then append /api if missing
 _raw = _raw.replace(/\/+$/, "");
