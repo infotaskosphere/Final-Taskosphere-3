@@ -3264,8 +3264,15 @@ async def invoice_stats(year: Optional[int] = None, month: Optional[int] = None,
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     q: dict = {"invoice_type": "tax_invoice", "status": {"$ne": "cancelled"}}
     if current_user.role != "admin": q["created_by"] = current_user.id
-    all_inv = await db.invoices.find(q, {"_id": 0, "grand_total": 1, "amount_paid": 1,
+    every_inv = await db.invoices.find(q, {"_id": 0, "grand_total": 1, "amount_paid": 1,
         "amount_due": 1, "status": 1, "invoice_date": 1, "client_name": 1, "total_gst": 1}).to_list(5000)
+    # Revenue/outstanding/trend figures must only reflect invoices actually
+    # posted to the books — sync_invoice_journal_entry() never posts a
+    # journal entry for a draft invoice, so counting drafts here would make
+    # this endpoint permanently disagree with Trial Balance / P&L / Balance
+    # Sheet. total_invoices and draft_count below intentionally still use
+    # every_inv, since those two are meant to reflect the full invoice list.
+    all_inv = [i for i in every_inv if i.get("status") != "draft"]
     today = date.today()
     cur_year = year or today.year
     cur_mon = month or today.month
@@ -3306,13 +3313,13 @@ async def invoice_stats(year: Optional[int] = None, month: Optional[int] = None,
     top_clients = sorted(client_rev.items(), key=lambda x: -x[1])[:5]
     return {
         "total_revenue": round(total_rev, 2), "total_outstanding": round(total_out, 2),
-        "overdue_count": overdue_c, "total_invoices": len(all_inv),
+        "overdue_count": overdue_c, "total_invoices": len(every_inv),
         "month_revenue": round(sum(i.get("grand_total", 0) for i in mon_inv), 2),
         "month_collected": round(sum(i.get("amount_paid", 0) for i in mon_inv), 2),
         "month_invoices": len(mon_inv), "monthly_trend": trend,
         "top_clients": [{"name": n, "revenue": round(v, 2)} for n, v in top_clients],
         "paid_count": sum(1 for i in all_inv if i.get("status") == "paid"),
-        "draft_count": sum(1 for i in all_inv if i.get("status") == "draft"),
+        "draft_count": sum(1 for i in every_inv if i.get("status") == "draft"),
         "total_gst": round(sum(i.get("total_gst", 0) for i in all_inv), 2),
     }
 
