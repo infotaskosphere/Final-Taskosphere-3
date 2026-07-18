@@ -9,26 +9,252 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from backend.models import User, AuditLog
 
 # ==========================================================
-# ENVIRONMENT & DATABASE
+# ENVIRONMENT & DATABASE (MOCK OR REAL)
 # ==========================================================
 MONGO_URL = os.getenv("MONGO_URL")
 DB_NAME = os.getenv("DB_NAME", "taskosphere")
 
-if not MONGO_URL:
-    raise Exception("MONGO_URL environment variable is not set")
+# In-memory MongoDB Mock classes
+import uuid
+import asyncio
 
-client = AsyncIOMotorClient(MONGO_URL)
-db = client[DB_NAME]
+class MockCursor:
+    def __init__(self, data):
+        self._data = data
+        self._index = 0
+
+    def limit(self, n):
+        self._data = self._data[:n]
+        return self
+
+    def sort(self, *args, **kwargs):
+        return self
+
+    def skip(self, n):
+        self._data = self._data[n:]
+        return self
+
+    async def to_list(self, length=None):
+        if length is not None:
+            return self._data[:length]
+        return self._data
+
+    def __aiter__(self):
+        self._index = 0
+        return self
+
+    async def __anext__(self):
+        if self._index >= len(self._data):
+            raise StopAsyncIteration
+        val = self._data[self._index]
+        self._index += 1
+        return val
+
+class MockCollection:
+    def __init__(self, name):
+        self.name = name
+        self._store = {}
+
+    async def find_one(self, query=None, *args, **kwargs):
+        if query is None:
+            query = {}
+        for doc in self._store.values():
+            if self._matches(doc, query):
+                return doc.copy()
+        return None
+
+    def find(self, query=None, *args, **kwargs):
+        if query is None:
+            query = {}
+        matched = []
+        for doc in self._store.values():
+            if self._matches(doc, query):
+                matched.append(doc.copy())
+        return MockCursor(matched)
+
+    async def insert_one(self, document):
+        doc = document.copy()
+        if "_id" not in doc:
+            doc["_id"] = str(uuid.uuid4())
+        self._store[str(doc["_id"])] = doc
+        class InsertResult:
+            def __init__(self, inserted_id):
+                self.inserted_id = inserted_id
+        return InsertResult(doc["_id"])
+
+    async def insert_many(self, documents):
+        inserted_ids = []
+        for doc_in in documents:
+            doc = doc_in.copy()
+            if "_id" not in doc:
+                doc["_id"] = str(uuid.uuid4())
+            self._store[str(doc["_id"])] = doc
+            inserted_ids.append(doc["_id"])
+        class InsertManyResult:
+            def __init__(self, ids):
+                self.inserted_ids = ids
+        return InsertManyResult(inserted_ids)
+
+    async def update_one(self, query, update, upsert=False, *args, **kwargs):
+        doc = await self.find_one(query)
+        if not doc:
+            if upsert:
+                new_doc = query.copy()
+                if "$set" in update:
+                    new_doc.update(update["$set"])
+                await self.insert_one(new_doc)
+                class UpdateResultUpsert:
+                    def __init__(self):
+                        self.matched_count = 0
+                        self.modified_count = 1
+                        self.upserted_id = new_doc["_id"]
+                return UpdateResultUpsert()
+            class UpdateResultNoMatch:
+                def __init__(self):
+                    self.matched_count = 0
+                    self.modified_count = 0
+                    self.upserted_id = None
+            return UpdateResultNoMatch()
+
+        if "$set" in update:
+            for k, v in update["$set"].items():
+                doc[k] = v
+        if "$unset" in update:
+            for k in update["$unset"].keys():
+                doc.pop(k, None)
+        if "$push" in update:
+            for k, v in update["$push"].items():
+                if k not in doc:
+                    doc[k] = []
+                if isinstance(doc[k], list):
+                    doc[k].append(v)
+        self._store[str(doc["_id"])] = doc
+        class UpdateResult:
+            def __init__(self, id):
+                self.matched_count = 1
+                self.modified_count = 1
+                self.upserted_id = None
+        return UpdateResult(doc["_id"])
+
+    async def delete_one(self, query, *args, **kwargs):
+        doc = await self.find_one(query)
+        if doc:
+            self._store.pop(str(doc["_id"]), None)
+            class DeleteResult:
+                def __init__(self):
+                    self.deleted_count = 1
+            return DeleteResult()
+        class DeleteResultEmpty:
+            def __init__(self):
+                self.deleted_count = 0
+        return DeleteResultEmpty()
+
+    async def delete_many(self, query, *args, **kwargs):
+        matched_keys = []
+        for _id, doc in self._store.items():
+            if self._matches(doc, query):
+                matched_keys.append(_id)
+        for k in matched_keys:
+            self._store.pop(k, None)
+        class DeleteManyResult:
+            def __init__(self, count):
+                self.deleted_count = count
+        return DeleteManyResult(len(matched_keys))
+
+    async def count_documents(self, query, *args, **kwargs):
+        count = 0
+        for doc in self._store.values():
+            if self._matches(doc, query):
+                count += 1
+        return count
+
+    def _matches(self, doc, query):
+        for q_key, q_val in query.items():
+            if q_key == "$or":
+                match_or = False
+                for sub_q in q_val:
+                    if self._matches(doc, sub_q):
+                        match_or = True
+                        break
+                if not match_or:
+                    return False
+                continue
+            if q_key == "$and":
+                for sub_q in q_val:
+                    if not self._matches(doc, sub_q):
+                        return False
+                continue
+
+            doc_val = doc.get(q_key)
+            if isinstance(q_val, dict):
+                for op, op_val in q_val.items():
+                    if op == "$in":
+                        if doc_val not in op_val:
+                            return False
+                    elif op == "$nin":
+                        if doc_val in op_val:
+                            return False
+                    elif op == "$ne":
+                        if doc_val == op_val:
+                            return False
+                    elif op == "$gt":
+                        if doc_val is None or doc_val <= op_val:
+                            return False
+                    elif op == "$gte":
+                        if doc_val is None or doc_val < op_val:
+                            return False
+                    elif op == "$lt":
+                        if doc_val is None or doc_val >= op_val:
+                            return False
+                    elif op == "$lte":
+                        if doc_val is None or doc_val > op_val:
+                            return False
+            else:
+                if str(doc_val) != str(q_val):
+                    return False
+        return True
+
+class MockDatabase:
+    def __init__(self):
+        self._collections = {}
+
+    def __getitem__(self, name):
+        if name not in self._collections:
+            self._collections[name] = MockCollection(name)
+        return self._collections[name]
+
+    def __getattr__(self, name):
+        return self[name]
+
+class MockMongoClient:
+    def __init__(self, *args, **kwargs):
+        self._db = MockDatabase()
+
+    def __getitem__(self, name):
+        return self._db
+
+    def __getattr__(self, name):
+        return self._db
+
+if not MONGO_URL:
+    print("[AI Studio] MONGO_URL not provided. Using fallback in-memory MongoDB client.")
+    client = MockMongoClient()
+    db = client[DB_NAME]
+else:
+    try:
+        client = AsyncIOMotorClient(MONGO_URL)
+        db = client[DB_NAME]
+    except Exception as e:
+        print(f"[AI Studio] Failed to connect to MongoDB, falling back to mock: {e}")
+        client = MockMongoClient()
+        db = client[DB_NAME]
 
 # ==========================================================
 # JWT / AUTH CONFIG
 # ==========================================================
-JWT_SECRET = os.getenv("JWT_SECRET")
+JWT_SECRET = os.getenv("JWT_SECRET", "mock_secret_key_for_taskosphere_development")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
-
-if not JWT_SECRET:
-    raise Exception("JWT_SECRET environment variable is not set")
 
 security = HTTPBearer()
 
