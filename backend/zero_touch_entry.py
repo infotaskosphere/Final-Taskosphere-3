@@ -5,8 +5,8 @@ Pipeline:
   1. TRIGGER   : `POST /api/zte/upload` (manual upload) — swap in a storage-bucket
                  event listener (S3/GCS "on_receipt_upload") or an inbox poller
                  ("on_invoice_email_received") to call `process_document(...)`
-                 automatically; the extraction + posting logic below is already
-                 decoupled from the HTTP trigger so either wiring is a thin shim.
+                 automatically; the extraction logic below is already decoupled
+                 from the HTTP trigger so either wiring is a thin shim.
   2. EXTRACT   : Vision LLM (reuses the Groq vision client already configured in
                  ai_document_reader.py) called in JSON-schema / forced-JSON mode —
                  no static template, works off any invoice layout. Also extracts
@@ -14,25 +14,42 @@ Pipeline:
                  pipeline can convert foreign-currency invoices to INR and figure
                  out which of the firm's companies the invoice belongs to.
   3. RESOLVE   : `resolve_company()` matches the extracted "billed to" details
-                 (GSTIN → billing email → company name, in that priority order)
-                 against Company Profiles (`db.companies`) so a multi-company
-                 setup posts each invoice into the correct company's books
-                 instead of a blank/default one. Unmatched documents are held
-                 as `needs_review` rather than guessed.
+                 against Company Profiles (`db.companies`) for multi-company
+                 setups. Two tiers:
+                   a) Deterministic — GSTIN → billing email → company name,
+                      in that priority order (cheap, exact, no LLM call).
+                   b) AI fallback — if none of those match and more than one
+                      company is configured, `_ai_resolve_company()` sends the
+                      extracted document context + the candidate company list
+                      to the LLM and asks it to pick the best match with a
+                      confidence score. Only accepted above a confidence
+                      threshold; otherwise the document is held for manual
+                      company assignment rather than guessed.
   4. CONVERT   : if the extracted currency isn't INR, `get_historical_fx_rate()`
                  fetches the ECB reference rate for that invoice's date (via the
                  free Frankfurter API, cached) and every amount is converted to
                  INR before anything is posted — so a $8.02 receipt is booked at
                  that day's actual rate, not booked as "₹8.02".
-  5. ROUTE     : `classify_expense_account()` inspects the vendor name and the
+  5. PREVIEW   : `classify_expense_account()` inspects the vendor name and the
                  firm's own learned category rules to pick a ledger account,
-                 then posts a balanced double-entry voucher via
-                 `accounting_core.post_journal_entry` (reused, not re-implemented,
-                 so trial balance / P&L / balance sheet reports stay consistent).
-  6. AUDIT     : Every AI-posted entry is flagged `source="ai_zero_touch"` and is
-                 immutable (see accounting_lock.py, Module 4) — corrections must
-                 go through an Adjustment Note Override rather than editing the
-                 original voucher.
+                 then `build_ledger_preview()` assembles the balanced
+                 double-entry lines — but does NOT post them. The computed
+                 preview is stored on the document with status
+                 `"pending_approval"`.
+  6. APPROVE   : Nothing reaches the ledger without a human clicking
+                 Approve. `POST /documents/{id}/approve` takes the stored
+                 preview and posts it via `accounting_core.post_journal_entry`
+                 (reused, not re-implemented, so trial balance / P&L / balance
+                 sheet reports stay consistent). `POST /documents/{id}/reject`
+                 discards the preview instead, with a mandatory reason.
+  7. AUDIT     : Every approved entry is flagged `source="ai_zero_touch"` and is
+                 immutable once posted (see accounting_lock.py, Module 4) —
+                 corrections must go through an Adjustment Note Override rather
+                 than editing the original voucher.
+
+The AI extracts, matches companies, converts currency, and drafts the entry
+end-to-end with zero manual data entry — but nothing is committed to the
+books until a human with posting rights reviews and approves it.
 
 Nothing here talks to a real object-storage bucket or mail server; those
 triggers are infra-specific to how Taskosphere is deployed. Wire the bucket/
@@ -247,10 +264,96 @@ async def resolve_company(current_user: User, extracted: dict) -> Tuple[Optional
             if cname and (billed_name in cname or cname in billed_name):
                 return c["id"], f"Matched by company name to '{c['name']}'.", companies
 
+    # ── AI fallback: deterministic GSTIN/email/name matching found nothing.
+    # Ask the LLM to reason over the full extracted context (letterhead name,
+    # vendor relationship, invoice content) against the candidate companies —
+    # catches cases like abbreviated names, trading names, or a "Bill To"
+    # that's slightly different text from the Company Profile name.
+    ai_company_id, ai_reason, ai_confidence = await _ai_resolve_company(extracted, companies)
+    if ai_company_id:
+        matched = next((c for c in companies if c["id"] == ai_company_id), None)
+        if matched:
+            return matched["id"], (
+                f"AI-matched to '{matched['name']}' (confidence {ai_confidence:.0%}): {ai_reason}"
+            ), companies
+
     return None, (
         "Could not match this document's 'Bill To' details to any of your "
-        f"{len(companies)} configured companies — assign the company manually."
+        f"{len(companies)} configured companies (checked GSTIN, email, name, "
+        "and an AI review) — assign the company manually."
     ), companies
+
+
+AI_COMPANY_MATCH_CONFIDENCE_THRESHOLD = 0.55
+
+
+async def _ai_resolve_company(extracted: dict, companies: List[dict]) -> Tuple[Optional[str], str, float]:
+    """LLM-based company matcher for multi-company firms. Returns
+    (company_id or None, reason, confidence). Never guesses below the
+    confidence threshold — an unmatched document goes to manual assignment
+    rather than risk posting into the wrong company's books."""
+    groq_key = os.environ.get("GROQ_API_KEY", "")
+    if not groq_key:
+        return None, "GROQ_API_KEY not configured — skipped AI company match.", 0.0
+
+    candidates = [
+        {"id": c["id"], "name": c.get("name", ""), "gstin": c.get("gstin", ""), "email": c.get("email", "")}
+        for c in companies
+    ]
+    prompt = f"""You are matching an accounting document to the correct company in a
+multi-company bookkeeping system. Given the document's extracted details and
+a list of candidate companies belonging to this firm, decide which company
+(if any) this document was billed to / belongs to.
+
+Document details:
+{json.dumps({
+    "document_type": extracted.get("document_type"),
+    "vendor_or_customer_name": extracted.get("vendor_or_customer_name"),
+    "billed_to_name": extracted.get("billed_to_name"),
+    "billed_to_email": extracted.get("billed_to_email"),
+    "billed_to_gstin": extracted.get("billed_to_gstin"),
+    "invoice_number": extracted.get("invoice_number"),
+}, indent=2)}
+
+Candidate companies:
+{json.dumps(candidates, indent=2)}
+
+Return ONLY a single JSON object (no markdown fences, no commentary):
+{{"company_id": string,  // the "id" of the best-matching company, or "" if none plausibly match
+  "confidence": number,  // 0-1, your confidence in this match
+  "reason": string}}     // one short sentence explaining the match (or why none matched)
+
+Only pick a company if there is real textual/contextual evidence (name
+similarity, known trading name, business context) — do not pick one just
+because it's the only option left unexamined."""
+
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                json={
+                    "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "response_format": {"type": "json_object"},
+                    "max_tokens": 300,
+                    "temperature": 0,
+                },
+            )
+        if resp.status_code != 200:
+            return None, f"AI company match request failed ({resp.status_code}).", 0.0
+        raw = resp.json()["choices"][0]["message"]["content"]
+        parsed = json.loads(_strip_json_fence(raw))
+    except Exception as e:
+        return None, f"AI company match failed: {e}", 0.0
+
+    company_id = (parsed.get("company_id") or "").strip()
+    confidence = float(parsed.get("confidence") or 0)
+    reason = parsed.get("reason") or ""
+    if not company_id or confidence < AI_COMPANY_MATCH_CONFIDENCE_THRESHOLD:
+        return None, reason or "AI could not confidently match a company.", confidence
+    return company_id, reason, confidence
 
 
 # ── Contextual vendor → ledger-account categorisation rules ─────────────────
@@ -318,9 +421,13 @@ async def process_document(
     contents: bytes,
     filename: str,
     current_user: User,
-    company_id: Optional[str] = None,   # None/"" = auto-detect from the document; a value = explicit override
-    auto_post: bool = True,
+    company_id: Optional[str] = None,   # None/"" = auto-detect (deterministic, then AI); a value = explicit override
 ) -> dict:
+    """Extracts + company-matches + drafts the ledger entry end-to-end with
+    zero manual data entry, but NEVER posts. Every document lands as either
+    `pending_approval` (ready for a human to review and click Approve) or
+    `needs_review` (extraction/company-match needs a human to fix something
+    first). Posting only happens via the explicit /approve endpoint."""
     img_b64, mime = _file_to_image_b64(contents, filename)
     extracted = await _groq_extract_json(img_b64, mime)
 
@@ -338,11 +445,15 @@ async def process_document(
         "company_match_reason": company_match_reason,
         "filename": filename,
         "extracted": extracted,
+        "preview": None,          # computed-but-unposted journal entry, awaiting approval
         "fx": None,
         "amount_inr": None,
         "status": "extracted",
         "journal_entry_id": None,
         "posting_error": None,
+        "rejection_reason": None,
+        "reviewed_by": None,
+        "reviewed_at": None,
         # Bank-reconciliation state (Module 3-of-the-brief / bank_accounts.py
         # closes this out automatically once a matching bank-statement line
         # is found — see bank_accounts._match_transaction).
@@ -356,17 +467,17 @@ async def process_document(
     if not resolved_company_id:
         record["status"] = "needs_review"
         record["posting_error"] = company_match_reason
-    elif auto_post:
+    else:
         try:
-            entry, fx_meta = await route_to_ledger(resolved_company_id, extracted, current_user.id, source_id=record_id)
-            record["journal_entry_id"] = entry["id"]
-            record["fx"] = fx_meta
-            record["amount_inr"] = round(fx_meta["original_total_value"] * fx_meta["rate_to_inr"], 2) if fx_meta \
-                else float(extracted.get("total_invoice_value") or 0)
-            record["status"] = "posted"
+            preview = await build_ledger_preview(resolved_company_id, extracted)
+            record["preview"] = preview
+            record["fx"] = preview["fx"]
+            record["amount_inr"] = round(preview["fx"]["original_total_value"] * preview["fx"]["rate_to_inr"], 2) \
+                if preview["fx"] else float(extracted.get("total_invoice_value") or 0)
+            record["status"] = "pending_approval"
         except ValueError as e:
             # Amount/currency/data didn't balance or was unusable — leave for
-            # human review rather than silently posting something wrong.
+            # human review rather than drafting something wrong.
             record["status"] = "needs_review"
             record["posting_error"] = str(e)
 
@@ -375,9 +486,13 @@ async def process_document(
     return record
 
 
-async def route_to_ledger(company_id: str, extracted: dict, created_by: str, source_id: str) -> Tuple[dict, Optional[dict]]:
-    """Autonomous double-entry routing (Module 1 steps 4-5).
-    Returns (posted_journal_entry, fx_conversion_metadata_or_None)."""
+async def build_ledger_preview(company_id: str, extracted: dict) -> dict:
+    """Autonomous double-entry drafting (Module 1 steps 4-5) — computes the
+    balanced journal lines but does NOT post them. Returns a preview dict:
+    {"lines": [...], "narration": str, "entry_date": "YYYY-MM-DD",
+     "fx": fx_conversion_metadata_or_None}. Raises ValueError if the document
+    can't be turned into a valid, balanced entry (routed to needs_review by
+    the caller instead)."""
     doc_type = (extracted.get("document_type") or "").upper()
     taxable_value = float(extracted.get("taxable_value") or 0)
     tax_breakup = extracted.get("tax_breakup") or {}
@@ -464,24 +579,30 @@ async def route_to_ledger(company_id: str, extracted: dict, created_by: str, sou
             "open Chart of Accounts once to seed them, then retry."
         )
 
-    entry = await ac.post_journal_entry(
+    return {"lines": lines, "narration": narration, "entry_date": inv_date, "fx": fx_meta}
+
+
+async def post_ledger_preview(company_id: str, preview: dict, created_by: str, source_id: str) -> dict:
+    """Posts a previously-built, human-approved preview to the ledger. This
+    is the ONLY function in this module that actually writes to
+    journal_entries/journal_lines — called exclusively from the /approve
+    endpoint, never automatically."""
+    return await ac.post_journal_entry(
         company_id=company_id,
-        entry_date=inv_date,
-        narration=narration,
-        lines=lines,
+        entry_date=preview["entry_date"],
+        narration=preview["narration"],
+        lines=preview["lines"],
         source="ai_zero_touch",
         source_id=source_id,
         created_by=created_by,
     )
-    return entry, fx_meta
 
 
 # ── HTTP trigger (manual upload; swap/augment with bucket or email webhook) ─
 @router.post("/upload")
 async def upload_and_process(
     file: UploadFile = File(...),
-    company_id: str = Form(""),   # leave blank to auto-detect from the document
-    auto_post: bool = Form(True),
+    company_id: str = Form(""),   # leave blank to auto-detect (deterministic, then AI)
     current_user: User = Depends(get_current_user),
 ):
     if not _perm_post(current_user):
@@ -489,12 +610,14 @@ async def upload_and_process(
     contents = await file.read()
     if not contents:
         raise HTTPException(422, "Empty file.")
+    # Extracts, matches the company (AI-assisted for multi-company setups),
+    # converts currency, and drafts the journal entry — but never posts.
+    # Human approval always happens separately via /approve below.
     record = await process_document(
         contents=contents,
         filename=file.filename or "upload",
         current_user=current_user,
         company_id=company_id or None,
-        auto_post=auto_post,
     )
     return record
 
@@ -535,49 +658,107 @@ class AssignCompanyBody(BaseModel):
 
 @router.post("/documents/{doc_id}/assign-company")
 async def assign_company(doc_id: str, body: AssignCompanyBody, current_user: User = Depends(get_current_user)):
+    """Manual company assignment for documents the AI (deterministic + AI
+    fallback) couldn't confidently match. Drafts the preview afterwards —
+    still requires a separate /approve to post."""
     if not _perm_post(current_user):
         raise HTTPException(403, "Access denied.")
     doc = await db.zte_processed_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Document not found.")
-    if doc["status"] == "posted":
-        raise HTTPException(400, "Already posted.")
+    if doc["status"] in ("posted", "rejected"):
+        raise HTTPException(400, f"Document is already {doc['status']}.")
     await db.zte_processed_documents.update_one(
         {"id": doc_id},
         {"$set": {"company_id": body.company_id, "company_match_reason": "Company assigned manually.", "posting_error": None}},
     )
     doc["company_id"] = body.company_id
-    return await _post_document(doc, current_user)
+    return await _draft_preview(doc)
 
 
 @router.post("/documents/{doc_id}/retry-posting")
-async def retry_posting(doc_id: str, current_user: User = Depends(get_current_user)):
+async def retry_draft(doc_id: str, current_user: User = Depends(get_current_user)):
+    """Re-attempts drafting the preview (e.g. after seeding missing default
+    ledger accounts, or adding a category rule). Still lands on
+    pending_approval, not posted — approval is a separate explicit step."""
     if not _perm_post(current_user):
         raise HTTPException(403, "Access denied.")
     doc = await db.zte_processed_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Document not found.")
-    if doc["status"] == "posted":
-        raise HTTPException(400, "Already posted.")
-    return await _post_document(doc, current_user)
+    if doc["status"] in ("posted", "rejected"):
+        raise HTTPException(400, f"Document is already {doc['status']}.")
+    return await _draft_preview(doc)
 
 
-async def _post_document(doc: dict, current_user: User) -> dict:
+async def _draft_preview(doc: dict) -> dict:
+    """Computes (but never posts) the journal entry preview for a document,
+    and saves it as pending_approval."""
     if not doc.get("company_id"):
         raise HTTPException(400, "No company assigned to this document yet — assign one first.")
     try:
-        entry, fx_meta = await route_to_ledger(doc["company_id"], doc["extracted"], current_user.id, source_id=doc["id"])
-        amount_inr = round(fx_meta["original_total_value"] * fx_meta["rate_to_inr"], 2) if fx_meta \
+        preview = await build_ledger_preview(doc["company_id"], doc["extracted"])
+        amount_inr = round(preview["fx"]["original_total_value"] * preview["fx"]["rate_to_inr"], 2) if preview["fx"] \
             else float((doc.get("extracted") or {}).get("total_invoice_value") or 0)
         await db.zte_processed_documents.update_one(
             {"id": doc["id"]},
-            {"$set": {"status": "posted", "journal_entry_id": entry["id"], "fx": fx_meta,
+            {"$set": {"status": "pending_approval", "preview": preview, "fx": preview["fx"],
                       "amount_inr": amount_inr, "posting_error": None}},
         )
-        return {"success": True, "journal_entry_id": entry["id"], "fx": fx_meta}
+        return {"success": True, "status": "pending_approval", "preview": preview}
     except ValueError as e:
-        await db.zte_processed_documents.update_one({"id": doc["id"]}, {"$set": {"posting_error": str(e)}})
+        await db.zte_processed_documents.update_one({"id": doc["id"]}, {"$set": {"status": "needs_review", "posting_error": str(e)}})
         raise HTTPException(400, str(e))
+
+
+@router.post("/documents/{doc_id}/approve")
+async def approve_document(doc_id: str, current_user: User = Depends(get_current_user)):
+    """The only endpoint in this module that posts to the ledger. A human
+    with posting rights reviews the AI-drafted preview and explicitly
+    approves it here — nothing reaches the books automatically."""
+    if not _perm_post(current_user):
+        raise HTTPException(403, "Access denied. Request access from your admin in Permission Governance.")
+    doc = await db.zte_processed_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Document not found.")
+    if doc["status"] != "pending_approval":
+        raise HTTPException(400, f"Document is '{doc['status']}', not pending approval.")
+    if not doc.get("preview"):
+        raise HTTPException(400, "No draft entry to approve — retry drafting first.")
+    try:
+        entry = await post_ledger_preview(doc["company_id"], doc["preview"], current_user.id, source_id=doc["id"])
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    now = datetime.now(timezone.utc).isoformat()
+    await db.zte_processed_documents.update_one(
+        {"id": doc_id},
+        {"$set": {"status": "posted", "journal_entry_id": entry["id"], "posting_error": None,
+                   "reviewed_by": current_user.id, "reviewed_at": now}},
+    )
+    return {"success": True, "journal_entry_id": entry["id"], "fx": doc.get("fx")}
+
+
+class RejectBody(BaseModel):
+    reason: str = Field(..., min_length=3, description="Why this AI-drafted entry is being rejected.")
+
+
+@router.post("/documents/{doc_id}/reject")
+async def reject_document(doc_id: str, body: RejectBody, current_user: User = Depends(get_current_user)):
+    """Discards an AI-drafted preview without ever posting it."""
+    if not _perm_post(current_user):
+        raise HTTPException(403, "Access denied.")
+    doc = await db.zte_processed_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Document not found.")
+    if doc["status"] in ("posted", "rejected"):
+        raise HTTPException(400, f"Document is already {doc['status']}.")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.zte_processed_documents.update_one(
+        {"id": doc_id},
+        {"$set": {"status": "rejected", "rejection_reason": body.reason,
+                   "reviewed_by": current_user.id, "reviewed_at": now}},
+    )
+    return {"success": True, "status": "rejected"}
 
 
 async def create_zte_indexes():
