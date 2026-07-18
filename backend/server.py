@@ -2942,6 +2942,22 @@ async def get_today_attendance(current_user: User = Depends(get_current_user)):
     # FIX: Added {"_id": 0} projection — without it ObjectId leaks into JSON response
     # and causes ValueError: 'ObjectId' object is not iterable (500 error)
     holiday = await db.holidays.find_one({"date": today_str}, {"_id": 0})
+    attendance = await db.attendance.find_one(
+        {"user_id": current_user.id, "date": today_str}, {"_id": 0}
+    )
+    # BUGFIX: previously, whenever today had a holiday record we returned an
+    # early "punch_in: None" response and never even looked at the user's
+    # actual attendance doc. That meant punching in on a holiday/half-day
+    # (which is explicitly allowed — see /attendance below) still showed
+    # "please punch in" on the Dashboard and Attendance page afterwards,
+    # while the punch-in button itself correctly rejected a second punch-in
+    # with "Already punched in". A real attendance record must always win.
+    if attendance:
+        if "status" not in attendance:
+            attendance["status"] = "present" if attendance.get("punch_in") else "absent"
+        if holiday:
+            attendance["holiday"] = holiday
+        return attendance
     if holiday:
         return {
             "status": "holiday",
@@ -2950,19 +2966,12 @@ async def get_today_attendance(current_user: User = Depends(get_current_user)):
             "punch_out": None,
             "leave_reason": None,
         }
-    attendance = await db.attendance.find_one(
-        {"user_id": current_user.id, "date": today_str}, {"_id": 0}
-    )
-    if not attendance:
-        return {
-            "status": "absent",
-            "punch_in": None,
-            "punch_out": None,
-            "leave_reason": None,
-        }
-    if "status" not in attendance:
-        attendance["status"] = "present" if attendance.get("punch_in") else "absent"
-    return attendance
+    return {
+        "status": "absent",
+        "punch_in": None,
+        "punch_out": None,
+        "leave_reason": None,
+    }
 
 
 @api_router.post("/attendance/apply-leave")
