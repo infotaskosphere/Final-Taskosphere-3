@@ -1,14 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
-  BarChart3, RefreshCw, CheckCircle2, AlertTriangle,
-  BookOpen, Landmark, Activity, TrendingUp, TrendingDown,
-  CalendarRange, Shield, Scale, Upload, ArrowLeftRight, ExternalLink,
+  BarChart3, RefreshCw, CheckCircle2, AlertTriangle, Download, Building2,
 } from 'lucide-react';
-import GifLoader, { ContentLoader } from '@/components/ui/GifLoader.jsx';
+import { ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
@@ -38,52 +36,24 @@ function Row({ label, value, isDark, bold }) {
   );
 }
 
-/* ── Quick-link cards for extended reports ─────────────────────────────── */
-const EXTENDED_REPORTS = [
-  { path: '/day-book',            icon: BookOpen,      label: 'Day Book',             desc: 'All transactions grouped by date' },
-  { path: '/cash-bank-book',      icon: Landmark,      label: 'Cash / Bank Book',     desc: 'Running balance ledger per account' },
-  { path: '/cash-flow',           icon: Activity,      label: 'Cash Flow Statement',  desc: 'Indirect method: operating / investing / financing' },
-  { path: '/outstanding-report',  icon: AlertTriangle, label: 'Outstanding',          desc: 'Receivable & payable aging buckets' },
-  { path: '/bank-reconciliation', icon: ArrowLeftRight,label: 'Bank Reconciliation',  desc: 'Upload statement & match to journal lines' },
-  { path: '/depreciation',        icon: TrendingDown,  label: 'Depreciation Schedule',desc: 'Fixed asset register with SLM / WDV schedule' },
-  { path: '/tds-tcs',             icon: Shield,        label: 'TDS / TCS',            desc: 'Deduction ledger with auto journal posting' },
-  { path: '/financial-ratios',    icon: BarChart3,     label: 'Financial Ratios',     desc: 'Liquidity, profitability & solvency ratios' },
-  { path: '/comparative-report',  icon: TrendingUp,    label: 'Comparative Report',   desc: 'Two-year P&L side-by-side with % change' },
-  { path: '/yearly-report',       icon: CalendarRange, label: 'Year-wise Report',     desc: 'Multi-year trend with bar chart' },
-  { path: '/opening-balances',    icon: Scale,         label: 'Opening Balances',     desc: 'Set per-FY opening balances & post journal' },
-  { path: '/accounting-audit-trail', icon: CheckCircle2, label: 'Accounting Audit Trail', desc: 'Immutable log of all accounting actions' },
-  { path: '/bulk-import',         icon: Upload,        label: 'Bulk Journal Import',  desc: 'Import hundreds of entries via JSON, async' },
-];
-
-function ExtendedReportsGrid({ isDark }) {
-  const navigate = useNavigate();
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-      {EXTENDED_REPORTS.map(r => {
-        const Icon = r.icon;
-        return (
-          <button
-            key={r.path}
-            onClick={() => navigate(r.path)}
-            className={`text-left rounded-2xl border p-4 flex items-start gap-3 transition-all hover:shadow-md active:scale-[0.98] ${
-              isDark ? 'bg-slate-800 border-slate-700 hover:border-blue-500/50 hover:bg-slate-700/60' : 'bg-white border-slate-200 hover:border-blue-300 hover:bg-blue-50/40'
-            }`}
-          >
-            <div className="h-9 w-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: `${COLORS.mediumBlue}18` }}>
-              <Icon className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{r.label}</p>
-                <ExternalLink className="h-3 w-3 text-slate-400" />
-              </div>
-              <p className={`text-xs mt-0.5 leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{r.desc}</p>
-            </div>
-          </button>
-        );
-      })}
-    </div>
-  );
+/* ── CSV export helper ─────────────────────────────────────────────────── */
+function downloadCsv(filename, rows) {
+  // rows: array of arrays (first row = header). Basic CSV-escaping for
+  // commas/quotes/newlines so account names with commas don't break columns.
+  const esc = (v) => {
+    const s = String(v ?? '');
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const csv = rows.map((r) => r.map(esc).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 /* ── Main inner component ──────────────────────────────────────────────── */
@@ -93,14 +63,24 @@ function AccountingReportsInner() {
   const [trialBalance, setTrialBalance] = useState(null);
   const [pnl, setPnl] = useState(null);
   const [balanceSheet, setBalanceSheet] = useState(null);
+  const [companies, setCompanies] = useState([]);
+  const [companyId, setCompanyId] = useState('');   // '' = default/all-companies book
+  const [activeTab, setActiveTab] = useState('trial-balance');
 
-  const fetchAll = async () => {
+  const fetchCompanies = async () => {
+    try {
+      const { data } = await api.get('/companies/list');
+      setCompanies(data || []);
+    } catch { /* non-fatal — selector just shows the default book */ }
+  };
+
+  const fetchAll = async (cid = companyId) => {
     setLoading(true);
     try {
       const [tbR, pnlR, bsR] = await Promise.allSettled([
-        api.get('/reports/trial-balance'),
-        api.get('/reports/profit-loss'),
-        api.get('/reports/balance-sheet'),
+        api.get('/reports/trial-balance', { params: { company_id: cid } }),
+        api.get('/reports/profit-loss', { params: { company_id: cid } }),
+        api.get('/reports/balance-sheet', { params: { company_id: cid } }),
       ]);
       setTrialBalance(tbR.status === 'fulfilled' ? tbR.value.data : null);
       setPnl(pnlR.status === 'fulfilled' ? pnlR.value.data : null);
@@ -111,7 +91,45 @@ function AccountingReportsInner() {
       setLoading(false);
     }
   };
-  useEffect(() => { fetchAll(); }, []);
+  useEffect(() => { fetchCompanies(); fetchAll(''); }, []);
+
+  const onCompanyChange = (cid) => {
+    const val = cid === '__all__' ? '' : cid;
+    setCompanyId(val);
+    fetchAll(val);
+  };
+
+  const companyLabel = companies.find((c) => c.id === companyId)?.name || 'All Companies';
+
+  const downloadActiveReport = () => {
+    const safeCompany = companyLabel.replace(/[^a-z0-9]+/gi, '_');
+    if (activeTab === 'trial-balance') {
+      if (!trialBalance) { toast.error('Nothing to download yet.'); return; }
+      const rows = [['Account Code', 'Account Name', 'Debit', 'Credit']];
+      trialBalance.rows.forEach((r) => rows.push([r.code, r.name, r.debit || '', r.credit || '']));
+      rows.push(['', 'Total', trialBalance.total_debit, trialBalance.total_credit]);
+      downloadCsv(`Trial_Balance_${safeCompany}.csv`, rows);
+    } else if (activeTab === 'pnl') {
+      if (!pnl) { toast.error('Nothing to download yet.'); return; }
+      const rows = [['Section', 'Account', 'Amount']];
+      (pnl.income || []).forEach((r) => rows.push(['Income', r.name, r.amount]));
+      rows.push(['Income', 'Total Income', pnl.total_income]);
+      (pnl.expenses || []).forEach((r) => rows.push(['Expense', r.name, r.amount]));
+      rows.push(['Expense', 'Total Expenses', pnl.total_expense]);
+      rows.push(['', 'Net Profit / Loss', pnl.net_profit]);
+      downloadCsv(`Profit_And_Loss_${safeCompany}.csv`, rows);
+    } else if (activeTab === 'balance-sheet') {
+      if (!balanceSheet) { toast.error('Nothing to download yet.'); return; }
+      const rows = [['Section', 'Account', 'Amount']];
+      (balanceSheet.assets || []).forEach((r) => rows.push(['Asset', r.name, r.amount]));
+      rows.push(['Asset', 'Total Assets', balanceSheet.total_assets]);
+      (balanceSheet.liabilities || []).forEach((r) => rows.push(['Liability', r.name, r.amount]));
+      rows.push(['Liability', 'Total Liabilities', balanceSheet.total_liabilities]);
+      (balanceSheet.equity || []).forEach((r) => rows.push(['Equity', r.name, r.amount]));
+      rows.push(['Equity', 'Total Equity', balanceSheet.total_equity]);
+      downloadCsv(`Balance_Sheet_${safeCompany}.csv`, rows);
+    }
+  };
 
   if (loading) return <ContentLoader />;
 
@@ -131,25 +149,40 @@ function AccountingReportsInner() {
                 <h1 className="text-2xl md:text-3xl font-bold tracking-tight mt-1">Accounting Reports</h1>
                 <p className="text-sm text-blue-100 mt-1 max-w-2xl">
                   Trial Balance, P&amp;L, and Balance Sheet — live from every posted journal entry.
-                  Plus 13 extended reports for day book, cash flow, aging, depreciation, TDS/TCS and more.
                 </p>
               </div>
             </div>
-            <Button onClick={fetchAll} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20">
-              <RefreshCw className="h-4 w-4 mr-2" /> Refresh
-            </Button>
+            <div className="flex flex-col gap-2 items-stretch sm:items-end">
+              <div className="flex flex-wrap gap-2">
+                <Select value={companyId || '__all__'} onValueChange={onCompanyChange}>
+                  <SelectTrigger className="h-9 min-w-[180px] bg-white/10 border-white/25 text-white">
+                    <Building2 className="h-3.5 w-3.5 mr-1.5 shrink-0" />
+                    <SelectValue placeholder="All Companies" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">All Companies</SelectItem>
+                    {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Button onClick={downloadActiveReport} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20">
+                  <Download className="h-4 w-4 mr-2" /> Download
+                </Button>
+                <Button onClick={() => fetchAll()} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20">
+                  <RefreshCw className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
 
         <GuidanceNote pageKey="accounting-reports" isDark={isDark} />
 
         {/* Tabs */}
-        <Tabs defaultValue="trial-balance">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="flex-wrap h-auto gap-1">
             <TabsTrigger value="trial-balance">Trial Balance</TabsTrigger>
             <TabsTrigger value="pnl">Profit &amp; Loss</TabsTrigger>
             <TabsTrigger value="balance-sheet">Balance Sheet</TabsTrigger>
-            <TabsTrigger value="extended">More Reports ✦</TabsTrigger>
           </TabsList>
 
           {/* ── Trial Balance ── */}
@@ -227,14 +260,6 @@ function AccountingReportsInner() {
               {balanceSheet?.balanced ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
               Assets {fmtC(balanceSheet?.total_assets)} = Liabilities + Equity {fmtC((balanceSheet?.total_liabilities || 0) + (balanceSheet?.total_equity || 0))}
             </div>
-          </TabsContent>
-
-          {/* ── Extended Reports ── */}
-          <TabsContent value="extended" className="mt-4">
-            <div className={`mb-4 rounded-2xl px-4 py-3 border text-sm ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-blue-50 border-blue-100 text-blue-800'}`}>
-              These are standalone full-page reports. Click any card to open it — it will open in the same app with its own filters, date pickers, and export options.
-            </div>
-            <ExtendedReportsGrid isDark={isDark} />
           </TabsContent>
         </Tabs>
 
