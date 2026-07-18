@@ -85,37 +85,35 @@ def _perm_post(user: User) -> bool:
 
 
 # ── Extraction schema (forced-JSON contract given to the LLM) ───────────────
-EXTRACTION_SCHEMA_PROMPT = """You are a structured-data extraction engine for accounting documents.
-Read the attached invoice/receipt image and return ONLY a single JSON object
+EXTRACTION_SCHEMA_PROMPT = """You are a highly precise Indian Chartered Accountant AI assistant.
+Read the attached invoice or receipt image and return ONLY a single JSON object
 (no markdown fences, no commentary) matching exactly this shape:
 
 {
   "document_type": "SALE" | "PURCHASE" | "UNKNOWN",
-  "vendor_or_customer_name": string,      // the OTHER party — who this business is transacting with
-  "tax_registration_number": string,      // vendor/customer GSTIN/PAN, "" if not visible
-  "billed_to_name": string,               // the name/company this document is addressed TO ("Bill To" / "Ship To" / recipient letterhead)
+  "vendor_or_customer_name": string,      // the OTHER party — who this business is transacting with. For a purchase invoice, this is the SELLER/SUPPLIER whose logo or letterhead is at the top. For a sales invoice, this is the CUSTOMER in 'Bill To'.
+  "tax_registration_number": string,      // vendor/customer GSTIN (usually 15-digit code like 24AAAAA1111A1Z1). Do not confuse with PAN/VAT unless GSTIN is not present.
+  "billed_to_name": string,               // the name/company this document is addressed TO ("Bill To" / "Ship To" / recipient letterhead).
   "billed_to_email": string,              // the "Bill To" email address if shown, else ""
   "billed_to_gstin": string,              // the recipient's own GSTIN if shown, else ""
   "invoice_number": string,
-  "invoice_date": "YYYY-MM-DD",
+  "invoice_date": "YYYY-MM-DD",           // extract carefully. Use ISO YYYY-MM-DD format.
   "line_items": [
     {"description": string, "amount": number}
   ],
-  "taxable_value": number,
-  "tax_breakup": {"cgst": number, "sgst": number, "igst": number},
-  "total_tax": number,
-  "total_invoice_value": number,
-  "currency": string,                     // 3-letter ISO 4217 code the amounts are actually denominated in (e.g. "USD", "EUR", "INR") — read the currency symbol/code on the document, do not assume INR
-  "confidence": number                    // 0-1, your own confidence in this read
+  "taxable_value": number,                // total taxable subtotal BEFORE GST
+  "tax_breakup": {"cgst": number, "sgst": number, "igst": number}, // extract CGST, SGST, IGST carefully. In Indian GST, CGST always equals SGST. If CGST/SGST exist, IGST must be 0. If IGST exists, CGST/SGST must be 0.
+  "total_tax": number,                    // sum of all taxes (CGST + SGST + IGST)
+  "total_invoice_value": number,          // Grand total amount (Taxable value + Total Tax)
+  "currency": string,                     // 3-letter ISO 4217 code (e.g., "INR" for ₹/Rs, "USD" for $, "EUR" for €). Check currency symbols carefully.
+  "confidence": number                    // 0-1, your confidence score
 }
 
 Rules:
-- document_type = "SALE" if this business is the one issuing/selling; "PURCHASE" if
-  this business is the buyer/recipient. Infer from letterhead/"Bill To" vs "From".
-- All numeric fields must be plain numbers (no currency symbols, no commas), in the
-  document's OWN currency — do not convert currency yourself, just report what's printed.
-- If a field is unreadable, use 0 for numbers or "" for strings — never omit a key.
-- Do not invent data that is not visible in the document.
+1. document_type: If the invoice is issued BY this firm, it is "SALE". If issued TO this firm (e.g. from vendor/supplier), it is "PURCHASE".
+2. No commas or currency symbols in numbers.
+3. Keep the values in the original currency of the invoice. Do not do any FX conversion yourself.
+4. Double check math: total_invoice_value = taxable_value + total_tax. If there is a rounding difference, report the exact numbers shown on the invoice.
 """
 
 
@@ -505,6 +503,32 @@ async def build_ledger_preview(company_id: str, extracted: dict) -> dict:
     inv_date = extracted.get("invoice_date") or date.today().isoformat()
     currency = (extracted.get("currency") or "INR").upper().strip() or "INR"
 
+    # Smart Indian GST and math auto-correction to eliminate accounting principle/concept errors
+    extracted_total_tax = float(extracted.get("total_tax") or 0)
+    if extracted_total_tax > 0 and (cgst + sgst + igst) <= 0:
+        company_gstin = ""
+        company_doc = await db.companies.find_one({"id": company_id}, {"_id": 0, "gstin": 1})
+        if company_doc:
+            company_gstin = str(company_doc.get("gstin") or "").strip()
+        
+        vendor_gstin = str(extracted.get("tax_registration_number") or "").strip()
+        is_same_state = False
+        if company_gstin and vendor_gstin and len(company_gstin) >= 2 and len(vendor_gstin) >= 2:
+            is_same_state = (company_gstin[:2] == vendor_gstin[:2])
+        
+        if is_same_state:
+            cgst = round(extracted_total_tax / 2, 2)
+            sgst = round(extracted_total_tax / 2, 2)
+            igst = 0.0
+        else:
+            igst = extracted_total_tax
+            cgst = 0.0
+            sgst = 0.0
+
+    total_tax = round(cgst + sgst + igst, 2)
+    if total_value <= 0 and taxable_value > 0:
+        total_value = round(taxable_value + total_tax, 2)
+
     if total_value <= 0:
         raise ValueError("Extracted invoice value is 0 — cannot post; needs manual review.")
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", inv_date):
@@ -520,7 +544,7 @@ async def build_ledger_preview(company_id: str, extracted: dict) -> dict:
         fx_meta = {
             "original_currency": currency,
             "original_taxable_value": taxable_value,
-            "original_total_tax": round(cgst + sgst + igst, 2),
+            "original_total_tax": total_tax,
             "original_total_value": total_value,
             "rate_to_inr": fx_rate,
             "rate_date": inv_date,
