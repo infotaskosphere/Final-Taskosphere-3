@@ -8,13 +8,12 @@ import {
 } from 'lucide-react';
 import { ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
 import {
   PageHeader, ReportCard, Row, EmptyState, DateFilterBar,
-  fmtC, fmtN, fmtPct, currentFYLabel,
+  fmtC, fmtN, fmtPct, currentFYLabel, COLORS,
 } from '@/components/reports/ReportShared.jsx';
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -35,6 +34,17 @@ const TABS = [
   { key: 'opening-balances',     label: 'Opening Balances',   icon: Scale,         path: '/opening-balances' },
   { key: 'audit-trail',          label: 'Audit Trail',        icon: CheckCircle2,  path: '/accounting-audit-trail' },
   { key: 'bulk-import',          label: 'Bulk Import',        icon: Upload,        path: '/bulk-import' },
+];
+
+/* Tabs organised into business-style functional groups for the sub-nav.
+   This keeps the same flat `tab` state — it's purely a presentational
+   grouping so the 13 sections read like sections of a ledger, with a
+   clear left-to-right, top-to-bottom grid instead of ragged wrapping. */
+const TAB_GROUPS = [
+  { label: 'Books',                       keys: ['day-book', 'cash-bank-book', 'cash-flow'] },
+  { label: 'Compliance & Reconciliation', keys: ['outstanding', 'bank-reconciliation', 'tds-tcs', 'audit-trail'] },
+  { label: 'Analysis & Reports',          keys: ['depreciation', 'financial-ratios', 'comparative', 'yearly'] },
+  { label: 'Setup & Data',                keys: ['opening-balances', 'bulk-import'] },
 ];
 
 const inputCls = (isDark) => `px-3 py-2 rounded-xl text-sm border ${isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-700'}`;
@@ -1011,6 +1021,10 @@ function ExtendedReportsInner() {
   const location = useLocation();
   const initialTab = TABS.find((t) => t.path === location.pathname)?.key || 'day-book';
   const [tab, setTab] = useState(initialTab);
+  const activeTab = TABS.find((t) => t.key === tab) || TABS[0];
+
+  const cardCls = isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200';
+  const groupLabelCls = isDark ? 'text-slate-500' : 'text-slate-400';
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
@@ -1022,17 +1036,57 @@ function ExtendedReportsInner() {
           isDark={isDark}
         />
 
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="flex-wrap h-auto gap-1">
-            {TABS.map((t) => (
-              <TabsTrigger key={t.key} value={t.key} className="gap-1.5">
-                <t.icon className="h-3.5 w-3.5" /> {t.label}
-              </TabsTrigger>
+        {/* Grouped, grid-aligned sub-nav — 13 sections read as ledger
+            categories instead of a ragged wall of pills. */}
+        <nav className={`rounded-2xl border shadow-sm ${cardCls}`}>
+          <div className="p-3 md:p-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {TAB_GROUPS.map((group) => (
+              <div key={group.label} className="space-y-1.5">
+                <p className={`text-[10px] font-bold uppercase tracking-wider ${groupLabelCls}`}>
+                  {group.label}
+                </p>
+                <div className="flex flex-col gap-1">
+                  {group.keys.map((key) => {
+                    const t = TABS.find((x) => x.key === key);
+                    if (!t) return null;
+                    const active = tab === key;
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => setTab(key)}
+                        aria-current={active ? 'true' : undefined}
+                        className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold border text-left transition ${
+                          active
+                            ? 'text-white border-transparent shadow-md'
+                            : isDark
+                              ? 'bg-slate-900/40 border-transparent text-slate-300 hover:bg-slate-700/50'
+                              : 'bg-slate-50 border-transparent text-slate-600 hover:bg-slate-100'
+                        }`}
+                        style={active ? { background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` } : {}}
+                      >
+                        <t.icon className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">{t.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             ))}
-          </TabsList>
-        </Tabs>
+          </div>
+        </nav>
 
-        <div className="mt-2">
+        {/* Section breadcrumb — confirms where you are and echoes the
+            back-to-Accounting-Reports path in the header above. */}
+        <div className={`flex items-center gap-1.5 text-xs font-medium px-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+          <span>Accounting Reports</span>
+          <ChevronRight className="h-3 w-3" />
+          <span className={`font-bold flex items-center gap-1.5 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+            <activeTab.icon className="h-3.5 w-3.5" style={{ color: COLORS.mediumBlue }} />
+            {activeTab.label}
+          </span>
+        </div>
+
+        <div>
           {tab === 'day-book' && <DayBookSection isDark={isDark} />}
           {tab === 'cash-bank-book' && <CashBankBookSection isDark={isDark} />}
           {tab === 'cash-flow' && <CashFlowSection isDark={isDark} />}
