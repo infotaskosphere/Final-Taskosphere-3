@@ -202,13 +202,33 @@ function AccountingReportsInner() {
 
   const companyLabel = companies.find((c) => c.id === companyId)?.name || 'All Companies';
 
-  const downloadPartyLedger = () => {
-    if (!partyLedger || !partyLedger.rows || partyLedger.rows.length === 0) { toast.error('Nothing to download yet.'); return; }
-    const safeParty = partyName.replace(/[^a-z0-9]+/gi, '_');
-    const rows = [['Date', 'Narration', 'Source', 'Debit', 'Credit', 'Balance']];
-    partyLedger.rows.forEach((r) => rows.push([r.date, r.narration, r.source, r.debit || '', r.credit || '', r.balance]));
-    rows.push(['', '', '', '', 'Closing Balance', partyLedger.closing_balance]);
-    downloadCsv(`Party_Ledger_${safeParty}_${dateFrom}_to_${dateTo}.csv`, rows);
+  const [partyExporting, setPartyExporting] = useState(false);
+
+  const downloadPartyLedger = async (format = 'xlsx') => {
+    if (!partyName) { toast.error('Pick a customer or vendor first'); return; }
+    if (!partyLedger) { toast.error('Load the ledger first.'); return; }
+    setPartyExporting(true);
+    try {
+      const { data } = await api.get(`/reports/party-ledger/export.${format}`, {
+        params: { party_name: partyName, party_type: partyType, company_id: companyId, date_from: dateFrom || undefined, date_to: dateTo || undefined },
+        responseType: 'blob',
+      });
+      const mime = format === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      const blob = new Blob([data], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const safeParty = partyName.replace(/[^a-z0-9]+/gi, '_');
+      a.href = url;
+      a.download = `Party_Ledger_${safeParty}_${dateFrom}_to_${dateTo}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error(`Failed to download ${format.toUpperCase()}`);
+    } finally {
+      setPartyExporting(false);
+    }
   };
 
   const downloadGeneralLedger = async () => {
@@ -256,7 +276,7 @@ function AccountingReportsInner() {
       rows.push(['Equity', 'Total Equity', balanceSheet.total_equity]);
       downloadCsv(`Balance_Sheet_${safeCompany}_${period}.csv`, rows);
     } else if (activeTab === 'party-ledger') {
-      downloadPartyLedger();
+      downloadPartyLedger('xlsx');
     }
   };
 
@@ -491,7 +511,12 @@ function AccountingReportsInner() {
                 </SelectContent>
               </Select>
               <Button onClick={fetchPartyLedger} disabled={partyLoading}>{partyLoading ? 'Loading…' : 'Load Ledger'}</Button>
-              <Button onClick={downloadPartyLedger} variant="outline"><Download className="h-4 w-4 mr-2" /> Download</Button>
+              <Button onClick={() => downloadPartyLedger('xlsx')} variant="outline" disabled={partyExporting || !partyLedger}>
+                <Download className="h-4 w-4 mr-2" /> Excel
+              </Button>
+              <Button onClick={() => downloadPartyLedger('pdf')} variant="outline" disabled={partyExporting || !partyLedger}>
+                <Download className="h-4 w-4 mr-2" /> PDF
+              </Button>
             </div>
             {!partyLedger ? (
               <p className="text-sm text-slate-400 py-6 text-center">Pick a customer or vendor and load their ledger.</p>
