@@ -48,19 +48,7 @@ import AccountingReports from './pages/AccountingReports.jsx';
 import ZeroTouchEntry from './pages/ZeroTouchEntry.jsx';
 import GSTPortalSync from './pages/GSTPortalSync.jsx';
 import AccountingIntegrity from './pages/AccountingIntegrity.jsx';
-import DayBook from './pages/DayBook.jsx';
-import CashBankBook from './pages/CashBankBook.jsx';
-import CashFlow from './pages/CashFlow.jsx';
-import OutstandingReport from './pages/OutstandingReport.jsx';
-import BankReconciliation from './pages/BankReconciliation.jsx';
-import DepreciationSchedule from './pages/DepreciationSchedule.jsx';
-import TDSTCSReport from './pages/TDSTCSReport.jsx';
-import FinancialRatios from './pages/FinancialRatios.jsx';
-import ComparativeReport from './pages/ComparativeReport.jsx';
-import YearlyReport from './pages/YearlyReport.jsx';
-import OpeningBalances from './pages/OpeningBalances.jsx';
-import AuditTrail from './pages/AuditTrail.jsx';
-import BulkImport from './pages/BulkImport.jsx';
+import ExtendedReports from './pages/ExtendedReports.jsx';
 import DueDates from './pages/DueDates.jsx';
 import ImportInvoices from './pages/ImportInvoices.jsx';
 
@@ -157,19 +145,19 @@ export default function AppRoutes() {
       <Route path="/zero-touch-entry" element={<Protected><ZeroTouchEntry /></Protected>} />
       <Route path="/gst-portal-sync" element={<Protected><GSTPortalSync /></Protected>} />
       <Route path="/accounting-integrity" element={<Protected><AccountingIntegrity /></Protected>} />
-      <Route path="/day-book" element={<Protected><DayBook /></Protected>} />
-      <Route path="/cash-bank-book" element={<Protected><CashBankBook /></Protected>} />
-      <Route path="/cash-flow" element={<Protected><CashFlow /></Protected>} />
-      <Route path="/outstanding-report" element={<Protected><OutstandingReport /></Protected>} />
-      <Route path="/bank-reconciliation" element={<Protected><BankReconciliation /></Protected>} />
-      <Route path="/depreciation" element={<Protected><DepreciationSchedule /></Protected>} />
-      <Route path="/tds-tcs" element={<Protected><TDSTCSReport /></Protected>} />
-      <Route path="/financial-ratios" element={<Protected><FinancialRatios /></Protected>} />
-      <Route path="/comparative-report" element={<Protected><ComparativeReport /></Protected>} />
-      <Route path="/yearly-report" element={<Protected><YearlyReport /></Protected>} />
-      <Route path="/opening-balances" element={<Protected><OpeningBalances /></Protected>} />
-      <Route path="/accounting-audit-trail" element={<Protected><AuditTrail /></Protected>} />
-      <Route path="/bulk-import" element={<Protected><BulkImport /></Protected>} />
+      <Route path="/day-book" element={<Protected><ExtendedReports /></Protected>} />
+      <Route path="/cash-bank-book" element={<Protected><ExtendedReports /></Protected>} />
+      <Route path="/cash-flow" element={<Protected><ExtendedReports /></Protected>} />
+      <Route path="/outstanding-report" element={<Protected><ExtendedReports /></Protected>} />
+      <Route path="/bank-reconciliation" element={<Protected><ExtendedReports /></Protected>} />
+      <Route path="/depreciation" element={<Protected><ExtendedReports /></Protected>} />
+      <Route path="/tds-tcs" element={<Protected><ExtendedReports /></Protected>} />
+      <Route path="/financial-ratios" element={<Protected><ExtendedReports /></Protected>} />
+      <Route path="/comparative-report" element={<Protected><ExtendedReports /></Protected>} />
+      <Route path="/yearly-report" element={<Protected><ExtendedReports /></Protected>} />
+      <Route path="/opening-balances" element={<Protected><ExtendedReports /></Protected>} />
+      <Route path="/accounting-audit-trail" element={<Protected><ExtendedReports /></Protected>} />
+      <Route path="/bulk-import" element={<Protected><ExtendedReports /></Protected>} />
       <Route path="/due-dates" element={<Protected><DueDates /></Protected>} />
       <Route path="/import-invoices" element={<Protected><ImportInvoices /></Protected>} />
 
