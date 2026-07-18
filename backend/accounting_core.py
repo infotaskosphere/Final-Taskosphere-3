@@ -13,6 +13,7 @@ entity already used elsewhere in the app — see /companies/list). Pass
 company_id="" to use a single default book if the firm only operates one.
 """
 
+import re
 import uuid
 import asyncio
 from datetime import datetime, date, timezone
@@ -25,6 +26,20 @@ from backend.dependencies import db, get_current_user
 from backend.models import User
 
 router = APIRouter(tags=["Accounting"])
+
+
+def _name_match_query(name: str) -> dict:
+    """Case/whitespace-insensitive exact-name match. Invoices and payments
+    for the same real-world party sometimes end up with slightly different
+    casing or spacing in `client_name`/`supplier_name` (typed once on the
+    invoice, typed again -- differently -- on a payment or a later invoice).
+    A plain exact string match then silently drops those rows out of the
+    Party Ledger (missing invoices, and "payments never deducted", because
+    the payment simply never matched the party query). Matching on a
+    normalized (trimmed, collapsed-whitespace, case-insensitive) pattern
+    instead means every real variant of the same name is picked up."""
+    normalized = re.sub(r"\s+", r"\\s+", re.escape((name or "").strip()))
+    return {"$regex": f"^{normalized}$", "$options": "i"}
 
 
 def _perm_view_coa(user: User) -> bool:
@@ -721,25 +736,40 @@ async def list_ledger_parties(company_id: str = Query(""), current_user: User = 
         pur_q["company_id"] = company_id
     customers = await db.invoices.distinct("client_name", inv_q)
     vendors = await db.purchase_invoices.distinct("supplier_name", pur_q)
+
+    def _dedupe(names):
+        # Collapse case/whitespace variants of the same party name (e.g.
+        # "8 PH Alkaline Aqua Pvt Ltd" typed once and "8 PH ALKALINE AQUA
+        # PVT LTD" typed another time on a later invoice) into a single
+        # entry, so the picker doesn't split one party's history across
+        # two rows and the Party Ledger's own name-matching stays in sync
+        # with what's actually offered here.
+        seen: dict = {}
+        for n in names:
+            n = (n or "").strip()
+            if not n:
+                continue
+            key = re.sub(r"\s+", " ", n).lower()
+            if key not in seen:
+                seen[key] = n
+        return sorted(seen.values())
+
     return {
-        "customers": sorted([c for c in customers if c]),
-        "vendors": sorted([v for v in vendors if v]),
+        "customers": _dedupe(customers),
+        "vendors": _dedupe(vendors),
     }
 
 
-@router.get("/reports/party-ledger")
-async def party_ledger(
-    party_name: str = Query(...), party_type: str = Query("customer"), company_id: str = Query(""),
-    date_from: Optional[str] = Query(None), date_to: Optional[str] = Query(None),
-    current_user: User = Depends(get_current_user),
-):
+async def _compute_party_ledger(
+    party_name: str, party_type: str, company_id: str,
+    date_from: Optional[str], date_to: Optional[str],
+) -> dict:
     """Statement of every transaction for one customer or vendor — invoices/
     bills, receipts/payments, and credit/debit notes — with a running
     balance, drawn from the same journal entries that back the other
-    reports (so it always agrees with Trial Balance / Balance Sheet)."""
-    if not _perm_reports(current_user):
-        raise HTTPException(403, "Access denied.")
-
+    reports (so it always agrees with Trial Balance / Balance Sheet).
+    Shared by the on-screen report and the Excel/PDF export endpoints so
+    a download always matches exactly what's on screen."""
     all_companies = not company_id
     if all_companies:
         await _reconcile_all_books(await _all_book_ids())
@@ -748,20 +778,21 @@ async def party_ledger(
 
     base_q: dict = {} if all_companies else {"company_id": company_id}
 
+    name_q = _name_match_query(party_name)
     if party_type == "vendor":
-        doc_q = {**base_q, "supplier_name": party_name}
+        doc_q = {**base_q, "supplier_name": name_q}
         bills = await db.purchase_invoices.find(doc_q, {"_id": 0, "id": 1}).to_list(20000)
         bill_ids = [b["id"] for b in bills]
-        pay_q = {**base_q, "$or": [{"supplier_name": party_name}, {"purchase_invoice_id": {"$in": bill_ids}}]}
+        pay_q = {**base_q, "$or": [{"supplier_name": name_q}, {"purchase_invoice_id": {"$in": bill_ids}}]}
         payments = await db.purchase_payments.find(pay_q, {"_id": 0, "id": 1}).to_list(20000)
         source_ids = bill_ids + [p["id"] for p in payments]
         sources = ["purchase", "purchase_payment"]
         control_code = "2000"  # Accounts Payable
     else:
-        doc_q = {**base_q, "client_name": party_name}
+        doc_q = {**base_q, "client_name": name_q}
         invoices = await db.invoices.find(doc_q, {"_id": 0, "id": 1}).to_list(20000)
         inv_ids = [i["id"] for i in invoices]
-        pay_q = {**base_q, "$or": [{"client_name": party_name}, {"invoice_id": {"$in": inv_ids}}]}
+        pay_q = {**base_q, "$or": [{"client_name": name_q}, {"invoice_id": {"$in": inv_ids}}]}
         payments = await db.payments.find(pay_q, {"_id": 0, "id": 1}).to_list(20000)
         source_ids = inv_ids + [p["id"] for p in payments]
         sources = ["sale", "payment"]
@@ -806,8 +837,220 @@ async def party_ledger(
         balance = round(balance + movement, 2)
         rows.append({
             "date": e["entry_date"], "narration": e["narration"], "source": e["source"],
+            "voucher_no": e.get("source_id", "")[:8] if e.get("source_id") else "",
             "debit": round(control_line["debit"], 2), "credit": round(control_line["credit"], 2),
             "balance": balance,
         })
 
-    return {"party_name": party_name, "party_type": party_type, "rows": rows, "closing_balance": balance}
+    company_name = "All Companies"
+    if not all_companies:
+        company = await db.companies.find_one({"id": company_id}, {"_id": 0, "name": 1})
+        company_name = (company or {}).get("name") or "My Company"
+
+    return {
+        "party_name": party_name, "party_type": party_type, "rows": rows,
+        "closing_balance": balance, "company_name": company_name,
+        "date_from": date_from, "date_to": date_to,
+    }
+
+
+@router.get("/reports/party-ledger")
+async def party_ledger(
+    party_name: str = Query(...), party_type: str = Query("customer"), company_id: str = Query(""),
+    date_from: Optional[str] = Query(None), date_to: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+):
+    if not _perm_reports(current_user):
+        raise HTTPException(403, "Access denied.")
+    return await _compute_party_ledger(party_name, party_type, company_id, date_from, date_to)
+
+
+def _safe_filename_part(s: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "_", (s or "").strip()).strip("_") or "Party"
+
+
+@router.get("/reports/party-ledger/export.xlsx")
+async def export_party_ledger_xlsx(
+    party_name: str = Query(...), party_type: str = Query("customer"), company_id: str = Query(""),
+    date_from: Optional[str] = Query(None), date_to: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+):
+    """Downloadable Party Ledger statement as a formatted .xlsx workbook —
+    company name, party name, statement period, opening/closing balance,
+    and every transaction with a running balance, laid out the way Tally /
+    Zoho Books / QuickBooks print a party statement."""
+    if not _perm_reports(current_user):
+        raise HTTPException(403, "Access denied.")
+    from io import BytesIO
+    from fastapi.responses import StreamingResponse
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    data = await _compute_party_ledger(party_name, party_type, company_id, date_from, date_to)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Party Ledger"
+
+    header_fill = PatternFill("solid", fgColor="0D3B66")
+    header_font = Font(name="Arial", bold=True, color="FFFFFF", size=11)
+    title_font = Font(name="Arial", bold=True, size=14, color="0D3B66")
+    sub_font = Font(name="Arial", size=10, color="475569")
+    bold_font = Font(name="Arial", bold=True, size=10)
+    normal_font = Font(name="Arial", size=10)
+    thin = Side(style="thin", color="CBD5E1")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    money_fmt = "#,##0.00"
+
+    ws.merge_cells("A1:F1")
+    ws["A1"] = data["company_name"]
+    ws["A1"].font = title_font
+
+    ws.merge_cells("A2:F2")
+    ws["A2"] = "Party Ledger / Statement of Account"
+    ws["A2"].font = Font(name="Arial", size=11, bold=True, color="1F6FB2")
+
+    period = f"{data.get('date_from') or 'Beginning'} to {data.get('date_to') or 'Date'}"
+    ws.merge_cells("A3:F3")
+    ws["A3"] = f"Party: {data['party_name']}   |   Type: {data['party_type'].title()}   |   Period: {period}"
+    ws["A3"].font = sub_font
+
+    ws.merge_cells("A4:F4")
+    ws["A4"] = f"Generated on {datetime.now().strftime('%d-%b-%Y %H:%M')}"
+    ws["A4"].font = sub_font
+
+    headers = ["Date", "Voucher No.", "Narration", "Debit (₹)", "Credit (₹)", "Running Balance (₹)"]
+    header_row = 6
+    for i, h in enumerate(headers, start=1):
+        c = ws.cell(row=header_row, column=i, value=h)
+        c.font = header_font
+        c.fill = header_fill
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c.border = border
+
+    r = header_row + 1
+    for row in data["rows"]:
+        ws.cell(row=r, column=1, value=row["date"]).font = normal_font
+        ws.cell(row=r, column=2, value=row.get("voucher_no", "")).font = normal_font
+        ws.cell(row=r, column=3, value=row["narration"]).font = normal_font
+        dc = ws.cell(row=r, column=4, value=row["debit"] or None)
+        cc = ws.cell(row=r, column=5, value=row["credit"] or None)
+        bc = ws.cell(row=r, column=6, value=row["balance"])
+        for cell in (dc, cc, bc):
+            cell.font = normal_font
+            cell.number_format = money_fmt
+            cell.alignment = Alignment(horizontal="right")
+        for col in range(1, 7):
+            ws.cell(row=r, column=col).border = border
+        r += 1
+
+    if not data["rows"]:
+        ws.merge_cells(f"A{r}:F{r}")
+        ws.cell(row=r, column=1, value="No transactions found for this party in the selected period.").font = normal_font
+        r += 1
+
+    ws.cell(row=r, column=3, value="Closing Balance").font = bold_font
+    ws.cell(row=r, column=3).alignment = Alignment(horizontal="right")
+    close_cell = ws.cell(row=r, column=6, value=data["closing_balance"])
+    close_cell.font = bold_font
+    close_cell.number_format = money_fmt
+    close_cell.alignment = Alignment(horizontal="right")
+    for col in range(1, 7):
+        ws.cell(row=r, column=col).border = border
+
+    widths = [13, 14, 46, 16, 16, 20]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = f"{_safe_filename_part(data['company_name'])}_Party_Ledger_{_safe_filename_part(party_name)}_{date_from or 'all'}_to_{date_to or 'all'}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@router.get("/reports/party-ledger/export.pdf")
+async def export_party_ledger_pdf(
+    party_name: str = Query(...), party_type: str = Query("customer"), company_id: str = Query(""),
+    date_from: Optional[str] = Query(None), date_to: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+):
+    """Downloadable Party Ledger statement as a formatted PDF — same
+    layout/content as the .xlsx export, for printing or emailing to the
+    party directly."""
+    if not _perm_reports(current_user):
+        raise HTTPException(403, "Access denied.")
+    from io import BytesIO
+    from fastapi.responses import StreamingResponse
+    from fpdf import FPDF
+
+    data = await _compute_party_ledger(party_name, party_type, company_id, date_from, date_to)
+
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.set_text_color(13, 59, 102)
+    pdf.cell(0, 8, data["company_name"], ln=True)
+
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(31, 111, 178)
+    pdf.cell(0, 7, "Party Ledger / Statement of Account", ln=True)
+
+    period = f"{data.get('date_from') or 'Beginning'} to {data.get('date_to') or 'Date'}"
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(71, 85, 105)
+    pdf.cell(0, 6, f"Party: {data['party_name']}    Type: {data['party_type'].title()}", ln=True)
+    pdf.cell(0, 6, f"Period: {period}", ln=True)
+    pdf.cell(0, 6, f"Generated on {datetime.now().strftime('%d-%b-%Y %H:%M')}", ln=True)
+    pdf.ln(3)
+
+    col_w = [22, 22, 82, 24, 24, 26]
+    headers = ["Date", "Voucher", "Narration", "Debit", "Credit", "Balance"]
+    pdf.set_fill_color(13, 59, 102)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 9)
+    for w, h in zip(col_w, headers):
+        pdf.cell(w, 8, h, border=1, align="C", fill=True)
+    pdf.ln()
+
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(30, 41, 59)
+    fill = False
+    for row in data["rows"]:
+        pdf.set_fill_color(241, 245, 249)
+        pdf.cell(col_w[0], 7, str(row["date"])[:10], border=1, align="C", fill=fill)
+        pdf.cell(col_w[1], 7, str(row.get("voucher_no", "")), border=1, align="C", fill=fill)
+        narration = str(row["narration"])[:58]
+        pdf.cell(col_w[2], 7, narration, border=1, align="L", fill=fill)
+        pdf.cell(col_w[3], 7, f"{row['debit']:,.2f}" if row["debit"] else "", border=1, align="R", fill=fill)
+        pdf.cell(col_w[4], 7, f"{row['credit']:,.2f}" if row["credit"] else "", border=1, align="R", fill=fill)
+        pdf.cell(col_w[5], 7, f"{row['balance']:,.2f}", border=1, align="R", fill=fill)
+        pdf.ln()
+        fill = not fill
+
+    if not data["rows"]:
+        pdf.set_font("Helvetica", "I", 9)
+        pdf.cell(sum(col_w), 8, "No transactions found for this party in the selected period.", border=1, align="C")
+        pdf.ln()
+
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_fill_color(226, 232, 240)
+    pdf.cell(sum(col_w[:5]), 8, "Closing Balance", border=1, align="R", fill=True)
+    pdf.cell(col_w[5], 8, f"{data['closing_balance']:,.2f}", border=1, align="R", fill=True)
+
+    out = pdf.output(dest="S")
+    pdf_bytes = bytes(out) if isinstance(out, (bytearray, bytes)) else out.encode("latin-1")
+    buf = BytesIO(pdf_bytes)
+    fname = f"{_safe_filename_part(data['company_name'])}_Party_Ledger_{_safe_filename_part(party_name)}_{date_from or 'all'}_to_{date_to or 'all'}.pdf"
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
