@@ -808,18 +808,25 @@ function YearlySection({ isDark }) {
 
 /* ── 11. Opening Balances ────────────────────────────────────────────── */
 function OpeningBalancesSection({ isDark }) {
-  const [fy, setFy] = useState(currentFYLabel());
+  const location = useLocation();
+  const companyId = new URLSearchParams(location.search).get('company_id') || '';
+  const [fy, setFy] = useState(new URLSearchParams(location.search).get('fy') || currentFYLabel());
   const [rows, setRows] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState({});
   const [saving, setSaving] = useState(false);
   const [obDate, setObDate] = useState('');
+  const fileInputRef = React.useRef(null);
+  const [uploading, setUploading] = useState(false);
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [obR, coaR] = await Promise.allSettled([api.get('/opening-balances', { params: { fy } }), api.get('/chart-of-accounts')]);
+      const [obR, coaR] = await Promise.allSettled([
+        api.get('/opening-balances', { params: { fy, company_id: companyId } }),
+        api.get('/chart-of-accounts', { params: { company_id: companyId } }),
+      ]);
       const ob = obR.status === 'fulfilled' ? obR.value.data.opening_balances : [];
       setRows(ob || []);
       setAccounts(coaR.status === 'fulfilled' ? coaR.value.data : []);
@@ -829,7 +836,7 @@ function OpeningBalancesSection({ isDark }) {
       setObDate(`${fy.split('-')[0]}-04-01`);
     } catch { toast.error('Failed to load opening balances'); } finally { setLoading(false); }
   };
-  useEffect(() => { fetchData(); }, [fy]);
+  useEffect(() => { fetchData(); }, [fy, companyId]);
 
   const setCell = (accountId, field, value) => setEditing((e) => ({ ...e, [accountId]: { ...e[accountId], [field]: value } }));
 
@@ -843,9 +850,56 @@ function OpeningBalancesSection({ isDark }) {
     if (lines.length === 0) { toast.error('Enter at least one opening balance'); return; }
     setSaving(true);
     try {
-      await api.post('/opening-balances', { fy, date: obDate, lines });
+      await api.post('/opening-balances', { company_id: companyId, fy, date: obDate, lines });
       toast.success('Opening balances saved'); fetchData();
     } catch (err) { toast.error(err?.response?.data?.detail || 'Failed to save opening balances'); } finally { setSaving(false); }
+  };
+
+  // Upload a full opening balance sheet directly: a 2-3 column CSV of
+  // "account code or name, debit, credit" — matched against this book's
+  // Chart of Accounts by code first, then by exact name, so a full trial
+  // balance exported from an old system can be dropped in without typing
+  // every line by hand.
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploading(true);
+    try {
+      const text = await file.text();
+      const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      if (lines.length < 2) { toast.error('CSV looks empty'); return; }
+      const header = lines[0].split(',').map((h) => h.trim().toLowerCase());
+      const idx = (names) => names.map((n) => header.indexOf(n)).find((i) => i >= 0) ?? -1;
+      const codeIdx = idx(['account_code', 'code']);
+      const nameIdx = idx(['account_name', 'account', 'name']);
+      const drIdx = idx(['debit', 'dr']);
+      const crIdx = idx(['credit', 'cr']);
+      if (codeIdx < 0 && nameIdx < 0) { toast.error('CSV needs an account_code or account_name column'); return; }
+      const byCode = {}; const byName = {};
+      accounts.forEach((a) => { byCode[String(a.code).trim().toLowerCase()] = a; byName[String(a.name).trim().toLowerCase()] = a; });
+      const nextEditing = { ...editing };
+      let matched = 0, unmatched = [];
+      for (const line of lines.slice(1)) {
+        const cells = line.split(',').map((c) => c.trim());
+        const code = codeIdx >= 0 ? cells[codeIdx] : '';
+        const name = nameIdx >= 0 ? cells[nameIdx] : '';
+        const acct = (code && byCode[code.toLowerCase()]) || (name && byName[name.toLowerCase()]);
+        if (!acct) { if (code || name) unmatched.push(code || name); continue; }
+        const debit = drIdx >= 0 ? Number(cells[drIdx]) || 0 : 0;
+        const credit = crIdx >= 0 ? Number(cells[crIdx]) || 0 : 0;
+        if (!debit && !credit) continue;
+        nextEditing[acct.id] = { debit, credit };
+        matched++;
+      }
+      setEditing(nextEditing);
+      if (matched) toast.success(`Loaded ${matched} row${matched === 1 ? '' : 's'} — review below and click Save.`);
+      if (unmatched.length) toast.error(`${unmatched.length} row(s) didn't match any account: ${unmatched.slice(0, 5).join(', ')}${unmatched.length > 5 ? '…' : ''}`);
+    } catch {
+      toast.error('Failed to read that file');
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
@@ -855,6 +909,11 @@ function OpeningBalancesSection({ isDark }) {
         <input value={fy} onChange={(e) => setFy(e.target.value)} placeholder="2024-25" className={inputCls(isDark)} style={{ width: 100 }} />
         <span className="text-sm text-slate-400">Opening date:</span>
         <input type="date" value={obDate} onChange={(e) => setObDate(e.target.value)} className={inputCls(isDark)} />
+        <span className="text-xs text-slate-400 ml-auto">{companyId ? 'Company-specific book' : 'Default book (no company selected)'}</span>
+        <input ref={fileInputRef} type="file" accept=".csv" className="hidden" onChange={handleFile} />
+        <Button size="sm" variant="outline" disabled={uploading} onClick={() => fileInputRef.current?.click()}>
+          <Upload className="h-3.5 w-3.5 mr-1.5" /> {uploading ? 'Reading…' : 'Upload opening balance sheet (CSV)'}
+        </Button>
       </div>
       {loading ? <ContentLoader /> : (
         <ReportCard title={`Opening Balances — FY ${fy}`} isDark={isDark}
