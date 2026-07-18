@@ -442,6 +442,54 @@ async def delete_journal_entry(entry_id: str, current_user: User = Depends(get_c
     return {"success": True}
 
 
+@router.put("/journal-entries/{entry_id}")
+async def update_journal_entry(entry_id: str, payload: JournalEntryCreate, current_user: User = Depends(get_current_user)):
+    """Edit an existing manual journal entry. Auto-posted entries (from
+    Sale/Purchase/Bank/Payment flows) must be corrected at the source
+    document — editing here would drift the ledger away from the invoice."""
+    if not _perm_post_journal(current_user):
+        raise HTTPException(403, "Access denied.")
+    entry = await db.journal_entries.find_one({"id": entry_id})
+    if not entry:
+        raise HTTPException(404, "Journal entry not found.")
+    if entry.get("source") != "manual":
+        raise HTTPException(400, "Auto-posted entries can't be edited here. Edit the source document (invoice, bill, payment) instead.")
+
+    lines = [l.model_dump() for l in payload.lines]
+    total_debit = round(sum(float(l.get("debit") or 0) for l in lines), 2)
+    total_credit = round(sum(float(l.get("credit") or 0) for l in lines), 2)
+    if abs(total_debit - total_credit) > 0.01:
+        raise HTTPException(400, f"Debit ({total_debit}) must equal credit ({total_credit}).")
+    if total_debit <= 0:
+        raise HTTPException(400, "Journal entry has no amount.")
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.journal_entries.update_one(
+        {"id": entry_id},
+        {"$set": {
+            "company_id": payload.company_id,
+            "entry_date": payload.entry_date,
+            "narration": payload.narration.strip(),
+            "total_debit": total_debit,
+            "total_credit": total_credit,
+            "updated_by": current_user.id,
+            "updated_at": now,
+        }},
+    )
+    # Replace lines wholesale — simpler and safer than diffing.
+    await db.journal_lines.delete_many({"entry_id": entry_id})
+    line_docs = [{
+        "id": str(uuid.uuid4()), "entry_id": entry_id, "company_id": payload.company_id,
+        "entry_date": payload.entry_date, "account_id": l["account_id"],
+        "account_name": l.get("account_name", ""), "debit": float(l.get("debit") or 0),
+        "credit": float(l.get("credit") or 0), "memo": l.get("memo", ""), "created_at": now,
+    } for l in lines]
+    if line_docs:
+        await db.journal_lines.insert_many(line_docs)
+    updated = await db.journal_entries.find_one({"id": entry_id}, {"_id": 0})
+    return updated
+
+
 # ── General Ledger ────────────────────────────────────────────────────────
 @router.get("/ledger/{account_id}")
 async def get_ledger(
@@ -476,7 +524,13 @@ async def get_ledger(
 
 # ── Trial Balance ─────────────────────────────────────────────────────────
 @router.get("/reports/trial-balance")
-async def trial_balance(company_id: str = Query(""), as_of: Optional[str] = Query(None), current_user: User = Depends(get_current_user)):
+async def trial_balance(
+    company_id: str = Query(""),
+    as_of: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+):
     if not _perm_reports(current_user):
         raise HTTPException(403, "Access denied. Request access from your admin in Permission Governance.")
 
@@ -492,8 +546,17 @@ async def trial_balance(company_id: str = Query(""), as_of: Optional[str] = Quer
     acct_q = {} if all_companies else {"company_id": company_id}
     accounts = await db.chart_of_accounts.find(acct_q, {"_id": 0}).sort("code", 1).to_list(20000)
     q: dict = {} if all_companies else {"company_id": company_id}
-    if as_of:
-        q["entry_date"] = {"$lte": as_of}
+    # Trial Balance honors both a snapshot cutoff (as_of) and an explicit
+    # from/to range so the "Custom range" filter on the Accounting Reports
+    # page actually narrows the report to that window instead of always
+    # showing everything up to the end date.
+    upper = date_to or as_of
+    if date_from or upper:
+        q["entry_date"] = {}
+        if date_from:
+            q["entry_date"]["$gte"] = date_from
+        if upper:
+            q["entry_date"]["$lte"] = upper
     lines = await db.journal_lines.find(q, {"_id": 0}).to_list(200000)
     totals: dict = {}
     for l in lines:
