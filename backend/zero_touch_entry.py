@@ -125,38 +125,84 @@ def _strip_json_fence(text: str) -> str:
 
 
 async def _groq_extract_json(image_b64: str, mime_type: str) -> dict:
+    """Call Groq's vision endpoint with automatic model fallback.
+
+    The previously-hard-coded ``meta-llama/llama-4-scout-17b-16e-instruct``
+    model has been retired on some Groq accounts and returns HTTP 404
+    (``model_not_found``), which our earlier code re-wrapped as a plain 422
+    — this is what caused the "Failed to load resource: the server responded
+    with a status of 422 ()" the user was seeing on the Zero-Touch Entry
+    page. We now try a small ordered list of vision-capable Groq models and
+    only surface an error if every fallback also fails."""
     import httpx
     groq_key = os.environ.get("GROQ_API_KEY", "")
     if not groq_key:
         raise HTTPException(500, "GROQ_API_KEY is not configured on the server.")
-    payload = {
-        "model": "meta-llama/llama-4-scout-17b-16e-instruct",
-        "messages": [{
-            "role": "user",
-            "content": [
-                {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_b64}"}},
-                {"type": "text", "text": EXTRACTION_SCHEMA_PROMPT},
-            ],
-        }],
-        "response_format": {"type": "json_object"},
-        "max_tokens": 2048,
-        "temperature": 0,
-    }
+
+    env_model = os.environ.get("GROQ_VISION_MODEL", "").strip()
+    candidate_models = [m for m in [
+        env_model or None,
+        "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+        "llama-3.2-90b-vision-preview",
+        "llama-3.2-11b-vision-preview",
+    ] if m]
+    # de-duplicate while preserving order
+    seen: set = set()
+    candidate_models = [m for m in candidate_models if not (m in seen or seen.add(m))]
+
+    last_error: Optional[str] = None
     async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
-            json=payload,
-        )
-    if resp.status_code == 429:
-        raise HTTPException(429, "Groq quota exceeded. Please wait a moment and try again.")
-    if resp.status_code != 200:
-        raise HTTPException(422, f"Groq API error {resp.status_code}: {resp.text[:300]}")
-    raw = resp.json()["choices"][0]["message"]["content"]
-    try:
-        return json.loads(_strip_json_fence(raw))
-    except json.JSONDecodeError as e:
-        raise HTTPException(422, f"Model did not return valid JSON: {e}. Raw: {raw[:300]}")
+        for model in candidate_models:
+            payload = {
+                "model": model,
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_b64}"}},
+                        {"type": "text", "text": EXTRACTION_SCHEMA_PROMPT},
+                    ],
+                }],
+                "response_format": {"type": "json_object"},
+                "max_tokens": 2048,
+                "temperature": 0,
+            }
+            resp = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                json=payload,
+            )
+            if resp.status_code == 429:
+                raise HTTPException(429, "Groq quota exceeded. Please wait a moment and try again.")
+            if resp.status_code == 200:
+                raw = resp.json()["choices"][0]["message"]["content"]
+                try:
+                    return json.loads(_strip_json_fence(raw))
+                except json.JSONDecodeError as e:
+                    raise HTTPException(422, f"Model did not return valid JSON: {e}. Raw: {raw[:300]}")
+
+            # If the model isn't available on this account, silently roll to
+            # the next candidate; otherwise remember the error and try the
+            # next model too — the last error is surfaced only if every model
+            # fails.
+            body = resp.text[:400]
+            last_error = f"{resp.status_code} on {model}: {body}"
+            if resp.status_code in (400, 401, 402, 403, 404) and (
+                "model_not_found" in body
+                or "does not exist" in body
+                or "not found" in body.lower()
+                or "decommissioned" in body.lower()
+            ):
+                continue
+            # Any other non-2xx (500s, etc.) is worth trying the next model too
+            continue
+
+    raise HTTPException(
+        422,
+        "Groq vision extraction failed for every configured model. "
+        f"Last error: {last_error or 'unknown'}. "
+        "Set the GROQ_VISION_MODEL env var to a model available on your Groq account."
+    )
 
 
 def _file_to_image_b64(contents: bytes, filename: str) -> Tuple[str, str]:
@@ -332,7 +378,7 @@ because it's the only option left unexamined."""
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
                 json={
-                    "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+                    "model": os.environ.get("GROQ_TEXT_MODEL", "llama-3.3-70b-versatile"),
                     "messages": [{"role": "user", "content": prompt}],
                     "response_format": {"type": "json_object"},
                     "max_tokens": 300,
