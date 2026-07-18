@@ -102,7 +102,10 @@ function AccountingReportsInner() {
     try {
       const { data } = await api.get('/companies/list');
       setCompanies(data || []);
-    } catch { /* non-fatal */ }
+      return data || [];
+    } catch {
+      return [];
+    }
   };
 
   const fetchParties = async (cid = companyId) => {
@@ -137,7 +140,28 @@ function AccountingReportsInner() {
     }
   };
 
-  useEffect(() => { fetchCompanies(); fetchParties(''); fetchAll({ companyId: '' }); }, []);
+  useEffect(() => {
+    (async () => {
+      const list = await fetchCompanies();
+      // "All Companies" is the most expensive view — it reconciles and
+      // scans every book in the system. Defaulting to it on every single
+      // page load (regardless of what the user actually wants to look at)
+      // was the main reason Accounting Reports felt slow to open. Instead,
+      // remember the last company viewed on this page and reopen straight
+      // into it; fall back to the first company only the very first time.
+      let initialCid = '';
+      try {
+        const stored = localStorage.getItem('accountingReports:lastCompanyId') || '';
+        if (stored && list.some((c) => c.id === stored)) initialCid = stored;
+        else if (list.length) initialCid = list[0].id;
+      } catch {
+        if (list.length) initialCid = list[0].id;
+      }
+      setCompanyId(initialCid);
+      fetchParties(initialCid);
+      fetchAll({ companyId: initialCid });
+    })();
+  }, []);
 
   const fetchPartyLedger = async () => {
     if (!partyName) { toast.error('Pick a customer or vendor first'); return; }
@@ -157,6 +181,7 @@ function AccountingReportsInner() {
   const onCompanyChange = (cid) => {
     const val = cid === '__all__' ? '' : cid;
     setCompanyId(val);
+    try { localStorage.setItem('accountingReports:lastCompanyId', val); } catch { /* non-fatal */ }
     fetchAll({ companyId: val });
     fetchParties(val);
     setPartyLedger(null);
