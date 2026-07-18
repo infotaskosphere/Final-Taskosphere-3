@@ -15,6 +15,7 @@ import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
 import { mirrorBankToSettings, bankFromAccount } from '@/lib/bankSync';
+import { GuidanceNote } from '@/components/ui/GuidanceNote.jsx';
 
 const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2', emeraldGreen: '#1FAF5A', amber: '#F59E0B', coral: '#FF6B6B' };
 const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
@@ -164,6 +165,8 @@ function BankAccountsInner() {
             </div>
           </div>
         </div>
+
+        <GuidanceNote pageKey="bank-accounts" isDark={isDark} />
 
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
           {[
