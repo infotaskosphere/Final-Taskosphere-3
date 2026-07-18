@@ -1,6 +1,11 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { BarChart3, RefreshCw, CheckCircle2, AlertTriangle } from 'lucide-react';
+import {
+  BarChart3, RefreshCw, CheckCircle2, AlertTriangle,
+  BookOpen, Landmark, Activity, TrendingUp, TrendingDown,
+  CalendarRange, Shield, Scale, Upload, ArrowLeftRight, ExternalLink,
+} from 'lucide-react';
 import GifLoader, { ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -11,6 +16,7 @@ import RequestAccessGate from '@/components/RequestAccessGate.jsx';
 const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2', emeraldGreen: '#1FAF5A', amber: '#F59E0B', coral: '#FF6B6B' };
 const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 
+/* ── Shared sub-components ─────────────────────────────────────────────── */
 function ReportCard({ title, children, isDark }) {
   return (
     <div className={`rounded-3xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
@@ -31,6 +37,55 @@ function Row({ label, value, isDark, bold }) {
   );
 }
 
+/* ── Quick-link cards for extended reports ─────────────────────────────── */
+const EXTENDED_REPORTS = [
+  { path: '/day-book',            icon: BookOpen,      label: 'Day Book',             desc: 'All transactions grouped by date' },
+  { path: '/cash-bank-book',      icon: Landmark,      label: 'Cash / Bank Book',     desc: 'Running balance ledger per account' },
+  { path: '/cash-flow',           icon: Activity,      label: 'Cash Flow Statement',  desc: 'Indirect method: operating / investing / financing' },
+  { path: '/outstanding-report',  icon: AlertTriangle, label: 'Outstanding',          desc: 'Receivable & payable aging buckets' },
+  { path: '/bank-reconciliation', icon: ArrowLeftRight,label: 'Bank Reconciliation',  desc: 'Upload statement & match to journal lines' },
+  { path: '/depreciation',        icon: TrendingDown,  label: 'Depreciation Schedule',desc: 'Fixed asset register with SLM / WDV schedule' },
+  { path: '/tds-tcs',             icon: Shield,        label: 'TDS / TCS',            desc: 'Deduction ledger with auto journal posting' },
+  { path: '/financial-ratios',    icon: BarChart3,     label: 'Financial Ratios',     desc: 'Liquidity, profitability & solvency ratios' },
+  { path: '/comparative-report',  icon: TrendingUp,    label: 'Comparative Report',   desc: 'Two-year P&L side-by-side with % change' },
+  { path: '/yearly-report',       icon: CalendarRange, label: 'Year-wise Report',     desc: 'Multi-year trend with bar chart' },
+  { path: '/opening-balances',    icon: Scale,         label: 'Opening Balances',     desc: 'Set per-FY opening balances & post journal' },
+  { path: '/accounting-audit-trail', icon: CheckCircle2, label: 'Accounting Audit Trail', desc: 'Immutable log of all accounting actions' },
+  { path: '/bulk-import',         icon: Upload,        label: 'Bulk Journal Import',  desc: 'Import hundreds of entries via JSON, async' },
+];
+
+function ExtendedReportsGrid({ isDark }) {
+  const navigate = useNavigate();
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      {EXTENDED_REPORTS.map(r => {
+        const Icon = r.icon;
+        return (
+          <button
+            key={r.path}
+            onClick={() => navigate(r.path)}
+            className={`text-left rounded-2xl border p-4 flex items-start gap-3 transition-all hover:shadow-md active:scale-[0.98] ${
+              isDark ? 'bg-slate-800 border-slate-700 hover:border-blue-500/50 hover:bg-slate-700/60' : 'bg-white border-slate-200 hover:border-blue-300 hover:bg-blue-50/40'
+            }`}
+          >
+            <div className="h-9 w-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: `${COLORS.mediumBlue}18` }}>
+              <Icon className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{r.label}</p>
+                <ExternalLink className="h-3 w-3 text-slate-400" />
+              </div>
+              <p className={`text-xs mt-0.5 leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{r.desc}</p>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ── Main inner component ──────────────────────────────────────────────── */
 function AccountingReportsInner() {
   const isDark = useDark();
   const [loading, setLoading] = useState(true);
@@ -62,6 +117,8 @@ function AccountingReportsInner() {
   return (
     <div className={`min-h-screen ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
       <div className="p-4 md:p-6 space-y-5 max-w-[1200px] mx-auto">
+
+        {/* Header */}
         <div className="rounded-3xl overflow-hidden shadow-xl" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
           <div className="p-6 md:p-7 flex flex-col lg:flex-row lg:items-center justify-between gap-5 text-white">
             <div className="flex items-start gap-4">
@@ -71,20 +128,28 @@ function AccountingReportsInner() {
               <div>
                 <p className="text-xs uppercase tracking-[0.25em] text-blue-100 font-bold">Accounts</p>
                 <h1 className="text-2xl md:text-3xl font-bold tracking-tight mt-1">Accounting Reports</h1>
-                <p className="text-sm text-blue-100 mt-1 max-w-2xl">Trial Balance, Profit &amp; Loss, and Balance Sheet — generated live from every posted journal entry.</p>
+                <p className="text-sm text-blue-100 mt-1 max-w-2xl">
+                  Trial Balance, P&amp;L, and Balance Sheet — live from every posted journal entry.
+                  Plus 13 extended reports for day book, cash flow, aging, depreciation, TDS/TCS and more.
+                </p>
               </div>
             </div>
-            <Button onClick={fetchAll} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20"><RefreshCw className="h-4 w-4 mr-2" /> Refresh</Button>
+            <Button onClick={fetchAll} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20">
+              <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+            </Button>
           </div>
         </div>
 
+        {/* Tabs */}
         <Tabs defaultValue="trial-balance">
-          <TabsList>
+          <TabsList className="flex-wrap h-auto gap-1">
             <TabsTrigger value="trial-balance">Trial Balance</TabsTrigger>
             <TabsTrigger value="pnl">Profit &amp; Loss</TabsTrigger>
             <TabsTrigger value="balance-sheet">Balance Sheet</TabsTrigger>
+            <TabsTrigger value="extended">More Reports ✦</TabsTrigger>
           </TabsList>
 
+          {/* ── Trial Balance ── */}
           <TabsContent value="trial-balance" className="mt-4">
             <ReportCard title="Trial Balance" isDark={isDark}>
               {!trialBalance || trialBalance.rows.length === 0 ? (
@@ -115,6 +180,7 @@ function AccountingReportsInner() {
             </ReportCard>
           </TabsContent>
 
+          {/* ── P&L ── */}
           <TabsContent value="pnl" className="mt-4">
             <div className="grid md:grid-cols-2 gap-4">
               <ReportCard title="Income" isDark={isDark}>
@@ -133,6 +199,7 @@ function AccountingReportsInner() {
             </div>
           </TabsContent>
 
+          {/* ── Balance Sheet ── */}
           <TabsContent value="balance-sheet" className="mt-4">
             <div className="grid md:grid-cols-2 gap-4">
               <ReportCard title="Assets" isDark={isDark}>
@@ -158,7 +225,16 @@ function AccountingReportsInner() {
               Assets {fmtC(balanceSheet?.total_assets)} = Liabilities + Equity {fmtC((balanceSheet?.total_liabilities || 0) + (balanceSheet?.total_equity || 0))}
             </div>
           </TabsContent>
+
+          {/* ── Extended Reports ── */}
+          <TabsContent value="extended" className="mt-4">
+            <div className={`mb-4 rounded-2xl px-4 py-3 border text-sm ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-blue-50 border-blue-100 text-blue-800'}`}>
+              These are standalone full-page reports. Click any card to open it — it will open in the same app with its own filters, date pickers, and export options.
+            </div>
+            <ExtendedReportsGrid isDark={isDark} />
+          </TabsContent>
         </Tabs>
+
       </div>
     </div>
   );
