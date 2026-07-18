@@ -149,10 +149,12 @@ async def list_locked_entries(company_id: str = Query(""), current_user: User = 
     return entries
 
 
-async def guard_deletion(entry_id: str) -> None:
+async def guard_deletion(entry_id: str, user: Optional[User] = None) -> None:
     """Call this before any hard-delete of a journal entry (in addition to
     accounting_core's own admin-only check) — raises if deletion would erase
-    audit-trail history."""
+    audit-trail history. Admins can bypass this check to fix incorrect entries."""
+    if user and getattr(user, "role", None) == "admin":
+        return
     entry = await db.journal_entries.find_one({"id": entry_id}, {"_id": 0})
     if not entry:
         return
