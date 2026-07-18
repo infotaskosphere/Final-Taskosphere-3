@@ -711,6 +711,48 @@ async def _draft_preview(doc: dict) -> dict:
         raise HTTPException(400, str(e))
 
 
+class PreviewLine(BaseModel):
+    account_id: str
+    account_name: str = ""
+    debit: float = 0.0
+    credit: float = 0.0
+    memo: str = ""
+
+
+class UpdatePreviewBody(BaseModel):
+    lines: List[PreviewLine]
+
+
+@router.post("/documents/{doc_id}/update-preview")
+async def update_preview(doc_id: str, body: UpdatePreviewBody, current_user: User = Depends(get_current_user)):
+    """Lets a human correct the AI-drafted account/head (or amounts) for a
+    still-unposted document before approving — e.g. the AI put a Purchase
+    against the generic 'Purchases' account when it should have gone to a
+    specific expense head. Only allowed while the document is still
+    pending_approval; once posted, corrections go through the Accounting
+    Integrity 'Fix this entry' flow instead (source-locked)."""
+    if not _perm_post(current_user):
+        raise HTTPException(403, "Access denied.")
+    doc = await db.zte_processed_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Document not found.")
+    if doc["status"] != "pending_approval":
+        raise HTTPException(400, f"Document is '{doc['status']}' — only a pending-approval draft can be edited.")
+    if not doc.get("preview"):
+        raise HTTPException(400, "No draft entry to edit.")
+    lines = [l.model_dump() for l in body.lines]
+    total_debit = round(sum(float(l.get("debit") or 0) for l in lines), 2)
+    total_credit = round(sum(float(l.get("credit") or 0) for l in lines), 2)
+    if abs(total_debit - total_credit) > 0.01:
+        raise HTTPException(400, f"Lines don't balance: debit {total_debit} != credit {total_credit}.")
+    if total_debit <= 0:
+        raise HTTPException(400, "Entry has no amount.")
+    new_preview = dict(doc["preview"])
+    new_preview["lines"] = lines
+    await db.zte_processed_documents.update_one({"id": doc_id}, {"$set": {"preview": new_preview}})
+    return {"success": True, "preview": new_preview}
+
+
 @router.post("/documents/{doc_id}/approve")
 async def approve_document(doc_id: str, current_user: User = Depends(get_current_user)):
     """The only endpoint in this module that posts to the ledger. A human
