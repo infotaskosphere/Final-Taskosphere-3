@@ -249,70 +249,61 @@ function AccountingReportsInner() {
   return (
     <div className="space-y-5 w-full min-w-0">
 
-      {/* Header */}
-      <div className="rounded-3xl overflow-hidden shadow-xl" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-        <div className="p-5 md:p-7 flex flex-col lg:flex-row lg:items-center justify-between gap-5 text-white">
-          <div className="flex items-start gap-4 min-w-0">
-            <div className="h-14 w-14 shrink-0 rounded-2xl bg-white/15 border border-white/20 flex items-center justify-center shadow-lg">
-              <BarChart3 className="h-7 w-7" />
+      {/* Header — compact so it doesn't dominate the page. Tabs sit below. */}
+      <div className="rounded-2xl overflow-hidden shadow-lg" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+        <div className="p-3 md:p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-white">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="h-10 w-10 shrink-0 rounded-xl bg-white/15 border border-white/20 flex items-center justify-center">
+              <BarChart3 className="h-5 w-5" />
             </div>
             <div className="min-w-0">
-              <p className="text-xs uppercase tracking-[0.25em] text-blue-100 font-bold">Accounts</p>
-              <h1 className="text-2xl md:text-3xl font-bold tracking-tight mt-1 truncate">Accounting Reports</h1>
-              <p className="text-sm text-blue-100 mt-1 max-w-2xl">
-                Trial Balance, P&amp;L, and Balance Sheet — live from every posted journal entry.
-              </p>
+              <h1 className="text-lg md:text-xl font-bold tracking-tight truncate">Accounting Reports</h1>
+              <p className="text-[11px] text-blue-100 truncate">Trial Balance, P&amp;L, and Balance Sheet — live from every posted journal entry.</p>
             </div>
           </div>
-          <div className="flex flex-col gap-2 lg:items-end min-w-0">
-            <div className="flex flex-wrap gap-2 lg:justify-end">
-              <Select value={companyId || '__all__'} onValueChange={onCompanyChange}>
-                <SelectTrigger className="h-9 min-w-[180px] bg-white/10 border-white/25 text-white">
-                  <Building2 className="h-3.5 w-3.5 mr-1.5 shrink-0" />
-                  <SelectValue placeholder="All Companies" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__all__">All Companies</SelectItem>
-                  {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <Button onClick={downloadActiveReport} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20">
-                <Download className="h-4 w-4 mr-2" /> Download
-              </Button>
-              <Button onClick={downloadGeneralLedger} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20">
-                <Download className="h-4 w-4 mr-2" /> General Ledger
-              </Button>
-              <Button onClick={() => fetchAll()} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20">
-                <RefreshCw className="h-4 w-4" />
-              </Button>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-blue-100 lg:justify-end">
-              <span className="font-semibold">Period:</span>
-              <Select value={fyKey} onValueChange={onFyChange}>
-                <SelectTrigger className="h-8 min-w-[150px] bg-white/10 border-white/25 text-white">
-                  <SelectValue placeholder="Financial year" />
-                </SelectTrigger>
-                <SelectContent>
-                  {fyOptions.map((f) => <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>)}
-                  <SelectItem value="custom">Custom range…</SelectItem>
-                </SelectContent>
-              </Select>
-              <span>From</span>
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => { setDateFrom(e.target.value); setFyKey('custom'); }}
-                className="h-8 rounded-lg px-2 bg-white/10 border border-white/25 text-white"
-              />
-              <span>To</span>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={(e) => { setDateTo(e.target.value); setFyKey('custom'); }}
-                className="h-8 rounded-lg px-2 bg-white/10 border border-white/25 text-white"
-              />
-              <Button onClick={applyDateFilters} size="sm" variant="outline" className="h-8 bg-white/10 border-white/25 text-white hover:bg-white/20">Apply</Button>
-            </div>
+          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+            <Select value={companyId || '__all__'} onValueChange={onCompanyChange}>
+              <SelectTrigger className="h-8 min-w-[160px] bg-white/10 border-white/25 text-white text-xs">
+                <Building2 className="h-3.5 w-3.5 mr-1.5 shrink-0" />
+                <SelectValue placeholder="All Companies" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All Companies</SelectItem>
+                {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={fyKey} onValueChange={onFyChange}>
+              <SelectTrigger className="h-8 min-w-[130px] bg-white/10 border-white/25 text-white text-xs">
+                <SelectValue placeholder="Financial year" />
+              </SelectTrigger>
+              <SelectContent>
+                {fyOptions.map((f) => <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>)}
+                <SelectItem value="custom">Custom range…</SelectItem>
+              </SelectContent>
+            </Select>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => { setDateFrom(e.target.value); setFyKey('custom'); }}
+              className="h-8 rounded-md px-2 bg-white/10 border border-white/25 text-white text-xs"
+            />
+            <span className="text-xs text-blue-100">to</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => { setDateTo(e.target.value); setFyKey('custom'); }}
+              className="h-8 rounded-md px-2 bg-white/10 border border-white/25 text-white text-xs"
+            />
+            <Button onClick={applyDateFilters} size="sm" variant="outline" className="h-8 bg-white/10 border-white/25 text-white hover:bg-white/20 text-xs">Apply</Button>
+            <Button onClick={downloadActiveReport} size="sm" variant="outline" className="h-8 bg-white/10 border-white/25 text-white hover:bg-white/20 text-xs">
+              <Download className="h-3.5 w-3.5 mr-1" /> Download
+            </Button>
+            <Button onClick={downloadGeneralLedger} size="sm" variant="outline" className="h-8 bg-white/10 border-white/25 text-white hover:bg-white/20 text-xs">
+              <Download className="h-3.5 w-3.5 mr-1" /> General Ledger
+            </Button>
+            <Button onClick={() => fetchAll()} size="sm" variant="outline" className="h-8 bg-white/10 border-white/25 text-white hover:bg-white/20 text-xs">
+              <RefreshCw className="h-3.5 w-3.5" />
+            </Button>
           </div>
         </div>
       </div>
@@ -321,11 +312,11 @@ function AccountingReportsInner() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="flex-wrap h-auto gap-1">
-          <TabsTrigger value="trial-balance">Trial Balance</TabsTrigger>
-          <TabsTrigger value="pnl">Profit &amp; Loss</TabsTrigger>
-          <TabsTrigger value="balance-sheet">Balance Sheet</TabsTrigger>
-          <TabsTrigger value="party-ledger">Party Ledger</TabsTrigger>
+        <TabsList className="grid grid-cols-2 md:grid-cols-2 h-auto gap-1 p-1">
+          <TabsTrigger value="trial-balance" className="h-8 text-xs">Trial Balance</TabsTrigger>
+          <TabsTrigger value="pnl" className="h-8 text-xs">Profit &amp; Loss</TabsTrigger>
+          <TabsTrigger value="balance-sheet" className="h-8 text-xs">Balance Sheet</TabsTrigger>
+          <TabsTrigger value="party-ledger" className="h-8 text-xs">Party Ledger</TabsTrigger>
         </TabsList>
 
         {/* ── Trial Balance ── */}
