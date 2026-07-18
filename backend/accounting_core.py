@@ -243,6 +243,25 @@ async def get_default_account_id(company_id: str, code: str) -> Optional[str]:
     return acct["id"] if acct else None
 
 
+async def _all_book_ids() -> List[str]:
+    """Every distinct book: each real company plus the "" default book (used
+    by manual Journal Entries, which have no company selector). Used for the
+    'All Companies' report view so it actually aggregates everything instead
+    of only showing the empty-company_id book."""
+    ids = {""}
+    async for c in db.companies.find({}, {"_id": 0, "id": 1}):
+        if c.get("id"):
+            ids.add(c["id"])
+    return list(ids)
+
+
+async def _reconcile_all_books(book_ids: List[str]):
+    from backend.invoicing import reconcile_and_sync_all_sales_and_payments, reconcile_and_sync_all_purchases_and_payments
+    for cid in book_ids:
+        await reconcile_and_sync_all_sales_and_payments(cid)
+        await reconcile_and_sync_all_purchases_and_payments(cid)
+
+
 @router.post("/journal-entries")
 async def create_journal_entry(payload: JournalEntryCreate, current_user: User = Depends(get_current_user)):
     if not _perm_post_journal(current_user):
@@ -343,35 +362,56 @@ async def get_ledger(
 async def trial_balance(company_id: str = Query(""), as_of: Optional[str] = Query(None), current_user: User = Depends(get_current_user)):
     if not _perm_reports(current_user):
         raise HTTPException(403, "Access denied. Request access from your admin in Permission Governance.")
-    
-    # Auto-reconcile and sync sales invoices, purchase bills, and payments to general ledger
-    from backend.invoicing import reconcile_and_sync_all_sales_and_payments, reconcile_and_sync_all_purchases_and_payments
-    await reconcile_and_sync_all_sales_and_payments(company_id)
-    await reconcile_and_sync_all_purchases_and_payments(company_id)
 
-    accounts = await db.chart_of_accounts.find({"company_id": company_id}, {"_id": 0}).sort("code", 1).to_list(2000)
-    q: dict = {"company_id": company_id}
+    all_companies = not company_id
+    # Auto-reconcile and sync sales invoices, purchase bills, and payments to
+    # general ledger. "All Companies" must reconcile every book, not just the
+    # empty-company_id one, or entries tied to a real company never show up.
+    if all_companies:
+        await _reconcile_all_books(await _all_book_ids())
+    else:
+        from backend.invoicing import reconcile_and_sync_all_sales_and_payments, reconcile_and_sync_all_purchases_and_payments
+        await reconcile_and_sync_all_sales_and_payments(company_id)
+        await reconcile_and_sync_all_purchases_and_payments(company_id)
+
+    acct_q = {} if all_companies else {"company_id": company_id}
+    accounts = await db.chart_of_accounts.find(acct_q, {"_id": 0}).sort("code", 1).to_list(20000)
+    q: dict = {} if all_companies else {"company_id": company_id}
     if as_of:
         q["entry_date"] = {"$lte": as_of}
-    lines = await db.journal_lines.find(q, {"_id": 0}).to_list(50000)
+    lines = await db.journal_lines.find(q, {"_id": 0}).to_list(200000)
     totals: dict = {}
     for l in lines:
         t = totals.setdefault(l["account_id"], {"debit": 0.0, "credit": 0.0})
         t["debit"] += l["debit"]
         t["credit"] += l["credit"]
 
-    rows, sum_debit, sum_credit = [], 0.0, 0.0
+    # When aggregating across companies, the same account *code* (e.g. "1000
+    # Cash in Hand") exists as a different account_id in each company's book,
+    # so roll totals up by code rather than by id.
+    by_key: dict = {}
     for a in accounts:
-        t = totals.get(a["id"], {"debit": 0.0, "credit": 0.0})
-        net = round(t["debit"] - t["credit"], 2)
+        key = a["code"] if all_companies else a["id"]
+        entry = by_key.setdefault(key, {"code": a["code"], "name": a["name"], "type": a["type"], "account_ids": []})
+        entry["account_ids"].append(a["id"])
+
+    rows, sum_debit, sum_credit = [], 0.0, 0.0
+    for key, entry in sorted(by_key.items(), key=lambda kv: kv[1]["code"]):
+        debit = sum(totals.get(aid, {"debit": 0.0}).get("debit", 0.0) for aid in entry["account_ids"])
+        credit = sum(totals.get(aid, {"credit": 0.0}).get("credit", 0.0) for aid in entry["account_ids"])
+        net = round(debit - credit, 2)
+        # debit-credit already lands correctly in the debit/credit column
+        # based on its sign for every account type: a positive net (debit
+        # exceeds credit) is a debit balance, a negative net is a credit
+        # balance. This is true for credit-normal accounts (liability,
+        # equity, income) too, since normal activity on them naturally
+        # produces a negative net here — no type-based flip is needed, and
+        # applying one (as this used to) inverted those accounts into the
+        # wrong column and made the sheet look permanently unbalanced.
         debit_bal = net if net > 0 else 0.0
         credit_bal = -net if net < 0 else 0.0
-        if a["type"] in ("liability", "equity", "income"):
-            # These carry a natural credit balance; flip presentation so a
-            # normal balance shows on the credit side.
-            debit_bal, credit_bal = credit_bal, debit_bal
         if debit_bal or credit_bal:
-            rows.append({"account_id": a["id"], "code": a["code"], "name": a["name"], "type": a["type"], "debit": debit_bal, "credit": credit_bal})
+            rows.append({"account_id": key, "code": entry["code"], "name": entry["name"], "type": entry["type"], "debit": debit_bal, "credit": credit_bal})
             sum_debit += debit_bal
             sum_credit += credit_bal
     return {"rows": rows, "total_debit": round(sum_debit, 2), "total_credit": round(sum_credit, 2), "balanced": abs(sum_debit - sum_credit) < 0.02}
@@ -385,27 +425,41 @@ async def profit_and_loss(
 ):
     if not _perm_reports(current_user):
         raise HTTPException(403, "Access denied. Request access from your admin in Permission Governance.")
-    
-    # Auto-reconcile and sync sales invoices, purchase bills, and payments to general ledger
-    from backend.invoicing import reconcile_and_sync_all_sales_and_payments, reconcile_and_sync_all_purchases_and_payments
-    await reconcile_and_sync_all_sales_and_payments(company_id)
-    await reconcile_and_sync_all_purchases_and_payments(company_id)
 
-    accounts = await db.chart_of_accounts.find({"company_id": company_id, "type": {"$in": ["income", "expense"]}}, {"_id": 0}).to_list(2000)
+    all_companies = not company_id
+    # Auto-reconcile and sync sales invoices, purchase bills, and payments to
+    # general ledger. "All Companies" must reconcile every book, not just the
+    # empty-company_id one, or entries tied to a real company never show up.
+    if all_companies:
+        await _reconcile_all_books(await _all_book_ids())
+    else:
+        from backend.invoicing import reconcile_and_sync_all_sales_and_payments, reconcile_and_sync_all_purchases_and_payments
+        await reconcile_and_sync_all_sales_and_payments(company_id)
+        await reconcile_and_sync_all_purchases_and_payments(company_id)
+
+    acct_q = {"type": {"$in": ["income", "expense"]}}
+    if not all_companies:
+        acct_q["company_id"] = company_id
+    accounts = await db.chart_of_accounts.find(acct_q, {"_id": 0}).to_list(20000)
     acct_by_id = {a["id"]: a for a in accounts}
-    q: dict = {"company_id": company_id, "account_id": {"$in": list(acct_by_id.keys())}}
+    q: dict = {"account_id": {"$in": list(acct_by_id.keys())}}
+    if not all_companies:
+        q["company_id"] = company_id
     if date_from or date_to:
         q["entry_date"] = {}
         if date_from:
             q["entry_date"]["$gte"] = date_from
         if date_to:
             q["entry_date"]["$lte"] = date_to
-    lines = await db.journal_lines.find(q, {"_id": 0}).to_list(50000)
+    lines = await db.journal_lines.find(q, {"_id": 0}).to_list(200000)
     income_rows, expense_rows = {}, {}
     for l in lines:
         a = acct_by_id[l["account_id"]]
         bucket = income_rows if a["type"] == "income" else expense_rows
-        row = bucket.setdefault(a["id"], {"code": a["code"], "name": a["name"], "amount": 0.0})
+        # Roll up by code (not account_id) when aggregating across companies,
+        # since the same account code is a different id in each book.
+        key = a["code"] if all_companies else a["id"]
+        row = bucket.setdefault(key, {"code": a["code"], "name": a["name"], "amount": 0.0})
         if a["type"] == "income":
             row["amount"] += l["credit"] - l["debit"]
         else:
@@ -426,26 +480,43 @@ async def profit_and_loss(
 async def balance_sheet(company_id: str = Query(""), as_of: Optional[str] = Query(None), current_user: User = Depends(get_current_user)):
     if not _perm_reports(current_user):
         raise HTTPException(403, "Access denied. Request access from your admin in Permission Governance.")
-    
-    # Auto-reconcile and sync sales invoices, purchase bills, and payments to general ledger
-    from backend.invoicing import reconcile_and_sync_all_sales_and_payments, reconcile_and_sync_all_purchases_and_payments
-    await reconcile_and_sync_all_sales_and_payments(company_id)
-    await reconcile_and_sync_all_purchases_and_payments(company_id)
+
+    all_companies = not company_id
+    # Auto-reconcile and sync sales invoices, purchase bills, and payments to
+    # general ledger. "All Companies" must reconcile every book, not just the
+    # empty-company_id one, or entries tied to a real company never show up.
+    if all_companies:
+        await _reconcile_all_books(await _all_book_ids())
+    else:
+        from backend.invoicing import reconcile_and_sync_all_sales_and_payments, reconcile_and_sync_all_purchases_and_payments
+        await reconcile_and_sync_all_sales_and_payments(company_id)
+        await reconcile_and_sync_all_purchases_and_payments(company_id)
 
     as_of = as_of or date.today().isoformat()
-    accounts = await db.chart_of_accounts.find({"company_id": company_id, "type": {"$in": ["asset", "liability", "equity"]}}, {"_id": 0}).to_list(2000)
+    acct_q = {"type": {"$in": ["asset", "liability", "equity"]}}
+    if not all_companies:
+        acct_q["company_id"] = company_id
+    accounts = await db.chart_of_accounts.find(acct_q, {"_id": 0}).to_list(20000)
     acct_by_id = {a["id"]: a for a in accounts}
-    lines = await db.journal_lines.find(
-        {"company_id": company_id, "account_id": {"$in": list(acct_by_id.keys())}, "entry_date": {"$lte": as_of}}, {"_id": 0}
-    ).to_list(50000)
+    line_q: dict = {"account_id": {"$in": list(acct_by_id.keys())}, "entry_date": {"$lte": as_of}}
+    if not all_companies:
+        line_q["company_id"] = company_id
+    lines = await db.journal_lines.find(line_q, {"_id": 0}).to_list(200000)
     balances: dict = {}
     for l in lines:
-        b = balances.setdefault(l["account_id"], 0.0)
-        balances[l["account_id"]] = b + l["debit"] - l["credit"]
+        # Roll up by code (not account_id) when aggregating across companies,
+        # since the same account code is a different id in each book.
+        a = acct_by_id.get(l["account_id"])
+        if not a:
+            continue
+        key = a["code"] if all_companies else l["account_id"]
+        b = balances.setdefault(key, 0.0)
+        balances[key] = b + l["debit"] - l["credit"]
 
+    acct_by_key = {(a["code"] if all_companies else a["id"]): a for a in accounts}
     assets, liabilities, equity = [], [], []
-    for acct_id, net in balances.items():
-        a = acct_by_id.get(acct_id)
+    for key, net in balances.items():
+        a = acct_by_key.get(key)
         if not a or abs(net) < 0.01:
             continue
         row = {"code": a["code"], "name": a["name"], "amount": round(net, 2) if a["type"] == "asset" else round(-net, 2)}
