@@ -4140,10 +4140,14 @@ async def sync_payment_journal_entry(payment_id: str):
         return
         
     invoice_id = payment.get("invoice_id")
-    inv = await db.invoices.find_one({"id": invoice_id})
-    invoice_no = inv.get("invoice_no") if inv else "Unknown"
-    client_name = inv.get("client_name") if inv else "Client"
-    
+    inv = await db.invoices.find_one({"id": invoice_id}) if invoice_id else None
+    invoice_no = inv.get("invoice_no") if inv else None
+    # Standalone/imported receipts (e.g. bank-matched or bulk-imported
+    # payments) carry their own client_name and have no invoice_id at all —
+    # fall back to that instead of the generic "Client" placeholder, and
+    # only mention "Client" as a last resort.
+    client_name = (inv.get("client_name") if inv else None) or payment.get("client_name") or "Client"
+
     company_id = payment.get("company_id") or (inv.get("company_id") if inv else "")
     amount = float(payment.get("amount") or 0)
     payment_date = payment.get("payment_date") or date.today().isoformat()
@@ -4164,12 +4168,17 @@ async def sync_payment_journal_entry(payment_id: str):
     debit_acct_id = cash_id if payment_mode == "cash" else bank_id
     debit_acct_name = "Cash in Hand" if payment_mode == "cash" else "Bank Accounts"
     
+    invoice_ref = f"Inv {invoice_no}" if invoice_no else "(no invoice linked)"
     lines = [
-        {"account_id": debit_acct_id, "account_name": debit_acct_name, "debit": amount, "credit": 0.0, "memo": f"Receipt for Inv {invoice_no} via {payment_mode.upper()}"},
-        {"account_id": ar_id, "account_name": "Accounts Receivable", "debit": 0.0, "credit": amount, "memo": f"Invoice {invoice_no} payment by {client_name}"}
+        {"account_id": debit_acct_id, "account_name": debit_acct_name, "debit": amount, "credit": 0.0, "memo": f"Receipt from {client_name} via {payment_mode.upper()}"},
+        {"account_id": ar_id, "account_name": "Accounts Receivable", "debit": 0.0, "credit": amount, "memo": f"Payment by {client_name} {invoice_ref}"}
     ]
     
-    narration = f"Receipt from {client_name} for Invoice {invoice_no} ({payment_mode.upper()})"
+    narration = (
+        f"Receipt from {client_name} for Invoice {invoice_no} ({payment_mode.upper()})"
+        if invoice_no else
+        f"Receipt from {client_name} ({payment_mode.upper()})"
+    )
     
     try:
         await post_journal_entry(
@@ -4401,11 +4410,16 @@ async def _reconcile_and_sync_all_sales_and_payments_impl(company_id: str):
             await db.journal_lines.delete_many({"entry_id": {"$in": stale_pay_ids}})
             await db.journal_entries.delete_many({"id": {"$in": stale_pay_ids}})
             
-        # 8. Sync missing/outdated payment entries
+        # 8. Sync missing/outdated payment entries. Also re-sync entries that
+        # were posted before the client_name fallback fix, which show up as
+        # "Receipt from Client for Invoice Unknown" even though the payment
+        # itself has a real client_name (common for imported/bank-matched
+        # receipts that were never linked to an invoice).
         for p in payments:
             p_id = p["id"]
             pe = pay_entry_by_source_id.get(p_id)
-            if not pe or abs(float(pe.get("total_debit", 0)) - float(p.get("amount", 0))) > 0.01:
+            stale_narration = pe and "for Invoice Unknown" in (pe.get("narration") or "") and (p.get("client_name") or "").strip()
+            if not pe or stale_narration or abs(float(pe.get("total_debit", 0)) - float(p.get("amount", 0))) > 0.01:
                 await sync_payment_journal_entry(p_id)
                 
     except Exception as e:
