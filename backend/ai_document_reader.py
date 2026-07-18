@@ -24,15 +24,96 @@ def _get_gemini_model():
         )
 
 
+# ── Provider selection ────────────────────────────────────────────────────────
+def _provider() -> str:
+    p = (os.environ.get("AI_PROVIDER") or "").strip().lower()
+    if p in ("gemini", "google", "google-ai"):
+        return "gemini"
+    if p == "groq":
+        return "groq"
+    if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
+        return "gemini"
+    return "groq"
+
+
+def _gemini_key() -> str:
+    return (os.environ.get("GEMINI_API_KEY")
+            or os.environ.get("GOOGLE_API_KEY")
+            or os.environ.get("GOOGLE_AI_STUDIO_API_KEY")
+            or "").strip()
+
+
+# ── Gemini vision — single image ─────────────────────────────────────────────
+async def _gemini_vision(image_b64: str, mime_type: str, prompt: str) -> str:
+    import httpx
+    key = _gemini_key()
+    if not key:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not configured on the server.")
+    model = (os.environ.get("GEMINI_VISION_MODEL") or "gemini-2.5-flash").strip()
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    body = {
+        "contents": [{
+            "role": "user",
+            "parts": [
+                {"text": prompt},
+                {"inline_data": {"mime_type": mime_type, "data": image_b64}},
+            ],
+        }],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2048},
+    }
+    async with httpx.AsyncClient(timeout=90) as client:
+        resp = await client.post(url, params={"key": key},
+                                 headers={"Content-Type": "application/json"}, json=body)
+    if resp.status_code == 429:
+        raise HTTPException(status_code=429, detail="Gemini quota exceeded. Please wait a moment and try again.")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=422, detail=f"Gemini API error {resp.status_code}: {resp.text[:300]}")
+    data = resp.json()
+    try:
+        parts = data["candidates"][0]["content"]["parts"]
+        return "".join(p.get("text", "") for p in parts if isinstance(p, dict))
+    except (KeyError, IndexError, TypeError):
+        raise HTTPException(status_code=422, detail="Gemini returned an empty response.")
+
+
+async def _gemini_vision_multipage(page_images_b64: list, prompt: str) -> str:
+    import httpx
+    key = _gemini_key()
+    if not key:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not configured on the server.")
+    model = (os.environ.get("GEMINI_VISION_MODEL") or "gemini-2.5-flash").strip()
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    parts = [{"text": prompt}]
+    for img_b64, mime in page_images_b64:
+        parts.append({"inline_data": {"mime_type": mime, "data": img_b64}})
+    body = {
+        "contents": [{"role": "user", "parts": parts}],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2048},
+    }
+    async with httpx.AsyncClient(timeout=120) as client:
+        resp = await client.post(url, params={"key": key},
+                                 headers={"Content-Type": "application/json"}, json=body)
+    if resp.status_code == 429:
+        raise HTTPException(status_code=429, detail="Gemini quota exceeded. Please wait a moment and try again.")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=422, detail=f"Gemini API error {resp.status_code}: {resp.text[:300]}")
+    data = resp.json()
+    try:
+        rparts = data["candidates"][0]["content"]["parts"]
+        return "".join(p.get("text", "") for p in rparts if isinstance(p, dict))
+    except (KeyError, IndexError, TypeError):
+        raise HTTPException(status_code=422, detail="Gemini returned an empty response.")
+
+
 # ── Groq vision — single image ────────────────────────────────────────────────
-async def _groq_vision(image_b64: str, mime_type: str, prompt: str) -> str:
+async def _groq_vision_raw(image_b64: str, mime_type: str, prompt: str) -> str:
     import httpx
     groq_key = os.environ.get("GROQ_API_KEY", "")
     if not groq_key:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY is not configured on the server.")
 
     payload = {
-        "model": "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "model": os.environ.get("GROQ_VISION_MODEL", "meta-llama/llama-4-maverick-17b-128e-instruct"),
         "messages": [{
             "role": "user",
             "content": [
@@ -55,8 +136,7 @@ async def _groq_vision(image_b64: str, mime_type: str, prompt: str) -> str:
     return resp.json()["choices"][0]["message"]["content"]
 
 
-# ── Groq vision — multiple page images (scanned PDF) ─────────────────────────
-async def _groq_vision_multipage(page_images_b64: list, prompt: str) -> str:
+async def _groq_vision_multipage_raw(page_images_b64: list, prompt: str) -> str:
     import httpx
     groq_key = os.environ.get("GROQ_API_KEY", "")
     if not groq_key:
@@ -68,7 +148,7 @@ async def _groq_vision_multipage(page_images_b64: list, prompt: str) -> str:
     content.append({"type": "text", "text": prompt})
 
     payload = {
-        "model": "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "model": os.environ.get("GROQ_VISION_MODEL", "meta-llama/llama-4-maverick-17b-128e-instruct"),
         "messages": [{"role": "user", "content": content}],
         "max_tokens": 2048,
     }
@@ -83,6 +163,31 @@ async def _groq_vision_multipage(page_images_b64: list, prompt: str) -> str:
     if resp.status_code != 200:
         raise HTTPException(status_code=422, detail=f"Groq API error {resp.status_code}: {resp.text[:300]}")
     return resp.json()["choices"][0]["message"]["content"]
+
+
+# ── Provider-agnostic vision wrappers ────────────────────────────────────────
+async def _groq_vision(image_b64: str, mime_type: str, prompt: str) -> str:
+    """Vision call — prefers Gemini when configured, falls back to Groq.
+    Named `_groq_vision` for backwards compatibility with existing callers."""
+    if _provider() == "gemini":
+        try:
+            return await _gemini_vision(image_b64, mime_type, prompt)
+        except HTTPException as e:
+            if os.environ.get("GROQ_API_KEY") and e.status_code in (422, 429, 500):
+                return await _groq_vision_raw(image_b64, mime_type, prompt)
+            raise
+    return await _groq_vision_raw(image_b64, mime_type, prompt)
+
+
+async def _groq_vision_multipage(page_images_b64: list, prompt: str) -> str:
+    if _provider() == "gemini":
+        try:
+            return await _gemini_vision_multipage(page_images_b64, prompt)
+        except HTTPException as e:
+            if os.environ.get("GROQ_API_KEY") and e.status_code in (422, 429, 500):
+                return await _groq_vision_multipage_raw(page_images_b64, prompt)
+            raise
+    return await _groq_vision_multipage_raw(page_images_b64, prompt)
 
 
 # ── Main route ────────────────────────────────────────────────────────────────
