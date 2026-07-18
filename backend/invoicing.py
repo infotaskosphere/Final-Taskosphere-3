@@ -3500,6 +3500,17 @@ async def update_invoice_status(
     amount_due is set to 0 so due/collected summaries are always correct even
     if the user never went through the formal payment recording flow.
 
+    IMPORTANT — this quick toggle used to only touch the invoice document.
+    That made the Invoicing list show "Paid / ₹0 due" while Accounting
+    Reports (Party Ledger, Trial Balance, Balance Sheet) still carried the
+    full invoice amount as outstanding, because nothing had ever credited
+    Accounts Receivable — there was no `payments` record and no journal
+    entry behind the "payment". We now auto-record the missing receipt (and
+    its journal entry) the same way the formal "Record Payment" flow does,
+    so every report agrees with what the dropdown shows. The auto-created
+    receipt is tagged `auto_generated: True` so it can be identified and
+    cleanly removed if the status is later changed away from Paid.
+
     When status is set to 'cancelled', amount_due is zeroed out so cancelled
     invoices don't inflate the outstanding balance.
     """
@@ -3518,24 +3529,65 @@ async def update_invoice_status(
     }
 
     # Fetch current invoice so we can read grand_total for the paid sync
-    inv = await db.invoices.find_one({"id": inv_id}, {"_id": 0, "grand_total": 1, "amount_paid": 1})
+    inv = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
     if not inv:
         raise HTTPException(404, "Invoice not found")
 
     fields_to_set = {"status": new_status, "updated_at": now_iso}
 
+    # Real receipts already on file for this invoice (formal "Record
+    # Payment" flow, imports, bank matches, etc.) — these already have their
+    # own journal entries, so we must not double-count them.
+    existing_payments = await db.payments.find({"invoice_id": inv_id}, {"_id": 0}).to_list(500)
+    recorded_total = round(sum(float(p.get("amount") or 0) for p in existing_payments), 2)
+    auto_payment = next((p for p in existing_payments if p.get("auto_generated")), None)
+
     if new_status == "paid":
         grand = float(inv.get("grand_total") or 0)
-        # Only update amount_paid if it's currently less than grand_total
-        # (preserves overpayment records if somehow amount_paid > grand_total)
-        current_paid = float(inv.get("amount_paid") or 0)
-        if current_paid < grand:
-            fields_to_set["amount_paid"] = round(grand, 2)
+        shortfall = round(grand - recorded_total, 2)
+        if shortfall > 0.004:
+            # Nothing (or not enough) has actually been received for this
+            # invoice yet — post the missing receipt so AR really clears.
+            if auto_payment:
+                new_amount = round(float(auto_payment.get("amount") or 0) + shortfall, 2)
+                await db.payments.update_one({"id": auto_payment["id"]}, {"$set": {"amount": new_amount}})
+                await sync_payment_journal_entry(auto_payment["id"])
+            else:
+                payment_id = str(uuid.uuid4())
+                await db.payments.insert_one({
+                    "id": payment_id, "invoice_id": inv_id, "amount": shortfall,
+                    "payment_date": date.today().isoformat(), "payment_mode": "bank",
+                    "reference_no": "", "notes": "Auto-recorded receipt — invoice marked Paid",
+                    "auto_generated": True,
+                    "created_by": getattr(current_user, "id", "system"), "created_at": now_iso,
+                })
+                await sync_payment_journal_entry(payment_id)
+            recorded_total = grand
+        fields_to_set["amount_paid"] = round(recorded_total, 2)
         fields_to_set["amount_due"] = 0.0
 
     elif new_status == "cancelled":
-        # Cancelled invoices should not appear in outstanding balance
+        # An auto-generated "quick paid" receipt was never real money in the
+        # bank — remove it along with its journal entry so a cancelled
+        # invoice doesn't leave a phantom credit sitting on the books.
+        if auto_payment:
+            await db.payments.delete_one({"id": auto_payment["id"]})
+            await sync_payment_journal_entry(auto_payment["id"])
+            recorded_total = round(recorded_total - float(auto_payment.get("amount") or 0), 2)
+            fields_to_set["amount_paid"] = round(max(recorded_total, 0), 2)
         fields_to_set["amount_due"] = 0.0
+
+    else:
+        # Moving back to draft/sent/partially_paid: same cleanup — an
+        # auto-generated receipt no longer matches reality once the user
+        # says the invoice isn't (fully) paid after all.
+        if auto_payment:
+            await db.payments.delete_one({"id": auto_payment["id"]})
+            await sync_payment_journal_entry(auto_payment["id"])
+            recorded_total = round(recorded_total - float(auto_payment.get("amount") or 0), 2)
+            grand = float(inv.get("grand_total") or 0)
+            fields_to_set["amount_paid"] = round(max(recorded_total, 0), 2)
+            fields_to_set["amount_due"] = round(max(grand - recorded_total, 0), 2)
 
     result = await db.invoices.update_one(
         {"id": inv_id},
@@ -3555,6 +3607,63 @@ async def update_invoice_status(
         "amount_paid": fields_to_set.get("amount_paid", inv.get("amount_paid", 0)),
         "amount_due":  fields_to_set.get("amount_due",  inv.get("amount_due",  0)),
     }
+
+
+@router.post("/invoices/reconcile-paid-receipts")
+async def reconcile_paid_receipts(
+    company_id: str = Query(""),
+    current_user: User = Depends(check_module_permission("invoicing", "create")),
+):
+    """
+    One-time backfill for invoices that were marked 'Paid' via the quick
+    status dropdown *before* this endpoint auto-recorded a receipt for that
+    action (see update_invoice_status above). Those invoices show
+    "Paid / ₹0 due" on the Invoicing page but still show the full amount
+    outstanding on Party Ledger / Trial Balance / Balance Sheet, because no
+    payment or journal entry was ever posted for them.
+
+    Safe to run more than once — an invoice is only touched if its recorded
+    payments (db.payments) don't yet add up to its grand_total.
+    """
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+
+    q: dict = {"status": "paid"}
+    if company_id:
+        q["company_id"] = company_id
+    invoices = await db.invoices.find(q, {"_id": 0}).to_list(20000)
+
+    fixed, skipped = [], 0
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for inv in invoices:
+        inv_id = inv["id"]
+        grand = float(inv.get("grand_total") or 0)
+        if grand <= 0:
+            skipped += 1
+            continue
+        existing_payments = await db.payments.find({"invoice_id": inv_id}, {"_id": 0}).to_list(500)
+        recorded_total = round(sum(float(p.get("amount") or 0) for p in existing_payments), 2)
+        shortfall = round(grand - recorded_total, 2)
+        if shortfall <= 0.004:
+            skipped += 1
+            continue
+        payment_id = str(uuid.uuid4())
+        await db.payments.insert_one({
+            "id": payment_id, "invoice_id": inv_id, "amount": shortfall,
+            "payment_date": inv.get("invoice_date") or date.today().isoformat(), "payment_mode": "bank",
+            "reference_no": "", "notes": "Auto-recorded receipt — backfilled for invoice already marked Paid",
+            "auto_generated": True,
+            "created_by": getattr(current_user, "id", "system"), "created_at": now_iso,
+        })
+        await sync_payment_journal_entry(payment_id)
+        await db.invoices.update_one(
+            {"id": inv_id},
+            {"$set": {"amount_paid": round(recorded_total + shortfall, 2), "amount_due": 0.0, "updated_at": now_iso}},
+        )
+        await sync_invoice_journal_entry(inv_id)
+        fixed.append({"invoice_id": inv_id, "invoice_no": inv.get("invoice_no"), "amount_recorded": shortfall})
+
+    return {"fixed_count": len(fixed), "skipped_count": skipped, "fixed": fixed}
 
 
 @router.get("/invoices/{inv_id}")
