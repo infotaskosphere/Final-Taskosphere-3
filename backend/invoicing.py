@@ -3026,10 +3026,11 @@ async def delete_purchase_invoice(invoice_id: str, current_user: User = Depends(
             await db.journal_entries.delete_one({"id": existing_pe["id"]})
     await db.purchase_payments.delete_many({"purchase_invoice_id": invoice_id})
 
-    existing_entry = await db.journal_entries.find_one({"source": "purchase", "source_id": invoice_id})
-    if existing_entry:
-        await db.journal_lines.delete_many({"entry_id": existing_entry["id"]})
-        await db.journal_entries.delete_one({"id": existing_entry["id"]})
+    _old_entries = await db.journal_entries.find({"source": "purchase", "source_id": invoice_id}, {"_id": 0, "id": 1}).to_list(50)
+    if _old_entries:
+        _old_ids = [e["id"] for e in _old_entries]
+        await db.journal_lines.delete_many({"entry_id": {"$in": _old_ids}})
+        await db.journal_entries.delete_many({"id": {"$in": _old_ids}})
 
     await db.purchase_invoices.delete_one({"id": invoice_id})
     client_id = existing.get("client_id")
@@ -4053,10 +4054,11 @@ async def sync_invoice_journal_entry(invoice_id: str):
     from backend.accounting_core import get_default_account_id, post_journal_entry
     
     # 1. Clean up any existing journal entries for this invoice
-    existing_entry = await db.journal_entries.find_one({"source": "sale", "source_id": invoice_id})
-    if existing_entry:
-        await db.journal_lines.delete_many({"entry_id": existing_entry["id"]})
-        await db.journal_entries.delete_one({"id": existing_entry["id"]})
+    _old_entries = await db.journal_entries.find({"source": "sale", "source_id": invoice_id}, {"_id": 0, "id": 1}).to_list(50)
+    if _old_entries:
+        _old_ids = [e["id"] for e in _old_entries]
+        await db.journal_lines.delete_many({"entry_id": {"$in": _old_ids}})
+        await db.journal_entries.delete_many({"id": {"$in": _old_ids}})
         
     # 2. Fetch the current invoice document
     inv = await db.invoices.find_one({"id": invoice_id})
@@ -4129,10 +4131,11 @@ async def sync_payment_journal_entry(payment_id: str):
     from backend.accounting_core import get_default_account_id, post_journal_entry
     
     # 1. Clean up any existing journal entries for this payment
-    existing_entry = await db.journal_entries.find_one({"source": "payment", "source_id": payment_id})
-    if existing_entry:
-        await db.journal_lines.delete_many({"entry_id": existing_entry["id"]})
-        await db.journal_entries.delete_one({"id": existing_entry["id"]})
+    _old_entries = await db.journal_entries.find({"source": "payment", "source_id": payment_id}, {"_id": 0, "id": 1}).to_list(50)
+    if _old_entries:
+        _old_ids = [e["id"] for e in _old_entries]
+        await db.journal_lines.delete_many({"entry_id": {"$in": _old_ids}})
+        await db.journal_entries.delete_many({"id": {"$in": _old_ids}})
         
     # 2. Fetch the current payment document
     payment = await db.payments.find_one({"id": payment_id})
@@ -4202,10 +4205,11 @@ async def sync_purchase_journal_entry(invoice_id: str):
     from backend.accounting_core import get_default_account_id, post_journal_entry
 
     # 1. Clean up any existing journal entry for this purchase bill
-    existing_entry = await db.journal_entries.find_one({"source": "purchase", "source_id": invoice_id})
-    if existing_entry:
-        await db.journal_lines.delete_many({"entry_id": existing_entry["id"]})
-        await db.journal_entries.delete_one({"id": existing_entry["id"]})
+    _old_entries = await db.journal_entries.find({"source": "purchase", "source_id": invoice_id}, {"_id": 0, "id": 1}).to_list(50)
+    if _old_entries:
+        _old_ids = [e["id"] for e in _old_entries]
+        await db.journal_lines.delete_many({"entry_id": {"$in": _old_ids}})
+        await db.journal_entries.delete_many({"id": {"$in": _old_ids}})
 
     # 2. Fetch the current purchase invoice document
     inv = await db.purchase_invoices.find_one({"id": invoice_id})
@@ -4265,10 +4269,11 @@ async def sync_purchase_payment_journal_entry(payment_id: str):
     from backend.accounting_core import get_default_account_id, post_journal_entry
 
     # 1. Clean up any existing journal entry for this payment
-    existing_entry = await db.journal_entries.find_one({"source": "purchase_payment", "source_id": payment_id})
-    if existing_entry:
-        await db.journal_lines.delete_many({"entry_id": existing_entry["id"]})
-        await db.journal_entries.delete_one({"id": existing_entry["id"]})
+    _old_entries = await db.journal_entries.find({"source": "purchase_payment", "source_id": payment_id}, {"_id": 0, "id": 1}).to_list(50)
+    if _old_entries:
+        _old_ids = [e["id"] for e in _old_entries]
+        await db.journal_lines.delete_many({"entry_id": {"$in": _old_ids}})
+        await db.journal_entries.delete_many({"id": {"$in": _old_ids}})
 
     # 2. Fetch the current payment document
     payment = await db.purchase_payments.find_one({"id": payment_id})
@@ -4353,8 +4358,40 @@ async def reconcile_and_sync_all_purchases_and_payments(company_id: str):
     await _run_reconcile_debounced(f"purchases:{company_id}", _reconcile_and_sync_all_purchases_and_payments_impl, company_id)
 
 
+async def _dedupe_journal_entries(company_id: str, source: str):
+    """Collapse duplicate journal entries that share the same source_id.
+    Duplicates can accumulate if sync_*_journal_entry ran concurrently (e.g.
+    two overlapping report loads racing the reconciler) — the cleanup pass
+    that lives inside sync_* only removes ONE existing entry before posting
+    a new one, so a race can leave two, and a subsequent race leaves three.
+    Keep the newest posting per source_id and delete the rest so the
+    Journal Entries page doesn't show the same invoice three times."""
+    entries = await db.journal_entries.find(
+        {"company_id": company_id, "source": source, "source_id": {"$ne": None}},
+        {"_id": 0, "id": 1, "source_id": 1, "created_at": 1},
+    ).to_list(20000)
+    by_src: Dict[str, list] = {}
+    for e in entries:
+        sid = e.get("source_id")
+        if not sid:
+            continue
+        by_src.setdefault(sid, []).append(e)
+    dup_ids: list = []
+    for sid, es in by_src.items():
+        if len(es) <= 1:
+            continue
+        es.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+        dup_ids.extend(e["id"] for e in es[1:])
+    if dup_ids:
+        await db.journal_lines.delete_many({"entry_id": {"$in": dup_ids}})
+        await db.journal_entries.delete_many({"id": {"$in": dup_ids}})
+
+
 async def _reconcile_and_sync_all_sales_and_payments_impl(company_id: str):
     try:
+        await _dedupe_journal_entries(company_id, "sale")
+        await _dedupe_journal_entries(company_id, "payment")
+
         # 1. Fetch all invoices for this company from the database
         invoices = await db.invoices.find({"company_id": company_id}).to_list(10000)
         invoice_ids = {inv["id"] for inv in invoices}
@@ -4435,6 +4472,8 @@ async def _reconcile_and_sync_all_purchases_and_payments_impl(company_id: str):
     the public reconcile_and_sync_all_purchases_and_payments wrapper above so
     it doesn't re-run on every single tab/report load."""
     try:
+        await _dedupe_journal_entries(company_id, "purchase")
+        await _dedupe_journal_entries(company_id, "purchase_payment")
         invoices = await db.purchase_invoices.find({"company_id": company_id}).to_list(10000)
         invoice_ids = {inv["id"] for inv in invoices}
         active_invoices = [inv for inv in invoices if inv.get("status", "outstanding") != "cancelled"]
