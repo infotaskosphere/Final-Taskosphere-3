@@ -169,6 +169,23 @@ async def create_accounting_extended_indexes():
         await db.payments.create_index("company_id")
         await db.purchase_payments.create_index("company_id")
         await db.purchase_payments.create_index("purchase_invoice_id")
+        # journal_lines was only indexed by (company_id, entry_date, account_id)
+        # / (company_id, source, entry_date). Every lookup of "all lines for
+        # this journal entry" — Party Ledger, the individual party-ledger
+        # sub-account view, and the Journal Entries list — filters by
+        # entry_id alone (often via a large $in list), which had no
+        # supporting index and fell back to a full collection scan. This was
+        # one of the biggest contributors to slow Accounting Reports loads.
+        await db.journal_lines.create_index("entry_id")
+        # payments.find({"invoice_id": ...}) runs on every invoice save,
+        # every status change, and every Party Ledger lookup — also had no
+        # index of its own (only company_id).
+        await db.payments.create_index("invoice_id")
+        # Party Ledger resolves a party's invoices/bills by name — index the
+        # lookup pattern actually used (company_id + name) instead of
+        # scanning every invoice/bill in the book.
+        await db.invoices.create_index([("company_id", 1), ("client_name", 1)])
+        await db.purchase_invoices.create_index([("company_id", 1), ("supplier_name", 1)])
     except Exception as e:
         import logging
         logging.getLogger(__name__).warning(f"[accounting_extended] index creation warning: {e}")
