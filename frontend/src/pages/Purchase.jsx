@@ -3,7 +3,7 @@ import { format, parseISO } from 'date-fns';
 import { toast } from 'sonner';
 import {
   UploadCloud, Search, RefreshCw, Building2, FileText, IndianRupee,
-  CheckCircle2, AlertTriangle, ShoppingBag, X, Database, Edit, Trash2
+  CheckCircle2, AlertTriangle, ShoppingBag, X, Database, Edit, Trash2, Wallet, Ban
 } from 'lucide-react';
 import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
@@ -20,6 +20,13 @@ const COLORS = {
   emeraldGreen: '#1FAF5A',
   amber: '#F59E0B',
   coral: '#FF6B6B',
+};
+
+const PURCHASE_STATUS_META = {
+  outstanding:    { label: 'Outstanding',     bg: '#FEF3C7', fg: '#B45309', border: '#FDE68A' },
+  partially_paid: { label: 'Partially Paid',  bg: '#DBEAFE', fg: '#1D4ED8', border: '#BFDBFE' },
+  paid:           { label: 'Paid',            bg: '#DCFCE7', fg: '#15803D', border: '#BBF7D0' },
+  cancelled:      { label: 'Cancelled',       bg: '#F1F5F9', fg: '#64748B', border: '#E2E8F0' },
 };
 
 const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
@@ -59,6 +66,11 @@ function Purchase() {
   });
   const [savingEdit, setSavingEdit] = useState(false);
 
+  // Payment recording state
+  const [payingInvoice, setPayingInvoice] = useState(null);
+  const [payForm, setPayForm] = useState({ amount: 0, payment_date: format(new Date(), 'yyyy-MM-dd'), payment_mode: 'bank', reference_no: '', notes: '' });
+  const [savingPayment, setSavingPayment] = useState(false);
+
   const fetchAll = async () => {
     setLoading(true);
     try {
@@ -92,10 +104,13 @@ function Purchase() {
 
   const stats = useMemo(() => {
     const total = purchaseInvoices.reduce((s, inv) => s + Number(inv.grand_total || 0), 0);
+    const outstanding = purchaseInvoices
+      .filter(inv => inv.status !== 'cancelled')
+      .reduce((s, inv) => s + Number(inv.amount_due ?? inv.grand_total ?? 0), 0);
     const linked = purchaseInvoices.filter(inv => inv.client_id).length;
     const suppliers = new Set(purchaseInvoices.map(inv => inv.supplier_name).filter(Boolean)).size;
     const reviewCount = purchaseInvoices.filter(inv => !inv.client_id || inv.needs_amount_review).length;
-    return { total, linked, suppliers, count: purchaseInvoices.length, unmatched: reviewCount };
+    return { total, outstanding, linked, suppliers, count: purchaseInvoices.length, unmatched: reviewCount };
   }, [purchaseInvoices]);
 
   const handleUpload = async () => {
@@ -174,6 +189,54 @@ function Purchase() {
     }
   };
 
+  const startPayment = (inv) => {
+    setPayingInvoice(inv);
+    setPayForm({
+      amount: Number(inv.amount_due ?? inv.grand_total ?? 0),
+      payment_date: format(new Date(), 'yyyy-MM-dd'),
+      payment_mode: 'bank',
+      reference_no: '',
+      notes: '',
+    });
+  };
+
+  const handleSavePayment = async () => {
+    if (!payingInvoice) return;
+    const amt = parseFloat(payForm.amount) || 0;
+    if (amt <= 0) { toast.error('Enter a payment amount greater than zero'); return; }
+    setSavingPayment(true);
+    try {
+      const dueNow = Number(payingInvoice.amount_due ?? payingInvoice.grand_total ?? 0);
+      const status = amt >= dueNow - 0.01 ? 'paid' : 'partially_paid';
+      const { data } = await api.patch(`/purchase-invoices/${payingInvoice.id}/status`, {
+        status,
+        amount: amt,
+        payment_date: payForm.payment_date,
+        payment_mode: payForm.payment_mode,
+        reference_no: payForm.reference_no,
+        notes: payForm.notes,
+      });
+      toast.success(data.status === 'paid' ? 'Marked as paid — payment entry posted to ledger' : 'Payment recorded — ledger updated');
+      setPayingInvoice(null);
+      await fetchAll();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to record payment');
+    } finally {
+      setSavingPayment(false);
+    }
+  };
+
+  const handleCancelInvoice = async (inv) => {
+    if (!window.confirm(`Mark bill ${inv.invoice_no || ''} as cancelled? Its ledger entry will be removed.`)) return;
+    try {
+      await api.patch(`/purchase-invoices/${inv.id}/status`, { status: 'cancelled' });
+      toast.success('Bill cancelled and removed from the ledger');
+      await fetchAll();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to cancel bill');
+    }
+  };
+
   if (loading) return <GifLoader />;
 
   return (
@@ -205,7 +268,7 @@ function Purchase() {
           {[
             { label: 'Purchase Invoices', value: stats.count, icon: FileText, color: COLORS.mediumBlue },
             { label: 'Total Purchase', value: fmtC(stats.total), icon: IndianRupee, color: COLORS.emeraldGreen },
-            { label: 'Linked Companies', value: stats.linked, icon: CheckCircle2, color: COLORS.deepBlue },
+            { label: 'Outstanding to Pay', value: fmtC(stats.outstanding), icon: Wallet, color: stats.outstanding ? COLORS.coral : COLORS.emeraldGreen },
             { label: 'Needs Review', value: stats.unmatched, icon: AlertTriangle, color: stats.unmatched ? COLORS.amber : COLORS.emeraldGreen },
           ].map((s) => (
             <div key={s.label} className={`rounded-2xl border p-4 shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
@@ -319,6 +382,18 @@ function Purchase() {
                             Verify amount
                           </span>
                         )}
+                        {(() => {
+                          const sm = PURCHASE_STATUS_META[inv.status || 'outstanding'] || PURCHASE_STATUS_META.outstanding;
+                          return (
+                            <span
+                              className="text-[10px] font-bold px-2 py-0.5 rounded-full border"
+                              style={{ background: sm.bg, color: sm.fg, borderColor: sm.border }}
+                              title={inv.amount_paid ? `Paid ${fmtC(inv.amount_paid)} of ${fmtC(inv.grand_total)}` : undefined}
+                            >
+                              {sm.label}
+                            </span>
+                          );
+                        })()}
                       </div>
                       <p className="text-sm text-slate-500 mt-1 truncate">
                         {inv.supplier_name || 'Unknown supplier'} {inv.supplier_gstin ? `· ${inv.supplier_gstin}` : ''}
@@ -330,8 +405,22 @@ function Purchase() {
                     <div className="text-right flex-shrink-0 flex flex-col items-end">
                       <p className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{fmtC(inv.grand_total)}</p>
                       <p className="text-xs text-slate-400">GST {fmtC(inv.total_gst)}</p>
+                      {inv.status !== 'cancelled' && Number(inv.amount_due) > 0 && (
+                        <p className="text-xs font-semibold" style={{ color: COLORS.coral }}>Due {fmtC(inv.amount_due)}</p>
+                      )}
                       <p className="text-[10px] text-slate-400 mt-1 truncate max-w-[180px]">{inv.file_name}</p>
                       <div className="flex items-center gap-2 mt-2">
+                        {inv.status !== 'paid' && inv.status !== 'cancelled' && (
+                          <Button
+                            size="sm"
+                            onClick={() => startPayment(inv)}
+                            className="h-7 rounded-lg text-white px-2 text-xs"
+                            style={{ background: COLORS.emeraldGreen }}
+                            title="Record payment — posts a ledger entry"
+                          >
+                            <Wallet className="h-3.5 w-3.5 mr-1" /> Record Payment
+                          </Button>
+                        )}
                         <Button
                           size="icon"
                           variant="ghost"
@@ -341,6 +430,17 @@ function Purchase() {
                         >
                           <Edit className="h-3.5 w-3.5" />
                         </Button>
+                        {inv.status !== 'cancelled' && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => handleCancelInvoice(inv)}
+                            className="h-7 w-7 rounded-lg text-slate-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/40"
+                            title="Cancel bill (removes it from the ledger)"
+                          >
+                            <Ban className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                         <Button
                           size="icon"
                           variant="ghost"
@@ -495,6 +595,86 @@ function Purchase() {
             </Button>
             <Button onClick={handleSaveEdit} disabled={savingEdit} className="rounded-xl text-white" style={{ background: COLORS.mediumBlue }}>
               {savingEdit ? <MiniLoader height={18} /> : 'Save Changes'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={payingInvoice !== null} onOpenChange={(open) => { if (!open) setPayingInvoice(null); }}>
+        <DialogContent className={`sm:max-w-md ${isDark ? 'bg-slate-900 text-slate-100 border-slate-800' : 'bg-white text-slate-900'}`}>
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold flex items-center gap-2">
+              <Wallet className="h-5 w-5 text-emerald-500" />
+              Record Payment
+            </DialogTitle>
+          </DialogHeader>
+
+          {payingInvoice && (
+            <div className="space-y-4 my-2">
+              <div className={`rounded-xl p-3 text-sm ${isDark ? 'bg-slate-800' : 'bg-slate-50'}`}>
+                <p className="font-semibold">{payingInvoice.invoice_no || 'No invoice no.'} — {payingInvoice.supplier_name}</p>
+                <p className="text-slate-400 text-xs mt-1">
+                  Bill total {fmtC(payingInvoice.grand_total)} · Due {fmtC(payingInvoice.amount_due ?? payingInvoice.grand_total)}
+                </p>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Amount Paid (₹)</label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={payForm.amount}
+                  onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })}
+                  className="mt-1 rounded-xl"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Payment Date</label>
+                  <Input
+                    type="date"
+                    value={payForm.payment_date}
+                    onChange={(e) => setPayForm({ ...payForm, payment_date: e.target.value })}
+                    className="mt-1 rounded-xl"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Mode</label>
+                  <Select value={payForm.payment_mode} onValueChange={(v) => setPayForm({ ...payForm, payment_mode: v })}>
+                    <SelectTrigger className={`mt-1 rounded-xl ${isDark ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50'}`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="bank">Bank / NEFT / UPI</SelectItem>
+                      <SelectItem value="cash">Cash</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Reference No. (optional)</label>
+                <Input
+                  value={payForm.reference_no}
+                  onChange={(e) => setPayForm({ ...payForm, reference_no: e.target.value })}
+                  className="mt-1 rounded-xl"
+                  placeholder="UTR / cheque no."
+                />
+              </div>
+
+              <p className="text-xs text-slate-400">
+                This posts a ledger entry — Dr Accounts Payable, Cr {payForm.payment_mode === 'cash' ? 'Cash in Hand' : 'Bank Accounts'}.
+              </p>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-4 border-t" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+            <Button variant="outline" onClick={() => setPayingInvoice(null)} className="rounded-xl">
+              Cancel
+            </Button>
+            <Button onClick={handleSavePayment} disabled={savingPayment} className="rounded-xl text-white" style={{ background: COLORS.emeraldGreen }}>
+              {savingPayment ? <MiniLoader height={18} /> : 'Save Payment'}
             </Button>
           </div>
         </DialogContent>
