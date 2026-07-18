@@ -159,6 +159,16 @@ async def create_accounting_extended_indexes():
         await db.tds_tcs_entries.create_index([("company_id", 1), ("entry_date", 1)])
         await db.accounting_audit_trail.create_index([("company_id", 1), ("created_at", -1)])
         await db.bulk_import_jobs.create_index([("job_id", 1)], unique=True)
+        # Speeds up the report-time reconciliation scan (sync_*_journal_entry
+        # look-ups by source/source_id, and the invoices/payments collections
+        # that get pulled per company on every Trial Balance / P&L / Balance
+        # Sheet / Ledger view).
+        await db.journal_entries.create_index([("source", 1), ("source_id", 1)])
+        await db.invoices.create_index("company_id")
+        await db.purchase_invoices.create_index("company_id")
+        await db.payments.create_index("company_id")
+        await db.purchase_payments.create_index("company_id")
+        await db.purchase_payments.create_index("purchase_invoice_id")
     except Exception as e:
         import logging
         logging.getLogger(__name__).warning(f"[accounting_extended] index creation warning: {e}")
