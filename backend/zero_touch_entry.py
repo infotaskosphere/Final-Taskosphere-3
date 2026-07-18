@@ -7,8 +7,9 @@ Pipeline:
                  ("on_invoice_email_received") to call `process_document(...)`
                  automatically; the extraction logic below is already decoupled
                  from the HTTP trigger so either wiring is a thin shim.
-  2. EXTRACT   : Vision LLM (reuses the Groq vision client already configured in
-                 ai_document_reader.py) called in JSON-schema / forced-JSON mode —
+  2. EXTRACT   : Vision LLM (Google Gemini 2.5 Flash via
+                 backend/services/gemini_client.py) called in JSON-schema /
+                 forced-JSON mode —
                  no static template, works off any invoice layout. Also extracts
                  the invoice currency and who the document is billed to, so the
                  pipeline can convert foreign-currency invoices to INR and figure
@@ -124,85 +125,38 @@ def _strip_json_fence(text: str) -> str:
     return text.strip()
 
 
-async def _groq_extract_json(image_b64: str, mime_type: str) -> dict:
-    """Call Groq's vision endpoint with automatic model fallback.
+# ── AI Extraction (Gemini 2.5 Flash) ─────────────────────────────────────────
+# Groq Vision has been retired in this pipeline. Every document extraction
+# now goes through Google Gemini 2.5 Flash via the reusable client in
+# backend/services/gemini_client.py. No business logic, journal generation,
+# GST calculation, ledger creation, or API-response shape has been changed —
+# only the AI provider that produces the extracted JSON.
 
-    The previously-hard-coded ``meta-llama/llama-4-scout-17b-16e-instruct``
-    model has been retired on some Groq accounts and returns HTTP 404
-    (``model_not_found``), which our earlier code re-wrapped as a plain 422
-    — this is what caused the "Failed to load resource: the server responded
-    with a status of 422 ()" the user was seeing on the Zero-Touch Entry
-    page. We now try a small ordered list of vision-capable Groq models and
-    only surface an error if every fallback also fails."""
-    import httpx
-    groq_key = os.environ.get("GROQ_API_KEY", "")
-    if not groq_key:
-        raise HTTPException(500, "GROQ_API_KEY is not configured on the server.")
+import logging as _zte_logging
+_zte_logger = _zte_logging.getLogger(__name__)
 
-    env_model = os.environ.get("GROQ_VISION_MODEL", "").strip()
-    candidate_models = [m for m in [
-        env_model or None,
-        "meta-llama/llama-4-maverick-17b-128e-instruct",
-        "meta-llama/llama-4-scout-17b-16e-instruct",
-        "llama-3.2-90b-vision-preview",
-        "llama-3.2-11b-vision-preview",
-    ] if m]
-    # de-duplicate while preserving order
-    seen: set = set()
-    candidate_models = [m for m in candidate_models if not (m in seen or seen.add(m))]
 
-    last_error: Optional[str] = None
-    async with httpx.AsyncClient(timeout=60) as client:
-        for model in candidate_models:
-            payload = {
-                "model": model,
-                "messages": [{
-                    "role": "user",
-                    "content": [
-                        {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_b64}"}},
-                        {"type": "text", "text": EXTRACTION_SCHEMA_PROMPT},
-                    ],
-                }],
-                "response_format": {"type": "json_object"},
-                "max_tokens": 2048,
-                "temperature": 0,
-            }
-            resp = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
-                json=payload,
-            )
-            if resp.status_code == 429:
-                raise HTTPException(429, "Groq quota exceeded. Please wait a moment and try again.")
-            if resp.status_code == 200:
-                raw = resp.json()["choices"][0]["message"]["content"]
-                try:
-                    return json.loads(_strip_json_fence(raw))
-                except json.JSONDecodeError as e:
-                    raise HTTPException(422, f"Model did not return valid JSON: {e}. Raw: {raw[:300]}")
+async def _vision_extract_json(image_b64: str, mime_type: str) -> dict:
+    """Extract structured invoice/receipt data using Gemini 2.5 Flash.
 
-            # If the model isn't available on this account, silently roll to
-            # the next candidate; otherwise remember the error and try the
-            # next model too — the last error is surfaced only if every model
-            # fails.
-            body = resp.text[:400]
-            last_error = f"{resp.status_code} on {model}: {body}"
-            if resp.status_code in (400, 401, 402, 403, 404) and (
-                "model_not_found" in body
-                or "does not exist" in body
-                or "not found" in body.lower()
-                or "decommissioned" in body.lower()
-            ):
-                continue
-            # Any other non-2xx (500s, etc.) is worth trying the next model too
-            continue
+    The prompt (``EXTRACTION_SCHEMA_PROMPT``) instructs Gemini to return
+    STRICT JSON only. The downstream accounting pipeline continues to
+    consume the returned dict exactly as it did before, so backward
+    compatibility with existing responses is preserved.
 
-    raise HTTPException(
-        422,
-        "Groq vision extraction failed for every configured model. "
-        f"Last error: {last_error or 'unknown'}. "
-        "Set the GROQ_VISION_MODEL env var to a model available on your Groq account."
-    )
+    On any Gemini failure the exception is logged and re-raised as
+    HTTPException(500) with the original error text — the server is never
+    allowed to crash.
+    """
+    from backend.services.gemini_client import gemini_extract_json
+    try:
+        return await gemini_extract_json(image_b64, mime_type, EXTRACTION_SCHEMA_PROMPT)
+    except HTTPException:
+        # Already an HTTP error with proper status/detail — surface as-is
+        raise
+    except Exception as e:  # pragma: no cover — defensive
+        _zte_logger.exception("Gemini extraction failed")
+        raise HTTPException(status_code=500, detail=f"Gemini extraction failed: {e}") from e
 
 
 def _file_to_image_b64(contents: bytes, filename: str) -> Tuple[str, str]:
@@ -332,13 +286,17 @@ AI_COMPANY_MATCH_CONFIDENCE_THRESHOLD = 0.55
 
 
 async def _ai_resolve_company(extracted: dict, companies: List[dict]) -> Tuple[Optional[str], str, float]:
-    """LLM-based company matcher for multi-company firms. Returns
-    (company_id or None, reason, confidence). Never guesses below the
-    confidence threshold — an unmatched document goes to manual assignment
-    rather than risk posting into the wrong company's books."""
-    groq_key = os.environ.get("GROQ_API_KEY", "")
-    if not groq_key:
-        return None, "GROQ_API_KEY not configured — skipped AI company match.", 0.0
+    """Gemini-based company matcher for multi-company firms.
+
+    Returns ``(company_id or None, reason, confidence)``. Never guesses below
+    the confidence threshold — an unmatched document goes to manual
+    assignment rather than risk posting into the wrong company's books.
+
+    Uses Gemini 2.5 Flash via the shared client; any failure is logged and
+    treated as "no match" (never crashes the pipeline)."""
+    api_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
+    if not api_key:
+        return None, "GEMINI_API_KEY not configured — skipped AI company match.", 0.0
 
     candidates = [
         {"id": c["id"], "name": c.get("name", ""), "gstin": c.get("gstin", ""), "email": c.get("email", "")}
@@ -371,26 +329,47 @@ Only pick a company if there is real textual/contextual evidence (name
 similarity, known trading name, business context) — do not pick one just
 because it's the only option left unexamined."""
 
-    import httpx
+    import asyncio
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
-                json={
-                    "model": os.environ.get("GROQ_TEXT_MODEL", "llama-3.3-70b-versatile"),
-                    "messages": [{"role": "user", "content": prompt}],
-                    "response_format": {"type": "json_object"},
-                    "max_tokens": 300,
-                    "temperature": 0,
-                },
-            )
-        if resp.status_code != 200:
-            return None, f"AI company match request failed ({resp.status_code}).", 0.0
-        raw = resp.json()["choices"][0]["message"]["content"]
-        parsed = json.loads(_strip_json_fence(raw))
+        from backend.services.gemini_client import get_gemini_client
+        from google.genai import types as genai_types  # type: ignore
     except Exception as e:
+        _zte_logger.exception("Gemini SDK unavailable for company match")
+        return None, f"AI company match unavailable: {e}", 0.0
+
+    def _call_gemini_sync():
+        client = get_gemini_client()
+        cfg = genai_types.GenerateContentConfig(
+            temperature=0,
+            max_output_tokens=512,
+            response_mime_type="application/json",
+        )
+        return client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=cfg,
+        )
+
+    try:
+        response = await asyncio.to_thread(_call_gemini_sync)
+        raw = getattr(response, "text", "") or ""
+        if not raw:
+            try:
+                parts = response.candidates[0].content.parts  # type: ignore[attr-defined]
+                raw = "".join(getattr(p, "text", "") for p in parts)
+            except Exception:
+                raw = ""
+        if not raw:
+            return None, "AI company match returned empty response.", 0.0
+        parsed = json.loads(_strip_json_fence(raw))
+    except HTTPException as e:
+        return None, f"AI company match failed: {e.detail}", 0.0
+    except Exception as e:
+        _zte_logger.exception("AI company match failed")
         return None, f"AI company match failed: {e}", 0.0
+
+    if not parsed:
+        return None, "AI company match request failed.", 0.0
 
     company_id = (parsed.get("company_id") or "").strip()
     confidence = float(parsed.get("confidence") or 0)
@@ -473,7 +452,7 @@ async def process_document(
     `needs_review` (extraction/company-match needs a human to fix something
     first). Posting only happens via the explicit /approve endpoint."""
     img_b64, mime = _file_to_image_b64(contents, filename)
-    extracted = await _groq_extract_json(img_b64, mime)
+    extracted = await _vision_extract_json(img_b64, mime)
 
     record_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
