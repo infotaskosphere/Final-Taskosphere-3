@@ -359,11 +359,70 @@ def _parse_tabular_statement(contents: bytes, filename: str) -> List[dict]:
 
 
 async def _parse_pdf_statement_via_ai(contents: bytes, filename: str) -> List[dict]:
-    """Scanned / exported PDF statements — reuse the same vision pipeline as
-    the Purchase invoice reader instead of a second implementation."""
-    from backend.ai_document_reader import _groq_vision_multipage
+    """Scanned / exported PDF statements — use Gemini 2.0 Flash text extraction when
+    a digital text layer is present; otherwise fall back to the vision pipeline."""
+    from backend.ai_document_reader import _groq_vision_multipage, _get_gemini_model
     import pdfplumber
     import json as _json
+
+    # Try extracting digital text layer first for 100% accuracy and speed
+    text_content = ""
+    try:
+        with pdfplumber.open(BytesIO(contents)) as pdf:
+            extracted_pages = []
+            for i, page in enumerate(pdf.pages[:15]):
+                text = page.extract_text()
+                if text and text.strip():
+                    extracted_pages.append(f"--- Page {i+1} ---\n{text.strip()}")
+            text_content = "\n\n".join(extracted_pages)
+    except Exception:
+        text_content = ""
+
+    if text_content.strip():
+        # High-precision digital PDF statement - use text-layer with Gemini 2.0 Flash
+        try:
+            model = _get_gemini_model()
+            prompt = (
+                "You are an expert Indian financial data parser. Below is the text content from a bank statement.\n"
+                "Please extract EVERY single transaction row and format it as a valid JSON array of objects.\n"
+                "Each object MUST have exactly these keys (and no others):\n"
+                '- "date": string in YYYY-MM-DD format (convert standard dates like "01 Apr 2026", "14/04/26", etc. to YYYY-MM-DD)\n'
+                '- "description": string (the transaction description, narration or particulars)\n'
+                '- "reference": string (cheque/UTR/reference number, or empty string if not shown)\n'
+                '- "debit": number (the transaction debit / withdrawal / payment amount. 0 if none)\n'
+                '- "credit": number (the transaction credit / deposit / receipt amount. 0 if none)\n'
+                '- "balance_after": number or null (running balance after transaction)\n\n'
+                "Ensure that:\n"
+                "- Debit and credit are ALWAYS positive numbers representing the amount transacted.\n"
+                "- Do not omit any transaction rows.\n"
+                "- Return ONLY the JSON array inside a standard JSON response. Do not include markdown fences, HTML, or explanations.\n\n"
+                f"BANK STATEMENT TEXT:\n{text_content}"
+            )
+            response = await model.generate_content_async(prompt)
+            answer = response.text
+            cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", answer.strip(), flags=re.I | re.S).strip()
+            m = re.search(r"\[.*\]", cleaned, re.S)
+            if m:
+                cleaned = m.group(0)
+            rows = _json.loads(cleaned)
+            out = []
+            for r in rows if isinstance(rows, list) else []:
+                d = _parse_stmt_date(r.get("date"))
+                if not d:
+                    continue
+                out.append({
+                    "date": d,
+                    "description": str(r.get("description", "")).strip(),
+                    "reference": str(r.get("reference", "")).strip(),
+                    "debit": round(abs(_parse_amount(r.get("debit"))), 2),
+                    "credit": round(abs(_parse_amount(r.get("credit"))), 2),
+                    "balance_after": r.get("balance_after"),
+                })
+            if out:
+                return out
+        except Exception:
+            # Fall back to image-based pipeline if digital extraction or parsing fails
+            pass
 
     page_images = []
     with pdfplumber.open(BytesIO(contents)) as pdf:
@@ -562,14 +621,14 @@ async def _auto_post_for_match(company_id: str, txn: dict, match: dict, created_
                 }},
             )
     else:
-        sales_acct_id = await get_default_account_id(company_id, "4000")  # Sales / Fee Income
-        if not sales_acct_id:
+        ar_acct_id = await get_default_account_id(company_id, "1100")  # Accounts Receivable
+        if not ar_acct_id:
             return None
         entry = await try_auto_post(
-            company_id, txn["date"], f"Receipt from {match['label']} (bank statement)",
+            company_id, txn["date"], f"Receipt from {match['label']} — settles Invoice {match.get('label')} (bank statement)",
             [
                 {"account_id": bank_acct_id, "account_name": "Bank Accounts", "debit": txn["credit"], "credit": 0},
-                {"account_id": sales_acct_id, "account_name": "Sales / Fee Income", "debit": 0, "credit": txn["credit"]},
+                {"account_id": ar_acct_id, "account_name": "Accounts Receivable", "debit": 0, "credit": txn["credit"]},
             ],
             "bank", txn["id"], created_by,
         )
