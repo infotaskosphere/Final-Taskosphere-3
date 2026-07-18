@@ -10,6 +10,7 @@ import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
 import { useAuth } from '@/contexts/AuthContext.jsx';
+import { GuidanceNote } from '@/components/ui/GuidanceNote.jsx';
 
 const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2', emeraldGreen: '#1FAF5A', amber: '#F59E0B', coral: '#FF6B6B' };
 const TYPE_COLOR = { asset: COLORS.mediumBlue, liability: COLORS.coral, equity: COLORS.deepBlue, income: COLORS.emeraldGreen, expense: COLORS.amber };
@@ -95,6 +96,8 @@ function ChartOfAccountsInner() {
             </div>
           </div>
         </div>
+
+        <GuidanceNote pageKey="chart-of-accounts" isDark={isDark} />
 
         <div className="flex gap-2 flex-wrap">
           {['all', 'asset', 'liability', 'equity', 'income', 'expense'].map(t => (
