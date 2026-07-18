@@ -298,11 +298,14 @@ async def create_journal_entry(payload: JournalEntryCreate, current_user: User =
 @router.get("/journal-entries")
 async def list_journal_entries(
     company_id: str = Query(""), date_from: Optional[str] = Query(None), date_to: Optional[str] = Query(None),
-    source: Optional[str] = Query(None), current_user: User = Depends(get_current_user),
+    source: Optional[str] = Query(None), page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=500),
+    current_user: User = Depends(get_current_user),
 ):
     if not _perm_view_journal(current_user):
         raise HTTPException(403, "Access denied.")
-    q: dict = {"company_id": company_id}
+
+    all_companies = not company_id
+    q: dict = {} if all_companies else {"company_id": company_id}
     if date_from or date_to:
         q["entry_date"] = {}
         if date_from:
@@ -311,15 +314,80 @@ async def list_journal_entries(
             q["entry_date"]["$lte"] = date_to
     if source:
         q["source"] = source
-    entries = await db.journal_entries.find(q, {"_id": 0}).sort("entry_date", -1).to_list(2000)
+
+    total = await db.journal_entries.count_documents(q)
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    page = min(page, total_pages)
+    skip = (page - 1) * page_size
+    entries = await db.journal_entries.find(q, {"_id": 0}).sort("entry_date", -1).skip(skip).limit(page_size).to_list(page_size)
+
     ids = [e["id"] for e in entries]
     lines = await db.journal_lines.find({"entry_id": {"$in": ids}}, {"_id": 0}).to_list(10000)
-    by_entry = {}
+    by_entry: dict = {}
     for l in lines:
         by_entry.setdefault(l["entry_id"], []).append(l)
+
+    # Enrich each entry with customer/vendor name, voucher/invoice number,
+    # payment mode, bank/cash account, and reference number — resolved from
+    # the underlying invoice/bill/payment that the entry was posted from, so
+    # the Journal Entries UI can show "Receipt from Abhinav against Invoice
+    # INV-2026-001" instead of just a raw narration string.
+    sale_ids = {e["source_id"] for e in entries if e.get("source") == "sale" and e.get("source_id")}
+    purchase_ids = {e["source_id"] for e in entries if e.get("source") == "purchase" and e.get("source_id")}
+    payment_ids = {e["source_id"] for e in entries if e.get("source") == "payment" and e.get("source_id")}
+    purchase_payment_ids = {e["source_id"] for e in entries if e.get("source") == "purchase_payment" and e.get("source_id")}
+
+    invoices_by_id, bills_by_id, payments_by_id, purchase_payments_by_id = {}, {}, {}, {}
+    if sale_ids:
+        invoices_by_id = {d["id"]: d for d in await db.invoices.find({"id": {"$in": list(sale_ids)}}, {"_id": 0}).to_list(len(sale_ids))}
+    if purchase_ids:
+        bills_by_id = {d["id"]: d for d in await db.purchase_invoices.find({"id": {"$in": list(purchase_ids)}}, {"_id": 0}).to_list(len(purchase_ids))}
+    if payment_ids:
+        payments_by_id = {d["id"]: d for d in await db.payments.find({"id": {"$in": list(payment_ids)}}, {"_id": 0}).to_list(len(payment_ids))}
+    if purchase_payment_ids:
+        purchase_payments_by_id = {d["id"]: d for d in await db.purchase_payments.find({"id": {"$in": list(purchase_payment_ids)}}, {"_id": 0}).to_list(len(purchase_payment_ids))}
+
+    # Receipts/payments often only carry an invoice_id/purchase_invoice_id —
+    # resolve those to get the invoice/bill number and party name too.
+    linked_inv_ids = {p["invoice_id"] for p in payments_by_id.values() if p.get("invoice_id")}
+    linked_inv_by_id = {d["id"]: d for d in await db.invoices.find({"id": {"$in": list(linked_inv_ids)}}, {"_id": 0, "id": 1, "invoice_no": 1, "client_name": 1}).to_list(len(linked_inv_ids))} if linked_inv_ids else {}
+    linked_bill_ids = {p["purchase_invoice_id"] for p in purchase_payments_by_id.values() if p.get("purchase_invoice_id")}
+    linked_bill_by_id = {d["id"]: d for d in await db.purchase_invoices.find({"id": {"$in": list(linked_bill_ids)}}, {"_id": 0, "id": 1, "invoice_no": 1, "supplier_name": 1}).to_list(len(linked_bill_ids))} if linked_bill_ids else {}
+
     for e in entries:
         e["lines"] = by_entry.get(e["id"], [])
-    return entries
+        src, sid = e.get("source"), e.get("source_id")
+        if src == "sale" and sid in invoices_by_id:
+            inv = invoices_by_id[sid]
+            e["customer_name"] = inv.get("client_name")
+            e["invoice_no"] = inv.get("invoice_no")
+            e["voucher_no"] = inv.get("invoice_no")
+            e["reference_no"] = inv.get("reference_no") or None
+        elif src == "purchase" and sid in bills_by_id:
+            bill = bills_by_id[sid]
+            e["vendor_name"] = bill.get("supplier_name")
+            e["invoice_no"] = bill.get("invoice_no")
+            e["voucher_no"] = bill.get("invoice_no")
+        elif src == "payment" and sid in payments_by_id:
+            pay = payments_by_id[sid]
+            linked = linked_inv_by_id.get(pay.get("invoice_id"))
+            e["customer_name"] = (linked.get("client_name") if linked else None) or pay.get("client_name")
+            e["invoice_no"] = linked.get("invoice_no") if linked else None
+            e["payment_mode"] = pay.get("payment_mode")
+            e["reference_no"] = pay.get("reference_no") or None
+            e["bank_account"] = "Cash in Hand" if str(pay.get("payment_mode") or "").lower() == "cash" else "Bank Accounts"
+            e["voucher_no"] = pay.get("id")
+        elif src == "purchase_payment" and sid in purchase_payments_by_id:
+            pay = purchase_payments_by_id[sid]
+            linked = linked_bill_by_id.get(pay.get("purchase_invoice_id"))
+            e["vendor_name"] = (linked.get("supplier_name") if linked else None) or pay.get("supplier_name")
+            e["invoice_no"] = linked.get("invoice_no") if linked else None
+            e["payment_mode"] = pay.get("payment_mode")
+            e["reference_no"] = pay.get("reference_no") or None
+            e["bank_account"] = "Cash in Hand" if str(pay.get("payment_mode") or "").lower() == "cash" else "Bank Accounts"
+            e["voucher_no"] = pay.get("id")
+
+    return {"entries": entries, "total": total, "total_pages": total_pages, "page": page, "page_size": page_size}
 
 
 @router.post("/journal-entries/bulk-delete")
