@@ -3,12 +3,13 @@ import { format, parseISO } from 'date-fns';
 import { toast } from 'sonner';
 import {
   UploadCloud, Search, RefreshCw, Building2, FileText, IndianRupee,
-  CheckCircle2, AlertTriangle, ShoppingBag, X, Database,
+  CheckCircle2, AlertTriangle, ShoppingBag, X, Database, Edit, Trash2
 } from 'lucide-react';
 import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 import { GuidanceNote } from '@/components/ui/GuidanceNote.jsx';
@@ -41,6 +42,22 @@ function Purchase() {
   const [selectedClientId, setSelectedClientId] = useState('auto');
   const [selectedCompanyId, setSelectedCompanyId] = useState('none');
   const [file, setFile] = useState(null);
+
+  // Editing state
+  const [editingInvoice, setEditingInvoice] = useState(null);
+  const [editForm, setEditForm] = useState({
+    supplier_name: '',
+    invoice_no: '',
+    invoice_date: '',
+    grand_total: 0,
+    total_gst: 0,
+    taxable_amount: 0,
+    client_id: '',
+    company_id: '',
+    supplier_gstin: '',
+    buyer_gstin: '',
+  });
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -102,6 +119,58 @@ function Purchase() {
       toast.error(err.response?.data?.detail || 'Failed to read invoice');
     } finally {
       setUploading(false);
+    }
+  };
+
+  const startEdit = (inv) => {
+    setEditingInvoice(inv);
+    setEditForm({
+      supplier_name: inv.supplier_name || '',
+      invoice_no: inv.invoice_no || '',
+      invoice_date: inv.invoice_date || '',
+      grand_total: inv.grand_total || 0,
+      total_gst: inv.total_gst || 0,
+      taxable_amount: inv.taxable_amount || 0,
+      client_id: inv.client_id || '',
+      company_id: inv.company_id || '',
+      supplier_gstin: inv.supplier_gstin || '',
+      buyer_gstin: inv.buyer_gstin || '',
+    });
+  };
+
+  const handleSaveEdit = async () => {
+    setSavingEdit(true);
+    try {
+      await api.put(`/purchase-invoices/${editingInvoice.id}`, {
+        supplier_name: editForm.supplier_name,
+        invoice_no: editForm.invoice_no,
+        invoice_date: editForm.invoice_date,
+        grand_total: parseFloat(editForm.grand_total) || 0,
+        total_gst: parseFloat(editForm.total_gst) || 0,
+        taxable_amount: parseFloat(editForm.taxable_amount) || 0,
+        client_id: editForm.client_id === 'none' ? '' : editForm.client_id,
+        company_id: editForm.company_id === 'none' ? '' : editForm.company_id,
+        supplier_gstin: editForm.supplier_gstin,
+        buyer_gstin: editForm.buyer_gstin,
+      });
+      toast.success('Purchase invoice updated successfully');
+      setEditingInvoice(null);
+      await fetchAll();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to update purchase invoice');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this purchase invoice?')) return;
+    try {
+      await api.delete(`/purchase-invoices/${id}`);
+      toast.success('Purchase invoice deleted');
+      await fetchAll();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to delete purchase invoice');
     }
   };
 
@@ -237,7 +306,7 @@ function Purchase() {
               ) : filtered.map(inv => (
                 <div key={inv.id} className={`p-4 transition ${isDark ? 'hover:bg-slate-700/60' : 'hover:bg-slate-50'}`}>
                   <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{inv.invoice_no || 'No invoice no.'}</p>
                         {inv.client_id ? (
@@ -258,10 +327,30 @@ function Purchase() {
                         <Building2 className="h-3.5 w-3.5" /> {inv.client_name || inv.buyer_name || 'No concerned company matched'} · {fmtDate(inv.invoice_date)}
                       </p>
                     </div>
-                    <div className="text-right flex-shrink-0">
+                    <div className="text-right flex-shrink-0 flex flex-col items-end">
                       <p className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{fmtC(inv.grand_total)}</p>
                       <p className="text-xs text-slate-400">GST {fmtC(inv.total_gst)}</p>
                       <p className="text-[10px] text-slate-400 mt-1 truncate max-w-[180px]">{inv.file_name}</p>
+                      <div className="flex items-center gap-2 mt-2">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => startEdit(inv)}
+                          className="h-7 w-7 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/40"
+                          title="Edit purchase invoice"
+                        >
+                          <Edit className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => handleDelete(inv.id)}
+                          className="h-7 w-7 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40"
+                          title="Delete purchase invoice"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -270,6 +359,146 @@ function Purchase() {
           </div>
         </div>
       </div>
+
+      <Dialog open={editingInvoice !== null} onOpenChange={(open) => { if (!open) setEditingInvoice(null); }}>
+        <DialogContent className={`sm:max-w-2xl max-h-[90vh] overflow-y-auto ${isDark ? 'bg-slate-900 text-slate-100 border-slate-800' : 'bg-white text-slate-900'}`}>
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold flex items-center gap-2">
+              <ShoppingBag className="h-5 w-5 text-blue-500" />
+              Edit Purchase Invoice Details
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Supplier / Vendor Name</label>
+              <Input
+                value={editForm.supplier_name}
+                onChange={(e) => setEditForm({ ...editForm, supplier_name: e.target.value })}
+                className="mt-1 rounded-xl"
+                placeholder="Supplier name"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Invoice No</label>
+              <Input
+                value={editForm.invoice_no}
+                onChange={(e) => setEditForm({ ...editForm, invoice_no: e.target.value })}
+                className="mt-1 rounded-xl"
+                placeholder="Invoice number"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Invoice Date</label>
+              <Input
+                type="date"
+                value={editForm.invoice_date}
+                onChange={(e) => setEditForm({ ...editForm, invoice_date: e.target.value })}
+                className="mt-1 rounded-xl"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Grand Total Amount (₹)</label>
+              <Input
+                type="number"
+                step="0.01"
+                value={editForm.grand_total}
+                onChange={(e) => setEditForm({ ...editForm, grand_total: e.target.value })}
+                className="mt-1 rounded-xl"
+                placeholder="0.00"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Total GST (₹)</label>
+              <Input
+                type="number"
+                step="0.01"
+                value={editForm.total_gst}
+                onChange={(e) => setEditForm({ ...editForm, total_gst: e.target.value })}
+                className="mt-1 rounded-xl"
+                placeholder="0.00"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Taxable Amount (₹)</label>
+              <Input
+                type="number"
+                step="0.01"
+                value={editForm.taxable_amount}
+                onChange={(e) => setEditForm({ ...editForm, taxable_amount: e.target.value })}
+                className="mt-1 rounded-xl"
+                placeholder="0.00"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Concerned Company / Client</label>
+              <Select
+                value={editForm.client_id || 'none'}
+                onValueChange={(val) => setEditForm({ ...editForm, client_id: val })}
+              >
+                <SelectTrigger className={`mt-1 rounded-xl ${isDark ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50'}`}>
+                  <SelectValue placeholder="Select client" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No matched company</SelectItem>
+                  {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.company_name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Sales Company / Book</label>
+              <Select
+                value={editForm.company_id || 'none'}
+                onValueChange={(val) => setEditForm({ ...editForm, company_id: val })}
+              >
+                <SelectTrigger className={`mt-1 rounded-xl ${isDark ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50'}`}>
+                  <SelectValue placeholder="Select book" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Not specified</SelectItem>
+                  {companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Supplier GSTIN</label>
+              <Input
+                value={editForm.supplier_gstin}
+                onChange={(e) => setEditForm({ ...editForm, supplier_gstin: e.target.value.toUpperCase() })}
+                className="mt-1 rounded-xl"
+                placeholder="Supplier GSTIN"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Buyer GSTIN</label>
+              <Input
+                value={editForm.buyer_gstin}
+                onChange={(e) => setEditForm({ ...editForm, buyer_gstin: e.target.value.toUpperCase() })}
+                className="mt-1 rounded-xl"
+                placeholder="Buyer GSTIN"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-4 border-t" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+            <Button variant="outline" onClick={() => setEditingInvoice(null)} className="rounded-xl">
+              Cancel
+            </Button>
+            <Button onClick={handleSaveEdit} disabled={savingEdit} className="rounded-xl text-white" style={{ background: COLORS.mediumBlue }}>
+              {savingEdit ? <MiniLoader height={18} /> : 'Save Changes'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
