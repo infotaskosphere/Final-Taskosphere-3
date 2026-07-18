@@ -40,7 +40,8 @@ router = APIRouter(prefix="/telegram", tags=["Telegram"])
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_TOKEN:
-    raise Exception("TELEGRAM_BOT_TOKEN not configured")
+    print("[WARNING] TELEGRAM_BOT_TOKEN not configured. Telegram bot integration will be disabled.")
+    TELEGRAM_TOKEN = "dummy_token"
 
 TELEGRAM_API    = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 BACKEND_URL     = os.getenv("BACKEND_URL", "http://localhost:8000")
