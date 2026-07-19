@@ -68,8 +68,9 @@ function Purchase() {
 
   // Payment recording state
   const [payingInvoice, setPayingInvoice] = useState(null);
-  const [payForm, setPayForm] = useState({ amount: 0, payment_date: format(new Date(), 'yyyy-MM-dd'), payment_mode: 'bank', reference_no: '', notes: '' });
+  const [payForm, setPayForm] = useState({ amount: 0, payment_date: format(new Date(), 'yyyy-MM-dd'), payment_mode: 'bank', bank_account_id: '', reference_no: '', notes: '' });
   const [savingPayment, setSavingPayment] = useState(false);
+  const [bankAccounts, setBankAccounts] = useState([]);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -195,15 +196,29 @@ function Purchase() {
       amount: Number(inv.amount_due ?? inv.grand_total ?? 0),
       payment_date: format(new Date(), 'yyyy-MM-dd'),
       payment_mode: 'bank',
+      bank_account_id: '',
       reference_no: '',
       notes: '',
     });
+    setBankAccounts([]);
+    api.get('/bank-accounts', { params: { company_id: inv.company_id || '' } })
+      .then(r => {
+        const accts = r.data || [];
+        setBankAccounts(accts);
+        const primary = accts.find(a => a.is_primary) || accts[0];
+        if (primary) setPayForm(p => ({ ...p, bank_account_id: primary.id }));
+      })
+      .catch(() => setBankAccounts([]));
   };
 
   const handleSavePayment = async () => {
     if (!payingInvoice) return;
     const amt = parseFloat(payForm.amount) || 0;
     if (amt <= 0) { toast.error('Enter a payment amount greater than zero'); return; }
+    if (payForm.payment_mode !== 'cash' && bankAccounts.length > 1 && !payForm.bank_account_id) {
+      toast.error('Select which bank account this was paid from');
+      return;
+    }
     setSavingPayment(true);
     try {
       const dueNow = Number(payingInvoice.amount_due ?? payingInvoice.grand_total ?? 0);
@@ -213,6 +228,7 @@ function Purchase() {
         amount: amt,
         payment_date: payForm.payment_date,
         payment_mode: payForm.payment_mode,
+        bank_account_id: payForm.payment_mode !== 'cash' ? (payForm.bank_account_id || null) : null,
         reference_no: payForm.reference_no,
         notes: payForm.notes,
       });
@@ -652,6 +668,24 @@ function Purchase() {
                   </Select>
                 </div>
               </div>
+
+              {payForm.payment_mode !== 'cash' && bankAccounts.length > 0 && (
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Bank Account</label>
+                  <Select value={payForm.bank_account_id} onValueChange={(v) => setPayForm({ ...payForm, bank_account_id: v })}>
+                    <SelectTrigger className={`mt-1 rounded-xl ${isDark ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50'}`}>
+                      <SelectValue placeholder="Select bank account" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {bankAccounts.map(a => (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.bank_name} · {a.account_number_masked}{a.is_primary ? ' (Primary)' : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
               <div>
                 <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Reference No. (optional)</label>
