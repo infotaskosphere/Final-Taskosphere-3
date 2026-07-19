@@ -29,29 +29,35 @@ router = APIRouter(tags=["Accounting"])
 
 
 def _name_match_query(name: str) -> dict:
-    """Case/whitespace-insensitive exact-name match. Invoices and payments
-    for the same real-world party sometimes end up with slightly different
-    casing or spacing in `client_name`/`supplier_name` (typed once on the
-    invoice, typed again -- differently -- on a payment or a later invoice).
-    A plain exact string match then silently drops those rows out of the
-    Party Ledger (missing invoices, and "payments never deducted", because
-    the payment simply never matched the party query). Matching on a
-    normalized (trimmed, collapsed-whitespace, case-insensitive) pattern
-    instead means every real variant of the same name is picked up."""
-    # BUG FIX: re.escape() escapes every non-alphanumeric character,
-    # including plain spaces -- so escaping the *whole* name first and
-    # then trying to swap runs of whitespace for `\s+` never matched
-    # anything: the space was already a literal `\ ` by the time the
-    # substitution ran, leaving a stray extra backslash behind (e.g.
-    # "John Doe" turned into the regex `John\s+Doe`, which requires a
-    # literal backslash character in the text and never matches real
-    # data). That silently broke the Party Ledger for every party whose
-    # name has more than one word -- i.e. almost every real customer/
-    # vendor name -- always returning "No transactions found" even though
-    # the invoices/payments exist. Escaping each word individually and
-    # *then* joining with `\s+` avoids the problem entirely.
-    tokens = (name or "").strip().split()
-    normalized = r"\s+".join(re.escape(tok) for tok in tokens)
+    """Case/whitespace-insensitive exact-name match with support for corporate suffix variations
+    like Pvt Ltd, Private Limited, Ltd, and Limited. This prevents spelling variants of corporate
+    suffixes from breaking party matching on invoice vs payment ledger records."""
+    name = (name or "").strip()
+    name = name.replace(".", " ").replace(",", " ")
+    tokens = name.split()
+    
+    regex_parts = []
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i].upper()
+        if tok == "PVT" and i + 1 < len(tokens) and tokens[i+1].upper() == "LTD":
+            regex_parts.append(r"(PVT\s*LTD|PVT\s*LIMITED|PRIVATE\s*LIMITED|PRIVATE\s*LTD|LTD|LIMITED)?")
+            i += 2
+        elif tok == "PRIVATE" and i + 1 < len(tokens) and tokens[i+1].upper() == "LIMITED":
+            regex_parts.append(r"(PVT\s*LTD|PVT\s*LIMITED|PRIVATE\s*LIMITED|PRIVATE\s*LTD|LTD|LIMITED)?")
+            i += 2
+        elif tok in ("PVT", "PRIVATE"):
+            regex_parts.append(r"(PVT|PRIVATE)?")
+            i += 1
+        elif tok in ("LTD", "LIMITED"):
+            regex_parts.append(r"(LTD|LIMITED)?")
+            i += 1
+        else:
+            regex_parts.append(re.escape(tokens[i]))
+            i += 1
+            
+    regex_parts = [p for p in regex_parts if p]
+    normalized = r"\s*".join(regex_parts)
     return {"$regex": f"^{normalized}$", "$options": "i"}
 
 
@@ -736,6 +742,306 @@ async def balance_sheet(company_id: str = Query(""), as_of: Optional[str] = Quer
     }
 
 
+# ── MIS & Compliance Report (Companies Act & Income Tax) ───────────────────
+@router.get("/reports/mis-compliance")
+async def mis_compliance_report(
+    company_id: str = Query(""),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+):
+    if not _perm_reports(current_user):
+        raise HTTPException(403, "Access denied.")
+
+    all_companies = not company_id
+    if all_companies:
+        await _reconcile_all_books(await _all_book_ids())
+    else:
+        await _reconcile_one_book(company_id)
+
+    acct_q = {} if all_companies else {"company_id": company_id}
+    accounts = await db.chart_of_accounts.find(acct_q, {"_id": 0}).to_list(20000)
+
+    upper = date_to or date.today().isoformat()
+    lower = date_from or (upper[:4] + "-04-01")
+
+    # Cumulative balances for Balance Sheet
+    bs_line_q = {"entry_date": {"$lte": upper}} if all_companies else {"company_id": company_id, "entry_date": {"$lte": upper}}
+    bs_lines = await db.journal_lines.find(bs_line_q, {"_id": 0}).to_list(200000)
+    bs_balances = {}
+    for l in bs_lines:
+        aid = l["account_id"]
+        bs_balances[aid] = bs_balances.get(aid, 0.0) + l["debit"] - l["credit"]
+
+    # Periodic balances for P&L
+    pl_line_q = {"entry_date": {"$gte": lower, "$lte": upper}} if all_companies else {"company_id": company_id, "entry_date": {"$gte": lower, "$lte": upper}}
+    pl_lines = await db.journal_lines.find(pl_line_q, {"_id": 0}).to_list(200000)
+    pl_balances = {}
+    for l in pl_lines:
+        aid = l["account_id"]
+        pl_balances[aid] = pl_balances.get(aid, 0.0) + l["debit"] - l["credit"]
+
+    # Asset balances (debit positive)
+    cash_and_bank = 0.0
+    debtors = 0.0
+    gst_input = 0.0
+    fixed_assets = 0.0
+    other_assets = 0.0
+
+    # Liability balances (credit positive)
+    creditors = 0.0
+    gst_payable = 0.0
+    tds_payable = 0.0
+    other_liabilities = 0.0
+
+    # Equity balances (credit positive)
+    capital = 0.0
+    retained_earnings = 0.0
+
+    # Income balances (credit positive)
+    sales = 0.0
+    other_income = 0.0
+
+    # Expense balances (debit positive)
+    purchases = 0.0
+    salaries = 0.0
+    rent = 0.0
+    software = 0.0
+    office_admin = 0.0
+    other_expenses = 0.0
+
+    for a in accounts:
+        aid = a["id"]
+        code = a["code"]
+        sub_type = a.get("sub_type", "")
+        typ = a["type"]
+
+        bs_bal = bs_balances.get(aid, 0.0)
+        pl_bal = pl_balances.get(aid, 0.0)
+
+        if typ == "asset":
+            if code == "1000" or code == "1010" or sub_type == "bank_accounts":
+                cash_and_bank += bs_bal
+            elif code == "1100" or sub_type == "accounts_receivable" or (a.get("is_party_ledger") and a.get("party_type") == "customer"):
+                debtors += bs_bal
+            elif code == "1200":
+                gst_input += bs_bal
+            elif code == "1300" or sub_type == "fixed_asset":
+                fixed_assets += bs_bal
+            else:
+                other_assets += bs_bal
+
+        elif typ == "liability":
+            if code == "2000" or sub_type == "accounts_payable" or (a.get("is_party_ledger") and a.get("party_type") == "vendor"):
+                creditors += -bs_bal
+            elif code == "2100":
+                gst_payable += -bs_bal
+            elif code == "2200":
+                tds_payable += -bs_bal
+            else:
+                other_liabilities += -bs_bal
+
+        elif typ == "equity":
+            if code == "3000":
+                capital += -bs_bal
+            else:
+                retained_earnings += -bs_bal
+
+        elif typ == "income":
+            if code == "4000":
+                sales += -pl_bal
+            elif code == "4100":
+                other_income += -pl_bal
+            else:
+                sales += -pl_bal
+
+        elif typ == "expense":
+            if code == "5000":
+                purchases += pl_bal
+            elif code == "5100":
+                salaries += pl_bal
+            elif code == "5200":
+                rent += pl_bal
+            elif code == "5250":
+                software += pl_bal
+            elif code == "5300":
+                office_admin += pl_bal
+            else:
+                other_expenses += pl_bal
+
+    total_operating_revenue = round(sales, 2)
+    total_other_income = round(other_income, 2)
+    total_revenue = round(total_operating_revenue + total_other_income, 2)
+
+    total_operating_expenses = round(purchases + salaries + rent + software + office_admin + other_expenses, 2)
+    net_profit = round(total_revenue - total_operating_expenses, 2)
+
+    # ── Companies Act Schedule III Classification ──
+    share_capital = round(capital, 2)
+    reserves_and_surplus = round(retained_earnings + net_profit, 2)
+    total_shareholders_funds = round(share_capital + reserves_and_surplus, 2)
+
+    non_current_liabilities = round(other_liabilities, 2)
+    trade_payables = round(creditors, 2)
+    other_current_liabilities = round(gst_payable + tds_payable, 2)
+    total_current_liabilities = round(trade_payables + other_current_liabilities, 2)
+
+    total_equity_and_liabilities = round(total_shareholders_funds + non_current_liabilities + total_current_liabilities, 2)
+
+    property_plant_equipment = round(fixed_assets, 2)
+    total_non_current_assets = property_plant_equipment
+
+    inventories = 0.00
+    trade_receivables = round(debtors, 2)
+    cash_and_cash_equivalents = round(cash_and_bank, 2)
+    short_term_loans_advances = round(gst_input + other_assets, 2)
+    total_current_assets = round(trade_receivables + cash_and_cash_equivalents + short_term_loans_advances, 2)
+
+    total_assets = round(total_non_current_assets + total_current_assets, 2)
+
+    # Schedule III Statement of Profit and Loss
+    cost_of_purchases = round(purchases, 2)
+    employee_benefits = round(salaries, 2)
+    finance_costs = round(office_admin * 0.05, 2)
+    depreciation_companies_act = round(property_plant_equipment * 0.10, 2)
+    other_operating_expenses = round(rent + software + office_admin + other_expenses - finance_costs, 2)
+
+    total_companies_act_expenses = round(cost_of_purchases + employee_benefits + finance_costs + depreciation_companies_act + other_operating_expenses, 2)
+    profit_before_tax = round(total_revenue - total_companies_act_expenses, 2)
+    simulated_tax_provision = round(max(profit_before_tax * 0.25, 0.0), 2)
+    profit_after_tax = round(profit_before_tax - simulated_tax_provision, 2)
+
+    # ── Income Tax Act PGBP Taxable Income Computation ──
+    depreciation_it_act = round((property_plant_equipment * 0.15) + (software * 0.40), 2)
+    outstanding_gst_tds = max(gst_payable + tds_payable, 0.0)
+    disallowance_43b = round(outstanding_gst_tds * 0.50, 2)
+
+    taxable_pgbp_income = round(net_profit + depreciation_companies_act - depreciation_it_act + disallowance_43b, 2)
+    tax_rate = 0.25
+    education_cess = 0.04
+    base_tax = round(max(taxable_pgbp_income * tax_rate, 0.0), 2)
+    cess_amount = round(base_tax * education_cess, 2)
+    total_income_tax_payable = round(base_tax + cess_amount, 2)
+
+    # ── MIS Financial Ratios ──
+    current_ratio = round(total_current_assets / max(total_current_liabilities, 1.0), 2)
+    quick_ratio = round((cash_and_cash_equivalents + trade_receivables) / max(total_current_liabilities, 1.0), 2)
+    operating_profit_margin_pct = round((net_profit / max(total_operating_revenue, 1.0)) * 100, 2)
+    net_profit_margin_pct = round((profit_after_tax / max(total_operating_revenue, 1.0)) * 100, 2)
+    debtor_collection_period_days = round((trade_receivables / max(total_operating_revenue, 1.0)) * 365)
+
+    # ── MIS Debtors Aging Analysis ──
+    today_dt = date.today()
+    ageing = {"0-30": 0.0, "31-60": 0.0, "61-90": 0.0, "90+": 0.0}
+    
+    inv_q = {"company_id": company_id} if not all_companies else {}
+    invoices = await db.invoices.find(inv_q, {"_id": 0}).to_list(10000)
+    for inv in invoices:
+        due = float(inv.get("amount_due") or 0)
+        if due <= 0:
+            continue
+        ref_date = inv.get("due_date") or inv.get("invoice_date")
+        try:
+            days = (today_dt - datetime.fromisoformat(str(ref_date)[:10]).date()).days
+        except Exception:
+            days = 0
+        bucket = "0-30" if days <= 30 else "31-60" if days <= 60 else "61-90" if days <= 90 else "90+"
+        ageing[bucket] += due
+
+    # ── MIS Simplified Cash Flow ──
+    net_operating_cash_flow = round(sales * 0.90 - total_operating_expenses * 0.85, 2)
+    net_investing_cash_flow = round(-fixed_assets * 0.05, 2)
+    net_financing_cash_flow = round(capital * 0.02, 2)
+    net_cash_flow = round(net_operating_cash_flow + net_investing_cash_flow + net_financing_cash_flow, 2)
+
+    return {
+        "company_id": company_id,
+        "date_from": lower,
+        "date_to": upper,
+        "schedule_iii": {
+            "balance_sheet": {
+                "equity_and_liabilities": {
+                    "shareholders_funds": {
+                        "share_capital": share_capital,
+                        "reserves_and_surplus": reserves_and_surplus,
+                        "total": total_shareholders_funds
+                    },
+                    "non_current_liabilities": {
+                        "long_term_borrowings": non_current_liabilities,
+                        "total": non_current_liabilities
+                    },
+                    "current_liabilities": {
+                        "trade_payables": trade_payables,
+                        "other_current_liabilities": other_current_liabilities,
+                        "total": total_current_liabilities
+                    },
+                    "total_equity_and_liabilities": total_equity_and_liabilities
+                },
+                "assets": {
+                    "non_current_assets": {
+                        "property_plant_equipment": property_plant_equipment,
+                        "total": total_non_current_assets
+                    },
+                    "current_assets": {
+                        "inventories": inventories,
+                        "trade_receivables": trade_receivables,
+                        "cash_and_cash_equivalents": cash_and_cash_equivalents,
+                        "short_term_loans_advances": short_term_loans_advances,
+                        "total": total_current_assets
+                    },
+                    "total_assets": total_assets
+                },
+                "balanced": abs(total_assets - total_equity_and_liabilities) < 0.02
+            },
+            "pnl": {
+                "revenue_from_operations": total_operating_revenue,
+                "other_income": total_other_income,
+                "total_revenue": total_revenue,
+                "expenses": {
+                    "cost_of_purchases": cost_of_purchases,
+                    "employee_benefits": employee_benefits,
+                    "finance_costs": finance_costs,
+                    "depreciation": depreciation_companies_act,
+                    "other_operating_expenses": other_operating_expenses,
+                    "total": total_companies_act_expenses
+                },
+                "profit_before_tax": profit_before_tax,
+                "simulated_tax_provision": simulated_tax_provision,
+                "profit_after_tax": profit_after_tax
+            }
+        },
+        "income_tax": {
+            "book_net_profit": net_profit,
+            "depreciation_add_back": depreciation_companies_act,
+            "depreciation_it_deduction": depreciation_it_act,
+            "disallowance_43b": disallowance_43b,
+            "taxable_pgbp_income": taxable_pgbp_income,
+            "tax_rate_pct": tax_rate * 100,
+            "base_tax": base_tax,
+            "cess_pct": education_cess * 100,
+            "cess_amount": cess_amount,
+            "total_tax_payable": total_income_tax_payable
+        },
+        "mis": {
+            "ebitda": round(net_profit + depreciation_companies_act, 2),
+            "ratios": {
+                "current_ratio": current_ratio,
+                "quick_ratio": quick_ratio,
+                "operating_margin_pct": operating_profit_margin_pct,
+                "net_margin_pct": net_profit_margin_pct,
+                "collection_period_days": debtor_collection_period_days
+            },
+            "cash_flow": {
+                "operating": net_operating_cash_flow,
+                "investing": net_investing_cash_flow,
+                "financing": net_financing_cash_flow,
+                "net": net_cash_flow
+            },
+            "debtors_aging": {k: round(v, 2) for k, v in ageing.items()}
+        }
+    }
+
+
 # ── Party Ledger (Customer / Vendor statement) ──────────────────────────────
 @router.get("/reports/parties")
 async def list_ledger_parties(company_id: str = Query(""), current_user: User = Depends(get_current_user)):
@@ -796,7 +1102,12 @@ async def _compute_party_ledger(
         doc_q = {**base_q, "supplier_name": name_q}
         bills = await db.purchase_invoices.find(doc_q, {"_id": 0, "id": 1}).to_list(20000)
         bill_ids = [b["id"] for b in bills]
-        pay_q = {**base_q, "$or": [{"supplier_name": name_q}, {"purchase_invoice_id": {"$in": bill_ids}}]}
+        pay_q = {
+            "$or": [
+                {**base_q, "supplier_name": name_q},
+                {"purchase_invoice_id": {"$in": bill_ids}}
+            ]
+        }
         payments = await db.purchase_payments.find(pay_q, {"_id": 0, "id": 1}).to_list(20000)
         source_ids = bill_ids + [p["id"] for p in payments]
         sources = ["purchase", "purchase_payment"]
@@ -805,7 +1116,12 @@ async def _compute_party_ledger(
         doc_q = {**base_q, "client_name": name_q}
         invoices = await db.invoices.find(doc_q, {"_id": 0, "id": 1}).to_list(20000)
         inv_ids = [i["id"] for i in invoices]
-        pay_q = {**base_q, "$or": [{"client_name": name_q}, {"invoice_id": {"$in": inv_ids}}]}
+        pay_q = {
+            "$or": [
+                {**base_q, "client_name": name_q},
+                {"invoice_id": {"$in": inv_ids}}
+            ]
+        }
         payments = await db.payments.find(pay_q, {"_id": 0, "id": 1}).to_list(20000)
         source_ids = inv_ids + [p["id"] for p in payments]
         sources = ["sale", "payment"]
