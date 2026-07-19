@@ -2822,3 +2822,37 @@ async def client_portal_approval_decision(
         raise HTTPException(status_code=400, detail="Failed to process approval decision.")
     return {"success": True, "message": f"Approval decision '{body.decision}' processed successfully."}
 
+
+class CopilotQueryRequest(BaseModel):
+    query: str
+    session_id: Optional[str] = None
+
+
+@router.post("/copilot/chat")
+async def client_portal_copilot_chat(
+    body: CopilotQueryRequest,
+    portal_user=Depends(get_current_portal_client)
+):
+    """Initiates an automated copilot transaction chat inside the Client Portal."""
+    from backend.copilot.copilot_engine import CopilotEngine
+    
+    # Adapt portal client to mock User object
+    class PortalUserAdaptor:
+        id = portal_user.get("id") or portal_user.get("user_id") or "portal_client"
+        company_id = portal_user.get("client_id") or "default_comp"
+        tenant_id = "default_tenant"
+        role = "portal_user"
+        permissions = {"can_view_reports": True}
+        
+    user = PortalUserAdaptor()
+    try:
+        return await CopilotEngine.process_copilot_request(
+            user=user,
+            session_id=body.session_id,
+            query=body.query,
+            role_preset="assistant"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
