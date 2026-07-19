@@ -29,14 +29,15 @@ class GeminiVisionEngine(BaseOCREngine):
         return bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
         
     async def extract_text_from_image(self, img_bytes: bytes, mime_type: str) -> Tuple[str, float]:
-        from backend.ai_document_reader import _gemini_vision
+        # Route all OCR through ai_provider (Gemini path).
+        from backend.ai.ai_provider import vision_single
         b64 = base64.b64encode(img_bytes).decode()
         prompt = (
             "You are a professional OCR engine. Transcribe all text from this image exactly as it appears. "
             "Do not add summaries, commentary, notes, or interpretations. Just output the verbatim transcribed text."
         )
         try:
-            text = await _gemini_vision(b64, mime_type, prompt)
+            text = await vision_single(b64, mime_type, prompt)
             return text or "", 0.95
         except Exception as e:
             logger.error(f"Gemini Vision OCR extraction failed: {e}")
@@ -51,15 +52,27 @@ class GroqVisionEngine(BaseOCREngine):
         return bool(os.environ.get("GROQ_API_KEY"))
         
     async def extract_text_from_image(self, img_bytes: bytes, mime_type: str) -> Tuple[str, float]:
-        from backend.ai_document_reader import _groq_vision_raw
+        # Route all OCR through ai_provider (Groq path uses groq_batch_processor
+        # internally for multi-image calls; single-image goes direct).
+        from backend.ai.ai_provider import vision_single
+        import os as _os
         b64 = base64.b64encode(img_bytes).decode()
         prompt = "Transcribe all text from this image verbatim. Do not summarize or explain."
+        # Force Groq for this engine call regardless of global AI_PROVIDER,
+        # so the OCR selector's engine choice is honoured.
+        _prev = _os.environ.get("AI_PROVIDER")
+        _os.environ["AI_PROVIDER"] = "groq"
         try:
-            text = await _groq_vision_raw(b64, mime_type, prompt)
+            text = await vision_single(b64, mime_type, prompt)
             return text or "", 0.90
         except Exception as e:
             logger.error(f"Groq Vision OCR extraction failed: {e}")
             raise
+        finally:
+            if _prev is None:
+                _os.environ.pop("AI_PROVIDER", None)
+            else:
+                _os.environ["AI_PROVIDER"] = _prev
 
 class TesseractEngine(BaseOCREngine):
     def get_name(self) -> str:
