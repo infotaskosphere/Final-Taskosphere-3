@@ -826,6 +826,13 @@ async def approve_document(doc_id: str, current_user: User = Depends(get_current
         {"$set": {"status": "posted", "journal_entry_id": entry["id"], "posting_error": None,
                    "reviewed_by": current_user.id, "reviewed_at": now}},
     )
+    
+    try:
+        from backend.ai import ai_router
+        await ai_router.update_accounting_memory(doc, entry, current_user.id)
+    except Exception as e:
+        _zte_logger.error(f"Failed to update AI accounting memory: {e}", exc_info=True)
+
     return {"success": True, "journal_entry_id": entry["id"], "fx": doc.get("fx")}
 
 
