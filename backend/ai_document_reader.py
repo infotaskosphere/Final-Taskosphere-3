@@ -1,8 +1,112 @@
-import os, io, base64
+import os, io, base64, asyncio, time, logging
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from backend.dependencies import get_current_user
 
 router = APIRouter(prefix="/api/ai", tags=["AI Document Reader"])
+
+_batch_logger = logging.getLogger("ai_document_reader.batching")
+
+# ═══════════════════════════════════════════════════════════════════════════
+# GROQ AUTO PAGE BATCHING (max 3 images/request) — additive, backward compatible.
+# Used by the scanned-PDF branch below and can be reused by the OCR pipeline.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _batch_size() -> int:
+    try:
+        n = int(os.environ.get("GROQ_MAX_IMAGES_PER_REQUEST", "3"))
+    except ValueError:
+        n = 3
+    return max(1, min(n, 3))  # Groq hard cap = 3
+
+
+def _parallel_batches() -> int:
+    try:
+        n = int(os.environ.get("GROQ_MAX_PARALLEL_BATCHES", "3"))
+    except ValueError:
+        n = 3
+    return max(1, n)
+
+
+async def _groq_ocr_single_page(img_b64: str, mime: str, prompt: str) -> str:
+    """OCR one page via Groq with 1 retry."""
+    for attempt in (1, 2):
+        try:
+            return await _groq_vision_raw(img_b64, mime, prompt)
+        except Exception as e:
+            if attempt == 2:
+                _batch_logger.warning(f"Single-page OCR failed after retry: {e}")
+                return ""
+            await asyncio.sleep(0.4)
+    return ""
+
+
+async def _groq_ocr_batch(pages: list, prompt: str) -> str:
+    """OCR a batch (<=3 images). Retry once, then fall back to per-page OCR
+    so a single bad page never fails the whole batch."""
+    if not pages:
+        return ""
+    for attempt in (1, 2):
+        try:
+            return await _groq_vision_multipage_raw(pages, prompt)
+        except Exception as e:
+            if attempt == 1:
+                _batch_logger.warning(f"Batch OCR attempt 1 failed, retrying: {e}")
+                await asyncio.sleep(0.6)
+                continue
+            _batch_logger.warning(f"Batch OCR retry failed, splitting into single pages: {e}")
+    # Fallback: OCR each page individually and stitch
+    results = []
+    for i, (b64, mime) in enumerate(pages, 1):
+        results.append(await _groq_ocr_single_page(b64, mime, prompt))
+    return "\n".join(results)
+
+
+async def _groq_vision_batched_pages(
+    page_images_b64: list,
+    prompt: str,
+    progress_cb=None,
+) -> str:
+    """
+    Auto-batch pages into groups of <= GROQ_MAX_IMAGES_PER_REQUEST (default 3),
+    run up to GROQ_MAX_PARALLEL_BATCHES batches concurrently, merge results
+    strictly in page order. Retries once per batch, then splits to single-page
+    OCR on failure. Releases each page's base64 payload after its batch runs
+    to keep memory usage bounded for large PDFs.
+    """
+    bsize = _batch_size()
+    pcount = _parallel_batches()
+    batches = [page_images_b64[i:i + bsize] for i in range(0, len(page_images_b64), bsize)]
+    total = len(batches)
+    results: list = [None] * total
+
+    _batch_logger.info(
+        f"Groq batched OCR: {len(page_images_b64)} pages -> {total} batches "
+        f"(batch_size={bsize}, parallel={pcount})"
+    )
+
+    sem = asyncio.Semaphore(pcount)
+    done_counter = {"n": 0}
+    lock = asyncio.Lock()
+
+    async def _run(idx: int, batch):
+        async with sem:
+            t0 = time.time()
+            text = await _groq_ocr_batch(batch, prompt)
+            _batch_logger.info(f"Batch {idx + 1}/{total} done in {time.time() - t0:.2f}s")
+            # Release b64 payloads for this batch immediately
+            batch.clear()
+            results[idx] = text or ""
+            async with lock:
+                done_counter["n"] += 1
+                if progress_cb:
+                    try:
+                        progress_cb(done_counter["n"], total)
+                    except Exception:
+                        pass
+
+    await asyncio.gather(*[_run(i, b) for i, b in enumerate(batches)])
+    # Merge preserving original page order
+    return "\n\n".join(r for r in results if r)
 
 
 # ── Gemini client (PDF text, Excel, CSV) ─────────────────────────────────────
@@ -295,12 +399,14 @@ async def analyze_document(
                 response = await model.generate_content_async(prompt)
                 return {"filename": filename, "analysis": response.text}
             else:
-                # Scanned PDF (no text layer) → render pages as images → Groq vision
+                # Scanned PDF (no text layer) → render pages as images → Vision.
+                # Uses auto-batching (Groq max 3 images/request), parallel batches,
+                # retry+split fallback, ordered merge, streaming memory release.
                 try:
                     from PIL import Image as PILImage
                     page_images_b64 = []
                     with pdfplumber.open(io.BytesIO(contents)) as pdf:
-                        for page in pdf.pages[:4]:   # max 4 pages for Groq
+                        for page in pdf.pages:  # unlimited — batching handles it
                             pil_img = page.to_image(resolution=150).original
                             if pil_img.mode not in ("RGB", "L"):
                                 pil_img = pil_img.convert("RGB")
@@ -308,6 +414,8 @@ async def analyze_document(
                             pil_img.save(buf, format="JPEG", quality=85)
                             img_b64 = base64.b64encode(buf.getvalue()).decode()
                             page_images_b64.append((img_b64, "image/jpeg"))
+                            # Release PIL/buffer refs promptly
+                            del pil_img, buf
 
                     if not page_images_b64:
                         raise HTTPException(status_code=422, detail="No pages could be rendered from this PDF.")
@@ -320,7 +428,16 @@ async def analyze_document(
                         "3. A structured summary\n"
                         "4. Important observations"
                     )
-                    analysis = await _groq_vision_multipage(page_images_b64, prompt)
+                    # Prefer Gemini multi-page if configured (no 3-image cap);
+                    # otherwise use Groq auto-batched pipeline.
+                    if _provider() == "gemini":
+                        try:
+                            analysis = await _gemini_vision_multipage(page_images_b64, prompt)
+                            return {"filename": filename, "analysis": analysis}
+                        except HTTPException as e:
+                            if not os.environ.get("GROQ_API_KEY") or e.status_code not in (422, 429, 500):
+                                raise
+                    analysis = await _groq_vision_batched_pages(page_images_b64, prompt)
                     return {"filename": filename, "analysis": analysis}
                 except HTTPException:
                     raise
