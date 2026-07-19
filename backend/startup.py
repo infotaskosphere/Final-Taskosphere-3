@@ -114,6 +114,13 @@ async def startup_event():
         except Exception as e:
             logger.error(f"Failed to initialize OCR indexes: {e}")
 
+        # ✅ Initialize validation indexes
+        try:
+            from backend.ai.validation_storage import init_validation_indexes
+            await init_validation_indexes()
+        except Exception as e:
+            logger.error(f"Failed to initialize validation indexes: {e}")
+
         # ✅ START SCHEDULER
         if not scheduler.running:
             scheduler.start()
