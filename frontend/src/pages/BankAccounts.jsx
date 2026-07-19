@@ -3,7 +3,7 @@ import { format, parseISO } from 'date-fns';
 import { toast } from 'sonner';
 import {
   Landmark, Plus, UploadCloud, RefreshCw, CheckCircle2, AlertTriangle,
-  Trash2, Link2, Unlink, X, ChevronRight, Search, Edit3, Eye, History, Ban,
+  Trash2, Link2, Unlink, X, ChevronRight, Search, Edit3, Eye, History, Ban, BookOpen,
 } from 'lucide-react';
 import GifLoader, { MiniLoader, ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
+import { useAuth } from '@/contexts/AuthContext.jsx';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
 import { mirrorBankToSettings, bankFromAccount } from '@/lib/bankSync';
 import { GuidanceNote } from '@/components/ui/GuidanceNote.jsx';
@@ -21,35 +22,44 @@ const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2', emeraldGreen: '#1FA
 const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 const fmtDate = (value) => { if (!value) return '—'; try { return format(parseISO(value), 'dd MMM yyyy'); } catch { return value; } };
 
-// ─── Smart client-side suggestion scorer (amount + date + narration + party) ───
+// ─── Smart suggestion scorer: amount, date, narration, party name, ───
+// ─── invoice no, bank reference, GSTIN — returns a 0-99 confidence %. ───
 function scoreInvoiceMatch(txn, inv) {
   let score = 0;
   const txnAmt = Number(txn.debit || txn.credit || 0);
   const invAmt = Number(inv.total || inv.grand_total || inv.amount || 0);
   if (txnAmt > 0 && invAmt > 0) {
     const diff = Math.abs(txnAmt - invAmt) / Math.max(txnAmt, invAmt);
-    if (diff < 0.001) score += 55;
-    else if (diff < 0.02) score += 45;
-    else if (diff < 0.05) score += 30;
-    else if (diff < 0.1) score += 15;
+    if (diff < 0.001) score += 45;
+    else if (diff < 0.02) score += 38;
+    else if (diff < 0.05) score += 25;
+    else if (diff < 0.1) score += 12;
   }
   try {
     const td = new Date(txn.date), id = new Date(inv.invoice_date || inv.date);
     const days = Math.abs((td - id) / 86400000);
-    if (days <= 1) score += 20;
-    else if (days <= 7) score += 14;
-    else if (days <= 30) score += 7;
+    if (days <= 1) score += 18;
+    else if (days <= 7) score += 12;
+    else if (days <= 30) score += 6;
   } catch {}
   const desc = ((txn.description || '') + ' ' + (txn.reference || '')).toLowerCase();
   const party = (inv.customer_name || inv.vendor_name || inv.party_name || '').toLowerCase();
-  if (party && desc.includes(party.split(' ')[0])) score += 15;
+  if (party && desc.includes(party.split(' ')[0])) score += 14;
   const invNo = (inv.invoice_number || inv.number || '').toLowerCase();
-  if (invNo && desc.includes(invNo)) score += 10;
+  if (invNo && desc.includes(invNo)) score += 9;
+  // Bank reference number — UTR/cheque/ref on the invoice matching the bank line's own reference column.
+  const invRef = (inv.reference_number || inv.utr || inv.payment_reference || '').toLowerCase();
+  if (invRef && (txn.reference || '').toLowerCase().includes(invRef)) score += 8;
+  // GSTIN — occasionally present in narration for GST-linked NEFT/RTGS transfers.
+  const gstin = (inv.gstin || inv.customer_gstin || '').toLowerCase();
+  if (gstin && desc.includes(gstin)) score += 6;
   return Math.min(99, Math.max(0, Math.round(score)));
 }
 
 function BankAccountsInner() {
   const isDark = useDark();
+  const { user, hasPermission } = useAuth();
+  const canMatch = user?.role === 'admin' || hasPermission('can_match_bank');
   const fileRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState([]);
@@ -182,13 +192,17 @@ function BankAccountsInner() {
   };
 
   const unmatchTxn = async (txnId, silent = false) => {
-    if (!silent && !window.confirm('Unmatch this transaction? The reconciliation link and its journal entry will be removed. The invoice, receipt, voucher, ledger and audit history are preserved.')) return false;
+    let reason = '';
+    if (!silent) {
+      if (!window.confirm('Unmatch this transaction? The reconciliation link and its journal entry will be removed. The invoice, receipt, voucher, ledger and audit history are preserved.')) return false;
+      reason = window.prompt('Optional: reason for unmatching (recorded in the audit trail)') || '';
+    }
     try {
-      await api.post(`/bank-transactions/${txnId}/unmatch`);
+      await api.post(`/bank-transactions/${txnId}/unmatch`, { reason });
       if (!silent) toast.success('Unmatched — journal entry reversed');
       await fetchTransactions(selected.id);
       return true;
-    } catch { toast.error('Failed to unmatch'); return false; }
+    } catch (err) { toast.error(err.response?.data?.detail || 'Failed to unmatch'); return false; }
   };
 
   const loadInvoices = async () => {
@@ -208,18 +222,21 @@ function BankAccountsInner() {
     loadInvoices();
   };
 
-  const confirmMatch = async (txn, inv) => {
+  const confirmMatch = async (txn, inv, score) => {
     try {
       const isDebit = Number(txn.debit || 0) > 0;
       const matched_type = isDebit ? 'purchase' : 'sale';
       const matched_label = `${inv.invoice_number || inv.number || ''} · ${inv.customer_name || inv.vendor_name || inv.party_name || ''}`.trim();
+      const payload = { matched_type, matched_id: inv.id, matched_label, post_journal: true, confidence: score ?? null };
       if (txn.matched_type) {
-        await api.post(`/bank-transactions/${txn.id}/unmatch`);
+        // Same transaction, changing to a different record — atomic edit-match:
+        // reverses the previous mapping and applies the new one in one call.
+        await api.post(`/bank-transactions/${txn.id}/edit-match`, payload);
+        toast.success('Match updated · ledger updated');
+      } else {
+        await api.post(`/bank-transactions/${txn.id}/match`, payload);
+        toast.success('Matched · ledger updated');
       }
-      await api.post(`/bank-transactions/${txn.id}/match`, {
-        matched_type, matched_id: inv.id, matched_label, post_journal: true,
-      });
-      toast.success('Matched · ledger updated');
       setMatchDialog(null);
       await fetchTransactions(selected.id);
     } catch (err) {
@@ -234,6 +251,22 @@ function BankAccountsInner() {
     } catch { toast.error('No audit trail available'); }
   };
 
+  const viewLedger = (txn) => {
+    if (!txn.journal_entry_id) { toast.error('No journal entry posted for this transaction yet'); return; }
+    window.open(`/journal-entries?entry=${txn.journal_entry_id}`, '_blank', 'noopener');
+  };
+
+  const toggleIgnore = async (txn) => {
+    const next = !txn.ignored;
+    setTransactions(ts => ts.map(x => x.id === txn.id ? { ...x, ignored: next } : x));
+    try {
+      await api.post(`/bank-transactions/${txn.id}/ignore`, { ignored: next });
+    } catch {
+      toast.error('Failed to update — reverting');
+      setTransactions(ts => ts.map(x => x.id === txn.id ? { ...x, ignored: !next } : x));
+    }
+  };
+
   const selectedList = Object.keys(selectedIds).filter(k => selectedIds[k]);
   const bulkUnmatch = async () => {
     if (!selectedList.length) return;
@@ -241,11 +274,18 @@ function BankAccountsInner() {
     for (const id of selectedList) { await unmatchTxn(id, true); }
     toast.success(`${selectedList.length} unmatched`);
   };
-  const bulkIgnore = () => {
+  const bulkIgnore = async () => {
     if (!selectedList.length) return;
+    const ids = [...selectedList];
     setTransactions(ts => ts.map(t => selectedIds[t.id] ? { ...t, ignored: true } : t));
     setSelectedIds({});
-    toast.success(`${selectedList.length} marked ignored (local)`);
+    try {
+      await Promise.all(ids.map(id => api.post(`/bank-transactions/${id}/ignore`, { ignored: true })));
+      toast.success(`${ids.length} marked ignored`);
+    } catch {
+      toast.error('Some transactions could not be marked ignored');
+      await fetchTransactions(selected.id);
+    }
   };
 
   const suggestionsFor = (txn) => {
@@ -406,7 +446,7 @@ function BankAccountsInner() {
                           {f[0].toUpperCase() + f.slice(1)}
                         </button>
                       ))}
-                      {selectedList.length > 0 && (
+                      {selectedList.length > 0 && canMatch && (
                         <>
                           <span className="text-[11px] font-bold text-slate-500 ml-2">{selectedList.length} selected</span>
                           <Button size="sm" variant="outline" className="rounded-full h-7 text-xs" onClick={bulkUnmatch}>Bulk Unmatch</Button>
@@ -455,17 +495,30 @@ function BankAccountsInner() {
                             <div className="flex flex-wrap gap-1.5 mt-2">
                               {t.matched_type ? (
                                 <>
-                                  <button onClick={() => openMatch(t, 'edit')} className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-blue-400 hover:text-blue-600 inline-flex items-center gap-1"><Edit3 className="h-3 w-3" /> Edit Match</button>
-                                  <button onClick={() => unmatchTxn(t.id)} className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-rose-400 hover:text-rose-600 inline-flex items-center gap-1"><Unlink className="h-3 w-3" /> Unmatch</button>
+                                  {canMatch && (
+                                    <button onClick={() => openMatch(t, 'edit')} className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-blue-400 hover:text-blue-600 inline-flex items-center gap-1"><Edit3 className="h-3 w-3" /> Edit Match</button>
+                                  )}
+                                  {canMatch && (
+                                    <button onClick={() => unmatchTxn(t.id)} className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-rose-400 hover:text-rose-600 inline-flex items-center gap-1"><Unlink className="h-3 w-3" /> Unmatch</button>
+                                  )}
                                   {t.matched_id && (
                                     <a href={`/invoicing?open=${t.matched_id}`} target="_blank" rel="noreferrer" className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-slate-400 inline-flex items-center gap-1"><Eye className="h-3 w-3" /> Invoice</a>
+                                  )}
+                                  {t.journal_entry_id && (
+                                    <button onClick={() => viewLedger(t)} className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-slate-400 inline-flex items-center gap-1"><BookOpen className="h-3 w-3" /> Ledger</button>
                                   )}
                                   <button onClick={() => viewAudit(t)} className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-slate-400 inline-flex items-center gap-1"><History className="h-3 w-3" /> Audit</button>
                                 </>
                               ) : (
                                 <>
-                                  <button onClick={() => openMatch(t, 'match')} className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-emerald-400 hover:text-emerald-600 inline-flex items-center gap-1"><Search className="h-3 w-3" /> Match</button>
-                                  <button onClick={() => setTransactions(ts => ts.map(x => x.id === t.id ? { ...x, ignored: !x.ignored } : x))} className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-slate-400 inline-flex items-center gap-1"><Ban className="h-3 w-3" /> Ignore</button>
+                                  {canMatch ? (
+                                    <>
+                                      <button onClick={() => openMatch(t, 'match')} className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-emerald-400 hover:text-emerald-600 inline-flex items-center gap-1"><Search className="h-3 w-3" /> Match</button>
+                                      <button onClick={() => toggleIgnore(t)} className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-slate-400 inline-flex items-center gap-1"><Ban className="h-3 w-3" /> {t.ignored ? 'Unignore' : 'Ignore'}</button>
+                                    </>
+                                  ) : (
+                                    <span className="text-[10px] text-slate-400 italic">View only — request Match access from your admin</span>
+                                  )}
                                 </>
                               )}
                             </div>
@@ -519,7 +572,7 @@ function BankAccountsInner() {
                     .map(inv => ({ inv, score: scoreInvoiceMatch(matchDialog.txn, inv) }))
                     .sort((a, b) => b.score - a.score)
                     .map(({ inv, score }) => (
-                      <button key={inv.id} onClick={() => confirmMatch(matchDialog.txn, inv)}
+                      <button key={inv.id} onClick={() => confirmMatch(matchDialog.txn, inv, score)}
                         className="w-full text-left p-3 hover:bg-blue-50 flex items-center justify-between gap-3">
                         <div className="min-w-0">
                           <p className="text-sm font-bold text-slate-800 truncate">
@@ -549,12 +602,30 @@ function BankAccountsInner() {
           <DialogHeader><DialogTitle>Audit trail</DialogTitle></DialogHeader>
           {auditDialog && (
             <div className="space-y-2 max-h-[420px] overflow-y-auto text-sm">
-              {(auditDialog.entries || []).length === 0 && <p className="text-slate-400">No audit entries.</p>}
-              {(auditDialog.entries || []).map((e, i) => (
-                <div key={i} className="border rounded-lg p-3 bg-slate-50">
-                  <pre className="text-[11px] whitespace-pre-wrap break-all text-slate-700">{JSON.stringify(e, null, 2)}</pre>
-                </div>
-              ))}
+              {(auditDialog.entries || []).length === 0 && <p className="text-slate-400">No audit entries yet.</p>}
+              {(auditDialog.entries || []).map((e, i) => {
+                const action = e.action || e.match_type || 'event';
+                const who = e.performed_by_name || e.matched_by_user || '—';
+                const when = e.matched_on || e.edited_on || e.unmatched_on || e.timestamp;
+                const badge = action === 'matched' ? { label: 'Matched', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' }
+                  : action === 'edited' ? { label: 'Edited', cls: 'bg-blue-50 text-blue-700 border-blue-200' }
+                  : action === 'unmatched' ? { label: 'Unmatched', cls: 'bg-rose-50 text-rose-700 border-rose-200' }
+                  : { label: action, cls: 'bg-slate-100 text-slate-600 border-slate-200' };
+                const fmtMatch = (m) => m ? `${m.type || '—'} · ${m.label || m.id || '—'}` : '—';
+                return (
+                  <div key={i} className="border rounded-lg p-3 bg-slate-50 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${badge.cls}`}>{badge.label}</span>
+                      <span className="text-[11px] text-slate-400">{when ? fmtDate(when) : ''}</span>
+                    </div>
+                    <p className="text-xs text-slate-600">By <span className="font-semibold text-slate-800">{who}</span></p>
+                    {e.previous_match && <p className="text-xs text-slate-600">Previous match: <span className="font-medium">{fmtMatch(e.previous_match)}</span></p>}
+                    {e.new_match && <p className="text-xs text-slate-600">New match: <span className="font-medium">{fmtMatch(e.new_match)}</span></p>}
+                    {(e.confidence !== undefined && e.confidence !== null) && <p className="text-xs text-slate-600">Confidence: {Math.round(e.confidence)}%</p>}
+                    {e.reason && <p className="text-xs text-slate-600">Reason: <span className="italic">{e.reason}</span></p>}
+                  </div>
+                );
+              })}
             </div>
           )}
         </DialogContent>
