@@ -3770,6 +3770,81 @@ async def get_invoice(inv_id: str, current_user: User = Depends(check_module_per
     return inv
 
 
+# ═══════════════════════════════════════════════════════════
+# AUTOMATIC GSTIN MIGRATION (Company Master -> Invoice) ON UPDATE
+# ═══════════════════════════════════════════════════════════
+#
+# Field names anywhere in an invoice document that represent the SELLING
+# COMPANY's GSTIN (as opposed to `client_gstin`, which belongs to the buyer
+# and must never be touched by this logic). Any of these keys, if already
+# present on the saved invoice document or in the incoming update payload,
+# are always re-stamped with the latest Company Master GSTIN before saving.
+_COMPANY_GST_FIELD_NAMES = (
+    "company_gstin",
+    "company_gst_number",
+    "seller_gstin",
+    "supplier_gstin",
+    "business_gstin",
+    "invoice_header_gstin",
+    "pdf_gstin",
+    "header_gstin",
+    "firm_gstin",
+    "gst_number",
+    "gstin",
+)
+
+
+async def _sync_invoice_gst_from_company(inv_id: str, ex: dict, data: dict, company_id: str) -> dict:
+    """
+    Automatic GSTIN migration during invoice updates.
+
+    Loads the latest Company/Business profile linked to the invoice (by
+    `company_id`) and compares its current GSTIN against every GST-related
+    field used anywhere on the invoice (see `_COMPANY_GST_FIELD_NAMES`). Any
+    field found to be outdated is automatically corrected to the Company
+    Master's current GSTIN before the invoice is saved. If a stored PDF/Drive
+    snapshot exists, it is cleared so the next generated PDF/print reflects
+    the corrected GSTIN.
+
+    This function is strictly additive and read-only with respect to every
+    other part of the invoice: it never touches invoice number, invoice
+    date, customer information, items, HSN codes, quantities, taxable
+    values, CGST/SGST/IGST calculations, totals, ledger entries, journal
+    entries, payment status, or bank reconciliation data.
+    """
+    if not company_id:
+        return data
+
+    company = await db.companies.find_one({"id": company_id}, {"_id": 0, "gstin": 1})
+    current_gstin = ((company or {}).get("gstin") or "").strip()
+    if not current_gstin:
+        return data
+
+    fields_synced = []
+    for field in _COMPANY_GST_FIELD_NAMES:
+        # Only touch a field if it is already used somewhere on this invoice
+        # (either present in the incoming payload or already stored on the
+        # existing invoice document) -- never invent new fields.
+        if field not in data and field not in ex:
+            continue
+        existing_value = data.get(field, ex.get(field)) or ""
+        if str(existing_value).strip() != current_gstin:
+            data[field] = current_gstin
+            fields_synced.append(field)
+
+    if fields_synced:
+        # Force regeneration of any stored invoice print/PDF snapshot so the
+        # next generated/uploaded copy reflects the corrected GSTIN.
+        data["pdf_drive_link"] = ""
+
+    logger.info(
+        f"Invoice GST fields synchronized from Company Master "
+        f"(invoice_id={inv_id}, company_id={company_id}, current_gstin={current_gstin!r}, "
+        f"fields_updated={fields_synced})"
+    )
+    return data
+
+
 @router.put("/invoices/{inv_id}")
 async def update_invoice(inv_id: str, data: dict, current_user: User = Depends(check_module_permission("invoicing", "create"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
@@ -3834,6 +3909,13 @@ async def update_invoice(inv_id: str, data: dict, current_user: User = Depends(c
     # -- Strip truly immutable fields -------------------------------------------
     for f in ("id", "created_by", "created_at", "amount_paid", "pdf_drive_link"):
         data.pop(f, None)
+
+    # -- Automatic GSTIN migration: sync all company/seller GST fields on the
+    #    invoice with the latest Company Master GSTIN before saving. This never
+    #    touches invoice number/date, customer info, items, HSN codes, quantities,
+    #    taxable values, GST calculations, totals, or any ledger/journal/payment data.
+    data = await _sync_invoice_gst_from_company(inv_id, ex, data, new_company_id)
+
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     data = _compute_invoice_totals(data, await _company_has_gst(new_company_id))
     data["amount_due"] = round(data["grand_total"] - ex.get("amount_paid", 0), 2)
