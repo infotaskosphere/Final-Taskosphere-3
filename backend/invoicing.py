@@ -4666,19 +4666,34 @@ async def sync_purchase_payment_journal_entry(payment_id: str):
 # all-company scans only exist as a backfill safety net (e.g. for bills that
 # existed before auto-posting was added). It's safe to skip a re-scan if one
 # already ran for this company very recently.
-_RECONCILE_TTL_SECONDS = 20
+_RECONCILE_TTL_SECONDS = 300
 _reconcile_last_run: Dict[str, float] = {}
 _reconcile_locks: Dict[str, "asyncio.Lock"] = {}
 
 
 async def _run_reconcile_debounced(cache_key: str, fn, *args):
     lock = _reconcile_locks.setdefault(cache_key, asyncio.Lock())
-    async with lock:
-        last = _reconcile_last_run.get(cache_key, 0.0)
-        if time.monotonic() - last < _RECONCILE_TTL_SECONDS:
-            return
-        await fn(*args)
-        _reconcile_last_run[cache_key] = time.monotonic()
+    if lock.locked():
+        # A reconciliation is already in progress. Bypass to avoid blocking.
+        return
+
+    last = _reconcile_last_run.get(cache_key, 0.0)
+    if time.monotonic() - last < _RECONCILE_TTL_SECONDS:
+        return
+
+    async def run_bg():
+        async with lock:
+            inner_last = _reconcile_last_run.get(cache_key, 0.0)
+            if time.monotonic() - inner_last < _RECONCILE_TTL_SECONDS:
+                return
+            try:
+                await fn(*args)
+                _reconcile_last_run[cache_key] = time.monotonic()
+            except Exception as e:
+                import logging
+                logging.error(f"Background reconciliation failed for {cache_key}: {e}")
+
+    asyncio.create_task(run_bg())
 
 
 async def reconcile_and_sync_all_sales_and_payments(company_id: str):
