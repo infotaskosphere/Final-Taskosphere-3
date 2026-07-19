@@ -83,6 +83,26 @@ async def classify_document(
     from backend.ai.document_classifier import classify_document as run_classifier
     return await run_classifier(contents, filename, raw_ocr_text, file_hash, document_id)
 
+async def find_template(contents: bytes, filename: str, ocr_text: str = "") -> Any:
+    """
+    Exposes find_matching_template from template_engine to find matching layout templates.
+    """
+    from backend.ai.template_engine import find_matching_template
+    return await find_matching_template(contents, filename, ocr_text)
+
+async def learn_template(
+    contents: bytes,
+    filename: str,
+    doc_type: str,
+    extracted_json: dict,
+    ocr_text: str
+) -> Any:
+    """
+    Exposes learn_template from template_engine to automatically learn templates.
+    """
+    from backend.ai.template_engine import learn_template as run_learn_template
+    return await run_learn_template(contents, filename, doc_type, extracted_json, ocr_text)
+
 async def process_document(
     contents: bytes,
     filename: str,
@@ -145,6 +165,88 @@ async def process_document(
         return res_json
         
     logger.info("Memory Miss")
+
+    # Phase 3: Template Search
+    from backend.ai.template_engine import find_matching_template, extract_using_template, learn_template
+    from backend.ai.template_storage import increment_usage
+    
+    matched_template = None
+    try:
+        matched_template = await find_matching_template(contents, filename, raw_ocr_text)
+    except Exception as exc:
+        logger.error(f"Template Search failed: {exc}", exc_info=True)
+        
+    if matched_template:
+        logger.info("Template Match Found")
+        # Extract fields using template and bypass Gemini/Groq
+        try:
+            result = extract_using_template(matched_template, raw_ocr_text)
+            await increment_usage(matched_template["template_id"], success=True)
+            
+            # Enrich with classification
+            if isinstance(result, dict):
+                result["classification"] = classification_res
+                result["document_type"] = classification_res["document_type"]
+                result["template_matched_id"] = matched_template["template_id"]
+                result["extraction_method"] = "template"
+                
+            # Save this to memory for future fingerprint hits as well
+            try:
+                classified_doc_type = classification_res["document_type"]
+                
+                parsed = {
+                    "vendor_name": result.get("vendor_or_customer_name") or "",
+                    "vendor_gstin": result.get("tax_registration_number") or "",
+                    "invoice_number": result.get("invoice_number") or "",
+                    "invoice_date": result.get("invoice_date") or "",
+                    "invoice_total": float(result.get("total_invoice_value") or 0) if result.get("total_invoice_value") else 0.0,
+                    "taxable_amount": float(result.get("taxable_value") or 0) if result.get("taxable_value") else 0.0,
+                    "gst_amount": float(result.get("total_tax") or 0) if result.get("total_tax") else 0.0
+                }
+                
+                fingerprint = generate_document_fingerprint(
+                    vendor_name=parsed["vendor_name"],
+                    vendor_gstin=parsed["vendor_gstin"],
+                    invoice_number=parsed["invoice_number"],
+                    document_type=classified_doc_type,
+                    raw_ocr_text=raw_ocr_text
+                )
+                
+                now = datetime.now(timezone.utc).isoformat()
+                new_record = {
+                    "document_id": str(uuid.uuid4()),
+                    "fingerprint": fingerprint,
+                    "document_type": classified_doc_type,
+                    "vendor_name": parsed["vendor_name"],
+                    "vendor_gstin": parsed["vendor_gstin"],
+                    "invoice_number": parsed["invoice_number"],
+                    "invoice_date": parsed["invoice_date"],
+                    "invoice_total": parsed["invoice_total"],
+                    "taxable_amount": parsed["taxable_amount"],
+                    "gst_amount": parsed["gst_amount"],
+                    "raw_ocr_text": raw_ocr_text,
+                    "extracted_json": result,
+                    "ledger_mapping": {},
+                    "journal_entry": {},
+                    "processing_engine": "template",
+                    "ai_confidence": classification_res["confidence"],
+                    "processing_status": "extracted",
+                    "created_at": now,
+                    "updated_at": now,
+                    "file_hash": file_hash,
+                    "raw_ocr_text_normalized": normalized_ocr
+                }
+                await save_ai_memory(new_record)
+                logger.info("Memory Saved (from Template)")
+            except Exception as e:
+                logger.error(f"Error saving template extraction to AI Memory: {e}", exc_info=True)
+                
+            return result
+        except Exception as e:
+            logger.error(f"Failed to extract using matched template: {e}", exc_info=True)
+            logger.info("Template extraction failed, falling back to AI extraction")
+    
+    logger.info("Template Miss")
     
     # 4. Execute existing reader workflow
     logger.info("Gemini Called")
@@ -162,6 +264,30 @@ async def process_document(
         
         # Use classified document type as the single source of truth
         classified_doc_type = classification_res["document_type"]
+        
+        # Trigger template learning automatically for successful high confidence extractions
+        try:
+            extracted_baseline = {
+                "vendor_or_customer_name": parsed["vendor_name"],
+                "tax_registration_number": parsed["vendor_gstin"],
+                "invoice_number": parsed["invoice_number"],
+                "invoice_date": parsed["invoice_date"],
+                "total_invoice_value": parsed["invoice_total"],
+                "taxable_value": parsed["taxable_amount"],
+                "total_tax": parsed["gst_amount"],
+                "confidence": 1.0,
+                "analysis": analysis_text
+            }
+            await learn_template(
+                contents=contents,
+                filename=filename,
+                doc_type=classified_doc_type,
+                extracted_json=extracted_baseline,
+                ocr_text=raw_ocr_text
+            )
+            logger.info("Template Created")
+        except Exception as temp_err:
+            logger.error(f"Error learning template: {temp_err}", exc_info=True)
         
         fingerprint = generate_document_fingerprint(
             vendor_name=parsed["vendor_name"],
