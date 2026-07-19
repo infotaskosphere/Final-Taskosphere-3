@@ -1542,14 +1542,6 @@ class PaymentCreate(BaseModel):
     payment_mode: str = "neft"
     reference_no: str = ""
     notes: str = ""
-    # Which specific bank account (from Accounts › Bank) the money landed in.
-    # Only meaningful when payment_mode != "cash". Required at the API layer
-    # (see _resolve_payment_bank_account) whenever the invoice's company has
-    # at least one bank account on file, so a receipt always ties back to a
-    # real account instead of only ever crediting the generic "Bank
-    # Accounts" control total — which is what let the Bank Accounts page
-    # balance drift out of step with what Accounting Reports showed.
-    bank_account_id: Optional[str] = None
 
 
 class Payment(PaymentCreate):
@@ -3091,9 +3083,6 @@ async def update_purchase_invoice_status(
       amount        — payment amount. Defaults to the full amount_due for 'paid'.
       payment_date  — defaults to today.
       payment_mode  — 'cash' | 'bank' (default 'bank').
-      bank_account_id — which bank account paid this vendor, when payment_mode
-                        isn't cash. Required whenever the company has more than
-                        one bank account on file (see _resolve_payment_bank_account).
       reference_no, notes
     """
     if not _perm(current_user):
@@ -3118,16 +3107,11 @@ async def update_purchase_invoice_status(
         if amount <= 0:
             raise HTTPException(400, "Payment amount must be greater than zero.")
 
-        payment_mode = (payload.get("payment_mode") or "bank").strip().lower()
-        bank_account = await _resolve_payment_bank_account(
-            inv.get("company_id") or "", payment_mode, payload.get("bank_account_id")
-        )
         payment_doc = {
             "id": str(uuid.uuid4()), "purchase_invoice_id": invoice_id,
             "company_id": inv.get("company_id") or "", "amount": amount,
             "payment_date": (payload.get("payment_date") or "").strip() or date.today().isoformat(),
-            "payment_mode": payment_mode,
-            "bank_account_id": bank_account["id"] if bank_account else None,
+            "payment_mode": (payload.get("payment_mode") or "bank").strip().lower(),
             "reference_no": (payload.get("reference_no") or "").strip(),
             "notes": (payload.get("notes") or "").strip(),
             "created_by": current_user.id, "created_at": now_iso,
@@ -3584,37 +3568,29 @@ async def update_invoice_status(
     if new_status == "paid":
         grand = float(inv.get("grand_total") or 0)
         shortfall = round(grand - recorded_total, 2)
+        pmode = (payload.get("payment_mode") or "bank").strip().lower()
+        if pmode not in ("bank", "cash"):
+            pmode = "bank"
+        bank_acct_id = payload.get("bank_account_id")
+        
         if shortfall > 0.004:
             # Nothing (or not enough) has actually been received for this
             # invoice yet — post the missing receipt so AR really clears.
-            # payment_mode / bank_account_id come from the "Where did this
-            # payment land?" dialog on the frontend (MarkPaidReceiptDialog).
-            # _resolve_payment_bank_account enforces that a specific bank
-            # account is chosen whenever this company has more than one on
-            # file, instead of every quick-paid receipt silently landing in
-            # the generic "Bank Accounts" control total with no way to tell
-            # which real account received it.
-            payment_mode = (payload.get("payment_mode") or "bank").strip().lower()
-            if payment_mode not in ("cash", "bank"):
-                payment_mode = "bank"
-            bank_account = await _resolve_payment_bank_account(
-                inv.get("company_id") or "", payment_mode, payload.get("bank_account_id")
-            )
-            bank_account_id = bank_account["id"] if bank_account else None
             if auto_payment:
                 new_amount = round(float(auto_payment.get("amount") or 0) + shortfall, 2)
                 await db.payments.update_one(
                     {"id": auto_payment["id"]},
-                    {"$set": {"amount": new_amount, "payment_mode": payment_mode, "bank_account_id": bank_account_id}},
+                    {"$set": {"amount": new_amount, "payment_mode": pmode, "bank_account_id": bank_acct_id}}
                 )
                 await sync_payment_journal_entry(auto_payment["id"])
             else:
                 payment_id = str(uuid.uuid4())
                 await db.payments.insert_one({
                     "id": payment_id, "invoice_id": inv_id, "amount": shortfall,
-                    "payment_date": date.today().isoformat(), "payment_mode": payment_mode,
-                    "bank_account_id": bank_account_id,
-                    "reference_no": "", "notes": "Auto-recorded receipt — invoice marked Paid",
+                    "company_id": inv.get("company_id") or "",
+                    "payment_date": date.today().isoformat(), "payment_mode": pmode,
+                    "bank_account_id": bank_acct_id,
+                    "reference_no": "", "notes": f"Auto-recorded receipt — invoice marked Paid via {pmode.upper()}",
                     "auto_generated": True,
                     "created_by": getattr(current_user, "id", "system"), "created_at": now_iso,
                 })
@@ -3804,95 +3780,8 @@ async def get_invoice(inv_id: str, current_user: User = Depends(check_module_per
     return inv
 
 
-# ═══════════════════════════════════════════════════════════
-# AUTOMATIC GSTIN MIGRATION (Company Master -> Invoice) ON UPDATE
-# ═══════════════════════════════════════════════════════════
-#
-# Field names anywhere in an invoice document that represent the SELLING
-# COMPANY's GSTIN (as opposed to `client_gstin`, which belongs to the buyer
-# and must never be touched by this logic). Any of these keys, if already
-# present on the saved invoice document or in the incoming update payload,
-# are always re-stamped with the latest Company Master GSTIN before saving.
-_COMPANY_GST_FIELD_NAMES = (
-    "company_gstin",
-    "company_gst_number",
-    "seller_gstin",
-    "supplier_gstin",
-    "business_gstin",
-    "invoice_header_gstin",
-    "pdf_gstin",
-    "header_gstin",
-    "firm_gstin",
-    "gst_number",
-    "gstin",
-)
-
-
-async def _sync_invoice_gst_from_company(inv_id: str, ex: dict, data: dict, company_id: str) -> dict:
-    """
-    Automatic GSTIN migration during invoice updates.
-
-    Loads the latest Company/Business profile linked to the invoice (by
-    `company_id`) and compares its current GST-registration status/GSTIN
-    against every GST-related field used anywhere on the invoice (see
-    `_COMPANY_GST_FIELD_NAMES`). Any field found to be outdated is
-    automatically corrected before the invoice is saved:
-      - If the company IS GST-registered, every such field is stamped with
-        its current GSTIN.
-      - If the company is NOT GST-registered (has_gst explicitly False),
-        every such field is cleared instead -- this prevents a non-GST
-        company's invoice from carrying a stray/legacy seller GSTIN (which
-        would otherwise cause it to incorrectly show up as GST payable /
-        in GST returns even though the selling company charges no GST).
-    If a stored PDF/Drive snapshot exists, it is cleared so the next
-    generated PDF/print reflects the corrected GSTIN.
-
-    This function is strictly additive and read-only with respect to every
-    other part of the invoice: it never touches invoice number, invoice
-    date, customer information, items, HSN codes, quantities, taxable
-    values, CGST/SGST/IGST calculations, totals, ledger entries, journal
-    entries, payment status, or bank reconciliation data.
-    """
-    if not company_id:
-        return data
-
-    company = await db.companies.find_one({"id": company_id}, {"_id": 0, "gstin": 1, "has_gst": 1})
-    if company is None:
-        return data
-
-    # Same semantics as `_company_has_gst`: GST-registered unless the
-    # company profile explicitly sets has_gst = False.
-    company_is_gst_registered = company.get("has_gst", True) is not False
-    current_gstin = (company.get("gstin") or "").strip() if company_is_gst_registered else ""
-
-    fields_synced = []
-    for field in _COMPANY_GST_FIELD_NAMES:
-        # Only touch a field if it is already used somewhere on this invoice
-        # (either present in the incoming payload or already stored on the
-        # existing invoice document) -- never invent new fields.
-        if field not in data and field not in ex:
-            continue
-        existing_value = str(data.get(field, ex.get(field)) or "").strip()
-        if existing_value != current_gstin:
-            data[field] = current_gstin
-            fields_synced.append(field)
-
-    if fields_synced:
-        # Force regeneration of any stored invoice print/PDF snapshot so the
-        # next generated/uploaded copy reflects the corrected GSTIN.
-        data["pdf_drive_link"] = ""
-
-    logger.info(
-        f"Invoice GST fields synchronized from Company Master "
-        f"(invoice_id={inv_id}, company_id={company_id}, "
-        f"company_gst_registered={company_is_gst_registered}, current_gstin={current_gstin!r}, "
-        f"fields_updated={fields_synced})"
-    )
-    return data
-
-
 @router.put("/invoices/{inv_id}")
-async def update_invoice(inv_id: str, data: dict, current_user: User = Depends(check_module_permission("invoicing", "create"))):
+async def update_invoice(inv_id: str, data: dict, background_tasks: BackgroundTasks = None, current_user: User = Depends(check_module_permission("invoicing", "create"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     ex = await db.invoices.find_one({"id": inv_id})
     if not ex: raise HTTPException(404, "Invoice not found")
@@ -3952,16 +3841,54 @@ async def update_invoice(inv_id: str, data: dict, current_user: User = Depends(c
         # If empty string sent, keep the original number
         data["invoice_no"] = old_invoice_no
 
+    # -- GSTIN Migration --------------------------------------------------------
+    company_id = data.get("company_id") or ex.get("company_id") or ""
+    gstin_updated = False
+    if company_id:
+        company_profile = await db.companies.find_one({"id": company_id})
+        if company_profile:
+            comp_gstin = str(company_profile.get("gstin") or "").strip()
+            if comp_gstin:
+                gst_fields = [
+                    "company_gstin",
+                    "company_gst_number",
+                    "seller_gstin",
+                    "supplier_gstin",
+                    "business_gstin",
+                    "invoice_header_gstin",
+                    "pdf_gstin",
+                    "seller_gst",
+                    "company_gst",
+                    "supplier_gst",
+                    "business_gst",
+                    "invoice_header_gst",
+                    "firm_gstin",
+                    "firm_gst",
+                    "header_gstin",
+                ]
+                # Check if any field is outdated (different from company's gstin)
+                is_outdated = False
+                for field in gst_fields:
+                    if field in ex:
+                        ex_val = str(ex.get(field) or "").strip().upper()
+                        if ex_val != comp_gstin.upper():
+                            is_outdated = True
+                            break
+                    if field in data:
+                        data_val = str(data.get(field) or "").strip().upper()
+                        if data_val != comp_gstin.upper():
+                            is_outdated = True
+                            break
+                
+                if is_outdated:
+                    for field in gst_fields:
+                        data[field] = comp_gstin
+                    gstin_updated = True
+                    logger.info("Invoice GST fields synchronized from Company Master.")
+
     # -- Strip truly immutable fields -------------------------------------------
     for f in ("id", "created_by", "created_at", "amount_paid", "pdf_drive_link"):
         data.pop(f, None)
-
-    # -- Automatic GSTIN migration: sync all company/seller GST fields on the
-    #    invoice with the latest Company Master GSTIN before saving. This never
-    #    touches invoice number/date, customer info, items, HSN codes, quantities,
-    #    taxable values, GST calculations, totals, or any ledger/journal/payment data.
-    data = await _sync_invoice_gst_from_company(inv_id, ex, data, new_company_id)
-
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     data = _compute_invoice_totals(data, await _company_has_gst(new_company_id))
     data["amount_due"] = round(data["grand_total"] - ex.get("amount_paid", 0), 2)
@@ -3972,6 +3899,51 @@ async def update_invoice(inv_id: str, data: dict, current_user: User = Depends(c
     )
     await db.invoices.update_one({"id": inv_id}, {"$set": data})
     await sync_invoice_journal_entry(inv_id)
+
+    # -- Regenerate print/PDF data if GSTIN was updated --------------------------
+    if gstin_updated and _drive_configured():
+        async def _regenerate_stored_pdf_data(inv_id_val: str):
+            try:
+                inv = await db.invoices.find_one({"id": inv_id_val}, {"_id": 0})
+                if not inv:
+                    return
+                comp = await db.companies.find_one({"id": inv.get("company_id")}, {"_id": 0}) or {}
+                pdf_buf = _build_invoice_pdf(inv, comp)
+                pdf_bytes = pdf_buf.getvalue()
+                
+                client_name = inv.get("client_name", "").strip()
+                try:
+                    client_folder_id = _get_or_create_client_folder(client_name)
+                except Exception:
+                    client_folder_id = DRIVE_FOLDERS["invoices"]
+                
+                safe_inv_no = (inv.get("invoice_no") or inv_id_val).replace("/", "_").replace("\\", "_")
+                company_prefix = (comp.get("name", "") or "").strip().replace(" ", "_").replace("/", "_").replace("\\", "_")
+                
+                _inv_fname = f"{company_prefix}_Invoice_{safe_inv_no}.pdf" if company_prefix else f"Invoice_{safe_inv_no}.pdf"
+                pdf_link = await _upload_to_drive(
+                    pdf_bytes, _inv_fname, "invoices", "application/pdf",
+                    custom_parent_id=client_folder_id
+                )
+                _json_fname = f"{company_prefix}_Invoice_{safe_inv_no}.json" if company_prefix else f"Invoice_{safe_inv_no}.json"
+                await _upload_to_drive(
+                    json.dumps(inv, default=str).encode(), _json_fname,
+                    "invoices", "application/json", custom_parent_id=client_folder_id
+                )
+                if pdf_link:
+                    await db.invoices.update_one(
+                        {"id": inv_id_val},
+                        {"$set": {"pdf_drive_link": pdf_link, "updated_at": datetime.now(timezone.utc).isoformat()}}
+                    )
+                    logger.info(f"Regenerated and uploaded updated PDF to Drive: {_inv_fname} -> {pdf_link}")
+            except Exception as e:
+                logger.error(f"Failed to regenerate stored PDF data for invoice {inv_id_val}: {e}", exc_info=True)
+
+        if background_tasks:
+            background_tasks.add_task(_regenerate_stored_pdf_data, inv_id)
+        else:
+            asyncio.create_task(_regenerate_stored_pdf_data(inv_id))
+
     return await db.invoices.find_one({"id": inv_id}, {"_id": 0})
 
 @router.delete("/invoices/bulk-delete")
@@ -4309,11 +4281,9 @@ async def record_payment(data: PaymentCreate, current_user: User = Depends(check
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     inv = await db.invoices.find_one({"id": data.invoice_id})
     if not inv: raise HTTPException(404, "Invoice not found")
-    bank_account = await _resolve_payment_bank_account(
-        inv.get("company_id") or "", data.payment_mode, data.bank_account_id
-    )
     payment_data = {**data.model_dump(), "id": str(uuid.uuid4()),
-                    "bank_account_id": bank_account["id"] if bank_account else None,
+                    "company_id": inv.get("company_id") or "",
+                    "client_name": inv.get("client_name") or "",
                     "created_by": current_user.id, "created_at": datetime.now(timezone.utc).isoformat()}
     await db.payments.insert_one({**payment_data})
     await sync_payment_journal_entry(payment_data["id"])
@@ -4388,71 +4358,6 @@ async def create_credit_note(data: CreditNoteCreate, current_user: User = Depend
 # ═══════════════════════════════════════════════════════════
 # LEDGER SYNC HELPERS (links invoicing and payments to ledger)
 # ═══════════════════════════════════════════════════════════
-
-async def _resolve_payment_bank_account(company_id: str, payment_mode: str, bank_account_id: Optional[str]) -> Optional[dict]:
-    """Validate the bank account a receipt/payment says it landed in.
-
-    - payment_mode == "cash": no bank account involved, always returns None.
-    - payment_mode == "bank": if the company has one or more accounts on
-      file in Accounts › Bank, a valid bank_account_id belonging to that
-      company is required — this is what forces "which bank account" to be
-      asked (and answered) whenever there's more than one on file, instead
-      of every receipt silently landing in the generic "Bank Accounts"
-      total with no way to tell which real account actually received it.
-      A company with zero bank accounts on file is allowed to proceed
-      without one (nothing to pick from yet); the receipt still posts to
-      the control account so the books aren't blocked on account setup.
-    """
-    mode = (payment_mode or "bank").strip().lower()
-    if mode == "cash":
-        return None
-
-    accounts = await db.bank_accounts.find({"company_id": company_id}, {"_id": 0}).to_list(500)
-    if not accounts:
-        return None  # nothing on file yet — fall back to the control total
-
-    if bank_account_id:
-        acct = next((a for a in accounts if a["id"] == bank_account_id), None)
-        if not acct:
-            raise HTTPException(400, "Selected bank account was not found for this company.")
-        return acct
-
-    if len(accounts) == 1:
-        return accounts[0]
-
-    raise HTTPException(
-        400,
-        "This company has more than one bank account on file — please choose which "
-        "bank account received this payment.",
-    )
-
-
-async def _sync_bank_transaction_for_payment(
-    *, payment_id: str, matched_type: str, bank_account: Optional[dict], company_id: str,
-    amount: float, txn_date: str, description: str, journal_entry_id: Optional[str], direction: str,
-):
-    """Keep the specific bank account's transaction feed (and therefore its
-    balance on the Bank Accounts page — see list_bank_accounts) in step with
-    receipts/payments recorded from the Invoicing/Purchase pages, the same
-    way an uploaded bank statement would. `direction` is "credit" (money in,
-    e.g. a customer receipt) or "debit" (money out, e.g. paying a vendor).
-    Always clears any previous transaction row for this payment first so
-    edits/deletes/status-reverts never leave a stale balance behind.
-    """
-    await db.bank_transactions.delete_many({"matched_id": payment_id, "matched_type": matched_type})
-    if not bank_account or amount <= 0:
-        return
-    now = datetime.now(timezone.utc).isoformat()
-    await db.bank_transactions.insert_one({
-        "id": str(uuid.uuid4()), "bank_account_id": bank_account["id"], "company_id": company_id,
-        "date": txn_date, "description": description, "reference": "",
-        "debit": amount if direction == "debit" else 0.0,
-        "credit": amount if direction == "credit" else 0.0,
-        "balance_after": None,
-        "matched_type": matched_type, "matched_id": payment_id, "matched_label": description,
-        "journal_entry_id": journal_entry_id, "source_file": "", "created_by": "system", "created_at": now,
-    })
-
 
 async def sync_invoice_journal_entry(invoice_id: str):
     from backend.accounting_core import get_default_account_id, post_journal_entry
@@ -4572,13 +4477,8 @@ async def sync_payment_journal_entry(payment_id: str):
     amount = float(payment.get("amount") or 0)
     payment_date = payment.get("payment_date") or date.today().isoformat()
     payment_mode = str(payment.get("payment_mode") or "bank").strip().lower()
-    bank_account_id = payment.get("bank_account_id")
     
     if amount <= 0:
-        # Nothing recorded for this payment (e.g. it was deleted or zeroed
-        # out) — make sure any bank-specific transaction row from a previous
-        # sync is cleared too, or that account's balance would stay wrong.
-        await db.bank_transactions.delete_many({"matched_id": payment_id, "matched_type": "sale_payment"})
         return
         
     # 3. Resolve accounts
@@ -4593,6 +4493,12 @@ async def sync_payment_journal_entry(payment_id: str):
     debit_acct_id = cash_id if payment_mode == "cash" else bank_id
     debit_acct_name = "Cash in Hand" if payment_mode == "cash" else "Bank Accounts"
     
+    bank_account_id = payment.get("bank_account_id")
+    if payment_mode == "bank" and bank_account_id:
+        bank_doc = await db.bank_accounts.find_one({"id": bank_account_id})
+        if bank_doc:
+            debit_acct_name = f"Bank Accounts - {bank_doc.get('bank_name') or 'Account'} ({bank_doc.get('account_holder') or ''})"
+    
     invoice_ref = f"Inv {invoice_no}" if invoice_no else "(no invoice linked)"
     lines = [
         {"account_id": debit_acct_id, "account_name": debit_acct_name, "debit": amount, "credit": 0.0, "memo": f"Receipt from {client_name} via {payment_mode.upper()}"},
@@ -4605,9 +4511,8 @@ async def sync_payment_journal_entry(payment_id: str):
         f"Receipt from {client_name} ({payment_mode.upper()})"
     )
     
-    entry_id = None
     try:
-        entry = await post_journal_entry(
+        await post_journal_entry(
             company_id=company_id,
             entry_date=payment_date,
             narration=narration,
@@ -4616,23 +4521,8 @@ async def sync_payment_journal_entry(payment_id: str):
             source_id=payment_id,
             created_by=payment.get("created_by", "system")
         )
-        entry_id = entry.get("id") if entry else None
     except Exception as e:
         logging.error(f"Error posting payment journal entry: {e}")
-
-    # 4. Mirror the receipt into the specific bank account's own transaction
-    # feed (if one was recorded) so its balance on the Bank Accounts page
-    # includes money received through Invoicing — not just uploaded bank
-    # statements — the same way this receipt already updates the generic
-    # "Bank Accounts" control total above.
-    bank_account = None
-    if payment_mode != "cash" and bank_account_id:
-        bank_account = await db.bank_accounts.find_one({"id": bank_account_id, "company_id": company_id}, {"_id": 0})
-    await _sync_bank_transaction_for_payment(
-        payment_id=payment_id, matched_type="sale_payment", bank_account=bank_account, company_id=company_id,
-        amount=amount, txn_date=payment_date, direction="credit", journal_entry_id=entry_id,
-        description=(f"Receipt from {client_name} for Invoice {invoice_no}" if invoice_no else f"Receipt from {client_name}"),
-    )
 
 
 async def sync_purchase_journal_entry(invoice_id: str):
@@ -4727,10 +4617,8 @@ async def sync_purchase_payment_journal_entry(payment_id: str):
     amount = round(float(payment.get("amount") or 0), 2)
     payment_date = payment.get("payment_date") or date.today().isoformat()
     payment_mode = str(payment.get("payment_mode") or "bank").strip().lower()
-    bank_account_id = payment.get("bank_account_id")
 
     if amount <= 0:
-        await db.bank_transactions.delete_many({"matched_id": payment_id, "matched_type": "purchase_payment"})
         return
 
     payable_id = await get_default_account_id(company_id, "2000")  # Accounts Payable
@@ -4749,9 +4637,8 @@ async def sync_purchase_payment_journal_entry(payment_id: str):
     ]
     narration = f"Payment to {supplier_name} for Bill {invoice_no} ({payment_mode.upper()})"
 
-    entry_id = None
     try:
-        entry = await post_journal_entry(
+        await post_journal_entry(
             company_id=company_id,
             entry_date=payment_date,
             narration=narration,
@@ -4760,18 +4647,8 @@ async def sync_purchase_payment_journal_entry(payment_id: str):
             source_id=payment_id,
             created_by=payment.get("created_by", "system"),
         )
-        entry_id = entry.get("id") if entry else None
     except Exception as e:
         logging.error(f"Error posting purchase payment journal entry: {e}")
-
-    bank_account = None
-    if payment_mode != "cash" and bank_account_id:
-        bank_account = await db.bank_accounts.find_one({"id": bank_account_id, "company_id": company_id}, {"_id": 0})
-    await _sync_bank_transaction_for_payment(
-        payment_id=payment_id, matched_type="purchase_payment", bank_account=bank_account, company_id=company_id,
-        amount=amount, txn_date=payment_date, direction="debit", journal_entry_id=entry_id,
-        description=f"Payment to {supplier_name} for Bill {invoice_no}",
-    )
 
 
 # ── Reconciliation debounce ──────────────────────────────────────────────
@@ -4874,19 +4751,77 @@ async def _reconcile_and_sync_all_sales_and_payments_impl(company_id: str):
             await db.journal_lines.delete_many({"entry_id": {"$in": stale_sale_ids}})
             await db.journal_entries.delete_many({"id": {"$in": stale_sale_ids}})
             
-        # 4. Sync missing/outdated sale entries
+        # 4. Sync missing/outdated sale entries & auto-reconcile invoice payments with db.payments
         for inv in active_invoices:
             inv_id = inv["id"]
             se = sale_entry_by_source_id.get(inv_id)
             if not se or abs(float(se.get("total_debit", 0)) - float(inv.get("grand_total", 0))) > 0.01:
                 await sync_invoice_journal_entry(inv_id)
                 
+            # --- Auto-reconcile invoice payments with db.payments ---
+            grand = float(inv.get("grand_total") or 0)
+            status = inv.get("status", "draft")
+            target_paid = float(inv.get("amount_paid") or 0)
+            if status == "paid":
+                target_paid = grand
+            
+            # Find actual payments already on file
+            existing_payments = await db.payments.find({"invoice_id": inv_id}).to_list(1000)
+            recorded_total = sum(float(p.get("amount") or 0) for p in existing_payments)
+            
+            if target_paid > recorded_total:
+                # We have a shortfall in payments -> auto-create a payment record to cash or bank
+                shortfall = round(target_paid - recorded_total, 2)
+                if shortfall > 0.01:
+                    payment_id = str(uuid.uuid4())
+                    await db.payments.insert_one({
+                        "id": payment_id,
+                        "invoice_id": inv_id,
+                        "company_id": company_id,
+                        "amount": shortfall,
+                        "payment_date": inv.get("invoice_date") or date.today().isoformat(),
+                        "payment_mode": "bank",
+                        "reference_no": "",
+                        "notes": "Auto-reconciled receipt — created to match invoice payment state",
+                        "auto_generated": True,
+                        "created_by": "system",
+                        "created_at": datetime.now(timezone.utc).isoformat()
+                    })
+                    await sync_payment_journal_entry(payment_id)
+                    recorded_total = round(recorded_total + shortfall, 2)
+                    
+            # Keep invoice's amount_paid, amount_due and status perfectly aligned with db.payments
+            final_paid = round(recorded_total, 2)
+            final_due = round(max(grand - final_paid, 0.0), 2)
+            final_status = status
+            if final_due <= 0 and grand > 0:
+                final_status = "paid"
+            elif final_paid > 0 and final_due > 0:
+                final_status = "partially_paid"
+                
+            if (abs(float(inv.get("amount_paid") or 0) - final_paid) > 0.01 or 
+                abs(float(inv.get("amount_due") or 0) - final_due) > 0.01 or 
+                status != final_status):
+                await db.invoices.update_one(
+                    {"id": inv_id},
+                    {"$set": {
+                        "amount_paid": final_paid,
+                        "amount_due": final_due,
+                        "status": final_status,
+                        "updated_at": datetime.now(timezone.utc).isoformat()
+                    }}
+                )
+                
         # 5. Fetch all payments for this company
         payments = await db.payments.find({"company_id": company_id}).to_list(10000)
         if invoice_ids:
             missing_payments = await db.payments.find({
                 "invoice_id": {"$in": list(invoice_ids)},
-                "company_id": {"$exists": False}
+                "$or": [
+                    {"company_id": {"$exists": False}},
+                    {"company_id": ""},
+                    {"company_id": None}
+                ]
             }).to_list(10000)
             pay_id_set = {p["id"] for p in payments}
             for mp in missing_payments:
@@ -4959,7 +4894,11 @@ async def _reconcile_and_sync_all_purchases_and_payments_impl(company_id: str):
         if invoice_ids:
             missing_payments = await db.purchase_payments.find({
                 "purchase_invoice_id": {"$in": list(invoice_ids)},
-                "company_id": {"$exists": False},
+                "$or": [
+                    {"company_id": {"$exists": False}},
+                    {"company_id": ""},
+                    {"company_id": None}
+                ],
             }).to_list(10000)
             pay_id_set = {p["id"] for p in payments}
             for mp in missing_payments:
