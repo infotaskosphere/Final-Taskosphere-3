@@ -799,3 +799,171 @@ async def delete_transaction(txn_id: str, current_user: User = Depends(get_curre
     if result.deleted_count == 0:
         raise HTTPException(404, "Bank transaction not found.")
     return {"success": True}
+
+
+# ═══════════════════════════════════════════════════════════
+# PHASE 8 – BANK INTELLIGENCE & AUTO RECONCILIATION ROUTER
+# ═══════════════════════════════════════════════════════════
+
+class BankRulePayload(BaseModel):
+    name: str
+    pattern: str
+    category: str
+    account_id: Optional[str] = None
+    account_name: Optional[str] = None
+    priority: int = 10
+
+
+class ManualReconcilePayload(BaseModel):
+    matched_record_id: Optional[str] = None
+    matched_record_type: Optional[str] = None
+    category: Optional[str] = None
+    coa_account_id: Optional[str] = None
+    company_id: str = ""
+
+
+@router.post("/bank-accounts/{bank_account_id}/process-statement")
+async def process_statement_intelligence(
+    bank_account_id: str,
+    company_id: str = Form(""),
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Autonomous Statement processing pipeline (Phase 8).
+    Extracts, classifies, matches, posts journals and calculates statistics.
+    """
+    if not _perm_view_bank(current_user):
+        raise HTTPException(403, "Access denied.")
+    
+    file_bytes = await file.read()
+    if len(file_bytes) > MAX_FILE_BYTES:
+        raise HTTPException(413, "File exceeds maximum size limits.")
+
+    from backend.bank_ai.bank_engine import BankIntelligenceEngine
+    try:
+        res = await BankIntelligenceEngine.process_bank_statement(
+            file_bytes=file_bytes,
+            filename=file.filename or "statement",
+            bank_account_id=bank_account_id,
+            company_id=company_id,
+            user_id=current_user.id
+        )
+        return res
+    except Exception as e:
+        raise HTTPException(500, f"Autonomous processing pipeline failed: {e}")
+
+
+@router.get("/bank-accounts/{bank_account_id}/statistics")
+async def get_bank_account_statistics(bank_account_id: str, current_user: User = Depends(get_current_user)):
+    """
+    Retrieves aggregated reconciliation rates and cash inflows/outflows volumes.
+    """
+    if not _perm_view_bank(current_user):
+        raise HTTPException(403, "Access denied.")
+    
+    from backend.bank_ai.bank_statistics import BankStatistics
+    stats = await BankStatistics.compute_and_save(bank_account_id)
+    return stats
+
+
+@router.get("/bank-accounts/{bank_account_id}/cashflow")
+async def get_cashflow_projections(bank_account_id: str, company_id: str = "", current_user: User = Depends(get_current_user)):
+    """
+    Retrieves 30-60-90 days cash flow projections and historical daily trends.
+    """
+    if not _perm_view_bank(current_user):
+        raise HTTPException(403, "Access denied.")
+    
+    from backend.bank_ai.cashflow_engine import CashflowEngine
+    projections = await CashflowEngine.analyse_and_project(bank_account_id, company_id)
+    return projections
+
+
+@router.get("/bank-accounts/rules")
+async def list_active_routing_rules(current_user: User = Depends(get_current_user)):
+    """
+    Exposes configured bank rules.
+    """
+    if not _perm_view_bank(current_user):
+        raise HTTPException(403, "Access denied.")
+    
+    from backend.bank_ai.bank_rules import BankRulesManager
+    rules = await BankRulesManager.get_all_rules()
+    return rules
+
+
+@router.post("/bank-accounts/rules")
+async def create_routing_rule(payload: BankRulePayload, current_user: User = Depends(get_current_user)):
+    """
+    Adds a new ledger routing rule for automated matching.
+    """
+    if not _perm_view_bank(current_user):
+        raise HTTPException(403, "Access denied.")
+    
+    from backend.bank_ai.bank_rules import BankRulesManager
+    rule_id = await BankRulesManager.create_rule(
+        name=payload.name,
+        pattern=payload.pattern,
+        category=payload.category,
+        account_id=payload.account_id,
+        account_name=payload.account_name,
+        priority=payload.priority
+    )
+    return {"success": True, "rule_id": rule_id}
+
+
+@router.delete("/bank-accounts/rules/{rule_id}")
+async def delete_routing_rule(rule_id: str, current_user: User = Depends(get_current_user)):
+    """
+    Deactivates a custom matching rule.
+    """
+    if not _perm_view_bank(current_user):
+        raise HTTPException(403, "Access denied.")
+    
+    from backend.bank_ai.bank_rules import BankRulesManager
+    success = await BankRulesManager.delete_rule(rule_id)
+    if not success:
+        raise HTTPException(404, "Rule not found or could not be deactivated.")
+    return {"success": True}
+
+
+@router.post("/bank-transactions/{txn_id}/manual-reconcile")
+async def manual_reconcile_transaction_api(
+    txn_id: str,
+    payload: ManualReconcilePayload,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Triggers manual reconciliation, posting necessary ledger updates and ML feedback.
+    """
+    if not _perm_view_bank(current_user):
+        raise HTTPException(403, "Access denied.")
+    
+    from backend.bank_ai.reconciliation_engine import ReconciliationEngine
+    res = await ReconciliationEngine.manual_reconcile(
+        bank_transaction_id=txn_id,
+        matched_record_id=payload.matched_record_id,
+        matched_record_type=payload.matched_record_type,
+        category=payload.category,
+        coa_account_id=payload.coa_account_id,
+        company_id=payload.company_id,
+        user_id=current_user.id
+    )
+    if res.get("status") == "error":
+        raise HTTPException(400, res["message"])
+    return res
+
+
+@router.get("/bank-transactions/{txn_id}/audit-trail")
+async def get_reconciliation_audit_trail_api(txn_id: str, current_user: User = Depends(get_current_user)):
+    """
+    Exposes auditable matching factors and confidence reasons for reconciliation choices.
+    """
+    if not _perm_view_bank(current_user):
+        raise HTTPException(403, "Access denied.")
+    
+    from backend.bank_ai.reconciliation_audit import ReconciliationAudit
+    audit = await ReconciliationAudit.get_audit_trail(txn_id)
+    return audit
+
