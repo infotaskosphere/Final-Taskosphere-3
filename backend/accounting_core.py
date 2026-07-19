@@ -38,7 +38,20 @@ def _name_match_query(name: str) -> dict:
     the payment simply never matched the party query). Matching on a
     normalized (trimmed, collapsed-whitespace, case-insensitive) pattern
     instead means every real variant of the same name is picked up."""
-    normalized = re.sub(r"\s+", r"\\s+", re.escape((name or "").strip()))
+    # BUG FIX: re.escape() escapes every non-alphanumeric character,
+    # including plain spaces -- so escaping the *whole* name first and
+    # then trying to swap runs of whitespace for `\s+` never matched
+    # anything: the space was already a literal `\ ` by the time the
+    # substitution ran, leaving a stray extra backslash behind (e.g.
+    # "John Doe" turned into the regex `John\s+Doe`, which requires a
+    # literal backslash character in the text and never matches real
+    # data). That silently broke the Party Ledger for every party whose
+    # name has more than one word -- i.e. almost every real customer/
+    # vendor name -- always returning "No transactions found" even though
+    # the invoices/payments exist. Escaping each word individually and
+    # *then* joining with `\s+` avoids the problem entirely.
+    tokens = (name or "").strip().split()
+    normalized = r"\s+".join(re.escape(tok) for tok in tokens)
     return {"$regex": f"^{normalized}$", "$options": "i"}
 
 
