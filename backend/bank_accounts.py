@@ -703,6 +703,45 @@ async def _auto_post_for_match(company_id: str, txn: dict, match: dict, created_
             )
         return entry["id"] if entry else None
 
+    if match["type"] in ("expense", "suspense"):
+        # Match a bank line directly to a chart-of-accounts head (any expense
+        # ledger, or the parking "Suspense Account" 9998). match["id"] is the
+        # chart_of_accounts.id — NOT an invoice id.
+        #
+        # Debit line (money paid out) → Dr <chosen head>  / Cr Bank
+        # Credit line (money received) → Dr Bank            / Cr <chosen head>
+        #
+        # "Suspense" is just the same posting against account 9998, chosen
+        # explicitly when the correct head isn't known yet. Later, the user
+        # opens the Suspense ledger, unmatches, and re-matches to the real
+        # expense head — the reversal + fresh posting keeps the trail clean.
+        acct = await db.chart_of_accounts.find_one({"id": match["id"]}, {"_id": 0})
+        if not acct:
+            return None
+        acct_name = acct.get("name", "Account")
+        amt = float(txn.get("debit") or 0) or float(txn.get("credit") or 0)
+        is_debit = bool(txn.get("debit"))
+        if is_debit:
+            lines = [
+                {"account_id": acct["id"], "account_name": acct_name, "debit": amt, "credit": 0},
+                {"account_id": bank_acct_id, "account_name": "Bank Accounts", "debit": 0, "credit": amt},
+            ]
+            narration_verb = "Payment"
+        else:
+            lines = [
+                {"account_id": bank_acct_id, "account_name": "Bank Accounts", "debit": amt, "credit": 0},
+                {"account_id": acct["id"], "account_name": acct_name, "debit": 0, "credit": amt},
+            ]
+            narration_verb = "Receipt"
+        note = " (parked — reclassify from Suspense Review)" if match["type"] == "suspense" else ""
+        entry = await try_auto_post(
+            match.get("company_id") or txn.get("company_id", ""), txn["date"],
+            f"{narration_verb} — {acct_name}{note} (bank statement)",
+            lines, "bank", txn["id"], created_by,
+        )
+        return entry["id"] if entry else None
+
+
     if match["type"] == "purchase":
         purchases_acct_id = await get_default_account_id(company_id, "5000")  # Purchases
         if not purchases_acct_id:
@@ -874,8 +913,8 @@ async def list_transactions(
 
 
 class ManualMatchInput(BaseModel):
-    matched_type: str  # purchase | sale
-    matched_id: str
+    matched_type: str  # purchase | sale | expense | suspense
+    matched_id: str    # for purchase/sale: invoice id; for expense/suspense: chart_of_accounts.id
     matched_label: str = ""
     post_journal: bool = True
     confidence: Optional[float] = None   # smart-suggestion confidence % shown to the user at match time, for the audit trail
