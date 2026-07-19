@@ -77,6 +77,7 @@ function AccountingReportsInner() {
   const [trialBalance, setTrialBalance] = useState(null);
   const [pnl, setPnl] = useState(null);
   const [balanceSheet, setBalanceSheet] = useState(null);
+  const [misData, setMisData] = useState(null);
   const [companies, setCompanies] = useState([]);
   const [companyId, setCompanyId] = useState('');
   const [activeTab, setActiveTab] = useState('trial-balance');
@@ -87,6 +88,7 @@ function AccountingReportsInner() {
   const [fyKey, setFyKey] = useState(defaultFY); // 'custom' | year string
   const [dateFrom, setDateFrom] = useState(fyDates(currentFYStartYear()).from);
   const [dateTo, setDateTo] = useState(fyDates(currentFYStartYear()).to);
+  const [misSubTab, setMisSubTab] = useState('insights');
 
   // Trial Balance pagination (client-side).
   const [tbPage, setTbPage] = useState(1);
@@ -124,14 +126,16 @@ function AccountingReportsInner() {
       // as_of drives Trial Balance & Balance Sheet snapshot; date_from/to
       // drives P&L range. We pass all three so backend can honor whichever
       // it uses for that endpoint.
-      const [tbR, pnlR, bsR] = await Promise.allSettled([
+      const [tbR, pnlR, bsR, misR] = await Promise.allSettled([
         api.get('/reports/trial-balance', { params: { company_id: cid, as_of: dt || undefined, date_from: df || undefined, date_to: dt || undefined } }),
         api.get('/reports/profit-loss', { params: { company_id: cid, date_from: df || undefined, date_to: dt || undefined } }),
         api.get('/reports/balance-sheet', { params: { company_id: cid, as_of: dt || undefined, date_from: df || undefined, date_to: dt || undefined } }),
+        api.get('/reports/mis-compliance', { params: { company_id: cid, date_from: df || undefined, date_to: dt || undefined } }),
       ]);
       setTrialBalance(tbR.status === 'fulfilled' ? tbR.value.data : null);
       setPnl(pnlR.status === 'fulfilled' ? pnlR.value.data : null);
       setBalanceSheet(bsR.status === 'fulfilled' ? bsR.value.data : null);
+      setMisData(misR.status === 'fulfilled' ? misR.value.data : null);
       setTbPage(1);
     } catch {
       toast.error('Failed to load reports');
@@ -414,12 +418,13 @@ function AccountingReportsInner() {
       <GuidanceNote pageKey="accounting-reports" isDark={isDark} />
 
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid grid-cols-2 md:grid-cols-2 h-auto gap-1 p-1">
-          <TabsTrigger value="trial-balance" className="h-8 text-xs">Trial Balance</TabsTrigger>
-          <TabsTrigger value="pnl" className="h-8 text-xs">Profit &amp; Loss</TabsTrigger>
-          <TabsTrigger value="balance-sheet" className="h-8 text-xs">Balance Sheet</TabsTrigger>
-          <TabsTrigger value="party-ledger" className="h-8 text-xs">Party Ledger</TabsTrigger>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid grid-cols-5 w-full h-11 bg-slate-100 dark:bg-slate-800 rounded-xl p-1 gap-1 border border-slate-200/50 dark:border-slate-700/50">
+          <TabsTrigger value="trial-balance" className="h-9 text-[10px] xs:text-[11px] sm:text-xs md:text-sm font-semibold rounded-lg transition-all truncate data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-slate-900 dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:text-white">Trial Balance</TabsTrigger>
+          <TabsTrigger value="pnl" className="h-9 text-[10px] xs:text-[11px] sm:text-xs md:text-sm font-semibold rounded-lg transition-all truncate data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-slate-900 dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:text-white">Profit &amp; Loss</TabsTrigger>
+          <TabsTrigger value="balance-sheet" className="h-9 text-[10px] xs:text-[11px] sm:text-xs md:text-sm font-semibold rounded-lg transition-all truncate data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-slate-900 dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:text-white">Balance Sheet</TabsTrigger>
+          <TabsTrigger value="party-ledger" className="h-9 text-[10px] xs:text-[11px] sm:text-xs md:text-sm font-semibold rounded-lg transition-all truncate data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-slate-900 dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:text-white">Party Ledger</TabsTrigger>
+          <TabsTrigger value="mis-compliance" className="h-9 text-[10px] xs:text-[11px] sm:text-xs md:text-sm font-semibold rounded-lg transition-all truncate data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-slate-900 dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:text-white">MIS &amp; Compliance</TabsTrigger>
         </TabsList>
 
         {/* ── Trial Balance ── */}
@@ -586,6 +591,260 @@ function AccountingReportsInner() {
               </>
             )}
           </ReportCard>
+        </TabsContent>
+
+        {/* ── MIS & Compliance ── */}
+        <TabsContent value="mis-compliance" className="mt-4">
+          <div className="flex justify-center mb-4">
+            <div className="inline-flex rounded-xl p-1 bg-slate-100 dark:bg-slate-800 border border-slate-200/50 dark:border-slate-700/50">
+              <button
+                onClick={() => setMisSubTab('insights')}
+                className={`px-4 py-2 rounded-lg text-xs md:text-sm font-semibold transition-all ${
+                  misSubTab === 'insights'
+                    ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white'
+                    : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                }`}
+              >
+                MIS Ratios &amp; Insights
+              </button>
+              <button
+                onClick={() => setMisSubTab('schedule-iii')}
+                className={`px-4 py-2 rounded-lg text-xs md:text-sm font-semibold transition-all ${
+                  misSubTab === 'schedule-iii'
+                    ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white'
+                    : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                }`}
+              >
+                Companies Act (Schedule III)
+              </button>
+              <button
+                onClick={() => setMisSubTab('income-tax')}
+                className={`px-4 py-2 rounded-lg text-xs md:text-sm font-semibold transition-all ${
+                  misSubTab === 'income-tax'
+                    ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white'
+                    : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                }`}
+              >
+                Income Tax Act (PGBP)
+              </button>
+            </div>
+          </div>
+
+          {!misData ? (
+            <p className="text-sm text-slate-400 py-6 text-center">No compliance or MIS data found for this period.</p>
+          ) : (
+            <>
+              {/* 1. MIS Insights */}
+              {misSubTab === 'insights' && (
+                <div className="space-y-6">
+                  {/* Bento Grid */}
+                  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {/* Profitability Card */}
+                    <div className={`rounded-3xl border p-5 shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                      <h4 className={`text-xs font-bold uppercase tracking-wider mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Profitability (MIS)</h4>
+                      <div className="space-y-4">
+                        <div>
+                          <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>EBITDA</span>
+                          <p className={`text-2xl font-bold font-mono ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{fmtC(misData.mis?.ebitda)}</p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 border-t pt-2" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                          <div>
+                            <span className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Operating Margin</span>
+                            <p className="text-sm font-semibold text-indigo-500">{misData.mis?.ratios?.operating_margin_pct}%</p>
+                          </div>
+                          <div>
+                            <span className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Net Margin</span>
+                            <p className="text-sm font-semibold text-emerald-500">{misData.mis?.ratios?.net_margin_pct}%</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Liquidity Ratios Card */}
+                    <div className={`rounded-3xl border p-5 shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                      <h4 className={`text-xs font-bold uppercase tracking-wider mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Liquidity &amp; Working Capital</h4>
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Current Ratio</span>
+                          <span className={`text-sm font-bold font-mono ${misData.mis?.ratios?.current_ratio >= 1.5 ? 'text-emerald-500' : 'text-amber-500'}`}>{misData.mis?.ratios?.current_ratio} <span className="text-xs font-normal text-slate-400">(Ideal: 2.0)</span></span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Quick Ratio</span>
+                          <span className={`text-sm font-bold font-mono ${misData.mis?.ratios?.quick_ratio >= 1.0 ? 'text-emerald-500' : 'text-amber-500'}`}>{misData.mis?.ratios?.quick_ratio} <span className="text-xs font-normal text-slate-400">(Ideal: 1.0)</span></span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Avg. Collection Period</span>
+                          <span className={`text-sm font-bold font-mono ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{misData.mis?.ratios?.collection_period_days} Days</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Cash Flow Summary Card */}
+                    <div className={`rounded-3xl border p-5 shadow-sm md:col-span-2 lg:col-span-1 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                      <h4 className={`text-xs font-bold uppercase tracking-wider mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Cash Flow (MIS)</h4>
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-xs py-1">
+                          <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>Operating Activity</span>
+                          <span className={`font-mono ${misData.mis?.cash_flow?.operating >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{fmtC(misData.mis?.cash_flow?.operating)}</span>
+                        </div>
+                        <div className="flex justify-between text-xs py-1">
+                          <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>Investing Activity</span>
+                          <span className={`font-mono ${misData.mis?.cash_flow?.investing >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{fmtC(misData.mis?.cash_flow?.investing)}</span>
+                        </div>
+                        <div className="flex justify-between text-xs py-1">
+                          <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>Financing Activity</span>
+                          <span className={`font-mono ${misData.mis?.cash_flow?.financing >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{fmtC(misData.mis?.cash_flow?.financing)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm font-bold pt-2 border-t" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                          <span className={isDark ? 'text-slate-200' : 'text-slate-700'}>Net cash movement</span>
+                          <span className={`font-mono ${misData.mis?.cash_flow?.net >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{fmtC(misData.mis?.cash_flow?.net)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Debtors Aging Summary */}
+                  <ReportCard title="Debtors Aging Analysis (MIS Receivable Buckets)" isDark={isDark}>
+                    <div className="space-y-4 py-2">
+                      {Object.entries(misData.mis?.debtors_aging || {}).map(([bucket, val]) => {
+                        const total = Object.values(misData.mis?.debtors_aging || {}).reduce((a, b) => a + b, 0) || 1;
+                        const pct = Math.round((val / total) * 100);
+                        return (
+                          <div key={bucket} className="space-y-1">
+                            <div className="flex justify-between text-xs font-semibold">
+                              <span className={isDark ? 'text-slate-300' : 'text-slate-600'}>{bucket} Days</span>
+                              <span className="font-mono">{fmtC(val)} ({pct}%)</span>
+                            </div>
+                            <div className="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-2">
+                              <div
+                                className="bg-gradient-to-r from-blue-500 to-indigo-500 h-2 rounded-full transition-all"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </ReportCard>
+                </div>
+              )}
+
+              {/* 2. Companies Act Schedule III */}
+              {misSubTab === 'schedule-iii' && (
+                <div className="space-y-6">
+                  <div className="grid md:grid-cols-2 gap-4">
+                    {/* BS */}
+                    <ReportCard title="Schedule III — Balance Sheet (Equity &amp; Liabilities)" isDark={isDark}>
+                      <div className="space-y-4">
+                        <div>
+                          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">1. Shareholders' Funds</p>
+                          <Row label="Share Capital" value={misData.schedule_iii?.balance_sheet?.equity_and_liabilities?.shareholders_funds?.share_capital} isDark={isDark} />
+                          <Row label="Reserves and Surplus" value={misData.schedule_iii?.balance_sheet?.equity_and_liabilities?.shareholders_funds?.reserves_and_surplus} isDark={isDark} />
+                          <Row label="Subtotal: Shareholders' Funds" value={misData.schedule_iii?.balance_sheet?.equity_and_liabilities?.shareholders_funds?.total} isDark={isDark} bold />
+                        </div>
+                        <div className="border-t pt-2" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">2. Non-Current Liabilities</p>
+                          <Row label="Long-term Borrowings / Liabilities" value={misData.schedule_iii?.balance_sheet?.equity_and_liabilities?.non_current_liabilities?.long_term_borrowings} isDark={isDark} />
+                          <Row label="Subtotal: Non-Current Liabilities" value={misData.schedule_iii?.balance_sheet?.equity_and_liabilities?.non_current_liabilities?.total} isDark={isDark} bold />
+                        </div>
+                        <div className="border-t pt-2" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">3. Current Liabilities</p>
+                          <Row label="Trade Payables (Sundry Creditors)" value={misData.schedule_iii?.balance_sheet?.equity_and_liabilities?.current_liabilities?.trade_payables} isDark={isDark} />
+                          <Row label="Other Current Liabilities (including GST &amp; TDS Payable)" value={misData.schedule_iii?.balance_sheet?.equity_and_liabilities?.current_liabilities?.other_current_liabilities} isDark={isDark} />
+                          <Row label="Subtotal: Current Liabilities" value={misData.schedule_iii?.balance_sheet?.equity_and_liabilities?.current_liabilities?.total} isDark={isDark} bold />
+                        </div>
+                        <div className="border-t pt-3 mt-2" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                          <Row label="TOTAL EQUITY AND LIABILITIES" value={misData.schedule_iii?.balance_sheet?.equity_and_liabilities?.total_equity_and_liabilities} isDark={isDark} bold />
+                        </div>
+                      </div>
+                    </ReportCard>
+
+                    <ReportCard title="Schedule III — Balance Sheet (Assets)" isDark={isDark}>
+                      <div className="space-y-4">
+                        <div>
+                          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">1. Non-Current Assets</p>
+                          <Row label="Property, Plant and Equipment (Fixed Assets)" value={misData.schedule_iii?.balance_sheet?.assets?.non_current_assets?.property_plant_equipment} isDark={isDark} />
+                          <Row label="Subtotal: Non-Current Assets" value={misData.schedule_iii?.balance_sheet?.assets?.non_current_assets?.total} isDark={isDark} bold />
+                        </div>
+                        <div className="border-t pt-2" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">2. Current Assets</p>
+                          <Row label="Inventories" value={misData.schedule_iii?.balance_sheet?.assets?.current_assets?.inventories} isDark={isDark} />
+                          <Row label="Trade Receivables (Sundry Debtors)" value={misData.schedule_iii?.balance_sheet?.assets?.current_assets?.trade_receivables} isDark={isDark} />
+                          <Row label="Cash and Cash Equivalents (Bank &amp; Cash in Hand)" value={misData.schedule_iii?.balance_sheet?.assets?.current_assets?.cash_and_cash_equivalents} isDark={isDark} />
+                          <Row label="Short-term Loans &amp; Advances (including GST Input)" value={misData.schedule_iii?.balance_sheet?.assets?.current_assets?.short_term_loans_advances} isDark={isDark} />
+                          <Row label="Subtotal: Current Assets" value={misData.schedule_iii?.balance_sheet?.assets?.current_assets?.total} isDark={isDark} bold />
+                        </div>
+                        <div className="border-t pt-3 mt-2" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                          <Row label="TOTAL ASSETS" value={misData.schedule_iii?.balance_sheet?.assets?.total_assets} isDark={isDark} bold />
+                        </div>
+                      </div>
+                    </ReportCard>
+                  </div>
+
+                  <ReportCard title="Schedule III — Statement of Profit &amp; Loss" isDark={isDark}>
+                    <div className="space-y-3">
+                      <Row label="I. Revenue from Operations (Gross Sales)" value={misData.schedule_iii?.pnl?.revenue_from_operations} isDark={isDark} />
+                      <Row label="II. Other Income" value={misData.schedule_iii?.pnl?.other_income} isDark={isDark} />
+                      <Row label="III. Total Income (I + II)" value={misData.schedule_iii?.pnl?.revenue_from_operations + misData.schedule_iii?.pnl?.other_income} isDark={isDark} bold />
+                      
+                      <div className="border-t pt-2 mt-2" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">IV. Expenses</p>
+                        <Row label="Cost of materials consumed / purchases" value={misData.schedule_iii?.pnl?.expenses?.cost_of_purchases} isDark={isDark} />
+                        <Row label="Employee benefits expense (Salaries &amp; Wages)" value={misData.schedule_iii?.pnl?.expenses?.employee_benefits} isDark={isDark} />
+                        <Row label="Finance costs (Bank charges/interests)" value={misData.schedule_iii?.pnl?.expenses?.finance_costs} isDark={isDark} />
+                        <Row label="Depreciation &amp; amortization expense" value={misData.schedule_iii?.pnl?.expenses?.depreciation} isDark={isDark} />
+                        <Row label="Other expenses" value={misData.schedule_iii?.pnl?.expenses?.other_operating_expenses} isDark={isDark} />
+                        <Row label="Total Expenses" value={misData.schedule_iii?.pnl?.expenses?.total} isDark={isDark} bold />
+                      </div>
+
+                      <div className="border-t pt-2 mt-2" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                        <Row label="V. Profit before Tax (III - IV)" value={misData.schedule_iii?.pnl?.profit_before_tax} isDark={isDark} bold />
+                        <Row label="VI. Provision for Tax (estimated corporate rate 25%)" value={misData.schedule_iii?.pnl?.simulated_tax_provision} isDark={isDark} />
+                        <Row label="VII. Profit after Tax (V - VI)" value={misData.schedule_iii?.pnl?.profit_after_tax} isDark={isDark} bold />
+                      </div>
+                    </div>
+                  </ReportCard>
+                </div>
+              )}
+
+              {/* 3. Income Tax Act */}
+              {misSubTab === 'income-tax' && (
+                <div className="space-y-6">
+                  <ReportCard title="Income Tax Act — Computation of Taxable Business Income (PGBP)" isDark={isDark}>
+                    <div className="space-y-3">
+                      <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'} italic mb-2`}>
+                        This calculation reconciles your Net Profit as per books to your Net Taxable Business Income under Profits and Gains of Business or Profession (PGBP) rules.
+                      </p>
+
+                      <Row label="Net Profit as per Book of Accounts" value={misData.income_tax?.book_net_profit} isDark={isDark} bold />
+                      
+                      <div className="border-t pt-2 mt-1" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                        <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-1">Additions:</p>
+                        <Row label="Add: Depreciation debited as per Companies Act rates" value={misData.income_tax?.depreciation_add_back} isDark={isDark} />
+                        <Row label="Add: Section 43B Disallowances (unpaid statutory dues like GST/TDS)" value={misData.income_tax?.disallowance_43b} isDark={isDark} />
+                      </div>
+
+                      <div className="border-t pt-2" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                        <p className="text-xs font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider mb-1">Deductions:</p>
+                        <Row label="Less: Depreciation allowable as per Income Tax Rules, Section 32" value={misData.income_tax?.depreciation_it_deduction} isDark={isDark} />
+                      </div>
+
+                      <div className="border-t pt-3 mt-2" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                        <Row label="NET TAXABLE BUSINESS INCOME (PGBP)" value={misData.income_tax?.taxable_pgbp_income} isDark={isDark} bold />
+                      </div>
+
+                      <div className="border-t pt-3 mt-4" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Estimated Income Tax Computation</p>
+                        <Row label={`Base Corporate/Proprietor Tax (${misData.income_tax?.tax_rate_pct}%)`} value={misData.income_tax?.base_tax} isDark={isDark} />
+                        <Row label={`Add: Health and Education Cess (${misData.income_tax?.cess_pct}%)`} value={misData.income_tax?.cess_amount} isDark={isDark} />
+                        <Row label="TOTAL ESTIMATED INCOME TAX PAYABLE" value={misData.income_tax?.total_tax_payable} isDark={isDark} bold />
+                      </div>
+                    </div>
+                  </ReportCard>
+                </div>
+              )}
+            </>
+          )}
         </TabsContent>
 
       </Tabs>
