@@ -22,12 +22,24 @@ const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2', emeraldGreen: '#1FA
 const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 const fmtDate = (value) => { if (!value) return '—'; try { return format(parseISO(value), 'dd MMM yyyy'); } catch { return value; } };
 
+// ─── Field helpers ── invoices in this app store the invoice number as
+// `invoice_no` and the party as `client_name` / `supplier_name` (see
+// backend/invoicing.py). Older records may use `invoice_number` /
+// `customer_name` / `vendor_name`, so keep the fallbacks. Without these,
+// the match dialog rendered "— · —" for every row.
+const invNumber = (inv) => inv?.invoice_no || inv?.invoice_number || inv?.number || inv?.bill_number || '';
+const invParty = (inv) =>
+  inv?.client_name || inv?.customer_name || inv?.supplier_name ||
+  inv?.vendor_name || inv?.party_name || inv?.buyer_name || '';
+const invAmount = (inv) => Number(inv?.grand_total || inv?.total || inv?.amount || 0);
+const invDate = (inv) => inv?.invoice_date || inv?.date || inv?.bill_date;
+
 // ─── Smart suggestion scorer: amount, date, narration, party name, ───
 // ─── invoice no, bank reference, GSTIN — returns a 0-99 confidence %. ───
 function scoreInvoiceMatch(txn, inv) {
   let score = 0;
   const txnAmt = Number(txn.debit || txn.credit || 0);
-  const invAmt = Number(inv.total || inv.grand_total || inv.amount || 0);
+  const invAmt = invAmount(inv);
   if (txnAmt > 0 && invAmt > 0) {
     const diff = Math.abs(txnAmt - invAmt) / Math.max(txnAmt, invAmt);
     if (diff < 0.001) score += 45;
@@ -36,22 +48,22 @@ function scoreInvoiceMatch(txn, inv) {
     else if (diff < 0.1) score += 12;
   }
   try {
-    const td = new Date(txn.date), id = new Date(inv.invoice_date || inv.date);
+    const td = new Date(txn.date), id = new Date(invDate(inv));
     const days = Math.abs((td - id) / 86400000);
     if (days <= 1) score += 18;
     else if (days <= 7) score += 12;
     else if (days <= 30) score += 6;
   } catch {}
   const desc = ((txn.description || '') + ' ' + (txn.reference || '')).toLowerCase();
-  const party = (inv.customer_name || inv.vendor_name || inv.party_name || '').toLowerCase();
+  const party = invParty(inv).toLowerCase();
   if (party && desc.includes(party.split(' ')[0])) score += 14;
-  const invNo = (inv.invoice_number || inv.number || '').toLowerCase();
+  const invNo = invNumber(inv).toLowerCase();
   if (invNo && desc.includes(invNo)) score += 9;
   // Bank reference number — UTR/cheque/ref on the invoice matching the bank line's own reference column.
   const invRef = (inv.reference_number || inv.utr || inv.payment_reference || '').toLowerCase();
   if (invRef && (txn.reference || '').toLowerCase().includes(invRef)) score += 8;
   // GSTIN — occasionally present in narration for GST-linked NEFT/RTGS transfers.
-  const gstin = (inv.gstin || inv.customer_gstin || '').toLowerCase();
+  const gstin = (inv.gstin || inv.customer_gstin || inv.supplier_gstin || '').toLowerCase();
   if (gstin && desc.includes(gstin)) score += 6;
   return Math.min(99, Math.max(0, Math.round(score)));
 }
@@ -82,6 +94,14 @@ function BankAccountsInner() {
   const [invoiceCache, setInvoiceCache] = useState([]);
   const [invoiceSearch, setInvoiceSearch] = useState('');
   const [invoiceLoading, setInvoiceLoading] = useState(false);
+
+  // Ledger heads (chart of accounts) for the "Expense Head" tab + inline "Create head"
+  const [ledgerCache, setLedgerCache] = useState([]);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [dialogTab, setDialogTab] = useState('invoice'); // 'invoice' | 'expense'
+  const [showNewHead, setShowNewHead] = useState(false);
+  const [newHead, setNewHead] = useState({ code: '', name: '', type: 'expense', sub_type: 'operating_expense' });
+  const [savingHead, setSavingHead] = useState(false);
 
   const fetchAccounts = async () => {
     setLoading(true);
@@ -229,17 +249,30 @@ function BankAccountsInner() {
     finally { setInvoiceLoading(false); }
   };
 
+  const loadLedgers = async (force = false) => {
+    if (ledgerCache.length && !force) return;
+    setLedgerLoading(true);
+    try {
+      const companyId = selected?.company_id || '';
+      const { data } = await api.get('/chart-of-accounts', { params: { company_id: companyId } });
+      setLedgerCache(Array.isArray(data) ? data : []);
+    } catch { /* silent — user may not have COA permission */ }
+    finally { setLedgerLoading(false); }
+  };
+
   const openMatch = async (txn, mode) => {
     setInvoiceSearch('');
+    setDialogTab('invoice');
     setMatchDialog({ txn, mode });
     loadInvoices();
+    loadLedgers();
   };
 
   const confirmMatch = async (txn, inv, score) => {
     try {
       const isDebit = Number(txn.debit || 0) > 0;
       const matched_type = isDebit ? 'purchase' : 'sale';
-      const matched_label = `${inv.invoice_number || inv.number || ''} · ${inv.customer_name || inv.vendor_name || inv.party_name || ''}`.trim();
+      const matched_label = `${invNumber(inv) || '—'} · ${invParty(inv) || '—'}`.trim();
       const payload = { matched_type, matched_id: inv.id, matched_label, post_journal: true, confidence: score ?? null };
       if (txn.matched_type) {
         // Same transaction, changing to a different record — atomic edit-match:
@@ -256,6 +289,61 @@ function BankAccountsInner() {
       toast.error(err.response?.data?.detail || 'Failed to match');
     }
   };
+
+  // Match a bank line to a chart-of-accounts head (any expense ledger, or the
+  // "Suspense Account" 9998). Backend posts Dr <head>/Cr Bank for debits and
+  // the reverse for credits — see backend/bank_accounts.py::_auto_post_for_match.
+  const confirmLedgerMatch = async (txn, acct, opts = {}) => {
+    try {
+      const matched_type = opts.suspense ? 'suspense' : 'expense';
+      const matched_label = `${acct.code} · ${acct.name}`;
+      const payload = { matched_type, matched_id: acct.id, matched_label, post_journal: true };
+      if (txn.matched_type) {
+        await api.post(`/bank-transactions/${txn.id}/edit-match`, payload);
+        toast.success(opts.suspense ? 'Parked in Suspense · ledger posted' : 'Matched to head · ledger posted');
+      } else {
+        await api.post(`/bank-transactions/${txn.id}/match`, payload);
+        toast.success(opts.suspense ? 'Parked in Suspense · ledger posted' : 'Matched to head · ledger posted');
+      }
+      setMatchDialog(null);
+      await fetchTransactions(selected.id);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to match');
+    }
+  };
+
+  // One-click: park directly to Suspense from the transaction row, no dialog.
+  const parkToSuspense = async (txn) => {
+    if (!ledgerCache.length) await loadLedgers(true);
+    const list = ledgerCache.length ? ledgerCache : [];
+    const suspense = list.find(a => a.code === '9998') || list.find(a => /suspense/i.test(a.name || ''));
+    if (!suspense) {
+      toast.error('Suspense account not found — open the Chart of Accounts once to seed defaults.');
+      return;
+    }
+    await confirmLedgerMatch(txn, suspense, { suspense: true });
+  };
+
+  const createHead = async () => {
+    if (!newHead.code.trim() || !newHead.name.trim()) { toast.error('Code and name are required'); return; }
+    setSavingHead(true);
+    try {
+      const { data } = await api.post('/chart-of-accounts', {
+        company_id: selected?.company_id || '',
+        code: newHead.code.trim(), name: newHead.name.trim(),
+        type: newHead.type, sub_type: newHead.sub_type,
+      });
+      toast.success(`Ledger head "${data.name}" created`);
+      setLedgerCache(prev => [...prev, data].sort((a, b) => (a.code || '').localeCompare(b.code || '')));
+      setShowNewHead(false);
+      setNewHead({ code: '', name: '', type: 'expense', sub_type: 'operating_expense' });
+      // Immediately offer to match the current transaction to the new head
+      if (matchDialog?.txn) await confirmLedgerMatch(matchDialog.txn, data);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to create ledger head');
+    } finally { setSavingHead(false); }
+  };
+
 
   const viewAudit = async (txn) => {
     try {
@@ -314,11 +402,18 @@ function BankAccountsInner() {
     const base = invoiceCache;
     if (!q) return base.slice(0, 200);
     return base.filter(i => {
-      const hay = [i.invoice_number, i.number, i.customer_name, i.vendor_name, i.party_name, i.gstin, i.total, i.amount, i.invoice_date, i.date]
+      const hay = [invNumber(i), invParty(i), i.gstin, i.customer_gstin, i.supplier_gstin, invAmount(i), invDate(i)]
         .filter(Boolean).join(' ').toLowerCase();
       return hay.includes(q);
     }).slice(0, 200);
   }, [invoiceCache, invoiceSearch]);
+
+  const filteredLedgers = useMemo(() => {
+    const q = invoiceSearch.trim().toLowerCase();
+    const base = (ledgerCache || []).filter(a => a.is_active !== false);
+    if (!q) return base.slice(0, 300);
+    return base.filter(a => `${a.code} ${a.name} ${a.type} ${a.sub_type}`.toLowerCase().includes(q)).slice(0, 300);
+  }, [ledgerCache, invoiceSearch]);
 
   if (loading) return <ContentLoader />;
 
@@ -501,7 +596,7 @@ function BankAccountsInner() {
                               )}
                               {!t.matched_type && top && top.score >= 30 && (
                                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
-                                  Suggested: {top.inv.invoice_number || top.inv.number || '—'} · {top.score}%
+                                  Suggested: {invNumber(top.inv) || '—'} · {invParty(top.inv) || '—'} · {top.score}%
                                 </span>
                               )}
                             </div>
@@ -527,6 +622,7 @@ function BankAccountsInner() {
                                   {canMatch ? (
                                     <>
                                       <button onClick={() => openMatch(t, 'match')} className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-emerald-400 hover:text-emerald-600 inline-flex items-center gap-1"><Search className="h-3 w-3" /> Match</button>
+                                      <button onClick={() => parkToSuspense(t)} title="Post to Suspense — reclassify to the correct expense head later" className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-amber-200 text-amber-700 hover:border-amber-400 hover:bg-amber-50 inline-flex items-center gap-1"><BookOpen className="h-3 w-3" /> Park to Suspense</button>
                                       <button onClick={() => toggleIgnore(t)} className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-slate-400 inline-flex items-center gap-1"><Ban className="h-3 w-3" /> {t.ignored ? 'Unignore' : 'Ignore'}</button>
                                     </>
                                   ) : (
@@ -571,38 +667,123 @@ function BankAccountsInner() {
                   </p>
                 </div>
               </div>
+              {/* Tabs: Invoice vs Expense Head */}
+              <div className="flex items-center gap-1 border-b">
+                <button onClick={() => setDialogTab('invoice')}
+                  className={`text-xs font-bold px-3 py-2 -mb-px border-b-2 ${dialogTab === 'invoice' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+                  Invoice
+                </button>
+                <button onClick={() => setDialogTab('expense')}
+                  className={`text-xs font-bold px-3 py-2 -mb-px border-b-2 ${dialogTab === 'expense' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+                  Expense / Ledger Head
+                </button>
+                <div className="ml-auto">
+                  <button onClick={() => { parkToSuspense(matchDialog.txn); }}
+                    className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-amber-200 text-amber-700 hover:bg-amber-50 inline-flex items-center gap-1">
+                    <BookOpen className="h-3 w-3" /> Park to Suspense
+                  </button>
+                </div>
+              </div>
+
               <div className="relative">
                 <Search className="h-4 w-4 absolute left-3 top-3 text-slate-400" />
-                <Input placeholder="Search by invoice #, party, GSTIN, amount, date, voucher…" className="pl-9" value={invoiceSearch} onChange={e => setInvoiceSearch(e.target.value)} />
+                <Input
+                  placeholder={dialogTab === 'invoice'
+                    ? 'Search by invoice #, party, GSTIN, amount, date…'
+                    : 'Search ledger heads by code or name (e.g. 5250 Software, Rent)…'}
+                  className="pl-9"
+                  value={invoiceSearch}
+                  onChange={e => setInvoiceSearch(e.target.value)} />
               </div>
-              <div className="max-h-[420px] overflow-y-auto divide-y border rounded-xl">
-                {invoiceLoading ? (
-                  <div className="p-6 text-center"><MiniLoader height={22} /></div>
-                ) : filteredInvoices.length === 0 ? (
-                  <p className="p-6 text-center text-sm text-slate-400">No invoices found.</p>
-                ) : (
-                  filteredInvoices
-                    .map(inv => ({ inv, score: scoreInvoiceMatch(matchDialog.txn, inv) }))
-                    .sort((a, b) => b.score - a.score)
-                    .map(({ inv, score }) => (
-                      <button key={inv.id} onClick={() => confirmMatch(matchDialog.txn, inv, score)}
-                        className="w-full text-left p-3 hover:bg-blue-50 flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-sm font-bold text-slate-800 truncate">
-                            {inv.invoice_number || inv.number || '—'} · {inv.customer_name || inv.vendor_name || inv.party_name || '—'}
-                          </p>
-                          <p className="text-xs text-slate-500">{fmtDate(inv.invoice_date || inv.date)} · {inv.gstin || ''}</p>
-                        </div>
-                        <div className="text-right flex-shrink-0">
-                          <p className="text-sm font-bold text-slate-700">{fmtC(inv.total || inv.grand_total || inv.amount)}</p>
-                          <p className={`text-[10px] font-bold ${score >= 70 ? 'text-emerald-600' : score >= 40 ? 'text-amber-600' : 'text-slate-400'}`}>{score}% match</p>
-                        </div>
-                      </button>
-                    ))
-                )}
-              </div>
+
+              {dialogTab === 'invoice' ? (
+                <div className="max-h-[420px] overflow-y-auto divide-y border rounded-xl">
+                  {invoiceLoading ? (
+                    <div className="p-6 text-center"><MiniLoader height={22} /></div>
+                  ) : filteredInvoices.length === 0 ? (
+                    <p className="p-6 text-center text-sm text-slate-400">No invoices found.</p>
+                  ) : (
+                    filteredInvoices
+                      .map(inv => ({ inv, score: scoreInvoiceMatch(matchDialog.txn, inv) }))
+                      .sort((a, b) => b.score - a.score)
+                      .map(({ inv, score }) => (
+                        <button key={inv.id} onClick={() => confirmMatch(matchDialog.txn, inv, score)}
+                          className="w-full text-left p-3 hover:bg-blue-50 flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold text-slate-800 truncate">
+                              {invNumber(inv) || '—'} · {invParty(inv) || '—'}
+                            </p>
+                            <p className="text-xs text-slate-500">{fmtDate(invDate(inv))} · {inv.gstin || inv.customer_gstin || inv.supplier_gstin || ''}</p>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <p className="text-sm font-bold text-slate-700">{fmtC(invAmount(inv))}</p>
+                            <p className={`text-[10px] font-bold ${score >= 70 ? 'text-emerald-600' : score >= 40 ? 'text-amber-600' : 'text-slate-400'}`}>{score}% match</p>
+                          </div>
+                        </button>
+                      ))
+                  )}
+                </div>
+              ) : (
+                <div className="border rounded-xl">
+                  <div className="flex items-center justify-between px-3 py-2 border-b bg-slate-50">
+                    <p className="text-[11px] text-slate-500">
+                      Pick the ledger head to book this bank line against. Posts Dr {'<head>'} / Cr Bank automatically.
+                    </p>
+                    <button onClick={() => setShowNewHead(true)}
+                      className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-blue-200 text-blue-700 hover:bg-blue-50 inline-flex items-center gap-1">
+                      <Plus className="h-3 w-3" /> New Head
+                    </button>
+                  </div>
+                  {showNewHead && (
+                    <div className="p-3 border-b bg-blue-50/40 space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <Input placeholder="Code (e.g. 5310)" value={newHead.code} onChange={e => setNewHead(h => ({ ...h, code: e.target.value }))} />
+                        <Input placeholder="Name (e.g. Internet & Telephone)" value={newHead.name} onChange={e => setNewHead(h => ({ ...h, name: e.target.value }))} />
+                        <Select value={newHead.type} onValueChange={v => setNewHead(h => ({ ...h, type: v }))}>
+                          <SelectTrigger className="text-sm"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="expense">Expense</SelectItem>
+                            <SelectItem value="income">Income</SelectItem>
+                            <SelectItem value="asset">Asset</SelectItem>
+                            <SelectItem value="liability">Liability</SelectItem>
+                            <SelectItem value="equity">Equity</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Input placeholder="Sub-type (operating_expense)" value={newHead.sub_type} onChange={e => setNewHead(h => ({ ...h, sub_type: e.target.value }))} />
+                      </div>
+                      <div className="flex gap-2 justify-end">
+                        <Button size="sm" variant="outline" onClick={() => setShowNewHead(false)}>Cancel</Button>
+                        <Button size="sm" onClick={createHead} disabled={savingHead}>{savingHead ? '…' : 'Create & Match'}</Button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="max-h-[360px] overflow-y-auto divide-y">
+                    {ledgerLoading ? (
+                      <div className="p-6 text-center"><MiniLoader height={22} /></div>
+                    ) : filteredLedgers.length === 0 ? (
+                      <p className="p-6 text-center text-sm text-slate-400">No ledger heads found. Create one above.</p>
+                    ) : (
+                      filteredLedgers.map(acct => (
+                        <button key={acct.id} onClick={() => confirmLedgerMatch(matchDialog.txn, acct)}
+                          className="w-full text-left p-3 hover:bg-emerald-50 flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold text-slate-800 truncate">{acct.code} · {acct.name}</p>
+                            <p className="text-xs text-slate-500 capitalize">{acct.type} · {acct.sub_type?.replace(/_/g, ' ')}</p>
+                          </div>
+                          {acct.code === '9998' && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Suspense</span>
+                          )}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
               <p className="text-[11px] text-slate-400">
-                Confirming will {matchDialog.mode === 'edit' ? 'reverse the previous reconciliation and create a new one' : 'create a new reconciliation'} — invoice status, ledger and dashboard update automatically.
+                {dialogTab === 'invoice'
+                  ? `Confirming will ${matchDialog.mode === 'edit' ? 'reverse the previous reconciliation and create a new one' : 'create a new reconciliation'} — invoice status, ledger and dashboard update automatically.`
+                  : 'Posting will create a journal entry (Dr chosen head / Cr Bank for debits, reverse for credits). Use Suspense when you\'re not sure yet — reclassify later.'}
               </p>
             </div>
           )}
