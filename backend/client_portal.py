@@ -2776,3 +2776,49 @@ async def list_client_subfolders(
     all_items = _fetch_drive_files_raw(root_folder_id, include_subfolders=False)
     subfolders = [{"id": f["id"], "name": f["name"]} for f in all_items if f.get("mimeType") == "application/vnd.google-apps.folder"]
     return {"subfolders": subfolders, "root_folder_id": root_folder_id}
+
+
+# ── Phase 11 Integration Endpoints ──────────────────────────────────────────
+
+class ClientApprovalDecisionRequest(BaseModel):
+    decision: str  # "APPROVED" or "REJECTED"
+    comment: Optional[str] = None
+
+
+@router.get("/workflows")
+async def client_portal_workflows(portal_user=Depends(get_current_portal_client)):
+    """List workflow instances for the logged-in portal client."""
+    client_id = portal_user["client_id"]
+    from backend.workflow.workflow_storage import WorkflowStorage
+    instances = await WorkflowStorage.list_workflow_instances({"input_data.client_id": client_id})
+    return instances
+
+
+@router.get("/approvals")
+async def client_portal_approvals(portal_user=Depends(get_current_portal_client)):
+    """List approval requests for the logged-in portal client."""
+    client_id = portal_user["client_id"]
+    from backend.workflow.workflow_storage import WorkflowStorage
+    approvals = await WorkflowStorage.list_approval_requests({"company_id": client_id})
+    return approvals
+
+
+@router.post("/approvals/{approval_id}/decision")
+async def client_portal_approval_decision(
+    approval_id: str,
+    body: ClientApprovalDecisionRequest,
+    portal_user=Depends(get_current_portal_client)
+):
+    """Submit approval decision from the client portal."""
+    portal_user_id = portal_user["id"]
+    from backend.workflow.approval_engine import ApprovalEngine
+    success = await ApprovalEngine.submit_decision(
+        approval_id=approval_id,
+        user_id=portal_user_id,
+        decision=body.decision,
+        comment=body.comment
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to process approval decision.")
+    return {"success": True, "message": f"Approval decision '{body.decision}' processed successfully."}
+
