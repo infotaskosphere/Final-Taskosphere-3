@@ -46,6 +46,18 @@ def _perm_view_bank(user: User) -> bool:
     return bool(perms.get("can_view_bank"))
 
 
+def _perm_match_bank(user: User) -> bool:
+    """Gate for actions that change reconciliation state (Match / Edit Match /
+    Unmatch / Ignore) — distinct from _perm_view_bank, which only gates read
+    access to the page. Admin: always allowed. Manager: allowed by default
+    (can_match_bank defaults True in DEFAULT_ROLE_PERMISSIONS). Staff: view
+    only unless an admin grants can_match_bank via Permission Governance."""
+    if user.role == "admin":
+        return True
+    perms = user.permissions if isinstance(user.permissions, dict) else (user.permissions.model_dump() if user.permissions else {})
+    return bool(perms.get("can_match_bank"))
+
+
 # ── Models ────────────────────────────────────────────────────────────────
 class BankAccountCreate(BaseModel):
     company_id: str = ""
@@ -568,7 +580,67 @@ async def _match_transaction(company_id: str, txn: dict) -> Optional[dict]:
     return None
 
 
+async def _snapshot_prev_match_status(match: dict) -> Optional[str]:
+    """Reads the matched record's current status *before* a match overwrites
+    it, so Unmatch / Edit Match can restore the exact prior value instead of
+    guessing a generic 'unpaid' state. Read-only — never mutates anything."""
+    if match["type"] == "purchase":
+        rec = await db.purchase_invoices.find_one({"id": match["id"]}, {"_id": 0, "payment_status": 1})
+        return (rec or {}).get("payment_status")
+    if match["type"] in ("sale",):
+        rec = await db.invoices.find_one({"id": match["id"]}, {"_id": 0, "status": 1})
+        return (rec or {}).get("status")
+    if match["type"] in ("zte_purchase", "zte_sale"):
+        rec = await db.zte_processed_documents.find_one({"id": match["id"]}, {"_id": 0, "settled": 1})
+        return "settled" if (rec or {}).get("settled") else "unsettled"
+    return None
+
+
+async def _revert_match_effects(txn: dict):
+    """Reverses only the reconciliation side-effects of a match — the journal
+    entry it posted and the paid/settled flag it set on the matched record —
+    restoring the record's exact prior status. Never touches the invoice,
+    purchase bill, receipt, GST filing, or audit history themselves; the
+    record stays fully intact and simply becomes available to match again.
+    Shared by Unmatch and Edit Match so both behave identically."""
+    if txn.get("journal_entry_id"):
+        await db.journal_lines.delete_many({"entry_id": txn["journal_entry_id"]})
+        await db.journal_entries.delete_one({"id": txn["journal_entry_id"]})
+
+    mtype, mid = txn.get("matched_type"), txn.get("matched_id")
+    prev_status = txn.get("prev_match_status")
+    now = datetime.now(timezone.utc).isoformat()
+
+    if mtype == "purchase" and mid:
+        await db.purchase_invoices.update_one(
+            {"id": mid},
+            {
+                "$set": {"payment_status": prev_status, "updated_at": now},
+                "$unset": {"paid_amount": "", "paid_date": "", "paid_bank_txn_id": "", "journal_entry_id": ""},
+            },
+        )
+    elif mtype == "sale" and mid:
+        restored_status = prev_status or "sent"
+        history_entry = {"status": restored_status, "changed_at": now, "changed_by": "system (bank unmatch)"}
+        rec = await db.invoices.find_one({"id": mid}, {"_id": 0, "grand_total": 1, "total_amount": 1, "total": 1})
+        due_total = float((rec or {}).get("grand_total") or (rec or {}).get("total_amount") or (rec or {}).get("total") or 0)
+        await db.invoices.update_one(
+            {"id": mid},
+            {
+                "$set": {"status": restored_status, "amount_paid": 0.0, "amount_due": round(due_total, 2), "updated_at": now},
+                "$unset": {"paid_bank_txn_id": "", "journal_entry_id": ""},
+                "$push": {"status_history": history_entry},
+            },
+        )
+    elif mtype in ("zte_purchase", "zte_sale") and mid:
+        await db.zte_processed_documents.update_one(
+            {"id": mid},
+            {"$set": {"settled": False}, "$unset": {"settled_bank_txn_id": "", "settled_journal_entry_id": ""}},
+        )
+
+
 async def _auto_post_for_match(company_id: str, txn: dict, match: dict, created_by: str) -> Optional[str]:
+    txn["prev_match_status"] = await _snapshot_prev_match_status(match)
     bank_acct_id = await get_default_account_id(company_id, "1010")  # Bank Accounts
     if not bank_acct_id:
         return None
@@ -768,41 +840,170 @@ class ManualMatchInput(BaseModel):
     matched_id: str
     matched_label: str = ""
     post_journal: bool = True
+    confidence: Optional[float] = None   # smart-suggestion confidence % shown to the user at match time, for the audit trail
+    reason: str = ""                     # optional note — required by nothing, but stored on the audit entry when given
+
+
+class UnmatchInput(BaseModel):
+    reason: str = ""
+
+
+async def _log_recon_audit(
+    txn: dict, action: str, current_user: User,
+    previous_match: Optional[dict] = None, new_match: Optional[dict] = None,
+    confidence: Optional[float] = None, reason: str = "",
+):
+    """Writes one audit entry to the same bank_reconciliation_audit collection
+    the Bank Accounts 'Audit' dialog already reads from (via
+    GET /bank-transactions/{id}/audit-trail → ReconciliationAudit.get_audit_trail).
+    action is one of 'matched' | 'edited' | 'unmatched'."""
+    from backend.bank_ai.bank_storage import BankStorage
+    record = {
+        "bank_transaction_id": txn.get("id"),
+        "bank_account_id": txn.get("bank_account_id"),
+        "action": action,
+        "match_type": "manual",
+        "transaction_details": {
+            "date": txn.get("date"),
+            "narration": txn.get("description"),
+            "reference": txn.get("reference"),
+            "amount": txn.get("debit") or txn.get("credit"),
+            "type": "debit" if txn.get("debit") else "credit",
+        },
+        "previous_match": previous_match,
+        "new_match": new_match,
+        "confidence": confidence,
+        "reasons": [reason] if reason else ([f"{action.capitalize()} by user."]),
+        "reason": reason,
+        "matched_by_user": current_user.id,
+        "performed_by_name": getattr(current_user, "name", None) or getattr(current_user, "email", None),
+    }
+    if action == "matched":
+        record["matched_by"] = current_user.id
+        record["matched_on"] = datetime.now(timezone.utc).isoformat()
+    elif action == "edited":
+        record["edited_by"] = current_user.id
+        record["edited_on"] = datetime.now(timezone.utc).isoformat()
+    elif action == "unmatched":
+        record["unmatched_by"] = current_user.id
+        record["unmatched_on"] = datetime.now(timezone.utc).isoformat()
+    try:
+        await BankStorage.log_audit_trail(record)
+    except Exception:
+        pass  # audit logging is best-effort — never blocks the reconciliation action itself
 
 
 @router.post("/bank-transactions/{txn_id}/match")
 async def manual_match_transaction(txn_id: str, payload: ManualMatchInput, current_user: User = Depends(get_current_user)):
-    if not _perm_view_bank(current_user):
-        raise HTTPException(403, "Access denied.")
+    if not _perm_match_bank(current_user):
+        raise HTTPException(403, "Access denied. Matching bank transactions requires Match permission — request access from your admin.")
     txn = await db.bank_transactions.find_one({"id": txn_id}, {"_id": 0})
     if not txn:
         raise HTTPException(404, "Bank transaction not found.")
+    if txn.get("matched_type") == payload.matched_type and txn.get("matched_id") == payload.matched_id:
+        raise HTTPException(400, "This transaction is already matched to that record.")
+    if txn.get("matched_type"):
+        raise HTTPException(400, "This transaction is already matched — use Edit Match to change it.")
+
     update = {"matched_type": payload.matched_type, "matched_id": payload.matched_id, "matched_label": payload.matched_label}
-    if payload.post_journal and not txn.get("journal_entry_id"):
+    if payload.post_journal:
         entry_id = await _auto_post_for_match(
             txn.get("company_id", ""), txn,
             {"type": payload.matched_type, "id": payload.matched_id, "label": payload.matched_label}, current_user.id,
         )
+        update["prev_match_status"] = txn.get("prev_match_status")
         if entry_id:
             update["journal_entry_id"] = entry_id
     await db.bank_transactions.update_one({"id": txn_id}, {"$set": update})
+
+    await _log_recon_audit(
+        txn, "matched", current_user,
+        new_match={"type": payload.matched_type, "id": payload.matched_id, "label": payload.matched_label},
+        confidence=payload.confidence, reason=payload.reason,
+    )
+    return {"success": True}
+
+
+@router.post("/bank-transactions/{txn_id}/edit-match")
+async def edit_match_transaction(txn_id: str, payload: ManualMatchInput, current_user: User = Depends(get_current_user)):
+    """Atomically replaces an existing match: reverses the previous
+    reconciliation's ledger/status effects, then applies the new one. Refuses
+    to 're-edit' onto the exact same record (duplicate reconciliation)."""
+    if not _perm_match_bank(current_user):
+        raise HTTPException(403, "Access denied. Editing a match requires Match permission — request access from your admin.")
+    txn = await db.bank_transactions.find_one({"id": txn_id}, {"_id": 0})
+    if not txn:
+        raise HTTPException(404, "Bank transaction not found.")
+    if not txn.get("matched_type"):
+        raise HTTPException(400, "This transaction isn't matched yet — use Match instead of Edit Match.")
+    if txn.get("matched_type") == payload.matched_type and txn.get("matched_id") == payload.matched_id:
+        raise HTTPException(400, "This transaction is already matched to that record.")
+
+    previous_match = {"type": txn.get("matched_type"), "id": txn.get("matched_id"), "label": txn.get("matched_label")}
+    await _revert_match_effects(txn)
+
+    update = {"matched_type": payload.matched_type, "matched_id": payload.matched_id, "matched_label": payload.matched_label,
+              "journal_entry_id": None, "prev_match_status": None}
+    # txn still carries the OLD journal_entry_id/matched_* in memory — clear
+    # them before re-posting so _auto_post_for_match snapshots the record's
+    # freshly-reverted status, not the stale one.
+    txn["journal_entry_id"] = None
+    if payload.post_journal:
+        entry_id = await _auto_post_for_match(
+            txn.get("company_id", ""), txn,
+            {"type": payload.matched_type, "id": payload.matched_id, "label": payload.matched_label}, current_user.id,
+        )
+        update["prev_match_status"] = txn.get("prev_match_status")
+        if entry_id:
+            update["journal_entry_id"] = entry_id
+    await db.bank_transactions.update_one({"id": txn_id}, {"$set": update})
+
+    new_match = {"type": payload.matched_type, "id": payload.matched_id, "label": payload.matched_label}
+    await _log_recon_audit(
+        txn, "edited", current_user, previous_match=previous_match, new_match=new_match,
+        confidence=payload.confidence, reason=payload.reason,
+    )
     return {"success": True}
 
 
 @router.post("/bank-transactions/{txn_id}/unmatch")
-async def unmatch_transaction(txn_id: str, current_user: User = Depends(get_current_user)):
-    if not _perm_view_bank(current_user):
-        raise HTTPException(403, "Access denied.")
+async def unmatch_transaction(txn_id: str, payload: UnmatchInput = UnmatchInput(), current_user: User = Depends(get_current_user)):
+    if not _perm_match_bank(current_user):
+        raise HTTPException(403, "Access denied. Unmatching requires Match permission — request access from your admin.")
     txn = await db.bank_transactions.find_one({"id": txn_id}, {"_id": 0})
     if not txn:
         raise HTTPException(404, "Bank transaction not found.")
-    if txn.get("journal_entry_id"):
-        await db.journal_lines.delete_many({"entry_id": txn["journal_entry_id"]})
-        await db.journal_entries.delete_one({"id": txn["journal_entry_id"]})
+    if not txn.get("matched_type"):
+        raise HTTPException(400, "This transaction isn't matched.")
+
+    previous_match = {"type": txn.get("matched_type"), "id": txn.get("matched_id"), "label": txn.get("matched_label")}
+    await _revert_match_effects(txn)
     await db.bank_transactions.update_one(
-        {"id": txn_id}, {"$set": {"matched_type": None, "matched_id": None, "matched_label": None, "journal_entry_id": None}}
+        {"id": txn_id},
+        {"$set": {"matched_type": None, "matched_id": None, "matched_label": None, "journal_entry_id": None, "prev_match_status": None}}
     )
+    await _log_recon_audit(txn, "unmatched", current_user, previous_match=previous_match, reason=payload.reason)
     return {"success": True}
+
+
+class IgnoreInput(BaseModel):
+    ignored: bool = True
+
+
+@router.post("/bank-transactions/{txn_id}/ignore")
+async def ignore_transaction(txn_id: str, payload: IgnoreInput = IgnoreInput(), current_user: User = Depends(get_current_user)):
+    """Marks an unmatched transaction as ignored (e.g. an internal transfer or
+    bank charge that will never have an invoice) so it stops showing up in
+    the Unmatched queue. Persisted — unlike a client-side-only flag, it
+    survives a page reload. Does not touch matched_type/matched_id, so an
+    ignored transaction can still be matched later if that changes."""
+    if not _perm_match_bank(current_user):
+        raise HTTPException(403, "Access denied. Ignoring a transaction requires Match permission — request access from your admin.")
+    txn = await db.bank_transactions.find_one({"id": txn_id}, {"_id": 0})
+    if not txn:
+        raise HTTPException(404, "Bank transaction not found.")
+    await db.bank_transactions.update_one({"id": txn_id}, {"$set": {"ignored": bool(payload.ignored)}})
+    return {"success": True, "ignored": bool(payload.ignored)}
 
 
 @router.delete("/bank-transactions/{txn_id}")
