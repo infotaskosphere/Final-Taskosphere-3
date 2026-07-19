@@ -3047,3 +3047,31 @@ async def upcoming_holidays(current_user=Depends(check_module_permission("email_
         ]}
     except Exception as e:
         return {"events": [], "error": str(e)}
+
+
+# ── Phase 11 Notification Engine Delegation ────────────────────────────────
+
+class DelegateNotificationRequest(BaseModel):
+    company_id: str
+    user_id: str
+    channel: str
+    template_name: str
+    context: Dict[str, Any]
+
+
+@router.post("/delegate-notification")
+async def delegate_notification_to_engine(
+    body: DelegateNotificationRequest,
+    current_user=Depends(check_module_permission("email_accounts", "view"))
+):
+    """Delegates a notification dispatch to Phase 11's centralized notification engine."""
+    from backend.workflow.notification_engine import NotificationEngine
+    result = await NotificationEngine.send_notification(
+        company_id=body.company_id,
+        user_id=body.user_id,
+        channel=body.channel,
+        template_name=body.template_name,
+        context=body.context
+    )
+    return result
+
