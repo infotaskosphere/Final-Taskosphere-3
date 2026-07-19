@@ -606,7 +606,23 @@ async def build_ledger_preview(company_id: str, extracted: dict) -> dict:
         narration = f"AI zero-touch entry — Sale to {vendor}, Invoice {inv_no}{fx_suffix}"
 
     elif doc_type == "PURCHASE":
-        expense_code, category_label = await classify_expense_account(company_id, vendor)
+        expense_code = None
+        category_label = None
+        
+        # Check Vendor Learning Engine recommendations
+        try:
+            from backend.ai.vendor_mapper import find_best_vendor_match
+            gst_val = (extracted.get("tax_registration_number") or "").strip().upper()
+            profile, score, _ = await find_best_vendor_match(vendor, gst_val)
+            if profile and profile.get("confidence_score", 0.0) >= 0.60:
+                expense_code = profile.get("default_ledger")
+                category_label = profile.get("expense_category")
+        except Exception as v_err:
+            _zte_logger.error(f"Error querying vendor recommendations: {v_err}", exc_info=True)
+            
+        if not expense_code:
+            expense_code, category_label = await classify_expense_account(company_id, vendor)
+            
         expense_id = await ac.get_default_account_id(company_id, expense_code)
         lines = [
             {"account_id": expense_id, "account_name": category_label, "debit": taxable_value, "credit": 0,
@@ -832,6 +848,50 @@ async def approve_document(doc_id: str, current_user: User = Depends(get_current
         await ai_router.update_accounting_memory(doc, entry, current_user.id)
     except Exception as e:
         _zte_logger.error(f"Failed to update AI accounting memory: {e}", exc_info=True)
+
+    # Update Vendor Learning Engine with final ledger, narration, corrections, and posting success
+    try:
+        from backend.ai.vendor_learning import record_manual_correction, learn_vendor_profile
+        
+        extracted = doc.get("extracted") or {}
+        vendor_name = extracted.get("vendor_or_customer_name") or ""
+        gstin = extracted.get("tax_registration_number") or ""
+        
+        if vendor_name:
+            final_preview = doc.get("preview") or {}
+            final_lines = final_preview.get("lines") or []
+            final_narration = final_preview.get("narration") or ""
+            
+            # Find the final expense account code
+            final_expense_account_code = "5000"
+            final_expense_category = "Purchases (uncategorised)"
+            for l in final_lines:
+                if l.get("debit", 0) > 0 and "GST" not in l.get("account_name", ""):
+                    final_expense_account_code = l.get("account_id", "5000")
+                    final_expense_category = l.get("account_name", "Purchases (uncategorised)")
+                    break
+                    
+            # Record corrections
+            corrections = {
+                "ledger": final_expense_account_code,
+                "expense_category": final_expense_category,
+                "narration": final_narration,
+                "gst_treatment": extracted.get("preferred_gst_treatment") or "Regular",
+                "posting_success": True
+            }
+            await record_manual_correction(vendor_name, gstin, corrections)
+            
+            # Also learn from this successfully approved transaction to reinforce pattern
+            learning_data = {
+                "document_type": extracted.get("document_type") or "PURCHASE",
+                "total_invoice_value": float(extracted.get("total_invoice_value") or doc.get("amount_inr") or 0.0),
+                "currency": extracted.get("currency") or "INR",
+                "tax_rate": float(extracted.get("tax_breakup", {}).get("cgst", 0.0) or 0.0),
+            }
+            await learn_vendor_profile(vendor_name, gstin, learning_data)
+            _zte_logger.info("Vendor Profile updated successfully after successful journal posting")
+    except Exception as learn_err:
+        _zte_logger.error(f"Error in Vendor Learning after posting: {learn_err}", exc_info=True)
 
     return {"success": True, "journal_entry_id": entry["id"], "fx": doc.get("fx")}
 
