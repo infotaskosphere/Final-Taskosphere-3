@@ -697,3 +697,36 @@ async def ai_get_workflow_kpis(company_id: str):
     return await KPIEngine.list_kpi_trend(company_id=company_id)
 
 
+# ── Phase 12 AI-Driven Copilot Bridge Endpoint ─────────────────────────────────
+
+class CopilotQueryRequest(BaseModel):
+    query: str
+    session_id: Optional[str] = None
+    role_preset: Optional[str] = "assistant"
+
+
+@router.post("/copilot/query")
+async def ai_copilot_query_bridge(body: CopilotQueryRequest):
+    """Bridge endpoint to dispatch natural language query to the enterprise Copilot."""
+    from backend.copilot.copilot_engine import CopilotEngine
+    class FallbackUser:
+        id = "system"
+        company_id = "default_comp"
+        tenant_id = "default_tenant"
+        role = "admin"
+        permissions = {"can_view_reports": True}
+        
+    user = FallbackUser()
+    try:
+        return await CopilotEngine.process_copilot_request(
+            user=user,
+            session_id=body.session_id,
+            query=body.query,
+            role_preset=body.role_preset
+        )
+    except Exception as e:
+        logger.error(f"Failed to execute copilot bridge query: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
