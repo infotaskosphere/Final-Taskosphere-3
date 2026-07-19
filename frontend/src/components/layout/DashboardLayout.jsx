@@ -544,7 +544,7 @@ const DashboardLayout = ({ children }) => {
             <motion.button
               whileTap={{ scale: 0.95 }}
               onClick={() => setSearchOpen(true)}
-              className={`p-2 rounded-xl border flex items-center justify-center transition-all cursor-pointer ${
+              className={`p-2 rounded-lg border flex items-center justify-center transition-all cursor-pointer ${
                 isDark 
                   ? 'border-slate-600 hover:border-slate-500 hover:bg-slate-800 text-slate-300' 
                   : 'border-slate-200 hover:border-slate-300 hover:bg-slate-100 text-slate-600'
@@ -556,17 +556,17 @@ const DashboardLayout = ({ children }) => {
 
             {/* AI Copilot Side Drawer Toggle */}
             <motion.button
+              whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               onClick={() => setCopilotOpen(true)}
-              className={`relative p-2 rounded-xl border flex items-center justify-center transition-all cursor-pointer ${
-                isDark 
-                  ? 'border-slate-600 hover:border-slate-500 hover:bg-slate-800 text-blue-400' 
-                  : 'border-slate-200 hover:border-slate-300 hover:bg-slate-100 text-blue-600'
-              }`}
+              className="relative p-2 rounded-lg flex items-center justify-center transition-all cursor-pointer shadow-[0_1px_2px_rgba(15,23,42,0.15)]"
+              style={{
+                background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 55%, #4338ca 100%)',
+              }}
               title="AI Copilot Engine"
             >
-              <BrainCircuit className="h-4 w-4" />
-              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-500 border border-white dark:border-slate-900 animate-pulse" />
+              <BrainCircuit className="h-4 w-4 text-white" strokeWidth={2.25} />
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-white dark:border-slate-900 animate-pulse" />
             </motion.button>
 
             <NotificationBell />
