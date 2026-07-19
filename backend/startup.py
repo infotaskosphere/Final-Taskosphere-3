@@ -107,6 +107,13 @@ async def startup_event():
         except Exception as e:
             logger.error(f"Failed to initialize vendor intelligence indexes: {e}")
 
+        # ✅ Initialize OCR indexes
+        try:
+            from backend.ai.ocr_storage import init_ocr_indexes
+            await init_ocr_indexes()
+        except Exception as e:
+            logger.error(f"Failed to initialize OCR indexes: {e}")
+
         # ✅ START SCHEDULER
         if not scheduler.running:
             scheduler.start()
