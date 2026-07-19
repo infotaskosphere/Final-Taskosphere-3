@@ -3,7 +3,7 @@ import { format, parseISO } from 'date-fns';
 import { toast } from 'sonner';
 import {
   Landmark, Plus, UploadCloud, RefreshCw, CheckCircle2, AlertTriangle,
-  Trash2, Link2, Unlink, X, ChevronRight,
+  Trash2, Link2, Unlink, X, ChevronRight, Search, Edit3, Eye, History, Ban,
 } from 'lucide-react';
 import GifLoader, { MiniLoader, ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,33 @@ const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2', emeraldGreen: '#1FA
 const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 const fmtDate = (value) => { if (!value) return '—'; try { return format(parseISO(value), 'dd MMM yyyy'); } catch { return value; } };
 
+// ─── Smart client-side suggestion scorer (amount + date + narration + party) ───
+function scoreInvoiceMatch(txn, inv) {
+  let score = 0;
+  const txnAmt = Number(txn.debit || txn.credit || 0);
+  const invAmt = Number(inv.total || inv.grand_total || inv.amount || 0);
+  if (txnAmt > 0 && invAmt > 0) {
+    const diff = Math.abs(txnAmt - invAmt) / Math.max(txnAmt, invAmt);
+    if (diff < 0.001) score += 55;
+    else if (diff < 0.02) score += 45;
+    else if (diff < 0.05) score += 30;
+    else if (diff < 0.1) score += 15;
+  }
+  try {
+    const td = new Date(txn.date), id = new Date(inv.invoice_date || inv.date);
+    const days = Math.abs((td - id) / 86400000);
+    if (days <= 1) score += 20;
+    else if (days <= 7) score += 14;
+    else if (days <= 30) score += 7;
+  } catch {}
+  const desc = ((txn.description || '') + ' ' + (txn.reference || '')).toLowerCase();
+  const party = (inv.customer_name || inv.vendor_name || inv.party_name || '').toLowerCase();
+  if (party && desc.includes(party.split(' ')[0])) score += 15;
+  const invNo = (inv.invoice_number || inv.number || '').toLowerCase();
+  if (invNo && desc.includes(invNo)) score += 10;
+  return Math.min(99, Math.max(0, Math.round(score)));
+}
+
 function BankAccountsInner() {
   const isDark = useDark();
   const fileRef = useRef(null);
@@ -36,17 +63,24 @@ function BankAccountsInner() {
   const [form, setForm] = useState({ bank_name: '', account_holder: '', account_number: '', ifsc: '', branch: '', account_type: 'current', opening_balance: 0, upi_id: '', company_id: '' });
   const [savingAccount, setSavingAccount] = useState(false);
 
+  // Manual match state
+  const [filter, setFilter] = useState('all');
+  const [selectedIds, setSelectedIds] = useState({});
+  const [matchDialog, setMatchDialog] = useState(null);
+  const [auditDialog, setAuditDialog] = useState(null);
+  const [progress, setProgress] = useState(null);
+  const [invoiceCache, setInvoiceCache] = useState([]);
+  const [invoiceSearch, setInvoiceSearch] = useState('');
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
+
   const fetchAccounts = async () => {
     setLoading(true);
     try {
       const { data } = await api.get('/bank-accounts');
       setAccounts(data || []);
       if (data?.length && !selected) setSelected(data[0]);
-    } catch {
-      toast.error('Failed to load bank accounts');
-    } finally {
-      setLoading(false);
-    }
+    } catch { toast.error('Failed to load bank accounts'); }
+    finally { setLoading(false); }
   };
 
   const fetchTransactions = async (bankAccountId) => {
@@ -55,11 +89,9 @@ function BankAccountsInner() {
     try {
       const { data } = await api.get(`/bank-accounts/${bankAccountId}/transactions`);
       setTransactions(data || []);
-    } catch {
-      toast.error('Failed to load transactions');
-    } finally {
-      setTxnLoading(false);
-    }
+      setSelectedIds({});
+    } catch { toast.error('Failed to load transactions'); }
+    finally { setTxnLoading(false); }
   };
 
   useEffect(() => {
@@ -74,23 +106,25 @@ function BankAccountsInner() {
     return { totalBalance, accountCount: accounts.length, matched, unmatched: transactions.length - matched };
   }, [accounts, transactions]);
 
+  const visibleTxns = useMemo(() => {
+    if (filter === 'matched') return transactions.filter(t => t.matched_type);
+    if (filter === 'unmatched') return transactions.filter(t => !t.matched_type && !t.ignored);
+    if (filter === 'ignored') return transactions.filter(t => t.ignored);
+    return transactions;
+  }, [transactions, filter]);
+
   const createAccount = async () => {
     if (!form.bank_name.trim()) { toast.error('Bank name is required'); return; }
     setSavingAccount(true);
     try {
       await api.post('/bank-accounts', form);
-      // Sync this account into Invoice + Quotation settings for the linked
-      // company so the same bank details appear in all three places.
       if (form.company_id) mirrorBankToSettings(form.company_id, bankFromAccount(form));
       toast.success(form.company_id ? 'Bank account added & synced to invoice/quotation settings' : 'Bank account added');
       setShowNewAccount(false);
       setForm({ bank_name: '', account_holder: '', account_number: '', ifsc: '', branch: '', account_type: 'current', opening_balance: 0, upi_id: '', company_id: '' });
       await fetchAccounts();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed to add bank account');
-    } finally {
-      setSavingAccount(false);
-    }
+    } catch (err) { toast.error(err.response?.data?.detail || 'Failed to add bank account'); }
+    finally { setSavingAccount(false); }
   };
 
   const deleteAccount = async (id) => {
@@ -100,20 +134,39 @@ function BankAccountsInner() {
       toast.success('Bank account deleted');
       if (selected?.id === id) setSelected(null);
       await fetchAccounts();
-    } catch {
-      toast.error('Failed to delete bank account');
-    }
+    } catch { toast.error('Failed to delete bank account'); }
+  };
+
+  // ─── Live progress driver ────────────────────────────────────────
+  const runProgress = () => {
+    const steps = [
+      { label: 'Preparing Document', pct: 5 },
+      { label: 'Converting Pages', pct: 15 },
+      { label: 'Reading Batches (OCR)', pct: 45 },
+      { label: 'Extracting Transactions', pct: 65 },
+      { label: 'Matching Ledger', pct: 82 },
+      { label: 'Posting Entries', pct: 94 },
+    ];
+    let i = 0;
+    setProgress({ ...steps[0], step: 1, total: steps.length });
+    const timer = setInterval(() => {
+      i = Math.min(i + 1, steps.length - 1);
+      setProgress({ ...steps[i], step: i + 1, total: steps.length });
+    }, 1200);
+    return () => clearInterval(timer);
   };
 
   const handleUpload = async () => {
     if (!file || !selected) { toast.error('Choose a statement file first'); return; }
-    const form = new FormData();
-    form.append('file', file);
+    const fd = new FormData();
+    fd.append('file', file);
     setUploading(true);
+    const stop = runProgress();
     try {
-      const { data } = await api.post(`/bank-accounts/${selected.id}/upload-statement`, form, {
+      const { data } = await api.post(`/bank-accounts/${selected.id}/upload-statement`, fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
+      setProgress({ label: 'Completed', pct: 100, step: 6, total: 6 });
       toast.success(`${data.transactions_saved} transactions read · ${data.auto_matched} matched · ${data.auto_posted} posted to ledger`);
       setFile(null);
       if (fileRef.current) fileRef.current.value = '';
@@ -122,19 +175,97 @@ function BankAccountsInner() {
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Could not read this statement');
     } finally {
+      stop();
+      setTimeout(() => setProgress(null), 900);
       setUploading(false);
     }
   };
 
-  const unmatchTxn = async (txnId) => {
+  const unmatchTxn = async (txnId, silent = false) => {
+    if (!silent && !window.confirm('Unmatch this transaction? The reconciliation link and its journal entry will be removed. The invoice, receipt, voucher, ledger and audit history are preserved.')) return false;
     try {
       await api.post(`/bank-transactions/${txnId}/unmatch`);
-      toast.success('Unmatched — journal entry reversed');
+      if (!silent) toast.success('Unmatched — journal entry reversed');
       await fetchTransactions(selected.id);
-    } catch {
-      toast.error('Failed to unmatch');
+      return true;
+    } catch { toast.error('Failed to unmatch'); return false; }
+  };
+
+  const loadInvoices = async () => {
+    if (invoiceCache.length) return;
+    setInvoiceLoading(true);
+    try {
+      const { data } = await api.get('/invoices', { params: { page: 1, page_size: 2000 } });
+      const list = Array.isArray(data) ? data : (data?.items || data?.invoices || []);
+      setInvoiceCache(list);
+    } catch { /* silent */ }
+    finally { setInvoiceLoading(false); }
+  };
+
+  const openMatch = async (txn, mode) => {
+    setInvoiceSearch('');
+    setMatchDialog({ txn, mode });
+    loadInvoices();
+  };
+
+  const confirmMatch = async (txn, inv) => {
+    try {
+      const isDebit = Number(txn.debit || 0) > 0;
+      const matched_type = isDebit ? 'purchase' : 'sale';
+      const matched_label = `${inv.invoice_number || inv.number || ''} · ${inv.customer_name || inv.vendor_name || inv.party_name || ''}`.trim();
+      if (txn.matched_type) {
+        await api.post(`/bank-transactions/${txn.id}/unmatch`);
+      }
+      await api.post(`/bank-transactions/${txn.id}/match`, {
+        matched_type, matched_id: inv.id, matched_label, post_journal: true,
+      });
+      toast.success('Matched · ledger updated');
+      setMatchDialog(null);
+      await fetchTransactions(selected.id);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to match');
     }
   };
+
+  const viewAudit = async (txn) => {
+    try {
+      const { data } = await api.get(`/bank-transactions/${txn.id}/audit-trail`);
+      setAuditDialog({ txn, entries: Array.isArray(data) ? data : (data?.entries || [data]) });
+    } catch { toast.error('No audit trail available'); }
+  };
+
+  const selectedList = Object.keys(selectedIds).filter(k => selectedIds[k]);
+  const bulkUnmatch = async () => {
+    if (!selectedList.length) return;
+    if (!window.confirm(`Unmatch ${selectedList.length} transactions? Journal entries will be reversed. Invoices and audit history are preserved.`)) return;
+    for (const id of selectedList) { await unmatchTxn(id, true); }
+    toast.success(`${selectedList.length} unmatched`);
+  };
+  const bulkIgnore = () => {
+    if (!selectedList.length) return;
+    setTransactions(ts => ts.map(t => selectedIds[t.id] ? { ...t, ignored: true } : t));
+    setSelectedIds({});
+    toast.success(`${selectedList.length} marked ignored (local)`);
+  };
+
+  const suggestionsFor = (txn) => {
+    if (!invoiceCache.length) return [];
+    return invoiceCache
+      .map(inv => ({ inv, score: scoreInvoiceMatch(txn, inv) }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 6);
+  };
+
+  const filteredInvoices = useMemo(() => {
+    const q = invoiceSearch.trim().toLowerCase();
+    const base = invoiceCache;
+    if (!q) return base.slice(0, 200);
+    return base.filter(i => {
+      const hay = [i.invoice_number, i.number, i.customer_name, i.vendor_name, i.party_name, i.gstin, i.total, i.amount, i.invoice_date, i.date]
+        .filter(Boolean).join(' ').toLowerCase();
+      return hay.includes(q);
+    }).slice(0, 200);
+  }, [invoiceCache, invoiceSearch]);
 
   if (loading) return <ContentLoader />;
 
@@ -190,20 +321,16 @@ function BankAccountsInner() {
         </div>
 
         <div className="grid lg:grid-cols-[300px_1fr] gap-5">
-          {/* Accounts list */}
           <div className={`rounded-3xl border shadow-sm p-4 h-fit ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
             <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 px-2 mb-2">Your bank accounts</p>
             {accounts.length === 0 ? (
               <p className="text-sm text-slate-400 p-3">No bank accounts yet. Add one to get started.</p>
             ) : accounts.map(a => (
-              <button
-                key={a.id} onClick={() => setSelected(a)}
+              <button key={a.id} onClick={() => setSelected(a)}
                 className={`w-full text-left rounded-2xl p-3 mb-2 border transition flex items-center justify-between gap-2 ${
-                  selected?.id === a.id
-                    ? 'border-blue-300 bg-blue-50/60'
-                    : isDark ? 'border-slate-700 hover:bg-slate-700/40' : 'border-slate-100 hover:bg-slate-50'
-                }`}
-              >
+                  selected?.id === a.id ? 'border-blue-300 bg-blue-50/60'
+                  : isDark ? 'border-slate-700 hover:bg-slate-700/40' : 'border-slate-100 hover:bg-slate-50'
+                }`}>
                 <div className="min-w-0">
                   <p className={`font-bold text-sm truncate ${isDark && selected?.id !== a.id ? 'text-slate-100' : 'text-slate-900'}`}>{a.bank_name}</p>
                   <p className="text-xs text-slate-400 truncate">{a.account_number_masked || a.account_holder}</p>
@@ -216,16 +343,13 @@ function BankAccountsInner() {
                 </div>
                 <div className="flex flex-col items-end gap-1">
                   <ChevronRight className="h-4 w-4 text-slate-300" />
-                  <Trash2
-                    className="h-3.5 w-3.5 text-slate-300 hover:text-rose-500"
-                    onClick={(e) => { e.stopPropagation(); deleteAccount(a.id); }}
-                  />
+                  <Trash2 className="h-3.5 w-3.5 text-slate-300 hover:text-rose-500"
+                    onClick={(e) => { e.stopPropagation(); deleteAccount(a.id); }} />
                 </div>
               </button>
             ))}
           </div>
 
-          {/* Selected account detail */}
           <div className="space-y-4">
             {!selected ? (
               <div className={`rounded-3xl border shadow-sm py-20 text-center ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
@@ -241,7 +365,7 @@ function BankAccountsInner() {
                     </div>
                     <div>
                       <h2 className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Upload statement — {selected.bank_name}</h2>
-                      <p className="text-xs text-slate-400">CSV, XLSX, or PDF exports from any bank are supported.</p>
+                      <p className="text-xs text-slate-400">CSV, XLSX, or PDF exports. Large PDFs auto-batch (3 pages/req, parallel).</p>
                     </div>
                   </div>
                   <div className={`border-2 border-dashed rounded-2xl p-5 text-center ${isDark ? 'border-slate-700 bg-slate-900/60' : 'border-blue-100 bg-blue-50/60'}`}>
@@ -255,47 +379,105 @@ function BankAccountsInner() {
                         {uploading ? <MiniLoader height={18} /> : 'Read & Match'}
                       </Button>
                     </div>
+                    {progress && (
+                      <div className="mt-4 text-left">
+                        <div className="flex justify-between text-[11px] font-bold text-slate-500 mb-1">
+                          <span>{progress.label}</span>
+                          <span>{progress.pct}%</span>
+                        </div>
+                        <div className="h-2 w-full rounded-full bg-slate-200 overflow-hidden">
+                          <div className="h-full rounded-full transition-all" style={{ width: `${progress.pct}%`, background: COLORS.mediumBlue }} />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 <div className={`rounded-3xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                  <div className="p-4 border-b" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
-                    <h2 className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Transactions</h2>
-                    <p className="text-xs text-slate-400">{transactions.length} rows</p>
+                  <div className="p-4 border-b flex flex-wrap items-center justify-between gap-3" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                    <div>
+                      <h2 className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Transactions</h2>
+                      <p className="text-xs text-slate-400">{visibleTxns.length} of {transactions.length} rows</p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {['all','matched','unmatched','ignored'].map(f => (
+                        <button key={f} onClick={() => setFilter(f)}
+                          className={`text-[11px] font-bold px-3 py-1 rounded-full border transition ${filter === f ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300'}`}>
+                          {f[0].toUpperCase() + f.slice(1)}
+                        </button>
+                      ))}
+                      {selectedList.length > 0 && (
+                        <>
+                          <span className="text-[11px] font-bold text-slate-500 ml-2">{selectedList.length} selected</span>
+                          <Button size="sm" variant="outline" className="rounded-full h-7 text-xs" onClick={bulkUnmatch}>Bulk Unmatch</Button>
+                          <Button size="sm" variant="outline" className="rounded-full h-7 text-xs" onClick={bulkIgnore}>Bulk Ignore</Button>
+                          <Button size="sm" variant="outline" className="rounded-full h-7 text-xs" onClick={() => { setSelectedIds({}); loadInvoices(); toast.success('Suggestions refreshed'); }}>Refresh Suggestions</Button>
+                        </>
+                      )}
+                    </div>
                   </div>
                   <div className="divide-y max-h-[600px] overflow-y-auto" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
                     {txnLoading ? (
                       <div className="p-10 text-center"><MiniLoader height={24} /></div>
-                    ) : transactions.length === 0 ? (
+                    ) : visibleTxns.length === 0 ? (
                       <div className="py-16 text-center">
-                        <p className="text-sm font-semibold text-slate-400">No transactions yet</p>
-                        <p className="text-xs text-slate-400 mt-1">Upload a statement above to get started.</p>
+                        <p className="text-sm font-semibold text-slate-400">No transactions to show</p>
+                        <p className="text-xs text-slate-400 mt-1">Upload a statement above or switch the filter.</p>
                       </div>
-                    ) : transactions.map(t => (
-                      <div key={t.id} className={`p-4 flex items-center justify-between gap-4 ${isDark ? 'hover:bg-slate-700/40' : 'hover:bg-slate-50'}`}>
-                        <div className="min-w-0">
-                          <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{t.description || 'No description'}</p>
-                          <p className="text-xs text-slate-400 mt-0.5">{fmtDate(t.date)} {t.reference ? `· ${t.reference}` : ''}</p>
-                          {t.matched_type ? (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 mt-1">
-                              <Link2 className="h-3 w-3" /> Matched · {t.matched_label} {t.journal_entry_id ? '· posted' : ''}
-                            </span>
-                          ) : (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 mt-1 inline-block">Unmatched</span>
-                          )}
+                    ) : visibleTxns.map(t => {
+                      const top = invoiceCache.length ? suggestionsFor(t)[0] : null;
+                      return (
+                        <div key={t.id} className={`p-4 flex items-start gap-3 ${isDark ? 'hover:bg-slate-700/40' : 'hover:bg-slate-50'} ${t.ignored ? 'opacity-60' : ''}`}>
+                          <input type="checkbox" className="mt-1"
+                            checked={!!selectedIds[t.id]}
+                            onChange={e => setSelectedIds(s => ({ ...s, [t.id]: e.target.checked }))} />
+                          <div className="min-w-0 flex-1">
+                            <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{t.description || 'No description'}</p>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                              {fmtDate(t.date)} {t.reference ? `· ${t.reference}` : ''}
+                            </p>
+                            <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                              {t.ignored ? (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">Ignored</span>
+                              ) : t.matched_type ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                  <Link2 className="h-3 w-3" /> Matched · {t.matched_label || t.matched_type} {t.journal_entry_id ? '· posted' : ''}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Unmatched</span>
+                              )}
+                              {!t.matched_type && top && top.score >= 30 && (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                  Suggested: {top.inv.invoice_number || top.inv.number || '—'} · {top.score}%
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap gap-1.5 mt-2">
+                              {t.matched_type ? (
+                                <>
+                                  <button onClick={() => openMatch(t, 'edit')} className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-blue-400 hover:text-blue-600 inline-flex items-center gap-1"><Edit3 className="h-3 w-3" /> Edit Match</button>
+                                  <button onClick={() => unmatchTxn(t.id)} className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-rose-400 hover:text-rose-600 inline-flex items-center gap-1"><Unlink className="h-3 w-3" /> Unmatch</button>
+                                  {t.matched_id && (
+                                    <a href={`/invoicing?open=${t.matched_id}`} target="_blank" rel="noreferrer" className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-slate-400 inline-flex items-center gap-1"><Eye className="h-3 w-3" /> Invoice</a>
+                                  )}
+                                  <button onClick={() => viewAudit(t)} className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-slate-400 inline-flex items-center gap-1"><History className="h-3 w-3" /> Audit</button>
+                                </>
+                              ) : (
+                                <>
+                                  <button onClick={() => openMatch(t, 'match')} className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-emerald-400 hover:text-emerald-600 inline-flex items-center gap-1"><Search className="h-3 w-3" /> Match</button>
+                                  <button onClick={() => setTransactions(ts => ts.map(x => x.id === t.id ? { ...x, ignored: !x.ignored } : x))} className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-slate-400 inline-flex items-center gap-1"><Ban className="h-3 w-3" /> Ignore</button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <p className={`font-bold ${t.debit ? 'text-rose-500' : 'text-emerald-600'}`}>
+                              {t.debit ? `- ${fmtC(t.debit)}` : `+ ${fmtC(t.credit)}`}
+                            </p>
+                          </div>
                         </div>
-                        <div className="text-right flex-shrink-0 flex items-center gap-3">
-                          <p className={`font-bold ${t.debit ? 'text-rose-500' : 'text-emerald-600'}`}>
-                            {t.debit ? `- ${fmtC(t.debit)}` : `+ ${fmtC(t.credit)}`}
-                          </p>
-                          {t.matched_type && (
-                            <button onClick={() => unmatchTxn(t.id)} title="Unmatch" className="text-slate-300 hover:text-rose-500">
-                              <Unlink className="h-4 w-4" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               </>
@@ -303,6 +485,80 @@ function BankAccountsInner() {
           </div>
         </div>
       </div>
+
+      {/* Match / Edit Match dialog */}
+      <Dialog open={!!matchDialog} onOpenChange={(o) => { if (!o) setMatchDialog(null); }}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{matchDialog?.mode === 'edit' ? 'Edit Match' : 'Match Transaction'}</DialogTitle>
+          </DialogHeader>
+          {matchDialog && (
+            <div className="space-y-3">
+              <div className="rounded-xl border p-3 bg-slate-50 text-sm">
+                <div className="flex justify-between">
+                  <div>
+                    <p className="font-bold text-slate-800">{matchDialog.txn.description || 'Transaction'}</p>
+                    <p className="text-xs text-slate-500">{fmtDate(matchDialog.txn.date)} · {matchDialog.txn.reference || '—'}</p>
+                  </div>
+                  <p className={`font-bold ${matchDialog.txn.debit ? 'text-rose-500' : 'text-emerald-600'}`}>
+                    {matchDialog.txn.debit ? `- ${fmtC(matchDialog.txn.debit)}` : `+ ${fmtC(matchDialog.txn.credit)}`}
+                  </p>
+                </div>
+              </div>
+              <div className="relative">
+                <Search className="h-4 w-4 absolute left-3 top-3 text-slate-400" />
+                <Input placeholder="Search by invoice #, party, GSTIN, amount, date, voucher…" className="pl-9" value={invoiceSearch} onChange={e => setInvoiceSearch(e.target.value)} />
+              </div>
+              <div className="max-h-[420px] overflow-y-auto divide-y border rounded-xl">
+                {invoiceLoading ? (
+                  <div className="p-6 text-center"><MiniLoader height={22} /></div>
+                ) : filteredInvoices.length === 0 ? (
+                  <p className="p-6 text-center text-sm text-slate-400">No invoices found.</p>
+                ) : (
+                  filteredInvoices
+                    .map(inv => ({ inv, score: scoreInvoiceMatch(matchDialog.txn, inv) }))
+                    .sort((a, b) => b.score - a.score)
+                    .map(({ inv, score }) => (
+                      <button key={inv.id} onClick={() => confirmMatch(matchDialog.txn, inv)}
+                        className="w-full text-left p-3 hover:bg-blue-50 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold text-slate-800 truncate">
+                            {inv.invoice_number || inv.number || '—'} · {inv.customer_name || inv.vendor_name || inv.party_name || '—'}
+                          </p>
+                          <p className="text-xs text-slate-500">{fmtDate(inv.invoice_date || inv.date)} · {inv.gstin || ''}</p>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <p className="text-sm font-bold text-slate-700">{fmtC(inv.total || inv.grand_total || inv.amount)}</p>
+                          <p className={`text-[10px] font-bold ${score >= 70 ? 'text-emerald-600' : score >= 40 ? 'text-amber-600' : 'text-slate-400'}`}>{score}% match</p>
+                        </div>
+                      </button>
+                    ))
+                )}
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Confirming will {matchDialog.mode === 'edit' ? 'reverse the previous reconciliation and create a new one' : 'create a new reconciliation'} — invoice status, ledger and dashboard update automatically.
+              </p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Audit trail dialog */}
+      <Dialog open={!!auditDialog} onOpenChange={(o) => { if (!o) setAuditDialog(null); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader><DialogTitle>Audit trail</DialogTitle></DialogHeader>
+          {auditDialog && (
+            <div className="space-y-2 max-h-[420px] overflow-y-auto text-sm">
+              {(auditDialog.entries || []).length === 0 && <p className="text-slate-400">No audit entries.</p>}
+              {(auditDialog.entries || []).map((e, i) => (
+                <div key={i} className="border rounded-lg p-3 bg-slate-50">
+                  <pre className="text-[11px] whitespace-pre-wrap break-all text-slate-700">{JSON.stringify(e, null, 2)}</pre>
+                </div>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={showNewAccount} onOpenChange={setShowNewAccount}>
         <DialogContent className="sm:max-w-md">
