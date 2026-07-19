@@ -1953,8 +1953,6 @@ export default function Attendance() {
   const [leaveTo,           setLeaveTo]           = useState(null);
   const [leaveReason,       setLeaveReason]       = useState('');
   const [holidayRows,       setHolidayRows]       = useState([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]);
-  const [showHalfDayModal,  setShowHalfDayModal]  = useState(false);
-  const [halfDayRows,       setHalfDayRows]       = useState([{ date: format(new Date(), 'yyyy-MM-dd'), session: 'morning', reason: '' }]);
   const [liveDuration,      setLiveDuration]      = useState('0h 0m');
 
   const [reminders,          setReminders]          = useState([]);
@@ -2604,28 +2602,6 @@ export default function Attendance() {
     setHolidayRows([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]);
     await fetchData();
   }, [holidayRows, fetchData]);
-
-  const handleAddHalfDays = useCallback(async () => {
-    const rows = halfDayRows.filter(r => r.date);
-    if (!rows.length) { toast.error('Add at least one half day'); return; }
-    let ok = 0; const errs = [];
-    for (const r of rows) {
-      try {
-        await api.post('/attendance/apply-leave', {
-          from_date: r.date,
-          to_date: r.date,
-          reason: r.reason || 'Half Day',
-          leave_type: r.session === 'afternoon' ? 'half_day_afternoon' : 'half_day_morning',
-        });
-        ok++;
-      } catch (e) { errs.push(`${r.date}: ${e?.response?.data?.detail || 'error'}`); }
-    }
-    if (ok) toast.success(`${ok} half day(s) saved`);
-    errs.forEach(e => toast.error(e));
-    setShowHalfDayModal(false);
-    setHalfDayRows([{ date: format(new Date(), 'yyyy-MM-dd'), session: 'morning', reason: '' }]);
-    await fetchData();
-  }, [halfDayRows, fetchData]);
 
   const handlePdfImport = useCallback(async (e) => {
     const file = e.target.files?.[0]; if (!file) return;
@@ -4458,14 +4434,6 @@ export default function Attendance() {
                       style={{ backgroundColor: COLORS.amber }}>
                       <Zap className="w-3 h-3 mr-1" /> Auto Sync
                     </Button>
-                    <Button size="sm" onClick={() => {
-                      setHalfDayRows([{ date: format(new Date(), 'yyyy-MM-dd'), session: 'morning', reason: '' }]);
-                      setShowHalfDayModal(true);
-                    }}
-                      className="h-8 px-3 text-xs font-semibold text-white rounded-lg"
-                      style={{ backgroundColor: COLORS.mediumBlue }}>
-                      <Plus className="w-3 h-3 mr-1" /> Add Half Day
-                    </Button>
                   </div>
                 )}
               />
@@ -5596,126 +5564,6 @@ export default function Attendance() {
                     Save {holidayRows.filter(r => r.name.trim()).length > 1
                       ? `${holidayRows.filter(r => r.name.trim()).length} Holidays`
                       : 'Holiday'}
-                  </Button>
-                </div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Add Half Day Modal */}
-        <AnimatePresence>
-          {showHalfDayModal && (
-            <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-              style={{ background: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(15,23,42,0.75)', backdropFilter: 'blur(8px)' }}
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <motion.div
-                className="w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
-                style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0' }}
-                initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
-                transition={{ type: 'spring', stiffness: 220, damping: 20 }}
-              >
-                {/* Header */}
-                <div className="px-6 py-5 text-white flex items-center justify-between flex-shrink-0"
-                  style={{ background: `linear-gradient(135deg, ${COLORS.mediumBlue}, #1e40af)` }}>
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center">
-                      <CalendarIcon className="w-4.5 h-4.5 text-white" />
-                    </div>
-                    <div>
-                      <h2 className="text-lg font-black">Add Half Day</h2>
-                      <p className="text-blue-200 text-xs">Add one or multiple half days at once</p>
-                    </div>
-                  </div>
-                  <button onClick={() => { setShowHalfDayModal(false); setHalfDayRows([{ date: format(new Date(), 'yyyy-MM-dd'), session: 'morning', reason: '' }]); }}
-                    className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center">
-                    <X className="w-4 h-4 text-white" />
-                  </button>
-                </div>
-
-                {/* Half Day Rows */}
-                <div className="flex-1 overflow-y-auto px-6 pt-4 pb-2 space-y-3" style={{ maxHeight: 360 }}>
-                  {halfDayRows.map((row, idx) => (
-                    <div key={idx} className="flex items-end gap-2">
-                      <div className="space-y-1" style={{ minWidth: 150 }}>
-                        <label className="text-xs font-semibold text-slate-500 dark:text-slate-400">Date *</label>
-                        <input
-                          type="date"
-                          value={row.date}
-                          onChange={e => {
-                            const rows = [...halfDayRows];
-                            rows[idx] = { ...rows[idx], date: e.target.value };
-                            setHalfDayRows(rows);
-                          }}
-                          className={inputCls}
-                          style={inputStyle}
-                        />
-                      </div>
-                      <div className="space-y-1" style={{ minWidth: 130 }}>
-                        <label className="text-xs font-semibold text-slate-500 dark:text-slate-400">Session</label>
-                        <select
-                          value={row.session}
-                          onChange={e => {
-                            const rows = [...halfDayRows];
-                            rows[idx] = { ...rows[idx], session: e.target.value };
-                            setHalfDayRows(rows);
-                          }}
-                          className={inputCls}
-                          style={inputStyle}
-                        >
-                          <option value="morning">Morning</option>
-                          <option value="afternoon">Afternoon</option>
-                        </select>
-                      </div>
-                      <div className="flex-1 space-y-1">
-                        <label className="text-xs font-semibold text-slate-500 dark:text-slate-400">Reason</label>
-                        <input
-                          type="text"
-                          value={row.reason}
-                          onChange={e => {
-                            const rows = [...halfDayRows];
-                            rows[idx] = { ...rows[idx], reason: e.target.value };
-                            setHalfDayRows(rows);
-                          }}
-                          placeholder="Optional reason…"
-                          className={inputCls}
-                          style={inputStyle}
-                        />
-                      </div>
-                      {halfDayRows.length > 1 && (
-                        <button
-                          onClick={() => setHalfDayRows(prev => prev.filter((_, i) => i !== idx))}
-                          className="mb-0.5 w-8 h-10 flex items-center justify-center rounded-xl text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex-shrink-0">
-                          <X className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-
-                  <button
-                    onClick={() => setHalfDayRows(prev => [...prev, { date: format(new Date(), 'yyyy-MM-dd'), session: 'morning', reason: '' }])}
-                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all"
-                    style={{ color: COLORS.mediumBlue }}>
-                    <Plus className="w-3.5 h-3.5" /> Add Another Half Day
-                  </button>
-                </div>
-
-                {/* Footer */}
-                <div className="px-6 py-4 flex justify-end gap-2 flex-shrink-0 border-t"
-                  style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
-                  <Button variant="ghost" onClick={() => { setShowHalfDayModal(false); setHalfDayRows([{ date: format(new Date(), 'yyyy-MM-dd'), session: 'morning', reason: '' }]); }}
-                    className="font-semibold rounded-xl" style={{ color: isDark ? D.muted : undefined }}>
-                    Cancel
-                  </Button>
-                  <Button
-                    disabled={halfDayRows.every(r => !r.date)}
-                    onClick={handleAddHalfDays}
-                    className="font-semibold text-white rounded-xl px-5"
-                    style={{ backgroundColor: COLORS.mediumBlue }}>
-                    <CheckCircle2 className="w-4 h-4 mr-1.5" />
-                    Save {halfDayRows.filter(r => r.date).length > 1
-                      ? `${halfDayRows.filter(r => r.date).length} Half Days`
-                      : 'Half Day'}
                   </Button>
                 </div>
               </motion.div>
