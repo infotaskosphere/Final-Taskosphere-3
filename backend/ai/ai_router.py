@@ -116,6 +116,41 @@ async def process_ocr(contents: bytes, filename: str, document_id: str = None) -
         # Fallback to basic text content extraction if everything fails
         return get_document_text_content(contents, filename)
 
+
+async def _orchestrate_gst(result: dict, current_user: Any, document_id: str) -> dict:
+    """Delegates GST processing to the GST Intelligence Engine."""
+    try:
+        from backend.gst_ai.gst_engine import GSTEngine
+        company_id = getattr(current_user, "company_id", "default_comp") if current_user else "default_comp"
+        user_id = getattr(current_user, "id", "system") if current_user else "system"
+        
+        is_purchase = result.get("document_type") != "Sales Invoice"
+        invoice_payload = {
+            "id": document_id,
+            "invoice_no": result.get("invoice_number") or result.get("invoice_no") or "",
+            "invoice_date": result.get("invoice_date") or "",
+            "supplier_gstin": result.get("tax_registration_number") or "",
+            "recipient_gstin": getattr(current_user, "gstin", "") if current_user else "",
+            "taxable_value": result.get("taxable_value") or result.get("taxable_amount") or 0.0,
+            "invoice_value": result.get("total_invoice_value") or result.get("invoice_total") or 0.0,
+            "cgst": result.get("cgst") or 0.0,
+            "sgst": result.get("sgst") or 0.0,
+            "igst": result.get("igst") or 0.0,
+            "rate": result.get("rate") or result.get("tax_rate") or 18.0,
+            "is_purchase": is_purchase
+        }
+        
+        gst_res = await GSTEngine.process_gst(
+            invoice_data=invoice_payload,
+            company_id=company_id,
+            user_id=user_id
+        )
+        result["gst_intelligence"] = gst_res
+        logger.info("GST Intelligence orchestrated successfully.")
+    except Exception as gst_err:
+        logger.error(f"Failed to orchestrate GST Intelligence: {gst_err}", exc_info=True)
+    return result
+
 async def process_document(
     contents: bytes,
     filename: str,
@@ -298,6 +333,7 @@ async def process_document(
                 except Exception as e:
                     logger.error(f"Error saving template extraction to AI Memory: {e}", exc_info=True)
                     
+                result = await _orchestrate_gst(result, current_user, document_id)
                 return result
         except Exception as e:
             logger.error(f"Failed to extract using matched template: {e}", exc_info=True)
@@ -440,6 +476,7 @@ async def process_document(
     except Exception as e:
         logger.error(f"Error saving to AI Memory: {e}", exc_info=True)
         
+    result = await _orchestrate_gst(result, current_user, document_id)
     return result
 
 def get_document_text_content(contents: bytes, filename: str) -> str:
