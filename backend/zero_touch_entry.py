@@ -968,6 +968,30 @@ async def approve_document(doc_id: str, current_user: User = Depends(get_current
             }
             await learn_vendor_profile(vendor_name, gstin, learning_data)
             _zte_logger.info("Vendor Profile updated successfully after successful journal posting")
+            
+            # --- PHASE 10 SELF-LEARNING ENGINE ---
+            try:
+                from backend.learning.learning_engine import LearningEngine
+                approved_post_payload = {
+                    "vendor_name": vendor_name,
+                    "ledger_code": final_expense_account_code,
+                    "account_code": final_expense_account_code,
+                    "document_type": extracted.get("document_type") or "PURCHASE",
+                    "total_invoice_value": float(extracted.get("total_invoice_value") or doc.get("amount_inr") or 0.0),
+                    "gst_rate": float(extracted.get("tax_breakup", {}).get("cgst", 0.0) or 0.0) * 2,
+                    "narration": final_narration,
+                    "raw_text": doc.get("raw_ocr_text") or ""
+                }
+                await LearningEngine.process_learning(
+                    company_id=doc["company_id"],
+                    user_id=current_user.id,
+                    event_type="approved_zte_journal",
+                    source_id=doc_id,
+                    data=approved_post_payload
+                )
+                _zte_logger.info("Phase 10 Self-Learning triggered successfully after posting.")
+            except Exception as learn_err10:
+                _zte_logger.error(f"Failed to trigger Phase 10 learning: {learn_err10}", exc_info=True)
     except Exception as learn_err:
         _zte_logger.error(f"Error in Vendor Learning after posting: {learn_err}", exc_info=True)
 
