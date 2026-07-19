@@ -151,6 +151,28 @@ async def _orchestrate_gst(result: dict, current_user: Any, document_id: str) ->
         logger.error(f"Failed to orchestrate GST Intelligence: {gst_err}", exc_info=True)
     return result
 
+
+async def _orchestrate_learning_and_recommendations(result: dict, current_user: Any, document_id: str) -> dict:
+    """Orchestrates Self-Learning and Recommendation Engine for document extraction."""
+    try:
+        from backend.learning.recommendation_engine import RecommendationEngine
+        company_id = getattr(current_user, "company_id", "default_comp") if current_user else "default_comp"
+        
+        # Prepare context data
+        context_data = {
+            "vendor_name": result.get("vendor_or_customer_name") or result.get("vendor_name") or "",
+            "document_type": result.get("document_type") or "",
+            "total_invoice_value": result.get("total_invoice_value") or result.get("invoice_total") or 0.0,
+            "tax_rate": result.get("tax_rate") or result.get("rate") or 0.0
+        }
+        
+        recs = await RecommendationEngine.generate_recommendations(context_data, company_id)
+        result["recommendations"] = recs
+        logger.info("Self-Learning Recommendations orchestrated successfully.")
+    except Exception as err:
+        logger.error(f"Failed to orchestrate learning/recommendations: {err}", exc_info=True)
+    return result
+
 async def process_document(
     contents: bytes,
     filename: str,
@@ -334,6 +356,7 @@ async def process_document(
                     logger.error(f"Error saving template extraction to AI Memory: {e}", exc_info=True)
                     
                 result = await _orchestrate_gst(result, current_user, document_id)
+                result = await _orchestrate_learning_and_recommendations(result, current_user, document_id)
                 return result
         except Exception as e:
             logger.error(f"Failed to extract using matched template: {e}", exc_info=True)
@@ -477,6 +500,7 @@ async def process_document(
         logger.error(f"Error saving to AI Memory: {e}", exc_info=True)
         
     result = await _orchestrate_gst(result, current_user, document_id)
+    result = await _orchestrate_learning_and_recommendations(result, current_user, document_id)
     return result
 
 def get_document_text_content(contents: bytes, filename: str) -> str:
