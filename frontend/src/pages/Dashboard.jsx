@@ -1922,7 +1922,7 @@ export default function Dashboard() {
         <React.Fragment key="metrics">
         {/* KEY METRICS — 6 EQUAL CARDS */}
         <motion.div
-          className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 [&>*]:min-w-0"
+          className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 [&>*]:min-w-0"
           variants={itemVariants}
         >
 
@@ -2065,48 +2065,6 @@ export default function Dashboard() {
               </div>
             </CardContent>
           </motion.div>
-
-          {/* 5. DSC Alerts */}
-          <motion.div
-            whileHover={{ y: -3, transition: springPhysics.card }}
-            whileTap={{ scale: 0.985 }}
-            onClick={() => navigate('/dsc?tab=expired')}
-            style={{ borderLeftWidth: 3, borderLeftColor: '#ef4444' }}
-            className={`${metricCardCls} ${
-              stats?.expiring_dsc_count > 0
-                ? isDark
-                  ? 'bg-red-900/20 border-red-800'
-                  : 'bg-red-50/50 border-red-200'
-                : metricCardDefault
-            }`}
-          >
-            <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
-              <div className="flex items-start justify-between">
-                <div className="min-w-0 flex-1 mr-2">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">DSC</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight text-red-500">
-                    {(stats?.expiring_dsc_count || 0) + (stats?.expired_dsc_count || 0)}
-                  </p>
-                  <p className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                    {stats?.expired_dsc_count || 0} expired
-                  </p>
-                </div>
-                <div
-                  className="p-2 rounded-lg group-hover:scale-110 transition-transform flex-shrink-0"
-                  style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.15)' : '#fef2f2' }}
-                >
-                  <Key className="h-4 w-4 text-red-500" />
-                </div>
-              </div>
-              <div className={`flex items-center gap-1 mt-3 text-xs font-medium group-hover:text-red-500 transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                <span>View all</span>
-                <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
-              </div>
-            </CardContent>
-          </motion.div>
-
-
-
 
           {/* 7. Team Task */}
           <motion.div
