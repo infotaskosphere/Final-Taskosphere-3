@@ -1855,6 +1855,81 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], clients
     </Dialog>
   );
 };
+
+// ════════════════════════════════════════════════════════════════════════════════
+// GST INVOICE LIST — simple flat list of every invoice that carries GST,
+// opened from the "Total GST" stat card (distinct from the full GSTR-1/3B
+// report opened by the "GST Returns" header button, which stays untouched).
+// ════════════════════════════════════════════════════════════════════════════════
+const GstInvoiceListModal = ({ open, onClose, invoices = [], companies = [], companyFilter = 'all', isDark }) => {
+  const gstInvoices = React.useMemo(() => {
+    return (invoices || [])
+      .filter(inv => (companyFilter === 'all' || inv.company_id === companyFilter))
+      .filter(inv => Number(inv.total_gst || 0) > 0.004)
+      .sort((a, b) => (b.invoice_date || '').localeCompare(a.invoice_date || ''));
+  }, [invoices, companyFilter]);
+
+  const totalGst = gstInvoices.reduce((s, i) => s + Number(i.total_gst || 0), 0);
+  const companyName = (id) => companies.find(c => c.id === id)?.name || '';
+
+  const thCls = `px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`;
+  const tdCls = `px-3 py-2 text-xs ${isDark ? 'text-slate-200' : 'text-slate-700'}`;
+  const trCls = `border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`;
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-4xl rounded-2xl p-0 overflow-hidden">
+        <DialogTitle className="sr-only">Invoices with GST</DialogTitle>
+        <DialogDescription className="sr-only">Full list of invoices carrying GST</DialogDescription>
+
+        <div className="px-6 py-4" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-white/60 text-[10px] uppercase tracking-widest">Invoices With GST</p>
+              <h2 className="text-white font-bold text-lg">{gstInvoices.length} invoices · {fmtC(totalGst)} total GST</h2>
+            </div>
+            <button onClick={onClose} className="text-white/70 hover:text-white"><X className="h-5 w-5" /></button>
+          </div>
+        </div>
+
+        <div className="p-4 max-h-[65vh] overflow-y-auto">
+          {gstInvoices.length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-8">No invoices with GST for the current company filter.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border ${isDark ? 'border-slate-700' : 'border-slate-200'}">
+              <table className="w-full">
+                <thead className={isDark ? 'bg-slate-800' : 'bg-slate-50'}>
+                  <tr>
+                    {['Invoice No', 'Client', 'Company', 'Date', 'Taxable', 'CGST', 'SGST', 'IGST', 'Total GST', 'Grand Total', 'Status'].map(h => (
+                      <th key={h} className={thCls}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {gstInvoices.map(inv => (
+                    <tr key={inv.id} className={trCls}>
+                      <td className={`${tdCls} font-bold`}>{inv.invoice_no}</td>
+                      <td className={tdCls}>{inv.client_name}</td>
+                      <td className={`${tdCls} text-slate-400`}>{companyName(inv.company_id)}</td>
+                      <td className={tdCls}>{inv.invoice_date}</td>
+                      <td className={`${tdCls} text-right`}>{fmtC(inv.total_taxable)}</td>
+                      <td className={`${tdCls} text-right`}>{fmtC(inv.total_cgst)}</td>
+                      <td className={`${tdCls} text-right`}>{fmtC(inv.total_sgst)}</td>
+                      <td className={`${tdCls} text-right`}>{fmtC(inv.total_igst)}</td>
+                      <td className={`${tdCls} text-right font-bold`}>{fmtC(inv.total_gst)}</td>
+                      <td className={`${tdCls} text-right`}>{fmtC(inv.grand_total)}</td>
+                      <td className={tdCls}>{STATUS_META[inv.status]?.label || inv.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
 // ════════════════════════════════════════════════════════════════════════════════
 // EXCEL IMPORT — parse Excel/CSV invoice template
 // ════════════════════════════════════════════════════════════════════════════════
@@ -2554,9 +2629,107 @@ const StatusPill = ({ inv }) => {
 // Selectable statuses exposed in the inline dropdown (overdue is computed, not stored)
 const INLINE_STATUSES = ['draft', 'sent', 'partially_paid', 'paid', 'cancelled'];
 
+// ── Quick "Mark Paid" receipt dialog ────────────────────────────────────
+// Shown when the inline status dropdown is used to mark an invoice Paid.
+// Asks whether the money landed in Cash or a Bank account, and — when the
+// invoice's company has more than one bank account on file — which one, so
+// the auto-recorded receipt (see backend update_invoice_status) carries
+// accurate payment_mode / bank_account_id instead of always guessing "bank".
+const MarkPaidReceiptDialog = ({ open, onClose, onConfirm, companyId, isDark }) => {
+  const [mode, setMode] = React.useState('bank');
+  const [bankAccounts, setBankAccounts] = React.useState([]);
+  const [bankAccountId, setBankAccountId] = React.useState('');
+  const [loadingAccounts, setLoadingAccounts] = React.useState(false);
+  const [submitting, setSubmitting] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!open) return;
+    setMode('bank');
+    setBankAccountId('');
+    setLoadingAccounts(true);
+    api.get('/bank-accounts', { params: { company_id: companyId } })
+      .then(r => {
+        const accts = r.data || [];
+        setBankAccounts(accts);
+        const primary = accts.find(a => a.is_primary) || accts[0];
+        if (primary) setBankAccountId(primary.id);
+      })
+      .catch(() => setBankAccounts([]))
+      .finally(() => setLoadingAccounts(false));
+  }, [open, companyId]);
+
+  const handleConfirm = async () => {
+    setSubmitting(true);
+    try {
+      await onConfirm({
+        payment_mode: mode,
+        bank_account_id: mode === 'bank' ? (bankAccountId || null) : null,
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-sm rounded-2xl p-6" onClick={e => e.stopPropagation()}>
+        <DialogTitle className="text-base font-bold">Where did this payment land?</DialogTitle>
+        <DialogDescription className="text-xs text-slate-400 mb-3">
+          Marking this invoice Paid records a receipt — tell us where the money went so your books stay accurate.
+        </DialogDescription>
+
+        <div className="grid grid-cols-2 gap-2 mb-3">
+          {[['bank', 'Bank'], ['cash', 'Cash']].map(([val, label]) => (
+            <button key={val} type="button" onClick={() => setMode(val)}
+              className={`h-10 rounded-xl text-sm font-bold border transition-all ${
+                mode === val
+                  ? (isDark ? 'border-blue-500 bg-blue-900/30 text-blue-300' : 'border-blue-500 bg-blue-50 text-blue-700')
+                  : (isDark ? 'border-slate-700 bg-slate-800 text-slate-300' : 'border-slate-200 bg-white text-slate-600')
+              }`}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {mode === 'bank' && (
+          <div className="mb-3">
+            <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">
+              Bank Account
+            </label>
+            {loadingAccounts ? (
+              <p className="text-xs text-slate-400">Loading accounts…</p>
+            ) : bankAccounts.length === 0 ? (
+              <p className="text-xs text-slate-400">No bank account on file for this company — receipt will post to the general Bank Accounts ledger.</p>
+            ) : (
+              <Select value={bankAccountId} onValueChange={setBankAccountId}>
+                <SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="Select bank account" /></SelectTrigger>
+                <SelectContent>
+                  {bankAccounts.map(a => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.bank_name} · {a.account_number_masked}{a.is_primary ? ' (Primary)' : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+        )}
+
+        <div className="flex gap-3 pt-1">
+          <Button type="button" variant="ghost" onClick={onClose} className="flex-1 h-10 rounded-xl">Cancel</Button>
+          <Button type="button" onClick={handleConfirm} disabled={submitting} className="flex-1 h-10 rounded-xl">
+            {submitting ? 'Saving…' : 'Confirm Paid'}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 const InlineStatusDropdown = ({ inv, onStatusChange, isDark }) => {
   const [open, setOpen]       = React.useState(false);
   const [loading, setLoading] = React.useState(false);
+  const [receiptDialogOpen, setReceiptDialogOpen] = React.useState(false);
   // Fixed-position coordinates — computed from the trigger button's screen rect
   const [dropPos, setDropPos] = React.useState({ top: 0, left: 0 });
   const triggerRef            = React.useRef(null);
@@ -2579,11 +2752,10 @@ const InlineStatusDropdown = ({ inv, onStatusChange, isDark }) => {
     setOpen(v => !v);
   };
 
-  const handleSelect = async (newStatus) => {
-    if (newStatus === inv.status) { setOpen(false); return; }
+  const submitStatusChange = async (newStatus, extra = {}) => {
     setLoading(true);
     try {
-      const { data } = await api.patch(`/invoices/${inv.id}/status`, { status: newStatus });
+      const { data } = await api.patch(`/invoices/${inv.id}/status`, { status: newStatus, ...extra });
       // data now includes amount_paid and amount_due from the server — pass them
       // so the parent can update the invoice row accurately without a refetch.
       onStatusChange(inv.id, newStatus, {
@@ -2596,7 +2768,20 @@ const InlineStatusDropdown = ({ inv, onStatusChange, isDark }) => {
     } finally {
       setLoading(false);
       setOpen(false);
+      setReceiptDialogOpen(false);
     }
+  };
+
+  const handleSelect = async (newStatus) => {
+    if (newStatus === inv.status) { setOpen(false); return; }
+    if (newStatus === 'paid') {
+      // Ask where the money landed (Cash / which Bank account) before
+      // recording the receipt, instead of silently assuming "bank".
+      setOpen(false);
+      setReceiptDialogOpen(true);
+      return;
+    }
+    submitStatusChange(newStatus);
   };
 
   return (
@@ -2653,6 +2838,14 @@ const InlineStatusDropdown = ({ inv, onStatusChange, isDark }) => {
           </div>
         </>
       )}
+
+      <MarkPaidReceiptDialog
+        open={receiptDialogOpen}
+        onClose={() => setReceiptDialogOpen(false)}
+        onConfirm={(extra) => submitStatusChange('paid', extra)}
+        companyId={inv.company_id}
+        isDark={isDark}
+      />
     </div>
   );
 };
@@ -3040,19 +3233,31 @@ const EnhancedRevenueTrend = ({ invoices = [], isDark }) => {
 // PAYMENT MODAL
 // ════════════════════════════════════════════════════════════════════════════════
 const PaymentModal = ({ invoice, open, onClose, onSuccess, isDark }) => {
-  const [form, setForm] = useState({ amount: '', payment_date: format(new Date(), 'yyyy-MM-dd'), payment_mode: 'neft', reference_no: '', notes: '' });
+  const [form, setForm] = useState({ amount: '', payment_date: format(new Date(), 'yyyy-MM-dd'), payment_mode: 'neft', reference_no: '', notes: '', bank_account_id: '' });
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState([]);
   const [histLoading, setHistLoading] = useState(false);
+  const [bankAccounts, setBankAccounts] = useState([]);
 
   useEffect(() => {
     if (open && invoice) {
-      setForm(p => ({ ...p, amount: invoice.amount_due?.toFixed(2) || '' }));
+      setForm(p => ({ ...p, amount: invoice.amount_due?.toFixed(2) || '', bank_account_id: '' }));
       setHistLoading(true);
       api.get('/payments', { params: { invoice_id: invoice.id } })
         .then(r => setHistory(r.data || []))
         .catch(() => setHistory([]))
         .finally(() => setHistLoading(false));
+      // Preload this company's bank accounts so a specific account can be
+      // picked when the payment mode is bank-based, instead of only ever
+      // posting to the generic Bank Accounts control account.
+      api.get('/bank-accounts', { params: { company_id: invoice.company_id } })
+        .then(r => {
+          const accts = r.data || [];
+          setBankAccounts(accts);
+          const primary = accts.find(a => a.is_primary) || accts[0];
+          if (primary) setForm(p => ({ ...p, bank_account_id: primary.id }));
+        })
+        .catch(() => setBankAccounts([]));
     }
   }, [open, invoice]);
 
@@ -3065,7 +3270,11 @@ const PaymentModal = ({ invoice, open, onClose, onSuccess, isDark }) => {
     }
     setLoading(true);
     try {
-      await api.post('/payments', { invoice_id: invoice.id, amount: amt, payment_date: form.payment_date, payment_mode: form.payment_mode, reference_no: form.reference_no, notes: form.notes });
+      await api.post('/payments', {
+        invoice_id: invoice.id, amount: amt, payment_date: form.payment_date, payment_mode: form.payment_mode,
+        reference_no: form.reference_no, notes: form.notes,
+        bank_account_id: form.payment_mode !== 'cash' ? (form.bank_account_id || null) : null,
+      });
       toast.success('Payment recorded!'); onSuccess?.(); onClose();
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed to record payment'); }
     finally { setLoading(false); }
@@ -3183,6 +3392,24 @@ const PaymentModal = ({ invoice, open, onClose, onSuccess, isDark }) => {
                 </Select>
               </div>
             </div>
+
+            {/* Which bank account received the money — only relevant when the
+                payment mode isn't cash and the company has accounts on file. */}
+            {form.payment_mode !== 'cash' && bankAccounts.length > 0 && (
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Bank Account</label>
+                <Select value={form.bank_account_id} onValueChange={v => setForm(p => ({ ...p, bank_account_id: v }))}>
+                  <SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="Select bank account" /></SelectTrigger>
+                  <SelectContent>
+                    {bankAccounts.map(a => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.bank_name} · {a.account_number_masked}{a.is_primary ? ' (Primary)' : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div>
               <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 block">Reference / UTR No.</label>
@@ -5631,6 +5858,7 @@ function Invoicing() {
   const [serviceMasterOpen, setServiceMasterOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [gstOpen, setGstOpen] = useState(false);
+  const [gstListOpen, setGstListOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [ledgerOpen, setLedgerOpen] = useState(false);
   const [ledgerClient, setLedgerClient] = useState(null);
@@ -6214,7 +6442,7 @@ const fetchAll = useCallback(async () => {
               setFromDate(first); setToDate(last); setStatusFilter('all'); setYearFilter('all');
               setTimeout(() => invoiceListRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
             }} />
-          <StatCard label="Total GST" value={fmtC(localStats.total_gst)} sub={`${localStats.paid_count} paid · ${localStats.draft_count} invoiced`} icon={Shield} color={COLORS.amber} bg={`${COLORS.amber}12`} isDark={isDark} onClick={() => setGstOpen(true)} />
+          <StatCard label="Total GST" value={fmtC(localStats.total_gst)} sub={`${localStats.paid_count} paid · ${localStats.draft_count} invoiced`} icon={Shield} color={COLORS.amber} bg={`${COLORS.amber}12`} isDark={isDark} onClick={() => setGstListOpen(true)} />
         </div>
       )}
 
@@ -6542,6 +6770,7 @@ const fetchAll = useCallback(async () => {
         isDark={isDark}
       />
       <GSTReportsModal open={gstOpen} onClose={() => setGstOpen(false)} invoices={invoices} companies={companies} clients={clients} isDark={isDark} />
+      <GstInvoiceListModal open={gstListOpen} onClose={() => setGstListOpen(false)} invoices={invoices} companies={companies} companyFilter={companyFilter} isDark={isDark} />
       {settingsOpen && <InvoiceSettings open={settingsOpen} onClose={() => setSettingsOpen(false)} companies={companies} isDark={isDark} />}
       {ledgerOpen && <PartyLedger open={ledgerOpen} onClose={() => setLedgerOpen(false)} invoices={invoices} clients={clients} companies={companies} isDark={isDark} initialClient={ledgerClient} />}
       {/* WHATSAPP INVOICE DIALOG */}
