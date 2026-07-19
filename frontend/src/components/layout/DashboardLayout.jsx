@@ -906,19 +906,13 @@ function AICopilotDrawer({ isOpen, onClose, isDark }) {
   const [messages, setMessages] = useState([
     {
       role: "assistant",
-      content: "Hello! I am your Enterprise AI Copilot. I have deep isolated database access, automatic email IMAP scanning capability, and a robust transaction execution engine. How can I assist you today?"
+      content: "Hello! I'm your AI Copilot. Ask me anything about your tasks, compliance, or accounts."
     }
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef(null);
 
-  const [suggestedAction, setSuggestedAction] = useState({
-    id: "auto_reconcile_gst",
-    title: "Reconcile GSTR-2B Input Tax Credit",
-    desc: "AI matching engine has found 3 matching purchases against GSTR filings. Ready to post automated reconciliation adjustments.",
-    type: "reconcile"
-  });
 
   const handleSend = async (e) => {
     e.preventDefault();
@@ -931,27 +925,11 @@ function AICopilotDrawer({ isOpen, onClose, isDark }) {
     try {
       const { data } = await api.post("/v2/copilot/chat", { query: userMsg });
       setMessages(prev => [...prev, { role: "assistant", content: data?.reply || "I am connected, but experiencing high load. Let me re-verify that action for you." }]);
-      
-      if (userMsg.toLowerCase().includes("gst") || userMsg.toLowerCase().includes("reconcile")) {
-        setSuggestedAction({
-          id: "reconcile_gst_action",
-          title: "Approve GST Credit Reallocation",
-          desc: "Allocate ₹12,450 tax offsets to IGST Ledger for Q1 compliance.",
-          type: "action"
-        });
-      } else if (userMsg.toLowerCase().includes("rent") || userMsg.toLowerCase().includes("journal")) {
-        setSuggestedAction({
-          id: "post_rent_journal",
-          title: "Post Office Rent Journal Entry",
-          desc: "Debit Rent Expense ₹15,000, Credit Bank Account. Fully approved under corporate budgets.",
-          type: "action"
-        });
-      }
     } catch {
       setTimeout(() => {
         setMessages(prev => [...prev, {
           role: "assistant",
-          content: `I processed your request: "${userMsg}". Here is the recommended enterprise strategy: I can initiate the database isolated synchronization block to align our Tally ERP registers and execute transactions. Let me know if you would like me to approve this transaction.`
+          content: `Sorry, I couldn't process "${userMsg}" right now. Please try again in a moment.`
         }]);
       }, 850);
     } finally {
@@ -959,19 +937,6 @@ function AICopilotDrawer({ isOpen, onClose, isDark }) {
     }
   };
 
-  const handleExecuteAction = async (actionId) => {
-    setLoading(true);
-    try {
-      await api.post("/v2/copilot/action", { action_id: actionId });
-      toast.success("AI Copilot successfully executed the approved transaction!");
-      setMessages(prev => [...prev, { role: "assistant", content: `✓ TRANSACTION SUCCESS: Action "${actionId}" was executed across isolated schema. DB ledger logs and compliance records have been posted securely.` }]);
-      setSuggestedAction(null);
-    } catch {
-      toast.error("Execution error. Verify platform isolation schema.");
-    } finally {
-      setLoading(false);
-    }
-  };
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -1021,25 +986,6 @@ function AICopilotDrawer({ isOpen, onClose, isDark }) {
             </div>
           )}
           <div ref={scrollRef} />
-
-          {suggestedAction && (
-            <div className={`p-3.5 rounded-2xl border mt-4 text-xs space-y-2 ${isDark ? 'bg-blue-950/20 border-blue-900/55' : 'bg-blue-50/50 border-blue-100'}`}>
-              <div className="flex items-center gap-1.5 text-blue-500 font-bold">
-                <ShieldCheck className="h-4 w-4" />
-                <span>Suggested Action Approval</span>
-              </div>
-              <div>
-                <p className={`font-black ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{suggestedAction.title}</p>
-                <p className="text-slate-400 text-[11px] mt-0.5 leading-relaxed">{suggestedAction.desc}</p>
-              </div>
-              <button
-                onClick={() => handleExecuteAction(suggestedAction.id)}
-                className="w-full h-8 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-[10px] tracking-wide uppercase transition-all shadow-md cursor-pointer"
-              >
-                Approve &amp; Execute Transaction
-              </button>
-            </div>
-          )}
         </div>
 
         {/* Suggestions Quick Pills */}
