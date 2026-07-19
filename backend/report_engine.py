@@ -338,3 +338,8 @@ def build_report(query: str, scraped: Dict, class_filter: Optional[int] = None) 
 # Bring logger into scope (module-level)
 import logging
 logger = logging.getLogger(__name__)
+
+# Phase 7 integration reference: Ensure future financial reporting modules (Balance Sheet,
+# Trial Balance, P&L, Cash Flow, and MIS) consume posted journal entries and voucher records
+# produced by the autonomous Accounting Engine without altering existing trademark report formats.
+
