@@ -357,4 +357,9 @@ async def analyze_document(
         )
 
     from backend.ai import ai_router
+    # Extract raw OCR text
+    raw_ocr_text = ai_router.get_document_text_content(contents, filename)
+    # Classify document
+    classification = await ai_router.classify_document(contents, filename, raw_ocr_text)
+    # Process document which runs classification, saves classification results, and orchestrates the AI extraction
     return await ai_router.process_document(contents, filename, current_user, _execute_existing_reader)
