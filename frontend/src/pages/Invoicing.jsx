@@ -5680,23 +5680,37 @@ function Invoicing() {
     // cancelled documents are excluded here. sync_invoice_journal_entry() on
     // the backend also now posts draft invoices so Trial Balance / P&L /
     // Balance Sheet stay consistent with what is shown on this page.
-    const recognized = base.filter(i => i.status !== 'cancelled');
-    const total_revenue = recognized.reduce((s, i) => s + (i.grand_total || 0), 0);
-    const total_outstanding = recognized.reduce((s, i) => s + calcDue(i), 0);
-    const total_gst = recognized.reduce((s, i) => s + (i.total_gst || 0), 0);
+    //
+    // Two fixes so this matches Accounting Reports (Trial Balance/P&L),
+    // which is driven by the actual posted journal entries:
+    //  1. Proforma invoices / estimates are quotations — they're never
+    //     posted to the books (see sync_invoice_journal_entry on the
+    //     backend), so counting their grand_total as "revenue" here
+    //     overstated this page's numbers versus Accounting Reports.
+    //  2. Credit notes were being *added* to total_revenue as if they were
+    //     extra sales, instead of reducing it — a credit note reverses
+    //     part of an earlier invoice (Dr Sales / Cr Accounts Receivable in
+    //     the ledger), so it must subtract from revenue here too.
+    const recognized = base.filter(i =>
+      i.status !== 'cancelled' && ['tax_invoice', 'credit_note', 'debit_note'].includes(i.invoice_type || 'tax_invoice')
+    );
+    const signedTotal = (i) => (i.invoice_type === 'credit_note' ? -1 : 1) * (i.grand_total || 0);
+    const total_revenue = recognized.reduce((s, i) => s + signedTotal(i), 0);
+    const total_outstanding = recognized.reduce((s, i) => s + (i.invoice_type === 'credit_note' ? 0 : calcDue(i)), 0);
+    const total_gst = recognized.reduce((s, i) => s + (i.invoice_type === 'credit_note' ? -1 : 1) * (i.total_gst || 0), 0);
     const total_invoices = base.length;
-    const month_revenue = recognized.filter(i => i.invoice_date?.startsWith(curMonth)).reduce((s, i) => s + (i.grand_total || 0), 0);
+    const month_revenue = recognized.filter(i => i.invoice_date?.startsWith(curMonth)).reduce((s, i) => s + signedTotal(i), 0);
     const month_invoices = recognized.filter(i => i.invoice_date?.startsWith(curMonth)).length;
-    const overdue_count = recognized.filter(i => calcDue(i) > 0 && i.due_date && differenceInDays(new Date(), parseISO(i.due_date)) > 0).length;
+    const overdue_count = recognized.filter(i => i.invoice_type !== 'credit_note' && calcDue(i) > 0 && i.due_date && differenceInDays(new Date(), parseISO(i.due_date)) > 0).length;
     const paid_count = base.filter(i => i.status === 'paid').length;
     const draft_count = base.filter(i => i.status === 'draft').length;
     const monthly_trend = Array.from({ length: 12 }, (_, i) => {
       const d = subMonths(now, 11 - i); const key = format(d, 'yyyy-MM');
       const monthInvs = recognized.filter(inv => inv.invoice_date?.startsWith(key));
-      return { label: format(d, 'MMM yy'), revenue: monthInvs.reduce((s, inv) => s + (inv.grand_total || 0), 0), collected: monthInvs.reduce((s, inv) => s + (inv.amount_paid || 0), 0) };
+      return { label: format(d, 'MMM yy'), revenue: monthInvs.reduce((s, inv) => s + signedTotal(inv), 0), collected: monthInvs.reduce((s, inv) => s + (inv.invoice_type === 'credit_note' ? 0 : (inv.amount_paid || 0)), 0) };
     });
     const clientMap = {};
-    recognized.forEach(inv => { if (!inv.client_name) return; clientMap[inv.client_name] = (clientMap[inv.client_name] || 0) + (inv.grand_total || 0); });
+    recognized.forEach(inv => { if (!inv.client_name) return; clientMap[inv.client_name] = (clientMap[inv.client_name] || 0) + signedTotal(inv); });
     const top_clients = Object.entries(clientMap).map(([name, revenue]) => ({ name, revenue })).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
     return { total_revenue, total_outstanding, total_gst, total_invoices, month_revenue, month_invoices, overdue_count, paid_count, draft_count, monthly_trend, top_clients };
   }, [invoices, companyFilter, yearFilter]);
