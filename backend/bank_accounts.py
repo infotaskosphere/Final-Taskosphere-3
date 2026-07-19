@@ -454,15 +454,27 @@ async def _parse_pdf_statement_via_ai(contents: bytes, filename: str) -> List[di
             # Fall back to image-based pipeline if digital extraction or parsing fails
             pass
 
+    # Render pages as images and route through the batched OCR pipeline. The
+    # ai_provider helper transparently batches Groq to <=3 images/request
+    # (retry+split, ordered merge) so callers no longer need a hard 10-page
+    # cap. We still cap at 50 pages to keep memory bounded.
     page_images = []
-    with pdfplumber.open(BytesIO(contents)) as pdf:
-        for page in pdf.pages[:10]:
-            pil_img = page.to_image(resolution=150).original
-            if pil_img.mode not in ("RGB", "L"):
-                pil_img = pil_img.convert("RGB")
-            buf = BytesIO()
-            pil_img.save(buf, format="JPEG", quality=85)
-            page_images.append((base64.b64encode(buf.getvalue()).decode(), "image/jpeg"))
+    try:
+        with pdfplumber.open(BytesIO(contents)) as pdf:
+            for page in pdf.pages[:50]:
+                try:
+                    pil_img = page.to_image(resolution=150).original
+                    if pil_img.mode not in ("RGB", "L"):
+                        pil_img = pil_img.convert("RGB")
+                    buf = BytesIO()
+                    pil_img.save(buf, format="JPEG", quality=85)
+                    page_images.append((base64.b64encode(buf.getvalue()).decode(), "image/jpeg"))
+                    del pil_img, buf
+                except Exception:
+                    # Skip only the broken page; keep processing the rest.
+                    continue
+    except Exception:
+        return []
     if not page_images:
         return []
     prompt = (
@@ -471,8 +483,13 @@ async def _parse_pdf_statement_via_ai(contents: bytes, filename: str) -> List[di
         "debit (number, 0 if none), credit (number, 0 if none), balance_after (number or null). "
         "Return ONLY the JSON array, no markdown fences, no explanation."
     )
-    answer = await _groq_vision_multipage(page_images, prompt)
-    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", answer.strip(), flags=re.I | re.S).strip()
+    try:
+        answer = await _groq_vision_multipage(page_images, prompt)
+    except Exception:
+        # Batched OCR failed entirely — return empty so the caller can surface
+        # a structured "no transactions read" response instead of a hard 500.
+        return []
+    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", (answer or "").strip(), flags=re.I | re.S).strip()
     m = re.search(r"\[.*\]", cleaned, re.S)
     if m:
         cleaned = m.group(0)
@@ -764,6 +781,8 @@ async def upload_statement(
     filename = file.filename or "statement"
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
+    warnings: List[str] = []
+    parsed_rows: List[dict] = []
     try:
         if ext in ("csv", "xlsx", "xls"):
             parsed_rows = _parse_tabular_statement(contents, filename)
@@ -771,13 +790,30 @@ async def upload_statement(
             parsed_rows = await _parse_pdf_statement_via_ai(contents, filename)
         else:
             raise HTTPException(415, f"Unsupported file type '.{ext}'. Upload a CSV, XLSX, or PDF bank statement.")
-    except HTTPException:
-        raise
+    except HTTPException as he:
+        # Structural / provider errors — surface the real reason instead of a generic message.
+        if he.status_code in (413, 415):
+            raise
+        warnings.append(str(he.detail) if he.detail else f"HTTP {he.status_code}")
+        parsed_rows = []
     except Exception as e:
-        raise HTTPException(422, f"Could not read this statement: {e}")
+        # Never bubble a 500 to the frontend; return a structured "no rows" response.
+        warnings.append(f"Could not read this statement: {e}")
+        parsed_rows = []
 
     if not parsed_rows:
-        raise HTTPException(422, "No transactions could be read from this file. Try exporting the statement as CSV or XLSX for the most reliable reading.")
+        return {
+            "success": False,
+            "bank_account_id": bank_account_id,
+            "transactions_saved": 0,
+            "auto_matched": 0,
+            "auto_posted": 0,
+            "transactions": [],
+            "warnings": warnings or [
+                "No transactions could be read from this file. Try exporting the "
+                "statement as CSV or XLSX for the most reliable reading."
+            ],
+        }
 
     now = datetime.now(timezone.utc).isoformat()
     saved, matched_count, posted_count = [], 0, 0
@@ -814,8 +850,10 @@ async def upload_statement(
         saved.append(doc)
 
     return {
+        "success": True,
         "bank_account_id": bank_account_id, "transactions_saved": len(saved),
         "auto_matched": matched_count, "auto_posted": posted_count, "transactions": saved,
+        "warnings": warnings,
     }
 
 
