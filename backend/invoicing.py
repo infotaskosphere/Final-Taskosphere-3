@@ -3799,12 +3799,19 @@ async def _sync_invoice_gst_from_company(inv_id: str, ex: dict, data: dict, comp
     Automatic GSTIN migration during invoice updates.
 
     Loads the latest Company/Business profile linked to the invoice (by
-    `company_id`) and compares its current GSTIN against every GST-related
-    field used anywhere on the invoice (see `_COMPANY_GST_FIELD_NAMES`). Any
-    field found to be outdated is automatically corrected to the Company
-    Master's current GSTIN before the invoice is saved. If a stored PDF/Drive
-    snapshot exists, it is cleared so the next generated PDF/print reflects
-    the corrected GSTIN.
+    `company_id`) and compares its current GST-registration status/GSTIN
+    against every GST-related field used anywhere on the invoice (see
+    `_COMPANY_GST_FIELD_NAMES`). Any field found to be outdated is
+    automatically corrected before the invoice is saved:
+      - If the company IS GST-registered, every such field is stamped with
+        its current GSTIN.
+      - If the company is NOT GST-registered (has_gst explicitly False),
+        every such field is cleared instead -- this prevents a non-GST
+        company's invoice from carrying a stray/legacy seller GSTIN (which
+        would otherwise cause it to incorrectly show up as GST payable /
+        in GST returns even though the selling company charges no GST).
+    If a stored PDF/Drive snapshot exists, it is cleared so the next
+    generated PDF/print reflects the corrected GSTIN.
 
     This function is strictly additive and read-only with respect to every
     other part of the invoice: it never touches invoice number, invoice
@@ -3815,10 +3822,14 @@ async def _sync_invoice_gst_from_company(inv_id: str, ex: dict, data: dict, comp
     if not company_id:
         return data
 
-    company = await db.companies.find_one({"id": company_id}, {"_id": 0, "gstin": 1})
-    current_gstin = ((company or {}).get("gstin") or "").strip()
-    if not current_gstin:
+    company = await db.companies.find_one({"id": company_id}, {"_id": 0, "gstin": 1, "has_gst": 1})
+    if company is None:
         return data
+
+    # Same semantics as `_company_has_gst`: GST-registered unless the
+    # company profile explicitly sets has_gst = False.
+    company_is_gst_registered = company.get("has_gst", True) is not False
+    current_gstin = (company.get("gstin") or "").strip() if company_is_gst_registered else ""
 
     fields_synced = []
     for field in _COMPANY_GST_FIELD_NAMES:
@@ -3827,8 +3838,8 @@ async def _sync_invoice_gst_from_company(inv_id: str, ex: dict, data: dict, comp
         # existing invoice document) -- never invent new fields.
         if field not in data and field not in ex:
             continue
-        existing_value = data.get(field, ex.get(field)) or ""
-        if str(existing_value).strip() != current_gstin:
+        existing_value = str(data.get(field, ex.get(field)) or "").strip()
+        if existing_value != current_gstin:
             data[field] = current_gstin
             fields_synced.append(field)
 
@@ -3839,7 +3850,8 @@ async def _sync_invoice_gst_from_company(inv_id: str, ex: dict, data: dict, comp
 
     logger.info(
         f"Invoice GST fields synchronized from Company Master "
-        f"(invoice_id={inv_id}, company_id={company_id}, current_gstin={current_gstin!r}, "
+        f"(invoice_id={inv_id}, company_id={company_id}, "
+        f"company_gst_registered={company_is_gst_registered}, current_gstin={current_gstin!r}, "
         f"fields_updated={fields_synced})"
     )
     return data
