@@ -70,10 +70,13 @@ const fmt = (n) => new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, ma
 const fmtC = (n) => `₹${fmt(n)}`;
 
 // ── Robust money helpers ────────────────────────────────────────────────────
-// Always derive the outstanding amount on the client. Never trust a stale
-// `amount_due` field coming from the backend — recompute as
-// grand_total − (advance + payments). amount_paid already includes the
-// advance (see save / update flow).
+// Accounting engine rule: workflow status (Draft/Sent/Partial/Paid/etc) is
+// UI only and must NEVER be branched on to decide money figures. Outstanding
+// and Paid are driven only by Invoice Amount, Payments, Credit Notes, Debit
+// Notes, and Cancellation — all of which the backend already folds into
+// amount_paid / amount_due via recalculate_invoice_accounting() every time a
+// payment, credit note, debit note, or edit happens. So the client trusts
+// those two fields directly instead of re-deriving them from `status`.
 const num = (v) => {
   const n = parseFloat(v);
   return Number.isFinite(n) ? n : 0;
@@ -81,25 +84,23 @@ const num = (v) => {
 const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 const calcPaid = (inv) => {
   if (!inv) return 0;
-  // If admin explicitly marked as fully paid, treat the entire grand_total as collected —
-  // even if amount_paid wasn't updated in the same request (e.g. inline status dropdown).
-  if (inv.status === 'paid') return num(inv.grand_total);
-  // amount_paid is the canonical "received so far" field once the form has
-  // run; fall back to advance_received for legacy / partially-migrated rows.
-  const paid = num(inv.amount_paid);
-  const advance = num(inv.advance_received);
-  return Math.max(paid, advance);
+  // amount_paid is the canonical "received so far" field, maintained by the
+  // accounting engine. Fall back to advance_received only for legacy rows
+  // that predate that field being populated.
+  if (inv.amount_paid !== undefined && inv.amount_paid !== null) return num(inv.amount_paid);
+  return num(inv.advance_received);
 };
 const calcDue = (inv) => {
   if (!inv) return 0;
-  // Fully-paid invoices have zero outstanding regardless of amount_paid field
-  if (inv.status === 'paid' || inv.status === 'cancelled') return 0;
+  // Cancelled invoices never carry Outstanding, regardless of amount_due.
+  if (inv.status === 'cancelled') return 0;
+  if (inv.amount_due !== undefined && inv.amount_due !== null) return round2(num(inv.amount_due));
+  // Legacy fallback for rows the engine hasn't touched yet.
   const grand = num(inv.grand_total);
   return round2(Math.max(0, grand - calcPaid(inv)));
 };
 const isFullyPaid = (inv) => {
   if (!inv) return false;
-  if (inv.status === 'paid') return true;
   return num(inv.grand_total) > 0 && calcDue(inv) <= 0.009;
 };
 const isPartiallyPaid = (inv) => {
@@ -4145,7 +4146,21 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
         amount_due:  amountDue,
       };
       if (editingInv?.id) await api.put(`/invoices/${editingInv.id}`, payload);
-      else {
+      else if (['credit_note', 'debit_note'].includes(form.invoice_type) && form.original_invoice_id) {
+        // Dedicated endpoint: links to the original invoice, posts the
+        // reversing/additional journal entry, and re-derives that invoice's
+        // Outstanding — none of which the generic /invoices POST does.
+        const notePath = form.invoice_type === 'credit_note' ? '/credit-notes' : '/debit-notes';
+        await api.post(notePath, {
+          original_invoice_id: form.original_invoice_id,
+          company_id: form.company_id,
+          client_name: form.client_name,
+          reason: form.notes?.trim() || `${form.invoice_type === 'credit_note' ? 'Credit' : 'Debit'} note against ${form.reference_no || 'invoice'}`,
+          items: totals.items,
+          notes: form.notes || '',
+        });
+        try { localStorage.removeItem(INV_DRAFT_KEY); } catch {}
+      } else {
         await api.post('/invoices', payload);
         try { localStorage.removeItem(INV_DRAFT_KEY); } catch {}
       }
@@ -5824,45 +5839,46 @@ function Invoicing() {
       if (fy && (inv.invoice_date < fy.from || inv.invoice_date > fy.to)) return false;
       return true;
     });
-    // Revenue-bearing figures now include 'draft' invoices as well (renamed
-    // to "Invoiced" in the UI) — per business rule, an invoiced document is
-    // recognised revenue immediately even before it is marked as sent. Only
-    // cancelled documents are excluded here. sync_invoice_journal_entry() on
-    // the backend also now posts draft invoices so Trial Balance / P&L /
-    // Balance Sheet stay consistent with what is shown on this page.
-    //
-    // Two fixes so this matches Accounting Reports (Trial Balance/P&L),
-    // which is driven by the actual posted journal entries:
-    //  1. Proforma invoices / estimates are quotations — they're never
-    //     posted to the books (see sync_invoice_journal_entry on the
-    //     backend), so counting their grand_total as "revenue" here
-    //     overstated this page's numbers versus Accounting Reports.
-    //  2. Credit notes were being *added* to total_revenue as if they were
-    //     extra sales, instead of reducing it — a credit note reverses
-    //     part of an earlier invoice (Dr Sales / Cr Accounts Receivable in
-    //     the ledger), so it must subtract from revenue here too.
+    // Accounting engine rule — matches backend invoice_stats() exactly:
+    //   Revenue      = Sum(all non-cancelled TAX INVOICE grand totals)
+    //   Collections  = Sum(amount_paid) on those same invoices
+    //   Outstanding  = Sum(amount_due)  on those same invoices
+    //   Revenue = Collections + Outstanding   (always)
+    // Credit Notes and Debit Notes are real accounting, but they never touch
+    // Revenue directly — they only net into the ORIGINAL invoice's
+    // amount_due, which recalculate_invoice_accounting() already applies
+    // server-side. Proforma/Estimate are quotations, never posted to the
+    // books, so they're excluded the same way the backend excludes them.
     const recognized = base.filter(i =>
-      i.status !== 'cancelled' && ['tax_invoice', 'credit_note', 'debit_note'].includes(i.invoice_type || 'tax_invoice')
+      i.status !== 'cancelled' && (i.invoice_type || 'tax_invoice') === 'tax_invoice'
     );
-    const signedTotal = (i) => (i.invoice_type === 'credit_note' ? -1 : 1) * (i.grand_total || 0);
-    const total_revenue = recognized.reduce((s, i) => s + signedTotal(i), 0);
-    const total_outstanding = recognized.reduce((s, i) => s + (i.invoice_type === 'credit_note' ? 0 : calcDue(i)), 0);
-    const total_gst = recognized.reduce((s, i) => s + (i.invoice_type === 'credit_note' ? -1 : 1) * (i.total_gst || 0), 0);
+    const total_revenue = recognized.reduce((s, i) => s + (i.grand_total || 0), 0);
+    const total_outstanding = recognized.reduce((s, i) => s + calcDue(i), 0);
+    const total_collected = recognized.reduce((s, i) => s + calcPaid(i), 0);
+    const total_gst = recognized.reduce((s, i) => s + (i.total_gst || 0), 0);
     const total_invoices = base.length;
-    const month_revenue = recognized.filter(i => i.invoice_date?.startsWith(curMonth)).reduce((s, i) => s + signedTotal(i), 0);
+    const month_revenue = recognized.filter(i => i.invoice_date?.startsWith(curMonth)).reduce((s, i) => s + (i.grand_total || 0), 0);
     const month_invoices = recognized.filter(i => i.invoice_date?.startsWith(curMonth)).length;
-    const overdue_count = recognized.filter(i => i.invoice_type !== 'credit_note' && calcDue(i) > 0 && i.due_date && differenceInDays(new Date(), parseISO(i.due_date)) > 0).length;
+    const overdue_count = recognized.filter(i => calcDue(i) > 0 && i.due_date && differenceInDays(new Date(), parseISO(i.due_date)) > 0).length;
     const paid_count = base.filter(i => i.status === 'paid').length;
     const draft_count = base.filter(i => i.status === 'draft').length;
     const monthly_trend = Array.from({ length: 12 }, (_, i) => {
       const d = subMonths(now, 11 - i); const key = format(d, 'yyyy-MM');
       const monthInvs = recognized.filter(inv => inv.invoice_date?.startsWith(key));
-      return { label: format(d, 'MMM yy'), revenue: monthInvs.reduce((s, inv) => s + signedTotal(inv), 0), collected: monthInvs.reduce((s, inv) => s + (inv.invoice_type === 'credit_note' ? 0 : (inv.amount_paid || 0)), 0) };
+      return { label: format(d, 'MMM yy'), revenue: monthInvs.reduce((s, inv) => s + (inv.grand_total || 0), 0), collected: monthInvs.reduce((s, inv) => s + calcPaid(inv), 0) };
     });
     const clientMap = {};
-    recognized.forEach(inv => { if (!inv.client_name) return; clientMap[inv.client_name] = (clientMap[inv.client_name] || 0) + signedTotal(inv); });
+    recognized.forEach(inv => { if (!inv.client_name) return; clientMap[inv.client_name] = (clientMap[inv.client_name] || 0) + (inv.grand_total || 0); });
     const top_clients = Object.entries(clientMap).map(([name, revenue]) => ({ name, revenue })).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
-    return { total_revenue, total_outstanding, total_gst, total_invoices, month_revenue, month_invoices, overdue_count, paid_count, draft_count, monthly_trend, top_clients };
+    // Self-check: Revenue must equal Collections + Outstanding. A mismatch
+    // means some invoice's amount_paid/amount_due drifted from the engine
+    // (e.g. a very old record it hasn't recalculated yet) — surface it in
+    // the console instead of silently showing wrong totals.
+    const _mismatch = Math.round((total_revenue - (total_collected + total_outstanding)) * 100) / 100;
+    if (Math.abs(_mismatch) > 0.05) {
+      console.warn(`[accounting-reconciliation] Revenue (${total_revenue.toFixed(2)}) != Collections (${total_collected.toFixed(2)}) + Outstanding (${total_outstanding.toFixed(2)}), diff=${_mismatch}`);
+    }
+    return { total_revenue, total_outstanding, total_collected, total_gst, total_invoices, month_revenue, month_invoices, overdue_count, paid_count, draft_count, monthly_trend, top_clients };
   }, [invoices, companyFilter, yearFilter]);
 
   // ── E. ALL useMemo: DERIVED DATA ──────────────────────────────────────────
@@ -5898,8 +5914,9 @@ function Invoicing() {
   // ── F. ALL useMemo: TOTALS / AGGREGATIONS ────────────────────────────────
 
   const enrichedFiltered = useMemo(() => (filtered || []).map(inv => {
-    // Always recompute the outstanding amount from grand_total − paid so the
-    // UI is correct even if the backend stored a stale `amount_due`.
+    // amount_paid / amount_due come straight from the accounting engine
+    // (Invoice Amount − Payments − Credit Notes + Debit Notes); calcDue/
+    // calcPaid just read those canonical fields now.
     const computedDue = calcDue(inv);
     const computedPaid = calcPaid(inv);
     const enriched = { ...inv, amount_due: computedDue, amount_paid: computedPaid };
@@ -6058,7 +6075,8 @@ const fetchAll = useCallback(async () => {
       id: null,
       invoice_no: '',
       invoice_type: returnType,
-      reference_no: invoice_no,   // reference the original invoice
+      reference_no: invoice_no,        // human-readable reference on the note itself
+      original_invoice_id: id,         // the real link the accounting engine nets against
       status: 'draft',
       amount_paid: 0,
       invoice_date: format(new Date(), 'yyyy-MM-dd'),
