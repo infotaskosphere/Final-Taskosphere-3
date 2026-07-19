@@ -134,16 +134,29 @@ async def _gemini_vision_multipage(page_images_b64: List[Tuple[str, str]],
 
 
 # ─── Public provider-agnostic API ─────────────────────────────────────────────
+# Status codes on which we fall back from Gemini to Groq (transient / provider-side failures).
+_FALLBACK_STATUS = {400, 402, 408, 413, 422, 429, 500, 502, 503, 504}
+
+
+def _should_fallback(err: Exception) -> bool:
+    """Fallback for any HTTP error worth retrying, or any non-HTTP transport error."""
+    if not os.environ.get("GROQ_API_KEY"):
+        return False
+    if isinstance(err, HTTPException):
+        return err.status_code in _FALLBACK_STATUS
+    # httpx.TimeoutException / TransportError / any other unexpected exception
+    return True
+
+
 async def vision_single(image_b64: str, mime_type: str, prompt: str) -> str:
     """OCR a single image with the configured provider, with cross-provider fallback."""
     provider = get_provider()
     if provider == "gemini":
         try:
             return await _gemini_vision_single(image_b64, mime_type, prompt)
-        except HTTPException as e:
-            if os.environ.get("GROQ_API_KEY") and e.status_code in (422, 429, 500):
-                logger.info(f"[ai_provider] Gemini single failed ({e.status_code}), "
-                            f"falling back to Groq.")
+        except Exception as e:
+            if _should_fallback(e):
+                logger.warning(f"[ai_provider] Gemini single failed ({e!r}), falling back to Groq.")
                 return await _groq.groq_vision_single(image_b64, mime_type, prompt)
             raise
     return await _groq.groq_vision_single(image_b64, mime_type, prompt)
@@ -159,10 +172,10 @@ async def vision_multipage(page_images_b64: List[Tuple[str, str]], prompt: str) 
     if provider == "gemini":
         try:
             return await _gemini_vision_multipage(page_images_b64, prompt)
-        except HTTPException as e:
-            if os.environ.get("GROQ_API_KEY") and e.status_code in (422, 429, 500):
-                logger.info(f"[ai_provider] Gemini multipage failed ({e.status_code}), "
-                            f"falling back to Groq batch processor.")
+        except Exception as e:
+            if _should_fallback(e):
+                logger.warning(f"[ai_provider] Gemini multipage failed ({e!r}), "
+                               f"falling back to Groq batch processor.")
                 return await _groq.groq_batched_ocr(page_images_b64, prompt)
             raise
     return await _groq.groq_batched_ocr(page_images_b64, prompt)
@@ -181,10 +194,10 @@ async def ocr_pages(page_images_b64: List[Tuple[str, str]],
     if provider == "gemini":
         try:
             return await _gemini_vision_multipage(page_images_b64, prompt)
-        except HTTPException as e:
-            if os.environ.get("GROQ_API_KEY") and e.status_code in (422, 429, 500):
-                logger.info(f"[ai_provider] Gemini ocr_pages failed ({e.status_code}), "
-                            f"falling back to Groq batch processor.")
+        except Exception as e:
+            if _should_fallback(e):
+                logger.warning(f"[ai_provider] Gemini ocr_pages failed ({e!r}), "
+                               f"falling back to Groq batch processor.")
                 return await _groq.groq_batched_ocr(page_images_b64, prompt, progress_cb)
             raise
     return await _groq.groq_batched_ocr(page_images_b64, prompt, progress_cb)
