@@ -3075,3 +3075,27 @@ async def delegate_notification_to_engine(
     )
     return result
 
+
+class EmailAttachmentScanner:
+    @staticmethod
+    async def process_and_meter_attachment(company_id: str, file_name: str, file_bytes: bytes) -> bool:
+        """Processes and increments SaaS file storage and counts metric usage under active tenant."""
+        from backend.platform.storage_manager import StorageManager
+        from backend.licensing.usage_tracker import UsageTracker
+        
+        file_size = len(file_bytes)
+        # 1. Enforce SaaS storage limit checks
+        quota_ok = await StorageManager.check_storage_quota(company_id, file_size)
+        if not quota_ok:
+            logger.warning(f"Storage limit exceeded during email attachment processing for tenant {company_id}.")
+            return False
+            
+        # 2. Allocate and record storage stats
+        await StorageManager.record_storage_allocation(company_id, file_size)
+        
+        # 3. Track metered count
+        await UsageTracker.track_metric_usage(company_id, "email_attachments_scanned", 1)
+        logger.info(f"Email attachment '{file_name}' ({file_size} bytes) successfully processed and metered.")
+        return True
+
+
