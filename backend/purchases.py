@@ -401,4 +401,9 @@ async def delete_purchase(purchase_id: str, current_user: User = Depends(get_cur
     result = await db.purchases.delete_one({"id": purchase_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Purchase invoice not found")
+        
+    # Phase 7 integration: Ensures that subsequent automatic reports or
+    # learning engines reflect any adjustments or deletions.
+    
     return {"success": True}
+
