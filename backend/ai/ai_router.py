@@ -130,9 +130,11 @@ async def process_document(
     
     # 1. Compute file hash
     file_hash = hashlib.sha256(contents).hexdigest()
+    import uuid
+    document_id = str(uuid.uuid4())
     
     # 2. Extract initial raw text to help look up
-    raw_ocr_text = await process_ocr(contents, filename)
+    raw_ocr_text = await process_ocr(contents, filename, document_id)
     normalized_ocr = ""
     if raw_ocr_text.strip():
         import re
@@ -194,79 +196,109 @@ async def process_document(
     if matched_template:
         logger.info("Template Match Found")
         # Extract fields using template and bypass Gemini/Groq
-        try:
-            result = extract_using_template(matched_template, raw_ocr_text)
-            await increment_usage(matched_template["template_id"], success=True)
-            
-            # Enrich with classification
-            if isinstance(result, dict):
-                result["classification"] = classification_res
-                result["document_type"] = classification_res["document_type"]
-                result["template_matched_id"] = matched_template["template_id"]
-                result["extraction_method"] = "template"
-                
-                # Apply Vendor Defaults & Learning
-                vendor_name = result.get("vendor_or_customer_name") or ""
-                vendor_gstin = result.get("tax_registration_number") or ""
-                result = await apply_vendor_defaults(vendor_name, vendor_gstin, result)
-                try:
-                    await learn_vendor_profile(vendor_name, vendor_gstin, result)
-                    logger.info("Vendor Defaults Applied and Profile Learned from Template")
-                except Exception as l_err:
-                    logger.error(f"Failed to learn vendor profile from template: {l_err}", exc_info=True)
-                
-            # Save this to memory for future fingerprint hits as well
             try:
-                classified_doc_type = classification_res["document_type"]
+                result = extract_using_template(matched_template, raw_ocr_text)
+                await increment_usage(matched_template["template_id"], success=True)
                 
-                parsed = {
-                    "vendor_name": result.get("vendor_or_customer_name") or "",
-                    "vendor_gstin": result.get("tax_registration_number") or "",
-                    "invoice_number": result.get("invoice_number") or "",
-                    "invoice_date": result.get("invoice_date") or "",
-                    "invoice_total": float(result.get("total_invoice_value") or 0) if result.get("total_invoice_value") else 0.0,
-                    "taxable_amount": float(result.get("taxable_value") or 0) if result.get("taxable_value") else 0.0,
-                    "gst_amount": float(result.get("total_tax") or 0) if result.get("total_tax") else 0.0
-                }
-                
-                fingerprint = generate_document_fingerprint(
-                    vendor_name=parsed["vendor_name"],
-                    vendor_gstin=parsed["vendor_gstin"],
-                    invoice_number=parsed["invoice_number"],
-                    document_type=classified_doc_type,
-                    raw_ocr_text=raw_ocr_text
-                )
-                
-                now = datetime.now(timezone.utc).isoformat()
-                new_record = {
-                    "document_id": str(uuid.uuid4()),
-                    "fingerprint": fingerprint,
-                    "document_type": classified_doc_type,
-                    "vendor_name": parsed["vendor_name"],
-                    "vendor_gstin": parsed["vendor_gstin"],
-                    "invoice_number": parsed["invoice_number"],
-                    "invoice_date": parsed["invoice_date"],
-                    "invoice_total": parsed["invoice_total"],
-                    "taxable_amount": parsed["taxable_amount"],
-                    "gst_amount": parsed["gst_amount"],
-                    "raw_ocr_text": raw_ocr_text,
-                    "extracted_json": result,
-                    "ledger_mapping": {},
-                    "journal_entry": {},
-                    "processing_engine": "template",
-                    "ai_confidence": classification_res["confidence"],
-                    "processing_status": "extracted",
-                    "created_at": now,
-                    "updated_at": now,
-                    "file_hash": file_hash,
-                    "raw_ocr_text_normalized": normalized_ocr
-                }
-                await save_ai_memory(new_record)
-                logger.info("Memory Saved (from Template)")
-            except Exception as e:
-                logger.error(f"Error saving template extraction to AI Memory: {e}", exc_info=True)
-                
-            return result
+                # Enrich with classification
+                if isinstance(result, dict):
+                    result["classification"] = classification_res
+                    result["document_type"] = classification_res["document_type"]
+                    result["template_matched_id"] = matched_template["template_id"]
+                    result["extraction_method"] = "template"
+                    
+                    # Apply Vendor Defaults & Learning
+                    vendor_name = result.get("vendor_or_customer_name") or ""
+                    vendor_gstin = result.get("tax_registration_number") or ""
+                    result = await apply_vendor_defaults(vendor_name, vendor_gstin, result)
+                    try:
+                        await learn_vendor_profile(vendor_name, vendor_gstin, result)
+                        logger.info("Vendor Defaults Applied and Profile Learned from Template")
+                    except Exception as l_err:
+                        logger.error(f"Failed to learn vendor profile from template: {l_err}", exc_info=True)
+                    
+                    # ─── INTEGRATE AI CONFIDENCE & VALIDATION ENGINE ───
+                    company_id = current_user.company_id if hasattr(current_user, 'company_id') else (current_user.get('company_id') if isinstance(current_user, dict) else None)
+                    vendor_profile = None
+                    try:
+                        if vendor_gstin:
+                            vendor_profile = await db.vendor_intelligence.find_one({"gstin": vendor_gstin})
+                        if not vendor_profile and vendor_name:
+                            vendor_profile = await db.vendor_intelligence.find_one({"vendor_name": vendor_name})
+                    except Exception as e:
+                        logger.error(f"Error fetching vendor profile in template matching: {e}")
+                        
+                    from backend.ai.document_validator import run_document_validation_pipeline
+                    validation_report = {}
+                    try:
+                        ocr_meta = await db.ocr_processing_history.find_one({"document_id": document_id}) or {}
+                        validation_report = await run_document_validation_pipeline(
+                            extracted_data=result,
+                            ocr_metadata=ocr_meta,
+                            filename=filename,
+                            document_id=document_id,
+                            vendor_profile=vendor_profile,
+                            template_matched=True,
+                            company_id=company_id
+                        )
+                        result["validation_report"] = validation_report
+                    except Exception as val_err:
+                        logger.error(f"Error in template validation: {val_err}", exc_info=True)
+                    
+                # Save this to memory for future fingerprint hits as well
+                try:
+                    classified_doc_type = classification_res["document_type"]
+                    
+                    parsed = {
+                        "vendor_name": result.get("vendor_or_customer_name") or "",
+                        "vendor_gstin": result.get("tax_registration_number") or "",
+                        "invoice_number": result.get("invoice_number") or "",
+                        "invoice_date": result.get("invoice_date") or "",
+                        "invoice_total": float(result.get("total_invoice_value") or 0) if result.get("total_invoice_value") else 0.0,
+                        "taxable_amount": float(result.get("taxable_value") or 0) if result.get("taxable_value") else 0.0,
+                        "gst_amount": float(result.get("total_tax") or 0) if result.get("total_tax") else 0.0
+                    }
+                    
+                    fingerprint = generate_document_fingerprint(
+                        vendor_name=parsed["vendor_name"],
+                        vendor_gstin=parsed["vendor_gstin"],
+                        invoice_number=parsed["invoice_number"],
+                        document_type=classified_doc_type,
+                        raw_ocr_text=raw_ocr_text
+                    )
+                    
+                    now = datetime.now(timezone.utc).isoformat()
+                    new_record = {
+                        "document_id": document_id,
+                        "fingerprint": fingerprint,
+                        "document_type": classified_doc_type,
+                        "vendor_name": parsed["vendor_name"],
+                        "vendor_gstin": parsed["vendor_gstin"],
+                        "invoice_number": parsed["invoice_number"],
+                        "invoice_date": parsed["invoice_date"],
+                        "invoice_total": parsed["invoice_total"],
+                        "taxable_amount": parsed["taxable_amount"],
+                        "gst_amount": parsed["gst_amount"],
+                        "raw_ocr_text": raw_ocr_text,
+                        "extracted_json": result,
+                        "ledger_mapping": {},
+                        "journal_entry": {},
+                        "processing_engine": "template",
+                        "ai_confidence": validation_report.get("overall_confidence", classification_res["confidence"]),
+                        "processing_status": "extracted",
+                        "validation_report": validation_report,
+                        "decision": validation_report.get("decision", "REQUIRES_REVIEW"),
+                        "created_at": now,
+                        "updated_at": now,
+                        "file_hash": file_hash,
+                        "raw_ocr_text_normalized": normalized_ocr
+                    }
+                    await save_ai_memory(new_record)
+                    logger.info("Memory Saved (from Template)")
+                except Exception as e:
+                    logger.error(f"Error saving template extraction to AI Memory: {e}", exc_info=True)
+                    
+                return result
         except Exception as e:
             logger.error(f"Failed to extract using matched template: {e}", exc_info=True)
             logger.info("Template extraction failed, falling back to AI extraction")
@@ -304,6 +336,36 @@ async def process_document(
             logger.info("Vendor Profile Updated from Gemini Extraction")
         except Exception as l_err:
             logger.error(f"Failed to apply/learn vendor profile: {l_err}", exc_info=True)
+
+        # ─── INTEGRATE AI CONFIDENCE & VALIDATION ENGINE ───
+        company_id = current_user.company_id if hasattr(current_user, 'company_id') else (current_user.get('company_id') if isinstance(current_user, dict) else None)
+        vendor_profile = None
+        try:
+            vendor_name = result.get("vendor_or_customer_name") or ""
+            vendor_gstin = result.get("tax_registration_number") or ""
+            if vendor_gstin:
+                vendor_profile = await db.vendor_intelligence.find_one({"gstin": vendor_gstin})
+            if not vendor_profile and vendor_name:
+                vendor_profile = await db.vendor_intelligence.find_one({"vendor_name": vendor_name})
+        except Exception as e:
+            logger.error(f"Error fetching vendor profile in Gemini validation: {e}")
+            
+        from backend.ai.document_validator import run_document_validation_pipeline
+        validation_report = {}
+        try:
+            ocr_meta = await db.ocr_processing_history.find_one({"document_id": document_id}) or {}
+            validation_report = await run_document_validation_pipeline(
+                extracted_data=result,
+                ocr_metadata=ocr_meta,
+                filename=filename,
+                document_id=document_id,
+                vendor_profile=vendor_profile,
+                template_matched=False,
+                company_id=company_id
+            )
+            result["validation_report"] = validation_report
+        except Exception as val_err:
+            logger.error(f"Error in Gemini validation: {val_err}", exc_info=True)
 
     # 5. Save to Memory
     try:
@@ -348,7 +410,7 @@ async def process_document(
         
         now = datetime.now(timezone.utc).isoformat()
         new_record = {
-            "document_id": str(uuid.uuid4()),
+            "document_id": document_id,
             "fingerprint": fingerprint,
             "document_type": classified_doc_type,
             "vendor_name": parsed["vendor_name"],
@@ -363,8 +425,10 @@ async def process_document(
             "ledger_mapping": {},
             "journal_entry": {},
             "processing_engine": "gemini",
-            "ai_confidence": classification_res["confidence"],
+            "ai_confidence": validation_report.get("overall_confidence", classification_res["confidence"]),
             "processing_status": "extracted",
+            "validation_report": validation_report,
+            "decision": validation_report.get("decision", "REQUIRES_REVIEW"),
             "created_at": now,
             "updated_at": now,
             "file_hash": file_hash,
