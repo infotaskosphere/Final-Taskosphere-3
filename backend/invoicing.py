@@ -1038,7 +1038,7 @@ def _parse_excel_file(file_path: str, filename: str) -> dict:
                         break
                     except Exception:
                         pass
-            status = "paid" if pay_sts == "paid" else ("partially_paid" if received > 0 and balance > 0 else ("sent" if balance > 0 else "draft"))
+            status = "paid" if pay_sts in ("paid", "received", "clear") else ("partially_paid" if received > 0 and balance > 0 else ("sent" if balance > 0 else "draft"))
             inv_type = "credit_note" if "credit" in txn_type else "tax_invoice"
             taxable  = round(total / 1.18, 2); gst_amt = round(total - taxable, 2)
             result["invoices"].append(_build_invoice(
@@ -3221,13 +3221,16 @@ async def create_invoice(data: InvoiceCreate, current_user: User = Depends(check
     due_date = data.due_date or (date.today() + timedelta(days=30)).isoformat()
     advance = max(0.0, float(data.advance_received or 0))
     raw = {"id": str(uuid.uuid4()), "invoice_no": inv_no, "invoice_date": inv_date, "due_date": due_date,
-           **data.model_dump(exclude={"invoice_no"}), "amount_paid": advance, "amount_due": 0.0, "pdf_drive_link": "",
+           **data.model_dump(exclude={"invoice_no"}), "amount_paid": advance, "pdf_drive_link": "",
            "created_by": current_user.id, "created_at": now, "updated_at": now}
     raw = _compute_invoice_totals(raw, await _company_has_gst(data.company_id))
+    raw["amount_due"] = round(max(raw["grand_total"] - advance, 0.0), 2)
     if raw["amount_due"] <= 0:
         raw["status"] = "paid"
     elif advance > 0:
         raw["status"] = "partially_paid"
+    else:
+        raw["status"] = data.status or "draft"
     await db.invoices.insert_one({**raw})
     await sync_invoice_journal_entry(raw["id"])
     # Record advance as a payment entry so history is tracked
@@ -4789,6 +4792,26 @@ async def _reconcile_and_sync_all_sales_and_payments_impl(company_id: str):
                     })
                     await sync_payment_journal_entry(payment_id)
                     recorded_total = round(recorded_total + shortfall, 2)
+            elif target_paid < recorded_total:
+                # We have excess recorded payments. If there are any auto_generated payments, 
+                # we can delete or adjust them to reconcile.
+                excess = round(recorded_total - target_paid, 2)
+                auto_payments = [p for p in existing_payments if p.get("auto_generated")]
+                for ap in auto_payments:
+                    if excess <= 0.01:
+                        break
+                    ap_amount = float(ap.get("amount") or 0)
+                    if ap_amount <= excess + 0.01:
+                        await db.payments.delete_one({"id": ap["id"]})
+                        await sync_payment_journal_entry(ap["id"])
+                        excess = round(excess - ap_amount, 2)
+                        recorded_total = round(recorded_total - ap_amount, 2)
+                    else:
+                        new_amount = round(ap_amount - excess, 2)
+                        await db.payments.update_one({"id": ap["id"]}, {"$set": {"amount": new_amount}})
+                        await sync_payment_journal_entry(ap["id"])
+                        recorded_total = round(recorded_total - excess, 2)
+                        excess = 0.0
                     
             # Keep invoice's amount_paid, amount_due and status perfectly aligned with db.payments
             final_paid = round(recorded_total, 2)
