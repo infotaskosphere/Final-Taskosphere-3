@@ -463,4 +463,28 @@ class AnalyticalTrendAnalyzer:
         }
 
 
+class EnterpriseExportOrchestrator:
+    @staticmethod
+    async def generate_and_export_ledger(company_id: str, format: str = "json") -> Dict[str, Any]:
+        """Orchestrates structured exports of company ledgers into designated output channels."""
+        from backend.dependencies import db
+        journals = await db.journals.find({"company_id": company_id}).to_list(100)
+        
+        if format.lower() == "xml":
+            from backend.exports.xml_export import XMLExport
+            data = XMLExport.export_to_tally_xml(journals)
+            return {"status": "SUCCESS", "format": "XML", "content": data}
+            
+        elif format.lower() == "pdf":
+            from backend.exports.pdf_export import PDFExport
+            pdf_bytes = PDFExport.render_pdf_report(f"Ledger Report - {company_id}", journals)
+            return {"status": "SUCCESS", "format": "PDF", "bytes_length": len(pdf_bytes)}
+            
+        else:
+            from backend.exports.json_export import JSONExport
+            data = JSONExport.export_to_json(journals)
+            return {"status": "SUCCESS", "format": "JSON", "content": data}
+
+
+
 
