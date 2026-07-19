@@ -525,6 +525,12 @@ async def startup_event():
         await create_compliance_indexes()
         await create_gst_reconciliation_indexes()
         await create_zte_indexes()
+        # AI Memory Foundation indexes
+        await db.ai_document_memory.create_index("fingerprint")
+        await db.ai_document_memory.create_index("vendor_gstin")
+        await db.ai_document_memory.create_index("invoice_number")
+        await db.ai_document_memory.create_index("vendor_name")
+        await db.ai_document_memory.create_index("created_at")
         await create_gst_portal_sync_indexes()
         await create_accounting_integrity_indexes()
         await create_accounting_extended_indexes()
