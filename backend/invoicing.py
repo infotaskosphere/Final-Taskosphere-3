@@ -1559,6 +1559,15 @@ class CreditNoteCreate(BaseModel):
     notes: str = ""
 
 
+class DebitNoteCreate(BaseModel):
+    original_invoice_id: str
+    company_id: str
+    client_name: str
+    reason: str
+    items: List[InvoiceItem] = []
+    notes: str = ""
+
+
 # ═══════════════════════════════════════════════════════════
 # CALCULATION ENGINE
 # ═══════════════════════════════════════════════════════════
@@ -3221,16 +3230,10 @@ async def create_invoice(data: InvoiceCreate, current_user: User = Depends(check
     due_date = data.due_date or (date.today() + timedelta(days=30)).isoformat()
     advance = max(0.0, float(data.advance_received or 0))
     raw = {"id": str(uuid.uuid4()), "invoice_no": inv_no, "invoice_date": inv_date, "due_date": due_date,
-           **data.model_dump(exclude={"invoice_no"}), "amount_paid": advance, "pdf_drive_link": "",
+           **data.model_dump(exclude={"invoice_no"}), "amount_paid": 0.0, "amount_due": 0.0, "pdf_drive_link": "",
+           "status": data.status or "draft",
            "created_by": current_user.id, "created_at": now, "updated_at": now}
     raw = _compute_invoice_totals(raw, await _company_has_gst(data.company_id))
-    raw["amount_due"] = round(max(raw["grand_total"] - advance, 0.0), 2)
-    if raw["amount_due"] <= 0:
-        raw["status"] = "paid"
-    elif advance > 0:
-        raw["status"] = "partially_paid"
-    else:
-        raw["status"] = data.status or "draft"
     await db.invoices.insert_one({**raw})
     await sync_invoice_journal_entry(raw["id"])
     # Record advance as a payment entry so history is tracked
@@ -3245,6 +3248,19 @@ async def create_invoice(data: InvoiceCreate, current_user: User = Depends(check
             "created_by": current_user.id, "created_at": now,
         })
         await sync_payment_journal_entry(pay_id)
+    # Recalculate after Create: single canonical engine derives
+    # amount_paid/amount_due/auto-status (accounts for the advance payment
+    # just recorded, and for the invoice_type == tax_invoice guard).
+    result = await recalculate_invoice_accounting(raw["id"])
+    if result:
+        raw["amount_paid"], raw["amount_due"], raw["status"] = result["amount_paid"], result["amount_due"], result["status"]
+    else:
+        # Non-tax-invoice types (proforma/estimate/credit_note/debit_note)
+        # aren't touched by the AR engine — keep the simple grand-total-minus-
+        # advance figure these previously had.
+        amount_due = round(max(raw["grand_total"] - advance, 0.0), 2)
+        await db.invoices.update_one({"id": raw["id"]}, {"$set": {"amount_paid": advance, "amount_due": amount_due}})
+        raw["amount_paid"], raw["amount_due"] = advance, amount_due
     raw.pop("_id", None)
     return raw
 
@@ -3297,6 +3313,14 @@ async def invoice_stats(year: Optional[int] = None, month: Optional[int] = None,
     # revenue immediately. sync_invoice_journal_entry() also posts drafts so
     # that Trial Balance / P&L / Balance Sheet remain consistent with the
     # figures reported here. Only cancelled invoices are excluded.
+    #
+    # Accounting engine rule: workflow status (Draft/Sent/Partial/Paid/etc)
+    # is UI-only and must never be branched on here. Revenue, Collections,
+    # and Outstanding are driven only by Invoice Amount, Payments, Credit
+    # Notes and Debit Notes — all of which recalculate_invoice_accounting()
+    # already folds into the stored amount_paid / amount_due fields on every
+    # payment/credit-note/debit-note/edit. So this report simply trusts those
+    # two fields instead of re-deriving them from `status`.
     all_inv = list(every_inv)
     today = date.today()
     cur_year = year or today.year
@@ -3307,22 +3331,31 @@ async def invoice_stats(year: Optional[int] = None, month: Optional[int] = None,
         except: return False
 
     total_rev = sum(i.get("grand_total", 0) for i in all_inv)
-    # Outstanding: exclude paid and cancelled — use grand_total minus amount_paid
-    # so old records with stale amount_due field don't inflate the number.
+
     def _calc_due(i):
-        if i.get("status") in ("paid", "cancelled"):
-            return 0.0
-        grand = float(i.get("grand_total") or 0)
-        paid  = float(i.get("amount_paid") or i.get("advance_received") or 0)
-        return max(0.0, grand - paid)
+        return max(0.0, float(i.get("amount_due") or 0))
 
     def _calc_paid(i):
-        if i.get("status") == "paid":
-            return float(i.get("grand_total") or 0)
-        return float(i.get("amount_paid") or i.get("advance_received") or 0)
+        return float(i.get("amount_paid") or 0)
 
     total_out = sum(_calc_due(i) for i in all_inv)
+    total_collected = sum(_calc_paid(i) for i in all_inv)
     overdue_c = sum(1 for i in all_inv if i.get("status") not in ("paid", "cancelled", "draft") and _calc_due(i) > 0)
+
+    # Revenue = Collections + Outstanding self-check. A mismatch means some
+    # invoice's amount_paid/amount_due drifted from Invoice Amount +
+    # Payments + Credit/Debit Notes (e.g. a record written before this
+    # engine existed, or a direct DB edit) — log it so it can be traced
+    # back to the specific invoice(s) instead of silently reporting wrong
+    # totals.
+    _mismatch = round(total_rev - (total_collected + total_out), 2)
+    if abs(_mismatch) > 0.05:
+        logging.warning(
+            f"[accounting-reconciliation] Revenue != Collections + Outstanding "
+            f"(diff={_mismatch}). Revenue={round(total_rev,2)} "
+            f"Collections={round(total_collected,2)} Outstanding={round(total_out,2)}. "
+            f"Run /invoices/reconcile-paid-receipts or the sales reconcile job to rebuild."
+        )
     mon_inv = [i for i in all_inv if _in_month(i.get("invoice_date", ""), cur_year, cur_mon)]
     trend = []
     for offset in range(11, -1, -1):
@@ -3635,13 +3668,21 @@ async def update_invoice_status(
     if result.matched_count == 0:
         raise HTTPException(404, "Invoice not found")
 
+    # Re-derive amount_paid/amount_due from the canonical engine (this also
+    # accounts for any Credit/Debit Notes against this invoice), then make
+    # sure the workflow status the dropdown explicitly asked for still wins
+    # — this endpoint is a manual UI action, not the auto-status rule.
+    if new_status != "cancelled":
+        await recalculate_invoice_accounting(inv_id)
+        await db.invoices.update_one({"id": inv_id}, {"$set": {"status": new_status}})
     await sync_invoice_journal_entry(inv_id)
 
+    final_inv = await db.invoices.find_one({"id": inv_id}, {"_id": 0, "amount_paid": 1, "amount_due": 1})
     return {
         "id":          inv_id,
         "status":      new_status,
-        "amount_paid": fields_to_set.get("amount_paid", inv.get("amount_paid", 0)),
-        "amount_due":  fields_to_set.get("amount_due",  inv.get("amount_due",  0)),
+        "amount_paid": (final_inv or {}).get("amount_paid", fields_to_set.get("amount_paid", inv.get("amount_paid", 0))),
+        "amount_due":  (final_inv or {}).get("amount_due",  fields_to_set.get("amount_due",  inv.get("amount_due",  0))),
     }
 
 
@@ -3894,7 +3935,6 @@ async def update_invoice(inv_id: str, data: dict, background_tasks: BackgroundTa
         data.pop(f, None)
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     data = _compute_invoice_totals(data, await _company_has_gst(new_company_id))
-    data["amount_due"] = round(data["grand_total"] - ex.get("amount_paid", 0), 2)
     logger.info(
         f"UPDATE invoice {inv_id}: $set keys = {list(data.keys())}, "
         f"invoice_no = {data.get('invoice_no', 'NOT PRESENT')!r}, "
@@ -3902,6 +3942,11 @@ async def update_invoice(inv_id: str, data: dict, background_tasks: BackgroundTa
     )
     await db.invoices.update_one({"id": inv_id}, {"$set": data})
     await sync_invoice_journal_entry(inv_id)
+    # Recalculate after Edit: Outstanding depends on the (possibly changed)
+    # Grand Total, so re-derive it from Payments + Credit/Debit Notes rather
+    # than the old naive "grand_total - old_amount_paid" line this replaced.
+    # (No-op for non-tax-invoice types like proforma/credit_note/debit_note.)
+    await recalculate_invoice_accounting(inv_id)
 
     # -- Regenerate print/PDF data if GSTIN was updated --------------------------
     if gstin_updated and _drive_configured():
@@ -3956,6 +4001,9 @@ async def bulk_delete_invoices(ids: List[str], current_user: User = Depends(chec
     deleted, failed = 0, 0
     for inv_id in ids:
         try:
+            _existing = await db.invoices.find_one({"id": inv_id}, {"_id": 0, "invoice_type": 1, "original_invoice_id": 1})
+            _parent_id = _existing.get("original_invoice_id") if _existing and _existing.get("invoice_type") in ("credit_note", "debit_note") else None
+
             # Delete journal entries for associated payments
             payments = await db.payments.find({"invoice_id": inv_id}).to_list(1000)
             for p in payments:
@@ -3969,6 +4017,8 @@ async def bulk_delete_invoices(ids: List[str], current_user: User = Depends(chec
             if r.deleted_count:
                 deleted += 1
                 await sync_invoice_journal_entry(inv_id)
+                if _parent_id:
+                    await recalculate_invoice_accounting(_parent_id)
             else:
                 failed += 1
         except Exception: failed += 1
@@ -3978,7 +4028,12 @@ async def bulk_delete_invoices(ids: List[str], current_user: User = Depends(chec
 @router.delete("/invoices/{inv_id}")
 async def delete_invoice(inv_id: str, current_user: User = Depends(check_module_permission("invoicing", "delete"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
-    
+
+    # If this is a Credit/Debit Note, remember its parent so we can re-derive
+    # the parent's Outstanding after the note is gone.
+    _existing = await db.invoices.find_one({"id": inv_id}, {"_id": 0, "invoice_type": 1, "original_invoice_id": 1})
+    _parent_id = _existing.get("original_invoice_id") if _existing and _existing.get("invoice_type") in ("credit_note", "debit_note") else None
+
     # Delete journal entries for associated payments
     payments = await db.payments.find({"invoice_id": inv_id}).to_list(1000)
     for p in payments:
@@ -3991,6 +4046,8 @@ async def delete_invoice(inv_id: str, current_user: User = Depends(check_module_
     result = await db.invoices.delete_one({"id": inv_id})
     if result.deleted_count == 0: raise HTTPException(404, "Invoice not found")
     await sync_invoice_journal_entry(inv_id)
+    if _parent_id:
+        await recalculate_invoice_accounting(_parent_id)
     return {"message": f"Invoice {inv_id} deleted"}
 
 
@@ -4291,15 +4348,9 @@ async def record_payment(data: PaymentCreate, current_user: User = Depends(check
     await db.payments.insert_one({**payment_data})
     await sync_payment_journal_entry(payment_data["id"])
     payment_data.pop("_id", None)
-    all_payments = await db.payments.find({"invoice_id": data.invoice_id}, {"_id": 0}).to_list(500)
-    total_paid = sum(float(p.get("amount", 0)) for p in all_payments)
-    grand_total = float(inv.get("grand_total", 0))
-    amount_due = round(max(grand_total - total_paid, 0), 2)
-    new_status = "paid" if amount_due <= 0 else ("partially_paid" if total_paid > 0 else inv.get("status", "sent"))
-    await db.invoices.update_one({"id": data.invoice_id},
-        {"$set": {"amount_paid": round(total_paid, 2), "amount_due": amount_due, "status": new_status,
-                  "updated_at": datetime.now(timezone.utc).isoformat()}})
-    await sync_invoice_journal_entry(data.invoice_id)
+    # Single source of truth: recompute Outstanding/Paid/auto-status from
+    # Invoice Amount + Payments + Credit Notes + Debit Notes.
+    await recalculate_invoice_accounting(data.invoice_id)
     return payment_data
 
 
@@ -4325,19 +4376,9 @@ async def delete_payment(pid: str, current_user: User = Depends(check_module_per
     # Sync payment to ledger (will delete its journal entry)
     await sync_payment_journal_entry(pid)
 
-    # Recalculate invoice payments & status
+    # Recalculate invoice payments & status — single source of truth.
     if invoice_id:
-        inv = await db.invoices.find_one({"id": invoice_id})
-        if inv:
-            all_payments = await db.payments.find({"invoice_id": invoice_id}, {"_id": 0}).to_list(500)
-            total_paid = sum(float(p.get("amount", 0)) for p in all_payments)
-            grand_total = float(inv.get("grand_total", 0))
-            amount_due = round(max(grand_total - total_paid, 0), 2)
-            new_status = "paid" if amount_due <= 0 else ("partially_paid" if total_paid > 0 else "sent")
-            await db.invoices.update_one({"id": invoice_id},
-                {"$set": {"amount_paid": round(total_paid, 2), "amount_due": amount_due, "status": new_status,
-                          "updated_at": datetime.now(timezone.utc).isoformat()}})
-            await sync_invoice_journal_entry(invoice_id)
+        await recalculate_invoice_accounting(invoice_id)
 
     return {"message": f"Payment {pid} deleted"}
 
@@ -4348,7 +4389,23 @@ async def delete_payment(pid: str, current_user: User = Depends(check_module_per
 
 @router.post("/credit-notes")
 async def create_credit_note(data: CreditNoteCreate, current_user: User = Depends(check_module_permission("invoicing", "create"))):
+    """Issue a Credit Note against an existing invoice.
+
+    Per the accounting-engine rule, a Credit Note is real accounting (not a
+    workflow status): it reduces that invoice's Outstanding/Accounts
+    Receivable and reverses the corresponding Sales/GST, regardless of the
+    original invoice's workflow status (Draft/Sent/Partial/Paid). It never
+    touches Revenue directly — Revenue stays "sum of non-cancelled invoice
+    grand totals"; the credit note only nets against Outstanding, exactly
+    the same way a Payment does.
+    """
     if not _perm(current_user): raise HTTPException(403, "Access denied")
+    original = await db.invoices.find_one({"id": data.original_invoice_id}, {"_id": 0})
+    if not original:
+        raise HTTPException(404, "Original invoice not found")
+    if original.get("status") == "cancelled":
+        raise HTTPException(400, "Cannot issue a Credit Note against a cancelled invoice")
+
     inv_no = await _next_invoice_no("CN", data.company_id, invoice_type="credit_note")
     now = datetime.now(timezone.utc).isoformat()
     raw = {"id": str(uuid.uuid4()), "invoice_no": inv_no, "invoice_type": "credit_note",
@@ -4356,6 +4413,132 @@ async def create_credit_note(data: CreditNoteCreate, current_user: User = Depend
            "created_by": current_user.id, "created_at": now, "updated_at": now,
            "status": "credit_note", "amount_paid": 0, "amount_due": 0, "pdf_drive_link": ""}
     raw = _compute_invoice_totals(raw, await _company_has_gst(data.company_id))
+
+    await db.invoices.insert_one({**raw})
+    raw.pop("_id", None)
+
+    # Post the credit note's own reversing journal entry (Dr Sales, Cr AR).
+    await sync_invoice_journal_entry(raw["id"])
+    # Re-derive the original invoice's Outstanding/Receivable/status now that
+    # this credit note exists against it.
+    await recalculate_invoice_accounting(data.original_invoice_id)
+
+    return raw
+
+
+@router.post("/debit-notes")
+async def create_debit_note(data: DebitNoteCreate, current_user: User = Depends(check_module_permission("invoicing", "create"))):
+    """Issue a Debit Note against an existing invoice (e.g. an under-billed
+    correction). Increases that invoice's Outstanding/Accounts Receivable
+    and posts additional Sales/GST — the mirror image of a Credit Note.
+    """
+    if not _perm(current_user): raise HTTPException(403, "Access denied")
+    original = await db.invoices.find_one({"id": data.original_invoice_id}, {"_id": 0})
+    if not original:
+        raise HTTPException(404, "Original invoice not found")
+    if original.get("status") == "cancelled":
+        raise HTTPException(400, "Cannot issue a Debit Note against a cancelled invoice")
+
+    inv_no = await _next_invoice_no("DN", data.company_id, invoice_type="debit_note")
+    now = datetime.now(timezone.utc).isoformat()
+    raw = {"id": str(uuid.uuid4()), "invoice_no": inv_no, "invoice_type": "debit_note",
+           **data.model_dump(), "invoice_date": date.today().isoformat(), "due_date": date.today().isoformat(),
+           "created_by": current_user.id, "created_at": now, "updated_at": now,
+           "status": "sent", "amount_paid": 0, "amount_due": 0, "pdf_drive_link": ""}
+    raw = _compute_invoice_totals(raw, await _company_has_gst(data.company_id))
+
+    await db.invoices.insert_one({**raw})
+    raw.pop("_id", None)
+
+    # Post the debit note's own journal entry (Dr AR, Cr Sales — same shape
+    # as a normal sale, since sync_invoice_journal_entry() only special-cases
+    # invoice_type == "credit_note").
+    await sync_invoice_journal_entry(raw["id"])
+    # Re-derive the original invoice's Outstanding/Receivable/status now that
+    # this debit note exists against it.
+    await recalculate_invoice_accounting(data.original_invoice_id)
+
+    return raw
+
+
+# ═══════════════════════════════════════════════════════════
+# ACCOUNTING ENGINE — single source of truth for Outstanding/Paid/Status
+# ═══════════════════════════════════════════════════════════
+
+async def recalculate_invoice_accounting(invoice_id: str) -> Optional[dict]:
+    """The one place Outstanding, Amount Paid, and the derived (Paid/Partial)
+    workflow status are computed for an invoice, driven ONLY by:
+        Invoice Amount, Payments, Credit Notes, Debit Notes, Cancellation
+    — never by manually-set workflow status.
+
+        Outstanding = Grand Total - Payments Received - Credit Notes + Debit Notes
+        Receivable  = Outstanding
+
+    Auto status (workflow status stays otherwise untouched — it's UI only):
+        Outstanding <= 0            -> "paid"
+        Payments > 0 & Outstanding > 0 -> "partially_paid"
+        otherwise                   -> keep current status, unless it was a
+                                       stale auto-derived paid/partial that no
+                                       longer holds (e.g. a credit note was
+                                       deleted), in which case fall back to
+                                       "sent".
+
+    Called after every mutation that can move the numbers: payment
+    add/edit/delete, credit note, debit note, invoice edit/cancel, so the
+    invoice document is always the single up-to-date source that Reports /
+    Dashboard / Party Ledger / Trial Balance all read from.
+    """
+    inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not inv or inv.get("invoice_type") != "tax_invoice":
+        return None
+
+    grand_total = float(inv.get("grand_total") or 0)
+
+    if inv.get("status") == "cancelled":
+        # Cancelled invoices must not affect Revenue/Receivable/Outstanding.
+        await db.invoices.update_one(
+            {"id": invoice_id},
+            {"$set": {"amount_due": 0.0, "updated_at": datetime.now(timezone.utc).isoformat()}},
+        )
+        return None
+
+    payments = await db.payments.find({"invoice_id": invoice_id}, {"_id": 0, "amount": 1}).to_list(2000)
+    payments_total = round(sum(float(p.get("amount") or 0) for p in payments), 2)
+
+    notes = await db.invoices.find(
+        {"original_invoice_id": invoice_id, "invoice_type": {"$in": ["credit_note", "debit_note"]}},
+        {"_id": 0, "invoice_type": 1, "grand_total": 1, "status": 1},
+    ).to_list(2000)
+    credit_notes_total = round(sum(float(n.get("grand_total") or 0) for n in notes
+                                    if n.get("invoice_type") == "credit_note" and n.get("status") != "cancelled"), 2)
+    debit_notes_total = round(sum(float(n.get("grand_total") or 0) for n in notes
+                                   if n.get("invoice_type") == "debit_note" and n.get("status") != "cancelled"), 2)
+
+    outstanding = round(grand_total - payments_total - credit_notes_total + debit_notes_total, 2)
+
+    current_status = inv.get("status", "draft")
+    if outstanding <= 0.004:
+        new_status = "paid"
+    elif payments_total > 0:
+        new_status = "partially_paid"
+    elif current_status in ("paid", "partially_paid"):
+        # Was auto-derived paid/partial previously (e.g. via a credit note
+        # that has since been removed) but no payment now justifies it.
+        new_status = "sent"
+    else:
+        new_status = current_status
+
+    await db.invoices.update_one(
+        {"id": invoice_id},
+        {"$set": {
+            "amount_paid": payments_total,
+            "amount_due": outstanding,
+            "status": new_status,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    await sync_invoice_journal_entry(invoice_id)
+    return {"invoice_id": invoice_id, "amount_paid": payments_total, "amount_due": outstanding, "status": new_status}
 
 
 # ═══════════════════════════════════════════════════════════
