@@ -247,6 +247,41 @@ function AccountingReportsInner() {
     }
   };
 
+  const downloadV2Export = async (format = 'xml') => {
+    try {
+      toast.info(`Preparing ${format.toUpperCase()} export via corporate ledger engine...`);
+      const { data } = await api.get('/v2/exports/ledger', {
+        params: {
+          format,
+          company_id: companyId || undefined,
+          date_from: dateFrom || undefined,
+          date_to: dateTo || undefined,
+        },
+        responseType: format === 'pdf' ? 'blob' : 'text',
+      });
+      
+      const mimeTypes = {
+        xml: 'application/xml',
+        pdf: 'application/pdf',
+        json: 'application/json',
+      };
+      
+      const blob = new Blob([data], { type: mimeTypes[format] || 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const safeCompany = companyLabel.replace(/[^a-z0-9]+/gi, '_');
+      a.href = url;
+      a.download = `Ledger_v2_${safeCompany}_${dateFrom}_to_${dateTo}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success(`${format.toUpperCase()} exported successfully!`);
+    } catch {
+      toast.error(`Failed to export ledger in ${format.toUpperCase()} format.`);
+    }
+  };
+
   const downloadActiveReport = () => {
     const safeCompany = companyLabel.replace(/[^a-z0-9]+/gi, '_');
     const period = `${dateFrom}_to_${dateTo}`;
@@ -347,6 +382,15 @@ function AccountingReportsInner() {
             </Button>
             <Button onClick={downloadGeneralLedger} size="sm" variant="outline" className="h-8 bg-white/10 border-white/25 text-white hover:bg-white/20 text-xs">
               <Download className="h-3.5 w-3.5 mr-1" /> General Ledger
+            </Button>
+            <Button onClick={() => downloadV2Export('xml')} size="sm" variant="outline" className="h-8 bg-white/10 border-white/25 text-amber-300 hover:bg-white/25 text-xs font-bold">
+              Tally ERP XML
+            </Button>
+            <Button onClick={() => downloadV2Export('pdf')} size="sm" variant="outline" className="h-8 bg-white/10 border-white/25 text-emerald-300 hover:bg-white/25 text-xs font-bold">
+              Corporate PDF
+            </Button>
+            <Button onClick={() => downloadV2Export('json')} size="sm" variant="outline" className="h-8 bg-white/10 border-white/25 text-blue-300 hover:bg-white/25 text-xs font-bold">
+              Structured JSON
             </Button>
             <Button
               onClick={() => {
