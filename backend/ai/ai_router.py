@@ -3,13 +3,18 @@ import logging
 import hashlib
 import json
 from datetime import datetime, timezone
-from typing import Callable, Any
+from typing import Callable, Any, Optional, List, Dict
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from backend.dependencies import db
 from backend.ai.fingerprint import generate_document_fingerprint
 from backend.ai.ai_memory import save_ai_memory, find_memory_by_fingerprint, update_ai_memory
 
 logger = logging.getLogger("ai_router")
+router = APIRouter(prefix="/ai", tags=["ai"])
+
 
 def parse_analysis_text(text: str) -> dict:
     import re
@@ -253,111 +258,111 @@ async def process_document(
     if matched_template:
         logger.info("Template Match Found")
         # Extract fields using template and bypass Gemini/Groq
-            try:
-                result = extract_using_template(matched_template, raw_ocr_text)
-                await increment_usage(matched_template["template_id"], success=True)
+        try:
+            result = extract_using_template(matched_template, raw_ocr_text)
+            await increment_usage(matched_template["template_id"], success=True)
+            
+            # Enrich with classification
+            if isinstance(result, dict):
+                result["classification"] = classification_res
+                result["document_type"] = classification_res["document_type"]
+                result["template_matched_id"] = matched_template["template_id"]
+                result["extraction_method"] = "template"
                 
-                # Enrich with classification
-                if isinstance(result, dict):
-                    result["classification"] = classification_res
-                    result["document_type"] = classification_res["document_type"]
-                    result["template_matched_id"] = matched_template["template_id"]
-                    result["extraction_method"] = "template"
-                    
-                    # Apply Vendor Defaults & Learning
-                    vendor_name = result.get("vendor_or_customer_name") or ""
-                    vendor_gstin = result.get("tax_registration_number") or ""
-                    result = await apply_vendor_defaults(vendor_name, vendor_gstin, result)
-                    try:
-                        await learn_vendor_profile(vendor_name, vendor_gstin, result)
-                        logger.info("Vendor Defaults Applied and Profile Learned from Template")
-                    except Exception as l_err:
-                        logger.error(f"Failed to learn vendor profile from template: {l_err}", exc_info=True)
-                    
-                    # ─── INTEGRATE AI CONFIDENCE & VALIDATION ENGINE ───
-                    company_id = current_user.company_id if hasattr(current_user, 'company_id') else (current_user.get('company_id') if isinstance(current_user, dict) else None)
-                    vendor_profile = None
-                    try:
-                        if vendor_gstin:
-                            vendor_profile = await db.vendor_intelligence.find_one({"gstin": vendor_gstin})
-                        if not vendor_profile and vendor_name:
-                            vendor_profile = await db.vendor_intelligence.find_one({"vendor_name": vendor_name})
-                    except Exception as e:
-                        logger.error(f"Error fetching vendor profile in template matching: {e}")
-                        
-                    from backend.ai.document_validator import run_document_validation_pipeline
-                    validation_report = {}
-                    try:
-                        ocr_meta = await db.ocr_processing_history.find_one({"document_id": document_id}) or {}
-                        validation_report = await run_document_validation_pipeline(
-                            extracted_data=result,
-                            ocr_metadata=ocr_meta,
-                            filename=filename,
-                            document_id=document_id,
-                            vendor_profile=vendor_profile,
-                            template_matched=True,
-                            company_id=company_id
-                        )
-                        result["validation_report"] = validation_report
-                    except Exception as val_err:
-                        logger.error(f"Error in template validation: {val_err}", exc_info=True)
-                    
-                # Save this to memory for future fingerprint hits as well
+                # Apply Vendor Defaults & Learning
+                vendor_name = result.get("vendor_or_customer_name") or ""
+                vendor_gstin = result.get("tax_registration_number") or ""
+                result = await apply_vendor_defaults(vendor_name, vendor_gstin, result)
                 try:
-                    classified_doc_type = classification_res["document_type"]
-                    
-                    parsed = {
-                        "vendor_name": result.get("vendor_or_customer_name") or "",
-                        "vendor_gstin": result.get("tax_registration_number") or "",
-                        "invoice_number": result.get("invoice_number") or "",
-                        "invoice_date": result.get("invoice_date") or "",
-                        "invoice_total": float(result.get("total_invoice_value") or 0) if result.get("total_invoice_value") else 0.0,
-                        "taxable_amount": float(result.get("taxable_value") or 0) if result.get("taxable_value") else 0.0,
-                        "gst_amount": float(result.get("total_tax") or 0) if result.get("total_tax") else 0.0
-                    }
-                    
-                    fingerprint = generate_document_fingerprint(
-                        vendor_name=parsed["vendor_name"],
-                        vendor_gstin=parsed["vendor_gstin"],
-                        invoice_number=parsed["invoice_number"],
-                        document_type=classified_doc_type,
-                        raw_ocr_text=raw_ocr_text
-                    )
-                    
-                    now = datetime.now(timezone.utc).isoformat()
-                    new_record = {
-                        "document_id": document_id,
-                        "fingerprint": fingerprint,
-                        "document_type": classified_doc_type,
-                        "vendor_name": parsed["vendor_name"],
-                        "vendor_gstin": parsed["vendor_gstin"],
-                        "invoice_number": parsed["invoice_number"],
-                        "invoice_date": parsed["invoice_date"],
-                        "invoice_total": parsed["invoice_total"],
-                        "taxable_amount": parsed["taxable_amount"],
-                        "gst_amount": parsed["gst_amount"],
-                        "raw_ocr_text": raw_ocr_text,
-                        "extracted_json": result,
-                        "ledger_mapping": {},
-                        "journal_entry": {},
-                        "processing_engine": "template",
-                        "ai_confidence": validation_report.get("overall_confidence", classification_res["confidence"]),
-                        "processing_status": "extracted",
-                        "validation_report": validation_report,
-                        "decision": validation_report.get("decision", "REQUIRES_REVIEW"),
-                        "created_at": now,
-                        "updated_at": now,
-                        "file_hash": file_hash,
-                        "raw_ocr_text_normalized": normalized_ocr
-                    }
-                    await save_ai_memory(new_record)
-                    logger.info("Memory Saved (from Template)")
+                    await learn_vendor_profile(vendor_name, vendor_gstin, result)
+                    logger.info("Vendor Defaults Applied and Profile Learned from Template")
+                except Exception as l_err:
+                    logger.error(f"Failed to learn vendor profile from template: {l_err}", exc_info=True)
+                
+                # ─── INTEGRATE AI CONFIDENCE & VALIDATION ENGINE ───
+                company_id = current_user.company_id if hasattr(current_user, 'company_id') else (current_user.get('company_id') if isinstance(current_user, dict) else None)
+                vendor_profile = None
+                try:
+                    if vendor_gstin:
+                        vendor_profile = await db.vendor_intelligence.find_one({"gstin": vendor_gstin})
+                    if not vendor_profile and vendor_name:
+                        vendor_profile = await db.vendor_intelligence.find_one({"vendor_name": vendor_name})
                 except Exception as e:
-                    logger.error(f"Error saving template extraction to AI Memory: {e}", exc_info=True)
+                    logger.error(f"Error fetching vendor profile in template matching: {e}")
                     
-                result = await _orchestrate_gst(result, current_user, document_id)
-                result = await _orchestrate_learning_and_recommendations(result, current_user, document_id)
-                return result
+                from backend.ai.document_validator import run_document_validation_pipeline
+                validation_report = {}
+                try:
+                    ocr_meta = await db.ocr_processing_history.find_one({"document_id": document_id}) or {}
+                    validation_report = await run_document_validation_pipeline(
+                        extracted_data=result,
+                        ocr_metadata=ocr_meta,
+                        filename=filename,
+                        document_id=document_id,
+                        vendor_profile=vendor_profile,
+                        template_matched=True,
+                        company_id=company_id
+                    )
+                    result["validation_report"] = validation_report
+                except Exception as val_err:
+                    logger.error(f"Error in template validation: {val_err}", exc_info=True)
+                
+            # Save this to memory for future fingerprint hits as well
+            try:
+                classified_doc_type = classification_res["document_type"]
+                
+                parsed = {
+                    "vendor_name": result.get("vendor_or_customer_name") or "",
+                    "vendor_gstin": result.get("tax_registration_number") or "",
+                    "invoice_number": result.get("invoice_number") or "",
+                    "invoice_date": result.get("invoice_date") or "",
+                    "invoice_total": float(result.get("total_invoice_value") or 0) if result.get("total_invoice_value") else 0.0,
+                    "taxable_amount": float(result.get("taxable_value") or 0) if result.get("taxable_value") else 0.0,
+                    "gst_amount": float(result.get("total_tax") or 0) if result.get("total_tax") else 0.0
+                }
+                
+                fingerprint = generate_document_fingerprint(
+                    vendor_name=parsed["vendor_name"],
+                    vendor_gstin=parsed["vendor_gstin"],
+                    invoice_number=parsed["invoice_number"],
+                    document_type=classified_doc_type,
+                    raw_ocr_text=raw_ocr_text
+                )
+                
+                now = datetime.now(timezone.utc).isoformat()
+                new_record = {
+                    "document_id": document_id,
+                    "fingerprint": fingerprint,
+                    "document_type": classified_doc_type,
+                    "vendor_name": parsed["vendor_name"],
+                    "vendor_gstin": parsed["vendor_gstin"],
+                    "invoice_number": parsed["invoice_number"],
+                    "invoice_date": parsed["invoice_date"],
+                    "invoice_total": parsed["invoice_total"],
+                    "taxable_amount": parsed["taxable_amount"],
+                    "gst_amount": parsed["gst_amount"],
+                    "raw_ocr_text": raw_ocr_text,
+                    "extracted_json": result,
+                    "ledger_mapping": {},
+                    "journal_entry": {},
+                    "processing_engine": "template",
+                    "ai_confidence": validation_report.get("overall_confidence", classification_res["confidence"]),
+                    "processing_status": "extracted",
+                    "validation_report": validation_report,
+                    "decision": validation_report.get("decision", "REQUIRES_REVIEW"),
+                    "created_at": now,
+                    "updated_at": now,
+                    "file_hash": file_hash,
+                    "raw_ocr_text_normalized": normalized_ocr
+                }
+                await save_ai_memory(new_record)
+                logger.info("Memory Saved (from Template)")
+            except Exception as e:
+                logger.error(f"Error saving template extraction to AI Memory: {e}", exc_info=True)
+                
+            result = await _orchestrate_gst(result, current_user, document_id)
+            result = await _orchestrate_learning_and_recommendations(result, current_user, document_id)
+            return result
         except Exception as e:
             logger.error(f"Failed to extract using matched template: {e}", exc_info=True)
             logger.info("Template extraction failed, falling back to AI extraction")
@@ -615,4 +620,80 @@ async def update_accounting_memory(doc: dict, entry: dict, user_id: str):
         logger.info("Orchestrated successfully: Validated extraction mapped via autonomous AccountingEngine.")
     except Exception as e:
         logger.error(f"Error in update_accounting_memory: {e}", exc_info=True)
+
+
+# ── Phase 11 AI-Driven Automation Endpoints ─────────────────────────────────
+
+class CustomWorkflowCreateRequest(BaseModel):
+    company_id: str
+    name: str
+    category: str
+    steps: List[Dict[str, Any]]
+    user_id: str
+    custom_rules: Optional[Dict[str, Any]] = None
+
+
+class WorkflowTriggerRequest(BaseModel):
+    company_id: str
+    definition_id: str
+    entity_id: str
+    entity_type: str
+    user_id: str
+    input_data: Dict[str, Any]
+
+
+@router.post("/workflow/create-custom")
+async def ai_create_custom_workflow(body: CustomWorkflowCreateRequest):
+    """Allows automatic/AI creation of custom company workflows."""
+    from backend.workflow.workflow_builder import WorkflowBuilder
+    result = await WorkflowBuilder.save_custom_workflow_definition(
+        company_id=body.company_id,
+        name=body.name,
+        category=body.category,
+        steps=body.steps,
+        user_id=body.user_id,
+        custom_rules=body.custom_rules
+    )
+    if not result:
+        raise HTTPException(status_code=400, detail="Failed to create custom workflow.")
+    return result
+
+
+@router.post("/workflow/trigger")
+async def ai_trigger_workflow(body: WorkflowTriggerRequest):
+    """Triggers an automated, configuration-driven business workflow instance."""
+    from backend.workflow.workflow_engine import WorkflowEngine
+    inst_id = await WorkflowEngine.start_workflow(
+        company_id=body.company_id,
+        definition_id=body.definition_id,
+        entity_id=body.entity_id,
+        entity_type=body.entity_type,
+        user_id=body.user_id,
+        input_data=body.input_data
+    )
+    if not inst_id:
+        raise HTTPException(status_code=400, detail="Failed to start workflow instance.")
+    return {"workflow_instance_id": inst_id, "status": "RUNNING"}
+
+
+@router.get("/workflow/dashboard")
+async def ai_get_workflow_dashboard(company_id: str, force_refresh: Optional[bool] = False):
+    """Retrieves consolidated real-time dashboard analytics."""
+    from backend.workflow.dashboard_engine import DashboardEngine
+    return await DashboardEngine.get_dashboard_summary(company_id=company_id, force_refresh=force_refresh)
+
+
+@router.get("/workflow/analytics")
+async def ai_get_workflow_analytics(company_id: str):
+    """Generates business intelligence metrics and trends."""
+    from backend.workflow.analytics_engine import AnalyticsEngine
+    return await AnalyticsEngine.generate_comprehensive_bi_analytics(company_id=company_id)
+
+
+@router.get("/workflow/kpis")
+async def ai_get_workflow_kpis(company_id: str):
+    """Calculates and returns a history of recorded business KPI snapshots."""
+    from backend.workflow.kpi_engine import KPIEngine
+    return await KPIEngine.list_kpi_trend(company_id=company_id)
+
 
