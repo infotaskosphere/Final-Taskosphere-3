@@ -609,6 +609,7 @@ async def startup_event():
         await db.bank_accounts.create_index("company_id")
         await db.bank_transactions.create_index([("bank_account_id", 1), ("date", -1)])
         await db.bank_transactions.create_index("matched_type")
+        await db.bank_reconciliation_audit.create_index([("bank_transaction_id", 1), ("timestamp", -1)])
         await db.chart_of_accounts.create_index([("company_id", 1), ("code", 1)], unique=True)
         await db.journal_entries.create_index([("company_id", 1), ("entry_date", -1)])
         await db.journal_lines.create_index("entry_id")
