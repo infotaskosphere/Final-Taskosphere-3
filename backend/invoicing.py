@@ -4188,13 +4188,22 @@ async def sync_invoice_journal_entry(invoice_id: str):
     status = inv.get("status", "draft")
     if status == "cancelled":
         return
-        
+
+    # 3b. Proforma invoices / estimates are quotations, not real invoices —
+    # no GST liability or revenue has actually been raised yet, so they
+    # must never be posted to Accounts Receivable / Sales. Posting them
+    # (as this used to, since only "credit_note" got special-cased below)
+    # inflated Trial Balance / P&L / Balance Sheet figures above what the
+    # Sales/Invoicing page reports as real revenue.
+    invoice_type = inv.get("invoice_type") or "tax_invoice"
+    if invoice_type in ("proforma", "estimate"):
+        return
+
     # 4. Extract required fields
     company_id = inv.get("company_id") or ""
     invoice_no = inv.get("invoice_no") or ""
     client_name = inv.get("client_name") or "Client"
     invoice_date = inv.get("invoice_date") or date.today().isoformat()
-    invoice_type = inv.get("invoice_type") or "tax_invoice"
     
     grand_total = float(inv.get("grand_total") or 0)
     total_gst = float(inv.get("total_gst") or 0)
@@ -4516,7 +4525,16 @@ async def _reconcile_and_sync_all_sales_and_payments_impl(company_id: str):
         invoice_ids = {inv["id"] for inv in invoices}
         # Drafts (renamed "Invoiced" in the UI) are now considered active for
         # journal-entry purposes — only cancelled invoices are skipped.
-        active_invoices = [inv for inv in invoices if inv.get("status", "draft") != "cancelled"]
+        # Proforma invoices / estimates are quotations, not real invoices,
+        # and are never posted to the books (see sync_invoice_journal_entry)
+        # — excluding them here too means any journal entry that was
+        # incorrectly posted for one before this fix gets cleaned up as a
+        # stale entry below, instead of being left behind forever.
+        active_invoices = [
+            inv for inv in invoices
+            if inv.get("status", "draft") != "cancelled"
+            and inv.get("invoice_type", "tax_invoice") not in ("proforma", "estimate")
+        ]
         active_invoice_ids = {inv["id"] for inv in active_invoices}
         
         # 2. Fetch all existing journal entries with source "sale" for this company
