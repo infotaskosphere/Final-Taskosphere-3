@@ -611,6 +611,7 @@ const ACCOUNT_PAGE_PERMS = [
 const ACCOUNT_WRITE_PERMS = [
   { parent: 'can_view_chart_of_accounts', permKey: 'can_manage_chart_of_accounts', label: 'Manage Chart of Accounts', desc: 'Create and edit ledger accounts',           icon: Pencil },
   { parent: 'can_view_journal_entries',   permKey: 'can_post_journal_entries',     label: 'Post Journal Entries',     desc: 'Create and post manual journal entries',    icon: Pencil },
+  { parent: 'can_view_bank',              permKey: 'can_match_bank',               label: 'Match / Unmatch Transactions', desc: 'Match, edit-match and unmatch bank reconciliations', icon: Pencil },
 ];
 
 const ACCOUNTS_ACCENT = '#1FAF5A';
