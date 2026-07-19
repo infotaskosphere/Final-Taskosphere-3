@@ -122,6 +122,11 @@ DEFAULT_ACCOUNTS = [
     ("5600", "Travel & Conveyance",      "expense",   "operating_expense"),
     ("5700", "Foreign Exchange Loss / Gain", "expense", "operating_expense"),
     ("5900", "Round Off",               "expense",   "operating_expense"),
+    # Suspense — parking account for bank lines that can't be classified at match time.
+    # Standard AI-accounting practice (Zoho / QuickBooks / Xero): post to suspense first
+    # so the bank balance stays reconciled, then reclassify from the "Suspense Review"
+    # workflow once the correct expense head is known.
+    ("9998", "Suspense Account",         "asset",     "current_asset"),
 ]
 
 
