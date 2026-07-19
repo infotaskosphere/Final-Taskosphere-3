@@ -16,6 +16,7 @@ company_id="" to use a single default book if the firm only operates one.
 import re
 import uuid
 import asyncio
+import logging
 from datetime import datetime, date, timezone
 from typing import Optional, List
 
@@ -315,6 +316,33 @@ async def _reconcile_all_books(book_ids: List[str]):
     await asyncio.gather(*(_reconcile_one_book(cid) for cid in book_ids))
 
 
+async def _validate_best_effort(company_id: str):
+    """Fire-and-forget consistency check (Revenue=Collections+Outstanding,
+    TB Debits=Credits, AR=Outstanding, Customer Ledger=AR, Sales
+    Ledger=Invoice Revenue, GST+NonGST+Export+Exempt=Revenue). Never
+    raises into the caller - a validator bug must not break report
+    rendering; mismatches are logged/persisted by the engine itself."""
+    try:
+        from backend.accounting_ai.reconciliation_validator import run_validation_engine
+        await run_validation_engine(company_id, auto_fix=True)
+    except Exception:
+        logging.getLogger("accounting_core").exception("validation engine failed")
+
+
+@router.get("/reports/validation-engine")
+async def validation_engine_report(company_id: str = Query(""), current_user: User = Depends(get_current_user)):
+    """On-demand reconciliation health check across Trial Balance, Party/
+    Customer Ledger, and GST report totals vs. the Invoice module's own
+    Revenue/Collections/Outstanding figures. Auto-heals by rerunning the
+    invoice->journal sync once before reporting a real mismatch."""
+    if not _perm_reports(current_user):
+        raise HTTPException(403, "Access denied. Request access from your admin in Permission Governance.")
+    from backend.accounting_ai.reconciliation_validator import run_validation_engine, run_validation_engine_all_books
+    if company_id:
+        return await run_validation_engine(company_id, auto_fix=True)
+    return {"books": await run_validation_engine_all_books()}
+
+
 @router.post("/journal-entries")
 async def create_journal_entry(payload: JournalEntryCreate, current_user: User = Depends(get_current_user)):
     if not _perm_post_journal(current_user):
@@ -576,6 +604,10 @@ async def trial_balance(
         await _reconcile_all_books(await _all_book_ids())
     else:
         await _reconcile_one_book(company_id)
+        # Fire-and-forget: check Revenue=Collections+Outstanding, TB
+        # balance, AR=Outstanding, etc. and self-heal via re-sync without
+        # adding validator latency to this report's response time.
+        asyncio.create_task(_validate_best_effort(company_id))
 
     acct_q = {} if all_companies else {"company_id": company_id}
     accounts = await db.chart_of_accounts.find(acct_q, {"_id": 0}).sort("code", 1).to_list(20000)
@@ -699,6 +731,7 @@ async def balance_sheet(company_id: str = Query(""), as_of: Optional[str] = Quer
         await _reconcile_all_books(await _all_book_ids())
     else:
         await _reconcile_one_book(company_id)
+        asyncio.create_task(_validate_best_effort(company_id))
 
     as_of = as_of or date.today().isoformat()
     acct_q = {"type": {"$in": ["asset", "liability", "equity"]}}
