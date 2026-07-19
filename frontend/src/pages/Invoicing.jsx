@@ -887,7 +887,22 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], clients
       if (c.id && gstin) clientGstinMap[c.id] = gstin;
     }
 
+    // Build a map: company_id → is the SELLING company GST-registered.
+    // Same semantics as the backend's `_company_has_gst`: registered unless
+    // has_gst is explicitly false. A non-GST company files no GST return and
+    // has no GST payable, so its invoices must never be classified into
+    // B2B/B2C/CDNR (which would otherwise show GST payable/GST return data
+    // purely because the buyer happens to have a GSTIN).
+    const companyGstMap = {};
+    for (const c of companies) {
+      companyGstMap[c.id] = c.has_gst !== false;
+    }
+
     for (const inv of baseInvoices) {
+      // Skip invoices billed under a non-GST-registered company entirely --
+      // they are outside the scope of GSTR-1 / GST payable.
+      if (companyGstMap[inv.company_id] === false) continue;
+
       // Use gstin directly on invoice; fall back to clients list if blank
       const gstin = inv.client_gstin?.trim() || (inv.client_id ? clientGstinMap[inv.client_id] : '') || '';
       const hasGstin = !!gstin;
@@ -922,11 +937,21 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], clients
     }), { taxable: 0, igst: 0, cgst: 0, sgst: 0 });
 
     return { b2b, b2cL, b2cS, b2cSTotal, cdnr, hsnSummary: Object.values(hsnMap) };
-  }, [baseInvoices]);
+  }, [baseInvoices, clients, companies]);
+
 
   // ── GSTR-3B data ────────────────────────────────────────────────────────
   const gstr3b = useMemo(() => {
-    const outward = baseInvoices
+    // Same non-GST-company exclusion as GSTR-1: a company with has_gst
+    // explicitly false charges no GST and must never contribute to Net Tax
+    // Payable, even if a legacy invoice still carries nonzero GST totals.
+    const companyGstMap = {};
+    for (const c of companies) {
+      companyGstMap[c.id] = c.has_gst !== false;
+    }
+    const gstEligibleInvoices = baseInvoices.filter(i => companyGstMap[i.company_id] !== false);
+
+    const outward = gstEligibleInvoices
       .filter(i => i.invoice_type === 'tax_invoice')
       .reduce((a, inv) => ({
         taxable: a.taxable + (inv.total_taxable || 0),
@@ -935,7 +960,7 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], clients
         sgst:    a.sgst    + (inv.total_sgst    || 0),
       }), { taxable: 0, igst: 0, cgst: 0, sgst: 0 });
 
-    const credits = baseInvoices
+    const credits = gstEligibleInvoices
       .filter(i => i.invoice_type === 'credit_note')
       .reduce((a, inv) => ({
         taxable: a.taxable + (inv.total_taxable || 0),
@@ -952,7 +977,7 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], clients
       outward, credits, netIGST, netCGST, netSGST,
       netTotal: netIGST + netCGST + netSGST,
     };
-  }, [baseInvoices]);
+  }, [baseInvoices, companies]);
 
   // ── Indian state-code map (POS code) ───────────────────────────────────
   const STATE_CODE = {
