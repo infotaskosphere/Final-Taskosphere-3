@@ -5,7 +5,7 @@
 //   • Section significance tooltips (Documents, Tasks, Invoices, Compliance)
 //   • Mark-as-read on expand
 // ─────────────────────────────────────────────────────────────────────────
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
@@ -1002,6 +1002,7 @@ export default function ClientPortalDashboard() {
     { id: "drive", label: "My Drive", icon: "☁️" },
     user.can_view_tasks      && { id: "tasks",      label: "Tasks",      icon: "✅" },
     { id: "messages", label: "Messages", icon: "💬", badge: unreadMessages },
+    { id: "copilot",  label: "AI Copilot", icon: "🧠" },
   ].filter(Boolean);
 
   return (
@@ -1223,9 +1224,129 @@ export default function ClientPortalDashboard() {
             {activeTab === "messages" && (
               <MessagesTab onUnreadChange={setUnreadMessages} />
             )}
+
+            {activeTab === "copilot" && (
+              <CopilotTab />
+            )}
           </>
         )}
       </div>
     </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   CLIENT PORTAL AI COPILOT TAB
+   ───────────────────────────────────────────────────────────────────────────── */
+function CopilotTab() {
+  const [messages, setMessages] = useState([
+    {
+      role: "assistant",
+      content: "Hello! I am your interactive AI Assistant for your Client Portal. I have secure real-time access to your tasks, compliance due dates, shared documents, and invoices. How can I help you today?"
+    }
+  ]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [sessionId] = useState(() => Math.random().toString(36).substring(7));
+  const scrollRef = useRef(null);
+
+  const handleSend = async (e) => {
+    if (e) e.preventDefault();
+    if (!input.trim() || loading) return;
+
+    const userText = input.trim();
+    setInput("");
+    setMessages(prev => [...prev, { role: "user", content: userText }]);
+    setLoading(true);
+
+    try {
+      const apiInstance = portalApi();
+      const { data } = await apiInstance.post("/client-portal/copilot/chat", {
+        query: userText,
+        session_id: sessionId
+      });
+      setMessages(prev => [...prev, { role: "assistant", content: data?.reply || "I am connected, but experiencing high load. Let me re-verify that action for you." }]);
+    } catch (err) {
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: "I couldn't process your request right now. Please ensure your portal connection is active or try again."
+      }]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages]);
+
+  const QUICK_PROMPTS = [
+    "What are my outstanding invoices?",
+    "Show my upcoming compliance tasks",
+    "List documents in my folder",
+    "How can I get support?"
+  ];
+
+  return (
+    <Section title="AI Copilot Assistant" icon="🧠">
+      <div className="flex flex-col h-[500px] bg-gray-50 rounded-2xl border border-gray-100 overflow-hidden shadow-inner">
+        {/* Messages body */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {messages.map((m, i) => (
+            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-[80%] p-3 rounded-2xl text-xs leading-relaxed shadow-sm ${
+                m.role === 'user'
+                  ? 'bg-blue-600 text-white rounded-tr-none'
+                  : 'bg-white text-gray-800 border border-gray-200/50 rounded-tl-none'
+              }`}>
+                {m.content}
+              </div>
+            </div>
+          ))}
+          {loading && (
+            <div className="flex items-center gap-2 text-gray-400 text-xs py-1 px-1 font-semibold animate-pulse">
+              <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+              AI Assistant is thinking...
+            </div>
+          )}
+          <div ref={scrollRef} />
+        </div>
+
+        {/* Suggestions Quick Pills */}
+        <div className="p-3 bg-white/70 border-t border-gray-100 flex flex-wrap gap-2 justify-center">
+          {QUICK_PROMPTS.map(p => (
+            <button
+              key={p}
+              disabled={loading}
+              onClick={() => { setInput(p); setTimeout(() => handleSend(), 50); }}
+              className="px-3 py-1.5 rounded-full text-[10px] font-bold border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 hover:text-blue-600 transition cursor-pointer"
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+
+        {/* Input area */}
+        <form onSubmit={handleSend} className="p-3 bg-white border-t border-gray-100 flex gap-2">
+          <input
+            type="text"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            disabled={loading}
+            placeholder="Ask AI anything about your firm's account, files or compliance..."
+            className="flex-1 h-10 px-4 text-xs rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-gray-50/50"
+          />
+          <button
+            type="submit"
+            disabled={!input.trim() || loading}
+            className="px-5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl disabled:opacity-50 transition h-10"
+          >
+            Send
+          </button>
+        </form>
+      </div>
+    </Section>
   );
 }
