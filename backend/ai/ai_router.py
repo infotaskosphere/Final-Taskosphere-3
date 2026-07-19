@@ -166,6 +166,9 @@ async def process_document(
         
     logger.info("Memory Miss")
 
+    from backend.ai.vendor_learning import apply_vendor_defaults, learn_vendor_profile
+    from backend.ai.vendor_mapper import lookup_vendor_from_ocr
+
     # Phase 3: Template Search
     from backend.ai.template_engine import find_matching_template, extract_using_template, learn_template
     from backend.ai.template_storage import increment_usage
@@ -189,6 +192,16 @@ async def process_document(
                 result["document_type"] = classification_res["document_type"]
                 result["template_matched_id"] = matched_template["template_id"]
                 result["extraction_method"] = "template"
+                
+                # Apply Vendor Defaults & Learning
+                vendor_name = result.get("vendor_or_customer_name") or ""
+                vendor_gstin = result.get("tax_registration_number") or ""
+                result = await apply_vendor_defaults(vendor_name, vendor_gstin, result)
+                try:
+                    await learn_vendor_profile(vendor_name, vendor_gstin, result)
+                    logger.info("Vendor Defaults Applied and Profile Learned from Template")
+                except Exception as l_err:
+                    logger.error(f"Failed to learn vendor profile from template: {l_err}", exc_info=True)
                 
             # Save this to memory for future fingerprint hits as well
             try:
@@ -247,6 +260,15 @@ async def process_document(
             logger.info("Template extraction failed, falling back to AI extraction")
     
     logger.info("Template Miss")
+
+    # Vendor Lookup from OCR early before calling existing reader
+    early_vendor = None
+    try:
+        early_vendor = await lookup_vendor_from_ocr(raw_ocr_text)
+        if early_vendor:
+            logger.info(f"Vendor Lookup Found Early from OCR: {early_vendor.get('vendor_name')}")
+    except Exception as exc:
+        logger.error(f"Early Vendor Lookup failed: {exc}", exc_info=True)
     
     # 4. Execute existing reader workflow
     logger.info("Gemini Called")
@@ -256,6 +278,20 @@ async def process_document(
     if isinstance(result, dict):
         result["classification"] = classification_res
         result["document_type"] = classification_res["document_type"]
+        
+        # Apply Vendor Defaults & Update Learning
+        try:
+            vendor_name = result.get("vendor_or_customer_name") or (early_vendor.get("vendor_name") if early_vendor else "")
+            vendor_gstin = result.get("tax_registration_number") or (early_vendor.get("gstin") if early_vendor else "")
+            
+            # Apply defaults to result
+            result = await apply_vendor_defaults(vendor_name, vendor_gstin, result)
+            
+            # Learn vendor profile from results
+            await learn_vendor_profile(vendor_name, vendor_gstin, result)
+            logger.info("Vendor Profile Updated from Gemini Extraction")
+        except Exception as l_err:
+            logger.error(f"Failed to apply/learn vendor profile: {l_err}", exc_info=True)
 
     # 5. Save to Memory
     try:
