@@ -25,6 +25,7 @@ from backend.ai_document_reader import router as ai_document_reader_router
 from backend.gst_reconciliation import router as gst_reconciliation_router
 from backend.gst_reconciliation import create_gst_reconciliation_indexes
 from backend.zero_touch_entry import router as zero_touch_entry_router, create_zte_indexes
+from backend.learning.learning_router import router as learning_router
 from backend.gst_portal_sync import router as gst_portal_sync_router, create_gst_portal_sync_indexes
 from backend.accounting_lock import router as accounting_lock_router, create_accounting_integrity_indexes
 from backend.reminders_router import router as reminders_router
@@ -525,6 +526,21 @@ async def startup_event():
         await create_compliance_indexes()
         await create_gst_reconciliation_indexes()
         await create_zte_indexes()
+        
+        # --- PHASE 10 SELF-LEARNING INDEXES ---
+        try:
+            await db.knowledge_base.create_index([("company_id", 1), ("category", 1), ("key", 1)], unique=True)
+            await db.learning_events.create_index([("company_id", 1), ("created_at", -1)])
+            await db.manual_corrections.create_index([("company_id", 1), ("created_at", -1)])
+            await db.recommendation_history.create_index([("company_id", 1), ("status", 1)])
+            await db.embeddings.create_index([("target_id", 1), ("target_type", 1)])
+            await db.learning_versions.create_index([("entity_id", 1), ("entity_type", 1)])
+            await db.learning_queue.create_index([("status", 1), ("created_at", 1)])
+            await db.learning_audit.create_index([("company_id", 1), ("timestamp", -1)])
+            logger.info("Phase 10 Self-Learning MongoDB indexes built.")
+        except Exception as e_idx10:
+            logger.warning(f"Phase 10 index creation warning: {e_idx10}")
+
         # AI Memory Foundation indexes
         await db.ai_document_memory.create_index("fingerprint")
         await db.ai_document_memory.create_index("vendor_gstin")
@@ -805,6 +821,14 @@ async def startup_event():
         logger.info(f"Consent cleanup: Updated {result.modified_count} users")
     except Exception as e:
         logger.error(f"Consent cleanup failed: {e}")
+
+    # ── PHASE 10 SELF-LEARNING SCHEDULER START ──
+    try:
+        from backend.learning.learning_scheduler import LearningScheduler
+        LearningScheduler.start()
+        logger.info("Phase 10 Self-Learning Scheduler started successfully on boot.")
+    except Exception as e_sched:
+        logger.error(f"Failed to start Phase 10 Self-Learning Scheduler on boot: {e_sched}")
 
 
 # ====================== HEALTH ======================
@@ -13711,6 +13735,7 @@ api_router.include_router(accounting_router)
 api_router.include_router(party_ledgers_router)   # Customer/Vendor sub-ledgers under AR/AP control accounts
 api_router.include_router(accounting_ext_router)  # Accounting Extended: Day Book, Cash Flow, Depreciation, TDS/TCS, Bank Recon, etc.
 app.include_router(zero_touch_entry_router)     # already has /api/zte prefix
+app.include_router(learning_router)           # Phase 10 Self-Learning Router
 app.include_router(gst_portal_sync_router)       # already has /api/gst-portal prefix
 app.include_router(accounting_lock_router)       # already has /api/accounting-integrity prefix
 api_router.include_router(bank_accounts_router)
