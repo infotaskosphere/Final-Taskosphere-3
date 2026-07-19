@@ -343,3 +343,28 @@ logger = logging.getLogger(__name__)
 # Trial Balance, P&L, Cash Flow, and MIS) consume posted journal entries and voucher records
 # produced by the autonomous Accounting Engine without altering existing trademark report formats.
 
+
+async def load_gst_summaries_to_report(company_id: str) -> dict:
+    """
+    Minimally integrates with GST storage to load historical GST return summaries 
+    for company-level compliance dashboards and financial audit reports.
+    """
+    try:
+        from backend.gst_ai.gst_storage import GSTStorage
+        return_summaries = await GSTStorage.list_returns({"company_id": company_id})
+        return {
+            "status": "SUCCESS",
+            "company_id": company_id,
+            "total_returns_tracked": len(return_summaries),
+            "summaries": return_summaries
+        }
+    except Exception as e:
+        logger.error(f"Failed to load GST summaries for reports: {e}", exc_info=True)
+        return {
+            "status": "FAILED",
+            "company_id": company_id,
+            "total_returns_tracked": 0,
+            "summaries": []
+        }
+
+
