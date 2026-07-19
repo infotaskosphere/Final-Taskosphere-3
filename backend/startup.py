@@ -100,6 +100,13 @@ async def startup_event():
 
         logger.info("Startup DB setup completed")
 
+        # ✅ Initialize vendor intelligence MongoDB indexes
+        try:
+            from backend.ai.vendor_storage import init_vendor_indexes
+            await init_vendor_indexes()
+        except Exception as e:
+            logger.error(f"Failed to initialize vendor intelligence indexes: {e}")
+
         # ✅ START SCHEDULER
         if not scheduler.running:
             scheduler.start()
