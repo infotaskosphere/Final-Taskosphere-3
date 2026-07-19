@@ -194,12 +194,18 @@ async def process_ocr_pipeline(
             }
             return embedded_text, meta
 
-    # ── STEP 3: Split into pages ──
+    # ── STEP 3: Split into pages (unlimited; batching handles size) ──
     pages = []
     if doc_format == "PDF":
-        pages = split_pdf_pages(contents, max_pages=10)
+        import os as _os
+        try:
+            _max_pages = int(_os.environ.get("OCR_MAX_PAGES", "0"))
+        except ValueError:
+            _max_pages = 0
+        pages = split_pdf_pages(contents, max_pages=_max_pages or 10_000)
     else:
         pages = split_image_or_other(contents, filename)
+    logger.info(f"OCR Pipeline: split into {len(pages)} page(s) for '{filename}'")
         
     if not pages:
         logger.warning("OCR Pipeline: No pages/frames could be extracted.")
