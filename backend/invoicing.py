@@ -1563,7 +1563,16 @@ class CreditNoteCreate(BaseModel):
 # CALCULATION ENGINE
 # ═══════════════════════════════════════════════════════════
 
-def _compute_item(item: InvoiceItem, is_interstate: bool) -> InvoiceItem:
+def _compute_item(item: InvoiceItem, is_interstate: bool, company_has_gst: bool = True) -> InvoiceItem:
+    # Only a GST-registered entity may charge GST. Whether the invoice is a
+    # "GST invoice" is decided entirely by the ISSUING company's own
+    # registration status (Company Profile → "GST Registered" toggle /
+    # `has_gst`) — never by whether the *buyer* happens to have a GSTIN.
+    # If the issuing company isn't GST-registered, force the item's rate to
+    # zero here so no CGST/SGST/IGST can be computed or stored downstream,
+    # no matter what gst_rate the request payload contained.
+    if not company_has_gst:
+        item.gst_rate = 0.0
     discount = round(item.unit_price * item.quantity * item.discount_pct / 100, 2)
     taxable = round(item.unit_price * item.quantity - discount, 2)
     gst = item.gst_rate
@@ -1583,13 +1592,28 @@ def _compute_item(item: InvoiceItem, is_interstate: bool) -> InvoiceItem:
     return item
 
 
-def _compute_invoice_totals(inv_data: dict) -> dict:
+async def _company_has_gst(company_id: str) -> bool:
+    """Whether the ISSUING company (the one raising the invoice/quotation,
+    not the buyer) is GST-registered. Defaults to True (GST applies) when
+    there's no company_id yet or no explicit `has_gst: false` on record, so
+    existing companies that never touched the toggle keep behaving as
+    before. Only an explicit `has_gst: false` on the company profile turns
+    GST off."""
+    if not company_id:
+        return True
+    company = await db.companies.find_one({"id": company_id}, {"_id": 0, "has_gst": 1})
+    if not company:
+        return True
+    return company.get("has_gst") is not False
+
+
+def _compute_invoice_totals(inv_data: dict, company_has_gst: bool = True) -> dict:
     items = inv_data.get("items", [])
     interstate = inv_data.get("is_interstate", False)
     computed = []
     for raw in items:
         it = InvoiceItem(**raw) if isinstance(raw, dict) else raw
-        it = _compute_item(it, interstate)
+        it = _compute_item(it, interstate, company_has_gst)
         computed.append(it.model_dump())
     subtotal = sum(i["unit_price"] * i["quantity"] for i in computed)
     total_discount = sum(i["unit_price"] * i["quantity"] * i["discount_pct"] / 100 for i in computed)
@@ -3199,8 +3223,7 @@ async def create_invoice(data: InvoiceCreate, current_user: User = Depends(check
     raw = {"id": str(uuid.uuid4()), "invoice_no": inv_no, "invoice_date": inv_date, "due_date": due_date,
            **data.model_dump(exclude={"invoice_no"}), "amount_paid": advance, "amount_due": 0.0, "pdf_drive_link": "",
            "created_by": current_user.id, "created_at": now, "updated_at": now}
-    raw = _compute_invoice_totals(raw)
-    raw["amount_due"] = round(raw["grand_total"] - advance, 2)
+    raw = _compute_invoice_totals(raw, await _company_has_gst(data.company_id))
     if raw["amount_due"] <= 0:
         raw["status"] = "paid"
     elif advance > 0:
@@ -3666,6 +3689,79 @@ async def reconcile_paid_receipts(
     return {"fixed_count": len(fixed), "skipped_count": skipped, "fixed": fixed}
 
 
+@router.post("/invoices/reconcile-gst-registration")
+async def reconcile_gst_registration(
+    company_id: str = Query(""),
+    current_user: User = Depends(check_module_permission("invoicing", "create")),
+):
+    """
+    One-time backfill for invoices/credit/debit notes that carry CGST/SGST/
+    IGST even though the issuing company profile is *not* GST-registered
+    (Company Profile → "GST Registered" toggle off / `has_gst: false`).
+
+    Before this fix, GST was computed from whatever `gst_rate` the request
+    payload happened to send (or the buyer's own GSTIN), never checked
+    against the issuing company's own registration — so a non-GST company
+    could still end up with GST Output Payable on Trial Balance / Balance
+    Sheet and GST amounts on the GSTR-1/GSTR-3B report. New invoices are now
+    forced to zero GST automatically (see _compute_invoice_totals /
+    _company_has_gst); this endpoint corrects documents that were already
+    saved before that fix, by zeroing their tax and re-syncing the journal
+    entry so every downstream report updates in one pass.
+
+    Safe to run more than once — a document is only touched if it still
+    carries non-zero GST and its company is (still) not GST-registered.
+    """
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+
+    comp_q: dict = {"has_gst": False}
+    if company_id:
+        comp_q["id"] = company_id
+    non_gst_companies = await db.companies.find(comp_q, {"_id": 0, "id": 1, "name": 1}).to_list(2000)
+    if not non_gst_companies:
+        return {"fixed_count": 0, "skipped_count": 0, "fixed": [], "message": "No non-GST-registered companies found."}
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    fixed, skipped = [], 0
+
+    for comp in non_gst_companies:
+        cid = comp["id"]
+        docs = await db.invoices.find({"company_id": cid, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(20000)
+        for inv in docs:
+            if float(inv.get("total_gst") or 0) <= 0.004:
+                skipped += 1
+                continue
+            recomputed = _compute_invoice_totals(dict(inv), company_has_gst=False)
+            recomputed["updated_at"] = now_iso
+            recomputed["amount_due"] = round(
+                recomputed["grand_total"] - float(inv.get("amount_paid") or 0), 2
+            )
+            for f in ("id", "created_by", "created_at", "_id"):
+                recomputed.pop(f, None)
+            await db.invoices.update_one({"id": inv["id"]}, {"$set": recomputed})
+            await sync_invoice_journal_entry(inv["id"])
+            fixed.append({
+                "invoice_id": inv["id"], "invoice_no": inv.get("invoice_no"),
+                "company_name": comp.get("name"), "old_total_gst": inv.get("total_gst"),
+                "new_grand_total": recomputed["grand_total"],
+            })
+
+        # Quotations for the same non-GST company — zero their stored gst_rate/gst_amount too.
+        qtns = await db.quotations.find({"company_id": cid}, {"_id": 0}).to_list(20000)
+        for q in qtns:
+            if float(q.get("gst_amount") or 0) <= 0.004:
+                continue
+            new_subtotal = float(q.get("subtotal") or 0)
+            await db.quotations.update_one(
+                {"id": q["id"]},
+                {"$set": {"gst_rate": 0.0, "gst_amount": 0.0, "total": round(new_subtotal, 2), "updated_at": now_iso}},
+            )
+            fixed.append({"quotation_id": q["id"], "quotation_no": q.get("quotation_no"), "company_name": comp.get("name")})
+
+    return {"fixed_count": len(fixed), "skipped_count": skipped, "fixed": fixed}
+
+
 @router.get("/invoices/{inv_id}")
 async def get_invoice(inv_id: str, current_user: User = Depends(check_module_permission("invoicing", "view"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
@@ -3739,7 +3835,7 @@ async def update_invoice(inv_id: str, data: dict, current_user: User = Depends(c
     for f in ("id", "created_by", "created_at", "amount_paid", "pdf_drive_link"):
         data.pop(f, None)
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    data = _compute_invoice_totals(data)
+    data = _compute_invoice_totals(data, await _company_has_gst(new_company_id))
     data["amount_due"] = round(data["grand_total"] - ex.get("amount_paid", 0), 2)
     logger.info(
         f"UPDATE invoice {inv_id}: $set keys = {list(data.keys())}, "
@@ -4154,11 +4250,7 @@ async def create_credit_note(data: CreditNoteCreate, current_user: User = Depend
            **data.model_dump(), "invoice_date": date.today().isoformat(), "due_date": date.today().isoformat(),
            "created_by": current_user.id, "created_at": now, "updated_at": now,
            "status": "credit_note", "amount_paid": 0, "amount_due": 0, "pdf_drive_link": ""}
-    raw = _compute_invoice_totals(raw)
-    await db.invoices.insert_one({**raw})
-    await sync_invoice_journal_entry(raw["id"])
-    raw.pop("_id", None)
-    return raw
+    raw = _compute_invoice_totals(raw, await _company_has_gst(data.company_id))
 
 
 # ═══════════════════════════════════════════════════════════
