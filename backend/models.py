@@ -91,6 +91,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_journal_entries": True,
           "can_post_journal_entries": True,
           "can_view_accounting_reports": True,
+          "can_match_bank": True,          # Match / Edit Match / Unmatch bank reconciliations
       },
       "manager": {
           # Manager: SCOPE = OWN + SAME_DEPARTMENT (Own + Team)
@@ -162,6 +163,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_journal_entries": False,
           "can_post_journal_entries": False,
           "can_view_accounting_reports": False,
+          "can_match_bank": True,          # Manager: Match / Edit Match / Unmatch by default (still gated by can_view_bank to reach the page)
       },
       "staff": {
           # Staff: SCOPE = OWN only
@@ -231,6 +233,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_journal_entries": False,
           "can_post_journal_entries": False,
           "can_view_accounting_reports": False,
+          "can_match_bank": False,          # Staff: view-only by default; admin can grant Match/Edit Match/Unmatch via Permission Governance
       },
   }
 
@@ -330,6 +333,11 @@ class UserPermissions(BaseModel):
     can_view_journal_entries: bool = False
     can_post_journal_entries: bool = False
     can_view_accounting_reports: bool = False
+    # can_match_bank → Bank Accounts page: Match / Edit Match / Unmatch actions.
+    # Distinct from can_view_bank (which only gates read access to the page).
+    # Admin: always True. Manager: True by default. Staff: False by default —
+    # grant via Permission Governance for permission-based access.
+    can_match_bank: bool = False
 
     model_config = ConfigDict(extra="ignore")
 
