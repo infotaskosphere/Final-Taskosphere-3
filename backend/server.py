@@ -873,6 +873,22 @@ async def startup_event():
     except Exception as e_wf_sched:
         logger.error(f"Failed to start Phase 11 Workflow Scheduler on boot: {e_wf_sched}")
 
+    # ── PHASE 12 PLATFORM BOOTSTRAP START ──
+    try:
+        from backend.platform.platform_engine import PlatformEngine
+        
+        async def bootstrap_saas_platform_async():
+            try:
+                await PlatformEngine.bootstrap_saas_platform()
+                logger.info("Phase 12 SaaS Platform bootstrapped successfully on boot.")
+            except Exception as e_saas:
+                logger.error(f"Failed to bootstrap SaaS Platform: {e_saas}")
+
+        asyncio.create_task(bootstrap_saas_platform_async())
+    except Exception as e_saas_import:
+        logger.error(f"Failed to import SaaS Platform Engine: {e_saas_import}")
+
+
 
 # ====================== HEALTH ======================
 @app.api_route("/health", methods=["GET", "HEAD"])
@@ -14113,6 +14129,10 @@ async def remove_clients_from_group(
 
 
 app.include_router(api_router)
+
+# ── Phase 12 Commercial SaaS API v2 Router ────────────────────────────────────
+from backend.api_v2.router_v2 import router as api_v2_router
+app.include_router(api_v2_router, prefix="/api")
 
 # ── Phase 11 AI-driven automation endpoints router ───────────────────────────
 from backend.ai.ai_router import router as ai_router_router
