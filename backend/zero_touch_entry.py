@@ -497,7 +497,63 @@ async def process_document(
             record["fx"] = preview["fx"]
             record["amount_inr"] = round(preview["fx"]["original_total_value"] * preview["fx"]["rate_to_inr"], 2) \
                 if preview["fx"] else float(extracted.get("total_invoice_value") or 0)
-            record["status"] = "pending_approval"
+            
+            # ─── INTEGRATION WITH PHASE 6 AI DECISION ENGINE ───
+            ocr_metadata = {
+                "confidence": extracted.get("confidence", 0.85),
+                "quality_score": 0.90,
+                "engine_used": "gemini_vision",
+                "pages_processed": 1
+            }
+            
+            vendor_profile = None
+            try:
+                vendor_name = extracted.get("vendor_or_customer_name") or ""
+                vendor_gstin = extracted.get("tax_registration_number") or ""
+                if vendor_gstin:
+                    vendor_profile = await db.vendor_intelligence.find_one({"gstin": vendor_gstin})
+                if not vendor_profile and vendor_name:
+                    vendor_profile = await db.vendor_intelligence.find_one({"vendor_name": vendor_name})
+            except Exception as e:
+                _zte_logger.error(f"Error querying vendor in ZTE decision: {e}")
+                
+            from backend.ai.document_validator import run_document_validation_pipeline
+            validation_report = await run_document_validation_pipeline(
+                extracted_data=extracted,
+                ocr_metadata=ocr_metadata,
+                filename=filename,
+                document_id=record_id,
+                vendor_profile=vendor_profile,
+                template_matched=False,
+                company_id=resolved_company_id
+            )
+            
+            record["validation_report"] = validation_report
+            decision = validation_report.get("decision", "REQUIRES_REVIEW")
+            
+            if decision == "AUTO_POST":
+                try:
+                    entry = await post_ledger_preview(resolved_company_id, preview, current_user.id, source_id=record_id)
+                    record["status"] = "posted"
+                    record["journal_entry_id"] = entry["id"]
+                    _zte_logger.info(f"Zero-Touch: Document {record_id} AUTO_POST completed successfully.")
+                    
+                    try:
+                        from backend.ai import ai_router
+                        await ai_router.update_accounting_memory(record, entry, current_user.id)
+                    except Exception as mem_err:
+                        _zte_logger.error(f"Failed to update AI memory in auto post: {mem_err}")
+                except Exception as post_err:
+                    _zte_logger.error(f"Auto post failed: {post_err}", exc_info=True)
+                    record["status"] = "needs_review"
+                    record["posting_error"] = f"Auto-post failed: {str(post_err)}"
+            elif decision == "REJECT":
+                record["status"] = "rejected"
+                record["rejection_reason"] = validation_report.get("decision_reason", "Rejected by AI Decision Engine.")
+            else:
+                record["status"] = "pending_approval"
+                record["posting_error"] = validation_report.get("decision_reason", "Requires manual review/approval.")
+                
         except ValueError as e:
             # Amount/currency/data didn't balance or was unusable — leave for
             # human review rather than drafting something wrong.
@@ -652,15 +708,37 @@ async def post_ledger_preview(company_id: str, preview: dict, created_by: str, s
     is the ONLY function in this module that actually writes to
     journal_entries/journal_lines — called exclusively from the /approve
     endpoint, never automatically."""
-    return await ac.post_journal_entry(
+    from backend.accounting_ai.accounting_engine import AccountingEngine
+    doc = await db.zte_processed_documents.find_one({"id": source_id})
+    extracted = doc.get("extracted") if doc else {
+        "document_type": "PURCHASE",
+        "vendor_or_customer_name": "Unknown Party",
+        "tax_registration_number": "",
+        "invoice_number": "",
+        "invoice_date": preview.get("entry_date"),
+        "line_items": [],
+        "taxable_value": sum(float(l.get("debit") or 0) for l in preview.get("lines", []) if "GST" not in l.get("account_name", "")),
+        "tax_breakup": {},
+        "total_tax": sum(float(l.get("debit") or 0) for l in preview.get("lines", []) if "GST" in l.get("account_name", "")),
+        "total_invoice_value": sum(float(l.get("debit") or 0) for l in preview.get("lines", []))
+    }
+    
+    vendor_profile = None
+    vendor_name = extracted.get("vendor_or_customer_name") or ""
+    vendor_gstin = extracted.get("tax_registration_number") or ""
+    if vendor_gstin:
+        vendor_profile = await db.vendor_intelligence.find_one({"gstin": vendor_gstin})
+    if not vendor_profile and vendor_name:
+        vendor_profile = await db.vendor_intelligence.find_one({"vendor_name": vendor_name})
+
+    return await AccountingEngine.process_posting(
         company_id=company_id,
-        entry_date=preview["entry_date"],
-        narration=preview["narration"],
-        lines=preview["lines"],
-        source="ai_zero_touch",
-        source_id=source_id,
+        extracted_data=extracted,
         created_by=created_by,
+        source_id=source_id,
+        vendor_profile=vendor_profile
     )
+
 
 
 # ── HTTP trigger (manual upload; swap/augment with bucket or email webhook) ─
