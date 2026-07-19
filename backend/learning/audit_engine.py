@@ -1,8 +1,9 @@
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from backend.learning.learning_storage import LearningStorage
 
 logger = logging.getLogger("learning_audit_engine")
+
 
 class LearningAuditEngine:
     @classmethod
