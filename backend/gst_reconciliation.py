@@ -872,8 +872,22 @@ async def reconcile_files(
         books_df = await _enrich_books_with_names(books_df)
     except Exception as _exc:
         logger.warning("Books name enrichment failed: %s", _exc)
+    # Delegate reconciliation operations to modular GST Intelligence engine
+    from backend.gst_ai.gst_reconciliation_engine import GSTReconciliationEngine
+    books_list = books_df.to_dict("records") if not books_df.empty else []
+    portal_list = portal_df.to_dict("records") if not portal_df.empty else []
+    engine_res = GSTReconciliationEngine.reconcile_books_vs_portal(
+        books_invoices=books_list,
+        portal_invoices=portal_list,
+        tolerance=tolerance,
+        enable_fuzzy=enable_fuzzy,
+        fuzzy_threshold=fuzzy_threshold
+    )
+
     result    = _reconcile(portal_df, books_df,
                            tolerance=tolerance, enable_fuzzy=enable_fuzzy, fuzzy_threshold=fuzzy_threshold)
+    # Inject engine analytics and results
+    result["engine_summary"] = engine_res["summary"]
     if save_session:
         sid = str(uuid.uuid4())
         await db.gst_reconciliation_sessions.insert_one({
