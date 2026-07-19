@@ -246,7 +246,7 @@ const DetailModal = memo(function DetailModal({ onClose, headerGradient, headerI
         animate={{ scale: 1, y: 0, opacity: 1 }}
         exit={{ scale: 0.88, y: 40, opacity: 0 }}
         transition={{ type: 'spring', stiffness: 220, damping: 22 }}
-        className="w-full max-w-md rounded-3xl overflow-hidden shadow-2xl"
+        className="w-full max-w-md rounded-xl overflow-hidden shadow-2xl"
         style={{
           background: isDark ? '#1e293b' : '#ffffff',
           border: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
@@ -698,7 +698,7 @@ const TaskStrip = memo(function TaskStrip({ task, isToMe, assignedName, onUpdate
 
 const SectionCard = memo(function SectionCard({ children, className = '' }) {
   return (
-    <div className={`bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm min-w-0 w-full ${className}`}>
+    <div className={`bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04)] min-w-0 w-full ${className}`}>
       {children}
     </div>
   );
@@ -718,8 +718,8 @@ const DonutMetricCard = memo(function DonutMetricCard({ isDark, title, centerVal
 
   return (
     <div
-      className={`group rounded-2xl shadow-sm border p-5 min-w-0 h-full flex flex-col transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 ${
-        isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200/80 hover:border-slate-300'
+      className={`group rounded-xl shadow-sm border p-5 min-w-0 h-full flex flex-col transition-all duration-200 hover:shadow-md ${
+        isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'
       } ${onCardClick ? 'cursor-pointer' : ''}`}
       onClick={onCardClick}
       role={onCardClick ? 'button' : undefined}
@@ -809,7 +809,7 @@ const DonutMetricCard = memo(function DonutMetricCard({ isDark, title, centerVal
 
 const CardHeaderRow = memo(function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge, compact = false }) {
   return (
-    <div className={`flex items-center justify-between border-b border-slate-100 dark:border-slate-700 min-w-0 gap-2 ${compact ? 'px-3 py-2' : 'px-4 py-3'}`}>
+    <div className={`flex items-center justify-between border-b border-slate-200 dark:border-slate-700 min-w-0 gap-2 ${compact ? 'px-3 py-2' : 'px-4 py-3'}`}>
       <div className={`flex items-center ${compact ? 'gap-2' : 'gap-2.5'}`}>
         <div className={`rounded-lg ${iconBg} ${compact ? 'p-1' : 'p-1.5'}`}>{icon}</div>
         <div>
@@ -1579,7 +1579,7 @@ export default function Dashboard() {
     return () => { document.body.style.overflow = 'auto'; };
   }, [todayAttendance, todayIsHoliday, actionDone]);
 
-  const metricCardCls     = 'rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer group border';
+  const metricCardCls     = 'rounded-xl shadow-none hover:shadow-md transition-all cursor-pointer group border';
   const metricCardDefault = isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200/80 hover:border-slate-300';
 
   const GreetIcon = getGreetingIcon();
@@ -1661,10 +1661,11 @@ export default function Dashboard() {
 
           {/* Header banner — width reduced to make room for the Attendance card */}
           <div
-            className="relative overflow-hidden rounded-2xl px-4 sm:px-6 pt-2 sm:pt-2.5 pb-2 sm:pb-2.5 flex-1 min-w-0"
+            className="relative overflow-hidden rounded-xl px-4 sm:px-6 pt-2 sm:pt-2.5 pb-2 sm:pb-2.5 flex-1 min-w-0"
             style={{
               background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)`,
-              boxShadow: `0 8px 32px rgba(13,59,102,0.28)`,
+              boxShadow: `0 1px 2px rgba(13,59,102,0.06), 0 6px 16px rgba(13,59,102,0.22)`,
+              border: '1px solid rgba(255,255,255,0.06)',
             }}
           >
             <div className="absolute right-0 top-0 w-72 h-72 rounded-full -mr-24 -mt-24 opacity-10"
@@ -1760,7 +1761,7 @@ export default function Dashboard() {
 
           {/* Attendance — Pill Style card (Option 2) */}
           <div
-            className={`relative overflow-hidden rounded-2xl w-full lg:w-[280px] flex-shrink-0 flex flex-col border shadow-sm hover:shadow-lg transition-all ${
+            className={`relative overflow-hidden rounded-xl w-full lg:w-[280px] flex-shrink-0 flex flex-col border shadow-none transition-all ${
               isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200/80'
             }`}
           >
@@ -1786,7 +1787,7 @@ export default function Dashboard() {
 
             <div className="px-3 pb-3 flex-1 flex flex-col justify-center gap-2.5">
               {todayIsHoliday ? (
-                <div className={`rounded-2xl px-3 py-3 text-center border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                <div className={`rounded-lg px-3 py-3 text-center border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
                   <p className={`font-bold text-sm ${isDark ? 'text-white' : 'text-slate-800'}`}>{todayHolidayName || 'Holiday Today'}</p>
                   <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Office is closed today.</p>
                   {!todayAttendance?.punch_in && (
@@ -1806,7 +1807,7 @@ export default function Dashboard() {
               ) : (
                 <>
                   {/* Status pill row */}
-                  <div className={`flex items-center justify-between gap-2 rounded-2xl px-2.5 py-2 border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                  <div className={`flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
                     {todayAttendance?.punch_in ? (
                       todayAttendance.punch_out ? (
                         <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full bg-slate-200/70 text-slate-500 dark:bg-slate-600/50 dark:text-slate-300 flex-shrink-0">
@@ -1931,6 +1932,7 @@ export default function Dashboard() {
             whileTap={{ scale: 0.985 }}
             onClick={() => navigate('/tasks?filter=my-tasks')}
             className={`${metricCardCls} ${metricCardDefault}`}
+            style={{ borderLeftWidth: 3, borderLeftColor: isDark ? '#60a5fa' : COLORS.deepBlue }}
           >
             <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
               <div className="flex items-start justify-between">
@@ -1941,7 +1943,7 @@ export default function Dashboard() {
                   </p>
                 </div>
                 <div
-                  className="p-2 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
+                  className="p-2 rounded-lg group-hover:scale-110 transition-transform flex-shrink-0"
                   style={{ backgroundColor: isDark ? 'rgba(96,165,250,0.12)' : `${COLORS.deepBlue}12` }}
                 >
                   <Briefcase className="h-4 w-4" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }} />
@@ -1959,6 +1961,7 @@ export default function Dashboard() {
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
             onClick={() => navigate('/tasks?filter=today_new')}
+            style={{ borderLeftWidth: 3, borderLeftColor: isDark ? '#a5b4fc' : '#4338ca' }}
             className={`${metricCardCls} ${
               todayNewTasks.length > 0
                 ? isDark
@@ -1976,7 +1979,7 @@ export default function Dashboard() {
                   </p>
                 </div>
                 <div
-                  className="p-2 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
+                  className="p-2 rounded-lg group-hover:scale-110 transition-transform flex-shrink-0"
                   style={{ backgroundColor: isDark ? 'rgba(165,180,252,0.12)' : '#e0e7ff' }}
                 >
                   <Zap className="h-4 w-4" style={{ color: isDark ? '#a5b4fc' : '#4338ca' }} />
@@ -1996,6 +1999,7 @@ export default function Dashboard() {
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
             onClick={() => navigate('/todos')}
+            style={{ borderLeftWidth: 3, borderLeftColor: isDark ? '#93c5fd' : COLORS.mediumBlue }}
             className={`${metricCardCls} ${
               pendingTodos.length > 0
                 ? isDark
@@ -2013,7 +2017,7 @@ export default function Dashboard() {
                   </p>
                 </div>
                 <div
-                  className="p-2 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
+                  className="p-2 rounded-lg group-hover:scale-110 transition-transform flex-shrink-0"
                   style={{ backgroundColor: isDark ? 'rgba(31,111,178,0.2)' : `${COLORS.mediumBlue}12` }}
                 >
                   <CheckSquare className="h-4 w-4" style={{ color: isDark ? '#93c5fd' : COLORS.mediumBlue }} />
@@ -2031,6 +2035,7 @@ export default function Dashboard() {
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
             onClick={() => navigate('/tasks?filter=overdue')}
+            style={{ borderLeftWidth: 3, borderLeftColor: COLORS.coral }}
             className={`${metricCardCls} ${
               overdueTaskCount > 0
                 ? isDark
@@ -2048,7 +2053,7 @@ export default function Dashboard() {
                   </p>
                 </div>
                 <div
-                  className="p-2 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
+                  className="p-2 rounded-lg group-hover:scale-110 transition-transform flex-shrink-0"
                   style={{ backgroundColor: `${COLORS.coral}18` }}
                 >
                   <AlertCircle className="h-4 w-4" style={{ color: COLORS.coral }} />
@@ -2066,6 +2071,7 @@ export default function Dashboard() {
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
             onClick={() => navigate('/dsc?tab=expired')}
+            style={{ borderLeftWidth: 3, borderLeftColor: '#ef4444' }}
             className={`${metricCardCls} ${
               stats?.expiring_dsc_count > 0
                 ? isDark
@@ -2086,7 +2092,7 @@ export default function Dashboard() {
                   </p>
                 </div>
                 <div
-                  className="p-2 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
+                  className="p-2 rounded-lg group-hover:scale-110 transition-transform flex-shrink-0"
                   style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.15)' : '#fef2f2' }}
                 >
                   <Key className="h-4 w-4 text-red-500" />
@@ -2107,6 +2113,7 @@ export default function Dashboard() {
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
             onClick={() => hasCrossVisibility && !usersLoading && navigate('/tasks?filter=team')}
+            style={{ borderLeftWidth: 3, borderLeftColor: hasCrossVisibility ? '#7c3aed' : (isDark ? '#334155' : '#e2e8f0') }}
             className={`${metricCardCls} ${
               hasCrossVisibility && teamTaskTotal > 0
                 ? isDark
@@ -2140,7 +2147,7 @@ export default function Dashboard() {
                   )}
                 </div>
                 <div
-                  className="p-2 rounded-xl group-hover:scale-110 transition-transform flex-shrink-0"
+                  className="p-2 rounded-lg group-hover:scale-110 transition-transform flex-shrink-0"
                   style={{ backgroundColor: hasCrossVisibility ? (isDark ? 'rgba(167,139,250,0.15)' : '#ede9fe') : (isDark ? 'rgba(71,85,105,0.2)' : '#f8fafc') }}
                 >
                   <Users className="h-4 w-4" style={{ color: hasCrossVisibility ? '#7c3aed' : (isDark ? '#475569' : '#cbd5e1') }} />
@@ -2699,14 +2706,14 @@ export default function Dashboard() {
               <motion.div
                 initial={{ scale: 0.88, y: 48 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.88, y: 48 }}
                 transition={{ type: 'spring', stiffness: 160, damping: 18 }}
-                className={`w-full max-w-sm mx-4 rounded-3xl overflow-hidden ${isDark ? 'bg-slate-900' : 'bg-white'}`}
+                className={`w-full max-w-sm mx-4 rounded-xl overflow-hidden ${isDark ? 'bg-slate-900' : 'bg-white'}`}
                 style={{ boxShadow: '0 32px 80px rgba(0,0,0,0.45)' }}
               >
                 <div
                   className="px-8 pt-8 pb-6 text-center"
                   style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
                 >
-                  <div className="w-14 h-14 bg-white/15 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                  <div className="w-14 h-14 bg-white/15 rounded-lg flex items-center justify-center mx-auto mb-4">
                     <Clock className="h-7 w-7 text-white" />
                   </div>
                   <div className="mb-3">
