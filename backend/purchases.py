@@ -266,6 +266,28 @@ async def parse_purchase_invoice(
     vendor_name = (parsed.get("vendor_name") or "").strip()
     matches = await _match_clients(vendor_name)
 
+    # Request vendor recommendations from the Vendor Learning Engine
+    recommendations = None
+    try:
+        from backend.ai.vendor_learning import apply_vendor_defaults
+        gst_val = (parsed.get("gstin") or "").strip().upper()
+        enriched = await apply_vendor_defaults(vendor_name, gst_val, parsed.copy())
+        vendor_confidence = enriched.get("vendor_confidence", 0.0)
+        # Apply recommendations only when confidence exceeds a configurable threshold (0.60)
+        if vendor_confidence >= 0.60:
+            recommendations = {
+                "default_ledger": enriched.get("default_ledger"),
+                "expense_category": enriched.get("expense_category"),
+                "cost_centre": enriched.get("cost_centre"),
+                "department": enriched.get("department"),
+                "preferred_gst_treatment": enriched.get("preferred_gst_treatment"),
+                "preferred_tds_section": enriched.get("preferred_tds_section"),
+                "suggested_narration": enriched.get("suggested_narration"),
+                "confidence_score": vendor_confidence
+            }
+    except Exception as exc:
+        pass
+
     return {
         "filename": filename,
         "vendor_name": vendor_name,
@@ -275,6 +297,7 @@ async def parse_purchase_invoice(
         "gstin": (parsed.get("gstin") or "").strip().upper(),
         "notes": (parsed.get("notes") or "").strip(),
         "suggested_matches": matches,
+        "vendor_recommendations": recommendations,
         "raw_text_preview": text_content[:600],
     }
 
