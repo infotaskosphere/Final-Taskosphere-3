@@ -329,6 +329,22 @@ def _compute_item_amount(item: QuotationItem) -> float:
     return round(item.quantity * item.unit_price, 2)
 
 
+async def _company_has_gst(company_id: str) -> bool:
+    """Whether the ISSUING company (the one raising the quotation, not the
+    buyer/client) is GST-registered. GST only ever applies based on the
+    seller's own registration status — a buyer having a GSTIN never makes
+    an otherwise-unregistered seller's document a GST document. Defaults to
+    True (GST applies) when there's no company_id yet or no explicit
+    `has_gst: false` on the company profile, so existing companies that
+    never touched the toggle keep behaving as before."""
+    if not company_id:
+        return True
+    company = await db.companies.find_one({"id": company_id}, {"_id": 0, "has_gst": 1})
+    if not company:
+        return True
+    return company.get("has_gst") is not False
+
+
 def _compute_totals(items: List[QuotationItem], gst_rate: float):
     subtotal = sum(i.amount for i in items)
     gst_amount = round(subtotal * gst_rate / 100, 2)
@@ -1700,6 +1716,12 @@ async def create_quotation(
         item.amount = _compute_item_amount(item)
         computed_items.append(item)
 
+    # Only a GST-registered issuing company may charge GST — never decided
+    # by whether the buyer/client has a GSTIN. Force the rate to zero here
+    # so it can't be bypassed by whatever gst_rate the request sent.
+    if not await _company_has_gst(data.company_id):
+        data.gst_rate = 0.0
+
     subtotal, gst_amount, total = _compute_totals(computed_items, data.gst_rate)
     now = datetime.now(timezone.utc).isoformat()
 
@@ -1801,6 +1823,10 @@ async def update_quotation(
             items.append(item)
 
     gst_rate = float(data.get("gst_rate", existing.get("gst_rate", 18)))
+    effective_company_id = data.get("company_id") or existing.get("company_id")
+    if not await _company_has_gst(effective_company_id):
+        gst_rate = 0.0
+        data["gst_rate"] = 0.0
     subtotal, gst_amount, total = _compute_totals(items, gst_rate)
 
     data["items"] = [i.model_dump() for i in items]
