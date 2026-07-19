@@ -541,6 +541,28 @@ async def startup_event():
         except Exception as e_idx10:
             logger.warning(f"Phase 10 index creation warning: {e_idx10}")
 
+        # --- PHASE 11 ENTERPRISE AUTOMATION INDEXES ---
+        try:
+            await db.workflow_definitions.create_index([("company_id", 1), ("category", 1)])
+            await db.workflow_definitions.create_index("id", unique=True, background=True)
+            await db.workflow_instances.create_index([("company_id", 1), ("status", 1)])
+            await db.workflow_instances.create_index("id", unique=True, background=True)
+            await db.workflow_history.create_index([("company_id", 1), ("instance_id", 1)])
+            await db.workflow_templates.create_index("id", unique=True, background=True)
+            await db.approval_requests.create_index([("company_id", 1), ("status", 1)])
+            await db.approval_requests.create_index("id", unique=True, background=True)
+            await db.approval_history.create_index([("company_id", 1), ("approval_id", 1)])
+            await db.automation_rules.create_index([("company_id", 1), ("is_active", 1)])
+            await db.business_events.create_index([("company_id", 1), ("event_type", 1)])
+            await db.notification_history.create_index([("company_id", 1), ("user_id", 1)])
+            await db.dashboard_cache.create_index("id", unique=True, background=True)
+            await db.analytics_data.create_index("company_id")
+            await db.kpi_history.create_index("company_id")
+            await db.workflow_audit.create_index([("company_id", 1), ("action", 1)])
+            logger.info("Phase 11 Enterprise Automation MongoDB indexes built.")
+        except Exception as e_idx11:
+            logger.warning(f"Phase 11 index creation warning: {e_idx11}")
+
         # AI Memory Foundation indexes
         await db.ai_document_memory.create_index("fingerprint")
         await db.ai_document_memory.create_index("vendor_gstin")
@@ -829,6 +851,27 @@ async def startup_event():
         logger.info("Phase 10 Self-Learning Scheduler started successfully on boot.")
     except Exception as e_sched:
         logger.error(f"Failed to start Phase 10 Self-Learning Scheduler on boot: {e_sched}")
+
+    # ── PHASE 11 WORKFLOW SCHEDULER & BOOTSTRAP START ──
+    try:
+        from backend.workflow.workflow_templates import WorkflowTemplates
+        from backend.workflow.workflow_scheduler import WorkflowScheduler
+        
+        # Bootstrap templates asynchronously
+        async def bootstrap_workflow_templates():
+            try:
+                await WorkflowTemplates.bootstrap_default_templates()
+                logger.info("Phase 11 default workflow templates bootstrapped successfully on boot.")
+            except Exception as e_tmpl:
+                logger.error(f"Failed to bootstrap default workflow templates: {e_tmpl}")
+
+        asyncio.create_task(bootstrap_workflow_templates())
+
+        # Start the escalation & automation scheduler background loop
+        WorkflowScheduler.start()
+        logger.info("Phase 11 Workflow Scheduler started successfully on boot.")
+    except Exception as e_wf_sched:
+        logger.error(f"Failed to start Phase 11 Workflow Scheduler on boot: {e_wf_sched}")
 
 
 # ====================== HEALTH ======================
@@ -14070,6 +14113,10 @@ async def remove_clients_from_group(
 
 
 app.include_router(api_router)
+
+# ── Phase 11 AI-driven automation endpoints router ───────────────────────────
+from backend.ai.ai_router import router as ai_router_router
+app.include_router(ai_router_router, prefix="/api")
 
 # ── ADMS machine root-level routes ───────────────────────────────────────────
 # ZKTeco / Identix machines configured in ADMS Cloud mode push to these URLs.
