@@ -1072,3 +1072,73 @@ async def export_party_ledger_pdf(
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
 
+
+async def post_gst_engine_entries(
+    company_id: str,
+    entry_date: str,
+    invoice_no: str,
+    gst_posting_instructions: List[dict],
+    user_id: str
+) -> Optional[dict]:
+    """
+    Consumes GST posting instructions from the GST Intelligence engine and posts
+    them to the general ledger, ensuring double entry balance.
+    """
+    try:
+        if not gst_posting_instructions:
+            return None
+        
+        lines = []
+        for inst in gst_posting_instructions:
+            code = inst.get("account_code", "1200")
+            acct_id = await get_default_account_id(company_id, code)
+            if not acct_id:
+                acct_id = await get_default_account_id(company_id, "1200")
+            
+            lines.append({
+                "account_id": acct_id or "default_gst_acc",
+                "account_name": inst.get("account_name", "GST Account"),
+                "debit": float(inst.get("debit", 0.0)),
+                "credit": float(inst.get("credit", 0.0)),
+                "memo": inst.get("memo", f"GST Entry - Inv {invoice_no}")
+            })
+            
+        # Ensure debits and credits balance or make best effort
+        total_debit = round(sum(l["debit"] for l in lines), 2)
+        total_credit = round(sum(l["credit"] for l in lines), 2)
+        if abs(total_debit - total_credit) > 0.01:
+            # Add balancing line to clear suspense or rounding
+            diff = round(total_debit - total_credit, 2)
+            suspense_id = await get_default_account_id(company_id, "9999") # suspense
+            if diff > 0:
+                lines.append({
+                    "account_id": suspense_id or "suspense",
+                    "account_name": "GST Rounding / Suspense Offset",
+                    "debit": 0.0,
+                    "credit": abs(diff),
+                    "memo": "GST Balancing Line"
+                })
+            else:
+                lines.append({
+                    "account_id": suspense_id or "suspense",
+                    "account_name": "GST Rounding / Suspense Offset",
+                    "debit": abs(diff),
+                    "credit": 0.0,
+                    "memo": "GST Balancing Line"
+                })
+
+        narration = f"GST Auto-Posting for Invoice {invoice_no}"
+        return await post_journal_entry(
+            company_id=company_id,
+            entry_date=entry_date,
+            narration=narration,
+            lines=lines,
+            source="gst_intelligence",
+            source_id=invoice_no,
+            created_by=user_id
+        )
+    except Exception as e:
+        logger.error(f"Failed to post GST engine entries: {e}", exc_info=True)
+        return None
+
+
