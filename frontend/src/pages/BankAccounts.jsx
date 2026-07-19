@@ -177,13 +177,26 @@ function BankAccountsInner() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setProgress({ label: 'Completed', pct: 100, step: 6, total: 6 });
-      toast.success(`${data.transactions_saved} transactions read · ${data.auto_matched} matched · ${data.auto_posted} posted to ledger`);
-      setFile(null);
-      if (fileRef.current) fileRef.current.value = '';
-      await fetchAccounts();
-      await fetchTransactions(selected.id);
+      const warnings = Array.isArray(data?.warnings) ? data.warnings : [];
+      if (data?.success === false || (data?.transactions_saved ?? 0) === 0) {
+        // Backend returned a structured "no rows" response — show the real reason.
+        const msg = warnings[0] || 'No transactions could be read from this file.';
+        toast.error(msg);
+      } else {
+        toast.success(`${data.transactions_saved} transactions read · ${data.auto_matched} matched · ${data.auto_posted} posted to ledger`);
+        warnings.forEach(w => toast.warning ? toast.warning(w) : toast(w));
+        setFile(null);
+        if (fileRef.current) fileRef.current.value = '';
+        await fetchAccounts();
+        await fetchTransactions(selected.id);
+      }
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Could not read this statement');
+      // Prefer the real backend message; only fall back to a generic label.
+      const detail = err?.response?.data?.detail
+        || err?.response?.data?.warnings?.[0]
+        || err?.message
+        || 'Could not read this statement';
+      toast.error(detail);
     } finally {
       stop();
       setTimeout(() => setProgress(null), 900);
