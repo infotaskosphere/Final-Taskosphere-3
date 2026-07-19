@@ -103,6 +103,19 @@ async def learn_template(
     from backend.ai.template_engine import learn_template as run_learn_template
     return await run_learn_template(contents, filename, doc_type, extracted_json, ocr_text)
 
+async def process_ocr(contents: bytes, filename: str, document_id: str = None) -> str:
+    """
+    Asynchronous OCR processor entry point utilizing the pluggable OCR pipeline.
+    """
+    from backend.ai.ocr_pipeline import process_ocr_pipeline
+    try:
+        text, meta = await process_ocr_pipeline(contents, filename, document_id)
+        return text
+    except Exception as exc:
+        logger.error(f"process_ocr pipeline failed: {exc}", exc_info=True)
+        # Fallback to basic text content extraction if everything fails
+        return get_document_text_content(contents, filename)
+
 async def process_document(
     contents: bytes,
     filename: str,
@@ -119,8 +132,7 @@ async def process_document(
     file_hash = hashlib.sha256(contents).hexdigest()
     
     # 2. Extract initial raw text to help look up
-    from backend.ai.ai_router import get_document_text_content
-    raw_ocr_text = get_document_text_content(contents, filename)
+    raw_ocr_text = await process_ocr(contents, filename)
     normalized_ocr = ""
     if raw_ocr_text.strip():
         import re
