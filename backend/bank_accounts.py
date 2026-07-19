@@ -209,6 +209,24 @@ def _pick_col(columns: List[str], hints: tuple) -> Optional[str]:
     return None
 
 
+def _row_looks_like_stmt_header(cells: List[str]) -> bool:
+    """True if a raw row of lowercased/stripped cell strings looks like the
+    real transaction-table header of a bank statement — i.e. it has both a
+    date-ish cell and a debit/credit/balance-ish cell. Used to skip past
+    banner rows (account details, address, opening balance, etc.) that some
+    bank exports place above the actual header row."""
+    if not cells:
+        return False
+    has_date = any(
+        any(h == c or h in c for h in _DATE_COL_HINTS) for c in cells if c
+    )
+    has_amount = any(
+        any(h == c or h in c for h in (*_DEBIT_COL_HINTS, *_CREDIT_COL_HINTS, *_BALANCE_COL_HINTS))
+        for c in cells if c
+    )
+    return has_date and has_amount
+
+
 def _parse_amount(val) -> float:
     if val is None:
         return 0.0
@@ -966,4 +984,3 @@ async def get_reconciliation_audit_trail_api(txn_id: str, current_user: User = D
     from backend.bank_ai.reconciliation_audit import ReconciliationAudit
     audit = await ReconciliationAudit.get_audit_trail(txn_id)
     return audit
-
