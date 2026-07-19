@@ -70,6 +70,19 @@ def parse_analysis_text(text: str) -> dict:
             
     return res
 
+async def classify_document(
+    contents: bytes,
+    filename: str,
+    raw_ocr_text: str = "",
+    file_hash: str = "",
+    document_id: str = ""
+) -> dict:
+    """
+    Module level classifier function that calls the document_classifier.py
+    """
+    from backend.ai.document_classifier import classify_document as run_classifier
+    return await run_classifier(contents, filename, raw_ocr_text, file_hash, document_id)
+
 async def process_document(
     contents: bytes,
     filename: str,
@@ -92,21 +105,44 @@ async def process_document(
     if raw_ocr_text.strip():
         import re
         normalized_ocr = re.sub(r'[^a-z0-9]', '', raw_ocr_text.lower().strip())[:1000]
-    
-    # 3. Look up in memory using file hash or normalized raw text
+
+    # Generate Fingerprint (Step 2 of Phase 2 Workflow)
+    from backend.ai.fingerprint import generate_document_fingerprint
+    fingerprint = generate_document_fingerprint(
+        vendor_name="",
+        vendor_gstin="",
+        invoice_number="",
+        document_type="",
+        raw_ocr_text=raw_ocr_text
+    )
+    logger.info("Fingerprint Generated")
+
+    # 3. Check AI Memory (Step 3 of Phase 2 Workflow)
+    memory_record = None
     try:
-        memory_record = None
         if file_hash:
             memory_record = await db.ai_document_memory.find_one({"file_hash": file_hash}, {"_id": 0})
         
         if not memory_record and normalized_ocr:
             memory_record = await db.ai_document_memory.find_one({"raw_ocr_text_normalized": normalized_ocr}, {"_id": 0})
-            
-        if memory_record:
-            logger.info("Memory Hit")
-            return memory_record["extracted_json"]
     except Exception as e:
         logger.error(f"Error checking AI Memory lookup: {e}", exc_info=True)
+
+    # 4. Classify Document (Step 4 of Phase 2 Workflow)
+    classification_res = {"document_type": "Other", "confidence": 0.0, "reason": "Failed to classify"}
+    try:
+        classification_res = await classify_document(contents, filename, raw_ocr_text, file_hash)
+    except Exception as exc:
+        logger.error(f"Classifier failed: {exc}", exc_info=True)
+    
+    # 5. Return Classification (Step 5 of Phase 2 Workflow / Continue existing processing)
+    if memory_record:
+        logger.info("Memory Hit")
+        res_json = memory_record["extracted_json"]
+        if isinstance(res_json, dict):
+            res_json["classification"] = classification_res
+            res_json["document_type"] = classification_res["document_type"]
+        return res_json
         
     logger.info("Memory Miss")
     
@@ -115,16 +151,23 @@ async def process_document(
     result = await existing_reader_func()
     logger.info("Gemini Success")
     
+    if isinstance(result, dict):
+        result["classification"] = classification_res
+        result["document_type"] = classification_res["document_type"]
+
     # 5. Save to Memory
     try:
         analysis_text = result.get("analysis") if isinstance(result, dict) else ""
         parsed = parse_analysis_text(analysis_text)
         
+        # Use classified document type as the single source of truth
+        classified_doc_type = classification_res["document_type"]
+        
         fingerprint = generate_document_fingerprint(
             vendor_name=parsed["vendor_name"],
             vendor_gstin=parsed["vendor_gstin"],
             invoice_number=parsed["invoice_number"],
-            document_type=parsed["document_type"],
+            document_type=classified_doc_type,
             raw_ocr_text=raw_ocr_text
         )
         logger.info("Fingerprint Generated")
@@ -133,7 +176,7 @@ async def process_document(
         new_record = {
             "document_id": str(uuid.uuid4()),
             "fingerprint": fingerprint,
-            "document_type": parsed["document_type"],
+            "document_type": classified_doc_type,
             "vendor_name": parsed["vendor_name"],
             "vendor_gstin": parsed["vendor_gstin"],
             "invoice_number": parsed["invoice_number"],
@@ -146,7 +189,7 @@ async def process_document(
             "ledger_mapping": {},
             "journal_entry": {},
             "processing_engine": "gemini",
-            "ai_confidence": parsed["confidence"],
+            "ai_confidence": classification_res["confidence"],
             "processing_status": "extracted",
             "created_at": now,
             "updated_at": now,
