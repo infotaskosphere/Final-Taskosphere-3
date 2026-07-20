@@ -1496,3 +1496,50 @@ async def post_gst_engine_entries(
         return None
 
 
+class FinixChatRequest(BaseModel):
+    message: str
+    company_id: str = ""
+    context_summary: str = ""
+
+
+@router.post("/reports/finix-dashboard/chat")
+async def finix_chat(req: FinixChatRequest, current_user: User = Depends(get_current_user)):
+    """Interactive chat with Finix AI, integrated with the Gemini API to analyze books contextually."""
+    try:
+        from backend.services.gemini_client import get_gemini_client
+        client = get_gemini_client()
+        
+        system_instruction = (
+            "You are Finix AI, an elite AI Accounting Assistant and double-entry specialist integrated into a financial module. "
+            "You have access to the user's financial metrics. Your tone is professional, extremely precise, and helpful. "
+            "Answer the user's accounting query contextually using the provided metrics. Spot anomalies, explain double-entry formulas "
+            "(like Receivable = Total Issued - Total Paid - Cancelled), and give actionable tax or cash flow advisory. "
+            "Avoid generic corporate fluff. Keep responses clean, using clear scannable bullet points and bold headers."
+        )
+        
+        prompt = f"User query: {req.message}\n\nCurrent ledger metrics/context:\n{req.context_summary}"
+        
+        # Call gemini-3.5-flash per SKILL.md guidelines for text Q&A
+        from google.genai import types # type: ignore
+        response = client.models.generate_content(
+            model="gemini-3.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=0.25,
+            )
+        )
+        return {"response": response.text}
+    except Exception as e:
+        logger.error(f"Error in Finix Chat: {e}", exc_info=True)
+        # Handle fallback if GEMINI_API_KEY is not configured or fails
+        fallback_msg = (
+            f"Finix AI is currently operating in offline-compatibility mode. I received your request: '{req.message}'. "
+            "Our audit algorithms verify your Accounts Receivable using the logic: "
+            "Receivable = Total Active Invoice Issued (excluding cancelled) - Total Payments Received. "
+            "To activate my full Gemini generative analytical co-pilot capabilities, please configure the `GEMINI_API_KEY` on your environment server."
+        )
+        return {"response": fallback_msg}
+
+
+
