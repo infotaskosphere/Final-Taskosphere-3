@@ -5242,3 +5242,149 @@ async def _reconcile_and_sync_all_purchases_and_payments_impl(company_id: str):
 
     except Exception as e:
         logging.error(f"Error in reconcile_and_sync_all_purchases_and_payments: {e}")
+
+
+# ── UNPREPARED INCOME ENDPOINTS (Income without prepared invoices) ──
+
+class UnpreparedIncomeCreate(BaseModel):
+    company_id: str
+    date: str  # YYYY-MM-DD
+    amount: float
+    payer_name: str
+    description: str = ""
+    receipt_account_id: str  # asset account id
+    income_account_id: str   # income account id
+
+
+async def sync_unprepared_income_journal_entry(income_id: str):
+    from backend.accounting_core import post_journal_entry
+    # 1. Clean up existing journal entries
+    old_entries = await db.journal_entries.find({"source": "unprepared_income", "source_id": income_id}).to_list(50)
+    if old_entries:
+        old_ids = [e["id"] for e in old_entries]
+        await db.journal_lines.delete_many({"entry_id": {"$in": old_ids}})
+        await db.journal_entries.delete_many({"id": {"$in": old_ids}})
+        
+    # 2. Fetch the current record
+    inc = await db.unprepared_incomes.find_one({"id": income_id})
+    if not inc:
+        return
+        
+    company_id = inc.get("company_id") or ""
+    date_str = inc.get("date") or date.today().isoformat()
+    amount = float(inc.get("amount") or 0.0)
+    payer_name = inc.get("payer_name") or "Payer"
+    description = inc.get("description") or ""
+    receipt_account_id = inc.get("receipt_account_id")
+    income_account_id = inc.get("income_account_id")
+    
+    if amount <= 0 or not receipt_account_id or not income_account_id:
+        return
+        
+    # Get account names
+    receipt_acct = await db.chart_of_accounts.find_one({"id": receipt_account_id})
+    income_acct = await db.chart_of_accounts.find_one({"id": income_account_id})
+    
+    receipt_name = receipt_acct.get("name", "Bank / Cash") if receipt_acct else "Bank / Cash"
+    income_name = income_acct.get("name", "Other Income") if income_acct else "Other Income"
+    
+    # Debit Receipt, Credit Income
+    lines = [
+        {"account_id": receipt_account_id, "account_name": receipt_name, "debit": amount, "credit": 0.0, "memo": f"Direct Income from {payer_name} - {description}"},
+        {"account_id": income_account_id, "account_name": income_name, "debit": 0.0, "credit": amount, "memo": f"Direct Income revenue - {description}"}
+    ]
+    
+    narration = f"Direct Income receipt (no invoice) from {payer_name}"
+    if description:
+        narration += f" - {description}"
+        
+    try:
+        await post_journal_entry(
+            company_id=company_id,
+            entry_date=date_str,
+            narration=narration,
+            lines=lines,
+            source="unprepared_income",
+            source_id=income_id,
+            created_by=inc.get("created_by", "system")
+        )
+    except Exception as e:
+        logging.error(f"Error posting unprepared income journal entry: {e}")
+
+
+@router.get("/unprepared-incomes")
+async def list_unprepared_incomes(company_id: str = Query(""), current_user: User = Depends(get_current_user)):
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+    q = {}
+    if company_id:
+        q["company_id"] = company_id
+    return await db.unprepared_incomes.find(q).sort("date", -1).to_list(5000)
+
+
+@router.post("/unprepared-incomes")
+async def create_unprepared_income(payload: UnpreparedIncomeCreate, current_user: User = Depends(get_current_user)):
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id": str(uuid.uuid4()),
+        "company_id": payload.company_id,
+        "date": payload.date,
+        "amount": payload.amount,
+        "payer_name": payload.payer_name,
+        "description": payload.description,
+        "receipt_account_id": payload.receipt_account_id,
+        "income_account_id": payload.income_account_id,
+        "created_by": current_user.id,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.unprepared_incomes.insert_one(doc)
+    doc.pop("_id", None)
+    await sync_unprepared_income_journal_entry(doc["id"])
+    return doc
+
+
+@router.put("/unprepared-incomes/{income_id}")
+async def update_unprepared_income(income_id: str, payload: UnpreparedIncomeCreate, current_user: User = Depends(get_current_user)):
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+    existing = await db.unprepared_incomes.find_one({"id": income_id})
+    if not existing:
+        raise HTTPException(404, "Income record not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    update = {
+        "company_id": payload.company_id,
+        "date": payload.date,
+        "amount": payload.amount,
+        "payer_name": payload.payer_name,
+        "description": payload.description,
+        "receipt_account_id": payload.receipt_account_id,
+        "income_account_id": payload.income_account_id,
+        "updated_at": now,
+    }
+    await db.unprepared_incomes.update_one({"id": income_id}, {"$set": update})
+    await sync_unprepared_income_journal_entry(income_id)
+    return {**existing, **update, "id": income_id}
+
+
+@router.delete("/unprepared-incomes/{income_id}")
+async def delete_unprepared_income(income_id: str, current_user: User = Depends(get_current_user)):
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+    existing = await db.unprepared_incomes.find_one({"id": income_id})
+    if not existing:
+        raise HTTPException(404, "Income record not found")
+    
+    # Delete journal entries
+    old_entries = await db.journal_entries.find({"source": "unprepared_income", "source_id": income_id}).to_list(50)
+    if old_entries:
+        old_ids = [e["id"] for e in old_entries]
+        await db.journal_lines.delete_many({"entry_id": {"$in": old_ids}})
+        await db.journal_entries.delete_many({"id": {"$in": old_ids}})
+        
+    await db.unprepared_incomes.delete_one({"id": income_id})
+    return {"success": True}
+
