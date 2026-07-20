@@ -23,6 +23,7 @@ export const BANK_FIELDS = [
   'bank_branch',
   'bank_account_type',
   'upi_id',
+  'linked_bank_account_id',
 ];
 
 function readAll(key) {
@@ -74,6 +75,7 @@ export function bankFromCompany(company) {
     bank_branch:         company.bank_branch || '',
     bank_account_type:   company.bank_account_type || '',
     upi_id:              company.upi_id || '',
+    linked_bank_account_id: company.linked_bank_account_id || '',
   };
   const out = {};
   Object.entries(map).forEach(([k, v]) => { if (v) out[k] = v; });
@@ -92,5 +94,6 @@ export function bankFromAccount(account) {
     bank_branch:         account.branch || '',
     bank_account_type:   type ? type.charAt(0).toUpperCase() + type.slice(1) : '',
     upi_id:              account.upi_id || '',
+    linked_bank_account_id: account.id || '',
   });
 }
