@@ -117,6 +117,7 @@ export const DEFAULT_INV_SETTINGS = {
   bank_branch:         '',
   bank_account_type:   'Current',
   upi_id:              '',
+  linked_bank_account_id: '',
   lock_invoice_bank:   false,
 
   // Design
@@ -302,6 +303,14 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
   const [copied, setCopied] = useState('');
   const [settingsPreviewHtml, setSettingsPreviewHtml] = useState('');
   const [previewKey, setPreviewKey]                   = useState(0);
+  const [bankAccounts, setBankAccounts]               = useState([]);
+
+  useEffect(() => {
+    if (!cid) return;
+    api.get('/bank-accounts/picker-list', { params: { company_id: cid } })
+      .then(r => setBankAccounts(r.data || []))
+      .catch(() => {});
+  }, [cid]);
 
   useEffect(() => {
     if (open) {
@@ -923,6 +932,45 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                       <div className={card}>
                         {secH('Bank Account', 'Shown on invoice for direct transfers')}
                         <div className="space-y-3">
+                          <div>
+                            <label className={lbl}>Link Bank Account</label>
+                            <Select
+                              value={form.linked_bank_account_id || '__none__'}
+                              onValueChange={v => {
+                                if (v === '__none__') {
+                                  setForm(p => ({ ...p, linked_bank_account_id: '' }));
+                                  return;
+                                }
+                                const ba = bankAccounts.find(b => b.id === v);
+                                if (ba) {
+                                  setForm(p => ({
+                                    ...p,
+                                    linked_bank_account_id: v,
+                                    bank_name:           ba.bank_name || p.bank_name,
+                                    bank_account_holder: ba.account_holder || p.bank_account_holder,
+                                    bank_account_no:     ba.account_number_full || ba.account_number_masked || p.bank_account_no,
+                                    bank_ifsc:           ba.ifsc || p.bank_ifsc,
+                                    bank_branch:         ba.branch || p.bank_branch,
+                                    bank_account_type:   (ba.account_type || 'current').charAt(0).toUpperCase() + (ba.account_type || 'current').slice(1),
+                                    upi_id:              ba.upi_id || p.upi_id,
+                                  }));
+                                }
+                              }}
+                            >
+                              <SelectTrigger className={inp}>
+                                <SelectValue placeholder="Select a bank account..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">— Not linked —</SelectItem>
+                                {bankAccounts.map(ba => (
+                                  <SelectItem key={ba.id} value={ba.id}>
+                                    {ba.bank_name}{ba.account_number_masked ? ` · ${ba.account_number_masked}` : ''}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
                           {[
                             { key: 'bank_account_holder', label: 'Account Holder Name', ph: 'As per bank records' },
                             { key: 'bank_name',           label: 'Bank Name',           ph: 'e.g. HDFC Bank' },
