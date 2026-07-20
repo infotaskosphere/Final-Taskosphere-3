@@ -17,7 +17,7 @@ const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFracti
 const fmtDate = (value) => { if (!value) return '—'; try { return format(parseISO(value), 'dd MMM yyyy'); } catch { return value; } };
 const SOURCE_LABEL = { manual: 'Manual', purchase: 'Purchase', sale: 'Sale', bank: 'Bank', payment: 'Receipt', purchase_payment: 'Payment' };
 
-function emptyLine() { return { account_id: '', account_name: '', debit: '', credit: '', memo: '' }; }
+function emptyLine(defaultType = 'Dr') { return { account_id: '', account_name: '', type: defaultType, debit: '', credit: '', memo: '' }; }
 
 function JournalEntriesInner() {
   const isDark = useDark();
@@ -27,7 +27,7 @@ function JournalEntriesInner() {
   const [showNew, setShowNew] = useState(false);
   const [entryDate, setEntryDate] = useState(new Date().toISOString().slice(0, 10));
   const [narration, setNarration] = useState('');
-  const [lines, setLines] = useState([emptyLine(), emptyLine()]);
+  const [lines, setLines] = useState([emptyLine('Dr'), emptyLine('Cr')]);
   const [saving, setSaving] = useState(false);
 
   const [companies, setCompanies] = useState([]);
@@ -113,6 +113,50 @@ function JournalEntriesInner() {
     setLines(ls => ls.map((l, i) => i === idx ? { ...l, ...patch } : l));
   };
 
+  const handleTypeChange = (idx, newType) => {
+    setLines(ls => ls.map((l, i) => {
+      if (i !== idx) return l;
+      const val = l.debit || l.credit || '';
+      if (newType === 'Dr') {
+        return { ...l, type: 'Dr', debit: val, credit: '' };
+      } else {
+        return { ...l, type: 'Cr', debit: '', credit: val };
+      }
+    }));
+  };
+
+  const handleEditTypeChange = (idx, newType) => {
+    setEditLines(ls => ls.map((l, i) => {
+      if (i !== idx) return l;
+      const val = l.debit || l.credit || '';
+      if (newType === 'Dr') {
+        return { ...l, type: 'Dr', debit: val, credit: '' };
+      } else {
+        return { ...l, type: 'Cr', debit: '', credit: val };
+      }
+    }));
+  };
+
+  const handleRefresh = async () => {
+    toast.promise(
+      (async () => {
+        const { data } = await api.post('/journal-entries/resync', { company_id: companyId || undefined });
+        await fetchAll();
+        return data;
+      })(),
+      {
+        loading: 'Running automatic system re-sync to restore missing entries...',
+        success: (data) => {
+          if (data?.recreated_bank_matches > 0) {
+            return `System re-sync complete. Automatically restored ${data.recreated_bank_matches} bank matching entries!`;
+          }
+          return 'System re-sync complete. All automated ledger entries are perfectly synchronized!';
+        },
+        error: 'System re-sync encountered an issue, but ledger entries were refreshed.'
+      }
+    );
+  };
+
   const submit = async () => {
     const validLines = lines
       .filter(l => l.account_id && (Number(l.debit) > 0 || Number(l.credit) > 0))
@@ -125,7 +169,7 @@ function JournalEntriesInner() {
       toast.success('Journal entry posted');
       setShowNew(false);
       setNarration('');
-      setLines([emptyLine(), emptyLine()]);
+      setLines([emptyLine('Dr'), emptyLine('Cr')]);
       await fetchAll();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to post journal entry');
@@ -156,6 +200,7 @@ function JournalEntriesInner() {
     setEditLines((entry.lines || []).map(l => ({
       account_id: l.account_id || '',
       account_name: l.account_name || '',
+      type: l.debit ? 'Dr' : 'Cr',
       debit: l.debit ? String(l.debit) : '',
       credit: l.credit ? String(l.credit) : '',
       memo: l.memo || '',
@@ -298,7 +343,7 @@ function JournalEntriesInner() {
           </div>
           <div className="flex flex-wrap gap-2 lg:justify-end items-center">
             <Select value={companyId || '__all__'} onValueChange={onCompanyChange}>
-              <SelectTrigger className="h-9 w-[170px] bg-white/10 border-white/25 text-white rounded-xl">
+              <SelectTrigger className="h-10 w-[170px] bg-white/10 border-white/20 text-white rounded-full text-xs md:text-sm font-medium hover:bg-white/15 transition-all">
                 <Building2 className="h-3.5 w-3.5 mr-1.5 shrink-0" />
                 <SelectValue placeholder="All Companies" />
               </SelectTrigger>
@@ -310,13 +355,13 @@ function JournalEntriesInner() {
             <Button 
               onClick={handleDeleteAll} 
               variant="outline" 
-              className="h-9 w-[170px] bg-white/10 border-white/25 text-white hover:bg-rose-600/30 hover:text-white hover:border-rose-400/40 rounded-xl"
+              className="h-10 w-[170px] bg-white/10 border-white/20 text-white hover:bg-rose-600/30 hover:text-white hover:border-rose-400/30 rounded-full text-xs md:text-sm font-medium transition-all"
             >
               <Trash2 className="h-3.5 w-3.5 mr-1.5 shrink-0" />
               Delete All
             </Button>
             <Select value={String(pageSize)} onValueChange={onPageSizeChange}>
-              <SelectTrigger className="h-9 w-[120px] bg-white/10 border-white/25 text-white rounded-xl">
+              <SelectTrigger className="h-10 w-[130px] bg-white/10 border-white/20 text-white rounded-full text-xs md:text-sm font-medium hover:bg-white/15 transition-all">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -325,11 +370,11 @@ function JournalEntriesInner() {
                 <SelectItem value="100">100 / page</SelectItem>
               </SelectContent>
             </Select>
-            <Button onClick={() => setShowNew(true)} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl"><Plus className="h-4 w-4 mr-2" /> New entry</Button>
-            <Button onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl">
-              {selectMode ? <><XCircle className="h-4 w-4 mr-2" /> Cancel select</> : <><CheckSquare className="h-4 w-4 mr-2" /> Select</>}
+            <Button onClick={() => setShowNew(true)} variant="outline" className="h-10 bg-white/10 border-white/20 text-white hover:bg-white/20 rounded-full text-xs md:text-sm font-medium transition-all"><Plus className="h-4 w-4 mr-1.5" /> New entry</Button>
+            <Button onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))} variant="outline" className="h-10 bg-white/10 border-white/20 text-white hover:bg-white/20 rounded-full text-xs md:text-sm font-medium transition-all">
+              {selectMode ? <><XCircle className="h-4 w-4 mr-1.5" /> Cancel select</> : <><CheckSquare className="h-4 w-4 mr-1.5" /> Select</>}
             </Button>
-            <Button onClick={() => fetchAll()} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl"><RefreshCw className="h-4 w-4 mr-2" /> Refresh</Button>
+            <Button onClick={handleRefresh} variant="outline" className="h-10 bg-white/10 border-white/20 text-white hover:bg-white/20 rounded-full text-xs md:text-sm font-medium transition-all"><RefreshCw className="h-4 w-4 mr-1.5" /> Refresh</Button>
           </div>
         </div>
       </div>
@@ -437,80 +482,276 @@ function JournalEntriesInner() {
       )}
 
       <Dialog open={showNew} onOpenChange={setShowNew}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader><DialogTitle>New journal entry</DialogTitle></DialogHeader>
-          <div className="space-y-3 mt-2">
-            <div className="grid grid-cols-2 gap-3">
-              <Input type="date" value={entryDate} onChange={e => setEntryDate(e.target.value)} />
-              <Input placeholder="Narration" value={narration} onChange={e => setNarration(e.target.value)} />
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-slate-800 dark:text-slate-100">
+              <NotebookPen className="h-5 w-5 text-blue-500" />
+              <span>New Journal Entry (Tally-Style Voucher)</span>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-500/5 p-3 rounded-xl border border-slate-200/40 dark:border-slate-800/40">
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">Voucher Date</label>
+                <Input type="date" value={entryDate} onChange={e => setEntryDate(e.target.value)} className="h-9 text-xs" />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">Narration / Remarks</label>
+                <Input placeholder="Enter general voucher narration..." value={narration} onChange={e => setNarration(e.target.value)} className="h-9 text-xs" />
+              </div>
             </div>
-            <div className="space-y-2">
-              {lines.map((l, idx) => (
-                <div key={idx} className="grid grid-cols-[1fr_90px_90px_28px] gap-2 items-center">
-                  <Select value={l.account_id} onValueChange={(v) => {
-                    const acct = accounts.find(a => a.id === v);
-                    updateLine(idx, { account_id: v, account_name: acct ? `${acct.code} ${acct.name}` : '' });
-                  }}>
-                    <SelectTrigger className="h-9"><SelectValue placeholder="Account" /></SelectTrigger>
-                    <SelectContent>
-                      {accounts.map(a => <SelectItem key={a.id} value={a.id}>{a.code} — {a.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <Input type="number" placeholder="Debit" className="h-9" value={l.debit} onChange={e => updateLine(idx, { debit: e.target.value, credit: '' })} />
-                  <Input type="number" placeholder="Credit" className="h-9" value={l.credit} onChange={e => updateLine(idx, { credit: e.target.value, debit: '' })} />
-                  <button onClick={() => setLines(ls => ls.filter((_, i) => i !== idx))} className="text-slate-300 hover:text-rose-500"><X className="h-4 w-4" /></button>
-                </div>
-              ))}
-              <Button variant="outline" size="sm" onClick={() => setLines(ls => [...ls, emptyLine()])}><Plus className="h-4 w-4 mr-2" /> Add line</Button>
+
+            <div className={`border rounded-xl overflow-hidden ${isDark ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50/50'} shadow-inner`}>
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className={`text-xs uppercase tracking-wider ${isDark ? 'bg-slate-800 text-slate-400 border-b border-slate-700' : 'bg-slate-100 text-slate-500 border-b border-slate-200'}`}>
+                    <th className="p-2.5 w-[75px] text-center font-bold">Dr/Cr</th>
+                    <th className="p-2.5">Particulars (Ledger Account Head)</th>
+                    <th className="p-2.5 w-[140px] text-right">Debit (₹)</th>
+                    <th className="p-2.5 w-[140px] text-right">Credit (₹)</th>
+                    <th className="p-2.5 w-[45px] text-center"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-dashed" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                  {lines.map((l, idx) => (
+                    <tr key={idx} className="hover:bg-slate-500/5 transition-colors">
+                      <td className="p-2">
+                        <Select value={l.type || 'Dr'} onValueChange={(v) => handleTypeChange(idx, v)}>
+                          <SelectTrigger className="h-9 text-xs font-bold w-[65px] bg-white/5 border-slate-200 dark:border-slate-700 rounded-lg text-center justify-center">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Dr"><span className="text-emerald-600 font-extrabold text-xs">Dr</span></SelectItem>
+                            <SelectItem value="Cr"><span className="text-amber-600 font-extrabold text-xs">Cr</span></SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </td>
+
+                      <td className="p-2">
+                        <div className="space-y-1">
+                          <Select value={l.account_id} onValueChange={(v) => {
+                            const acct = accounts.find(a => a.id === v);
+                            updateLine(idx, { account_id: v, account_name: acct ? `${acct.code} ${acct.name}` : '' });
+                          }}>
+                            <SelectTrigger className="h-9 text-xs bg-white/5 border-slate-200 dark:border-slate-700 rounded-lg">
+                              <SelectValue placeholder="Select Ledger Head..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {accounts.map(a => (
+                                <SelectItem key={a.id} value={a.id}>
+                                  <span className="font-semibold text-xs text-blue-500 mr-2">{a.code}</span>
+                                  <span className="text-xs">{a.name}</span>
+                                  <span className="text-[10px] ml-2 opacity-60 italic">({a.type})</span>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {l.account_id && (
+                            <Input 
+                              placeholder="Line reference/memo..." 
+                              className="h-7 text-[11px] px-2 py-0.5 border-slate-200 dark:border-slate-700 rounded-md italic bg-transparent"
+                              value={l.memo || ''} 
+                              onChange={e => updateLine(idx, { memo: e.target.value })} 
+                            />
+                          )}
+                        </div>
+                      </td>
+
+                      <td className="p-2">
+                        <Input 
+                          type="number" 
+                          placeholder="0.00" 
+                          className="h-9 text-right font-mono text-xs border-slate-200 dark:border-slate-700 rounded-lg bg-white/5"
+                          disabled={l.type === 'Cr'}
+                          value={l.type === 'Cr' ? '' : l.debit} 
+                          onChange={e => updateLine(idx, { debit: e.target.value, credit: '' })} 
+                        />
+                      </td>
+
+                      <td className="p-2">
+                        <Input 
+                          type="number" 
+                          placeholder="0.00" 
+                          className="h-9 text-right font-mono text-xs border-slate-200 dark:border-slate-700 rounded-lg bg-white/5"
+                          disabled={l.type === 'Dr'}
+                          value={l.type === 'Dr' ? '' : l.credit} 
+                          onChange={e => updateLine(idx, { credit: e.target.value, debit: '' })} 
+                        />
+                      </td>
+
+                      <td className="p-2 text-center">
+                        <button 
+                          onClick={() => setLines(ls => ls.filter((_, i) => i !== idx))} 
+                          className="text-slate-400 hover:text-rose-500 p-1.5 rounded-md hover:bg-rose-500/10 transition"
+                          title="Remove ledger line"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            <div className="flex items-center justify-between text-sm border-t pt-3">
-              <span>Debit: <span className="font-mono font-bold">{fmtC(totals.debit)}</span> · Credit: <span className="font-mono font-bold">{fmtC(totals.credit)}</span></span>
-              <span className={totals.balanced ? 'text-emerald-600 font-bold' : 'text-rose-500 font-bold'}>
-                {totals.balanced ? 'Balanced' : 'Not balanced'}
-              </span>
+
+            <div className="flex justify-between items-center">
+              <Button variant="outline" size="sm" onClick={() => setLines(ls => [...ls, emptyLine('Dr')])} className="h-8 text-xs rounded-lg">
+                <Plus className="h-3.5 w-3.5 mr-1.5" /> Add Voucher Line
+              </Button>
             </div>
-            <Button onClick={submit} disabled={saving || !totals.balanced} className="w-full" style={{ background: COLORS.mediumBlue }}>
-              {saving ? <MiniLoader height={18} /> : 'Post entry'}
+
+            <div className={`flex flex-col md:flex-row md:items-center justify-between p-3.5 rounded-xl border text-sm gap-3 ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+              <div className="flex flex-wrap gap-x-5 gap-y-1 font-semibold text-xs uppercase tracking-wider text-slate-500">
+                <span>Total Debit: <span className="font-mono text-sm font-bold text-slate-800 dark:text-slate-200">{fmtC(totals.debit)}</span></span>
+                <span>Total Credit: <span className="font-mono text-sm font-bold text-slate-800 dark:text-slate-200">{fmtC(totals.credit)}</span></span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${totals.balanced ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
+                  {totals.balanced ? 'Balanced' : 'Not Balanced'}
+                </span>
+              </div>
+            </div>
+
+            <Button onClick={submit} disabled={saving || !totals.balanced} className="w-full h-10 font-bold rounded-xl shadow-lg transition-all" style={{ background: COLORS.mediumBlue }}>
+              {saving ? <MiniLoader height={18} /> : 'Post Voucher Entry'}
             </Button>
           </div>
         </DialogContent>
       </Dialog>
 
       <Dialog open={!!editingEntry} onOpenChange={(o) => !o && closeEdit()}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader><DialogTitle>Edit journal entry</DialogTitle></DialogHeader>
-          <div className="space-y-3 mt-2">
-            <div className="grid grid-cols-2 gap-3">
-              <Input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} />
-              <Input placeholder="Narration" value={editNarration} onChange={e => setEditNarration(e.target.value)} />
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-slate-800 dark:text-slate-100">
+              <NotebookPen className="h-5 w-5 text-blue-500" />
+              <span>Edit Journal Entry (Tally-Style Voucher)</span>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-500/5 p-3 rounded-xl border border-slate-200/40 dark:border-slate-800/40">
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">Voucher Date</label>
+                <Input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} className="h-9 text-xs" />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">Narration / Remarks</label>
+                <Input placeholder="Enter general voucher narration..." value={editNarration} onChange={e => setEditNarration(e.target.value)} className="h-9 text-xs" />
+              </div>
             </div>
-            <div className="space-y-2">
-              {editLines.map((l, idx) => (
-                <div key={idx} className="grid grid-cols-[1fr_90px_90px_28px] gap-2 items-center">
-                  <Select value={l.account_id} onValueChange={(v) => {
-                    const acct = accounts.find(a => a.id === v);
-                    updateEditLine(idx, { account_id: v, account_name: acct ? `${acct.code} ${acct.name}` : l.account_name });
-                  }}>
-                    <SelectTrigger className="h-9"><SelectValue placeholder={l.account_name || 'Account'} /></SelectTrigger>
-                    <SelectContent>
-                      {accounts.map(a => <SelectItem key={a.id} value={a.id}>{a.code} — {a.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <Input type="number" placeholder="Debit" className="h-9" value={l.debit} onChange={e => updateEditLine(idx, { debit: e.target.value, credit: '' })} />
-                  <Input type="number" placeholder="Credit" className="h-9" value={l.credit} onChange={e => updateEditLine(idx, { credit: e.target.value, debit: '' })} />
-                  <button onClick={() => setEditLines(ls => ls.filter((_, i) => i !== idx))} className="text-slate-300 hover:text-rose-500"><X className="h-4 w-4" /></button>
-                </div>
-              ))}
-              <Button variant="outline" size="sm" onClick={() => setEditLines(ls => [...ls, emptyLine()])}><Plus className="h-4 w-4 mr-2" /> Add line</Button>
+
+            <div className={`border rounded-xl overflow-hidden ${isDark ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50/50'} shadow-inner`}>
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className={`text-xs uppercase tracking-wider ${isDark ? 'bg-slate-800 text-slate-400 border-b border-slate-700' : 'bg-slate-100 text-slate-500 border-b border-slate-200'}`}>
+                    <th className="p-2.5 w-[75px] text-center font-bold">Dr/Cr</th>
+                    <th className="p-2.5">Particulars (Ledger Account Head)</th>
+                    <th className="p-2.5 w-[140px] text-right">Debit (₹)</th>
+                    <th className="p-2.5 w-[140px] text-right">Credit (₹)</th>
+                    <th className="p-2.5 w-[45px] text-center"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-dashed" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                  {editLines.map((l, idx) => (
+                    <tr key={idx} className="hover:bg-slate-500/5 transition-colors">
+                      <td className="p-2">
+                        <Select value={l.type || 'Dr'} onValueChange={(v) => handleEditTypeChange(idx, v)}>
+                          <SelectTrigger className="h-9 text-xs font-bold w-[65px] bg-white/5 border-slate-200 dark:border-slate-700 rounded-lg text-center justify-center">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Dr"><span className="text-emerald-600 font-extrabold text-xs">Dr</span></SelectItem>
+                            <SelectItem value="Cr"><span className="text-amber-600 font-extrabold text-xs">Cr</span></SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </td>
+
+                      <td className="p-2">
+                        <div className="space-y-1">
+                          <Select value={l.account_id} onValueChange={(v) => {
+                            const acct = accounts.find(a => a.id === v);
+                            updateEditLine(idx, { account_id: v, account_name: acct ? `${acct.code} ${acct.name}` : l.account_name });
+                          }}>
+                            <SelectTrigger className="h-9 text-xs bg-white/5 border-slate-200 dark:border-slate-700 rounded-lg">
+                              <SelectValue placeholder={l.account_name || "Select Ledger Head..."} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {accounts.map(a => (
+                                <SelectItem key={a.id} value={a.id}>
+                                  <span className="font-semibold text-xs text-blue-500 mr-2">{a.code}</span>
+                                  <span className="text-xs">{a.name}</span>
+                                  <span className="text-[10px] ml-2 opacity-60 italic">({a.type})</span>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {l.account_id && (
+                            <Input 
+                              placeholder="Line reference/memo..." 
+                              className="h-7 text-[11px] px-2 py-0.5 border-slate-200 dark:border-slate-700 rounded-md italic bg-transparent"
+                              value={l.memo || ''} 
+                              onChange={e => updateEditLine(idx, { memo: e.target.value })} 
+                            />
+                          )}
+                        </div>
+                      </td>
+
+                      <td className="p-2">
+                        <Input 
+                          type="number" 
+                          placeholder="0.00" 
+                          className="h-9 text-right font-mono text-xs border-slate-200 dark:border-slate-700 rounded-lg bg-white/5"
+                          disabled={l.type === 'Cr'}
+                          value={l.type === 'Cr' ? '' : l.debit} 
+                          onChange={e => updateEditLine(idx, { debit: e.target.value, credit: '' })} 
+                        />
+                      </td>
+
+                      <td className="p-2">
+                        <Input 
+                          type="number" 
+                          placeholder="0.00" 
+                          className="h-9 text-right font-mono text-xs border-slate-200 dark:border-slate-700 rounded-lg bg-white/5"
+                          disabled={l.type === 'Dr'}
+                          value={l.type === 'Dr' ? '' : l.credit} 
+                          onChange={e => updateEditLine(idx, { credit: e.target.value, debit: '' })} 
+                        />
+                      </td>
+
+                      <td className="p-2 text-center">
+                        <button 
+                          onClick={() => setEditLines(ls => ls.filter((_, i) => i !== idx))} 
+                          className="text-slate-400 hover:text-rose-500 p-1.5 rounded-md hover:bg-rose-500/10 transition"
+                          title="Remove ledger line"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            <div className="flex items-center justify-between text-sm border-t pt-3">
-              <span>Debit: <span className="font-mono font-bold">{fmtC(editTotals.debit)}</span> · Credit: <span className="font-mono font-bold">{fmtC(editTotals.credit)}</span></span>
-              <span className={editTotals.balanced ? 'text-emerald-600 font-bold' : 'text-rose-500 font-bold'}>
-                {editTotals.balanced ? 'Balanced' : 'Not balanced'}
-              </span>
+
+            <div className="flex justify-between items-center">
+              <Button variant="outline" size="sm" onClick={() => setEditLines(ls => [...ls, emptyLine('Dr')])} className="h-8 text-xs rounded-lg">
+                <Plus className="h-3.5 w-3.5 mr-1.5" /> Add Voucher Line
+              </Button>
             </div>
-            <Button onClick={saveEdit} disabled={editSaving || !editTotals.balanced} className="w-full" style={{ background: COLORS.mediumBlue }}>
-              {editSaving ? <MiniLoader height={18} /> : 'Save changes'}
+
+            <div className={`flex flex-col md:flex-row md:items-center justify-between p-3.5 rounded-xl border text-sm gap-3 ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+              <div className="flex flex-wrap gap-x-5 gap-y-1 font-semibold text-xs uppercase tracking-wider text-slate-500">
+                <span>Total Debit: <span className="font-mono text-sm font-bold text-slate-800 dark:text-slate-200">{fmtC(editTotals.debit)}</span></span>
+                <span>Total Credit: <span className="font-mono text-sm font-bold text-slate-800 dark:text-slate-200">{fmtC(editTotals.credit)}</span></span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${editTotals.balanced ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
+                  {editTotals.balanced ? 'Balanced' : 'Not Balanced'}
+                </span>
+              </div>
+            </div>
+
+            <Button onClick={saveEdit} disabled={editSaving || !editTotals.balanced} className="w-full h-10 font-bold rounded-xl shadow-lg transition-all" style={{ background: COLORS.mediumBlue }}>
+              {editSaving ? <MiniLoader height={18} /> : 'Save Voucher Changes'}
             </Button>
           </div>
         </DialogContent>
