@@ -5795,6 +5795,22 @@ function Invoicing() {
   const [referralSummaryOpen, setReferralSummaryOpen] = useState(false);
   const [savedReferrers, setSavedReferrers] = useState([]);
 
+  // Unprepared direct income states
+  const [unpreparedIncomes, setUnpreparedIncomes] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [activeSubTab, setActiveSubTab] = useState('invoices'); // 'invoices' | 'other_income'
+  const [incomeFormOpen, setIncomeFormOpen] = useState(false);
+  const [editingIncome, setEditingIncome] = useState(null);
+  const [incomeForm, setIncomeForm] = useState({
+    company_id: '',
+    date: new Date().toISOString().slice(0, 10),
+    amount: '',
+    payer_name: '',
+    description: '',
+    receipt_account_id: '',
+    income_account_id: '',
+  });
+
   // ── B. ALL useRef ─────────────────────────────────────────────────────────
   const iframeRef = useRef(null);
   const searchRef = useRef(null);
@@ -5926,6 +5942,33 @@ function Invoicing() {
     return enriched;
   }), [filtered]);
 
+  const filteredUnpreparedIncomes = useMemo(() => {
+    return (unpreparedIncomes || []).filter(inc => {
+      // Company filter
+      if (companyFilter !== 'all' && inc.company_id !== companyFilter) return false;
+      
+      // Date filter (from / to)
+      if (fromDate && inc.date < fromDate) return false;
+      if (toDate && inc.date > toDate) return false;
+      
+      // Year Filter
+      if (yearFilter !== 'all') {
+        const year = inc.date?.slice(0, 4);
+        if (year !== yearFilter) return false;
+      }
+      
+      // Search term (payer_name or description)
+      if (searchTerm) {
+        const term = searchTerm.toLowerCase();
+        const pName = (inc.payer_name || '').toLowerCase();
+        const desc = (inc.description || '').toLowerCase();
+        if (!pName.includes(term) && !desc.includes(term)) return false;
+      }
+      
+      return true;
+    });
+  }, [unpreparedIncomes, companyFilter, fromDate, toDate, yearFilter, searchTerm]);
+
   // ── paginatedFiltered: client-side page slice of enrichedFiltered ──────────
   const paginatedFiltered = useMemo(() => {
     const start = (listPage - 1) * LIST_PAGE_SIZE;
@@ -5962,12 +6005,14 @@ function Invoicing() {
 const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [invR, compR, clientR, leadR, statR] = await Promise.allSettled([
+      const [invR, compR, clientR, leadR, statR, otherIncR, accountsR] = await Promise.allSettled([
         api.get('/invoices', { params: { page: 1, page_size: 5000 } }),
         api.get('/companies'),
         api.get('/clients', { params: { page: 1, page_size: 100 } }),
         api.get('/leads'),
         api.get('/invoices/stats'),
+        api.get('/unprepared-incomes'),
+        api.get('/chart-of-accounts'),
       ]);
 
       if (invR.status === 'fulfilled') {
@@ -6014,6 +6059,20 @@ const fetchAll = useCallback(async () => {
 
       if (statR.status === 'fulfilled') setStats(statR.value.data || null);
       else { console.error('Failed to load stats:', statR.reason); setStats(null); }
+
+      if (otherIncR.status === 'fulfilled') {
+        setUnpreparedIncomes(otherIncR.value.data || []);
+      } else {
+        console.error('Failed to load unprepared incomes:', otherIncR.reason);
+        setUnpreparedIncomes([]);
+      }
+
+      if (accountsR.status === 'fulfilled') {
+        setAccounts(accountsR.value.data || []);
+      } else {
+        console.error('Failed to load accounts:', accountsR.reason);
+        setAccounts([]);
+      }
 
     } catch (err) {
       console.error('fetchAll unexpected error:', err);
@@ -6316,6 +6375,57 @@ const fetchAll = useCallback(async () => {
     }
   }, [loading, invoices]);
 
+  const handleSaveIncome = async (e) => {
+    e.preventDefault();
+    if (!incomeForm.company_id) { toast.error('Please select a company'); return; }
+    if (!incomeForm.date) { toast.error('Please select a date'); return; }
+    if (!incomeForm.amount || parseFloat(incomeForm.amount) <= 0) { toast.error('Please enter a valid amount'); return; }
+    if (!incomeForm.payer_name) { toast.error('Please enter a payer name'); return; }
+    if (!incomeForm.receipt_account_id) { toast.error('Please select a receipt ledger account'); return; }
+    if (!incomeForm.income_account_id) { toast.error('Please select an income ledger account'); return; }
+
+    try {
+      const payload = {
+        ...incomeForm,
+        amount: parseFloat(incomeForm.amount),
+      };
+      if (editingIncome) {
+        await api.put(`/unprepared-incomes/${editingIncome.id}`, payload);
+        toast.success('Direct income updated successfully');
+      } else {
+        await api.post('/unprepared-incomes', payload);
+        toast.success('Direct income recorded successfully');
+      }
+      setIncomeFormOpen(false);
+      setEditingIncome(null);
+      setIncomeForm({
+        company_id: '',
+        date: new Date().toISOString().slice(0, 10),
+        amount: '',
+        payer_name: '',
+        description: '',
+        receipt_account_id: '',
+        income_account_id: '',
+      });
+      fetchAll();
+    } catch (err) {
+      console.error(err);
+      toast.error(err?.response?.data?.detail || 'Failed to save direct income');
+    }
+  };
+
+  const handleDeleteIncome = async (incomeId) => {
+    if (!window.confirm('Are you sure you want to delete this direct income record?')) return;
+    try {
+      await api.delete(`/unprepared-incomes/${incomeId}`);
+      toast.success('Direct income deleted');
+      fetchAll();
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to delete direct income');
+    }
+  };
+
   // Reset list page whenever filters or search change
   useEffect(() => { setListPage(1); setOutstandingPage(1); setReceivedPage(1); }, [statusFilter, typeFilter, companyFilter, yearFilter, fromDate, toDate, searchTerm, gstOnlyFilter]);
 
@@ -6368,7 +6478,33 @@ const fetchAll = useCallback(async () => {
         <EnhancedRevenueTrend invoices={invoices || []} isDark={isDark} />
       )}
 
-      {/* FILTERS */}
+      {/* TABS FOR INVOICES VS OTHER DIRECT INCOME */}
+      <div className="flex border-b border-slate-200 dark:border-slate-700 space-x-1 mt-4">
+        <button
+          onClick={() => { setActiveSubTab('invoices'); setSearchInput(''); setSearchTerm(''); }}
+          className={`px-5 py-2.5 text-sm font-bold border-b-2 transition-all flex items-center gap-2 ${
+            activeSubTab === 'invoices'
+              ? 'border-blue-500 text-blue-600 dark:text-blue-400 font-extrabold'
+              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+          }`}
+        >
+          <Receipt className="h-4 w-4" /> Prepared Invoices ({invoices.length})
+        </button>
+        <button
+          onClick={() => { setActiveSubTab('other_income'); setSearchInput(''); setSearchTerm(''); }}
+          className={`px-5 py-2.5 text-sm font-bold border-b-2 transition-all flex items-center gap-2 ${
+            activeSubTab === 'other_income'
+              ? 'border-blue-500 text-blue-600 dark:text-blue-400 font-extrabold'
+              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+          }`}
+        >
+          <IndianRupee className="h-4 w-4" /> Direct Income / No Invoice ({unpreparedIncomes.length})
+        </button>
+      </div>
+
+      {activeSubTab === 'invoices' ? (
+        <>
+          {/* FILTERS */}
       <div className={`rounded-2xl border shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
         <div className={`flex items-center gap-3 px-3.5 py-3 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
           <div className="relative flex-1">
@@ -6657,6 +6793,204 @@ const fetchAll = useCallback(async () => {
           )}
         </div>
       )}
+        </>
+      ) : (
+        /* OTHER INCOME RENDERING SECTION */
+        <div className="space-y-4">
+          {/* STATS HEADER FOR OTHER INCOME */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className={`rounded-2xl p-5 border shadow-sm flex items-center gap-4 ${isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-emerald-500/10">
+                <IndianRupee className="h-6 w-6 text-emerald-500" />
+              </div>
+              <div>
+                <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Total Direct Income</p>
+                <h3 className={`text-xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                  {fmtC(filteredUnpreparedIncomes.reduce((acc, x) => acc + (x.amount || 0), 0))}
+                </h3>
+                <p className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{filteredUnpreparedIncomes.length} Direct records</p>
+              </div>
+              <Button
+                onClick={() => {
+                  setEditingIncome(null);
+                  setIncomeForm({
+                    company_id: companies?.[0]?.id || '',
+                    date: new Date().toISOString().slice(0, 10),
+                    amount: '',
+                    payer_name: '',
+                    description: '',
+                    receipt_account_id: accounts.find(a => a.type === 'asset' && a.code === 1010)?.id || accounts.find(a => a.type === 'asset')?.id || '',
+                    income_account_id: accounts.find(a => a.type === 'income' && a.code === 4000)?.id || accounts.find(a => a.type === 'income')?.id || '',
+                  });
+                  setIncomeFormOpen(true);
+                }}
+                className="ml-auto h-9 px-4 rounded-xl text-white gap-1.5"
+                style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
+              >
+                <Plus className="h-4 w-4" /> Record Direct Income
+              </Button>
+            </div>
+          </div>
+
+          {/* OTHER INCOME FILTERS */}
+          <div className={`rounded-2xl border shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+            <div className={`flex items-center gap-3 px-3.5 py-3 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+              <div className="relative flex-1">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                <Input
+                  placeholder="Search payer name or description..."
+                  className={`pl-10 h-9 border-none focus-visible:ring-1 focus-visible:ring-blue-300 rounded-xl text-sm ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}
+                  value={searchInput}
+                  onChange={e => setSearchInput(e.target.value)}
+                />
+                {searchInput && <button onClick={() => setSearchInput('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><X className="h-3.5 w-3.5" /></button>}
+              </div>
+              <div className={`h-9 px-3 flex items-center rounded-xl text-xs font-bold border whitespace-nowrap flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-300 border-slate-600' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>
+                {filteredUnpreparedIncomes.length} <span className="ml-1 font-normal text-slate-400">records</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 px-3.5 py-2.5 overflow-x-auto scrollbar-none flex-wrap">
+              {(companies?.length || 0) > 1 && (
+                <Select value={companyFilter} onValueChange={setCompanyFilter}>
+                  <SelectTrigger className={`h-9 w-[160px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-blue-50 text-blue-700'}`}>
+                    <Building2 className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" />
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Companies</SelectItem>
+                    {(companies || []).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              )}
+              <Select value={yearFilter} onValueChange={setYearFilter}>
+                <SelectTrigger className={`h-9 w-[130px] border-none rounded-xl text-xs flex-shrink-0 font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}>
+                  <CalendarDays className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Years</SelectItem>
+                  {availableYears.map(y => <SelectItem key={y} value={y}>FY {y}-{String(parseInt(y) + 1).slice(2)}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <div className="flex items-center gap-1.5">
+                <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className={`h-9 px-2 rounded-xl text-xs border ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 [color-scheme:dark]' : 'bg-white border-slate-200'}`} />
+                <span className="text-slate-400 text-xs">–</span>
+                <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className={`h-9 px-2 rounded-xl text-xs border ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 [color-scheme:dark]' : 'bg-white border-slate-200'}`} />
+              </div>
+              {(companyFilter !== 'all' || yearFilter !== 'all' || fromDate || toDate) && (
+                <button onClick={() => { setCompanyFilter('all'); setYearFilter('all'); setFromDate(''); setToDate(''); }} className="h-9 px-3 rounded-xl text-xs font-semibold text-red-500 hover:bg-red-50 flex items-center gap-1"><X className="h-3 w-3" /> Clear</button>
+              )}
+            </div>
+          </div>
+
+          {/* LIST */}
+          {filteredUnpreparedIncomes.length === 0 ? (
+            <div className={`rounded-2xl border p-16 text-center ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+              <div className="w-16 h-16 rounded-2xl mx-auto flex items-center justify-center mb-4 bg-emerald-500/10">
+                <IndianRupee className="h-8 w-8 text-emerald-500" />
+              </div>
+              <h3 className={`text-lg font-bold mb-2 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>No direct income records</h3>
+              <p className={`text-sm mb-6 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                {searchTerm || companyFilter !== 'all' || yearFilter !== 'all' || fromDate || toDate ? 'No records match the current filters' : 'Record direct income whose invoice is not prepared'}
+              </p>
+              <Button
+                onClick={() => {
+                  setEditingIncome(null);
+                  setIncomeForm({
+                    company_id: companies?.[0]?.id || '',
+                    date: new Date().toISOString().slice(0, 10),
+                    amount: '',
+                    payer_name: '',
+                    description: '',
+                    receipt_account_id: accounts.find(a => a.type === 'asset' && a.code === 1010)?.id || accounts.find(a => a.type === 'asset')?.id || '',
+                    income_account_id: accounts.find(a => a.type === 'income' && a.code === 4000)?.id || accounts.find(a => a.type === 'income')?.id || '',
+                  });
+                  setIncomeFormOpen(true);
+                }}
+                className="h-10 px-6 rounded-xl text-white gap-2"
+                style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
+              >
+                <Plus className="h-4 w-4" /> Record Direct Income
+              </Button>
+            </div>
+          ) : (
+            <div className={`rounded-2xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse" style={{ minWidth: 700 }}>
+                  <thead>
+                    <tr className={`border-b text-[11px] font-bold uppercase tracking-wider ${isDark ? 'bg-slate-800/40 border-slate-700 text-slate-400' : 'bg-slate-50/70 border-slate-100 text-slate-500'}`}>
+                      <th className="p-4">Date</th>
+                      <th className="p-4">Company</th>
+                      <th className="p-4">Payer</th>
+                      <th className="p-4 text-right">Amount</th>
+                      <th className="p-4">Receipt (Asset Account)</th>
+                      <th className="p-4">Category (Income Head)</th>
+                      <th className="p-4">Description</th>
+                      <th className="p-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredUnpreparedIncomes.map(inc => {
+                      const co = companies.find(c => c.id === inc.company_id);
+                      const rcAcc = accounts.find(a => a.id === inc.receipt_account_id);
+                      const incAcc = accounts.find(a => a.id === inc.income_account_id);
+                      return (
+                        <tr key={inc.id} className={`border-b last:border-0 transition-colors ${isDark ? 'border-slate-700 hover:bg-slate-700/30' : 'border-slate-50 hover:bg-slate-50/50'}`}>
+                          <td className="p-4 text-sm font-semibold">{fmtDate(inc.date)}</td>
+                          <td className="p-4 text-xs font-semibold">
+                            <span className="px-2 py-1 rounded bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                              {co ? co.name : 'Unknown Company'}
+                            </span>
+                          </td>
+                          <td className="p-4 text-sm font-semibold">{inc.payer_name}</td>
+                          <td className="p-4 text-sm font-bold text-right text-emerald-600 dark:text-emerald-400">{fmtC(inc.amount)}</td>
+                          <td className="p-4 text-xs font-medium text-slate-500">
+                            {rcAcc ? `${rcAcc.name} (${rcAcc.code})` : '—'}
+                          </td>
+                          <td className="p-4 text-xs font-medium text-slate-500">
+                            {incAcc ? `${incAcc.name} (${incAcc.code})` : '—'}
+                          </td>
+                          <td className="p-4 text-xs text-slate-400 max-w-xs truncate" title={inc.description}>{inc.description || '—'}</td>
+                          <td className="p-4 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => {
+                                  setEditingIncome(inc);
+                                  setIncomeForm({
+                                    company_id: inc.company_id,
+                                    date: inc.date,
+                                    amount: String(inc.amount),
+                                    payer_name: inc.payer_name,
+                                    description: inc.description || '',
+                                    receipt_account_id: inc.receipt_account_id,
+                                    income_account_id: inc.income_account_id,
+                                  });
+                                  setIncomeFormOpen(true);
+                                }}
+                                title="Edit"
+                                className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-blue-900/30' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}
+                              >
+                                <Edit className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteIncome(inc.id)}
+                                title="Delete"
+                                className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-red-400 hover:bg-red-900/30' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* MODALS */}
       <InvoiceForm
@@ -6705,6 +7039,137 @@ const fetchAll = useCallback(async () => {
       <GSTReportsModal open={gstOpen} onClose={() => setGstOpen(false)} invoices={invoices} companies={companies} clients={clients} isDark={isDark} />
       {settingsOpen && <InvoiceSettings open={settingsOpen} onClose={() => setSettingsOpen(false)} companies={companies} isDark={isDark} />}
       {ledgerOpen && <PartyLedger open={ledgerOpen} onClose={() => setLedgerOpen(false)} invoices={invoices} clients={clients} companies={companies} isDark={isDark} initialClient={ledgerClient} />}
+      
+      {/* DIRECT INCOME DIALOG MODAL */}
+      <Dialog open={incomeFormOpen} onOpenChange={(v) => { if(!v) { setIncomeFormOpen(false); setEditingIncome(null); } }}>
+        <DialogContent className={`max-w-md rounded-2xl border shadow-2xl p-6 ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100' : 'bg-white border-slate-200 text-slate-800'}`}>
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold flex items-center gap-2">
+              <IndianRupee className="h-5 w-5 text-emerald-500" />
+              {editingIncome ? 'Edit Direct Income Record' : 'Record Direct Income / Other Income'}
+            </DialogTitle>
+            <p className="text-xs text-slate-400">Record payments received directly without a prepared sales invoice.</p>
+          </DialogHeader>
+          <form onSubmit={handleSaveIncome} className="space-y-4 mt-4">
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Select Company</Label>
+              <Select
+                value={incomeForm.company_id}
+                onValueChange={(v) => setIncomeForm({ ...incomeForm, company_id: v })}
+              >
+                <SelectTrigger className={`h-10 rounded-xl text-sm border-slate-200 dark:border-slate-600 focus:border-blue-400 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`}>
+                  <SelectValue placeholder="Choose company profile..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {companies.map(c => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold">Date</Label>
+                <Input
+                  type="date"
+                  required
+                  value={incomeForm.date}
+                  onChange={(e) => setIncomeForm({ ...incomeForm, date: e.target.value })}
+                  className={`h-10 rounded-xl text-sm border-slate-200 dark:border-slate-600 ${isDark ? 'bg-slate-700 text-slate-100 [color-scheme:dark]' : 'bg-white'}`}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold">Amount (INR)</Label>
+                <Input
+                  type="number"
+                  step="any"
+                  required
+                  placeholder="e.g. 15000"
+                  value={incomeForm.amount}
+                  onChange={(e) => setIncomeForm({ ...incomeForm, amount: e.target.value })}
+                  className={`h-10 rounded-xl text-sm border-slate-200 dark:border-slate-600 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Payer / Client Name</Label>
+              <Input
+                type="text"
+                required
+                placeholder="Name of the person/firm paying"
+                value={incomeForm.payer_name}
+                onChange={(e) => setIncomeForm({ ...incomeForm, payer_name: e.target.value })}
+                className={`h-10 rounded-xl text-sm border-slate-200 dark:border-slate-600 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Receipt Account (Asset)</Label>
+              <Select
+                value={incomeForm.receipt_account_id}
+                onValueChange={(v) => setIncomeForm({ ...incomeForm, receipt_account_id: v })}
+              >
+                <SelectTrigger className={`h-10 rounded-xl text-sm border-slate-200 dark:border-slate-600 focus:border-blue-400 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`}>
+                  <SelectValue placeholder="Choose receipt ledger account..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {accounts.filter(a => a.type === 'asset').map(a => (
+                    <SelectItem key={a.id} value={a.id}>{a.name} ({a.code})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Income Category (Income Head)</Label>
+              <Select
+                value={incomeForm.income_account_id}
+                onValueChange={(v) => setIncomeForm({ ...incomeForm, income_account_id: v })}
+              >
+                <SelectTrigger className={`h-10 rounded-xl text-sm border-slate-200 dark:border-slate-600 focus:border-blue-400 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-white'}`}>
+                  <SelectValue placeholder="Choose income category account..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {accounts.filter(a => a.type === 'income').map(a => (
+                    <SelectItem key={a.id} value={a.id}>{a.name} ({a.code})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Description / Remarks</Label>
+              <textarea
+                placeholder="Optional remarks or details of transaction..."
+                value={incomeForm.description}
+                onChange={(e) => setIncomeForm({ ...incomeForm, description: e.target.value })}
+                className={`w-full p-2.5 rounded-xl border text-sm border-slate-200 dark:border-slate-600 focus:ring-1 focus:ring-blue-400 min-h-[60px] ${isDark ? 'bg-slate-700 text-slate-100 text-sm' : 'bg-white'}`}
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-slate-100 dark:border-slate-700">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => { setIncomeFormOpen(false); setEditingIncome(null); }}
+                className="rounded-xl h-10 px-4 text-xs font-bold"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                className="rounded-xl h-10 px-5 text-xs font-bold text-white"
+                style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}
+              >
+                Save Record
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       {/* WHATSAPP INVOICE DIALOG */}
       {waInvoice && (
         <WhatsAppSendDialog
