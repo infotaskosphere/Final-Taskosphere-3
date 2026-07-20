@@ -432,58 +432,62 @@ async def _parse_pdf_statement_via_ai(contents: bytes, filename: str) -> List[di
     import json as _json
 
     # Try extracting digital text layer first for 100% accuracy and speed
-    text_content = ""
+    extracted_pages = []
     try:
         with pdfplumber.open(BytesIO(contents)) as pdf:
-            extracted_pages = []
-            for i, page in enumerate(pdf.pages[:15]):
+            for i, page in enumerate(pdf.pages[:30]):
                 text = page.extract_text()
                 if text and text.strip():
-                    extracted_pages.append(f"--- Page {i+1} ---\n{text.strip()}")
-            text_content = "\n\n".join(extracted_pages)
+                    extracted_pages.append((i + 1, text.strip()))
     except Exception:
-        text_content = ""
+        extracted_pages = []
 
-    if text_content.strip():
-        # High-precision digital PDF statement - use text-layer with Gemini 2.0 Flash
+    out = []
+    if extracted_pages:
+        # High-precision digital PDF statement - use text-layer with Gemini 2.0 Flash page-by-page
         try:
             model = _get_gemini_model()
-            prompt = (
-                "You are an expert Indian financial data parser. Below is the text content from a bank statement.\n"
-                "Please extract EVERY single transaction row and format it as a valid JSON array of objects.\n"
-                "Each object MUST have exactly these keys (and no others):\n"
-                '- "date": string in YYYY-MM-DD format (convert standard dates like "01 Apr 2026", "14/04/26", etc. to YYYY-MM-DD)\n'
-                '- "description": string (the transaction description, narration or particulars)\n'
-                '- "reference": string (cheque/UTR/reference number, or empty string if not shown)\n'
-                '- "debit": number (the transaction debit / withdrawal / payment amount. 0 if none)\n'
-                '- "credit": number (the transaction credit / deposit / receipt amount. 0 if none)\n'
-                '- "balance_after": number or null (running balance after transaction)\n\n'
-                "Ensure that:\n"
-                "- Debit and credit are ALWAYS positive numbers representing the amount transacted.\n"
-                "- Do not omit any transaction rows.\n"
-                "- Return ONLY the JSON array inside a standard JSON response. Do not include markdown fences, HTML, or explanations.\n\n"
-                f"BANK STATEMENT TEXT:\n{text_content}"
-            )
-            response = await model.generate_content_async(prompt)
-            answer = response.text
-            cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", answer.strip(), flags=re.I | re.S).strip()
-            m = re.search(r"\[.*\]", cleaned, re.S)
-            if m:
-                cleaned = m.group(0)
-            rows = _json.loads(cleaned)
-            out = []
-            for r in rows if isinstance(rows, list) else []:
-                d = _parse_stmt_date(r.get("date"))
-                if not d:
+            for page_num, page_text in extracted_pages:
+                prompt = (
+                    "You are an expert financial data extraction system. Extract EVERY transaction row from this page of a bank statement.\n"
+                    f"Page Number: {page_num}\n\n"
+                    "Extract each row into a JSON array of objects, with these exact keys:\n"
+                    '- "date": string in YYYY-MM-DD format (normalize input dates like "15 Apr 2026", "14/04/26", "23-05-2023", "01/05/23" to YYYY-MM-DD)\n'
+                    '- "description": string (the full transaction description/narration/particulars)\n'
+                    '- "reference": string (cheque number, UTR number, UPI transaction reference, reference number or empty string if not shown)\n'
+                    '- "debit": number (withdrawal / debit / payment amount, positive number, or 0 if none)\n'
+                    '- "credit": number (deposit / credit / receipt amount, positive number, or 0 if none)\n'
+                    '- "balance_after": number or null (running balance or closing balance after this transaction)\n\n'
+                    "Strict Constraints:\n"
+                    "1. DO NOT omit any transaction. Extract ALL transactions present on this page.\n"
+                    "2. Ensure debit and credit are positive numbers.\n"
+                    "3. Return ONLY a valid JSON array of objects. Do not wrap in markdown fences or include any other text.\n\n"
+                    f"PAGE TEXT:\n{page_text}"
+                )
+                try:
+                    response = await model.generate_content_async(prompt)
+                    answer = response.text
+                    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", answer.strip(), flags=re.I | re.S).strip()
+                    m = re.search(r"\[.*\]", cleaned, re.S)
+                    if m:
+                        cleaned = m.group(0)
+                    rows = _json.loads(cleaned)
+                    for r in rows if isinstance(rows, list) else []:
+                        d = _parse_stmt_date(r.get("date"))
+                        if not d:
+                            continue
+                        out.append({
+                            "date": d,
+                            "description": str(r.get("description", "")).strip(),
+                            "reference": str(r.get("reference", "")).strip(),
+                            "debit": round(abs(_parse_amount(r.get("debit"))), 2),
+                            "credit": round(abs(_parse_amount(r.get("credit"))), 2),
+                            "balance_after": r.get("balance_after"),
+                        })
+                except Exception as page_err:
+                    import logging
+                    logging.getLogger("bank_accounts").warning(f"Failed to parse page {page_num}: {page_err}")
                     continue
-                out.append({
-                    "date": d,
-                    "description": str(r.get("description", "")).strip(),
-                    "reference": str(r.get("reference", "")).strip(),
-                    "debit": round(abs(_parse_amount(r.get("debit"))), 2),
-                    "credit": round(abs(_parse_amount(r.get("credit"))), 2),
-                    "balance_after": r.get("balance_after"),
-                })
             if out:
                 return out
         except Exception:
@@ -548,6 +552,41 @@ async def _parse_pdf_statement_via_ai(contents: bytes, filename: str) -> List[di
     return out
 
 
+# ── NLP Normalization and Machine Learning Learner ─────────────────────────
+def normalize_description(desc: str) -> str:
+    if not desc:
+        return ""
+    # Convert to lowercase
+    s = desc.lower()
+    # Strip all digits (removes transaction numbers, dates, times, cheques, timestamps)
+    s = re.sub(r'\d+', ' ', s)
+    # Strip common non-alphabetic punctuation and noise characters
+    s = re.sub(r'[\/\-\_\,\.\:\;\#\*\+\=\[\]\(\)\{\}\&]', ' ', s)
+    # Normalize whitespaces to single space
+    s = re.sub(r'\s+', ' ', s)
+    return s.strip()
+
+
+async def learn_transaction_match(description: str, matched_type: str, matched_id: str, matched_label: str):
+    normalized = normalize_description(description)
+    if len(normalized) < 4:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    await db.bank_learned_mappings.update_one(
+        {"pattern": normalized},
+        {
+            "$set": {
+                "matched_type": matched_type,
+                "matched_id": matched_id,
+                "matched_label": matched_label,
+                "updated_at": now
+            },
+            "$inc": {"score": 1}
+        },
+        upsert=True
+    )
+
+
 # ── Matching + auto journal posting ───────────────────────────────────────
 async def _match_transaction(company_id: str, txn: dict) -> Optional[dict]:
     """Try to match one bank line against:
@@ -562,7 +601,9 @@ async def _match_transaction(company_id: str, txn: dict) -> Optional[dict]:
     invoice can't be closed twice by two different statement lines. Zero-Touch
     entries are checked first for a debit line since they carry the
     AI-extracted vendor name, which gives a better match than the generic
-    purchase_invoices collection when both exist."""
+    purchase_invoices collection when both exist.
+      3) FALLBACK: A learned mapping from machine learning (Module 8) built from
+         prior manual matches on the same description pattern."""
     txn_date = txn["date"]
     try:
         dt = datetime.strptime(txn_date, "%Y-%m-%d")
@@ -630,6 +671,61 @@ async def _match_transaction(company_id: str, txn: dict) -> Optional[dict]:
             match_amount = float(due) if due is not None else total
             if match_amount and abs(match_amount - amount) <= max(1.0, amount * 0.01):
                 return {"type": "sale", "id": c.get("id"), "label": c.get("client_name") or c.get("invoice_no") or "Sale invoice", "grand_total": total}
+
+    # ── FALLBACK: Check Machine Learning Learned Mappings ──
+    normalized = normalize_description(txn.get("description", ""))
+    if normalized:
+        learned = await db.bank_learned_mappings.find_one({"pattern": normalized})
+        if learned:
+            mtype = learned.get("matched_type")
+            mid = learned.get("matched_id")
+            mlabel = learned.get("matched_label")
+            if mtype in ("expense", "suspense", "asset", "liability", "revenue"):
+                acct = await db.chart_of_accounts.find_one({"id": mid})
+                if acct:
+                    return {
+                        "type": mtype,
+                        "id": mid,
+                        "label": mlabel or acct.get("name", "Account"),
+                        "source": "ml_learned"
+                    }
+            elif mtype == "purchase":
+                amount = txn.get("debit") or 0.0
+                if amount > 0:
+                    bill = await db.purchase_invoices.find_one({
+                        "company_id": company_id,
+                        "payment_status": {"$ne": "paid"},
+                        "supplier_name": mlabel,
+                    })
+                    if bill:
+                        gt = float(bill.get("grand_total") or 0)
+                        if abs(gt - amount) <= max(1.0, amount * 0.05):
+                            return {
+                                "type": "purchase",
+                                "id": bill["id"],
+                                "label": bill.get("supplier_name") or bill.get("invoice_no") or "Purchase invoice",
+                                "grand_total": gt,
+                                "source": "ml_learned_bill"
+                            }
+            elif mtype == "sale":
+                amount = txn.get("credit") or 0.0
+                if amount > 0:
+                    invoice = await db.invoices.find_one({
+                        "company_id": company_id,
+                        "status": {"$nin": ["paid", "cancelled"]},
+                        "client_name": mlabel,
+                    })
+                    if invoice:
+                        gt = float(invoice.get("grand_total") or invoice.get("total_amount") or invoice.get("total") or 0)
+                        if abs(gt - amount) <= max(1.0, amount * 0.05):
+                            return {
+                                "type": "sale",
+                                "id": invoice.get("id"),
+                                "label": invoice.get("client_name") or invoice.get("invoice_no") or "Sale invoice",
+                                "grand_total": gt,
+                                "source": "ml_learned_invoice"
+                            }
+
     return None
 
 
@@ -739,7 +835,7 @@ async def _auto_post_for_match(company_id: str, txn: dict, match: dict, created_
             )
         return entry["id"] if entry else None
 
-    if match["type"] in ("expense", "suspense"):
+    if match["type"] in ("expense", "suspense", "asset", "liability", "revenue"):
         # Match a bank line directly to a chart-of-accounts head (any expense
         # ledger, or the parking "Suspense Account" 9998). match["id"] is the
         # chart_of_accounts.id — NOT an invoice id.
@@ -900,12 +996,50 @@ async def upload_statement(
             "matched_type": None, "matched_id": None, "matched_label": None, "journal_entry_id": None,
             "source_file": filename, "created_by": current_user.id, "created_at": now,
         }
-        # Skip exact duplicates from re-uploading the same statement twice.
+        # ── COMPREHENSIVE DEDUPLICATION ENGINE ──
+        # 1. Exact Duplicate (same date, debit, credit, description)
         dup = await db.bank_transactions.find_one({
             "bank_account_id": bank_account_id, "date": doc["date"], "debit": doc["debit"],
             "credit": doc["credit"], "description": doc["description"],
         })
         if dup:
+            continue
+
+        # 2. Reference duplicate (if a non-empty cheque/UTR/reference number is present, it's globally unique)
+        ref = str(doc.get("reference") or "").strip()
+        if ref:
+            dup_ref = await db.bank_transactions.find_one({
+                "bank_account_id": bank_account_id,
+                "reference": ref
+            })
+            if dup_ref:
+                continue
+
+        # 3. Fuzzy Duplicate (same amount, date +/- 1 day to handle value vs txn date shifts, and similar description)
+        try:
+            dt_row = datetime.strptime(doc["date"], "%Y-%m-%d")
+            date_from = (dt_row - timedelta(days=1)).date().isoformat()
+            date_to = (dt_row + timedelta(days=1)).date().isoformat()
+        except Exception:
+            date_from = doc["date"]
+            date_to = doc["date"]
+
+        candidates = await db.bank_transactions.find({
+            "bank_account_id": bank_account_id,
+            "debit": doc["debit"],
+            "credit": doc["credit"],
+            "date": {"$gte": date_from, "$lte": date_to}
+        }).to_list(100)
+
+        is_dup = False
+        norm_desc = normalize_description(doc["description"])
+        for c in candidates:
+            c_norm = normalize_description(c.get("description", ""))
+            if c_norm == norm_desc or (len(c_norm) > 4 and len(norm_desc) > 4 and (c_norm in norm_desc or norm_desc in c_norm)):
+                is_dup = True
+                break
+
+        if is_dup:
             continue
 
         if auto_match:
@@ -1029,6 +1163,12 @@ async def manual_match_transaction(txn_id: str, payload: ManualMatchInput, curre
             update["journal_entry_id"] = entry_id
     await db.bank_transactions.update_one({"id": txn_id}, {"$set": update})
 
+    # Learn this pattern for machine learning feedback loops
+    try:
+        await learn_transaction_match(txn.get("description", ""), payload.matched_type, payload.matched_id, payload.matched_label)
+    except Exception:
+        pass
+
     await _log_recon_audit(
         txn, "matched", current_user,
         new_match={"type": payload.matched_type, "id": payload.matched_id, "label": payload.matched_label},
@@ -1070,6 +1210,12 @@ async def edit_match_transaction(txn_id: str, payload: ManualMatchInput, current
         if entry_id:
             update["journal_entry_id"] = entry_id
     await db.bank_transactions.update_one({"id": txn_id}, {"$set": update})
+
+    # Learn this pattern for machine learning feedback loops
+    try:
+        await learn_transaction_match(txn.get("description", ""), payload.matched_type, payload.matched_id, payload.matched_label)
+    except Exception:
+        pass
 
     new_match = {"type": payload.matched_type, "id": payload.matched_id, "label": payload.matched_label}
     await _log_recon_audit(
