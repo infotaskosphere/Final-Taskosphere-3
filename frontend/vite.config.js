@@ -29,7 +29,7 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    sourcemap: false,
     assetsInlineLimit: 0,
     chunkSizeWarningLimit: 2000,
     rollupOptions: {
