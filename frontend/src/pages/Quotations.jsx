@@ -526,7 +526,7 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
                       linked_bank_account_id: v,
                       bank_name:         ba.bank_name         || p.bank_name,
                       bank_account_name: ba.account_holder    || p.bank_account_name,
-                      bank_account_no:   ba.account_number_masked || p.bank_account_no,
+                      bank_account_no:   ba.account_number_full || ba.account_number_masked || p.bank_account_no,
                       bank_ifsc:         ba.ifsc               || p.bank_ifsc,
                       bank_branch:       ba.branch             || p.bank_branch,
                       bank_account_type: ba.account_type       || p.bank_account_type,
