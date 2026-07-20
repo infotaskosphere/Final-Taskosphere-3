@@ -351,6 +351,7 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
     name: '', address: '', phone: '', email: '', website: '', gstin: '', pan: '',
     has_gst: true,
     bank_account_name: '', bank_name: '', bank_account_no: '', bank_ifsc: '',
+    bank_branch: '', bank_account_type: 'Current', upi_id: '',
     linked_bank_account_id: '',
     logo_base64: null, tm_logo_base64: null, signature_base64: null,
     smtp_host: '', smtp_port: 587, smtp_user: '', smtp_password: '', smtp_from_name: '',
@@ -376,6 +377,9 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
         bank_name: editingCompany.bank_name || '',
         bank_account_no: editingCompany.bank_account_no || '',
         bank_ifsc: editingCompany.bank_ifsc || '',
+        bank_branch: editingCompany.bank_branch || '',
+        bank_account_type: editingCompany.bank_account_type || 'Current',
+        upi_id: editingCompany.upi_id || '',
         linked_bank_account_id: editingCompany.linked_bank_account_id || '',
         logo_base64: editingCompany.logo_base64 || null,
         tm_logo_base64: editingCompany.tm_logo_base64 || null,
@@ -390,10 +394,11 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
   }, [editingCompany]);
 
   useEffect(() => {
-    api.get('/bank-accounts/picker-list')
+    const params = editingCompany?.id ? { company_id: editingCompany.id } : {};
+    api.get('/bank-accounts/picker-list', { params })
       .then(r => setBankAccounts(r.data || []))
       .catch(() => {}); // silently ignore if user has no bank access
-  }, []);
+  }, [editingCompany]);
 
   const handleChange = e => setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
 
@@ -433,6 +438,9 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
           bank_name: form.bank_name,
           bank_account_no: form.bank_account_no,
           bank_ifsc: form.bank_ifsc,
+          bank_branch: form.bank_branch,
+          bank_account_type: form.bank_account_type,
+          upi_id: form.upi_id,
         });
       }
 
@@ -520,6 +528,9 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
                       bank_account_name: ba.account_holder    || p.bank_account_name,
                       bank_account_no:   ba.account_number_masked || p.bank_account_no,
                       bank_ifsc:         ba.ifsc               || p.bank_ifsc,
+                      bank_branch:       ba.branch             || p.bank_branch,
+                      bank_account_type: ba.account_type       || p.bank_account_type,
+                      upi_id:            ba.upi_id             || p.upi_id,
                     }));
                   }
                 }}
@@ -549,6 +560,8 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
               { label: 'Bank Name',    name: 'bank_name'         },
               { label: 'Account No.',  name: 'bank_account_no'   },
               { label: 'IFSC Code',    name: 'bank_ifsc'         },
+              { label: 'Branch',       name: 'bank_branch'       },
+              { label: 'UPI ID',       name: 'upi_id'            },
             ].map(f => (
               <div key={f.name} className="space-y-1.5">
                 <Label className="text-xs font-semibold">{f.label}</Label>
