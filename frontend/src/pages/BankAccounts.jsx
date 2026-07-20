@@ -17,6 +17,7 @@ import { useAuth } from '@/contexts/AuthContext.jsx';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
 import { mirrorBankToSettings, bankFromAccount } from '@/lib/bankSync';
 import { GuidanceNote } from '@/components/ui/GuidanceNote.jsx';
+import { useNavigate } from 'react-router-dom';
 
 const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2', emeraldGreen: '#1FAF5A', amber: '#F59E0B', coral: '#FF6B6B' };
 const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
@@ -69,6 +70,7 @@ function scoreInvoiceMatch(txn, inv) {
 }
 
 function BankAccountsInner() {
+  const navigate = useNavigate();
   const isDark = useDark();
   const { user, hasPermission } = useAuth();
   const canMatch = user?.role === 'admin' || hasPermission('can_match_bank');
@@ -95,6 +97,11 @@ function BankAccountsInner() {
   const [invoiceSearch, setInvoiceSearch] = useState('');
   const [invoiceLoading, setInvoiceLoading] = useState(false);
 
+  // States for manual purchase invoice creation
+  const [showNewPurchaseForm, setShowNewPurchaseForm] = useState(false);
+  const [newPurchaseForm, setNewPurchaseForm] = useState({ supplier_name: '', invoice_no: '', invoice_date: '', gst_rate: '18', grand_total: '' });
+  const [savingPurchase, setSavingPurchase] = useState(false);
+
   // Ledger heads (chart of accounts) for the "Expense Head" tab + inline "Create head"
   const [ledgerCache, setLedgerCache] = useState([]);
   const [ledgerLoading, setLedgerLoading] = useState(false);
@@ -102,6 +109,11 @@ function BankAccountsInner() {
   const [showNewHead, setShowNewHead] = useState(false);
   const [newHead, setNewHead] = useState({ code: '', name: '', type: 'expense', sub_type: 'operating_expense' });
   const [savingHead, setSavingHead] = useState(false);
+
+  // Direct expense account creation states
+  const [showNewExpenseHeadForm, setShowNewExpenseHeadForm] = useState(false);
+  const [newExpenseHead, setNewExpenseHead] = useState({ code: '', name: '' });
+  const [savingExpenseHead, setSavingExpenseHead] = useState(false);
 
   const fetchAccounts = async () => {
     setLoading(true);
@@ -238,13 +250,44 @@ function BankAccountsInner() {
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed to unmatch'); return false; }
   };
 
-  const loadInvoices = async () => {
-    if (invoiceCache.length) return;
+  const loadInvoices = async (force = false) => {
+    if (invoiceCache.length && !force) return;
     setInvoiceLoading(true);
     try {
-      const { data } = await api.get('/invoices', { params: { page: 1, page_size: 2000 } });
-      const list = Array.isArray(data) ? data : (data?.items || data?.invoices || []);
-      setInvoiceCache(list);
+      const [salesRes, purchasesRes] = await Promise.allSettled([
+        api.get('/invoices', { params: { page: 1, page_size: 2000 } }),
+        api.get('/purchase-invoices', { params: { page_size: 2000 } })
+      ]);
+
+      let salesList = [];
+      if (salesRes.status === 'fulfilled') {
+        const data = salesRes.value.data;
+        const rawSales = Array.isArray(data) ? data : (data?.items || data?.invoices || []);
+        salesList = rawSales.map(s => ({
+          ...s,
+          isPurchase: false,
+          invoice_no: s.invoice_no || s.invoice_number || s.number || s.bill_number || '',
+          client_name: s.client_name || s.customer_name || s.party_name || s.buyer_name || 'Customer',
+          grand_total: s.grand_total || s.amount || s.total || 0,
+          invoice_date: s.invoice_date || s.date || s.bill_date || ''
+        }));
+      }
+
+      let purchasesList = [];
+      if (purchasesRes.status === 'fulfilled') {
+        const data = purchasesRes.value.data;
+        const rawPurchases = Array.isArray(data) ? data : (data?.items || data?.invoices || data?.purchase_invoices || []);
+        purchasesList = rawPurchases.map(p => ({
+          ...p,
+          isPurchase: true,
+          invoice_no: p.invoice_no || p.bill_number || p.invoice_number || '',
+          client_name: p.supplier_name || p.vendor_name || p.client_name || 'Vendor',
+          grand_total: p.grand_total || p.amount || p.total || 0,
+          invoice_date: p.invoice_date || p.date || p.bill_date || ''
+        }));
+      }
+
+      setInvoiceCache([...salesList, ...purchasesList]);
     } catch { /* silent */ }
     finally { setInvoiceLoading(false); }
   };
@@ -264,8 +307,83 @@ function BankAccountsInner() {
     setInvoiceSearch('');
     setDialogTab('invoice');
     setMatchDialog({ txn, mode });
+
+    // Guess vendor name from transaction description
+    const rawDesc = txn.description || '';
+    let cleanVendor = rawDesc
+      .replace(/(payment to|transfer to|paid to|to|rtgs|neft|imps|upi|gpay|paytm|pos|chg)/gi, '')
+      .replace(/[\s\-_]+/g, ' ')
+      .trim();
+    if (cleanVendor.length > 50) cleanVendor = cleanVendor.slice(0, 50);
+
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const billNo = txn.reference ? `BILL-${txn.reference}` : `BILL-${txn.date?.replace(/-/g, '') || ''}-${randomSuffix}`;
+
+    setNewPurchaseForm({
+      supplier_name: cleanVendor.toUpperCase(),
+      invoice_no: billNo,
+      invoice_date: txn.date || new Date().toISOString().split('T')[0],
+      gst_rate: '18',
+      grand_total: Number(txn.debit || 0).toString()
+    });
+    setShowNewPurchaseForm(false);
+    setShowNewExpenseHeadForm(false);
+
     loadInvoices();
     loadLedgers();
+  };
+
+  const createAndMatchPurchaseInvoice = async () => {
+    if (!newPurchaseForm.supplier_name.trim()) { toast.error('Supplier name is required'); return; }
+    if (!newPurchaseForm.invoice_no.trim()) { toast.error('Invoice/Bill number is required'); return; }
+    if (!newPurchaseForm.invoice_date.trim()) { toast.error('Invoice/Bill date is required'); return; }
+
+    setSavingPurchase(true);
+    try {
+      const gtotal = Number(newPurchaseForm.grand_total || 0);
+      const rate = Number(newPurchaseForm.gst_rate || 0);
+      const total_gst = Math.round((gtotal - (gtotal / (1 + rate / 100)) + Number.EPSILON) * 100) / 100;
+      const taxable_amount = Math.round((gtotal - total_gst + Number.EPSILON) * 100) / 100;
+
+      const payload = {
+        company_id: selected?.company_id || '',
+        client_name: selected?.account_holder || '',
+        supplier_name: newPurchaseForm.supplier_name.trim(),
+        supplier_gstin: '',
+        invoice_no: newPurchaseForm.invoice_no.trim(),
+        invoice_date: newPurchaseForm.invoice_date,
+        taxable_amount,
+        total_gst,
+        grand_total: gtotal,
+        currency: 'INR'
+      };
+
+      const { data } = await api.post('/purchase-invoices', payload);
+      const newInv = data.purchase_invoice;
+
+      // Force cache reset
+      setInvoiceCache([]);
+
+      const matched_label = `${invNumber(newInv) || '—'} · ${invParty(newInv) || '—'}`.trim();
+      const matchPayload = {
+        matched_type: 'purchase',
+        matched_id: newInv.id,
+        matched_label,
+        post_journal: true,
+        confidence: 100
+      };
+
+      await api.post(`/bank-transactions/${matchDialog.txn.id}/match`, matchPayload);
+      toast.success('Bill created and transaction matched!');
+
+      setMatchDialog(null);
+      await fetchAccounts();
+      await fetchTransactions(selected.id);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to create and match bill');
+    } finally {
+      setSavingPurchase(false);
+    }
   };
 
   const confirmMatch = async (txn, inv, score) => {
@@ -344,6 +462,39 @@ function BankAccountsInner() {
     } finally { setSavingHead(false); }
   };
 
+  const getSuggestedExpenseCode = () => {
+    const codes = ledgerCache.map(c => Number(c.code)).filter(c => c >= 5000 && c < 6000);
+    if (!codes.length) return '5100';
+    return String(Math.max(...codes) + 10);
+  };
+
+  const createAndMatchDirectExpense = async () => {
+    if (!newExpenseHead.code.trim() || !newExpenseHead.name.trim()) {
+      toast.error('Code and name are required');
+      return;
+    }
+    setSavingExpenseHead(true);
+    try {
+      const { data: acct } = await api.post('/chart-of-accounts', {
+        company_id: selected?.company_id || '',
+        code: newExpenseHead.code.trim(),
+        name: newExpenseHead.name.trim(),
+        type: 'expense',
+        sub_type: 'operating_expense'
+      });
+      toast.success(`Expense Account "${acct.name}" created successfully`);
+      setLedgerCache(prev => [...prev, acct].sort((a, b) => (a.code || '').localeCompare(b.code || '')));
+      setShowNewExpenseHeadForm(false);
+      if (matchDialog?.txn) {
+        await confirmLedgerMatch(matchDialog.txn, acct);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to create and match expense account');
+    } finally {
+      setSavingExpenseHead(false);
+    }
+  };
+
 
   const viewAudit = async (txn) => {
     try {
@@ -354,7 +505,7 @@ function BankAccountsInner() {
 
   const viewLedger = (txn) => {
     if (!txn.journal_entry_id) { toast.error('No journal entry posted for this transaction yet'); return; }
-    window.open(`/journal-entries?entry=${txn.journal_entry_id}`, '_blank', 'noopener');
+    navigate(`/journal-entries?entry=${txn.journal_entry_id}`);
   };
 
   const toggleIgnore = async (txn) => {
@@ -390,23 +541,30 @@ function BankAccountsInner() {
   };
 
   const suggestionsFor = (txn) => {
-    if (!invoiceCache.length) return [];
+    if (!invoiceCache.length || !txn) return [];
+    const isDebit = Number(txn.debit || 0) > 0;
     return invoiceCache
+      .filter(i => isDebit ? !!i.isPurchase : !i.isPurchase)
       .map(inv => ({ inv, score: scoreInvoiceMatch(txn, inv) }))
       .sort((a, b) => b.score - a.score)
       .slice(0, 6);
   };
 
   const filteredInvoices = useMemo(() => {
+    if (!matchDialog?.txn) return [];
+    const isDebit = Number(matchDialog.txn.debit || 0) > 0;
     const q = invoiceSearch.trim().toLowerCase();
-    const base = invoiceCache;
+    
+    // If it's debit, show ONLY purchase invoices; if it's credit, show ONLY sales invoices
+    const base = invoiceCache.filter(i => isDebit ? !!i.isPurchase : !i.isPurchase);
+    
     if (!q) return base.slice(0, 200);
     return base.filter(i => {
       const hay = [invNumber(i), invParty(i), i.gstin, i.customer_gstin, i.supplier_gstin, invAmount(i), invDate(i)]
         .filter(Boolean).join(' ').toLowerCase();
       return hay.includes(q);
     }).slice(0, 200);
-  }, [invoiceCache, invoiceSearch]);
+  }, [invoiceCache, invoiceSearch, matchDialog?.txn]);
 
   const filteredLedgers = useMemo(() => {
     const q = invoiceSearch.trim().toLowerCase();
@@ -610,7 +768,7 @@ function BankAccountsInner() {
                                     <button onClick={() => unmatchTxn(t.id)} className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-rose-400 hover:text-rose-600 inline-flex items-center gap-1"><Unlink className="h-3 w-3" /> Unmatch</button>
                                   )}
                                   {t.matched_id && (
-                                    <a href={`/invoicing?open=${t.matched_id}`} target="_blank" rel="noreferrer" className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-slate-400 inline-flex items-center gap-1"><Eye className="h-3 w-3" /> Invoice</a>
+                                    <button onClick={() => navigate(`/invoicing?open=${t.matched_id}`)} className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-slate-400 inline-flex items-center gap-1"><Eye className="h-3 w-3" /> Invoice</button>
                                   )}
                                   {t.journal_entry_id && (
                                     <button onClick={() => viewLedger(t)} className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-slate-200 hover:border-slate-400 inline-flex items-center gap-1"><BookOpen className="h-3 w-3" /> Ledger</button>
@@ -697,31 +855,122 @@ function BankAccountsInner() {
               </div>
 
               {dialogTab === 'invoice' ? (
-                <div className="max-h-[420px] overflow-y-auto divide-y border rounded-xl">
-                  {invoiceLoading ? (
-                    <div className="p-6 text-center"><MiniLoader height={22} /></div>
-                  ) : filteredInvoices.length === 0 ? (
-                    <p className="p-6 text-center text-sm text-slate-400">No invoices found.</p>
+                <div className="space-y-3">
+                  {showNewPurchaseForm ? (
+                    <div className="border rounded-2xl p-4 bg-blue-50/25 dark:bg-slate-900/40 space-y-3 border-blue-200 dark:border-slate-700">
+                      <div className="flex items-center justify-between border-b pb-2 mb-2 dark:border-slate-700">
+                        <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200">Create & Match Purchase Bill</h3>
+                        <Button size="xs" variant="ghost" onClick={() => setShowNewPurchaseForm(false)}>Cancel</Button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Supplier Name</Label>
+                          <Input placeholder="e.g. AWS SERVICES" value={newPurchaseForm.supplier_name} onChange={e => setNewPurchaseForm(f => ({ ...f, supplier_name: e.target.value.toUpperCase() }))} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Bill/Invoice Number</Label>
+                          <Input placeholder="e.g. BILL-102" value={newPurchaseForm.invoice_no} onChange={e => setNewPurchaseForm(f => ({ ...f, invoice_no: e.target.value }))} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Bill Date</Label>
+                          <Input type="date" value={newPurchaseForm.invoice_date} onChange={e => setNewPurchaseForm(f => ({ ...f, invoice_date: e.target.value }))} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs font-semibold text-slate-600 dark:text-slate-400">GST Rate (%)</Label>
+                          <Select value={newPurchaseForm.gst_rate} onValueChange={v => setNewPurchaseForm(f => ({ ...f, gst_rate: v }))}>
+                            <SelectTrigger className="text-sm"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="18">18% GST (Standard)</SelectItem>
+                              <SelectItem value="12">12% GST</SelectItem>
+                              <SelectItem value="5">5% GST</SelectItem>
+                              <SelectItem value="28">28% GST</SelectItem>
+                              <SelectItem value="0">0% GST (Exempt)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1 col-span-2">
+                          <Label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Total Amount (₹)</Label>
+                          <Input type="number" placeholder="Total bill amount" value={newPurchaseForm.grand_total} onChange={e => setNewPurchaseForm(f => ({ ...f, grand_total: e.target.value }))} />
+                        </div>
+                      </div>
+                      <div className="flex gap-2 justify-end pt-2">
+                        <Button size="sm" variant="outline" className="rounded-xl" onClick={() => setShowNewPurchaseForm(false)}>Cancel</Button>
+                        <Button size="sm" onClick={createAndMatchPurchaseInvoice} disabled={savingPurchase} className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl">
+                          {savingPurchase ? 'Creating…' : 'Save & Match'}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : showNewExpenseHeadForm ? (
+                    <div className="border rounded-2xl p-4 bg-amber-50/25 dark:bg-slate-900/40 space-y-3 border-amber-200 dark:border-slate-700">
+                      <div className="flex items-center justify-between border-b pb-2 mb-2 dark:border-slate-700">
+                        <h3 className="text-xs font-bold text-amber-800 dark:text-amber-200">Create Expense Account & Match</h3>
+                        <Button size="xs" variant="ghost" onClick={() => setShowNewExpenseHeadForm(false)}>Cancel</Button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Account Code</Label>
+                          <Input placeholder="e.g. 5210" value={newExpenseHead.code} onChange={e => setNewExpenseHead(h => ({ ...h, code: e.target.value }))} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Expense Account Name</Label>
+                          <Input placeholder="e.g. Travel Expenses" value={newExpenseHead.name} onChange={e => setNewExpenseHead(h => ({ ...h, name: e.target.value }))} />
+                        </div>
+                      </div>
+                      <div className="flex gap-2 justify-end pt-2">
+                        <Button size="sm" variant="outline" className="rounded-xl" onClick={() => setShowNewExpenseHeadForm(false)}>Cancel</Button>
+                        <Button size="sm" onClick={createAndMatchDirectExpense} disabled={savingExpenseHead} className="bg-amber-600 hover:bg-amber-700 text-white rounded-xl">
+                          {savingExpenseHead ? 'Creating…' : 'Create & Match Expense'}
+                        </Button>
+                      </div>
+                    </div>
                   ) : (
-                    filteredInvoices
-                      .map(inv => ({ inv, score: scoreInvoiceMatch(matchDialog.txn, inv) }))
-                      .sort((a, b) => b.score - a.score)
-                      .map(({ inv, score }) => (
-                        <button key={inv.id} onClick={() => confirmMatch(matchDialog.txn, inv, score)}
-                          className="w-full text-left p-3 hover:bg-blue-50 flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="text-sm font-bold text-slate-800 truncate">
-                              {invNumber(inv) || '—'} · {invParty(inv) || '—'}
-                            </p>
-                            <p className="text-xs text-slate-500">{fmtDate(invDate(inv))} · {inv.gstin || inv.customer_gstin || inv.supplier_gstin || ''}</p>
-                          </div>
-                          <div className="text-right flex-shrink-0">
-                            <p className="text-sm font-bold text-slate-700">{fmtC(invAmount(inv))}</p>
-                            <p className={`text-[10px] font-bold ${score >= 70 ? 'text-emerald-600' : score >= 40 ? 'text-amber-600' : 'text-slate-400'}`}>{score}% match</p>
-                          </div>
-                        </button>
-                      ))
+                    <>
+                      {Number(matchDialog.txn.debit || 0) > 0 && (
+                        <div className="flex flex-col sm:flex-row gap-2 mb-1">
+                          <button onClick={() => { setShowNewPurchaseForm(true); setShowNewExpenseHeadForm(false); }} className="flex-1 py-2.5 px-3 rounded-xl border border-dashed border-blue-300 text-blue-700 dark:text-blue-400 bg-blue-50/40 dark:bg-slate-900/60 hover:bg-blue-50 font-bold text-xs inline-flex items-center justify-center gap-1">
+                            <Plus className="h-3.5 w-3.5" /> Create & Match Bill
+                          </button>
+                          <button onClick={() => {
+                            setShowNewExpenseHeadForm(true);
+                            setShowNewPurchaseForm(false);
+                            setNewExpenseHead({
+                              code: getSuggestedExpenseCode(),
+                              name: (matchDialog.txn.description || '').replace(/[\d\-\/]/g, ' ').replace(/\s+/g, ' ').trim()
+                            });
+                          }} className="flex-1 py-2.5 px-3 rounded-xl border border-dashed border-amber-300 text-amber-700 dark:text-amber-400 bg-amber-50/40 dark:bg-slate-900/60 hover:bg-amber-50 font-bold text-xs inline-flex items-center justify-center gap-1">
+                            <Plus className="h-3.5 w-3.5" /> Book directly to new Expense Account
+                          </button>
+                        </div>
+                      )}
+                    </>
                   )}
+
+                  <div className="max-h-[360px] overflow-y-auto divide-y border rounded-xl">
+                    {invoiceLoading ? (
+                      <div className="p-6 text-center"><MiniLoader height={22} /></div>
+                    ) : filteredInvoices.length === 0 ? (
+                      <p className="p-6 text-center text-sm text-slate-400">No invoices found.</p>
+                    ) : (
+                      filteredInvoices
+                        .map(inv => ({ inv, score: scoreInvoiceMatch(matchDialog.txn, inv) }))
+                        .sort((a, b) => b.score - a.score)
+                        .map(({ inv, score }) => (
+                          <button key={inv.id} onClick={() => confirmMatch(matchDialog.txn, inv, score)}
+                            className="w-full text-left p-3 hover:bg-blue-50 flex items-center justify-between gap-3 dark:hover:bg-slate-700/60">
+                            <div className="min-w-0">
+                              <p className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">
+                                {invNumber(inv) || '—'} · {invParty(inv) || '—'}
+                              </p>
+                              <p className="text-xs text-slate-500">{fmtDate(invDate(inv))} · {inv.gstin || inv.customer_gstin || inv.supplier_gstin || ''}</p>
+                            </div>
+                            <div className="text-right flex-shrink-0">
+                              <p className="text-sm font-bold text-slate-700 dark:text-slate-300">{fmtC(invAmount(inv))}</p>
+                              <p className={`text-[10px] font-bold ${score >= 70 ? 'text-emerald-600' : score >= 40 ? 'text-amber-600' : 'text-slate-400'}`}>{score}% match</p>
+                            </div>
+                          </button>
+                        ))
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div className="border rounded-xl">
