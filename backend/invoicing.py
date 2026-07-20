@@ -2921,10 +2921,26 @@ def _purchase_scope_query(current_user: User) -> dict:
     return {} if getattr(current_user, "role", None) == "admin" else {"created_by": current_user.id}
 
 @router.get("/purchase-invoices")
-async def list_purchase_invoices(client_id: Optional[str] = Query(None), search: Optional[str] = Query(None), page: int = Query(1, ge=1), page_size: int = Query(100, ge=1, le=1000), current_user: User = Depends(get_current_user)):
+async def list_purchase_invoices(
+    client_id: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=1000),
+    company_id: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user)
+):
     if not _perm(current_user):
         raise HTTPException(403, "Access denied")
-    q = _purchase_scope_query(current_user)
+    q = {}
+    if current_user.role != "admin":
+        if current_user.company_id:
+            q["company_id"] = current_user.company_id
+        else:
+            q["created_by"] = current_user.id
+
+    if company_id:
+        q["company_id"] = company_id
+
     if client_id:
         q["client_id"] = client_id
     if search:
@@ -2987,6 +3003,73 @@ async def upload_purchase_invoice(file: UploadFile = File(...), client_id: Optio
     await sync_purchase_journal_entry(doc["id"])
     doc.pop("_id", None)
     return {"purchase_invoice": doc, "matched_client": matched_client, "duplicate": False}
+
+
+class PurchaseInvoiceCreate(BaseModel):
+    company_id: str
+    client_id: Optional[str] = None
+    client_name: Optional[str] = None
+    supplier_name: str
+    supplier_gstin: Optional[str] = ""
+    invoice_no: str
+    invoice_date: str
+    taxable_amount: float
+    total_gst: float
+    grand_total: float
+    currency: Optional[str] = "INR"
+
+
+@router.post("/purchase-invoices")
+async def create_purchase_invoice(data: PurchaseInvoiceCreate, current_user: User = Depends(get_current_user)):
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+    
+    invoice_no = data.invoice_no.strip()
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Check duplicate
+    duplicate_q = {"invoice_no": invoice_no, "created_by": current_user.id}
+    if data.client_id:
+        duplicate_q["client_id"] = data.client_id
+    if data.supplier_gstin:
+        duplicate_q["supplier_gstin"] = data.supplier_gstin
+    existing = await db.purchase_invoices.find_one(duplicate_q, {"_id": 0}) if invoice_no else None
+    if existing:
+        raise HTTPException(400, f"A purchase invoice with number {invoice_no} already exists.")
+        
+    doc = {
+        "id": str(uuid.uuid4()),
+        "company_id": data.company_id or "",
+        "client_id": data.client_id or "",
+        "client_name": data.client_name or "",
+        "supplier_name": data.supplier_name,
+        "supplier_gstin": data.supplier_gstin or "",
+        "buyer_name": data.client_name or "",
+        "buyer_gstin": "",
+        "invoice_no": invoice_no,
+        "invoice_date": data.invoice_date,
+        "taxable_amount": data.taxable_amount,
+        "total_gst": data.total_gst,
+        "grand_total": data.grand_total,
+        "currency": data.currency or "INR",
+        "file_name": "",
+        "file_size": 0,
+        "content_type": "",
+        "parse_confidence": 1.0,
+        "raw_text_excerpt": "Manually created from bank account matching",
+        "created_by": current_user.id,
+        "created_at": now,
+        "updated_at": now,
+        "status": "outstanding",
+        "amount_paid": 0.0,
+        "amount_due": round(data.grand_total, 2),
+    }
+    await db.purchase_invoices.insert_one(doc)
+    if data.client_id:
+        await db.clients.update_one({"id": data.client_id}, {"$set": {"last_purchase_invoice_at": now}, "$inc": {"purchase_invoice_count": 1}})
+    await sync_purchase_journal_entry(doc["id"])
+    doc.pop("_id", None)
+    return {"purchase_invoice": doc}
 
 
 class PurchaseInvoiceUpdate(BaseModel):
@@ -3271,10 +3354,19 @@ async def list_invoices(
     page_size: int = Query(20, ge=1, le=10000, description="Results per page"),
     status: Optional[str] = Query(None, description="Filter by status"),
     search: Optional[str] = Query(None, description="Search by client name or invoice number"),
+    company_id: Optional[str] = Query(None, description="Filter by company"),
     current_user: User = Depends(check_module_permission("invoicing", "view")),
 ):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
-    q: dict = {} if current_user.role == "admin" else {"created_by": current_user.id}
+    q: dict = {}
+    if current_user.role != "admin":
+        if current_user.company_id:
+            q["company_id"] = current_user.company_id
+        else:
+            q["created_by"] = current_user.id
+
+    if company_id:
+        q["company_id"] = company_id
     if status and status in INV_STATUS:
         q["status"] = status
     if search:
