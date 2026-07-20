@@ -489,6 +489,42 @@ async def bulk_delete_journal_entries(payload: dict, current_user: User = Depend
     return {"deleted_count": len(deleted_ids), "failed": failed}
 
 
+@router.post("/journal-entries/delete-all")
+async def delete_all_journal_entries(payload: dict, current_user: User = Depends(get_current_user)):
+    if not _perm_post_journal(current_user):
+        raise HTTPException(403, "Access denied.")
+    
+    company_id = payload.get("company_id")
+    q = {}
+    if company_id:
+        q["company_id"] = company_id
+        
+    entries = await db.journal_entries.find(q).to_list(100000)
+    if not entries:
+        return {"deleted_count": 0, "failed_count": 0}
+        
+    from backend.accounting_lock import guard_deletion
+    deleted_ids = []
+    failed_count = 0
+    
+    for entry in entries:
+        entry_id = entry["id"]
+        try:
+            if entry.get("source") != "manual" and current_user.role != "admin":
+                failed_count += 1
+                continue
+            await guard_deletion(entry_id, current_user)
+            deleted_ids.append(entry_id)
+        except Exception:
+            failed_count += 1
+            
+    if deleted_ids:
+        await db.journal_lines.delete_many({"entry_id": {"$in": deleted_ids}})
+        await db.journal_entries.delete_many({"id": {"$in": deleted_ids}})
+        
+    return {"deleted_count": len(deleted_ids), "failed_count": failed_count}
+
+
 @router.delete("/journal-entries/{entry_id}")
 async def delete_journal_entry(entry_id: str, current_user: User = Depends(get_current_user)):
     if not _perm_post_journal(current_user):
