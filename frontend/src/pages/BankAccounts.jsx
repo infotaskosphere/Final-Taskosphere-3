@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { toast } from 'sonner';
 import {
-  Landmark, Plus, UploadCloud, RefreshCw, CheckCircle2, AlertTriangle,
+  Landmark, Plus, UploadCloud, RefreshCw, CheckCircle2, AlertTriangle, AlertCircle, Sparkles, Check,
   Trash2, Link2, Unlink, X, ChevronRight, Search, Edit3, Eye, History, Ban, BookOpen,
 } from 'lucide-react';
 import GifLoader, { MiniLoader, ContentLoader } from '@/components/ui/GifLoader.jsx';
@@ -249,6 +249,36 @@ function BankAccountsInner() {
       await fetchTransactions(selected.id);
       return true;
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed to unmatch'); return false; }
+  };
+
+  const approveSuggestedMatch = async (txn) => {
+    if (!txn || !txn.suggested_match) return;
+    const { matched_type, matched_id, matched_label } = txn.suggested_match;
+    try {
+      const payload = {
+        matched_type,
+        matched_id,
+        matched_label,
+        post_journal: true,
+        confidence: 100
+      };
+      await api.post(`/bank-transactions/${txn.id}/match`, payload);
+      toast.success('Suggested match approved and posted!');
+      await fetchTransactions(selected.id);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to approve suggestion');
+    }
+  };
+
+  const rejectSuggestedMatch = async (txn) => {
+    if (!txn) return;
+    try {
+      await api.post(`/bank-transactions/${txn.id}/reject-suggestion`);
+      toast.success('Suggested match dismissed');
+      await fetchTransactions(selected.id);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to dismiss suggestion');
+    }
   };
 
   const loadInvoices = async (force = false) => {
@@ -735,8 +765,28 @@ function BankAccountsInner() {
                       </div>
                     ) : visibleTxns.map(t => {
                       const top = invoiceCache.length ? suggestionsFor(t)[0] : null;
+                      const hasSuggestion = t.suggested_match && t.suggested_match.pending_approval;
+                      const isUnmatched = !t.matched_type && !t.ignored;
+                      
+                      // Compute special background styles based on status
+                      let rowBgClass = isDark ? 'hover:bg-slate-700/40' : 'hover:bg-slate-50';
+                      let borderClass = '';
+                      
+                      if (isUnmatched) {
+                        if (hasSuggestion) {
+                          rowBgClass = isDark ? 'bg-indigo-950/15 hover:bg-indigo-950/25' : 'bg-indigo-50/50 hover:bg-indigo-50/80';
+                          borderClass = 'border-l-4 border-indigo-500';
+                        } else if (t.credit) {
+                          rowBgClass = isDark ? 'bg-amber-950/10 hover:bg-amber-950/20' : 'bg-amber-50/40 hover:bg-amber-50/70';
+                          borderClass = 'border-l-4 border-amber-500';
+                        } else if (t.debit) {
+                          rowBgClass = isDark ? 'bg-rose-950/10 hover:bg-rose-950/20' : 'bg-rose-50/30 hover:bg-rose-50/60';
+                          borderClass = 'border-l-4 border-rose-400';
+                        }
+                      }
+
                       return (
-                        <div key={t.id} className={`p-4 flex items-start gap-3 ${isDark ? 'hover:bg-slate-700/40' : 'hover:bg-slate-50'} ${t.ignored ? 'opacity-60' : ''}`}>
+                        <div key={t.id} className={`p-4 flex items-start gap-3 transition-colors ${rowBgClass} ${borderClass} ${t.ignored ? 'opacity-60' : ''}`}>
                           <input type="checkbox" className="mt-1"
                             checked={!!selectedIds[t.id]}
                             onChange={e => setSelectedIds(s => ({ ...s, [t.id]: e.target.checked }))} />
@@ -745,23 +795,70 @@ function BankAccountsInner() {
                             <p className="text-xs text-slate-400 mt-0.5">
                               {fmtDate(t.date)} {t.reference ? `· ${t.reference}` : ''}
                             </p>
-                            <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                            
+                            {/* Visual Discrepancy Badges & AI Suggestions */}
+                            <div className="flex flex-wrap items-center gap-2 mt-2">
                               {t.ignored ? (
                                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">Ignored</span>
                               ) : t.matched_type ? (
                                 <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                                   <Link2 className="h-3 w-3" /> Matched · {t.matched_label || t.matched_type} {t.journal_entry_id ? '· posted' : ''}
                                 </span>
+                              ) : hasSuggestion ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200">
+                                  <Sparkles className="h-3 w-3 text-indigo-600 animate-pulse" /> Suggested Match (Pending Approval)
+                                </span>
+                              ) : t.credit ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                                  <AlertCircle className="h-3 w-3 text-amber-600" /> Missing Sale Invoice (Unreported Income)
+                                </span>
                               ) : (
-                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Unmatched</span>
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200">
+                                  <AlertTriangle className="h-3 w-3 text-rose-600" /> Missing Purchase/Expense Record
+                                </span>
                               )}
-                              {!t.matched_type && top && top.score >= 30 && (
+
+                              {!t.matched_type && !hasSuggestion && top && top.score >= 30 && (
                                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
-                                  Suggested: {invNumber(top.inv) || '—'} · {invParty(top.inv) || '—'} · {top.score}%
+                                  Suggested Invoice: {invNumber(top.inv) || '—'} · {invParty(top.inv) || '—'} · {top.score}%
                                 </span>
                               )}
                             </div>
-                            <div className="flex flex-wrap gap-1.5 mt-2">
+
+                            {/* Pending Suggestion Confirmation Panel */}
+                            {hasSuggestion && (
+                              <div className="mt-3.5 p-3 rounded-xl border border-indigo-100 bg-white dark:bg-slate-800/80 shadow-sm space-y-2 max-w-xl">
+                                <p className="text-xs text-slate-600 dark:text-slate-300">
+                                  Prior matched logic pattern found: classify as <strong className="text-indigo-900 dark:text-indigo-200">{t.suggested_match.matched_label}</strong> ({t.suggested_match.matched_type})?
+                                </p>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    onClick={() => approveSuggestedMatch(t)}
+                                    className="text-[11px] font-bold px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm transition inline-flex items-center gap-1"
+                                  >
+                                    <Check className="h-3 w-3" /> Approve Match
+                                  </button>
+                                  <button
+                                    onClick={() => rejectSuggestedMatch(t)}
+                                    className="text-[11px] font-bold px-3 py-1 bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 rounded-lg transition inline-flex items-center gap-1"
+                                  >
+                                    <X className="h-3 w-3" /> Reject
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Informative Help Text for discrepancies */}
+                            {isUnmatched && !hasSuggestion && (
+                              <p className="text-xs text-slate-400 mt-2 italic">
+                                {t.credit 
+                                  ? `This deposit of ${fmtC(t.credit)} is on the statement but has no matching sale report invoice. Match it to an existing sale, park it, or create a record.`
+                                  : `This expense of ${fmtC(t.debit)} is on the statement but has no matching purchase/expense bill. Match it, park it, or create a purchase bill.`
+                                }
+                              </p>
+                            )}
+
+                            <div className="flex flex-wrap gap-1.5 mt-2.5">
                               {t.matched_type ? (
                                 <>
                                   {canMatch && (
