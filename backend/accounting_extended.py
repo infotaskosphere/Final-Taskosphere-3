@@ -554,9 +554,9 @@ async def outstanding_receivable(
         raise HTTPException(403, "Access denied.")
     as_of = as_of or date.today().isoformat()
 
-    # Fetch unpaid / partially paid sale invoices
+    # Fetch unpaid / partially paid sale invoices (excluding cancelled ones)
     invoices = await db.invoices.find(
-        {"company_id": company_id, "status": {"$ne": "paid"}},
+        {"company_id": company_id, "status": {"$nin": ["paid", "cancelled"]}},
         {"_id": 0}
     ).to_list(10000)
 
@@ -602,7 +602,7 @@ async def outstanding_payable(
     as_of = as_of or date.today().isoformat()
 
     purchases = await db.purchase_invoices.find(
-        {"company_id": company_id, "status": {"$ne": "paid"}},
+        {"company_id": company_id, "status": {"$nin": ["paid", "cancelled"]}},
         {"_id": 0}
     ).to_list(10000)
 
