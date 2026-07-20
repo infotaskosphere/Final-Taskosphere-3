@@ -183,8 +183,19 @@ async def list_bank_accounts(company_id: Optional[str] = Query(None), current_us
     q = {"company_id": company_id} if company_id else {}
     accounts = await db.bank_accounts.find(q, {"_id": 0, "account_number_full": 0}).sort("created_at", -1).to_list(500)
     for a in accounts:
-        txns = await db.bank_transactions.find({"bank_account_id": a["id"]}, {"_id": 0, "debit": 1, "credit": 1}).to_list(100000)
-        balance = a["opening_balance"] + sum(float(t.get("credit") or 0) for t in txns) - sum(float(t.get("debit") or 0) for t in txns)
+        txns = await db.bank_transactions.find({"bank_account_id": a["id"]}, {"_id": 0, "debit": 1, "credit": 1, "date": 1, "balance_after": 1}).to_list(100000)
+        
+        # Determine the latest transaction containing a valid balance_after
+        latest_txn = await db.bank_transactions.find_one(
+            {"bank_account_id": a["id"], "balance_after": {"$ne": None}},
+            sort=[("date", -1), ("created_at", -1), ("id", -1)]
+        )
+        
+        if latest_txn and latest_txn.get("balance_after") is not None:
+            balance = latest_txn["balance_after"]
+        else:
+            balance = a["opening_balance"] + sum(float(t.get("credit") or 0) for t in txns) - sum(float(t.get("debit") or 0) for t in txns)
+            
         a["current_balance"] = round(balance, 2)
         a["transaction_count"] = len(txns)
     return accounts
@@ -1044,14 +1055,22 @@ async def upload_statement(
         if auto_match:
             match = await _match_transaction(bank_acct.get("company_id", ""), doc)
             if match:
-                doc["matched_type"] = match["type"]
-                doc["matched_id"] = match["id"]
-                doc["matched_label"] = match["label"]
-                matched_count += 1
-                entry_id = await _auto_post_for_match(bank_acct.get("company_id", ""), doc, match, current_user.id)
-                if entry_id:
-                    doc["journal_entry_id"] = entry_id
-                    posted_count += 1
+                if match.get("source") in ("ml_learned", "ml_learned_bill", "ml_learned_invoice") or "source" in match:
+                    doc["suggested_match"] = {
+                        "matched_type": match["type"],
+                        "matched_id": match["id"],
+                        "matched_label": match["label"],
+                        "pending_approval": True
+                    }
+                else:
+                    doc["matched_type"] = match["type"]
+                    doc["matched_id"] = match["id"]
+                    doc["matched_label"] = match["label"]
+                    matched_count += 1
+                    entry_id = await _auto_post_for_match(bank_acct.get("company_id", ""), doc, match, current_user.id)
+                    if entry_id:
+                        doc["journal_entry_id"] = entry_id
+                        posted_count += 1
 
         await db.bank_transactions.insert_one(doc)
         doc.pop("_id", None)
@@ -1153,8 +1172,6 @@ async def auto_match_similar_transactions(
         "matched_type": {"$in": [None, ""]}
     }).to_list(100000)
     
-    match_payload = {"type": matched_type, "id": matched_id, "label": matched_label}
-    
     for txn in unmatched_txns:
         txn_desc = txn.get("description", "")
         c_norm = normalize_description(txn_desc)
@@ -1165,23 +1182,15 @@ async def auto_match_similar_transactions(
         )
         
         if is_similar:
-            update = {
+            suggested_match = {
                 "matched_type": matched_type,
                 "matched_id": matched_id,
-                "matched_label": matched_label
+                "matched_label": matched_label,
+                "pending_approval": True
             }
-            if post_journal:
-                entry_id = await _auto_post_for_match(company_id, txn, match_payload, user_id)
-                if entry_id:
-                    update["journal_entry_id"] = entry_id
-                    
-            await db.bank_transactions.update_one({"id": txn["id"]}, {"$set": update})
-            
-            # Log audit trail for this auto-matched transaction
-            await _log_recon_audit(
-                txn, "matched", None, # None signifies system auto-match
-                new_match=match_payload,
-                confidence=0.9, reason="Auto-matched similar approved expense/transaction"
+            await db.bank_transactions.update_one(
+                {"id": txn["id"]},
+                {"$set": {"suggested_match": suggested_match}}
             )
 
 
@@ -1206,7 +1215,7 @@ async def manual_match_transaction(txn_id: str, payload: ManualMatchInput, curre
         update["prev_match_status"] = txn.get("prev_match_status")
         if entry_id:
             update["journal_entry_id"] = entry_id
-    await db.bank_transactions.update_one({"id": txn_id}, {"$set": update})
+    await db.bank_transactions.update_one({"id": txn_id}, {"$set": update, "$unset": {"suggested_match": ""}})
 
     # Learn this pattern for machine learning feedback loops
     try:
@@ -1265,7 +1274,7 @@ async def edit_match_transaction(txn_id: str, payload: ManualMatchInput, current
         update["prev_match_status"] = txn.get("prev_match_status")
         if entry_id:
             update["journal_entry_id"] = entry_id
-    await db.bank_transactions.update_one({"id": txn_id}, {"$set": update})
+    await db.bank_transactions.update_one({"id": txn_id}, {"$set": update, "$unset": {"suggested_match": ""}})
 
     # Learn this pattern for machine learning feedback loops
     try:
@@ -1330,6 +1339,18 @@ async def ignore_transaction(txn_id: str, payload: IgnoreInput = IgnoreInput(), 
         raise HTTPException(404, "Bank transaction not found.")
     await db.bank_transactions.update_one({"id": txn_id}, {"$set": {"ignored": bool(payload.ignored)}})
     return {"success": True, "ignored": bool(payload.ignored)}
+
+
+@router.post("/bank-transactions/{txn_id}/reject-suggestion")
+async def reject_suggestion(txn_id: str, current_user: User = Depends(get_current_user)):
+    """Rejects/dismisses a suggested match on an unmatched bank transaction."""
+    if not _perm_match_bank(current_user):
+        raise HTTPException(403, "Access denied. Rejecting a suggestion requires Match permission.")
+    txn = await db.bank_transactions.find_one({"id": txn_id}, {"_id": 0})
+    if not txn:
+        raise HTTPException(404, "Bank transaction not found.")
+    await db.bank_transactions.update_one({"id": txn_id}, {"$unset": {"suggested_match": ""}})
+    return {"success": True}
 
 
 @router.delete("/bank-transactions/{txn_id}")
