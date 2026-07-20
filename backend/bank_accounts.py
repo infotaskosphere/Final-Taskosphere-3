@@ -181,7 +181,7 @@ async def get_bank_accounts_picker(company_id: Optional[str] = Query(None), curr
     if not _perm_view_bank(current_user):
         raise HTTPException(403, "Access denied. Request access from your admin in Permission Governance.")
     q = {"company_id": company_id} if company_id else {}
-    accounts = await db.bank_accounts.find(q, {"_id": 0, "account_number_full": 0}).sort("created_at", -1).to_list(500)
+    accounts = await db.bank_accounts.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
     return accounts
 
 
@@ -208,6 +208,47 @@ async def list_bank_accounts(company_id: Optional[str] = Query(None), current_us
         a["current_balance"] = round(balance, 2)
         a["transaction_count"] = len(txns)
     return accounts
+
+
+@router.put("/bank-accounts/{bank_account_id}")
+async def update_bank_account(bank_account_id: str, payload: BankAccountCreate, current_user: User = Depends(get_current_user)):
+    if not _perm_view_bank(current_user):
+        raise HTTPException(403, "Access denied.")
+    existing = await db.bank_accounts.find_one({"id": bank_account_id})
+    if not existing:
+        raise HTTPException(404, "Bank account not found.")
+    
+    full_acc_no = re.sub(r"\s+", "", payload.account_number or "")
+    if "•" in full_acc_no:
+        full_acc_no = existing.get("account_number_full") or ""
+        masked_acc_no = existing.get("account_number_masked") or ""
+    else:
+        masked_acc_no = _mask_account_number(payload.account_number)
+
+    doc = {
+        "company_id": payload.company_id,
+        "bank_name": payload.bank_name.strip(),
+        "account_holder": payload.account_holder.strip(),
+        "account_number_masked": masked_acc_no,
+        "account_number_full": full_acc_no,
+        "ifsc": payload.ifsc.strip().upper(),
+        "branch": payload.branch.strip(),
+        "account_type": payload.account_type,
+        "opening_balance": float(payload.opening_balance or 0),
+        "upi_id": payload.upi_id.strip(),
+        "notes": payload.notes.strip(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    
+    await db.bank_accounts.update_one({"id": bank_account_id}, {"$set": doc})
+    
+    if payload.company_id:
+        try:
+            await sync_bank_account_to_company({**doc, "id": bank_account_id}, full_acc_no)
+        except Exception:
+            pass
+            
+    return {"status": "success", "id": bank_account_id}
 
 
 @router.delete("/bank-accounts/{bank_account_id}")
