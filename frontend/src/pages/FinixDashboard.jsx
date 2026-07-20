@@ -89,11 +89,11 @@ function FinixDashboardInner() {
       let misData = misRes.status === 'fulfilled' ? misRes.value.data : null;
 
       // Extract Revenue from P&L or Trial Balance
-      let revTotal = pnlData?.revenue || 0;
+      let revTotal = pnlData?.total_income || pnlData?.revenue || 0;
       if (!revTotal && tbData?.rows) {
         // Fallback to accounts code 4000
         const salesAcct = tbData.rows.find(r => r.code === '4000');
-        revTotal = salesAcct ? Math.abs(salesAcct.balance || 0) : 0;
+        revTotal = salesAcct ? Math.abs((salesAcct.credit || 0) - (salesAcct.debit || 0)) : 0;
       }
       setRevenue(revTotal);
 
@@ -101,7 +101,7 @@ function FinixDashboardInner() {
       let arTotal = 0;
       if (tbData?.rows) {
         const arAcct = tbData.rows.find(r => r.code === '1100');
-        arTotal = arAcct ? (arAcct.balance || arAcct.debit - arAcct.credit || 0) : 0;
+        arTotal = arAcct ? ((arAcct.debit || 0) - (arAcct.credit || 0)) : 0;
       }
       if (!arTotal && bsData?.assets) {
         const arRow = bsData.assets.find(a => a.code === '1100' || a.name?.toLowerCase().includes('receivable'));
@@ -114,7 +114,9 @@ function FinixDashboardInner() {
       if (tbData?.rows) {
         const cashAcct = tbData.rows.find(r => r.code === '1000');
         const bankAcct = tbData.rows.find(r => r.code === '1010');
-        liquidCash = (cashAcct ? cashAcct.balance || 0 : 0) + (bankAcct ? bankAcct.balance || 0 : 0);
+        const cashVal = cashAcct ? ((cashAcct.debit || 0) - (cashAcct.credit || 0)) : 0;
+        const bankVal = bankAcct ? ((bankAcct.debit || 0) - (bankAcct.credit || 0)) : 0;
+        liquidCash = cashVal + bankVal;
       }
       if (!liquidCash && bsData?.assets) {
         const cashRow = bsData.assets.find(a => a.code === '1000' || a.code === '1010' || a.name?.toLowerCase().includes('cash') || a.name?.toLowerCase().includes('bank'));
@@ -126,7 +128,7 @@ function FinixDashboardInner() {
       let apTotal = 0;
       if (tbData?.rows) {
         const apAcct = tbData.rows.find(r => r.code === '2000');
-        apTotal = apAcct ? Math.abs(apAcct.balance || apAcct.credit - apAcct.debit || 0) : 0;
+        apTotal = apAcct ? Math.abs((apAcct.credit || 0) - (apAcct.debit || 0)) : 0;
       }
       if (!apTotal && bsData?.liabilities) {
         const apRow = bsData.liabilities.find(l => l.code === '2000' || l.name?.toLowerCase().includes('payable'));
@@ -183,7 +185,7 @@ function FinixDashboardInner() {
       if (arTotal > 0) {
         const arRatio = (arTotal / (revTotal || 1)) * 100;
         if (arRatio > 35) {
-          generatedInsights.append({
+          generatedInsights.push({
             type: 'warning',
             category: 'Receivables & Collections',
             title: 'High Receivable Exposure Detected',
