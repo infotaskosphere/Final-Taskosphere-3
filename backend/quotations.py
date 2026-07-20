@@ -1577,6 +1577,20 @@ async def get_companies(
 ):
     query = {} if current_user.role == "admin" else {"created_by": current_user.id}
     companies = await db.companies.find(query, {"_id": 0}).to_list(500)
+    for c in companies:
+        link_id = c.get("linked_bank_account_id")
+        if link_id:
+            ba = await db.bank_accounts.find_one({"id": link_id})
+            if ba:
+                c["bank_name"] = ba.get("bank_name", "")
+                c["bank_account_name"] = ba.get("account_holder", "")
+                c["bank_account_holder"] = ba.get("account_holder", "")
+                c["bank_account_no"] = ba.get("account_number_full") or ba.get("account_number_masked", "")
+                c["bank_ifsc"] = ba.get("ifsc", "")
+                c["bank_branch"] = ba.get("branch", "")
+                c["bank_account_type"] = (ba.get("account_type", "current") or "current").capitalize()
+                if ba.get("upi_id"):
+                    c["upi_id"] = ba["upi_id"]
     return companies
 
 
