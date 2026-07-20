@@ -4744,6 +4744,8 @@ async def sync_payment_journal_entry(payment_id: str):
         
     invoice_id = payment.get("invoice_id")
     inv = await db.invoices.find_one({"id": invoice_id}) if invoice_id else None
+    if inv and inv.get("status") == "cancelled":
+        return
     invoice_no = inv.get("invoice_no") if inv else None
     # Standalone/imported receipts (e.g. bank-matched or bulk-imported
     # payments) carry their own client_name and have no invoice_id at all —
@@ -5140,6 +5142,10 @@ async def _reconcile_and_sync_all_sales_and_payments_impl(company_id: str):
             for mp in missing_payments:
                 if mp["id"] not in pay_id_set:
                     payments.append(mp)
+                    
+        # Exclude payments linked to cancelled invoices
+        cancelled_invoice_ids = {inv["id"] for inv in invoices if inv.get("status") == "cancelled"}
+        payments = [p for p in payments if p.get("invoice_id") not in cancelled_invoice_ids]
                     
         payment_ids = {p["id"] for p in payments}
         
