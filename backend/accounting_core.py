@@ -521,8 +521,103 @@ async def delete_all_journal_entries(payload: dict, current_user: User = Depends
     if deleted_ids:
         await db.journal_lines.delete_many({"entry_id": {"$in": deleted_ids}})
         await db.journal_entries.delete_many({"id": {"$in": deleted_ids}})
-        
+
     return {"deleted_count": len(deleted_ids), "failed_count": failed_count}
+
+
+@router.post("/journal-entries/resync")
+async def resync_journal_entries(payload: dict, current_user: User = Depends(get_current_user)):
+    """Triggers an automatic system re-sync to find missing or deleted automated
+    journal entries and recreate them in the system.
+    """
+    if not _perm_post_journal(current_user):
+        raise HTTPException(403, "Access denied.")
+
+    company_id = payload.get("company_id")
+    if company_id == "__all__":
+        company_id = None
+
+    # Resolve which companies to process
+    if company_id:
+        company_ids = [company_id]
+    else:
+        # Fetch all companies
+        companies = await db.companies.find({}, {"id": 1}).to_list(1000)
+        company_ids = [c["id"] for c in companies]
+        if not company_ids:
+            # Fallback to empty string for single default book if no company documents exist
+            company_ids = [""]
+
+    from backend.invoicing import (
+        _reconcile_and_sync_all_sales_and_payments_impl,
+        _reconcile_and_sync_all_purchases_and_payments_impl
+    )
+    from backend.bank_accounts import _auto_post_for_match
+
+    recreated_bank_matches = 0
+
+    for cid in company_ids:
+        try:
+            # 1. Re-sync all sales and purchase invoices/payments (handles missing/deleted entries)
+            await _reconcile_and_sync_all_sales_and_payments_impl(cid)
+            await _reconcile_and_sync_all_purchases_and_payments_impl(cid)
+        except Exception as e:
+            logging.error(f"Error during sales/purchase sync for company {cid}: {e}")
+
+        # 2. Check matched bank transactions in this company
+        try:
+            # We fetch bank accounts in this company to find statement lines
+            acct_ids = []
+            if cid:
+                accts = await db.bank_accounts.find({"company_id": cid}, {"id": 1}).to_list(1000)
+                acct_ids = [a["id"] for a in accts]
+            
+            # Find matched transactions that are NOT ignored
+            q = {"matched_type": {"$ne": None}, "ignored": {"$ne": True}}
+            if acct_ids:
+                q["bank_account_id"] = {"$in": acct_ids}
+            elif cid:
+                q["company_id"] = cid
+
+            txns = await db.bank_transactions.find(q).to_list(10000)
+            for txn in txns:
+                je_id = txn.get("journal_entry_id")
+                exists = False
+                if je_id:
+                    je = await db.journal_entries.find_one({"id": je_id}, {"id": 1})
+                    if je:
+                        exists = True
+                
+                if not exists:
+                    # Missing or deleted! Re-generate!
+                    match_doc = {
+                        "type": txn["matched_type"],
+                        "id": txn["matched_id"],
+                        "label": txn.get("matched_label") or "Match"
+                    }
+                    try:
+                        # Auto-post for match
+                        new_je_id = await _auto_post_for_match(
+                            company_id=cid or txn.get("company_id", ""),
+                            txn=txn,
+                            match=match_doc,
+                            created_by=current_user.id
+                        )
+                        if new_je_id:
+                            await db.bank_transactions.update_one(
+                                {"id": txn["id"]},
+                                {"$set": {"journal_entry_id": new_je_id}}
+                            )
+                            recreated_bank_matches += 1
+                    except Exception as e:
+                        logging.error(f"Error recreating match for txn {txn.get('id')}: {e}")
+        except Exception as e:
+            logging.error(f"Error re-syncing bank matches for company {cid}: {e}")
+
+    return {
+        "success": True,
+        "recreated_bank_matches": recreated_bank_matches
+    }
 
 
 @router.delete("/journal-entries/{entry_id}")
