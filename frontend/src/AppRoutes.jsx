@@ -39,6 +39,7 @@ import LeadsPage from './pages/Leads.jsx';
 import Quotations from './pages/Quotations.jsx';
 
 /* ── Accounts (core + extended reports) ──────────────────────────────── */
+import FinixDashboard from './pages/FinixDashboard.jsx';
 import Invoicing from './pages/Invoicing.jsx';
 import Purchase from './pages/Purchase.jsx';
 import BankAccounts from './pages/BankAccounts.jsx';
@@ -136,6 +137,7 @@ export default function AppRoutes() {
       <Route path="/quotations" element={<Protected><Quotations /></Protected>} />
 
       {/* ── Accounts ── */}
+      <Route path="/finix-dashboard" element={<Protected><FinixDashboard /></Protected>} />
       <Route path="/invoicing" element={<Protected><Invoicing /></Protected>} />
       <Route path="/purchase" element={<Protected><Purchase /></Protected>} />
       <Route path="/bank-accounts" element={<Protected><BankAccounts /></Protected>} />
