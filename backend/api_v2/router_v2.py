@@ -1,6 +1,6 @@
 import logging
 from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from backend.dependencies import get_current_user
 
@@ -105,13 +105,13 @@ async def api_export_ledger(
     
     if format.lower() == "xml":
         xml_data = XMLExport.export_to_tally_xml(journals)
-        return {"format": "XML", "data": xml_data}
+        return Response(content=xml_data, media_type="application/xml")
     elif format.lower() == "pdf":
         pdf_bytes = PDFExport.render_pdf_report("Taskosphere Ledger Audit", journals)
-        return {"format": "PDF", "bytes_length": len(pdf_bytes)}
+        return Response(content=pdf_bytes, media_type="application/pdf")
     else:
         json_data = JSONExport.export_to_json(journals)
-        return {"format": "JSON", "data": json_data}
+        return Response(content=json_data, media_type="application/json")
 
 
 # --- LICENSING ROUTES ---
