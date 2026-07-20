@@ -4592,6 +4592,7 @@ async def recalculate_invoice_accounting(invoice_id: str) -> Optional[dict]:
             {"id": invoice_id},
             {"$set": {"amount_due": 0.0, "updated_at": datetime.now(timezone.utc).isoformat()}},
         )
+        await sync_invoice_journal_entry(invoice_id)
         return None
 
     payments = await db.payments.find({"invoice_id": invoice_id}, {"_id": 0, "amount": 1}).to_list(2000)
