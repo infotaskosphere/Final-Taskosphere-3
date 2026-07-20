@@ -54,7 +54,7 @@ const DEDUP_WINDOW_MS = 300;
 // ─── Axios Instance ───────────────────────────────────────────
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 60000,
+  timeout: 300000,
   headers: { "Content-Type": "application/json" },
 });
 
