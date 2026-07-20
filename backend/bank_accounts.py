@@ -176,6 +176,15 @@ async def create_bank_account(payload: BankAccountCreate, current_user: User = D
     return doc
 
 
+@router.get("/bank-accounts/picker-list")
+async def get_bank_accounts_picker(company_id: Optional[str] = Query(None), current_user: User = Depends(get_current_user)):
+    if not _perm_view_bank(current_user):
+        raise HTTPException(403, "Access denied. Request access from your admin in Permission Governance.")
+    q = {"company_id": company_id} if company_id else {}
+    accounts = await db.bank_accounts.find(q, {"_id": 0, "account_number_full": 0}).sort("created_at", -1).to_list(500)
+    return accounts
+
+
 @router.get("/bank-accounts")
 async def list_bank_accounts(company_id: Optional[str] = Query(None), current_user: User = Depends(get_current_user)):
     if not _perm_view_bank(current_user):
