@@ -96,6 +96,7 @@ function BankAccountsInner() {
   const [invoiceCache, setInvoiceCache] = useState([]);
   const [invoiceSearch, setInvoiceSearch] = useState('');
   const [invoiceLoading, setInvoiceLoading] = useState(false);
+  const [loadedCompanyId, setLoadedCompanyId] = useState('');
 
   // States for manual purchase invoice creation
   const [showNewPurchaseForm, setShowNewPurchaseForm] = useState(false);
@@ -251,12 +252,13 @@ function BankAccountsInner() {
   };
 
   const loadInvoices = async (force = false) => {
-    if (invoiceCache.length && !force) return;
+    const companyId = selected?.company_id || '';
+    if (invoiceCache.length && loadedCompanyId === companyId && !force) return;
     setInvoiceLoading(true);
     try {
       const [salesRes, purchasesRes] = await Promise.allSettled([
-        api.get('/invoices', { params: { page: 1, page_size: 2000 } }),
-        api.get('/purchase-invoices', { params: { page_size: 2000 } })
+        api.get('/invoices', { params: { page: 1, page_size: 2000, company_id: companyId } }),
+        api.get('/purchase-invoices', { params: { page_size: 2000, company_id: companyId } })
       ]);
 
       let salesList = [];
@@ -288,6 +290,7 @@ function BankAccountsInner() {
       }
 
       setInvoiceCache([...salesList, ...purchasesList]);
+      setLoadedCompanyId(companyId);
     } catch { /* silent */ }
     finally { setInvoiceLoading(false); }
   };
@@ -949,7 +952,24 @@ function BankAccountsInner() {
                     {invoiceLoading ? (
                       <div className="p-6 text-center"><MiniLoader height={22} /></div>
                     ) : filteredInvoices.length === 0 ? (
-                      <p className="p-6 text-center text-sm text-slate-400">No invoices found.</p>
+                      <div className="p-6 text-center space-y-4">
+                        <p className="text-sm text-slate-400">No invoices found for this company.</p>
+                        <div className="bg-amber-50/50 dark:bg-slate-900/60 border border-amber-200 dark:border-slate-800 rounded-xl p-4 text-left">
+                          <p className="text-xs text-amber-800 dark:text-amber-400 font-semibold mb-3">
+                            💡 Since this is an expense with no purchase record (bill), you can book it directly to an Expense Head/Account.
+                          </p>
+                          <div className="flex flex-col sm:flex-row gap-2">
+                            <Button size="sm" variant="outline" className="flex-1 border-amber-300 text-amber-900 dark:text-amber-400 text-xs font-bold bg-white dark:bg-slate-800 hover:bg-amber-50"
+                              onClick={() => { setDialogTab('expense'); setShowNewHead(false); }}>
+                              Switch to Ledgers
+                            </Button>
+                            <Button size="sm" className="flex-1 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold"
+                              onClick={() => { setDialogTab('expense'); setShowNewHead(true); }}>
+                              + Create New Account
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
                     ) : (
                       filteredInvoices
                         .map(inv => ({ inv, score: scoreInvoiceMatch(matchDialog.txn, inv) }))
