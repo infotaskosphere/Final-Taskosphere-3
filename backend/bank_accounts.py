@@ -937,7 +937,7 @@ async def _auto_post_for_match(company_id: str, txn: dict, match: dict, created_
 
 @router.post("/bank-accounts/{bank_account_id}/upload-statement")
 async def upload_statement(
-    bank_account_id: str, file: UploadFile = File(...), auto_match: bool = Form(True),
+    bank_account_id: str, file: UploadFile = File(...), auto_match: bool = Form(default=True),
     current_user: User = Depends(get_current_user),
 ):
     if not _perm_view_bank(current_user):
@@ -988,6 +988,26 @@ async def upload_statement(
 
     now = datetime.now(timezone.utc).isoformat()
     saved, matched_count, posted_count = [], 0, 0
+
+    # ── COMPREHENSIVE MULTI-SET DEDUPLICATION ENGINE ──
+    db_txns = await db.bank_transactions.find({"bank_account_id": bank_account_id}).to_list(100000)
+    db_counts = {}
+    db_refs = set()
+    for t in db_txns:
+        ref_val = str(t.get("reference") or "").strip().lower()
+        if ref_val and ref_val not in ("", "-", ".", "0", "nan", "none", "n/a", "null"):
+            db_refs.add(ref_val)
+        
+        key = (
+            t["date"],
+            round(float(t.get("debit") or 0.0), 2),
+            round(float(t.get("credit") or 0.0), 2),
+            str(t.get("description") or "").strip().lower()
+        )
+        db_counts[key] = db_counts.get(key, 0) + 1
+
+    uploaded_counts = {}
+
     for row in parsed_rows:
         doc = {
             "id": str(uuid.uuid4()), "bank_account_id": bank_account_id, "company_id": bank_acct.get("company_id", ""),
@@ -996,51 +1016,30 @@ async def upload_statement(
             "matched_type": None, "matched_id": None, "matched_label": None, "journal_entry_id": None,
             "source_file": filename, "created_by": current_user.id, "created_at": now,
         }
-        # ── COMPREHENSIVE DEDUPLICATION ENGINE ──
-        # 1. Exact Duplicate (same date, debit, credit, description)
-        dup = await db.bank_transactions.find_one({
-            "bank_account_id": bank_account_id, "date": doc["date"], "debit": doc["debit"],
-            "credit": doc["credit"], "description": doc["description"],
-        })
-        if dup:
-            continue
 
-        # 2. Reference duplicate (if a non-empty cheque/UTR/reference number is present, it's globally unique)
-        ref = str(doc.get("reference") or "").strip()
-        if ref:
-            dup_ref = await db.bank_transactions.find_one({
-                "bank_account_id": bank_account_id,
-                "reference": ref
-            })
-            if dup_ref:
+        # 1. Reference number global check
+        ref = str(doc.get("reference") or "").strip().lower()
+        if ref and ref not in ("", "-", ".", "0", "nan", "none", "n/a", "null"):
+            if ref in db_refs:
                 continue
 
-        # 3. Fuzzy Duplicate (same amount, date +/- 1 day to handle value vs txn date shifts, and similar description)
-        try:
-            dt_row = datetime.strptime(doc["date"], "%Y-%m-%d")
-            date_from = (dt_row - timedelta(days=1)).date().isoformat()
-            date_to = (dt_row + timedelta(days=1)).date().isoformat()
-        except Exception:
-            date_from = doc["date"]
-            date_to = doc["date"]
-
-        candidates = await db.bank_transactions.find({
-            "bank_account_id": bank_account_id,
-            "debit": doc["debit"],
-            "credit": doc["credit"],
-            "date": {"$gte": date_from, "$lte": date_to}
-        }).to_list(100)
-
-        is_dup = False
-        norm_desc = normalize_description(doc["description"])
-        for c in candidates:
-            c_norm = normalize_description(c.get("description", ""))
-            if c_norm == norm_desc or (len(c_norm) > 4 and len(norm_desc) > 4 and (c_norm in norm_desc or norm_desc in c_norm)):
-                is_dup = True
-                break
-
-        if is_dup:
+        # 2. Multi-set exact match check
+        desc_key = str(doc.get("description") or "").strip().lower()
+        key = (
+            doc["date"],
+            round(float(doc.get("debit") or 0.0), 2),
+            round(float(doc.get("credit") or 0.0), 2),
+            desc_key
+        )
+        
+        already_in_db = db_counts.get(key, 0)
+        already_processed = uploaded_counts.get(key, 0)
+        
+        if already_processed < already_in_db:
+            uploaded_counts[key] = already_processed + 1
             continue
+            
+        uploaded_counts[key] = already_processed + 1
 
         if auto_match:
             match = await _match_transaction(bank_acct.get("company_id", ""), doc)
@@ -1140,6 +1139,52 @@ async def _log_recon_audit(
         pass  # audit logging is best-effort — never blocks the reconciliation action itself
 
 
+async def auto_match_similar_transactions(
+    company_id: str, description: str, matched_type: str, matched_id: str, matched_label: str,
+    post_journal: bool, user_id: str
+):
+    norm_target = normalize_description(description)
+    if not norm_target:
+        return
+        
+    # Find all unmatched transactions for this company
+    unmatched_txns = await db.bank_transactions.find({
+        "company_id": company_id,
+        "matched_type": {"$in": [None, ""]}
+    }).to_list(100000)
+    
+    match_payload = {"type": matched_type, "id": matched_id, "label": matched_label}
+    
+    for txn in unmatched_txns:
+        txn_desc = txn.get("description", "")
+        c_norm = normalize_description(txn_desc)
+        
+        # Check if description matches exactly, or fuzzy sub-string
+        is_similar = (c_norm == norm_target) or (
+            len(c_norm) > 4 and len(norm_target) > 4 and (c_norm in norm_target or norm_target in c_norm)
+        )
+        
+        if is_similar:
+            update = {
+                "matched_type": matched_type,
+                "matched_id": matched_id,
+                "matched_label": matched_label
+            }
+            if post_journal:
+                entry_id = await _auto_post_for_match(company_id, txn, match_payload, user_id)
+                if entry_id:
+                    update["journal_entry_id"] = entry_id
+                    
+            await db.bank_transactions.update_one({"id": txn["id"]}, {"$set": update})
+            
+            # Log audit trail for this auto-matched transaction
+            await _log_recon_audit(
+                txn, "matched", None, # None signifies system auto-match
+                new_match=match_payload,
+                confidence=0.9, reason="Auto-matched similar approved expense/transaction"
+            )
+
+
 @router.post("/bank-transactions/{txn_id}/match")
 async def manual_match_transaction(txn_id: str, payload: ManualMatchInput, current_user: User = Depends(get_current_user)):
     if not _perm_match_bank(current_user):
@@ -1168,6 +1213,17 @@ async def manual_match_transaction(txn_id: str, payload: ManualMatchInput, curre
         await learn_transaction_match(txn.get("description", ""), payload.matched_type, payload.matched_id, payload.matched_label)
     except Exception:
         pass
+
+    # Auto-match other similar transactions across the system
+    try:
+        await auto_match_similar_transactions(
+            txn.get("company_id", ""), txn.get("description", ""),
+            payload.matched_type, payload.matched_id, payload.matched_label,
+            payload.post_journal, current_user.id
+        )
+    except Exception as e:
+        import logging
+        logging.error(f"Error in auto-matching similar transactions: {e}")
 
     await _log_recon_audit(
         txn, "matched", current_user,
@@ -1216,6 +1272,17 @@ async def edit_match_transaction(txn_id: str, payload: ManualMatchInput, current
         await learn_transaction_match(txn.get("description", ""), payload.matched_type, payload.matched_id, payload.matched_label)
     except Exception:
         pass
+
+    # Auto-match other similar transactions across the system
+    try:
+        await auto_match_similar_transactions(
+            txn.get("company_id", ""), txn.get("description", ""),
+            payload.matched_type, payload.matched_id, payload.matched_label,
+            payload.post_journal, current_user.id
+        )
+    except Exception as e:
+        import logging
+        logging.error(f"Error in auto-matching similar transactions in edit-match: {e}")
 
     new_match = {"type": payload.matched_type, "id": payload.matched_id, "label": payload.matched_label}
     await _log_recon_audit(
