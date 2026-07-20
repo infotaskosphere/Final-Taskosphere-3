@@ -91,11 +91,16 @@ const NAV_GROUPS = [
     id: 'accounts',
     dividerLabel: 'Accounts',
     items: [
-      // ── Core Accounting ───────────────────────────────────────────────────
+      {
+        path:       '/finix-dashboard',
+        icon:       LayoutDashboard,
+        label:      'Finix Dashboard',
+        permission: 'can_view_accounting_reports',
+      },
       {
         path:       '/invoicing',
         icon:       CreditCard,
-        label:      'Sale',
+        label:      'Sales',
         permission: ['can_manage_invoices', 'can_create_quotations', 'can_view_sale'],
       },
       {
@@ -111,16 +116,16 @@ const NAV_GROUPS = [
         permission: 'can_view_bank',
       },
       {
-        path:       '/chart-of-accounts',
-        icon:       BookOpen,
-        label:      'Chart of Accounts',
-        permission: ['can_view_chart_of_accounts', 'can_manage_chart_of_accounts'],
-      },
-      {
         path:       '/journal-entries',
         icon:       NotebookPen,
         label:      'Journal Entries',
         permission: ['can_view_journal_entries', 'can_post_journal_entries'],
+      },
+      {
+        path:       '/zero-touch-entry',
+        icon:       ScanLine,
+        label:      'Zero Touch Entries',
+        permission: 'can_post_journal_entries',
       },
       {
         path:       '/accounting-reports',
@@ -129,10 +134,10 @@ const NAV_GROUPS = [
         permission: 'can_view_accounting_reports',
       },
       {
-        path:       '/zero-touch-entry',
-        icon:       ScanLine,
-        label:      'Zero-Touch Entry (AI)',
-        permission: 'can_post_journal_entries',
+        path:       '/day-book',
+        icon:       BarChart3,
+        label:      'Extended Accounts Reports',
+        permission: 'can_view_accounting_reports',
       },
       {
         path:       '/gst-portal-sync',
@@ -146,12 +151,11 @@ const NAV_GROUPS = [
         label:      'Accounting Integrity',
         permission: 'can_manage_chart_of_accounts',
       },
-      // ── Accounting Extended (consolidated single page, tabs inside) ────────
       {
-        path:       '/day-book',
-        icon:       BarChart3,
-        label:      'Extended Reports',
-        permission: 'can_view_accounting_reports',
+        path:       '/chart-of-accounts',
+        icon:       BookOpen,
+        label:      'Charts of Accounts',
+        permission: ['can_view_chart_of_accounts', 'can_manage_chart_of_accounts'],
       },
     ],
   },
