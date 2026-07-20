@@ -238,6 +238,45 @@ function JournalEntriesInner() {
     }
   };
 
+  const handleDeleteAll = async () => {
+    const activeCompany = companies.find(c => c.id === companyId);
+    const scopeName = activeCompany ? `for "${activeCompany.name}"` : "for all companies";
+    
+    if (!window.confirm(`CRITICAL WARNING: Are you sure you want to delete ALL journal entries ${scopeName}? This action is irreversible.`)) {
+      return;
+    }
+    
+    const confirmText = prompt(`Type "delete all" to confirm deleting all journal entries ${scopeName}:`);
+    if (confirmText?.toLowerCase() !== 'delete all') {
+      toast.error('Deletion cancelled — confirmation text did not match');
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      const { data } = await api.post('/journal-entries/delete-all', { company_id: companyId || undefined });
+      const deleted = data.deleted_count || 0;
+      const failed = data.failed_count || 0;
+      
+      if (deleted > 0) {
+        toast.success(`Successfully deleted ${deleted} journal entries`);
+      } else if (failed === 0) {
+        toast.info('No journal entries found to delete');
+      }
+      
+      if (failed > 0) {
+        toast.error(`Could not delete ${failed} entry/entries (e.g., auto-posted or locked)`);
+      }
+      
+      setPage(1);
+      await fetchAll({ page: 1 });
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to delete all journal entries');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (loading) return <ContentLoader />;
 
   // NOTE: DashboardLayout already applies page padding + max-width + background,
@@ -257,9 +296,9 @@ function JournalEntriesInner() {
               <p className="text-sm text-blue-100 mt-1 max-w-2xl">Every Purchase, Sale, and matched Bank transaction posts here automatically. Post manual entries for anything else.</p>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2 lg:justify-end">
+          <div className="flex flex-wrap gap-2 lg:justify-end items-center">
             <Select value={companyId || '__all__'} onValueChange={onCompanyChange}>
-              <SelectTrigger className="h-9 min-w-[170px] bg-white/10 border-white/25 text-white">
+              <SelectTrigger className="h-9 w-[170px] bg-white/10 border-white/25 text-white rounded-xl">
                 <Building2 className="h-3.5 w-3.5 mr-1.5 shrink-0" />
                 <SelectValue placeholder="All Companies" />
               </SelectTrigger>
@@ -268,8 +307,16 @@ function JournalEntriesInner() {
                 {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
               </SelectContent>
             </Select>
+            <Button 
+              onClick={handleDeleteAll} 
+              variant="outline" 
+              className="h-9 w-[170px] bg-white/10 border-white/25 text-white hover:bg-rose-600/30 hover:text-white hover:border-rose-400/40 rounded-xl"
+            >
+              <Trash2 className="h-3.5 w-3.5 mr-1.5 shrink-0" />
+              Delete All
+            </Button>
             <Select value={String(pageSize)} onValueChange={onPageSizeChange}>
-              <SelectTrigger className="h-9 w-[110px] bg-white/10 border-white/25 text-white">
+              <SelectTrigger className="h-9 w-[120px] bg-white/10 border-white/25 text-white rounded-xl">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -278,11 +325,11 @@ function JournalEntriesInner() {
                 <SelectItem value="100">100 / page</SelectItem>
               </SelectContent>
             </Select>
-            <Button onClick={() => setShowNew(true)} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20"><Plus className="h-4 w-4 mr-2" /> New entry</Button>
-            <Button onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20">
+            <Button onClick={() => setShowNew(true)} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl"><Plus className="h-4 w-4 mr-2" /> New entry</Button>
+            <Button onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl">
               {selectMode ? <><XCircle className="h-4 w-4 mr-2" /> Cancel select</> : <><CheckSquare className="h-4 w-4 mr-2" /> Select</>}
             </Button>
-            <Button onClick={() => fetchAll()} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20"><RefreshCw className="h-4 w-4 mr-2" /> Refresh</Button>
+            <Button onClick={() => fetchAll()} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20 rounded-xl"><RefreshCw className="h-4 w-4 mr-2" /> Refresh</Button>
           </div>
         </div>
       </div>
