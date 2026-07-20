@@ -184,7 +184,7 @@ async def list_bank_accounts(company_id: Optional[str] = Query(None), current_us
     accounts = await db.bank_accounts.find(q, {"_id": 0, "account_number_full": 0}).sort("created_at", -1).to_list(500)
     for a in accounts:
         txns = await db.bank_transactions.find({"bank_account_id": a["id"]}, {"_id": 0, "debit": 1, "credit": 1}).to_list(100000)
-        balance = a["opening_balance"] + sum(t.get("credit", 0) for t in txns) - sum(t.get("debit", 0) for t in txns)
+        balance = a["opening_balance"] + sum(float(t.get("credit") or 0) for t in txns) - sum(float(t.get("debit") or 0) for t in txns)
         a["current_balance"] = round(balance, 2)
         a["transaction_count"] = len(txns)
     return accounts
@@ -210,12 +210,16 @@ _BALANCE_COL_HINTS = ("balance", "closing balance", "running balance")
 _REF_COL_HINTS = ("ref", "reference", "chq", "cheque", "utr")
 
 
-def _pick_col(columns: List[str], hints: tuple) -> Optional[str]:
+def _pick_col(columns: List[str], hints: tuple, exclude: tuple = ()) -> Optional[str]:
     lower = {c: str(c).strip().lower() for c in columns}
     for c, low in lower.items():
+        if any(ex in low for ex in exclude):
+            continue
         if any(h == low for h in hints):
             return c
     for c, low in lower.items():
+        if any(ex in low for ex in exclude):
+            continue
         if any(h in low for h in hints):
             return c
     return None
@@ -242,14 +246,25 @@ def _row_looks_like_stmt_header(cells: List[str]) -> bool:
 def _parse_amount(val) -> float:
     if val is None:
         return 0.0
-    s = str(val).strip().replace(",", "").replace("₹", "").replace("Rs.", "").replace("Rs", "")
+    if isinstance(val, (int, float)):
+        return float(val)
+    s = str(val).strip()
     if not s or s.lower() in ("nan", "none", "-"):
         return 0.0
-    neg = s.startswith("(") and s.endswith(")")
-    s = s.strip("()")
+    
+    s_lower = s.lower()
+    is_neg_dr = "dr" in s_lower or "dr" in s_lower.replace(" ", "")
+    
+    # Strip everything except digits, dots, hyphens, and parenthesis
+    s_clean = re.sub(r'[^\d\.\-\(\)]', '', s_lower)
+    if not s_clean:
+        return 0.0
+        
+    neg = s_clean.startswith("(") and s_clean.endswith(")")
+    s_clean = s_clean.strip("()")
     try:
-        v = abs(float(s))
-        return -v if neg else v
+        v = abs(float(s_clean))
+        return -v if (neg or is_neg_dr) else v
     except Exception:
         return 0.0
 
@@ -363,20 +378,41 @@ def _parse_tabular_statement(contents: bytes, filename: str) -> List[dict]:
         raise ValueError("Could not find a date column in this statement. Check the file has a header row with a 'Date' column.")
 
     desc_col = _pick_col(columns, _DESC_COL_HINTS) or ""
-    debit_col = _pick_col(columns, _DEBIT_COL_HINTS)
-    credit_col = _pick_col(columns, _CREDIT_COL_HINTS)
+    debit_col = _pick_col(columns, _DEBIT_COL_HINTS, exclude=("cr/dr", "dr/cr", "cr_dr", "dr_cr", "type", "indicator"))
+    credit_col = _pick_col(columns, _CREDIT_COL_HINTS, exclude=("cr/dr", "dr/cr", "cr_dr", "dr_cr", "type", "indicator"))
     balance_col = _pick_col(columns, _BALANCE_COL_HINTS)
     ref_col = _pick_col(columns, _REF_COL_HINTS) or ""
+
+    # Fallback for single-column "Amount" bank statement exports (common in HDFC/ICICI/SBI)
+    amount_col = None
+    if not debit_col and not credit_col:
+        amount_col = _pick_col(columns, ("amount", "transaction amount", "amt", "amount (inr)", "amount(inr)", "txn amount"))
 
     txns = []
     for _, row in df.iterrows():
         d = _parse_stmt_date(row.get(date_col))
         if not d:
             continue
-        debit = _parse_amount(row.get(debit_col)) if debit_col else 0.0
-        credit = _parse_amount(row.get(credit_col)) if credit_col else 0.0
+        
+        debit = 0.0
+        credit = 0.0
+        
+        if amount_col:
+            val = row.get(amount_col)
+            parsed_val = _parse_amount(val)
+            if parsed_val < 0:
+                debit = abs(parsed_val)
+                credit = 0.0
+            else:
+                debit = 0.0
+                credit = abs(parsed_val)
+        else:
+            debit = _parse_amount(row.get(debit_col)) if debit_col else 0.0
+            credit = _parse_amount(row.get(credit_col)) if credit_col else 0.0
+            
         if not debit and not credit:
             continue
+            
         txns.append({
             "date": d,
             "description": str(row.get(desc_col, "")).strip() if desc_col else "",
