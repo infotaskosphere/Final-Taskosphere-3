@@ -86,6 +86,23 @@ function BankAccountsInner() {
   const [showNewAccount, setShowNewAccount] = useState(false);
   const [form, setForm] = useState({ bank_name: '', account_holder: '', account_number: '', ifsc: '', branch: '', account_type: 'current', opening_balance: 0, upi_id: '', company_id: '' });
   const [savingAccount, setSavingAccount] = useState(false);
+  const [editingAccountId, setEditingAccountId] = useState(null);
+
+  const openEditAccount = (a) => {
+    setEditingAccountId(a.id);
+    setForm({
+      bank_name: a.bank_name || '',
+      account_holder: a.account_holder || '',
+      account_number: a.account_number_masked || '',
+      ifsc: a.ifsc || '',
+      branch: a.branch || '',
+      account_type: a.account_type || 'current',
+      opening_balance: a.opening_balance || 0,
+      upi_id: a.upi_id || '',
+      company_id: a.company_id || '',
+    });
+    setShowNewAccount(true);
+  };
 
   // Manual match state
   const [filter, setFilter] = useState('all');
@@ -160,13 +177,20 @@ function BankAccountsInner() {
     if (!form.bank_name.trim()) { toast.error('Bank name is required'); return; }
     setSavingAccount(true);
     try {
-      await api.post('/bank-accounts', form);
-      if (form.company_id) mirrorBankToSettings(form.company_id, bankFromAccount(form));
-      toast.success(form.company_id ? 'Bank account added & synced to invoice/quotation settings' : 'Bank account added');
+      if (editingAccountId) {
+        await api.put(`/bank-accounts/${editingAccountId}`, form);
+        if (form.company_id) mirrorBankToSettings(form.company_id, bankFromAccount({ ...form, account_number_full: form.account_number }));
+        toast.success(form.company_id ? 'Bank account updated & synced to invoice/quotation settings' : 'Bank account updated');
+      } else {
+        await api.post('/bank-accounts', form);
+        if (form.company_id) mirrorBankToSettings(form.company_id, bankFromAccount(form));
+        toast.success(form.company_id ? 'Bank account added & synced to invoice/quotation settings' : 'Bank account added');
+      }
       setShowNewAccount(false);
+      setEditingAccountId(null);
       setForm({ bank_name: '', account_holder: '', account_number: '', ifsc: '', branch: '', account_type: 'current', opening_balance: 0, upi_id: '', company_id: '' });
       await fetchAccounts();
-    } catch (err) { toast.error(err.response?.data?.detail || 'Failed to add bank account'); }
+    } catch (err) { toast.error(err.response?.data?.detail || 'Failed to save bank account'); }
     finally { setSavingAccount(false); }
   };
 
@@ -680,10 +704,14 @@ function BankAccountsInner() {
                   )}
                   <p className="text-sm font-bold mt-1" style={{ color: COLORS.emeraldGreen }}>{fmtC(a.current_balance)}</p>
                 </div>
-                <div className="flex flex-col items-end gap-1">
+                <div className="flex flex-col items-end gap-2">
                   <ChevronRight className="h-4 w-4 text-slate-300" />
-                  <Trash2 className="h-3.5 w-3.5 text-slate-300 hover:text-rose-500"
-                    onClick={(e) => { e.stopPropagation(); deleteAccount(a.id); }} />
+                  <div className="flex items-center gap-2">
+                    <Edit3 className="h-3.5 w-3.5 text-slate-400 hover:text-blue-500 cursor-pointer"
+                      onClick={(e) => { e.stopPropagation(); openEditAccount(a); }} />
+                    <Trash2 className="h-3.5 w-3.5 text-slate-400 hover:text-rose-500 cursor-pointer"
+                      onClick={(e) => { e.stopPropagation(); deleteAccount(a.id); }} />
+                  </div>
                 </div>
               </button>
             ))}
@@ -1191,9 +1219,15 @@ function BankAccountsInner() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showNewAccount} onOpenChange={setShowNewAccount}>
+      <Dialog open={showNewAccount} onOpenChange={(open) => {
+        setShowNewAccount(open);
+        if (!open) {
+          setEditingAccountId(null);
+          setForm({ bank_name: '', account_holder: '', account_number: '', ifsc: '', branch: '', account_type: 'current', opening_balance: 0, upi_id: '', company_id: '' });
+        }
+      }}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Add bank account</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editingAccountId ? 'Edit bank account' : 'Add bank account'}</DialogTitle></DialogHeader>
           <div className="space-y-3 mt-2">
             <Input placeholder="Bank name (e.g. HDFC Bank)" value={form.bank_name} onChange={e => setForm(f => ({ ...f, bank_name: e.target.value }))} />
             <Input placeholder="Account holder name" value={form.account_holder} onChange={e => setForm(f => ({ ...f, account_holder: e.target.value }))} />
