@@ -1427,6 +1427,19 @@ export default function Dashboard() {
   const completionRate =
     myTaskCount > 0 ? Math.round((myCompletedTasks / myTaskCount) * 100) : 0;
 
+  const totalSystemTasks = useMemo(
+    () => stats?.total_tasks ?? tasks.length,
+    [stats?.total_tasks, tasks.length]
+  );
+  const completedSystemTasks = useMemo(
+    () => stats?.completed_tasks ?? tasks.filter(t => t.status === 'completed').length,
+    [stats?.completed_tasks, tasks]
+  );
+
+  const effectiveTotal = isAdmin ? totalSystemTasks : myTaskCount;
+  const effectiveCompleted = isAdmin ? completedSystemTasks : myCompletedTasks;
+  const effectiveRate = effectiveTotal > 0 ? Math.round((effectiveCompleted / effectiveTotal) * 100) : 0;
+
   const isOverdueDate = useCallback((dueDate) => dueDate && new Date(dueDate) < new Date(), []);
 
   const showTaskSection =
@@ -1690,6 +1703,28 @@ export default function Dashboard() {
                       Today is a holiday{todayHolidayName ? ` — ${todayHolidayName}` : ''}. Office closed.
                     </p>
                   )}
+
+                  {/* Task Completion Progress Bar in Welcome Banner */}
+                  <div className="mt-2.5 max-w-xs sm:max-w-sm">
+                    <div className="flex items-center justify-between text-xs mb-1">
+                      <span className="text-white/80 font-medium flex items-center gap-1.5 text-[11px]">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-300" />
+                        {isAdmin ? 'Overall Completion' : 'My Task Completion'}
+                      </span>
+                      <span className="text-white font-bold text-xs tabular-nums">{effectiveRate}%</span>
+                    </div>
+                    <div className="h-2 w-full rounded-full bg-black/25 overflow-hidden p-0.5 border border-white/10">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${effectiveRate}%` }}
+                        transition={{ duration: 0.8, ease: "easeOut" }}
+                        className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-teal-300 shadow-sm"
+                      />
+                    </div>
+                    <p className="text-[10px] text-white/60 mt-0.5 font-medium">
+                      {effectiveCompleted} of {effectiveTotal} tasks completed
+                    </p>
+                  </div>
                 </div>
 
                 <div className="hidden md:flex items-center gap-3 flex-shrink-0">
@@ -1922,7 +1957,7 @@ export default function Dashboard() {
         <React.Fragment key="metrics">
         {/* KEY METRICS — 6 EQUAL CARDS */}
         <motion.div
-          className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 [&>*]:min-w-0"
+          className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 [&>*]:min-w-0"
           variants={itemVariants}
         >
 
@@ -2066,7 +2101,7 @@ export default function Dashboard() {
             </CardContent>
           </motion.div>
 
-          {/* 7. Team Task */}
+          {/* 5. Team Task */}
           <motion.div
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
@@ -2120,6 +2155,52 @@ export default function Dashboard() {
                 ) : (
                   <span>cross visibility off</span>
                 )}
+              </div>
+            </CardContent>
+          </motion.div>
+
+          {/* 6. Visual Task Completion Progress Card */}
+          <motion.div
+            whileHover={{ y: -3, transition: springPhysics.card }}
+            whileTap={{ scale: 0.985 }}
+            onClick={() => navigate('/tasks?filter=completed')}
+            style={{ borderLeftWidth: 3, borderLeftColor: COLORS.emeraldGreen }}
+            className={`${metricCardCls} ${metricCardDefault}`}
+          >
+            <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
+              <div className="flex items-start justify-between">
+                <div className="min-w-0 flex-1 mr-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Task Progress</p>
+                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.emeraldGreen }}>
+                    {effectiveRate}%
+                  </p>
+                </div>
+                <div
+                  className="p-2 rounded-lg group-hover:scale-110 transition-transform flex-shrink-0"
+                  style={{ backgroundColor: `${COLORS.emeraldGreen}18` }}
+                >
+                  <CheckCircle2 className="h-4 w-4" style={{ color: COLORS.emeraldGreen }} />
+                </div>
+              </div>
+
+              {/* Visual Progress Bar inside Card */}
+              <div className="mt-2.5">
+                <div className={`h-2 w-full rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ width: `${effectiveRate}%` }}
+                    transition={{ duration: 0.8, ease: "easeOut" }}
+                    className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400"
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[10px] mt-1.5 font-medium">
+                  <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>
+                    {effectiveCompleted} / {effectiveTotal} done
+                  </span>
+                  <span className="text-emerald-500 group-hover:underline flex items-center gap-0.5 font-semibold">
+                    Completed <ChevronRight className="h-2.5 w-2.5" />
+                  </span>
+                </div>
               </div>
             </CardContent>
           </motion.div>
@@ -2197,6 +2278,20 @@ export default function Dashboard() {
                     { name: 'Completed', value: completedCt, color: COLORS.emeraldGreen },
                     { name: 'Remaining', value: Math.max(0, totalTasks - completedCt), color: isDark ? '#334155' : '#E2E8F0' },
                   ]}
+                  footer={
+                    <div className="mt-3 pt-2.5 border-t border-slate-200 dark:border-slate-700">
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className={`font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Overall Completion Rate</span>
+                        <span className={`font-bold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{effectiveRate}%</span>
+                      </div>
+                      <div className={`h-2 w-full rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-700"
+                          style={{ width: `${effectiveRate}%` }}
+                        />
+                      </div>
+                    </div>
+                  }
                 />
               </>
             );
