@@ -2621,7 +2621,7 @@ const handleCopilotChat = async (req: express.Request, res: express.Response) =>
         }
       });
       if (response.text) {
-        return res.json({ reply: response.text, status: "success" });
+        return res.json({ reply: response.text, response: response.text, message: response.text, status: "success" });
       }
     } catch (err: any) {
       console.warn("Copilot Gemini API call failed:", err?.message || err);
@@ -2639,7 +2639,7 @@ const handleCopilotChat = async (req: express.Request, res: express.Response) =>
   } else {
     reply += "Taskosphere AI Copilot is active and connected to your workspace. Ask me to summarize compliance tasks, verify ITC eligibility, or analyze client records.";
   }
-  return res.json({ reply, status: "success" });
+  return res.json({ reply, response: reply, message: reply, status: "success" });
 };
 
 apiRouter.post("/copilot/chat", handleCopilotChat);
