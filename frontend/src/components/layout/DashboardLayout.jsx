@@ -557,7 +557,7 @@ const DashboardLayout = ({ children }) => {
               <Search className="h-4 w-4" />
             </motion.button>
 
-            {/* AI Copilot Side Drawer Toggle */}
+            {/* AI Search Side Drawer Toggle */}
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
@@ -566,7 +566,7 @@ const DashboardLayout = ({ children }) => {
               style={{
                 background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 55%, #4338ca 100%)',
               }}
-              title="AI Copilot Engine"
+              title="AI Search"
             >
               <BrainCircuit className="h-4 w-4 text-white" strokeWidth={2.25} />
               <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-white dark:border-slate-900 animate-pulse" />
@@ -809,9 +809,20 @@ function EnterpriseSearchModal({ isOpen, onClose, isDark }) {
       const { data } = await api.get("/v2/search", {
         params: { query: query.trim(), category }
       });
-      setResults(data?.results || []);
+      let resList = [];
+      if (Array.isArray(data?.results)) {
+        resList = data.results;
+      } else if (Array.isArray(data)) {
+        resList = data;
+      } else if (data && typeof data === 'object') {
+        const docs = (data.documents || []).map((d) => ({ ...d, source: d.source || 'documents', title: d.filename || d.title || d.name || 'Document' }));
+        const ledgers = (data.ledger_entries || []).map((l) => ({ ...l, source: l.source || 'ledger', title: l.narration || l.description || 'Ledger Entry', amount: l.debit || l.credit || l.amount }));
+        const semantics = (data.semantic_entries || []).map((s) => ({ ...s, source: s.source || 'semantic', title: s.title || s.narration || 'Semantic Result' }));
+        resList = [...docs, ...ledgers, ...semantics];
+      }
+      setResults(resList);
     } catch {
-      toast.error("Failed to execute parallel enterprise search query");
+      toast.error("Failed to execute search query");
     } finally {
       setLoading(false);
     }
@@ -852,8 +863,8 @@ function EnterpriseSearchModal({ isOpen, onClose, isDark }) {
             placeholder="Type to search across ledgers, compliance records, uploaded documents..."
             className={`flex-1 h-11 px-3 text-sm rounded-xl border focus:outline-none focus:ring-2 focus:ring-blue-500 ${isDark ? 'bg-slate-950 border-slate-700 text-slate-100' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
           />
-          <Button type="submit" disabled={loading} className="h-11 px-5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs">
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Search v2"}
+          <Button type="submit" disabled={loading} className="h-11 px-5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs cursor-pointer">
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Search"}
           </Button>
         </form>
 
@@ -889,7 +900,7 @@ function EnterpriseSearchModal({ isOpen, onClose, isDark }) {
                 </div>
                 <p className={`font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{r.title || r.narration}</p>
                 {r.snippet && <p className="text-slate-400 text-[11px] leading-relaxed italic">"{r.snippet}"</p>}
-                {r.amount && <p className="font-mono text-blue-500 font-bold">Amount: ₹{Number(r.amount).toLocaleString('en-IN')}</p>}
+                {r.amount !== undefined && r.amount !== null && <p className="font-mono text-blue-500 font-bold">Amount: ₹{Number(r.amount).toLocaleString('en-IN')}</p>}
               </div>
             ))
           ) : query.trim() ? (
@@ -908,13 +919,13 @@ function EnterpriseSearchModal({ isOpen, onClose, isDark }) {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   AI COPILOT SLIDEOUT DRAWER
+   AI SEARCH SLIDEOUT DRAWER
    ───────────────────────────────────────────────────────────────────────────── */
 function AICopilotDrawer({ isOpen, onClose, isDark }) {
   const [messages, setMessages] = useState([
     {
       role: "assistant",
-      content: "Hello! I'm your AI Copilot. Ask me anything about your tasks, compliance, or accounts."
+      content: "Hello! I'm AI Search. Ask me anything about your tasks, compliance, bank transactions, or accounts."
     }
   ]);
   const [input, setInput] = useState("");
@@ -935,7 +946,7 @@ function AICopilotDrawer({ isOpen, onClose, isDark }) {
       const replyText = data?.reply || data?.response || data?.message || (typeof data === "string" ? data : null);
       setMessages(prev => [...prev, {
         role: "assistant",
-        content: replyText || `Taskosphere AI Copilot processed your request: "${userMsg}". All compliance records and ITC feeds are synchronized.`
+        content: replyText || `Taskosphere AI Search processed your request: "${userMsg}". All compliance records and ITC feeds are synchronized.`
       }]);
     } catch {
       setTimeout(() => {
@@ -972,9 +983,9 @@ function AICopilotDrawer({ isOpen, onClose, isDark }) {
               <BrainCircuit className="h-5 w-5 text-blue-500" />
             </div>
             <div>
-              <h3 className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>AI Copilot Engine v2</h3>
+              <h3 className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>AI Search</h3>
               <p className="text-[10px] text-emerald-500 font-bold flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Platform Isolation Active
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Workspace Active
               </p>
             </div>
           </div>
@@ -994,7 +1005,7 @@ function AICopilotDrawer({ isOpen, onClose, isDark }) {
           ))}
           {loading && (
             <div className="flex items-center gap-2 text-slate-400 text-[11px] font-bold py-1 px-1">
-              <Loader2 className="h-3 w-3 animate-spin text-blue-500" /> Copilot reasoning...
+              <Loader2 className="h-3 w-3 animate-spin text-blue-500" /> AI Search processing...
             </div>
           )}
           <div ref={scrollRef} />
@@ -1004,8 +1015,8 @@ function AICopilotDrawer({ isOpen, onClose, isDark }) {
         <div className="p-3 border-t flex flex-wrap gap-1.5 justify-center" style={{ borderColor: isDark ? '#334155' : '#f1f5f9' }}>
           {[
             "Verify GST ITC",
-            "Draft Q1 Ledger PDF",
-            "Audit Tenant Isolations",
+            "Find Unpaid Bills",
+            "Audit Bank Entries",
           ].map(p => (
             <button
               key={p}
@@ -1023,7 +1034,7 @@ function AICopilotDrawer({ isOpen, onClose, isDark }) {
             type="text"
             value={input}
             onChange={e => setInput(e.target.value)}
-            placeholder="Ask Copilot to execute transactions..."
+            placeholder="Search or ask AI anything..."
             className={`flex-1 h-9 px-3 text-xs rounded-xl focus:outline-none border focus:ring-2 focus:ring-blue-500 ${isDark ? 'bg-slate-950 border-slate-800 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
           />
           <button type="submit" disabled={!input.trim() || loading} className="px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl disabled:opacity-50 cursor-pointer h-9">
