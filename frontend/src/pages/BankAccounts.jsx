@@ -133,6 +133,38 @@ function BankAccountsInner() {
   const [newExpenseHead, setNewExpenseHead] = useState({ code: '', name: '' });
   const [savingExpenseHead, setSavingExpenseHead] = useState(false);
 
+  // Futuristic AI Copilot & Fast Local Feed Search States
+  const [txnSearchText, setTxnSearchText] = useState('');
+  const [isAutoMatching, setIsAutoMatching] = useState(false);
+
+  // Helper to explain WHY an invoice has been suggested
+  const getScoreReason = (txn, inv) => {
+    const reasons = [];
+    const txnAmt = Number(txn.debit || txn.credit || 0);
+    const invAmt = invAmount(inv);
+    if (txnAmt > 0 && invAmt > 0) {
+      const diff = Math.abs(txnAmt - invAmt) / Math.max(txnAmt, invAmt);
+      if (diff < 0.001) reasons.push('Exact amount match (+45%)');
+      else if (diff < 0.02) reasons.push('Amount matches within 2% (+38%)');
+      else if (diff < 0.05) reasons.push('Amount matches within 5% (+25%)');
+    }
+    try {
+      const td = new Date(txn.date), id = new Date(invDate(inv));
+      const days = Math.abs((td - id) / 86400000);
+      if (days <= 1) reasons.push('Date within 1 day (+18%)');
+      else if (days <= 7) reasons.push('Date within 7 days (+12%)');
+      else if (days <= 30) reasons.push('Date within 30 days (+6%)');
+    } catch {}
+    const desc = ((txn.description || '') + ' ' + (txn.reference || '')).toLowerCase();
+    const party = invParty(inv).toLowerCase();
+    if (party && desc.includes(party.split(' ')[0])) reasons.push('Overlap in party name (+14%)');
+    const invNo = invNumber(inv).toLowerCase();
+    if (invNo && desc.includes(invNo)) reasons.push('Invoice ID in bank narrative (+9%)');
+    const invRef = (inv.reference_number || inv.utr || inv.payment_reference || '').toLowerCase();
+    if (invRef && (txn.reference || '').toLowerCase().includes(invRef)) reasons.push('Matching payment reference (+8%)');
+    return reasons.join(' · ') || 'Partial Match (minimum score threshold met)';
+  };
+
   const fetchAccounts = async () => {
     setLoading(true);
     try {
@@ -167,11 +199,86 @@ function BankAccountsInner() {
   }, [accounts, transactions]);
 
   const visibleTxns = useMemo(() => {
-    if (filter === 'matched') return transactions.filter(t => t.matched_type);
-    if (filter === 'unmatched') return transactions.filter(t => !t.matched_type && !t.ignored);
-    if (filter === 'ignored') return transactions.filter(t => t.ignored);
-    return transactions;
-  }, [transactions, filter]);
+    let list = transactions;
+    if (filter === 'matched') list = transactions.filter(t => t.matched_type);
+    else if (filter === 'unmatched') list = transactions.filter(t => !t.matched_type && !t.ignored);
+    else if (filter === 'ignored') list = transactions.filter(t => t.ignored);
+
+    if (txnSearchText.trim()) {
+      const q = txnSearchText.toLowerCase();
+      list = list.filter(t => {
+        const desc = (t.description || '').toLowerCase();
+        const ref = (t.reference || '').toLowerCase();
+        const amtStr = String(t.debit || t.credit || '');
+        const dateStr = fmtDate(t.date).toLowerCase();
+        const matchLabel = (t.matched_label || '').toLowerCase();
+        return desc.includes(q) || ref.includes(q) || amtStr.includes(q) || dateStr.includes(q) || matchLabel.includes(q);
+      });
+    }
+    return list;
+  }, [transactions, filter, txnSearchText]);
+
+  const copilotStats = useMemo(() => {
+    const unmatched = transactions.filter(t => !t.matched_type && !t.ignored);
+    let totalScore = 0;
+    let counted = 0;
+    let highConfCount = 0;
+
+    unmatched.forEach(t => {
+      const suggestions = suggestionsFor(t);
+      if (suggestions.length) {
+        totalScore += suggestions[0].score;
+        counted++;
+        if (suggestions[0].score >= 80) {
+          highConfCount++;
+        }
+      }
+    });
+
+    const avgScore = counted > 0 ? Math.round(totalScore / counted) : 0;
+    return { avgScore, highConfCount };
+  }, [transactions, invoiceCache]);
+
+  const autoMatchAllHighConfidence = async () => {
+    const unmatched = transactions.filter(t => !t.matched_type && !t.ignored);
+    const toMatch = [];
+    for (const t of unmatched) {
+      const suggestions = suggestionsFor(t);
+      if (suggestions.length && suggestions[0].score >= 80) {
+        toMatch.push({ txn: t, inv: suggestions[0].inv, score: suggestions[0].score });
+      }
+    }
+    if (!toMatch.length) {
+      toast.info('No unmatched transactions found with high confidence (>= 80%)');
+      return;
+    }
+    if (!window.confirm(`Found ${toMatch.length} transactions with high-confidence matches (>= 80%). Proceed with auto-matching?`)) return;
+
+    setIsAutoMatching(true);
+    let successCount = 0;
+    try {
+      for (const item of toMatch) {
+        const isDebit = Number(item.txn.debit || 0) > 0;
+        const matched_type = isDebit ? 'purchase' : 'sale';
+        const matched_label = `${invNumber(item.inv) || '—'} · ${invParty(item.inv) || '—'}`.trim();
+        const payload = {
+          matched_type,
+          matched_id: item.inv.id,
+          matched_label,
+          post_journal: true,
+          confidence: item.score
+        };
+        await api.post(`/bank-transactions/${item.txn.id}/match`, payload);
+        successCount++;
+      }
+      toast.success(`Successfully auto-matched ${successCount} transactions!`);
+      await fetchTransactions(selected.id);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Error during auto-matching');
+    } finally {
+      setIsAutoMatching(false);
+    }
+  };
 
   const createAccount = async () => {
     if (!form.bank_name.trim()) { toast.error('Bank name is required'); return; }
@@ -760,26 +867,97 @@ function BankAccountsInner() {
                   </div>
                 </div>
 
-                <div className={`rounded-3xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                  <div className="p-4 border-b flex flex-wrap items-center justify-between gap-3" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
-                    <div>
-                      <h2 className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Transactions</h2>
-                      <p className="text-xs text-slate-400">{visibleTxns.length} of {transactions.length} rows</p>
+                {/* Futuristic AI Copilot Intelligence Hub */}
+                <div className={`relative rounded-3xl border p-5 overflow-hidden shadow-md transition-all duration-300 ${
+                  isDark 
+                    ? 'bg-gradient-to-br from-slate-900 via-indigo-950/20 to-slate-900 border-indigo-500/30 shadow-indigo-500/5' 
+                    : 'bg-gradient-to-br from-white via-indigo-50/20 to-white border-indigo-200 shadow-indigo-100/40'
+                }`}>
+                  {/* Subtle animated light trail at top */}
+                  <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-indigo-500 to-transparent animate-pulse" />
+                  
+                  <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3.5">
+                      <div className="h-10 w-10 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-500 flex-shrink-0 animate-pulse">
+                        <Sparkles className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>AI Matchmaker &amp; Copilot</h3>
+                          <span className="text-[9px] uppercase tracking-wider font-extrabold px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">Active</span>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-1 max-w-xl">
+                          Our neural mapping engine analyzes transaction size, payment dates, party aliases, and narration references to automatically suggest ledger reconciliations.
+                        </p>
+                      </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {['all','matched','unmatched','ignored'].map(f => (
-                        <button key={f} onClick={() => setFilter(f)}
-                          className={`text-[11px] font-bold px-3 py-1 rounded-full border transition ${filter === f ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300'}`}>
-                          {f[0].toUpperCase() + f.slice(1)}
-                        </button>
-                      ))}
+                    
+                    <div className="flex flex-wrap items-center gap-3 sm:self-center">
+                      <div className="text-left sm:text-right px-3 py-1 rounded-xl bg-slate-500/5 border border-slate-500/10">
+                        <span className="block text-[9px] uppercase tracking-wider font-bold text-slate-400">Match Confidence</span>
+                        <span className="text-xs font-black text-indigo-500">{copilotStats.avgScore}% avg</span>
+                      </div>
+                      
+                      <div className="text-left sm:text-right px-3 py-1 rounded-xl bg-slate-500/5 border border-slate-500/10">
+                        <span className="block text-[9px] uppercase tracking-wider font-bold text-slate-400">High Conf Ready</span>
+                        <span className="text-xs font-black text-emerald-500">{copilotStats.highConfCount} rows</span>
+                      </div>
+                      
+                      <Button
+                        onClick={autoMatchAllHighConfidence}
+                        disabled={isAutoMatching || copilotStats.highConfCount === 0}
+                        className="rounded-xl text-white font-bold text-xs shadow-sm shadow-indigo-500/20 px-4 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 border-none h-9 gap-1.5"
+                      >
+                        {isAutoMatching ? (
+                          <MiniLoader height={14} />
+                        ) : (
+                          <>
+                            <Sparkles className="h-3.5 w-3.5" />
+                            <span>Run AI Auto-Match</span>
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className={`rounded-3xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                  <div className="p-4 border-b flex flex-col md:flex-row md:items-center justify-between gap-3" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                    <div className="flex items-center justify-between w-full md:w-auto">
+                      <div>
+                        <h2 className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Transactions</h2>
+                        <p className="text-xs text-slate-400">{visibleTxns.length} of {transactions.length} rows</p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                      {/* Interactive Instant Local Search Box */}
+                      <div className="relative w-full sm:w-48 lg:w-60">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                        <Input 
+                          placeholder="Instant feed search…" 
+                          value={txnSearchText} 
+                          onChange={(e) => setTxnSearchText(e.target.value)} 
+                          className="pl-8 h-8 text-xs w-full bg-slate-500/5 border-slate-500/10 focus:border-indigo-500 transition-all rounded-xl" 
+                        />
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {['all','matched','unmatched','ignored'].map(f => (
+                          <button key={f} onClick={() => setFilter(f)}
+                            className={`text-[11px] font-bold px-3 py-1 rounded-full border transition ${filter === f ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'}`}>
+                            {f[0].toUpperCase() + f.slice(1)}
+                          </button>
+                        ))}
+                      </div>
+                      
                       {selectedList.length > 0 && canMatch && (
-                        <>
-                          <span className="text-[11px] font-bold text-slate-500 ml-2">{selectedList.length} selected</span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[11px] font-bold text-slate-500">{selectedList.length} selected</span>
                           <Button size="sm" variant="outline" className="rounded-full h-7 text-xs" onClick={bulkUnmatch}>Bulk Unmatch</Button>
                           <Button size="sm" variant="outline" className="rounded-full h-7 text-xs" onClick={bulkIgnore}>Bulk Ignore</Button>
                           <Button size="sm" variant="outline" className="rounded-full h-7 text-xs" onClick={() => { setSelectedIds({}); loadInvoices(); toast.success('Suggestions refreshed'); }}>Refresh Suggestions</Button>
-                        </>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -876,15 +1054,38 @@ function BankAccountsInner() {
                               </div>
                             )}
 
-                            {/* Informative Help Text for discrepancies */}
-                            {isUnmatched && !hasSuggestion && (
+                            {/* Informative Help Text for discrepancies with integrated AI Suggestion & Quick Match */}
+                            {isUnmatched && !hasSuggestion && top && top.score >= 70 ? (
+                              <div className="mt-3 p-3 rounded-2xl border border-dashed border-emerald-500/30 bg-emerald-500/[0.02] max-w-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all">
+                                <div className="space-y-0.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <Sparkles className="h-3.5 w-3.5 text-emerald-500 animate-pulse" />
+                                    <span className={`text-xs font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>
+                                      AI Suggested: {top.score}% confidence match
+                                    </span>
+                                  </div>
+                                  <p className={`text-xs font-medium truncate max-w-[320px] ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                                    {invNumber(top.inv)} · {invParty(top.inv)} ({fmtC(invAmount(top.inv))})
+                                  </p>
+                                  <p className="text-[10px] text-slate-400">
+                                    Why this matched: {getScoreReason(t, top.inv)}
+                                  </p>
+                                </div>
+                                <button
+                                  onClick={() => confirmMatch(t, top.inv, top.score)}
+                                  className="self-end sm:self-center text-[11px] font-bold px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm transition-all duration-200 flex items-center gap-1"
+                                >
+                                  <Check className="h-3.5 w-3.5" /> Quick Match
+                                </button>
+                              </div>
+                            ) : isUnmatched && !hasSuggestion ? (
                               <p className="text-xs text-slate-400 mt-2 italic">
                                 {t.credit 
                                   ? `This deposit of ${fmtC(t.credit)} is on the statement but has no matching sale report invoice. Match it to an existing sale, park it, or create a record.`
                                   : `This expense of ${fmtC(t.debit)} is on the statement but has no matching purchase/expense bill. Match it, park it, or create a purchase bill.`
                                 }
                               </p>
-                            )}
+                            ) : null}
 
                             <div className="flex flex-wrap gap-1.5 mt-2.5">
                               {t.matched_type ? (
