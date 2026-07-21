@@ -11,6 +11,16 @@ import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../components/ui/alert-dialog';
 import { Checkbox } from '../components/ui/checkbox';
 import { Badge } from '../components/ui/badge';
 import { Switch } from '../components/ui/switch';
@@ -197,6 +207,7 @@ const STATUS_STYLES = {
   in_progress: { bg: 'bg-amber-50',  text: 'text-amber-700',  border: 'border-amber-200',  dot: 'bg-amber-500',  label: 'In Progress' },
   completed:   { bg: 'bg-blue-50',   text: 'text-blue-700',   border: 'border-blue-200',   dot: 'bg-blue-500',   label: 'Completed' },
   overdue:     { bg: 'bg-red-100',   text: 'text-red-800',    border: 'border-red-300',    dot: 'bg-red-700',    label: 'Overdue' },
+  due_today:   { bg: 'bg-amber-100', text: 'text-amber-900',  border: 'border-amber-300',  dot: 'bg-amber-500',  label: 'Due Today' },
 };
 
 const PRIORITY_STYLES = {
@@ -206,8 +217,9 @@ const PRIORITY_STYLES = {
   critical: { bg: 'bg-red-50',    text: 'text-red-700',    bar: 'bg-red-600',    label: 'CRIT' },
 };
 
-const getStripeColor = (task, overdue) => {
+const getStripeColor = (task, overdue, dueToday) => {
   if (overdue) return 'bg-red-700';
+  if (dueToday) return 'bg-amber-500';
   const s = (task.status || '').toLowerCase();
   if (s === 'completed')   return 'bg-blue-600';
   if (s === 'in_progress') return 'bg-amber-500';
@@ -388,7 +400,7 @@ const TeamTaskCard = memo(function TeamTaskCard({ stats, hasCrossVisibility, use
 // TaskRow — unchanged logic, same compact list row
 // ═══════════════════════════════════════════════════════════════════════════════
 const TaskRow = memo(function TaskRow({
-  task, index, isOverdue, statusStyle, priorityStyle, stripeColor,
+  task, index, isOverdue, isDueToday, statusStyle, priorityStyle, stripeColor,
   getUserName, getClientName, getRelativeDueDate, getChecklistProgress,
   parseChecklist, taskChecklists, toggleChecklistItem,
   canModifyTask, canDeleteTasks,
@@ -482,7 +494,11 @@ const TaskRow = memo(function TaskRow({
 
           <div className="flex items-center justify-center overflow-hidden">
             {isOverdue ? (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700 whitespace-nowrap">OVERDUE</span>
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700 border border-red-200 whitespace-nowrap">OVERDUE</span>
+            ) : isDueToday ? (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 whitespace-nowrap flex items-center gap-0.5">
+                <Zap className="h-2.5 w-2.5 text-amber-600 fill-amber-600" /> DUE TODAY
+              </span>
             ) : (
               <span className="text-slate-200 text-[10px]">—</span>
             )}
@@ -500,27 +516,28 @@ const TaskRow = memo(function TaskRow({
             </span>
           </div>
 
-          <div className={`flex items-center justify-center overflow-hidden px-1 ${isOverdue ? 'text-red-600' : 'text-slate-500'}`}>
+          <div className={`flex items-center justify-center overflow-hidden px-1 ${isOverdue ? 'text-red-600' : isDueToday ? 'text-amber-700 font-bold' : 'text-slate-500'}`}>
             {task.due_date ? (
               isOverdue ? (
                 <div className="flex flex-col items-center leading-tight text-center">
                   <span className="text-[10px] font-bold whitespace-nowrap text-red-600">
-                    {Math.abs(Math.ceil((new Date(task.due_date) - new Date()) / 86400000))} days
+                    {getRelativeDueDate(task.due_date)}
                   </span>
                   <span className="text-[9px] font-bold uppercase tracking-wide text-red-500">OVERDUE</span>
                 </div>
-              ) : (() => {
-                const diffDays = Math.ceil((new Date(task.due_date) - new Date()) / 86400000);
-                const daysLabel = diffDays === 0 ? 'Today' : diffDays === 1 ? '1 day' : `${diffDays} days`;
-                const dirLabel  = diffDays === 0 ? '' : diffDays > 0 ? 'left' : '';
-                return (
-                  <div className="flex flex-col items-center leading-tight text-center">
-                    <span className="text-[10px] font-bold whitespace-nowrap text-slate-600">{daysLabel}</span>
-                    {dirLabel ? <span className="text-[9px] font-medium text-slate-400">{dirLabel}</span>
-                      : <span className="text-[9px] font-medium text-amber-500">due today</span>}
-                  </div>
-                );
-              })()
+              ) : isDueToday ? (
+                <div className="flex flex-col items-center leading-tight text-center bg-amber-50 dark:bg-amber-900/30 px-1.5 py-0.5 rounded border border-amber-200">
+                  <span className="text-[10px] font-bold whitespace-nowrap text-amber-800 dark:text-amber-300 flex items-center gap-1">
+                    <Zap className="h-2.5 w-2.5 text-amber-500 fill-amber-500" /> Today
+                  </span>
+                  <span className="text-[8px] font-extrabold uppercase tracking-wide text-amber-600">DUE TODAY</span>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center leading-tight text-center">
+                  <span className="text-[10px] font-bold whitespace-nowrap text-slate-600">{getRelativeDueDate(task.due_date)}</span>
+                  <span className="text-[9px] font-medium text-slate-400">{format(new Date(task.due_date), 'MMM dd')}</span>
+                </div>
+              )
             ) : <span className="text-slate-300 text-[10px]">—</span>}
           </div>
 
@@ -624,7 +641,7 @@ const TaskRow = memo(function TaskRow({
 // BoardCard — unchanged
 // ═══════════════════════════════════════════════════════════════════════════════
 const BoardCard = memo(function BoardCard({
-  task, index, isOverdue, stripeColor, statusStyle, priorityStyle,
+  task, index, isOverdue, isDueToday, stripeColor, statusStyle, priorityStyle,
   getUserName, getClientName, getRelativeDueDate, getChecklistProgress,
   parseChecklist, taskChecklists, toggleChecklistItem,
   canModifyTask, canDeleteTasks,
@@ -677,7 +694,8 @@ const BoardCard = memo(function BoardCard({
             <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md ${priorityStyle.bg} ${priorityStyle.text}`}>
               {priorityStyle.label}
             </span>
-            {isOverdue && <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md bg-red-100 text-red-700">Overdue</span>}
+            {isOverdue && <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md bg-red-100 text-red-700 border border-red-200 flex items-center gap-1"><AlertCircle className="h-3 w-3 text-red-600" /> Overdue</span>}
+            {isDueToday && <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1"><Zap className="h-3 w-3 text-amber-600 fill-amber-600" /> Due Today</span>}
             {task.is_recurring && <span className="text-[10px] font-semibold bg-purple-50 text-purple-700 px-2 py-0.5 rounded-md">↺ Recurring</span>}
             {task.category && <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{task.category}</span>}
           </div>
@@ -701,7 +719,9 @@ const BoardCard = memo(function BoardCard({
                 <span className="truncate max-w-[120px]">{getUserName(task.assigned_to)}</span>
               </div>
               {task.due_date && (
-                <span className={`text-xs font-medium flex items-center gap-1 ${isOverdue ? 'text-red-600' : 'text-slate-500'}`}>
+                <span className={`text-xs font-bold flex items-center gap-1 px-1.5 py-0.5 rounded ${
+                  isOverdue ? 'text-red-600 bg-red-50 dark:bg-red-950/40 border border-red-200' : isDueToday ? 'text-amber-800 bg-amber-100 dark:bg-amber-900/40 border border-amber-300' : 'text-slate-500'
+                }`}>
                   <Clock className="h-3.5 w-3.5" />
                   {getRelativeDueDate(task.due_date)}
                 </span>
@@ -844,6 +864,9 @@ export default function Tasks() {
   const [viewMode,           setViewMode]           = useState('list');
   const [taskDetailOpen,     setTaskDetailOpen]     = useState(false);
   const [selectedDetailTask, setSelectedDetailTask] = useState(null);
+  const [deleteDialogOpen,   setDeleteDialogOpen]   = useState(false);
+  const [taskToDelete,       setTaskToDelete]       = useState(null);
+  const [isDeletingTask,     setIsDeletingTask]     = useState(false);
   const [comments,           setComments]           = useState({});
   const [showCommentsDialog, setShowCommentsDialog] = useState(false);
   const [selectedTask,       setSelectedTask]       = useState(null);
@@ -1079,16 +1102,64 @@ export default function Tasks() {
   const getUserName      = useCallback((id) => userMap.get(id)?.full_name || 'Unassigned', [userMap]);
   const getClientName    = useCallback((id) => clientMap.get(id)?.company_name || 'No Client', [clientMap]);
   const getCategoryLabel = useCallback((v)  => TASK_CATEGORIES.find(c => c.value === v)?.label || v || 'Other', []);
-  const isOverdue = useCallback((task) => { if (task.status === 'completed' || !task.due_date) return false; return new Date(task.due_date) < new Date(); }, []);
-  const getDisplayStatus = useCallback((task) => isOverdue(task) ? 'overdue' : task.status || 'pending', [isOverdue]);
+  const isOverdue = useCallback((task) => {
+    if (!task || task.status === 'completed' || !task.due_date) return false;
+    try {
+      const now = new Date();
+      const todayStr = format(now, 'yyyy-MM-dd');
+      const dueObj = typeof task.due_date === 'string' ? new Date(task.due_date) : task.due_date;
+      if (!dueObj || isNaN(dueObj.getTime())) return false;
+      const dueStr = format(dueObj, 'yyyy-MM-dd');
+      return dueStr < todayStr;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const isDueToday = useCallback((task) => {
+    if (!task || task.status === 'completed' || !task.due_date) return false;
+    try {
+      const now = new Date();
+      const todayStr = format(now, 'yyyy-MM-dd');
+      const dueObj = typeof task.due_date === 'string' ? new Date(task.due_date) : task.due_date;
+      if (!dueObj || isNaN(dueObj.getTime())) return false;
+      const dueStr = format(dueObj, 'yyyy-MM-dd');
+      return dueStr === todayStr;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const getDisplayStatus = useCallback((task) => {
+    if (isOverdue(task)) return 'overdue';
+    if (isDueToday(task)) return 'due_today';
+    return task.status || 'pending';
+  }, [isOverdue, isDueToday]);
+
   const getRelativeDueDate = useCallback((dueDate) => {
     if (!dueDate) return '';
-    const due = new Date(dueDate); const now = new Date(); const diffDays = Math.ceil((due - now) / 86400000);
-    if (diffDays < 0)   return `${Math.abs(diffDays)}d overdue`;
-    if (diffDays === 0) return 'Today';
-    if (diffDays === 1) return 'Tomorrow';
-    if (diffDays <= 7)  return `In ${diffDays}d`;
-    return format(due, 'MMM dd');
+    try {
+      const now = new Date();
+      const todayStr = format(now, 'yyyy-MM-dd');
+      const dueObj = typeof dueDate === 'string' ? new Date(dueDate) : dueDate;
+      if (!dueObj || isNaN(dueObj.getTime())) return '';
+      const dueStr = format(dueObj, 'yyyy-MM-dd');
+
+      if (dueStr < todayStr) {
+        const diffMs = new Date(todayStr).getTime() - new Date(dueStr).getTime();
+        const diffDays = Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24)));
+        return `${diffDays}d overdue`;
+      }
+      if (dueStr === todayStr) return 'Due Today';
+
+      const diffMs = new Date(dueStr).getTime() - new Date(todayStr).getTime();
+      const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+      if (diffDays === 1) return 'Due Tomorrow';
+      if (diffDays <= 7) return `In ${diffDays}d`;
+      return format(dueObj, 'MMM dd');
+    } catch {
+      return '';
+    }
   }, []);
   const openTaskDetail = useCallback((task) => { setSelectedDetailTask(task); setTaskDetailOpen(true); }, []);
   const resetForm = useCallback(() => { setFormData({ ...EMPTY_FORM }); setEditingTask(null); }, []);
@@ -1142,13 +1213,42 @@ export default function Tasks() {
     } catch { toast.error('Failed to add reminder'); }
   };
 
-  const handleDelete = async (taskId) => {
-    if (!window.confirm('Delete this task?')) return;
+  const handleDelete = (taskOrId) => {
+    let taskObj = null;
+    if (typeof taskOrId === 'object' && taskOrId !== null) {
+      taskObj = taskOrId;
+    } else {
+      taskObj = tasks.find(t => String(t.id) === String(taskOrId)) || { id: taskOrId, title: 'this task' };
+    }
+    setTaskToDelete(taskObj);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!taskToDelete?.id) return;
+    setIsDeletingTask(true);
     try {
-      const res = await fetch(`${API_BASE}/tasks/${taskId}`, { method: 'DELETE', headers: { ...getAuthHeader() } });
-      if (res.ok) { setTasks(prev => prev.filter(t => t.id !== taskId)); toast.success('Task deleted!'); }
-      else toast.error('Failed to delete task');
-    } catch { toast.error('Network error'); }
+      const res = await fetch(`${API_BASE}/tasks/${taskToDelete.id}`, {
+        method: 'DELETE',
+        headers: { ...getAuthHeader() },
+      });
+      if (res.ok) {
+        setTasks(prev => prev.filter(t => t.id !== taskToDelete.id));
+        toast.success('Task deleted successfully');
+        setDeleteDialogOpen(false);
+        setTaskToDelete(null);
+        if (taskDetailOpen && selectedDetailTask?.id === taskToDelete.id) {
+          setTaskDetailOpen(false);
+          setSelectedDetailTask(null);
+        }
+      } else {
+        toast.error('Failed to delete task');
+      }
+    } catch {
+      toast.error('Network error while deleting task');
+    } finally {
+      setIsDeletingTask(false);
+    }
   };
 
   const handleQuickStatusChange = async (task, newStatus) => {
@@ -1591,8 +1691,9 @@ export default function Tasks() {
     inProgress: scopedTasks.filter(t => t.status === 'in_progress').length,
     completed:  scopedTasks.filter(t => t.status === 'completed').length,
     overdue:    scopedTasks.filter(t => isOverdue(t)).length,
+    dueToday:   scopedTasks.filter(t => isDueToday(t)).length,
     teamTask:   hasCrossVisibility ? tasks.filter(t => { const isIncomplete = t.status !== 'completed'; const isMyTask = t.assigned_to === user?.id || (t.sub_assignees || []).includes(user?.id); const isCrossTask = crossVisibilityUserIds.includes(t.assigned_to) || (t.sub_assignees || []).some(id => crossVisibilityUserIds.includes(id)); return isIncomplete && (isMyTask || isCrossTask); }).length : 0,
-  }), [myTasks, scopedTasks, tasks, hasCrossVisibility, crossVisibilityUserIds, user?.id, isOverdue]);
+  }), [myTasks, scopedTasks, tasks, hasCrossVisibility, crossVisibilityUserIds, user?.id, isOverdue, isDueToday]);
 
   const completionRate = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
 
@@ -1617,7 +1718,7 @@ export default function Tasks() {
     const matchesAssignee = filterAssignee.length === 0 || filterAssignee.includes(task.assigned_to) || filterAssignee.some(id => (task.sub_assignees || []).includes(id));
     const matchesTeam     = !filterTeamOnly || task.assigned_to === user?.id || (task.sub_assignees || []).includes(user?.id) || crossVisibilityUserIds.includes(task.assigned_to) || (task.sub_assignees || []).some(id => crossVisibilityUserIds.includes(id));
     let matchesStatus = true;
-    if (filterStatus !== 'all') matchesStatus = filterStatus === 'overdue' ? isOverdue(task) : task.status === filterStatus;
+    if (filterStatus !== 'all') matchesStatus = filterStatus === 'overdue' ? isOverdue(task) : filterStatus === 'due_today' ? isDueToday(task) : task.status === filterStatus;
     let matchesTodayNew = true;
     if (filterTodayNew) {
       const todayStr = format(new Date(), 'yyyy-MM-dd');
@@ -1644,7 +1745,7 @@ export default function Tasks() {
     return matchesSearch && matchesStatus && matchesPriority && matchesCategory && matchesAssignee && matchesTeam && matchesTodayNew && matchesPending;
   }), [scopedTasks, searchQuery, filterStatus, filterPriority, filterCategory, filterAssignee,
        filterTeamOnly, filterTodayNew, filterPending, showMyTasksOnly,
-       user?.id, crossVisibilityUserIds, isOverdue, isAdmin]);
+       user?.id, crossVisibilityUserIds, isOverdue, isDueToday, isAdmin]);
 
   // ── displayTasks must be defined BEFORE filteredStats ────────────────────
   const displayTasks = React.useMemo(() => {
@@ -1671,6 +1772,7 @@ export default function Tasks() {
     const wipFiltered   = list.filter(t => t.status === 'in_progress');
     const doneFiltered  = list.filter(t => t.status === 'completed');
     const overdueList   = list.filter(t => isOverdue(t));
+    const dueTodayList  = list.filter(t => isDueToday(t));
     const teamFiltered  = hasCrossVisibility
       ? list.filter(t => {
           const isIncomplete = t.status !== 'completed';
@@ -1695,10 +1797,11 @@ export default function Tasks() {
       inProgress:     wipFiltered.length,
       completed:      doneFiltered.length,
       overdue:        overdueList.length,
+      dueToday:       dueTodayList.length,
       teamTask:       teamFiltered.length,
       completionRate: filteredCompletionRate,
     };
-  }, [displayTasks, user, isOverdue, hasCrossVisibility, crossVisibilityUserIds, filterAssignedByMe, filterCreatedBy]);
+  }, [displayTasks, user, isOverdue, isDueToday, hasCrossVisibility, crossVisibilityUserIds, filterAssignedByMe, filterCreatedBy]);
 
   // Human-readable filter context for the live card subheadings
   const filterContextLabel = React.useMemo(() => {
@@ -2451,6 +2554,7 @@ export default function Tasks() {
             accent: isDark ? '#60a5fa' : COLORS.deepBlue,
             icon: SlidersHorizontal,
             active: showMyTasksOnly,
+            onClick: () => setShowMyTasksOnly(!showMyTasksOnly),
           },
           {
             id: 'todo',
@@ -2460,6 +2564,7 @@ export default function Tasks() {
             accent: '#EF4444',
             icon: Circle,
             active: filterStatus === 'pending',
+            onClick: () => setFilterStatus(filterStatus === 'pending' ? 'all' : 'pending'),
           },
           {
             id: 'wip',
@@ -2469,6 +2574,7 @@ export default function Tasks() {
             accent: COLORS.amber,
             icon: TrendingUp,
             active: filterStatus === 'in_progress',
+            onClick: () => setFilterStatus(filterStatus === 'in_progress' ? 'all' : 'in_progress'),
           },
           {
             id: 'done',
@@ -2480,6 +2586,17 @@ export default function Tasks() {
             active: filterStatus === 'completed',
             showRate: true,
             rate: filteredStats.completionRate,
+            onClick: () => setFilterStatus(filterStatus === 'completed' ? 'all' : 'completed'),
+          },
+          {
+            id: 'dueToday',
+            label: buildLabel('Due Today', 'status', filterStatus === 'due_today' ? '✓' : undefined),
+            value: filteredStats.dueToday,
+            total: stats.dueToday,
+            accent: '#f59e0b',
+            icon: Zap,
+            active: filterStatus === 'due_today',
+            onClick: () => setFilterStatus(filterStatus === 'due_today' ? 'all' : 'due_today'),
           },
           {
             id: 'overdue',
@@ -2489,6 +2606,7 @@ export default function Tasks() {
             accent: COLORS.coral,
             icon: AlertCircle,
             active: filterStatus === 'overdue',
+            onClick: () => setFilterStatus(filterStatus === 'overdue' ? 'all' : 'overdue'),
           },
           {
             id: 'team',
@@ -2499,6 +2617,7 @@ export default function Tasks() {
             icon: Users,
             active: filterTeamOnly,
             hidden: !hasCrossVisibility,
+            onClick: () => setFilterTeamOnly(!filterTeamOnly),
           },
         ];
 
@@ -2531,8 +2650,8 @@ export default function Tasks() {
             </AnimatePresence>
 
             {/* Mini stat cards — always visible */}
-            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-              {miniCards.map(({ id, label, value, total, accent, icon: Icon, active, showRate, rate, hidden }) => {
+            <div className="grid grid-cols-3 sm:grid-cols-7 gap-2">
+              {miniCards.map(({ id, label, value, total, accent, icon: Icon, active, showRate, rate, hidden, onClick }) => {
                 if (hidden) return null;
                 const pct     = total > 0 ? Math.round((value / total) * 100) : 0;
                 const delta   = value - total; // negative = fewer in filter than global
@@ -2541,12 +2660,13 @@ export default function Tasks() {
                   <motion.div
                     key={id}
                     layout
+                    onClick={onClick}
                     animate={{ scale: active ? 1.02 : 1 }}
                     transition={{ duration: 0.18 }}
-                    className={`rounded-xl px-2.5 py-2 border flex flex-col gap-1 transition-all ${
+                    className={`rounded-xl px-2.5 py-2 border flex flex-col gap-1 transition-all cursor-pointer select-none ${
                       active
-                        ? (isDark ? 'border-slate-500 bg-slate-700' : 'border-slate-300 bg-white shadow-sm')
-                        : (isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-white/80 border-slate-200/80')
+                        ? (isDark ? 'border-slate-500 bg-slate-700 shadow-md' : 'border-slate-300 bg-white shadow-sm')
+                        : (isDark ? 'bg-slate-800/60 border-slate-700 hover:bg-slate-800' : 'bg-white/80 border-slate-200/80 hover:bg-white')
                     }`}
                     style={active ? { borderColor: accent, boxShadow: `0 0 0 1.5px ${accent}40` } : {}}
                   >
@@ -4266,6 +4386,57 @@ export default function Tasks() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ── Delete Task Confirmation Modal ───────────────────────────── */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={(open) => {
+        if (!isDeletingTask) {
+          setDeleteDialogOpen(open);
+          if (!open) setTaskToDelete(null);
+        }
+      }}>
+        <AlertDialogContent className={`max-w-md rounded-2xl ${isDark ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-white border-slate-200 text-slate-900'}`}>
+          <AlertDialogHeader className="space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 flex items-center justify-center">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <AlertDialogTitle className="text-lg font-bold">Delete Task?</AlertDialogTitle>
+              <AlertDialogDescription className={`text-sm mt-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                Are you sure you want to delete <span className="font-semibold text-slate-800 dark:text-slate-200">"{taskToDelete?.title || 'this task'}"</span>? This action cannot be undone.
+              </AlertDialogDescription>
+            </div>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-6 flex items-center gap-2 sm:justify-end">
+            <AlertDialogCancel
+              onClick={() => { setDeleteDialogOpen(false); setTaskToDelete(null); }}
+              disabled={isDeletingTask}
+              className={`rounded-xl h-10 px-4 text-xs font-semibold ${isDark ? 'border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300' : ''}`}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleConfirmDelete();
+              }}
+              disabled={isDeletingTask}
+              className="rounded-xl h-10 px-4 text-xs font-semibold bg-red-600 hover:bg-red-700 text-white flex items-center gap-2 shadow-md shadow-red-600/20"
+            >
+              {isDeletingTask ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-4 h-4" />
+                  Delete Task
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <input type="file" accept=".csv" ref={fileInputRef} style={{ display: 'none' }} onChange={handleCsvUpload} />
       <AIFileInsights file={csvAiFile} label="CSV Task Data Insights" />
