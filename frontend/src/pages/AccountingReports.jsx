@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+import { format } from 'date-fns';
+import * as XLSX from 'xlsx';
 import {
   BarChart3, RefreshCw, CheckCircle2, AlertTriangle, Download, Building2,
   ChevronLeft, ChevronRight, Scale,
@@ -16,6 +18,339 @@ import { GuidanceNote } from '@/components/ui/GuidanceNote.jsx';
 
 const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2', emeraldGreen: '#1FAF5A', amber: '#F59E0B', coral: '#FF6B6B' };
 const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+
+const fmtN = (n) =>
+  new Intl.NumberFormat('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n ?? 0);
+
+function printLedger(rows, client, company, dateFrom, dateTo, openingBal) {
+  const closingRow  = rows[rows.length - 1];
+  const closingBal  = closingRow ? Math.abs(closingRow.runningBalance) : 0;
+  const closingSide = closingRow?.balanceSide || 'Dr';
+  const totalDr     = rows.reduce((s, r) => s + r.dr, 0);
+  const totalCr     = rows.reduce((s, r) => s + r.cr, 0);
+  const periodLabel = dateFrom && dateTo
+    ? `${format(new Date(dateFrom), 'dd-MMM-yyyy')} to ${format(new Date(dateTo), 'dd-MMM-yyyy')}`
+    : 'All time';
+
+  const rowsHtml = rows
+    .map((r) => {
+      const isOpening = r.type === 'opening';
+      const drColor   = r.dr > 0 ? '#1D4ED8' : '#9CA3AF';
+      const crColor   = r.cr > 0 ? '#059669' : '#9CA3AF';
+      const bgColor   = isOpening ? '#EFF6FF' : 'transparent';
+      return `
+        <tr style="background:${bgColor}; page-break-inside:avoid;">
+          <td style="padding:8px 12px; border-bottom:1px solid #E5E7EB; font-size:12.5px; color:#374151; white-space:nowrap;">
+            ${isOpening ? '' : format(new Date(r.date), 'dd-MMM-yy')}
+          </td>
+          <td style="padding:8px 12px; border-bottom:1px solid #E5E7EB; font-size:12.5px; color:#111827; font-weight:${isOpening ? '600' : '400'}; max-width:320px; overflow:hidden; text-overflow:ellipsis;">
+            ${r.narration}
+          </td>
+          <td style="padding:8px 12px; border-bottom:1px solid #E5E7EB; font-size:12px; color:#6B7280; text-align:center; font-family:monospace;">
+            ${r.ref}
+          </td>
+          <td style="padding:8px 12px; border-bottom:1px solid #E5E7EB; font-size:12.5px; text-align:right; color:${drColor}; font-weight:500;">
+            ${r.dr > 0 ? fmtN(r.dr) : '—'}
+          </td>
+          <td style="padding:8px 12px; border-bottom:1px solid #E5E7EB; font-size:12.5px; text-align:right; color:${crColor}; font-weight:500;">
+            ${r.cr > 0 ? fmtN(r.cr) : '—'}
+          </td>
+          <td style="padding:8px 12px; border-bottom:1px solid #E5E7EB; font-size:12.5px; text-align:right; font-weight:600; color:#111827;">
+            ${fmtN(Math.abs(r.runningBalance))}
+          </td>
+          <td style="padding:8px 12px; border-bottom:1px solid #E5E7EB; font-size:11px; text-align:center;">
+            <span style="display:inline-block; padding:2px 8px; border-radius:999px; font-weight:700;
+              background:${r.balanceSide === 'Dr' ? '#DBEAFE' : '#D1FAE5'};
+              color:${r.balanceSide === 'Dr' ? '#1D4ED8' : '#059669'};">
+              ${r.balanceSide}
+            </span>
+          </td>
+        </tr>`;
+    })
+    .join('');
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <title>Account Statement</title>
+  <style>
+    @page { margin: 14mm 12mm; size: A4 landscape; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Arial, Helvetica, sans-serif;
+      margin: 0; padding: 0;
+      color: #111827;
+      font-size: 13px;
+    }
+    .page-wrap { padding: 0; }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding-bottom: 16px;
+      border-bottom: 2.5px solid #1D4ED8;
+      margin-bottom: 18px;
+    }
+    .header-left h1 {
+      margin: 0 0 4px;
+      font-size: 22px;
+      font-weight: 700;
+      color: #1D4ED8;
+      letter-spacing: -0.5px;
+    }
+    .header-left .subtitle {
+      font-size: 12px;
+      color: #6B7280;
+      margin: 0;
+    }
+    .header-right {
+      text-align: right;
+      font-size: 12.5px;
+      color: #374151;
+    }
+    .header-right .company-name {
+      font-size: 15px;
+      font-weight: 700;
+      color: #111827;
+    }
+    .meta-row {
+      display: flex;
+      gap: 24px;
+      margin-bottom: 16px;
+      padding: 12px 16px;
+      background: #F8FAFC;
+      border: 1px solid #E2E8F0;
+      border-radius: 8px;
+    }
+    .meta-item label { font-size: 10px; text-transform: uppercase; color: #9CA3AF; letter-spacing: 0.06em; display:block; margin-bottom:2px; }
+    .meta-item span  { font-size: 13px; font-weight: 600; color: #111827; }
+    .summary-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .summary-box {
+      flex: 1;
+      border: 1px solid #E2E8F0;
+      border-radius: 8px;
+      padding: 10px 14px;
+    }
+    .summary-box label { font-size: 10px; text-transform: uppercase; color: #9CA3AF; letter-spacing: 0.06em; display:block; }
+    .summary-box .val  { font-size: 16px; font-weight: 700; margin-top: 2px; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    colgroup col:nth-child(1) { width: 82px; }
+    colgroup col:nth-child(2) { width: auto; }
+    colgroup col:nth-child(3) { width: 110px; }
+    colgroup col:nth-child(4) { width: 110px; }
+    colgroup col:nth-child(5) { width: 110px; }
+    colgroup col:nth-child(6) { width: 110px; }
+    colgroup col:nth-child(7) { width: 58px; }
+    thead tr th {
+      background: #1D4ED8;
+      color: #fff;
+      padding: 10px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      border: none;
+    }
+    thead tr th:nth-child(4),
+    thead tr th:nth-child(5),
+    thead tr th:nth-child(6) { text-align: right; }
+    thead tr th:nth-child(3),
+    thead tr th:nth-child(7) { text-align: center; }
+    tfoot tr td {
+      background: #1E3A5F;
+      color: #fff;
+      padding: 11px 12px;
+      font-weight: 700;
+      font-size: 12.5px;
+    }
+    tfoot tr td:nth-child(2) { text-align: right; }
+    tfoot tr td:nth-child(3) { text-align: right; }
+    tfoot tr td:nth-child(4) { text-align: right; }
+    tfoot tr td:nth-child(5) { text-align: center; }
+    .footer {
+      margin-top: 28px;
+      padding-top: 12px;
+      border-top: 1px solid #E5E7EB;
+      font-size: 11px;
+      color: #9CA3AF;
+      display: flex;
+      justify-content: space-between;
+    }
+    @media print {
+      thead { display: table-header-group; }
+      tfoot { display: table-footer-group; }
+    }
+  </style>
+</head>
+<body>
+<div class="page-wrap">
+  <div class="header">
+    <div class="header-left">
+      <h1>Account Statement</h1>
+      <p class="subtitle">Party / Client Account Ledger</p>
+    </div>
+    <div class="header-right">
+      <div class="company-name">${company?.name || 'Your Company'}</div>
+      <div>${company?.address || ''}</div>
+      ${company?.phone ? `<div>Ph: ${company.phone}</div>` : ''}
+      ${company?.email ? `<div>${company.email}</div>` : ''}
+    </div>
+  </div>
+  <div class="meta-row">
+    <div class="meta-item">
+      <label>Party Name</label>
+      <span>${client?.company_name || '—'}</span>
+    </div>
+    ${client?.client_gstin ? `<div class="meta-item"><label>GSTIN</label><span>${client.client_gstin}</span></div>` : ''}
+    ${client?.phone ? `<div class="meta-item"><label>Phone</label><span>${client.phone}</span></div>` : ''}
+    ${client?.email ? `<div class="meta-item"><label>Email</label><span>${client.email}</span></div>` : ''}
+    <div class="meta-item">
+      <label>Period</label>
+      <span>${periodLabel}</span>
+    </div>
+    <div class="meta-item">
+      <label>Opening Balance</label>
+      <span>₹${fmtN(openingBal)}</span>
+    </div>
+  </div>
+  <div class="summary-row">
+    <div class="summary-box">
+      <label>Total Debit (₹)</label>
+      <div class="val" style="color:#1D4ED8;">₹${fmtN(totalDr)}</div>
+    </div>
+    <div class="summary-box">
+      <label>Total Credit (₹)</label>
+      <div class="val" style="color:#059669;">₹${fmtN(totalCr)}</div>
+    </div>
+    <div class="summary-box">
+      <label>Closing Balance</label>
+      <div class="val" style="color:${closingSide === 'Dr' ? '#DC2626' : '#059669'};">₹${fmtN(closingBal)} ${closingSide}</div>
+    </div>
+    <div class="summary-box">
+      <label>Net (Dr - Cr)</label>
+      <div class="val" style="color:#6B7280;">₹${fmtN(Math.abs(totalDr - totalCr))}</div>
+    </div>
+  </div>
+  <table>
+    <colgroup>
+      <col /><col /><col /><col /><col /><col /><col />
+    </colgroup>
+    <thead>
+      <tr>
+        <th style="text-align:left;">Date</th>
+        <th style="text-align:left;">Particulars / Description</th>
+        <th>Voucher No.</th>
+        <th>Debit (₹)</th>
+        <th>Credit (₹)</th>
+        <th>Balance (₹)</th>
+        <th>Dr/Cr</th>
+      </tr>
+    </thead>
+    <tbody>${rowsHtml}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="3" style="text-align:right;">CLOSING BALANCE</td>
+        <td style="text-align:right;">₹${fmtN(totalDr)}</td>
+        <td style="text-align:right;">₹${fmtN(totalCr)}</td>
+        <td style="text-align:right;">₹${fmtN(closingBal)}</td>
+        <td style="text-align:center;">${closingSide}</td>
+      </tr>
+    </tfoot>
+  </table>
+  <div class="footer">
+    <span>This is a computer-generated Account Statement.</span>
+    <span>Generated on ${format(new Date(), 'dd-MMM-yyyy hh:mm a')}</span>
+  </div>
+</div>
+</body>
+</html>`;
+
+  const win = window.open('', '_blank', 'width=1400,height=920');
+  if (!win) {
+    toast.error('Please allow pop-ups to print / save PDF.');
+    return;
+  }
+  win.document.write(html);
+  win.document.close();
+  win.onload = () => { win.focus(); win.print(); };
+}
+
+function exportLedgerReconciliationExcel(rows, client, company, dateFrom, dateTo, openingBalance) {
+  const periodLabel = dateFrom && dateTo
+    ? `${format(new Date(dateFrom), 'dd-MMM-yyyy')} – ${format(new Date(dateTo), 'dd-MMM-yyyy')}`
+    : 'All time';
+
+  const closingRow  = rows[rows.length - 1];
+  const closingBal  = closingRow ? Math.abs(closingRow.runningBalance) : 0;
+  const closingSide = closingRow?.balanceSide || 'Dr';
+  const totalDr     = rows.filter((r) => r.type !== 'opening').reduce((s, r) => s + r.dr, 0);
+  const totalCr     = rows.filter((r) => r.type !== 'opening').reduce((s, r) => s + r.cr, 0);
+
+  const sheetData = [
+    ['Account Statement', '', '', '', '', '', '', '', '', '', '', ''],
+    [],
+    ['Company:',   company?.name    || '', '', '', '', '', '', '', '', '', '', ''],
+    ['Address:',   company?.address || '', '', '', '', '', '', '', '', '', '', ''],
+    ['Phone:',     company?.phone   || '', '', '', '', '', '', 'Email:', company?.email || '', '', ''],
+    ['Party:',     client?.company_name || '', '', '', '', '', '', '', '', '', '', ''],
+    ['GSTIN:',     client?.client_gstin || '—', '', '', '', '', '', '', '', '', '', ''],
+    ['Period:',    periodLabel, '', '', '', '', '', '', '', 'Generated:', format(new Date(), 'dd-MMM-yyyy'), ''],
+    [],
+    ['Date', 'Particulars / Description', '', '', '', 'Debit (₹)', '', 'Credit (₹)', '', 'Balance (₹)', '', 'Dr/Cr'],
+    ['', 'Opening Balance', '', '', '', '', '', '', '', openingBalance || 0, '', ''],
+  ];
+
+  rows.forEach((r) => {
+    if (r.type === 'opening') return;
+    const dateStr = r.date ? format(new Date(r.date), 'dd/MM/yyyy') : '';
+    sheetData.push([
+      dateStr,
+      r.narration, '', '', '',
+      r.dr > 0 ? r.dr : '', '',
+      r.cr > 0 ? r.cr : '', '',
+      Math.abs(r.runningBalance), '',
+      r.balanceSide,
+    ]);
+  });
+
+  sheetData.push(['', 'Closing Balance', '', '', '', '', '', '', '', closingBal, '', closingSide]);
+  sheetData.push(['', 'Total',           '', '', '', totalDr,      '', totalCr,   '', '',          '', '']);
+
+  const ws = XLSX.utils.aoa_to_sheet(sheetData);
+
+  ws['!merges'] = [
+    { s: { r: 0,  c: 0 }, e: { r: 0,  c: 11 } },
+    { s: { r: 2,  c: 0 }, e: { r: 2,  c: 11 } },
+    { s: { r: 3,  c: 0 }, e: { r: 3,  c: 11 } },
+    { s: { r: 4,  c: 0 }, e: { r: 4,  c: 5  } },
+    { s: { r: 4,  c: 7 }, e: { r: 4,  c: 11 } },
+    { s: { r: 5,  c: 0 }, e: { r: 5,  c: 11 } },
+    { s: { r: 6,  c: 0 }, e: { r: 6,  c: 11 } },
+    { s: { r: 7,  c: 0 }, e: { r: 7,  c: 7  } },
+    { s: { r: 9,  c: 1 }, e: { r: 9,  c: 4  } },
+    { s: { r: 10, c: 1 }, e: { r: 10, c: 4  } },
+  ];
+
+  ws['!cols'] = [
+    { wch: 12 }, { wch: 48 }, { wch: 6 }, { wch: 6 }, { wch: 6 },
+    { wch: 16 }, { wch: 6 }, { wch: 16 }, { wch: 6 },
+    { wch: 16 }, { wch: 6 }, { wch: 8 },
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Account Statement');
+
+  const clientName = (client?.company_name || 'party').replace(/[^a-zA-Z0-9]/g, '_');
+  XLSX.writeFile(wb, `Account_Statement_${clientName}_${format(new Date(), 'dd-MMM-yyyy')}.xlsx`);
+  toast.success('Account Statement exported successfully');
+}
 
 /* ── Financial-Year helpers (India FY = 1 Apr → 31 Mar) ─────────────────── */
 function currentFYStartYear(d = new Date()) {
@@ -99,6 +434,8 @@ function AccountingReportsInner() {
   const [partyName, setPartyName] = useState('');
   const [partyLedger, setPartyLedger] = useState(null);
   const [partyLoading, setPartyLoading] = useState(false);
+  const [clients, setClients] = useState([]);
+  const [purchaseInvoices, setPurchaseInvoices] = useState([]);
 
   const fetchCompanies = async () => {
     try {
@@ -164,6 +501,8 @@ function AccountingReportsInner() {
       setCompanyId(initialCid);
       fetchParties(initialCid);
       fetchAll({ companyId: initialCid });
+      api.get('/clients').then(r => setClients(r.data || [])).catch(() => {});
+      api.get('/purchase-invoices').then(r => setPurchaseInvoices(r.data || [])).catch(() => {});
     })();
   }, []);
 
@@ -171,10 +510,16 @@ function AccountingReportsInner() {
     if (!partyName) { toast.error('Pick a customer or vendor first'); return; }
     setPartyLoading(true);
     try {
-      const { data } = await api.get('/reports/party-ledger', {
-        params: { party_name: partyName, party_type: partyType, company_id: companyId, date_from: dateFrom || undefined, date_to: dateTo || undefined },
-      });
-      setPartyLedger(data);
+      const [ledgerRes, clientsRes, purRes] = await Promise.all([
+        api.get('/reports/party-ledger', {
+          params: { party_name: partyName, party_type: partyType, company_id: companyId, date_from: dateFrom || undefined, date_to: dateTo || undefined },
+        }),
+        api.get('/clients').catch(() => ({ data: [] })),
+        api.get('/purchase-invoices').catch(() => ({ data: [] }))
+      ]);
+      setPartyLedger(ledgerRes.data);
+      setClients(clientsRes.data || []);
+      setPurchaseInvoices(purRes.data || []);
     } catch {
       toast.error('Failed to load party ledger');
     } finally {
@@ -208,28 +553,78 @@ function AccountingReportsInner() {
 
   const [partyExporting, setPartyExporting] = useState(false);
 
-  const downloadPartyLedger = async (format = 'xlsx') => {
+  const downloadPartyLedger = async (fmt = 'xlsx') => {
     if (!partyName) { toast.error('Pick a customer or vendor first'); return; }
     if (!partyLedger) { toast.error('Load the ledger first.'); return; }
     setPartyExporting(true);
     try {
-      const { data } = await api.get(`/reports/party-ledger/export.${format}`, {
-        params: { party_name: partyName, party_type: partyType, company_id: companyId, date_from: dateFrom || undefined, date_to: dateTo || undefined },
-        responseType: 'blob',
+      // Find selected company based on filters
+      const selectedCompany = companies.find((c) => c.id === companyId) || companies[0] || null;
+
+      // Find client details or construct mock vendor details
+      let selectedClient = null;
+      if (partyType === 'customer') {
+        selectedClient = clients.find((c) => c.company_name === partyName || c.id === partyName) || {
+          company_name: partyName,
+          client_gstin: '',
+          phone: '',
+          email: '',
+        };
+      } else {
+        const matchingPur = purchaseInvoices.find((p) => p.supplier_name === partyName);
+        selectedClient = {
+          company_name: partyName,
+          client_gstin: matchingPur?.supplier_gstin || '',
+          phone: matchingPur?.phone || '',
+          email: matchingPur?.phone || '', // fallback
+        };
+      }
+
+      // Convert partyLedger rows to printLedger format
+      const formattedRows = [
+        {
+          id: 'opening',
+          date: dateFrom || '2000-01-01',
+          type: 'opening',
+          ref: '',
+          narration: 'Opening Balance',
+          dr: 0,
+          cr: 0,
+          runningBalance: 0,
+          balanceSide: partyType === 'customer' ? 'Dr' : 'Cr'
+        }
+      ];
+
+      let runningBal = 0;
+      (partyLedger.rows || []).forEach((r) => {
+        let diff = 0;
+        if (partyType === 'customer') {
+          diff = (r.debit || 0) - (r.credit || 0);
+        } else {
+          diff = (r.credit || 0) - (r.debit || 0);
+        }
+        runningBal += diff;
+        formattedRows.push({
+          id: r.id,
+          date: r.date,
+          type: r.voucher_type?.toLowerCase() || 'invoice',
+          ref: r.voucher_no || '—',
+          narration: r.narration || '',
+          dr: r.debit || 0,
+          cr: r.credit || 0,
+          runningBalance: runningBal,
+          balanceSide: runningBal >= 0 ? (partyType === 'customer' ? 'Dr' : 'Cr') : (partyType === 'customer' ? 'Cr' : 'Dr')
+        });
       });
-      const mime = format === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-      const blob = new Blob([data], { type: mime });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      const safeParty = partyName.replace(/[^a-z0-9]+/gi, '_');
-      a.href = url;
-      a.download = `Party_Ledger_${safeParty}_${dateFrom}_to_${dateTo}.${format}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch {
-      toast.error(`Failed to download ${format.toUpperCase()}`);
+
+      if (fmt === 'pdf') {
+        printLedger(formattedRows, selectedClient, selectedCompany, dateFrom, dateTo, 0);
+      } else {
+        exportLedgerReconciliationExcel(formattedRows, selectedClient, selectedCompany, dateFrom, dateTo, 0);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error(`Failed to export ledger in ${fmt.toUpperCase()} format.`);
     } finally {
       setPartyExporting(false);
     }
