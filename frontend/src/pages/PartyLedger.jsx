@@ -1178,7 +1178,7 @@ export default function PartyLedger({
   }, [rows, clientInvoices]);
 
   const selectedClient  = clients.find((c) => c.id === clientId) || null;
-  const selectedCompany = companies[0] || null;
+  const selectedCompany = (companyFilter !== 'all' ? (companies.find((co) => co.id === companyFilter) || companies[0]) : companies[0]) || null;
   const hasData         = rows.length > 1;
 
   const handlePrint       = () => printLedger(rows, selectedClient, selectedCompany, dateFrom, dateTo, openingBal);
