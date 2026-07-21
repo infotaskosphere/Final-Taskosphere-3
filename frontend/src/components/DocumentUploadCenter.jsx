@@ -20,6 +20,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useLocation } from 'react-router-dom';
 import api from '@/lib/api.js';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -968,6 +969,7 @@ function ItemCard({ item, isDark, selected, onToggleSelect, onOpen, onToggleVisi
 // Main export
 // ═══════════════════════════════════════════════════════════════════════════
 export default function DocumentUploadCenter({ isDark, isAdmin }) {
+  const location = useLocation();
   const [clients, setClients] = useState([]);
   const [loadingClients, setLoadingClients] = useState(true);
   const [selectedClient, setSelectedClient] = useState(null);
@@ -1064,6 +1066,19 @@ export default function DocumentUploadCenter({ isDark, isAdmin }) {
     const pu = (c.portal_users || [])[0] || null;
     setPortalUser(pu);
   };
+
+  useEffect(() => {
+    if (clients.length > 0) {
+      const params = new URLSearchParams(location.search);
+      const queryClientId = params.get('clientId');
+      if (queryClientId) {
+        const found = clients.find(c => c.id === queryClientId);
+        if (found) {
+          selectClient(found);
+        }
+      }
+    }
+  }, [location.search, clients]);
 
   const currentFolderId = breadcrumb.length ? breadcrumb[breadcrumb.length - 1].id : portalUser?.google_drive_folder_id;
 
