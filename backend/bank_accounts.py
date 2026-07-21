@@ -15,9 +15,19 @@ payment against Accounts Payable/Receivable separately). That keeps
 auto-posting simple and matches how most small firms actually work day to
 day; the Accounts Payable/Receivable accounts are still in the Chart of
 Accounts for anyone who wants to post accrual entries by hand through
-Journal Entries. Unmatched transactions are never auto-posted — they sit
-as "unmatched" until a person matches them manually, so the ledger never
-gets a guessed entry.
+Journal Entries.
+
+A line with no confident match is auto-parked to the Suspense Account
+(9998) rather than left fully unposted — the same posting the "Park to
+Suspense" button already makes for a manual match. Every bank statement
+line must land in the ledger at import time, matched or not: leaving a
+line completely unposted means the real cash movement happened in the
+bank but never in the books, so the GL Bank Accounts balance silently
+drifts away from the real bank balance (and, for an unmatched receipt,
+Accounts Receivable stays overstated because nothing told the ledger the
+money arrived) — with no error anywhere to surface it. Suspense keeps the
+bank side always correct; the unclassified side sits visibly in the
+Suspense Review workflow until it's reclassified to its real head.
 """
 
 import re
@@ -1072,7 +1082,7 @@ async def upload_statement(
         }
 
     now = datetime.now(timezone.utc).isoformat()
-    saved, matched_count, posted_count = [], 0, 0
+    saved, matched_count, posted_count, auto_suspensed_count = [], 0, 0, 0
 
     # ── COMPREHENSIVE MULTI-SET DEDUPLICATION ENGINE ──
     db_txns = await db.bank_transactions.find({"bank_account_id": bank_account_id}).to_list(100000)
@@ -1145,6 +1155,39 @@ async def upload_statement(
                     if entry_id:
                         doc["journal_entry_id"] = entry_id
                         posted_count += 1
+            else:
+                # ── No confident match: park to Suspense instead of dropping the line ──
+                # A statement line that matches nothing used to stay completely
+                # unposted — matched_type/journal_entry_id both None, zero impact
+                # on the ledger. That's silent and cumulative: the real cash
+                # movement happened in the bank, but the GL "1010 Bank Accounts"
+                # balance never moved with it, so it drifts further from the
+                # actual bank balance with every unmatched line. For an
+                # unmatched credit specifically, it also leaves Accounts
+                # Receivable overstated — the invoice still shows "due" even
+                # though the money already arrived, because nothing ever told
+                # the ledger this receipt happened.
+                #
+                # Fix: auto-park every unmatched line to the Suspense Account
+                # (9998) the moment it's imported — the exact same posting the
+                # "Park to Suspense" button already does for a manual match
+                # (see _auto_post_for_match's "suspense" branch). This keeps
+                # Bank Accounts always equal to the real statement; the
+                # unclassified side sits in Suspense, visible in the Suspense
+                # Review workflow, until someone reclassifies it to its real
+                # expense/income head.
+                suspense_id = await get_default_account_id(bank_acct.get("company_id", ""), "9998")
+                if suspense_id:
+                    suspense_match = {"type": "suspense", "id": suspense_id, "label": "Unclassified (auto-parked)"}
+                    doc["matched_type"] = "suspense"
+                    doc["matched_id"] = suspense_id
+                    doc["matched_label"] = "Unclassified (auto-parked)"
+                    doc["auto_suspensed"] = True
+                    entry_id = await _auto_post_for_match(bank_acct.get("company_id", ""), doc, suspense_match, current_user.id)
+                    if entry_id:
+                        doc["journal_entry_id"] = entry_id
+                        posted_count += 1
+                        auto_suspensed_count += 1
 
         await db.bank_transactions.insert_one(doc)
         doc.pop("_id", None)
@@ -1153,7 +1196,8 @@ async def upload_statement(
     return {
         "success": True,
         "bank_account_id": bank_account_id, "transactions_saved": len(saved),
-        "auto_matched": matched_count, "auto_posted": posted_count, "transactions": saved,
+        "auto_matched": matched_count, "auto_posted": posted_count,
+        "auto_suspensed": auto_suspensed_count, "transactions": saved,
         "warnings": warnings,
     }
 
@@ -1719,3 +1763,56 @@ async def get_reconciliation_audit_trail_api(txn_id: str, current_user: User = D
     from backend.bank_ai.reconciliation_audit import ReconciliationAudit
     audit = await ReconciliationAudit.get_audit_trail(txn_id)
     return audit
+
+
+class BackfillSuspenseInput(BaseModel):
+    company_id: Optional[str] = None  # omit to backfill every company
+
+
+@router.post("/bank-transactions/backfill-unmatched-to-suspense")
+async def backfill_unmatched_to_suspense(
+    payload: Optional[BackfillSuspenseInput] = None, current_user: User = Depends(get_current_user),
+):
+    """One-time fix-up for statement lines imported *before* upload_statement
+    started auto-parking unmatched lines to Suspense: every bank transaction
+    still sitting with matched_type=None (and not explicitly ignored) never
+    posted a journal entry, so the GL "Bank Accounts" balance has been
+    silently understating/overstating the real bank balance ever since —
+    and, for unmatched receipts, Accounts Receivable has stayed overstated
+    because the ledger was never told the money arrived. This finds every
+    such line (optionally scoped to one company) and parks each one to
+    Suspense (9998) exactly like a manual "Park to Suspense" match, so
+    Trial Balance / Balance Sheet / the Bank & Cash dashboard card start
+    agreeing with the real statement again. Safe to re-run — only rows
+    still unmatched are touched."""
+    if not _perm_view_bank(current_user):
+        raise HTTPException(403, "Access denied. Request access from your admin in Permission Governance.")
+
+    q: dict = {"matched_type": {"$in": [None, ""]}, "ignored": {"$ne": True}}
+    if payload and payload.company_id:
+        q["company_id"] = payload.company_id
+    unmatched = await db.bank_transactions.find(q, {"_id": 0}).to_list(200000)
+
+    parked, skipped = 0, 0
+    for txn in unmatched:
+        company_id = txn.get("company_id", "")
+        suspense_id = await get_default_account_id(company_id, "9998")
+        if not suspense_id:
+            skipped += 1
+            continue
+        match = {"type": "suspense", "id": suspense_id, "label": "Unclassified (auto-parked)"}
+        entry_id = await _auto_post_for_match(company_id, txn, match, current_user.id)
+        if not entry_id:
+            skipped += 1
+            continue
+        await db.bank_transactions.update_one(
+            {"id": txn["id"]},
+            {"$set": {
+                "matched_type": "suspense", "matched_id": suspense_id,
+                "matched_label": "Unclassified (auto-parked)",
+                "journal_entry_id": entry_id, "auto_suspensed": True,
+            }},
+        )
+        parked += 1
+
+    return {"success": True, "scanned": len(unmatched), "parked_to_suspense": parked, "skipped": skipped}
