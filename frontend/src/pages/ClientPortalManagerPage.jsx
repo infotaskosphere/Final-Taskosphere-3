@@ -277,9 +277,9 @@ function OverviewTab({ portalUsers, loading, navigate, isAdmin, isDark, onManage
         </div>
 
         {/* Search, Filters, and View Toggles */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full lg:w-auto">
           {/* Search Box */}
-          <div className="relative">
+          <div className="relative w-full sm:w-auto">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
             <Input placeholder="Search clients or users…" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8 h-8 text-xs w-full sm:w-48 lg:w-56 bg-transparent" />
           </div>
@@ -288,7 +288,7 @@ function OverviewTab({ portalUsers, loading, navigate, isAdmin, isDark, onManage
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className={`h-8 px-2.5 rounded-md text-xs border bg-transparent ${
+            className={`h-8 px-2.5 rounded-md text-xs border bg-transparent w-full sm:w-auto ${
               isDark ? 'border-slate-700 text-slate-300 bg-slate-800' : 'border-slate-200 text-slate-600 bg-white'
             }`}
           >
@@ -301,7 +301,7 @@ function OverviewTab({ portalUsers, loading, navigate, isAdmin, isDark, onManage
           <select
             value={permFilter}
             onChange={(e) => setPermFilter(e.target.value)}
-            className={`h-8 px-2.5 rounded-md text-xs border bg-transparent ${
+            className={`h-8 px-2.5 rounded-md text-xs border bg-transparent w-full sm:w-auto ${
               isDark ? 'border-slate-700 text-slate-300 bg-slate-800' : 'border-slate-200 text-slate-600 bg-white'
             }`}
           >
@@ -313,7 +313,7 @@ function OverviewTab({ portalUsers, loading, navigate, isAdmin, isDark, onManage
           </select>
 
           {/* View Toggles (List vs Card) */}
-          <div className={`flex items-center rounded-lg p-0.5 border ${isDark ? 'border-slate-700 bg-slate-800/50' : 'border-slate-200 bg-slate-50'}`}>
+          <div className={`flex items-center rounded-lg p-0.5 border w-fit self-end sm:self-auto ${isDark ? 'border-slate-700 bg-slate-800/50' : 'border-slate-200 bg-slate-50'}`}>
             <button
               onClick={() => setViewMode('list')}
               title="List View"
