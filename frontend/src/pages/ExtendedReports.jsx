@@ -4,10 +4,11 @@ import { toast } from 'sonner';
 import {
   BookOpen, Landmark, Activity, AlertTriangle, ArrowLeftRight, TrendingDown,
   Shield, BarChart3, TrendingUp, CalendarRange, Scale, CheckCircle2, Upload,
-  ChevronDown, ChevronRight, Plus, Play, Link2, Unlink, Loader2,
+  ChevronDown, ChevronRight, Plus, Play, Link2, Unlink, Loader2, Building2,
 } from 'lucide-react';
 import { ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
@@ -56,7 +57,7 @@ const SOURCES = [
   { value: 'bank', label: 'Bank' }, { value: 'manual', label: 'Manual' }, { value: 'ai_zero_touch', label: 'AI Zero-Touch' },
 ];
 
-function DayBookSection({ isDark }) {
+function DayBookSection({ isDark, companyId }) {
   const [mode, setMode] = useState('fy');
   const [fy, setFy] = useState(currentFYLabel());
   const [fromDate, setFromDate] = useState('');
@@ -69,13 +70,13 @@ function DayBookSection({ isDark }) {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const params = { source: source || undefined };
+      const params = { company_id: companyId, source: source || undefined };
       if (mode === 'fy') params.fy = fy; else { params.from_date = fromDate; params.to_date = toDate; }
       const { data } = await api.get('/reports/day-book', { params });
       setData(data);
     } catch { toast.error('Failed to load Day Book'); } finally { setLoading(false); }
   };
-  useEffect(() => { fetchData(); }, [mode, fy, source]);
+  useEffect(() => { fetchData(); }, [mode, fy, source, companyId]);
   const toggle = (date) => setExpanded((e) => ({ ...e, [date]: !e[date] }));
 
   return (
@@ -141,7 +142,7 @@ function DayBookSection({ isDark }) {
 }
 
 /* ── 2. Cash / Bank Book ─────────────────────────────────────────────── */
-function CashBankBookSection({ isDark }) {
+function CashBankBookSection({ isDark, companyId }) {
   const [mode, setMode] = useState('fy');
   const [fy, setFy] = useState(currentFYLabel());
   const [fromDate, setFromDate] = useState('');
@@ -152,13 +153,13 @@ function CashBankBookSection({ isDark }) {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const params = {};
+      const params = { company_id: companyId };
       if (mode === 'fy') params.fy = fy; else { params.from_date = fromDate; params.to_date = toDate; }
       const { data } = await api.get('/reports/cash-bank-book', { params });
       setData(data);
     } catch { toast.error('Failed to load Cash / Bank Book'); } finally { setLoading(false); }
   };
-  useEffect(() => { fetchData(); }, [mode, fy]);
+  useEffect(() => { fetchData(); }, [mode, fy, companyId]);
 
   return (
     <div className="space-y-4">
@@ -194,7 +195,7 @@ function CashBankBookSection({ isDark }) {
 }
 
 /* ── 3. Cash Flow ────────────────────────────────────────────────────── */
-function CashFlowSection({ isDark }) {
+function CashFlowSection({ isDark, companyId }) {
   const [mode, setMode] = useState('fy');
   const [fy, setFy] = useState(currentFYLabel());
   const [fromDate, setFromDate] = useState('');
@@ -205,13 +206,13 @@ function CashFlowSection({ isDark }) {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const params = {};
+      const params = { company_id: companyId };
       if (mode === 'fy') params.fy = fy; else { params.from_date = fromDate; params.to_date = toDate; }
       const { data } = await api.get('/reports/cash-flow', { params });
       setData(data);
     } catch { toast.error('Failed to load Cash Flow Statement'); } finally { setLoading(false); }
   };
-  useEffect(() => { fetchData(); }, [mode, fy]);
+  useEffect(() => { fetchData(); }, [mode, fy, companyId]);
 
   return (
     <div className="space-y-4">
@@ -291,7 +292,7 @@ function OutstandingTable({ rows, isDark, partyLabel }) {
   );
 }
 
-function OutstandingSection({ isDark }) {
+function OutstandingSection({ isDark, companyId }) {
   const [side, setSide] = useState('receivable');
   const [receivable, setReceivable] = useState(null);
   const [payable, setPayable] = useState(null);
@@ -300,12 +301,16 @@ function OutstandingSection({ isDark }) {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [rR, rP] = await Promise.allSettled([api.get('/reports/outstanding/receivable'), api.get('/reports/outstanding/payable')]);
+      const params = { company_id: companyId };
+      const [rR, rP] = await Promise.allSettled([
+        api.get('/reports/outstanding/receivable', { params }),
+        api.get('/reports/outstanding/payable', { params }),
+      ]);
       setReceivable(rR.status === 'fulfilled' ? rR.value.data : null);
       setPayable(rP.status === 'fulfilled' ? rP.value.data : null);
     } catch { toast.error('Failed to load Outstanding Report'); } finally { setLoading(false); }
   };
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [companyId]);
 
   const active = side === 'receivable' ? receivable : payable;
 
@@ -327,7 +332,7 @@ function OutstandingSection({ isDark }) {
 }
 
 /* ── 5. Bank Reconciliation ─────────────────────────────────────────────*/
-function BankReconciliationSection({ isDark }) {
+function BankReconciliationSection({ isDark, companyId }) {
   const [bankAccounts, setBankAccounts] = useState([]);
   const [selectedBank, setSelectedBank] = useState('');
   const [recon, setRecon] = useState(null);
@@ -336,10 +341,16 @@ function BankReconciliationSection({ isDark }) {
 
   const loadBankAccounts = async () => {
     try {
-      const { data } = await api.get('/bank-accounts');
+      const { data } = await api.get('/bank-accounts', { params: { company_id: companyId || undefined } });
       setBankAccounts(data || []);
-      if (data && data.length > 0) setSelectedBank((prev) => prev || data[0].id);
-      else setLoading(false);
+      // Switching company: drop a selection that belongs to the old
+      // company's book instead of leaving a stale bank account picked.
+      if (data && data.length > 0) {
+        setSelectedBank((prev) => (data.some((b) => b.id === prev) ? prev : data[0].id));
+      } else {
+        setSelectedBank('');
+        setLoading(false);
+      }
     } catch { toast.error('Failed to load bank accounts'); setLoading(false); }
   };
   const loadRecon = async (bankId) => {
@@ -350,7 +361,7 @@ function BankReconciliationSection({ isDark }) {
       setRecon(data);
     } catch { toast.error('Failed to load reconciliation data'); } finally { setLoading(false); }
   };
-  useEffect(() => { loadBankAccounts(); }, []);
+  useEffect(() => { loadBankAccounts(); }, [companyId]);
   useEffect(() => { if (selectedBank) loadRecon(selectedBank); }, [selectedBank]);
 
   const handleUpload = async (e) => {
