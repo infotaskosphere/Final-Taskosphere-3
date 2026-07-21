@@ -1178,8 +1178,12 @@ apiRouter.patch("/purchase-invoices/:id/status", (req, res) => {
 apiRouter.get("/purchase", (req, res) => res.json(purchaseInvoices));
 
 // Bank Accounts
-apiRouter.get("/bank-accounts", (req, res) => res.json(bankAccounts));
+apiRouter.get("/bank-accounts", (req, res) => {
+  syncLedgersWithInvoicesAndBills();
+  res.json(bankAccounts);
+});
 apiRouter.get("/bank-accounts/:id/transactions", (req, res) => {
+  syncLedgersWithInvoicesAndBills();
   res.json(bankTransactions.filter(t => t.bank_account_id === req.params.id));
 });
 
@@ -1510,9 +1514,11 @@ apiRouter.delete("/chart-of-accounts/:id", (req, res) => {
 
 // Journal Entries REST API
 apiRouter.get("/journal-entries", (req, res) => {
-  const { company_id, date_from, date_to, search } = req.query;
+  syncLedgersWithInvoicesAndBills();
+  
+  const { company_id, date_from, date_to, search, page, page_size } = req.query;
   let list = journalEntries;
-  if (company_id && company_id !== "all") {
+  if (company_id && company_id !== "all" && company_id !== "") {
     list = list.filter(je => je.company_id === company_id);
   }
   if (date_from) {
@@ -1528,6 +1534,23 @@ apiRouter.get("/journal-entries", (req, res) => {
   
   // Sort reverse chronological
   list = [...list].sort((a, b) => b.entry_date.localeCompare(a.entry_date));
+  
+  if (page || page_size) {
+    const pageNum = parseInt(page as string) || 1;
+    const pageSizeNum = parseInt(page_size as string) || 50;
+    const total = list.length;
+    const total_pages = Math.ceil(total / pageSizeNum);
+    const startIdx = (pageNum - 1) * pageSizeNum;
+    const paginated = list.slice(startIdx, startIdx + pageSizeNum);
+    
+    return res.json({
+      entries: paginated,
+      total,
+      total_pages,
+      page: pageNum,
+      page_size: pageSizeNum
+    });
+  }
   
   res.json(list);
 });
