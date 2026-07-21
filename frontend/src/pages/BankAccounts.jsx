@@ -35,6 +35,46 @@ const invParty = (inv) =>
 const invAmount = (inv) => Number(inv?.grand_total || inv?.total || inv?.amount || 0);
 const invDate = (inv) => inv?.invoice_date || inv?.date || inv?.bill_date;
 
+// Clean numbers and special characters from bank description to get core merchant/party
+const cleanDescription = (str) => {
+  if (!str) return '';
+  return str.toLowerCase()
+    .replace(/[0-9]+/g, '')
+    .replace(/[\/\-\_\.\,\:\;\*\&\#\@\(\)\+]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+// Computes similarity score (0 to 100) between two transactions
+const getTxnSimilarity = (t1, t2) => {
+  const isDebit1 = Number(t1.debit || 0) > 0;
+  const isDebit2 = Number(t2.debit || 0) > 0;
+  if (isDebit1 !== isDebit2) return 0;
+
+  const desc1 = cleanDescription(t1.description);
+  const desc2 = cleanDescription(t2.description);
+  if (desc1 === desc2 && desc1 !== '') return 100;
+  if (!desc1 || !desc2) return 0;
+
+  // Dice's Coefficient (bigram matching)
+  const getBigrams = (str) => {
+    const bigrams = new Set();
+    for (let i = 0; i < str.length - 1; i++) {
+      bigrams.add(str.slice(i, i + 2));
+    }
+    return bigrams;
+  };
+  const b1 = getBigrams(desc1);
+  const b2 = getBigrams(desc2);
+  if (b1.size === 0 || b2.size === 0) return 0;
+
+  let intersection = 0;
+  b1.forEach(b => {
+    if (b2.has(b)) intersection++;
+  });
+  return Math.round((2 * intersection) / (b1.size + b2.size) * 100);
+};
+
 // ─── Smart suggestion scorer: amount, date, narration, party name, ───
 // ─── invoice no, bank reference, GSTIN — returns a 0-99 confidence %. ───
 function scoreInvoiceMatch(txn, inv) {
@@ -540,13 +580,86 @@ function BankAccountsInner() {
       await api.post(`/bank-transactions/${matchDialog.txn.id}/match`, matchPayload);
       toast.success('Bill created and transaction matched!');
 
+      const origTxn = matchDialog.txn;
       setMatchDialog(null);
       await fetchAccounts();
       await fetchTransactions(selected.id);
+
+      // AI Copilot automatically matches similar transactions
+      await checkAndAutoMatchSimilar(origTxn, newInv, 'invoice');
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to create and match bill');
     } finally {
       setSavingPurchase(false);
+    }
+  };
+
+  const checkAndAutoMatchSimilar = async (matchedTxn, matchTarget, type) => {
+    // Find all unmatched, non-ignored transactions in the currently selected bank account, excluding matchedTxn itself
+    const unmatched = transactions.filter(t => t.id !== matchedTxn.id && !t.matched_type && !t.ignored);
+    const similarTxns = [];
+
+    for (const other of unmatched) {
+      const sim = getTxnSimilarity(matchedTxn, other);
+      if (sim >= 90) {
+        similarTxns.push({ txn: other, score: sim });
+      }
+    }
+
+    if (similarTxns.length === 0) return;
+
+    toast.info(`🤖 AI Copilot: Found ${similarTxns.length} transactions of 90%+ similar nature. Auto-matching them now...`, {
+      icon: '🤖',
+      duration: 3500
+    });
+
+    let successCount = 0;
+    try {
+      for (const item of similarTxns) {
+        if (type === 'ledger') {
+          const matched_type = matchTarget.code === '9998' ? 'suspense' : 'expense';
+          const matched_label = `${matchTarget.code} · ${matchTarget.name}`;
+          const payload = { matched_type, matched_id: matchTarget.id, matched_label, post_journal: true };
+          await api.post(`/bank-transactions/${item.txn.id}/match`, payload);
+          successCount++;
+        } else if (type === 'invoice') {
+          const suggestions = suggestionsFor(item.txn);
+          if (suggestions.length && suggestions[0].score >= 70) {
+            const bestInv = suggestions[0].inv;
+            const isDebit = Number(item.txn.debit || 0) > 0;
+            const matched_type = isDebit ? 'purchase' : 'sale';
+            const matched_label = `${invNumber(bestInv) || '—'} · ${invParty(bestInv) || '—'}`.trim();
+            const payload = { 
+              matched_type, 
+              matched_id: bestInv.id, 
+              matched_label, 
+              post_journal: true, 
+              confidence: suggestions[0].score 
+            };
+            await api.post(`/bank-transactions/${item.txn.id}/match`, payload);
+            successCount++;
+          } else {
+            const isDebit = Number(item.txn.debit || 0) > 0;
+            const matched_type = isDebit ? 'purchase' : 'sale';
+            const matched_label = `${invNumber(matchTarget) || '—'} · ${invParty(matchTarget) || '—'}`.trim();
+            const payload = { 
+              matched_type, 
+              matched_id: matchTarget.id, 
+              matched_label, 
+              post_journal: true, 
+              confidence: item.score 
+            };
+            await api.post(`/bank-transactions/${item.txn.id}/match`, payload);
+            successCount++;
+          }
+        }
+      }
+      if (successCount > 0) {
+        toast.success(`🤖 AI Copilot: Auto-matched ${successCount} additional similar transactions!`);
+        await fetchTransactions(selected.id);
+      }
+    } catch (err) {
+      console.error('Error auto-matching similar transactions:', err);
     }
   };
 
@@ -557,8 +670,6 @@ function BankAccountsInner() {
       const matched_label = `${invNumber(inv) || '—'} · ${invParty(inv) || '—'}`.trim();
       const payload = { matched_type, matched_id: inv.id, matched_label, post_journal: true, confidence: score ?? null };
       if (txn.matched_type) {
-        // Same transaction, changing to a different record — atomic edit-match:
-        // reverses the previous mapping and applies the new one in one call.
         await api.post(`/bank-transactions/${txn.id}/edit-match`, payload);
         toast.success('Match updated · ledger updated');
       } else {
@@ -567,6 +678,9 @@ function BankAccountsInner() {
       }
       setMatchDialog(null);
       await fetchTransactions(selected.id);
+
+      // Trigger auto matching for similar items
+      await checkAndAutoMatchSimilar(txn, inv, 'invoice');
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to match');
     }
@@ -589,6 +703,9 @@ function BankAccountsInner() {
       }
       setMatchDialog(null);
       await fetchTransactions(selected.id);
+
+      // Trigger auto matching for similar items
+      await checkAndAutoMatchSimilar(txn, acct, 'ledger');
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to match');
     }
