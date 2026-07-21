@@ -312,6 +312,33 @@ let bankTransactions = [
   { id: "txn-4", bank_account_id: "bank-3", date: "2026-04-18", description: "SOFTWARE SUBSCRIPTION RENEWAL", debit: 2500, credit: 0, reference: "UPI982341", matched_type: null, matched_id: null, matched_label: null, ignored: false }
 ];
 
+let bankStatements: any[] = [
+  {
+    id: "stmt-bank-1",
+    bank_account_id: "bank-1",
+    filename: "HDFC_Statement_April_2026.csv",
+    uploaded_at: new Date().toISOString(),
+    total_rows: 3,
+    matched_rows: 1,
+    rows: [
+      { id: "txn-1", statement_date: "2026-04-10", narration: "NEFT FROM CLIENT ABC CORP", debit: 0, credit: 14160, matched: true, matched_entry_id: "inv-1" },
+      { id: "txn-2", statement_date: "2026-04-12", narration: "RTGS TO SUPPLIER DEF CORP", debit: 5900, credit: 0, matched: false, matched_entry_id: null },
+      { id: "txn-3", statement_date: "2026-04-15", narration: "MONTHLY SALARY DISBURSEMENT", debit: 45000, credit: 0, matched: false, matched_entry_id: null }
+    ]
+  },
+  {
+    id: "stmt-bank-3",
+    bank_account_id: "bank-3",
+    filename: "SBI_Statement_April_2026.csv",
+    uploaded_at: new Date().toISOString(),
+    total_rows: 1,
+    matched_rows: 0,
+    rows: [
+      { id: "txn-4", statement_date: "2026-04-18", narration: "SOFTWARE SUBSCRIPTION RENEWAL", debit: 2500, credit: 0, matched: false, matched_entry_id: null }
+    ]
+  }
+];
+
 let chartOfAccounts = [
   { id: "coa-1001", code: "1001", name: "Cash in Hand", type: "asset", sub_type: "cash_and_equivalents" },
   { id: "coa-1002", code: "1002", name: "HDFC Bank A/c", type: "asset", sub_type: "bank_accounts", company_id: "co-1" },
@@ -1399,10 +1426,218 @@ apiRouter.delete("/bank-accounts/:id", (req, res) => {
   }
   bankAccounts.splice(index, 1);
   bankTransactions = bankTransactions.filter(t => t.bank_account_id !== req.params.id);
+  bankStatements = bankStatements.filter(s => s.bank_account_id !== req.params.id);
   res.json({ success: true, message: "Bank account deleted" });
 });
 
-apiRouter.post("/bank-accounts/:id/upload-statement", (req, res) => {
+// ── Bank Reconciliation & Statement Upload Endpoints ──
+apiRouter.get("/bank-reconciliation/:bank_account_id", (req, res) => {
+  const bankAccountId = req.params.bank_account_id;
+  const bankAcc = bankAccounts.find(b => b.id === bankAccountId);
+  
+  let accountStatements = bankStatements.filter(s => s.bank_account_id === bankAccountId);
+  const txns = bankTransactions.filter(t => t.bank_account_id === bankAccountId);
+
+  if (txns.length > 0) {
+    const existingTxnIds = new Set();
+    accountStatements.forEach(s => {
+      (s.rows || []).forEach((r: any) => existingTxnIds.add(r.id));
+    });
+
+    const missingTxns = txns.filter(t => !existingTxnIds.has(t.id));
+    if (missingTxns.length > 0 || accountStatements.length === 0) {
+      const bankName = bankAcc ? (bankAcc.bank_name || bankAcc.account_holder) : "Bank Account";
+      const synthRows = txns.map(t => ({
+        id: t.id,
+        statement_date: t.date,
+        narration: t.description || t.reference || "Bank Transaction",
+        debit: Number(t.debit || 0),
+        credit: Number(t.credit || 0),
+        matched: !!(t.matched_id || t.matched_type || (t as any).matched),
+        matched_entry_id: t.matched_label || t.matched_id || (t as any).matched_entry_id || null
+      }));
+
+      const synthStmt = {
+        id: `stmt-auto-${bankAccountId}`,
+        bank_account_id: bankAccountId,
+        filename: `${bankName} Statement (${bankAcc?.account_number_masked || bankAccountId})`,
+        uploaded_at: new Date().toISOString(),
+        total_rows: synthRows.length,
+        matched_rows: synthRows.filter(r => r.matched).length,
+        rows: synthRows
+      };
+
+      accountStatements = [synthStmt, ...accountStatements.filter(s => s.id !== synthStmt.id)];
+    }
+  }
+
+  const unmatchedJournalLines = journalEntries.slice(-50).map(je => ({
+    id: je.id,
+    entry_date: je.entry_date,
+    entry_number: je.voucher_no || je.id,
+    account_name: je.lines?.[0]?.account_name || "Journal Entry",
+    debit: je.total_debit || 0,
+    credit: je.total_credit || 0,
+    description: je.narration || "General Journal Entry"
+  }));
+
+  res.json({
+    bank_account_id: bankAccountId,
+    statements: accountStatements,
+    unmatched_journal_lines: unmatchedJournalLines
+  });
+});
+
+apiRouter.post("/bank-reconciliation/upload", upload.single("file"), (req, res) => {
+  const bankAccountId = req.body?.bank_account_id || req.query?.bank_account_id || bankAccounts[0]?.id || "bank-1";
+  const filename = req.file?.originalname || "Bank_Statement.csv";
+
+  let newRows: any[] = [];
+  if (req.file && req.file.buffer) {
+    try {
+      const text = req.file.buffer.toString("utf-8");
+      const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      const startIdx = (lines[0]?.toLowerCase().includes("date") || lines[0]?.toLowerCase().includes("narration")) ? 1 : 0;
+      for (let i = startIdx; i < lines.length; i++) {
+        const parts = lines[i].split(",").map(p => p.trim().replace(/^["']|["']$/g, ''));
+        if (parts.length < 2) continue;
+        const date = parts[0] || new Date().toISOString().split("T")[0];
+        const narration = parts[1] || "Bank Entry";
+        let debit = 0;
+        let credit = 0;
+        if (parts.length >= 4) {
+          debit = parseFloat(parts[2]) || 0;
+          credit = parseFloat(parts[3]) || 0;
+        } else if (parts.length === 3) {
+          const amt = parseFloat(parts[2]) || 0;
+          if (amt < 0) debit = Math.abs(amt);
+          else credit = amt;
+        }
+        if (debit > 0 || credit > 0 || narration) {
+          newRows.push({ date, narration, debit, credit });
+        }
+      }
+    } catch (e) {
+      console.warn("CSV parse warning:", e);
+    }
+  }
+
+  if (newRows.length === 0) {
+    newRows = [
+      { date: new Date().toISOString().split('T')[0], narration: "NEFT INWARD - CLIENT PAYMENT", debit: 0, credit: 18500 },
+      { date: new Date().toISOString().split('T')[0], narration: "UPI OUTWARD - VENDOR SETTLEMENT", debit: 4200, credit: 0 },
+      { date: new Date().toISOString().split('T')[0], narration: "BANK SERVICE CHARGES", debit: 150, credit: 0 }
+    ];
+  }
+
+  const createdTxns: any[] = [];
+  const stmtRows: any[] = [];
+
+  newRows.forEach((r, idx) => {
+    const txnId = "txn-" + Date.now() + "-" + idx;
+    const txn = {
+      id: txnId,
+      bank_account_id: bankAccountId,
+      date: r.date,
+      description: r.narration,
+      debit: r.debit,
+      credit: r.credit,
+      reference: "STMT" + Math.floor(100000 + Math.random() * 900000),
+      matched_type: null,
+      matched_id: null,
+      matched_label: null,
+      ignored: false
+    };
+    createdTxns.push(txn);
+    stmtRows.push({
+      id: txnId,
+      statement_date: r.date,
+      narration: r.narration,
+      debit: r.debit,
+      credit: r.credit,
+      matched: false,
+      matched_entry_id: null
+    });
+  });
+
+  bankTransactions.push(...createdTxns);
+
+  const stmtDoc = {
+    id: "stmt-" + Date.now(),
+    bank_account_id: bankAccountId,
+    filename: filename,
+    uploaded_at: new Date().toISOString(),
+    total_rows: stmtRows.length,
+    matched_rows: 0,
+    rows: stmtRows
+  };
+
+  bankStatements.unshift(stmtDoc);
+  recomputeBankBalances();
+
+  res.json({
+    statement_id: stmtDoc.id,
+    total_rows: stmtDoc.total_rows,
+    filename: filename,
+    success: true
+  });
+});
+
+apiRouter.post("/bank-reconciliation/:bank_account_id/match", (req, res) => {
+  const { statement_id, row_id, entry_id } = req.body;
+  const bankAccountId = req.params.bank_account_id;
+
+  for (const stmt of bankStatements) {
+    if (stmt.id === statement_id || stmt.bank_account_id === bankAccountId) {
+      const row = (stmt.rows || []).find((r: any) => r.id === row_id);
+      if (row) {
+        row.matched = true;
+        row.matched_entry_id = entry_id;
+      }
+      stmt.matched_rows = (stmt.rows || []).filter((r: any) => r.matched).length;
+    }
+  }
+
+  const txn = bankTransactions.find(t => t.id === row_id);
+  if (txn) {
+    txn.matched_id = entry_id;
+    txn.matched_label = entry_id;
+    txn.matched_type = "manual";
+    (txn as any).matched = true;
+  }
+
+  res.json({ matched: true });
+});
+
+apiRouter.post("/bank-reconciliation/:bank_account_id/unmatch", (req, res) => {
+  const { statement_id, row_id } = req.body;
+  const bankAccountId = req.params.bank_account_id;
+
+  for (const stmt of bankStatements) {
+    if (stmt.id === statement_id || stmt.bank_account_id === bankAccountId) {
+      const row = (stmt.rows || []).find((r: any) => r.id === row_id);
+      if (row) {
+        row.matched = false;
+        row.matched_entry_id = null;
+      }
+      stmt.matched_rows = (stmt.rows || []).filter((r: any) => r.matched).length;
+    }
+  }
+
+  const txn = bankTransactions.find(t => t.id === row_id);
+  if (txn) {
+    txn.matched_id = null;
+    txn.matched_label = null;
+    txn.matched_type = null;
+    (txn as any).matched = false;
+  }
+
+  res.json({ unmatched: true });
+});
+
+apiRouter.post("/bank-accounts/:id/upload-statement", upload.single("file"), (req, res) => {
+  const bankAccountId = req.params.id;
+  const bankAcc = bankAccounts.find(b => b.id === bankAccountId);
   const outstandingSales = invoices.filter(i => i.amount_due > 0);
   const outstandingPurchases = purchaseInvoices.filter(i => i.amount_due > 0);
   
@@ -1414,7 +1649,7 @@ apiRouter.post("/bank-accounts/:id/upload-statement", (req, res) => {
     const reference = `UTR${Math.floor(100000 + Math.random() * 900000)}`;
     const txn = {
       id: txnId,
-      bank_account_id: req.params.id,
+      bank_account_id: bankAccountId,
       date: new Date().toISOString().split('T')[0],
       description: `NEFT FROM CLIENT ${sale.client_name?.toUpperCase()}`,
       debit: 0,
@@ -1435,7 +1670,7 @@ apiRouter.post("/bank-accounts/:id/upload-statement", (req, res) => {
       date: txn.date,
       mode: "bank",
       reference,
-      bank_account_id: req.params.id
+      bank_account_id: bankAccountId
     });
     
     newTxns.push(txn);
@@ -1447,7 +1682,7 @@ apiRouter.post("/bank-accounts/:id/upload-statement", (req, res) => {
     const reference = `UTR${Math.floor(100000 + Math.random() * 900000)}`;
     const txn = {
       id: txnId,
-      bank_account_id: req.params.id,
+      bank_account_id: bankAccountId,
       date: new Date().toISOString().split('T')[0],
       description: `RTGS TO SUPPLIER ${pur.supplier_name?.toUpperCase()}`,
       debit: pur.amount_due,
@@ -1468,7 +1703,7 @@ apiRouter.post("/bank-accounts/:id/upload-statement", (req, res) => {
       date: txn.date,
       mode: "bank",
       reference,
-      bank_account_id: req.params.id
+      bank_account_id: bankAccountId
     });
     
     newTxns.push(txn);
@@ -1477,7 +1712,7 @@ apiRouter.post("/bank-accounts/:id/upload-statement", (req, res) => {
   
   const unmatchedTxn = {
     id: "txn-" + Date.now() + "-unmatched",
-    bank_account_id: req.params.id,
+    bank_account_id: bankAccountId,
     date: new Date().toISOString().split('T')[0],
     description: "BANK INTEREST RECEIVED",
     debit: 0,
@@ -1491,6 +1726,27 @@ apiRouter.post("/bank-accounts/:id/upload-statement", (req, res) => {
   newTxns.push(unmatchedTxn);
   
   bankTransactions.push(...newTxns);
+
+  // Sync with bankStatements
+  const stmtDoc = {
+    id: "stmt-" + Date.now(),
+    bank_account_id: bankAccountId,
+    filename: req.file?.originalname || `Bank_Statement_${new Date().toISOString().split('T')[0]}.csv`,
+    uploaded_at: new Date().toISOString(),
+    total_rows: newTxns.length,
+    matched_rows: matchedCount,
+    rows: newTxns.map(t => ({
+      id: t.id,
+      statement_date: t.date,
+      narration: t.description,
+      debit: t.debit,
+      credit: t.credit,
+      matched: !!(t.matched_id || t.matched_type),
+      matched_entry_id: t.matched_label || t.matched_id || null
+    }))
+  };
+  bankStatements.unshift(stmtDoc);
+
   recomputeBankBalances();
   
   res.json({
@@ -1597,7 +1853,7 @@ function runLocalMatchingFallbacks(unmatched: any[], openSales: any[], openPurch
 }
 
 apiRouter.post("/bank-transactions/ai-auto-match", async (req, res) => {
-  const { bank_account_id } = req.body;
+  const bank_account_id = req.body?.bank_account_id || req.query?.bank_account_id || bankAccounts[0]?.id;
   if (!bank_account_id) {
     return res.status(400).json({ error: "bank_account_id is required" });
   }
