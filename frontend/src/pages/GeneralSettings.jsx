@@ -12,7 +12,7 @@ import {
   Save, Loader2, CheckCircle2, Mail, Shield,
   Settings, Clock, Hash, Star, Trophy, TrendingUp,
   CheckSquare, Timer, Zap, Users as UsersIcon, Link2,
-  HardDrive, Plug, ChevronRight,
+  HardDrive, Plug, ChevronRight, Building2,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -503,6 +503,17 @@ export default function GeneralSettings() {
       {/* ── CLIENTS TAB ──────────────────────────────────────────────────── */}
       {activeTab === "clients" && (
         <AssignedClientsPanel isDark={isDark} />
+      )}
+
+      {/* ── INTEGRATIONS TAB ──────────────────────────────────────────────── */}
+      {activeTab === "integrations" && (
+        <div className="flex flex-col sm:flex-row gap-4">
+          <IntegrationSidebar active={intSection} onChange={setIntSection} isDark={isDark} />
+          <div className="flex-1 min-w-0">
+            {intSection === "drives" && <DriveIntegrations isDark={isDark} />}
+            {intSection === "email" && <EmailIntegrationsPlaceholder isDark={isDark} />}
+          </div>
+        </div>
       )}
 
       {activeTab === "licensing" && user?.role === "admin" && (
