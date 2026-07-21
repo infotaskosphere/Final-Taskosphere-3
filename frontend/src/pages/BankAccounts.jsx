@@ -230,7 +230,6 @@ function BankAccountsInner() {
     fetchAccounts();
     api.get('/companies/list').then(r => setCompanies(r.data || [])).catch(() => {});
   }, []);
-  useEffect(() => { if (selected) fetchTransactions(selected.id); }, [selected?.id]);
 
   const stats = useMemo(() => {
     const totalBalance = accounts.reduce((s, a) => s + Number(a.current_balance || 0), 0);
@@ -276,10 +275,15 @@ function BankAccountsInner() {
 
     unmatched.forEach(t => {
       const suggestions = suggestionsFor(t);
-      if (suggestions.length) {
+      if (suggestions.length && suggestions[0].score >= 80) {
         totalScore += suggestions[0].score;
         counted++;
-        if (suggestions[0].score >= 80) {
+        highConfCount++;
+      } else {
+        const desc = (t.description || '').toLowerCase();
+        if (desc.includes('salary') || desc.includes('wages') || desc.includes('payroll') || desc.includes('rent') || desc.includes('lease') || desc.includes('interest') || desc.includes('audit') || desc.includes('professional') || desc.includes('office') || desc.includes('stationery')) {
+          totalScore += 85;
+          counted++;
           highConfCount++;
         }
       }
@@ -290,41 +294,31 @@ function BankAccountsInner() {
   }, [transactions, invoiceCache]);
 
   const autoMatchAllHighConfidence = async () => {
+    if (!selected) return;
     const unmatched = transactions.filter(t => !t.matched_type && !t.ignored);
-    const toMatch = [];
-    for (const t of unmatched) {
-      const suggestions = suggestionsFor(t);
-      if (suggestions.length && suggestions[0].score >= 80) {
-        toMatch.push({ txn: t, inv: suggestions[0].inv, score: suggestions[0].score });
-      }
-    }
-    if (!toMatch.length) {
-      toast.info('No unmatched transactions found with high confidence (>= 80%)');
+    if (!unmatched.length) {
+      toast.info('No unmatched transactions found.');
       return;
     }
-    if (!window.confirm(`Found ${toMatch.length} transactions with high-confidence matches (>= 80%). Proceed with auto-matching?`)) return;
+    
+    if (!window.confirm(`Found ${unmatched.length} unmatched transactions. Run advanced AI Auto-Matching now? This will map transactions to matching invoices and ledger accounts.`)) {
+      return;
+    }
 
     setIsAutoMatching(true);
-    let successCount = 0;
     try {
-      for (const item of toMatch) {
-        const isDebit = Number(item.txn.debit || 0) > 0;
-        const matched_type = isDebit ? 'purchase' : 'sale';
-        const matched_label = `${invNumber(item.inv) || '—'} · ${invParty(item.inv) || '—'}`.trim();
-        const payload = {
-          matched_type,
-          matched_id: item.inv.id,
-          matched_label,
-          post_journal: true,
-          confidence: item.score
-        };
-        await api.post(`/bank-transactions/${item.txn.id}/match`, payload);
-        successCount++;
+      const { data } = await api.post('/bank-transactions/ai-auto-match', {
+        bank_account_id: selected.id
+      });
+      if (data.success) {
+        toast.success(data.message || 'Successfully auto-matched transactions!');
+        await fetchAccounts();
+        await fetchTransactions(selected.id);
+      } else {
+        toast.error(data.error || 'Error during AI auto-matching');
       }
-      toast.success(`Successfully auto-matched ${successCount} transactions!`);
-      await fetchTransactions(selected.id);
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Error during auto-matching');
+      toast.error(err.response?.data?.error || err.response?.data?.detail || 'Error during AI auto-matching');
     } finally {
       setIsAutoMatching(false);
     }
@@ -516,6 +510,14 @@ function BankAccountsInner() {
     } catch { /* silent — user may not have COA permission */ }
     finally { setLedgerLoading(false); }
   };
+
+  useEffect(() => {
+    if (selected) {
+      fetchTransactions(selected.id);
+      loadInvoices(true);
+      loadLedgers(true);
+    }
+  }, [selected?.id]);
 
   const openMatch = async (txn, mode) => {
     setInvoiceSearch('');
@@ -1022,7 +1024,7 @@ function BankAccountsInner() {
                       
                       <Button
                         onClick={autoMatchAllHighConfidence}
-                        disabled={isAutoMatching || copilotStats.highConfCount === 0}
+                        disabled={isAutoMatching || transactions.filter(t => !t.matched_type && !t.ignored).length === 0}
                         className="rounded-xl text-white font-bold text-xs shadow-sm shadow-indigo-500/20 px-4 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 border-none h-9 gap-1.5"
                       >
                         {isAutoMatching ? (
