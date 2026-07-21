@@ -29,6 +29,12 @@ from backend.models import User
 router = APIRouter(tags=["Accounting"])
 
 
+async def _empty_coro(val):
+    """Trivial coroutine that returns a constant — used as a no-op arm in
+    asyncio.gather() calls so both branches always produce an awaitable."""
+    return val
+
+
 def _name_match_query(name: str) -> dict:
     """Case/whitespace-insensitive exact-name match with support for corporate suffix variations
     like Pvt Ltd, Private Limited, Ltd, and Limited. This prevents spelling variants of corporate
@@ -768,33 +774,95 @@ async def trial_balance(
 
     acct_q = {} if all_companies else {"company_id": company_id}
     accounts = await db.chart_of_accounts.find(acct_q, {"_id": 0}).sort("code", 1).to_list(20000)
-    q: dict = {} if all_companies else {"company_id": company_id}
-    # Trial Balance honors both a snapshot cutoff (as_of) and an explicit
-    # from/to range so the "Custom range" filter on the Accounting Reports
-    # page actually narrows the report to that window instead of always
-    # showing everything up to the end date.
-    upper = date_to or as_of
-    if date_from or upper:
-        q["entry_date"] = {}
-        if date_from:
-            q["entry_date"]["$gte"] = date_from
-        if upper:
-            q["entry_date"]["$lte"] = upper
-    lines = await db.journal_lines.find(q, {"_id": 0}).to_list(200000)
-    totals: dict = {}
-    for l in lines:
-        t = totals.setdefault(l["account_id"], {"debit": 0.0, "credit": 0.0})
-        t["debit"] += l["debit"]
-        t["credit"] += l["credit"]
 
-    # When aggregating across companies, the same account *code* (e.g. "1000
-    # Cash in Hand") exists as a different account_id in each company's book,
-    # so roll totals up by code rather than by id.
+    # ── Split accounts into Balance-Sheet vs P&L ─────────────────────────────
+    # Balance-sheet accounts (asset, liability, equity) carry forward across
+    # periods.  Their Trial Balance figure must be the CUMULATIVE balance up
+    # to date_to — applying date_from to them would exclude old outstanding
+    # invoices / bank entries from before the period start, making AR and Bank
+    # look far too low compared with the Sales and Bank pages.
+    #
+    # P&L accounts (income, expense) correctly show only the selected period's
+    # activity, so date_from applies to them as usual.
+    BS_TYPES = {"asset", "liability", "equity"}
+    PL_TYPES = {"income", "expense"}
+
+    # Build by_key early so we can derive account-ID sets per category.
     by_key: dict = {}
     for a in accounts:
         key = a["code"] if all_companies else a["id"]
         entry = by_key.setdefault(key, {"code": a["code"], "name": a["name"], "type": a["type"], "account_ids": []})
         entry["account_ids"].append(a["id"])
+
+    bs_ids = [aid for e in by_key.values() if e["type"] in BS_TYPES for aid in e["account_ids"]]
+    pl_ids = [aid for e in by_key.values() if e["type"] in PL_TYPES for aid in e["account_ids"]]
+
+    upper = date_to or as_of
+    base_q: dict = {} if all_companies else {"company_id": company_id}
+
+    # Balance-sheet query: all history up to date_to (no lower bound).
+    bs_q = dict(base_q)
+    if upper:
+        bs_q["entry_date"] = {"$lte": upper}
+    if bs_ids:
+        bs_q["account_id"] = {"$in": bs_ids}
+
+    # P&L query: only the selected period.
+    pl_q = dict(base_q)
+    if date_from or upper:
+        pl_q["entry_date"] = {}
+        if date_from:
+            pl_q["entry_date"]["$gte"] = date_from
+        if upper:
+            pl_q["entry_date"]["$lte"] = upper
+    if pl_ids:
+        pl_q["account_id"] = {"$in": pl_ids}
+
+    # Fire both queries in parallel to keep response time low.
+    bs_lines, pl_lines = await asyncio.gather(
+        db.journal_lines.find(bs_q, {"_id": 0}).to_list(200000) if bs_ids else _empty_coro([]),
+        db.journal_lines.find(pl_q, {"_id": 0}).to_list(200000) if pl_ids else _empty_coro([]),
+    )
+
+    totals: dict = {}
+    for l in bs_lines + pl_lines:
+        t = totals.setdefault(l["account_id"], {"debit": 0.0, "credit": 0.0})
+        t["debit"] += l["debit"]
+        t["credit"] += l["credit"]
+
+    # ── Inject bank opening balances that were never posted as journal entries ─
+    # When a bank account is configured with an opening_balance in db.bank_accounts,
+    # that amount lives only in the bank_accounts document — it is NOT automatically
+    # posted to journal_lines unless the user explicitly runs "Add Opening Balance".
+    # Without this injection the Trial Balance bank figure is lower than the bank
+    # page balance by exactly the opening balance amount.
+    ob_bank_q = {} if all_companies else {"company_id": company_id}
+    bank_acct_docs = await db.bank_accounts.find(ob_bank_q, {"_id": 0, "company_id": 1, "opening_balance": 1}).to_list(500)
+    for ba in bank_acct_docs:
+        ob = float(ba.get("opening_balance") or 0)
+        if ob <= 0:
+            continue
+        ba_cid = ba.get("company_id") or ""
+        # Skip if a proper opening-balance journal entry already exists for this
+        # company — that means the user clicked "Add Opening Balance" and the
+        # amount is already in journal_lines; injecting again would double-count.
+        ob_je = await db.journal_entries.find_one(
+            {"company_id": ba_cid, "source": "opening_balance"}, {"_id": 0, "id": 1}
+        )
+        if ob_je:
+            continue
+        bank_lid = await get_default_account_id(ba_cid, "1010")
+        equity_lid = await get_default_account_id(ba_cid, "3000")
+        if bank_lid:
+            t = totals.setdefault(bank_lid, {"debit": 0.0, "credit": 0.0})
+            t["debit"] += ob
+        if equity_lid:
+            t2 = totals.setdefault(equity_lid, {"debit": 0.0, "credit": 0.0})
+            t2["credit"] += ob
+
+    # When aggregating across companies, the same account *code* (e.g. "1000
+    # Cash in Hand") exists as a different account_id in each company's book,
+    # so roll totals up by code rather than by id.
 
     rows, sum_debit, sum_credit = [], 0.0, 0.0
     for key, entry in sorted(by_key.items(), key=lambda kv: kv[1]["code"]):
