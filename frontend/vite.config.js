@@ -57,16 +57,16 @@ export default defineConfig({
         // (shown below) which is safer than the object form because Rollup
         // handles internal dependencies between chunks correctly:
         //
-        // manualChunks(id) {
-        //   if (id.includes('node_modules')) {
-        //     if (id.includes('framer-motion'))   return 'vendor-framer';
-        //     if (id.includes('lucide-react'))     return 'vendor-icons';
-        //     if (id.includes('@radix-ui'))        return 'vendor-radix';
-        //     if (id.includes('recharts') || id.includes('chart.js')) return 'vendor-charts';
-        //     if (id.includes('@hello-pangea'))    return 'vendor-dnd';
-        //     return 'vendor';   // everything else in one vendor chunk
-        //   }
-        // },
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('framer-motion'))   return 'vendor-framer';
+            if (id.includes('lucide-react'))     return 'vendor-icons';
+            if (id.includes('@radix-ui'))        return 'vendor-radix';
+            if (id.includes('recharts') || id.includes('chart.js')) return 'vendor-charts';
+            if (id.includes('@hello-pangea'))    return 'vendor-dnd';
+            return 'vendor';   // everything else in one vendor chunk
+          }
+        },
       },
     },
   },
