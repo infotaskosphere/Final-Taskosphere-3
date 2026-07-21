@@ -132,6 +132,14 @@ DEFAULT_ACCOUNTS = [
 
 _ensured_coa_companies: set = set()
 
+# Process-level cache for get_default_account_id.
+# Keys: (company_id, code) → account_id string.
+# Chart-of-accounts IDs are stable once seeded; they never change during a
+# server lifetime, so this cache never goes stale.  A server restart clears
+# it automatically and any new accounts are re-seeded by
+# ensure_default_chart_of_accounts on first use.
+_acct_id_cache: dict = {}
+
 
 async def ensure_default_chart_of_accounts(company_id: str, created_by: str):
     """Insert any DEFAULT_ACCOUNTS codes this company doesn't have yet.
@@ -292,9 +300,15 @@ async def try_auto_post(company_id: str, entry_date: str, narration: str, lines:
 
 
 async def get_default_account_id(company_id: str, code: str) -> Optional[str]:
+    cache_key = (company_id, code)
+    if cache_key in _acct_id_cache:
+        return _acct_id_cache[cache_key]
     await ensure_default_chart_of_accounts(company_id, "system")
     acct = await db.chart_of_accounts.find_one({"company_id": company_id, "code": code}, {"_id": 0, "id": 1})
-    return acct["id"] if acct else None
+    result = acct["id"] if acct else None
+    if result:
+        _acct_id_cache[cache_key] = result
+    return result
 
 
 async def _all_book_ids() -> List[str]:
@@ -404,22 +418,29 @@ async def list_journal_entries(
     payment_ids = {e["source_id"] for e in entries if e.get("source") == "payment" and e.get("source_id")}
     purchase_payment_ids = {e["source_id"] for e in entries if e.get("source") == "purchase_payment" and e.get("source_id")}
 
-    invoices_by_id, bills_by_id, payments_by_id, purchase_payments_by_id = {}, {}, {}, {}
-    if sale_ids:
-        invoices_by_id = {d["id"]: d for d in await db.invoices.find({"id": {"$in": list(sale_ids)}}, {"_id": 0}).to_list(len(sale_ids))}
-    if purchase_ids:
-        bills_by_id = {d["id"]: d for d in await db.purchase_invoices.find({"id": {"$in": list(purchase_ids)}}, {"_id": 0}).to_list(len(purchase_ids))}
-    if payment_ids:
-        payments_by_id = {d["id"]: d for d in await db.payments.find({"id": {"$in": list(payment_ids)}}, {"_id": 0}).to_list(len(payment_ids))}
-    if purchase_payment_ids:
-        purchase_payments_by_id = {d["id"]: d for d in await db.purchase_payments.find({"id": {"$in": list(purchase_payment_ids)}}, {"_id": 0}).to_list(len(purchase_payment_ids))}
+    # PERF: fire all four enrichment lookups concurrently instead of serially.
+    # Each awaits a round-trip to MongoDB; doing them in parallel cuts the
+    # enrichment phase from ~4× RTT to ~1× RTT.
+    async def _fetch_if(collection, ids, projection):
+        if not ids:
+            return {}
+        docs = await collection.find({"id": {"$in": list(ids)}}, {"_id": 0, **projection}).to_list(len(ids))
+        return {d["id"]: d for d in docs}
 
-    # Receipts/payments often only carry an invoice_id/purchase_invoice_id —
-    # resolve those to get the invoice/bill number and party name too.
+    invoices_by_id, bills_by_id, payments_by_id, purchase_payments_by_id = await asyncio.gather(
+        _fetch_if(db.invoices,          sale_ids,             {"id": 1, "client_name": 1, "invoice_no": 1, "reference_no": 1}),
+        _fetch_if(db.purchase_invoices, purchase_ids,         {"id": 1, "supplier_name": 1, "invoice_no": 1}),
+        _fetch_if(db.payments,          payment_ids,          {"id": 1, "invoice_id": 1, "client_name": 1, "payment_mode": 1, "reference_no": 1, "bank_account_id": 1}),
+        _fetch_if(db.purchase_payments, purchase_payment_ids, {"id": 1, "purchase_invoice_id": 1, "supplier_name": 1, "payment_mode": 1, "reference_no": 1}),
+    )
+
+    # Resolve linked invoice/bill numbers for payment records — also parallel.
     linked_inv_ids = {p["invoice_id"] for p in payments_by_id.values() if p.get("invoice_id")}
-    linked_inv_by_id = {d["id"]: d for d in await db.invoices.find({"id": {"$in": list(linked_inv_ids)}}, {"_id": 0, "id": 1, "invoice_no": 1, "client_name": 1}).to_list(len(linked_inv_ids))} if linked_inv_ids else {}
     linked_bill_ids = {p["purchase_invoice_id"] for p in purchase_payments_by_id.values() if p.get("purchase_invoice_id")}
-    linked_bill_by_id = {d["id"]: d for d in await db.purchase_invoices.find({"id": {"$in": list(linked_bill_ids)}}, {"_id": 0, "id": 1, "invoice_no": 1, "supplier_name": 1}).to_list(len(linked_bill_ids))} if linked_bill_ids else {}
+    linked_inv_by_id, linked_bill_by_id = await asyncio.gather(
+        _fetch_if(db.invoices,          linked_inv_ids,  {"id": 1, "invoice_no": 1, "client_name": 1}),
+        _fetch_if(db.purchase_invoices, linked_bill_ids, {"id": 1, "invoice_no": 1, "supplier_name": 1}),
+    )
 
     for e in entries:
         e["lines"] = by_entry.get(e["id"], [])
