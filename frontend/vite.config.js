@@ -42,24 +42,6 @@ export default defineConfig({
           }
           return 'assets/[name]-[hash][extname]';
         },
-        manualChunks(id) {
-          if (id.includes('node_modules')) {
-            if (
-              id.includes('react') ||
-              id.includes('react-dom') ||
-              id.includes('@radix-ui') ||
-              id.includes('scheduler') ||
-              id.includes('jsx-runtime')
-            ) {
-              return 'vendor-react';
-            }
-            if (id.includes('framer-motion')) return 'vendor-framer';
-            if (id.includes('lucide-react')) return 'vendor-icons';
-            if (id.includes('recharts') || id.includes('chart.js')) return 'vendor-charts';
-            if (id.includes('jspdf') || id.includes('html2canvas') || id.includes('xlsx')) return 'vendor-docs';
-            return 'vendor';
-          }
-        },
       },
     },
   },
