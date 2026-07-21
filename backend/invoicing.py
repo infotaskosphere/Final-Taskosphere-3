@@ -5088,18 +5088,25 @@ async def _reconcile_and_sync_all_sales_and_payments_impl(company_id: str):
 
             if bank_settled:
                 # Invoice was settled through bank statement reconciliation.
-                # Clean up any spurious auto-generated payments that previous
-                # reconcile runs may have already created for this invoice.
-                spurious = [p for p in existing_payments if p.get("auto_generated")]
-                for sp in spurious:
+                # The bank-match journal (Dr Bank 1010 / Cr AR 1100) posted by
+                # _auto_post_for_match is the single authoritative posting for
+                # this receipt.  Any payment journal entries that also exist for
+                # payments linked to this invoice — whether auto-generated or
+                # manually entered — would post a second Dr Bank / Cr AR and
+                # double-count both Bank and AR.  Wipe their journal entries now
+                # (keeping the payment RECORDS themselves so users can still see
+                # the payment history), and delete the auto-generated payment
+                # records too since they were only placeholders.
+                for p in existing_payments:
                     _je_rows = await db.journal_entries.find(
-                        {"source": "payment", "source_id": sp["id"]}, {"_id": 0, "id": 1}
+                        {"source": "payment", "source_id": p["id"]}, {"_id": 0, "id": 1}
                     ).to_list(20)
                     if _je_rows:
                         _je_ids = [r["id"] for r in _je_rows]
                         await db.journal_lines.delete_many({"entry_id": {"$in": _je_ids}})
                         await db.journal_entries.delete_many({"id": {"$in": _je_ids}})
-                    await db.payments.delete_one({"id": sp["id"]})
+                    if p.get("auto_generated"):
+                        await db.payments.delete_one({"id": p["id"]})
                 # Treat the invoice as fully paid — the bank match journal is the
                 # source of truth; no extra payment record is needed.
                 recorded_total = target_paid
@@ -5185,6 +5192,12 @@ async def _reconcile_and_sync_all_sales_and_payments_impl(company_id: str):
         # Exclude payments linked to cancelled invoices
         cancelled_invoice_ids = {inv["id"] for inv in invoices if inv.get("status") == "cancelled"}
         payments = [p for p in payments if p.get("invoice_id") not in cancelled_invoice_ids]
+
+        # Build the set of invoice IDs settled via bank reconciliation.
+        # Their Dr Bank / Cr AR posting is owned by the bank-match journal
+        # (source="bank"); any payment journal (source="payment") for the same
+        # invoice is a duplicate that must be suppressed, not re-synced.
+        bank_settled_invoice_ids = {inv["id"] for inv in active_invoices if inv.get("paid_bank_txn_id")}
                     
         payment_ids = {p["id"] for p in payments}
         
@@ -5207,9 +5220,22 @@ async def _reconcile_and_sync_all_sales_and_payments_impl(company_id: str):
         # "Receipt from Client for Invoice Unknown" even though the payment
         # itself has a real client_name (common for imported/bank-matched
         # receipts that were never linked to an invoice).
+        #
+        # CRITICAL: skip (and erase) any payment journal whose linked invoice is
+        # bank-settled.  The bank-match journal (Dr Bank / Cr AR, source="bank")
+        # is the single authoritative posting for those receipts.  Re-syncing
+        # payment journals here would re-introduce the duplicate Dr Bank / Cr AR
+        # on every reconcile run, inflating Bank and driving AR negative.
         for p in payments:
             p_id = p["id"]
             pe = pay_entry_by_source_id.get(p_id)
+            if p.get("invoice_id") in bank_settled_invoice_ids:
+                # Payment belongs to a bank-reconciled invoice — its journal
+                # entry (if any survived) must be removed, not re-posted.
+                if pe:
+                    await db.journal_lines.delete_many({"entry_id": pe["id"]})
+                    await db.journal_entries.delete_one({"id": pe["id"]})
+                continue
             stale_narration = pe and "for Invoice Unknown" in (pe.get("narration") or "") and (p.get("client_name") or "").strip()
             if not pe or stale_narration or abs(float(pe.get("total_debit", 0)) - float(p.get("amount", 0))) > 0.01:
                 await sync_payment_journal_entry(p_id)
