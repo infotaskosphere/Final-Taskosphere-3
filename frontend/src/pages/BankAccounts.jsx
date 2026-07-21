@@ -258,6 +258,16 @@ function BankAccountsInner() {
     return list;
   }, [transactions, filter, txnSearchText]);
 
+  const suggestionsFor = (txn) => {
+    if (!invoiceCache.length || !txn) return [];
+    const isDebit = Number(txn.debit || 0) > 0;
+    return invoiceCache
+      .filter(i => isDebit ? !!i.isPurchase : !i.isPurchase)
+      .map(inv => ({ inv, score: scoreInvoiceMatch(txn, inv) }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 6);
+  };
+
   const copilotStats = useMemo(() => {
     const unmatched = transactions.filter(t => !t.matched_type && !t.ignored);
     let totalScore = 0;
@@ -819,16 +829,6 @@ function BankAccountsInner() {
       toast.error('Some transactions could not be marked ignored');
       await fetchTransactions(selected.id);
     }
-  };
-
-  const suggestionsFor = (txn) => {
-    if (!invoiceCache.length || !txn) return [];
-    const isDebit = Number(txn.debit || 0) > 0;
-    return invoiceCache
-      .filter(i => isDebit ? !!i.isPurchase : !i.isPurchase)
-      .map(inv => ({ inv, score: scoreInvoiceMatch(txn, inv) }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 6);
   };
 
   const filteredInvoices = useMemo(() => {
