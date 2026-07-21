@@ -1739,69 +1739,26 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                 finally{setDetectingDetailDups(false);}
               };
               const tryAIDetect=async()=>{
-                const clientNames=adapted.map((i,idx)=>({idx,name:i.name,assigned:i.assigned_to_name||'',notes:i.notes||''}));
-                const prompt=`You are a duplicate detection expert for a CA firm's compliance tracker. Analyze these client entries and find duplicates (same company entered twice, name variations, abbreviations, etc). Only include entries that are actual duplicates. Return JSON array of groups: [{item_ids:[idx1,idx2,...],confidence:"high"|"medium",reason:"explanation"}]. If no duplicates, return []. Data:\n${JSON.stringify(clientNames,null,2)}`;
-                // Try Grok
                 try{
-                  const grokRes=await fetch('https://api.x.ai/v1/chat/completions',{
-                    method:'POST',
-                    headers:{'Content-Type':'application/json','Authorization':`Bearer ${process.env.REACT_APP_GROK_API_KEY||''}`},
-                    body:JSON.stringify({model:'grok-beta',messages:[{role:'user',content:prompt}],max_tokens:2000,temperature:0.1}),
-                  });
-                  if(grokRes.ok){
-                    const grokData=await grokRes.json();
-                    const text=grokData.choices?.[0]?.message?.content||'';
-                    const jsonMatch=text.match(/\[[\s\S]*\]/);
-                    if(jsonMatch){
-                      const aiGroups=JSON.parse(jsonMatch[0]);
-                      const mappedGroups=aiGroups.map(g=>({
-                        item_ids:g.item_ids.map(idx=>String(adapted[idx]?.id||idx)),
-                        confidence:g.confidence||'medium',
-                        reason:g.reason||'AI detected similarity',
-                        score:g.confidence==='high'?90:70,
-                        source:'grok',
-                      })).filter(g=>g.item_ids.length>1);
-                      setDetailDupGroups(mappedGroups);
-                      setShowDetailDupDialog(true);
-                      if(!mappedGroups.length)toast.success(`Grok AI: No duplicates found among ${activeItems.length} active clients ✓`);
-                      else toast.info(`Grok AI found ${mappedGroups.length} duplicate group${mappedGroups.length!==1?'s':''}`);
-                      setDetectingDetailDups(false);
-                      return;
-                    }
-                  }
-                }catch(e){console.warn('Grok failed, trying Gemini',e);}
-                // Try Gemini
-                try{
-                  const geminiKey=process.env.REACT_APP_GEMINI_API_KEY||'';
-                  const geminiRes=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,{
-                    method:'POST',
-                    headers:{'Content-Type':'application/json'},
-                    body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.1,maxOutputTokens:2000}}),
-                  });
-                  if(geminiRes.ok){
-                    const geminiData=await geminiRes.json();
-                    const text=geminiData.candidates?.[0]?.content?.parts?.[0]?.text||'';
-                    const jsonMatch=text.match(/\[[\s\S]*\]/);
-                    if(jsonMatch){
-                      const aiGroups=JSON.parse(jsonMatch[0]);
-                      const mappedGroups=aiGroups.map(g=>({
-                        item_ids:g.item_ids.map(idx=>String(adapted[idx]?.id||idx)),
-                        confidence:g.confidence||'medium',
-                        reason:g.reason||'AI detected similarity',
-                        score:g.confidence==='high'?90:70,
-                        source:'gemini',
-                      })).filter(g=>g.item_ids.length>1);
-                      setDetailDupGroups(mappedGroups);
-                      setShowDetailDupDialog(true);
-                      if(!mappedGroups.length)toast.success(`Gemini AI: No duplicates found among ${activeItems.length} active clients ✓`);
-                      else toast.info(`Gemini AI found ${mappedGroups.length} duplicate group${mappedGroups.length!==1?'s':''}`);
-                      setDetectingDetailDups(false);
-                      return;
-                    }
-                  }
-                }catch(e){console.warn('Gemini failed, using local engine',e);}
-                // Final fallback
-                localFallback();
+                  const clientNames=adapted.map((i,idx)=>({idx,name:i.name,assigned:i.assigned_to_name||'',notes:i.notes||''}));
+                  const { data } = await api.post('/compliance/detect-duplicates', { items: clientNames, context: 'client_entries' });
+                  const mappedGroups = (data.groups || []).map(g => ({
+                    item_ids: (g.item_ids || []).map(idx => String(adapted[idx]?.id || idx)),
+                    confidence: g.confidence || 'medium',
+                    reason: g.reason || 'AI detected similarity',
+                    score: g.confidence === 'high' ? 90 : 70,
+                    source: 'gemini',
+                  })).filter(g => g.item_ids.length > 1);
+                  setDetailDupGroups(mappedGroups);
+                  setShowDetailDupDialog(true);
+                  if(!mappedGroups.length)toast.success(`Gemini AI: No duplicates found among ${activeItems.length} active clients ✓`);
+                  else toast.info(`Gemini AI found ${mappedGroups.length} duplicate group${mappedGroups.length!==1?'s':''}`);
+                }catch(e){
+                  console.warn('Gemini AI failed, using local engine', e);
+                  localFallback();
+                }finally{
+                  setDetectingDetailDups(false);
+                }
               };
               tryAIDetect().catch(()=>localFallback());
             }}
@@ -3726,76 +3683,26 @@ export default function CompliancePage(){
     };
 
     const tryAIDetect = async () => {
-      const complianceNames = compliance.map((c, idx) => ({ idx, name: c.name, category: c.category, fy_year: c.fy_year, frequency: c.frequency }));
-      const prompt = `You are a duplicate detection expert for a CA firm's compliance tracker. Analyze these compliance items and find duplicates (same compliance entered twice, name variations, abbreviations, etc). Only include entries that are actual duplicates. Return JSON array of groups: [{item_ids:[idx1,idx2,...],confidence:"high"|"medium",reason:"explanation"}]. If no duplicates, return []. Data:\n${JSON.stringify(complianceNames, null, 2)}`;
-
-      // Try Grok
       try {
-        const grokKey = process.env.REACT_APP_GROK_API_KEY || '';
-        if (grokKey) {
-          const grokRes = await fetch('https://api.x.ai/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${grokKey}` },
-            body: JSON.stringify({ model: 'grok-beta', messages: [{ role: 'user', content: prompt }], max_tokens: 2000, temperature: 0.1 }),
-          });
-          if (grokRes.ok) {
-            const grokData = await grokRes.json();
-            const text = grokData.choices?.[0]?.message?.content || '';
-            const jsonMatch = text.match(/\[[\s\S]*\]/);
-            if (jsonMatch) {
-              const aiGroups = JSON.parse(jsonMatch[0]);
-              const mappedGroups = aiGroups.map(g => ({
-                item_ids: g.item_ids.map(idx => String(compliance[idx]?.id || idx)),
-                confidence: g.confidence || 'medium',
-                reason: g.reason || 'AI detected similarity',
-                score: g.confidence === 'high' ? 90 : 70,
-                source: 'grok',
-              })).filter(g => g.item_ids.length > 1);
-              setDupGroups(mappedGroups);
-              setShowDupDialog(true);
-              if (!mappedGroups.length) toast.success(`Grok AI: No duplicates found in ${compliance.length} items ✓`);
-              else toast.info(`Grok AI found ${mappedGroups.length} duplicate group${mappedGroups.length !== 1 ? 's' : ''}`);
-              setDetectingDups(false);
-              return;
-            }
-          }
-        }
-      } catch (e) { console.warn('Grok failed, trying Gemini', e); }
-
-      // Try Gemini
-      try {
-        const geminiKey = process.env.REACT_APP_GEMINI_API_KEY || '';
-        if (geminiKey) {
-          const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 2000 } }),
-          });
-          if (geminiRes.ok) {
-            const geminiData = await geminiRes.json();
-            const text = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
-            const jsonMatch = text.match(/\[[\s\S]*\]/);
-            if (jsonMatch) {
-              const aiGroups = JSON.parse(jsonMatch[0]);
-              const mappedGroups = aiGroups.map(g => ({
-                item_ids: g.item_ids.map(idx => String(compliance[idx]?.id || idx)),
-                confidence: g.confidence || 'medium',
-                reason: g.reason || 'AI detected similarity',
-                score: g.confidence === 'high' ? 90 : 70,
-                source: 'gemini',
-              })).filter(g => g.item_ids.length > 1);
-              setDupGroups(mappedGroups);
-              setShowDupDialog(true);
-              if (!mappedGroups.length) toast.success(`Gemini AI: No duplicates found in ${compliance.length} items ✓`);
-              else toast.info(`Gemini AI found ${mappedGroups.length} duplicate group${mappedGroups.length !== 1 ? 's' : ''}`);
-              setDetectingDups(false);
-              return;
-            }
-          }
-        }
-      } catch (e) { console.warn('Gemini failed, using local engine', e); }
-
-      localFallback();
+        const complianceNames = compliance.map((c, idx) => ({ idx, name: c.name, category: c.category, fy_year: c.fy_year, frequency: c.frequency }));
+        const { data } = await api.post('/compliance/detect-duplicates', { items: complianceNames, context: 'compliance_items' });
+        const mappedGroups = (data.groups || []).map(g => ({
+          item_ids: (g.item_ids || []).map(idx => String(compliance[idx]?.id || idx)),
+          confidence: g.confidence || 'medium',
+          reason: g.reason || 'AI detected similarity',
+          score: g.confidence === 'high' ? 90 : 70,
+          source: 'gemini',
+        })).filter(g => g.item_ids.length > 1);
+        setDupGroups(mappedGroups);
+        setShowDupDialog(true);
+        if (!mappedGroups.length) toast.success(`Gemini AI: No duplicates found in ${compliance.length} items ✓`);
+        else toast.info(`Gemini AI found ${mappedGroups.length} duplicate group${mappedGroups.length !== 1 ? 's' : ''}`);
+      } catch (e) {
+        console.warn('Gemini AI failed, using local engine', e);
+        localFallback();
+      } finally {
+        setDetectingDups(false);
+      }
     };
 
     tryAIDetect().catch(() => localFallback());
