@@ -1002,7 +1002,7 @@ function BankAccountsInner() {
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <h3 className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>AI Matchmaker &amp; Copilot</h3>
+                          <h3 className={`font-bold text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>AI Matchmaker &amp; AI Search</h3>
                           <span className="text-[9px] uppercase tracking-wider font-extrabold px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">Active</span>
                         </div>
                         <p className="text-xs text-slate-400 mt-1 max-w-xl">
