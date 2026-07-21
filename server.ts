@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
+import { GoogleGenAI, Type } from "@google/genai";
 
 const app = express();
 const PORT = 3000;
@@ -1283,6 +1284,310 @@ apiRouter.post("/bank-accounts/:id/upload-statement", (req, res) => {
     message: `Statement parsed by Accounting AI. Found ${newTxns.length} transactions. Auto-matched ${matchedCount} invoices and posted ledger receipts.`,
     added: newTxns.length,
     matched: matchedCount
+  });
+});
+
+function runLocalMatchingFallbacks(unmatched: any[], openSales: any[], openPurchases: any[], coa: any[]) {
+  const localResults: any[] = [];
+  const allInvoices = [
+    ...openSales.map(s => ({ ...s, isPurchase: false })),
+    ...openPurchases.map(p => ({ ...p, isPurchase: true }))
+  ];
+
+  for (const t of unmatched) {
+    const isDebit = Number(t.debit || 0) > 0;
+    const invoiceSuggestions = allInvoices
+      .filter(i => isDebit ? !!i.isPurchase : !i.isPurchase)
+      .map(inv => {
+        let score = 0;
+        const txnAmt = Number(t.debit || t.credit || 0);
+        const invAmt = Number(inv.grand_total || inv.amount || 0);
+        if (txnAmt > 0 && invAmt > 0) {
+          const diff = Math.abs(txnAmt - invAmt) / Math.max(txnAmt, invAmt);
+          if (diff < 0.001) score += 45;
+          else if (diff < 0.02) score += 38;
+          else if (diff < 0.05) score += 25;
+          else if (diff < 0.1) score += 12;
+        }
+        try {
+          const td = new Date(t.date);
+          const id = new Date(inv.invoice_date || inv.date);
+          const days = Math.abs((td.getTime() - id.getTime()) / 86400000);
+          if (days <= 1) score += 18;
+          else if (days <= 7) score += 12;
+          else if (days <= 30) score += 6;
+        } catch {}
+        
+        const desc = ((t.description || "") + " " + (t.reference || "")).toLowerCase();
+        const party = (inv.client_name || inv.supplier_name || inv.customer_name || "").toLowerCase();
+        if (party && desc.includes(party.split(" ")[0])) score += 14;
+        
+        const invNo = (inv.invoice_no || inv.number || "").toLowerCase();
+        if (invNo && desc.includes(invNo)) score += 9;
+
+        const invRef = (inv.reference_number || inv.utr || inv.payment_reference || "").toLowerCase();
+        if (invRef && (t.reference || "").toLowerCase().includes(invRef)) score += 8;
+
+        return { inv, score };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    if (invoiceSuggestions.length && invoiceSuggestions[0].score >= 80) {
+      const best = invoiceSuggestions[0];
+      localResults.push({
+        transaction_id: t.id,
+        matched_type: best.inv.isPurchase ? "purchase" : "sale",
+        matched_id: best.inv.id,
+        matched_label: `${best.inv.invoice_no || "—"} · ${best.inv.client_name || "—"}`.trim(),
+        confidence_score: best.score,
+        reasoning: `Matched via local high-confidence heuristic rules (Score: ${best.score}%)`
+      });
+    } else {
+      const desc = (t.description || "").toLowerCase();
+      let matchedCoa = null;
+      let reasoning = "";
+
+      if (desc.includes("salary") || desc.includes("wages") || desc.includes("payroll")) {
+        matchedCoa = coa.find(c => c.code === "5002") || coa.find(c => c.name.toLowerCase().includes("salary"));
+        reasoning = "Matched to employee salaries ledger based on keyword 'salary'";
+      } else if (desc.includes("rent") || desc.includes("lease")) {
+        matchedCoa = coa.find(c => c.code === "5006") || coa.find(c => c.name.toLowerCase().includes("rent"));
+        reasoning = "Matched to office rent ledger based on keyword 'rent'";
+      } else if (desc.includes("interest")) {
+        matchedCoa = coa.find(c => c.code === "4002") || coa.find(c => c.name.toLowerCase().includes("interest") || c.name.toLowerCase().includes("income"));
+        reasoning = "Matched to other interest/income ledger based on keyword 'interest'";
+      } else if (desc.includes("audit") || desc.includes("professional") || desc.includes("consult")) {
+        matchedCoa = coa.find(c => c.code === "5005") || coa.find(c => c.name.toLowerCase().includes("professional"));
+        reasoning = "Matched to professional fees ledger based on professional keywords";
+      } else if (desc.includes("office") || desc.includes("stationery") || desc.includes("courier")) {
+        matchedCoa = coa.find(c => c.code === "5004") || coa.find(c => c.name.toLowerCase().includes("office"));
+        reasoning = "Matched to office expense ledger based on description keywords";
+      } else if (desc.includes("interest") || desc.includes("dividend") || desc.includes("bank interest")) {
+        matchedCoa = coa.find(c => c.code === "4002") || coa.find(c => c.name.toLowerCase().includes("interest"));
+        reasoning = "Matched to bank interest/other income based on description";
+      }
+
+      if (matchedCoa) {
+        localResults.push({
+          transaction_id: t.id,
+          matched_type: "expense",
+          matched_id: matchedCoa.id,
+          matched_label: `${matchedCoa.code} · ${matchedCoa.name}`,
+          confidence_score: 85,
+          reasoning
+        });
+      }
+    }
+  }
+  return localResults;
+}
+
+apiRouter.post("/bank-transactions/ai-auto-match", async (req, res) => {
+  const { bank_account_id } = req.body;
+  if (!bank_account_id) {
+    return res.status(400).json({ error: "bank_account_id is required" });
+  }
+
+  const unmatched = bankTransactions.filter(
+    t => t.bank_account_id === bank_account_id && !t.matched_type && !t.ignored
+  );
+
+  if (unmatched.length === 0) {
+    return res.json({ success: true, message: "No unmatched transactions found.", matchedCount: 0 });
+  }
+
+  const openSales = invoices.filter(i => i.status !== "paid");
+  const openPurchases = purchaseInvoices.filter(i => i.status !== "paid");
+  const coa = chartOfAccounts.filter(c => c.is_active !== false);
+
+  const apiKey = process.env.GEMINI_API_KEY || process.env.REACT_APP_GEMINI_API_KEY || "";
+  let results: any[] = [];
+  let useGemini = false;
+
+  if (apiKey) {
+    try {
+      const ai = new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: {
+          headers: {
+            "User-Agent": "aistudio-build",
+          }
+        }
+      });
+
+      const salesCandidates = openSales.map(i => ({
+        id: i.id,
+        invoice_no: i.invoice_no,
+        party_name: i.client_name,
+        grand_total: i.grand_total,
+        invoice_date: i.invoice_date,
+        type: "sale"
+      }));
+
+      const purchaseCandidates = openPurchases.map(p => ({
+        id: p.id,
+        invoice_no: p.invoice_no,
+        party_name: p.supplier_name,
+        grand_total: p.grand_total,
+        invoice_date: p.invoice_date,
+        type: "purchase"
+      }));
+
+      const ledgerCandidates = coa.map(c => ({
+        id: c.id,
+        code: c.code,
+        name: c.name,
+        type: c.type,
+        sub_type: c.sub_type
+      }));
+
+      const transactionList = unmatched.map(t => ({
+        id: t.id,
+        date: t.date,
+        description: t.description,
+        debit: t.debit,
+        credit: t.credit,
+        reference: t.reference
+      }));
+
+      const prompt = `You are an expert AI accountant. Your task is to match unmatched bank transactions to the correct invoice (sale or purchase) or ledger account (Chart of Accounts head) with high confidence.
+
+Candidate Invoices (Sales):
+${JSON.stringify(salesCandidates, null, 2)}
+
+Candidate Invoices (Purchases/Bills):
+${JSON.stringify(purchaseCandidates, null, 2)}
+
+Chart of Accounts (Ledger Heads):
+${JSON.stringify(ledgerCandidates, null, 2)}
+
+Transactions to match:
+${JSON.stringify(transactionList, null, 2)}
+
+Instructions:
+1. For each transaction, find if there is a matching sales invoice (matching amount, date proximity, client party name in description) or purchase invoice (matching amount, date proximity, supplier/vendor name in description).
+2. If there's no matching invoice, suggest a Chart of Accounts ledger head. For example, if description says "MONTHLY SALARY DISBURSEMENT" or has employee payments, match with employee/salaries ledger (type: expense, sub_type: operating_expense). If "INTEREST", match with other/interest income ledger.
+3. Assign a confidence score from 0 to 100.
+4. Output the result for each transaction in the exact JSON schema requested.`;
+
+      const aiResponse = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                transaction_id: { type: Type.STRING },
+                matched_type: { 
+                  type: Type.STRING, 
+                  description: "Must be 'sale', 'purchase', 'expense', 'suspense', or null" 
+                },
+                matched_id: { type: Type.STRING, description: "The ID of the matched invoice or chart of account head. Null if unmatched." },
+                matched_label: { type: Type.STRING, description: "Display label for the match" },
+                confidence_score: { type: Type.INTEGER, description: "Confidence score (0-100)" },
+                reasoning: { type: Type.STRING, description: "Reasoning for matching" }
+              },
+              required: ["transaction_id", "matched_type", "confidence_score", "reasoning"]
+            }
+          }
+        }
+      });
+
+      results = JSON.parse(aiResponse.text || "[]");
+      useGemini = true;
+    } catch (err: any) {
+      console.warn("Gemini AI matching failed, using local fallback loop:", err.message);
+      results = runLocalMatchingFallbacks(unmatched, openSales, openPurchases, coa);
+    }
+  } else {
+    console.log("No Gemini API Key found. Using high-fidelity local match fallbacks.");
+    results = runLocalMatchingFallbacks(unmatched, openSales, openPurchases, coa);
+  }
+
+  let successCount = 0;
+  for (const match of results) {
+    if (match.confidence_score >= 80 && match.matched_id && match.matched_type) {
+      const txn = bankTransactions.find(t => t.id === match.transaction_id);
+      if (txn && !txn.matched_type) {
+        txn.matched_type = match.matched_type;
+        txn.matched_id = match.matched_id;
+        txn.matched_label = match.matched_label || "AI Autoposted";
+
+        if (match.matched_type === "sale") {
+          const sale = invoices.find(i => i.id === match.matched_id);
+          if (sale) {
+            sale.amount_paid = sale.grand_total;
+            sale.amount_due = 0;
+            sale.status = "paid";
+            postSalesPaymentJournal(sale, {
+              amount: sale.grand_total,
+              date: txn.date,
+              mode: "bank",
+              reference: txn.reference || `REC-${Date.now().toString().slice(-4)}`,
+              bank_account_id: txn.bank_account_id
+            });
+          }
+        } else if (match.matched_type === "purchase") {
+          const pur = purchaseInvoices.find(p => p.id === match.matched_id);
+          if (pur) {
+            pur.amount_paid = pur.grand_total;
+            pur.amount_due = 0;
+            pur.status = "paid";
+            postPurchasePaymentJournal(pur, {
+              amount: pur.grand_total,
+              date: txn.date,
+              mode: "bank",
+              reference: txn.reference || `PAY-${Date.now().toString().slice(-4)}`,
+              bank_account_id: txn.bank_account_id
+            });
+          }
+        } else if (match.matched_type === "expense" || match.matched_type === "suspense") {
+          const coaHead = chartOfAccounts.find(c => c.id === match.matched_id);
+          if (coaHead) {
+            const isDebit = txn.debit > 0;
+            const amount = isDebit ? txn.debit : txn.credit;
+            const jeId = "je-bank-" + txn.id;
+            
+            journalEntries = journalEntries.filter(je => je.id !== jeId);
+            journalEntries.push({
+              id: jeId,
+              entry_date: txn.date,
+              narration: `AI Bank Match: ${txn.description} [Reason: ${match.reasoning}]`,
+              source: "bank_match",
+              invoice_no: txn.reference,
+              voucher_no: `JV-${Date.now().toString().slice(-4)}`,
+              total_debit: amount,
+              total_credit: amount,
+              company_id: "co-1",
+              status: "posted",
+              lines: isDebit ? [
+                { id: "jel-b1", account_id: coaHead.id, account_name: `${coaHead.code} ${coaHead.name}`, debit: amount, credit: 0, memo: txn.description },
+                { id: "jel-b2", account_id: "coa-1002", account_name: "1002 HDFC Bank A/c", debit: 0, credit: amount, memo: txn.description }
+              ] : [
+                { id: "jel-b1", account_id: "coa-1002", account_name: "1002 HDFC Bank A/c", debit: amount, credit: 0, memo: txn.description },
+                { id: "jel-b2", account_id: coaHead.id, account_name: `${coaHead.code} ${coaHead.name}`, debit: 0, credit: amount, memo: txn.description }
+              ]
+            });
+            txn.journal_entry_id = jeId;
+          }
+        }
+        successCount++;
+      }
+    }
+  }
+
+  recomputeBankBalances();
+
+  res.json({
+    success: true,
+    message: useGemini 
+      ? `Gemini 3.5-Flash successfully analyzed and mapped ${unmatched.length} transactions. Auto-matched ${successCount} items with confidence >= 80%.`
+      : `AI Matching Assistant matched ${successCount} transactions using high-confidence rule-based heuristics.`,
+    matchedCount: successCount,
+    results
   });
 });
 
