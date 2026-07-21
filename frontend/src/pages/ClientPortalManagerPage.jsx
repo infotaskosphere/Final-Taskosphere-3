@@ -17,6 +17,7 @@ import {
   XCircle, Play, RotateCcw, Check, X, ChevronDown, ChevronUp,
   Folder, FolderCheck, UploadCloud, Upload, Sparkles, AlertTriangle, RefreshCcw, Eye, ChevronRight as ChevronRightIcon, Zap,
   Link2, EyeOff, FolderSearch, File, Copy, KeyRound, SlidersHorizontal, Image as ImageIcon,
+  LayoutGrid, List,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -62,10 +63,18 @@ function StatCard({ icon: Icon, label, value, color, bg }) {
 /* ── Portal User Card ───────────────────────────────────────────────────────── */
 function PortalUserCard({ pu, onManage, isAdmin }) {
   const { isDark } = useDark();
+  const navigate = useNavigate();
   const perm = pu.permissions || pu;
   const [revealed, setRevealed] = useState(null); // null = not fetched, else the plaintext password
   const [revealing, setRevealing] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+
+  const handleCardClick = (e) => {
+    if (e.target.closest('button') || e.target.closest('a') || e.target.closest('input')) {
+      return;
+    }
+    navigate(`/client-portal-manager/documents?clientId=${pu.client_id}`);
+  };
 
   const toggleReveal = async () => {
     if (showPassword) { setShowPassword(false); return; }
@@ -103,9 +112,10 @@ function PortalUserCard({ pu, onManage, isAdmin }) {
       variants={itemVariants}
       whileHover={{ y: -2, boxShadow: '0 8px 24px rgba(0,0,0,0.10)' }}
       transition={springCard}
-      className={`rounded-2xl border overflow-hidden shadow-sm ${
-        isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
+      className={`rounded-2xl border overflow-hidden shadow-sm cursor-pointer select-none ${
+        isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'
       }`}
+      onClick={handleCardClick}
     >
       <div className="h-1.5 w-full" style={{ background: pu.is_active ? GRADIENT : '#94a3b8' }} />
       <div className="p-5">
@@ -219,19 +229,43 @@ function PortalUserCard({ pu, onManage, isAdmin }) {
 /* ── Overview Tab ───────────────────────────────────────────────────────────── */
 function OverviewTab({ portalUsers, loading, navigate, isAdmin, isDark, onManage }) {
   const [search, setSearch] = useState('');
+  const [viewMode, setViewMode] = useState('list'); // 'list' is default, 'card' is alternative
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'active', 'inactive'
+  const [permFilter, setPermFilter] = useState('all'); // 'all', 'can_view_tasks', 'can_view_documents', etc.
+
   const filtered = portalUsers.filter((pu) => {
     const q = search.toLowerCase();
-    return (
+    const matchesSearch = (
       (pu.display_name    || '').toLowerCase().includes(q) ||
       (pu.portal_username || '').toLowerCase().includes(q) ||
       (pu.client_name     || '').toLowerCase().includes(q) ||
       (pu.email           || '').toLowerCase().includes(q)
     );
+    if (!matchesSearch) return false;
+
+    if (statusFilter === 'active' && !pu.is_active) return false;
+    if (statusFilter === 'inactive' && pu.is_active) return false;
+
+    if (permFilter !== 'all') {
+      const permKey = permFilter;
+      const hasPerm = pu[permKey] || (pu.permissions && pu.permissions[permKey]);
+      if (!hasPerm) return false;
+    }
+
+    return true;
   });
+
+  const handleRowClick = (pu, e) => {
+    if (e.target.closest('button') || e.target.closest('a') || e.target.closest('input')) {
+      return;
+    }
+    navigate(`/client-portal-manager/documents?clientId=${pu.client_id}`);
+  };
 
   return (
     <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-      <div className={`flex items-center justify-between px-5 py-4 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+      {/* Search and Filter Bar */}
+      <div className={`flex flex-col lg:flex-row lg:items-center justify-between gap-4 px-5 py-4 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
         <div className="flex items-center gap-2.5">
           <div className="p-1.5 rounded-lg" style={{ background: `${COLORS.deepBlue}12` }}>
             <Shield className="h-4 w-4" style={{ color: COLORS.deepBlue }} />
@@ -241,11 +275,71 @@ function OverviewTab({ portalUsers, loading, navigate, isAdmin, isDark, onManage
             <p className="text-xs text-slate-400">{filtered.length} of {portalUsers.length} users</p>
           </div>
         </div>
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-          <Input placeholder="Search clients or users…" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8 h-8 text-xs w-48 sm:w-64" />
+
+        {/* Search, Filters, and View Toggles */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+          {/* Search Box */}
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+            <Input placeholder="Search clients or users…" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8 h-8 text-xs w-full sm:w-48 lg:w-56 bg-transparent" />
+          </div>
+
+          {/* Status Filter */}
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className={`h-8 px-2.5 rounded-md text-xs border bg-transparent ${
+              isDark ? 'border-slate-700 text-slate-300 bg-slate-800' : 'border-slate-200 text-slate-600 bg-white'
+            }`}
+          >
+            <option value="all">All Statuses</option>
+            <option value="active">Active Only</option>
+            <option value="inactive">Inactive Only</option>
+          </select>
+
+          {/* Permissions Filter */}
+          <select
+            value={permFilter}
+            onChange={(e) => setPermFilter(e.target.value)}
+            className={`h-8 px-2.5 rounded-md text-xs border bg-transparent ${
+              isDark ? 'border-slate-700 text-slate-300 bg-slate-800' : 'border-slate-200 text-slate-600 bg-white'
+            }`}
+          >
+            <option value="all">All Permissions</option>
+            <option value="can_view_tasks">Can View Tasks</option>
+            <option value="can_view_documents">Can View Docs</option>
+            <option value="can_view_invoices">Can View Invoices</option>
+            <option value="can_view_compliance">Can View Compliance</option>
+          </select>
+
+          {/* View Toggles (List vs Card) */}
+          <div className={`flex items-center rounded-lg p-0.5 border ${isDark ? 'border-slate-700 bg-slate-800/50' : 'border-slate-200 bg-slate-50'}`}>
+            <button
+              onClick={() => setViewMode('list')}
+              title="List View"
+              className={`p-1 rounded-md transition-all ${
+                viewMode === 'list'
+                  ? 'bg-white dark:bg-slate-700 shadow-sm text-slate-800 dark:text-slate-100'
+                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+              }`}
+            >
+              <List className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => setViewMode('card')}
+              title="Card View"
+              className={`p-1 rounded-md transition-all ${
+                viewMode === 'card'
+                  ? 'bg-white dark:bg-slate-700 shadow-sm text-slate-800 dark:text-slate-100'
+                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+              }`}
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </div>
+
       <div className="p-5">
         {loading ? (
           <div className="flex items-center justify-center py-16 gap-2 text-slate-400">
@@ -256,17 +350,125 @@ function OverviewTab({ portalUsers, loading, navigate, isAdmin, isDark, onManage
             <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4" style={{ background: `${COLORS.deepBlue}10` }}>
               <Building2 className="h-6 w-6" style={{ color: COLORS.deepBlue }} />
             </div>
-            <h3 className="font-semibold text-slate-700 dark:text-slate-300 text-sm mb-1">{search ? 'No results found' : 'No portal users yet'}</h3>
+            <h3 className="font-semibold text-slate-700 dark:text-slate-300 text-sm mb-1">
+              {search || statusFilter !== 'all' || permFilter !== 'all' ? 'No results found' : 'No portal users yet'}
+            </h3>
             <p className="text-xs text-slate-400 max-w-xs">
-              {search ? 'Try a different search term.' : 'Portal accounts are created from the Clients page. Open a client and use the Portal Access panel to invite them.'}
+              {search || statusFilter !== 'all' || permFilter !== 'all'
+                ? 'Try adjusting your search terms or filters.'
+                : 'Portal accounts are created from the Clients page. Open a client and use the Portal Access panel to invite them.'}
             </p>
-            {!search && (
+            {!(search || statusFilter !== 'all' || permFilter !== 'all') && (
               <Button size="sm" className="mt-4 text-xs text-white" onClick={() => navigate('/clients')} style={{ background: GRADIENT }}>
                 <ChevronRight className="h-3.5 w-3.5 mr-1" /> Go to Clients
               </Button>
             )}
           </div>
+        ) : viewMode === 'list' ? (
+          /* List View (Table Mode) */
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                  {['Client / Company', 'Portal Username', 'Email Address', 'Status', 'Permissions Enabled', 'Actions'].map((h) => (
+                    <th key={h} className="text-left py-3 px-4 text-xs font-semibold text-slate-500 tracking-wider">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((pu) => (
+                  <tr
+                    key={pu.id}
+                    onClick={(e) => handleRowClick(pu, e)}
+                    className={`border-b last:border-0 hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors cursor-pointer select-none ${
+                      isDark ? 'border-slate-700/60' : 'border-slate-100'
+                    }`}
+                  >
+                    <td className="py-4 px-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-sm" style={{ background: GRADIENT }}>
+                          {(pu.display_name || pu.portal_username || '?')[0].toUpperCase()}
+                        </div>
+                        <div>
+                          <span className="font-semibold text-slate-800 dark:text-slate-100 text-sm block">
+                            {pu.display_name || pu.portal_username}
+                          </span>
+                          {pu.client_name && (
+                            <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1 mt-0.5">
+                              <Building2 className="h-3 w-3" /> {pu.client_name}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-4 px-4 text-xs text-slate-600 dark:text-slate-400 font-mono">@{pu.portal_username}</td>
+                    <td className="py-4 px-4 text-xs text-slate-500 dark:text-slate-400">{pu.email || '—'}</td>
+                    <td className="py-4 px-4">
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                        pu.is_active
+                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400'
+                          : 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'
+                      }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${pu.is_active ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                        {pu.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    <td className="py-4 px-4">
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          { key: 'can_view_tasks',      label: 'Tasks',      icon: ClipboardList, color: '#3B82F6' },
+                          { key: 'can_view_documents',  label: 'Docs',       icon: FileText,      color: '#8B5CF6' },
+                          { key: 'can_view_invoices',   label: 'Invoices',   icon: CreditCard,    color: '#10B981' },
+                          { key: 'can_view_compliance', label: 'Compliance', icon: Shield,        color: '#F59E0B' },
+                        ].map(({ key, label, icon: Icon, color }) => {
+                          const hasPerm = pu[key] || (pu.permissions && pu.permissions[key]);
+                          return (
+                            <span
+                              key={key}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-semibold border"
+                              style={
+                                hasPerm
+                                  ? { background: `${color}12`, color, borderColor: `${color}30` }
+                                  : { background: 'transparent', color: '#94a3b8', borderColor: isDark ? '#334155' : '#e2e8f0' }
+                              }
+                            >
+                              <Icon className="h-2.5 w-2.5" />
+                              {label}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </td>
+                    <td className="py-4 px-4">
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => navigate(`/client-portal-manager/documents?clientId=${pu.client_id}`)}
+                          className="text-xs h-7 px-2.5"
+                        >
+                          <FileText className="h-3.5 w-3.5 mr-1" /> Document Portal
+                        </Button>
+                        {isAdmin && onManage && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => onManage(pu)}
+                            className="h-7 w-7 p-0"
+                            title="Manage permissions"
+                          >
+                            <Settings className="h-3.5 w-3.5 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300" />
+                          </Button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
+          /* Card View (Grid Mode) */
           <motion.div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4" variants={containerVariants} initial="hidden" animate="visible">
             {filtered.map((pu) => (
               <PortalUserCard key={pu.id} pu={pu} isAdmin={isAdmin} onManage={onManage} />
