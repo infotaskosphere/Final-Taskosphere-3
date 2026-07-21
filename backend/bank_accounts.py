@@ -963,6 +963,30 @@ async def _auto_post_for_match(company_id: str, txn: dict, match: dict, created_
         ar_acct_id = await get_default_account_id(company_id, "1100")  # Accounts Receivable
         if not ar_acct_id:
             return None
+
+        # ── De-duplicate before posting ──────────────────────────────────────
+        # If the invoice already has payment records in db.payments (i.e. the
+        # user manually recorded the receipt before uploading the bank statement),
+        # those payments already posted:  Dr Bank (1010) / Cr AR (1100)
+        # Posting the bank-match journal on top would be a second Dr Bank / Cr AR
+        # — double-crediting AR and double-debiting Bank.
+        #
+        # Fix: wipe any existing payment-source journal entries for this invoice
+        # before posting the bank-match journal, so there is exactly ONE
+        # Dr Bank / Cr AR for this receipt.
+        existing_pmts_for_inv = await db.payments.find(
+            {"invoice_id": match["id"]}, {"_id": 0, "id": 1}
+        ).to_list(100)
+        if existing_pmts_for_inv:
+            pmt_ids = [p["id"] for p in existing_pmts_for_inv]
+            old_pmt_jes = await db.journal_entries.find(
+                {"source": "payment", "source_id": {"$in": pmt_ids}}, {"_id": 0, "id": 1}
+            ).to_list(100)
+            if old_pmt_jes:
+                old_je_ids = [e["id"] for e in old_pmt_jes]
+                await db.journal_lines.delete_many({"entry_id": {"$in": old_je_ids}})
+                await db.journal_entries.delete_many({"id": {"$in": old_je_ids}})
+
         entry = await try_auto_post(
             company_id, txn["date"], f"Receipt from {match['label']} — settles Invoice {match.get('label')} (bank statement)",
             [
