@@ -5015,6 +5015,11 @@ async def _reconcile_and_sync_all_sales_and_payments_impl(company_id: str):
     try:
         await _dedupe_journal_entries(company_id, "sale")
         await _dedupe_journal_entries(company_id, "payment")
+        # Deduplicate bank-match journals too.  If the server restarts mid-reconcile
+        # (or two report loads race each other), _auto_post_for_match can post more
+        # than one "bank" entry for the same bank transaction id.  This collapses
+        # duplicates down to the newest one before any balance is computed.
+        await _dedupe_journal_entries(company_id, "bank")
 
         # 1. Fetch all invoices for this company from the database
         invoices = await db.invoices.find({"company_id": company_id}).to_list(10000)
@@ -5224,6 +5229,10 @@ async def _reconcile_and_sync_all_purchases_and_payments_impl(company_id: str):
     try:
         await _dedupe_journal_entries(company_id, "purchase")
         await _dedupe_journal_entries(company_id, "purchase_payment")
+        # Collapse duplicate bank-match journals that can accumulate when the
+        # server restarts mid-reconcile or two report loads race each other.
+        await _dedupe_journal_entries(company_id, "bank")
+
         invoices = await db.purchase_invoices.find({"company_id": company_id}).to_list(10000)
         invoice_ids = {inv["id"] for inv in invoices}
         active_invoices = [inv for inv in invoices if inv.get("status", "outstanding") != "cancelled"]
@@ -5243,6 +5252,58 @@ async def _reconcile_and_sync_all_purchases_and_payments_impl(company_id: str):
             if not e or abs(float(e.get("total_debit", 0)) - float(inv.get("grand_total", 0))) > 0.01:
                 await sync_purchase_journal_entry(inv_id)
 
+        # ── Correct stale bank-match journal entries for bank-settled purchases ──
+        #
+        # Older versions of _auto_post_for_match posted Dr Purchases (5000) / Cr Bank
+        # for a purchase match.  The correct accrual entry is Dr AP (2000) / Cr Bank —
+        # the invoice-booking journal (Dr Purchases / Cr AP) already handles the
+        # expense side.  Detect and re-post any legacy entries that still use the
+        # wrong debit account so existing production data is healed automatically.
+        bank_settled_inv = [inv for inv in active_invoices if inv.get("paid_bank_txn_id")]
+        if bank_settled_inv:
+            from backend.accounting_core import get_default_account_id as _get_acct, post_journal_entry as _post_je
+            ap_id  = await _get_acct(company_id, "2000")   # Accounts Payable (correct)
+            pur_id = await _get_acct(company_id, "5000")   # Purchases (wrong legacy debit)
+            bnk_id = await _get_acct(company_id, "1010")   # Bank Accounts
+            for inv in bank_settled_inv:
+                txn_id = inv["paid_bank_txn_id"]
+                bank_je = await db.journal_entries.find_one(
+                    {"source": "bank", "source_id": txn_id, "company_id": company_id}, {"_id": 0}
+                )
+                if not bank_je:
+                    continue
+                je_lines = await db.journal_lines.find(
+                    {"entry_id": bank_je["id"]}, {"_id": 0}
+                ).to_list(10)
+                # Only rewrite if the debit side still points at Purchases
+                wrong_debit = any(
+                    l.get("account_id") == pur_id and float(l.get("debit") or 0) > 0
+                    for l in je_lines
+                )
+                if not wrong_debit:
+                    continue
+                await db.journal_lines.delete_many({"entry_id": bank_je["id"]})
+                await db.journal_entries.delete_one({"id": bank_je["id"]})
+                amount = float(inv.get("grand_total") or 0) or float(bank_je.get("total_debit") or 0)
+                if amount > 0 and ap_id and bnk_id:
+                    await _post_je(
+                        company_id=company_id,
+                        entry_date=bank_je["entry_date"],
+                        narration=bank_je.get("narration") or f"Payment to supplier (bank statement)",
+                        lines=[
+                            {"account_id": ap_id,  "account_name": "Accounts Payable", "debit": amount, "credit": 0.0},
+                            {"account_id": bnk_id, "account_name": "Bank Accounts",    "debit": 0.0,    "credit": amount},
+                        ],
+                        source="bank",
+                        source_id=txn_id,
+                        created_by="system",
+                    )
+
+        # IDs of invoices settled via bank matching — their AP is already cleared
+        # by the bank-match journal; a manual purchase_payment on top would post a
+        # second Dr AP / Cr Bank and double-credit the bank account.
+        bank_settled_ids = {inv["id"] for inv in bank_settled_inv}
+
         payments = await db.purchase_payments.find({"company_id": company_id}).to_list(10000)
         if invoice_ids:
             missing_payments = await db.purchase_payments.find({
@@ -5257,6 +5318,12 @@ async def _reconcile_and_sync_all_purchases_and_payments_impl(company_id: str):
             for mp in missing_payments:
                 if mp["id"] not in pay_id_set:
                     payments.append(mp)
+
+        # Exclude purchase payments that belong to bank-settled invoices.
+        # The bank-match journal (Dr AP / Cr Bank) already settles them; syncing
+        # a separate purchase_payment journal would double-credit Bank Accounts.
+        payments = [p for p in payments if p.get("purchase_invoice_id") not in bank_settled_ids]
+
         payment_ids = {p["id"] for p in payments}
 
         existing_pay_entries = await db.journal_entries.find({"company_id": company_id, "source": "purchase_payment"}).to_list(10000)
