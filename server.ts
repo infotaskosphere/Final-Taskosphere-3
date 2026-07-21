@@ -934,6 +934,88 @@ function getAccountBalances(companyId: string | undefined, dateFrom?: string, da
 apiRouter.get("/companies/list", (req, res) => res.json(companies));
 apiRouter.get("/companies", (req, res) => res.json(companies));
 
+apiRouter.post("/companies", (req, res) => {
+  const body = req.body;
+  const newCompany = {
+    id: body.id || `co-${Date.now()}`,
+    name: body.name || "",
+    address: body.address || "",
+    phone: body.phone || "",
+    email: body.email || "",
+    website: body.website || "",
+    gstin: body.gstin || "",
+    pan: body.pan || "",
+    has_gst: body.has_gst !== false,
+    bank_account_name: body.bank_account_name || "",
+    bank_name: body.bank_name || "",
+    bank_account_no: body.bank_account_no || "",
+    bank_ifsc: body.bank_ifsc || "",
+    bank_branch: body.bank_branch || "",
+    bank_account_type: body.bank_account_type || "Current",
+    upi_id: body.upi_id || "",
+    linked_bank_account_id: body.linked_bank_account_id || "",
+    logo_base64: body.logo_base64 || null,
+    tm_logo_base64: body.tm_logo_base64 || null,
+    signature_base64: body.signature_base64 || null,
+    smtp_host: body.smtp_host || "",
+    smtp_port: Number(body.smtp_port) || 587,
+    smtp_user: body.smtp_user || "",
+    smtp_password: body.smtp_password || "",
+    smtp_from_name: body.smtp_from_name || "",
+  };
+  companies.push(newCompany);
+  res.json(newCompany);
+});
+
+apiRouter.put("/companies/:id", (req, res) => {
+  const { id } = req.params;
+  const idx = companies.findIndex(c => c.id === id);
+  if (idx !== -1) {
+    const body = req.body;
+    companies[idx] = {
+      ...companies[idx],
+      name: body.name !== undefined ? body.name : companies[idx].name,
+      address: body.address !== undefined ? body.address : companies[idx].address,
+      phone: body.phone !== undefined ? body.phone : companies[idx].phone,
+      email: body.email !== undefined ? body.email : companies[idx].email,
+      website: body.website !== undefined ? body.website : companies[idx].website,
+      gstin: body.gstin !== undefined ? body.gstin : companies[idx].gstin,
+      pan: body.pan !== undefined ? body.pan : companies[idx].pan,
+      has_gst: body.has_gst !== undefined ? (body.has_gst !== false) : companies[idx].has_gst,
+      bank_account_name: body.bank_account_name !== undefined ? body.bank_account_name : companies[idx].bank_account_name,
+      bank_name: body.bank_name !== undefined ? body.bank_name : companies[idx].bank_name,
+      bank_account_no: body.bank_account_no !== undefined ? body.bank_account_no : companies[idx].bank_account_no,
+      bank_ifsc: body.bank_ifsc !== undefined ? body.bank_ifsc : companies[idx].bank_ifsc,
+      bank_branch: body.bank_branch !== undefined ? body.bank_branch : companies[idx].bank_branch,
+      bank_account_type: body.bank_account_type !== undefined ? body.bank_account_type : companies[idx].bank_account_type,
+      upi_id: body.upi_id !== undefined ? body.upi_id : companies[idx].upi_id,
+      linked_bank_account_id: body.linked_bank_account_id !== undefined ? body.linked_bank_account_id : companies[idx].linked_bank_account_id,
+      logo_base64: body.logo_base64 !== undefined ? body.logo_base64 : companies[idx].logo_base64,
+      tm_logo_base64: body.tm_logo_base64 !== undefined ? body.tm_logo_base64 : companies[idx].tm_logo_base64,
+      signature_base64: body.signature_base64 !== undefined ? body.signature_base64 : companies[idx].signature_base64,
+      smtp_host: body.smtp_host !== undefined ? body.smtp_host : companies[idx].smtp_host,
+      smtp_port: body.smtp_port !== undefined ? (Number(body.smtp_port) || 587) : companies[idx].smtp_port,
+      smtp_user: body.smtp_user !== undefined ? body.smtp_user : companies[idx].smtp_user,
+      smtp_password: body.smtp_password !== undefined ? body.smtp_password : companies[idx].smtp_password,
+      smtp_from_name: body.smtp_from_name !== undefined ? body.smtp_from_name : companies[idx].smtp_from_name,
+    };
+    res.json(companies[idx]);
+  } else {
+    res.status(404).json({ error: "Company not found" });
+  }
+});
+
+apiRouter.delete("/companies/:id", (req, res) => {
+  const { id } = req.params;
+  const idx = companies.findIndex(c => c.id === id);
+  if (idx !== -1) {
+    companies.splice(idx, 1);
+    res.json({ success: true });
+  } else {
+    res.status(404).json({ error: "Company not found" });
+  }
+});
+
 // Invoices (Sales Invoices)
 apiRouter.get("/invoices", (req, res) => {
   const { company_id } = req.query;
