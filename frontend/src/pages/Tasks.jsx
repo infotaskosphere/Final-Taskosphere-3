@@ -2608,17 +2608,6 @@ export default function Tasks() {
             active: filterStatus === 'overdue',
             onClick: () => setFilterStatus(filterStatus === 'overdue' ? 'all' : 'overdue'),
           },
-          {
-            id: 'team',
-            label: buildLabel('Team Tasks', 'team'),
-            value: filteredStats.teamTask,
-            total: stats.teamTask,
-            accent: isDark ? '#a78bfa' : '#7c3aed',
-            icon: Users,
-            active: filterTeamOnly,
-            hidden: !hasCrossVisibility,
-            onClick: () => setFilterTeamOnly(!filterTeamOnly),
-          },
         ];
 
         return (
@@ -2650,7 +2639,7 @@ export default function Tasks() {
             </AnimatePresence>
 
             {/* Mini stat cards — always visible */}
-            <div className="grid grid-cols-3 sm:grid-cols-7 gap-2">
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
               {miniCards.map(({ id, label, value, total, accent, icon: Icon, active, showRate, rate, hidden, onClick }) => {
                 if (hidden) return null;
                 const pct     = total > 0 ? Math.round((value / total) * 100) : 0;
