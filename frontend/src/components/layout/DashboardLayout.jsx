@@ -801,13 +801,14 @@ function EnterpriseSearchModal({ isOpen, onClose, isDark }) {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  const handleSearch = async (e) => {
+  const handleSearch = async (e, catOverride) => {
     if (e) e.preventDefault();
     if (!query.trim()) return;
     setLoading(true);
+    const catToUse = catOverride || category;
     try {
       const { data } = await api.get("/v2/search", {
-        params: { query: query.trim(), category }
+        params: { query: query.trim(), category: catToUse }
       });
       let resList = [];
       if (Array.isArray(data?.results)) {
@@ -854,7 +855,7 @@ function EnterpriseSearchModal({ isOpen, onClose, isDark }) {
           </button>
         </div>
 
-        <form onSubmit={handleSearch} className="flex gap-2 mb-3">
+        <form onSubmit={(e) => handleSearch(e)} className="flex gap-2 mb-3">
           <input
             autoFocus
             type="text"
@@ -874,7 +875,7 @@ function EnterpriseSearchModal({ isOpen, onClose, isDark }) {
             <button
               key={cat}
               type="button"
-              onClick={() => { setCategory(cat); if (query.trim()) { setTimeout(() => handleSearch(), 0); } }}
+              onClick={() => { setCategory(cat); if (query.trim()) { handleSearch(null, cat); } }}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold capitalize transition-all cursor-pointer ${category === cat ? 'bg-blue-600 text-white shadow-sm' : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'}`}
             >
               {cat}
