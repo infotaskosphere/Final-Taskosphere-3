@@ -660,6 +660,46 @@ async def startup_event():
         )
         await db.whatsapp_hub_contacts.create_index("session_id", background=True)
         await db.whatsapp_hub_groups.create_index("jid", unique=True, background=True)
+
+        # ── ACCOUNTING / INVOICING — the most-queried collections ────────────
+        # These are called on every report load, reconcile, and invoice CRUD.
+        # Without indexes every call does a full collection scan; with large
+        # data sets (10k+ invoices) that causes 5-10 s latency per page.
+        await db.invoices.create_index([("company_id", 1), ("status", 1)], background=True)
+        await db.invoices.create_index([("company_id", 1), ("invoice_date", -1)], background=True)
+        await db.invoices.create_index([("company_id", 1), ("invoice_type", 1)], background=True)
+        await db.invoices.create_index("id", unique=True, background=True)
+        await db.invoices.create_index("paid_bank_txn_id", background=True, sparse=True)
+
+        await db.payments.create_index([("company_id", 1), ("invoice_id", 1)], background=True)
+        await db.payments.create_index("invoice_id", background=True)
+        await db.payments.create_index("id", unique=True, background=True)
+
+        await db.purchase_invoices.create_index([("company_id", 1), ("status", 1)], background=True)
+        await db.purchase_invoices.create_index([("company_id", 1), ("invoice_date", -1)], background=True)
+        await db.purchase_invoices.create_index("id", unique=True, background=True)
+        await db.purchase_invoices.create_index("paid_bank_txn_id", background=True, sparse=True)
+
+        await db.purchase_payments.create_index([("company_id", 1), ("purchase_invoice_id", 1)], background=True)
+        await db.purchase_payments.create_index("purchase_invoice_id", background=True)
+        await db.purchase_payments.create_index("id", unique=True, background=True)
+
+        # Journal entries: source+source_id compound is hit on every sync
+        await db.journal_entries.create_index([("company_id", 1), ("source", 1), ("source_id", 1)], background=True)
+        await db.journal_entries.create_index([("source", 1), ("source_id", 1)], background=True)
+        await db.journal_entries.create_index("id", unique=True, background=True)
+
+        # Journal lines: compound index covering Trial Balance aggregation
+        await db.journal_lines.create_index([("company_id", 1), ("entry_date", -1), ("account_id", 1)], background=True)
+        await db.journal_lines.create_index([("entry_id", 1), ("account_id", 1)], background=True)
+
+        # Audit logs: queried by module+record_id and user+timestamp
+        await db.audit_logs.create_index([("module", 1), ("record_id", 1), ("timestamp", -1)], background=True)
+        await db.audit_logs.create_index([("user_id", 1), ("timestamp", -1)], background=True)
+
+        # DSC register: expiry-based lookups
+        await db.dsc_register.create_index([("assigned_to", 1), ("expiry_date", 1)], background=True)
+
     except Exception as e:
         # Log index creation errors but do NOT crash the server
         logger.warning(f"Index creation warning (non-fatal): {e}")
@@ -11506,6 +11546,9 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     async def _empty_list():
         return []
 
+    # PERF: Use tight projections — fetch only the fields this handler actually
+    # reads. Eliminates transmitting large blobs (notes, attachments, address
+    # strings, etc.) that the dashboard never touches.
     (
         tasks,
         dsc_list,
@@ -11514,20 +11557,25 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         due_dates,
         users_for_workload,
     ) = await asyncio.gather(
-        # BUG FIX: these were all capped at .to_list(1000) / .to_list(100).
-        # Since the counts/lists here feed the dashboard's actual numbers
-        # (total_tasks, total_clients, etc.), a company that grew past 1000
-        # tasks or clients wasn't just experiencing slowness — the dashboard
-        # was silently showing an undercount. Fetching everything the
-        # (already permission-scoped) query matches fixes both.
-        db.tasks.find(task_query, {"_id": 0}).to_list(length=None),
-        db.dsc_register.find({}, {"_id": 0}).to_list(length=None),
-        db.clients.find(client_query, {"_id": 0}).to_list(length=None),
+        db.tasks.find(task_query, {
+            "_id": 0, "id": 1, "status": 1, "due_date": 1,
+            "assigned_to": 1, "sub_assignees": 1, "created_by": 1,
+        }).to_list(length=None),
+        db.dsc_register.find({}, {
+            "_id": 0, "id": 1, "holder_name": 1,
+            "certificate_number": 1, "expiry_date": 1,
+        }).to_list(length=None),
+        db.clients.find(client_query, {
+            "_id": 0, "id": 1, "birthday": 1,
+        }).to_list(length=None),
         db.compliance_masters.find(
             {"is_closed": True}, {"_id": 0, "name": 1, "calendar_due_date_id": 1}
         ).to_list(length=None),
-        db.due_dates.find(due_date_query, {"_id": 0}).to_list(length=None),
-        db.users.find({}, {"_id": 0, "password": 0}).to_list(length=None)
+        db.due_dates.find(due_date_query, {
+            "_id": 0, "id": 1, "title": 1, "due_date": 1, "department": 1,
+        }).to_list(length=None),
+        db.users.find({}, {"_id": 0, "id": 1, "full_name": 1})
+        .to_list(length=None)
         if current_user.role != "staff"
         else _empty_list(),
     )
@@ -11741,7 +11789,14 @@ async def get_activity_summary(
             query["timestamp"]["$lte"] = datetime.fromisoformat(date_to)
         except Exception:
             pass
-    activities = await db.staff_activity.find(query, {"_id": 0}).to_list(10000)
+    # PERF: tight projection + 5 000-record cap.  The aggregation below only
+    # reads six fields per document; fetching the full document (~20 fields
+    # including raw page-title strings) wastes bandwidth and memory.
+    activities = await db.staff_activity.find(query, {
+        "_id": 0,
+        "user_id": 1, "duration_seconds": 1, "app_name": 1,
+        "category": 1, "website": 1, "idle": 1,
+    }).sort("timestamp", -1).limit(5000).to_list(5000)
     user_summary = {}
     for activity in activities:
         uid = activity.get("user_id")
