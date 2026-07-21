@@ -20,23 +20,21 @@ class ReasoningEngine:
         # Gemini call
         if active_provider == "gemini":
             try:
-                # Call Gemini SDK if key exists
-                gemini_key = os.getenv("GEMINI_API_KEY")
+                gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("REACT_APP_GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
                 if gemini_key:
-                    # Let's import GoogleGenAI or use existing helper if possible
                     from google import genai
-                    from google.genai import types
-                    client = genai.Client()
+                    client = genai.Client(api_key=gemini_key)
                     response = client.models.generate_content(
-                        model='gemini-3.5-flash',
+                        model='gemini-3.6-flash',
                         contents=final_prompt,
                     )
-                    return {
-                        "text": response.text,
-                        "provider": "gemini",
-                        "model": "gemini-3.5-flash",
-                        "tokens": len(response.text) // 4
-                    }
+                    if response.text:
+                        return {
+                            "text": response.text,
+                            "provider": "gemini",
+                            "model": "gemini-3.6-flash",
+                            "tokens": len(response.text) // 4
+                        }
             except Exception as e:
                 logger.error(f"Gemini API call failed: {e}", exc_info=True)
                 
