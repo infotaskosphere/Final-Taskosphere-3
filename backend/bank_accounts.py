@@ -1244,6 +1244,119 @@ async def auto_match_similar_transactions(
             )
 
 
+class AIAutoMatchInput(BaseModel):
+    bank_account_id: Optional[str] = None
+
+
+@router.post("/bank-transactions/ai-auto-match")
+async def run_ai_auto_match(payload: Optional[AIAutoMatchInput] = None, current_user: User = Depends(get_current_user)):
+    bank_acc_id = payload.bank_account_id if payload else None
+    
+    query = {"matched_type": {"$in": [None, ""]}}
+    if bank_acc_id:
+        query["bank_account_id"] = bank_acc_id
+    
+    unmatched = await db.bank_transactions.find(query).to_list(1000)
+    if not unmatched:
+        return {"success": True, "message": "No unmatched transactions found.", "matchedCount": 0}
+
+    open_sales = await db.invoices.find({"status": {"$ne": "paid"}}, {"_id": 0}).to_list(1000)
+    open_purchases = await db.purchase_invoices.find({"status": {"$ne": "paid"}}, {"_id": 0}).to_list(1000)
+    coa_items = await db.chart_of_accounts.find({}, {"_id": 0}).to_list(1000)
+
+    matched_count = 0
+    for txn in unmatched:
+        txn_id = txn.get("id")
+        desc = (txn.get("description") or "").strip().lower()
+        debit = float(txn.get("debit") or 0)
+        credit = float(txn.get("credit") or 0)
+        amt = credit if credit > 0 else debit
+
+        matched = False
+        # 1. Match Sales (Credits)
+        if credit > 0:
+            for s in open_sales:
+                inv_no = (s.get("invoice_no") or "").lower()
+                client_name = (s.get("client_name") or s.get("party_name") or "").lower()
+                tot = float(s.get("grand_total") or s.get("total_amount") or 0)
+
+                if (inv_no and inv_no in desc) or (client_name and len(client_name) > 3 and client_name in desc) or (tot > 0 and abs(tot - amt) < 0.01):
+                    await db.bank_transactions.update_one(
+                        {"id": txn_id},
+                        {"$set": {
+                            "matched_type": "sale",
+                            "matched_id": s.get("id"),
+                            "matched_label": f"Invoice #{s.get('invoice_no', '')} - {s.get('client_name', '')}",
+                            "confidence_score": 95,
+                            "pending_approval": False
+                        }}
+                    )
+                    await db.invoices.update_one(
+                        {"id": s.get("id")},
+                        {"$set": {"status": "paid", "amount_due": 0}}
+                    )
+                    matched_count += 1
+                    matched = True
+                    break
+
+        # 2. Match Purchases (Debits)
+        if not matched and debit > 0:
+            for p in open_purchases:
+                inv_no = (p.get("invoice_no") or "").lower()
+                supplier_name = (p.get("supplier_name") or p.get("vendor_name") or "").lower()
+                tot = float(p.get("grand_total") or p.get("total_amount") or 0)
+
+                if (inv_no and inv_no in desc) or (supplier_name and len(supplier_name) > 3 and supplier_name in desc) or (tot > 0 and abs(tot - amt) < 0.01):
+                    await db.bank_transactions.update_one(
+                        {"id": txn_id},
+                        {"$set": {
+                            "matched_type": "purchase",
+                            "matched_id": p.get("id"),
+                            "matched_label": f"Bill #{p.get('invoice_no', '')} - {p.get('supplier_name', '')}",
+                            "confidence_score": 92,
+                            "pending_approval": False
+                        }}
+                    )
+                    await db.purchase_invoices.update_one(
+                        {"id": p.get("id")},
+                        {"$set": {"status": "paid", "amount_due": 0}}
+                    )
+                    matched_count += 1
+                    matched = True
+                    break
+
+        # 3. Match Chart of Accounts keywords (Salary, Rent, Interest, Taxes, Bank Charges)
+        if not matched:
+            target_coa = None
+            if "salary" in desc or "wage" in desc:
+                target_coa = next((c for c in coa_items if "salary" in c.get("name", "").lower()), None)
+            elif "rent" in desc:
+                target_coa = next((c for c in coa_items if "rent" in c.get("name", "").lower()), None)
+            elif "interest" in desc:
+                target_coa = next((c for c in coa_items if "interest" in c.get("name", "").lower()), None)
+            elif "charge" in desc or "fee" in desc or "tax" in desc:
+                target_coa = next((c for c in coa_items if "bank" in c.get("name", "").lower() or "charge" in c.get("name", "").lower()), None)
+
+            if target_coa:
+                await db.bank_transactions.update_one(
+                    {"id": txn_id},
+                    {"$set": {
+                        "matched_type": "expense" if debit > 0 else "income",
+                        "matched_id": target_coa.get("id"),
+                        "matched_label": target_coa.get("name"),
+                        "confidence_score": 88,
+                        "pending_approval": False
+                    }}
+                )
+                matched_count += 1
+
+    return {
+        "success": True,
+        "message": f"AI Auto-matching complete. Matched {matched_count} transaction(s).",
+        "matchedCount": matched_count
+    }
+
+
 @router.post("/bank-transactions/{txn_id}/match")
 async def manual_match_transaction(txn_id: str, payload: ManualMatchInput, current_user: User = Depends(get_current_user)):
     if not _perm_match_bank(current_user):
