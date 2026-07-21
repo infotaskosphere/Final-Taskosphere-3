@@ -1188,6 +1188,64 @@ apiRouter.get("/bank-accounts/:id/transactions", (req, res) => {
   res.json(bankTransactions.filter(t => t.bank_account_id === req.params.id));
 });
 
+apiRouter.post("/bank-accounts", (req, res) => {
+  const { bank_name, account_holder, account_number, ifsc, branch, account_type, opening_balance, upi_id, company_id } = req.body;
+  const id = "bank-" + Date.now();
+  const masked = account_number ? "XXXX" + account_number.slice(-4) : "XXXX";
+  const newAccount = {
+    id,
+    bank_name: bank_name || "",
+    account_holder: account_holder || "",
+    account_number: account_number || "",
+    account_number_masked: masked,
+    ifsc: ifsc || "",
+    branch: branch || "",
+    account_type: account_type || "current",
+    current_balance: Number(opening_balance || 0),
+    opening_balance: Number(opening_balance || 0),
+    upi_id: upi_id || "",
+    company_id: company_id || "co-1",
+    is_primary: bankAccounts.length === 0,
+    status: "active"
+  };
+  bankAccounts.push(newAccount);
+  res.status(201).json(newAccount);
+});
+
+apiRouter.put("/bank-accounts/:id", (req, res) => {
+  const account = bankAccounts.find(b => b.id === req.params.id);
+  if (!account) {
+    return res.status(404).json({ error: "Bank account not found" });
+  }
+  const { bank_name, account_holder, account_number, ifsc, branch, account_type, opening_balance, upi_id, company_id } = req.body;
+  if (bank_name !== undefined) account.bank_name = bank_name;
+  if (account_holder !== undefined) account.account_holder = account_holder;
+  if (account_number !== undefined) {
+    (account as any).account_number = account_number;
+    account.account_number_masked = "XXXX" + account_number.slice(-4);
+  }
+  if (ifsc !== undefined) (account as any).ifsc = ifsc;
+  if (branch !== undefined) (account as any).branch = branch;
+  if (account_type !== undefined) (account as any).account_type = account_type;
+  if (opening_balance !== undefined) {
+    (account as any).opening_balance = Number(opening_balance);
+    recomputeBankBalances();
+  }
+  if (upi_id !== undefined) (account as any).upi_id = upi_id;
+  if (company_id !== undefined) account.company_id = company_id;
+  res.json(account);
+});
+
+apiRouter.delete("/bank-accounts/:id", (req, res) => {
+  const index = bankAccounts.findIndex(b => b.id === req.params.id);
+  if (index === -1) {
+    return res.status(404).json({ error: "Bank account not found" });
+  }
+  bankAccounts.splice(index, 1);
+  bankTransactions = bankTransactions.filter(t => t.bank_account_id !== req.params.id);
+  res.json({ success: true, message: "Bank account deleted" });
+});
+
 apiRouter.post("/bank-accounts/:id/upload-statement", (req, res) => {
   const outstandingSales = invoices.filter(i => i.amount_due > 0);
   const outstandingPurchases = purchaseInvoices.filter(i => i.amount_due > 0);
