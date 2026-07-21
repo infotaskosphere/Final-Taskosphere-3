@@ -529,14 +529,13 @@ const DashboardLayout = ({ children }) => {
             <AnimatePresence mode="wait">
               <motion.h1
                 key={location.pathname}
-                className={`text-xs sm:text-sm font-semibold truncate min-w-0 tracking-tight ${
+                className={`text-xs sm:text-sm font-semibold truncate min-w-0 tracking-tight max-w-[80px] xs:max-w-[130px] sm:max-w-[260px] ${
                   isDark ? 'text-slate-100' : 'text-slate-800'
                 }`}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -6 }}
                 transition={{ type: 'spring', stiffness: 400, damping: 26 }}
-                style={{ maxWidth: 'clamp(100px, 40vw, 260px)' }}
               >
                 {activeLabel}
               </motion.h1>
@@ -578,40 +577,45 @@ const DashboardLayout = ({ children }) => {
             {/* Theme toggle */}
             <motion.button
               onClick={() => setIsDark(!isDark)}
-              className={`relative flex-shrink-0 w-[54px] h-7 rounded-full flex items-center border transition-colors shadow-inner ${
+              className={`relative flex-shrink-0 w-8 sm:w-[54px] h-8 sm:h-7 rounded-xl sm:rounded-full flex items-center justify-center sm:justify-start border transition-colors shadow-inner ${
                 isDark
-                  ? 'bg-gradient-to-r from-slate-800 to-slate-700 border-slate-600'
-                  : 'bg-gradient-to-r from-sky-100 to-slate-100 border-slate-300'
+                  ? 'bg-slate-800 hover:bg-slate-700/60 border-slate-600 text-slate-300'
+                  : 'bg-white hover:bg-slate-50 border-slate-300 text-slate-600'
               }`}
               whileTap={{ scale: 0.93 }}
               transition={springMed}
               aria-label="Toggle theme"
             >
-              <Sun  className="absolute left-1.5 h-3 w-3 text-amber-400" />
-              <Moon className="absolute right-1.5 h-3 w-3 text-slate-400" />
-              <motion.div
-                className={`absolute w-5 h-5 rounded-full shadow flex items-center justify-center z-10 ${
-                  isDark ? 'bg-slate-200' : 'bg-white'
-                }`}
-                animate={{ x: isDark ? 28 : 3 }}
-                transition={springSnap}
-                style={{ top: '50%', marginTop: -10 }}
-              >
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.div
-                    key={isDark ? 'moon' : 'sun'}
-                    initial={{ rotate: -30, opacity: 0, scale: 0.7 }}
-                    animate={{ rotate: 0, opacity: 1, scale: 1 }}
-                    exit={{ rotate: 30, opacity: 0, scale: 0.7 }}
-                    transition={{ duration: 0.15 }}
-                  >
-                    {isDark
-                      ? <Moon className="h-3 w-3 text-slate-700" />
-                      : <Sun  className="h-3 w-3 text-amber-500" />
-                    }
-                  </motion.div>
-                </AnimatePresence>
-              </motion.div>
+              <div className="sm:hidden flex items-center justify-center">
+                {isDark ? <Moon className="h-4 w-4 text-amber-400" /> : <Sun className="h-4 w-4 text-amber-500" />}
+              </div>
+              <div className="hidden sm:block">
+                <Sun  className="absolute left-1.5 h-3 w-3 text-amber-400" style={{ top: '50%', marginTop: -6 }} />
+                <Moon className="absolute right-1.5 h-3 w-3 text-slate-400" style={{ top: '50%', marginTop: -6 }} />
+                <motion.div
+                  className={`absolute w-5 h-5 rounded-full shadow flex items-center justify-center z-10 ${
+                    isDark ? 'bg-slate-200' : 'bg-white'
+                  }`}
+                  animate={{ x: isDark ? 28 : 3 }}
+                  transition={springSnap}
+                  style={{ top: '50%', marginTop: -10 }}
+                >
+                  <AnimatePresence mode="wait" initial={false}>
+                    <motion.div
+                      key={isDark ? 'moon' : 'sun'}
+                      initial={{ rotate: -30, opacity: 0, scale: 0.7 }}
+                      animate={{ rotate: 0, opacity: 1, scale: 1 }}
+                      exit={{ rotate: 30, opacity: 0, scale: 0.7 }}
+                      transition={{ duration: 0.15 }}
+                    >
+                      {isDark
+                        ? <Moon className="h-3 w-3 text-slate-700" />
+                        : <Sun  className="h-3 w-3 text-amber-500" />
+                      }
+                    </motion.div>
+                  </AnimatePresence>
+                </motion.div>
+              </div>
             </motion.button>
 
             {/* User menu */}
