@@ -65,6 +65,7 @@ from pydantic import BaseModel, Field
 
 from backend.dependencies import db, get_current_user
 from backend.models import User
+from backend.accounting_core import get_default_account_id
 
 # ── Try importing AI clients (optional — degrade gracefully if missing) ───
 try:
@@ -1313,8 +1314,16 @@ async def run_depreciation(
             "source": "depreciation", "idempotency_key": ik,
             "posted_by": str(current_user.id), "created_at": now_iso,
         })
-        dep_acct = asset.get("depreciation_account_id") or "5500"
-        asset_acct = asset.get("asset_account_id") or "1300"
+        # asset.depreciation_account_id / asset_account_id are expected to
+        # already be real chart_of_accounts ids when explicitly set on the
+        # asset; the fallback must resolve the default code ("5500" / "1300")
+        # to its real id the same way — posting the literal code string as
+        # account_id makes the entry invisible to Trial Balance/Balance
+        # Sheet/P&L, since reports join on chart_of_accounts.id, not code.
+        dep_acct = asset.get("depreciation_account_id") or await get_default_account_id(company_id, "5500")
+        asset_acct = asset.get("asset_account_id") or await get_default_account_id(company_id, "1300")
+        if not dep_acct or not asset_acct:
+            continue
         for line_acct, dr, cr in [(dep_acct, monthly_dep, 0), (asset_acct, 0, monthly_dep)]:
             await db.journal_lines.insert_one({
                 "id": str(uuid.uuid4()), "entry_id": entry_id, "company_id": company_id,
@@ -1380,8 +1389,16 @@ async def record_tds_tcs(
         "narration": f"{'TDS' if req.payment_type == 'tds' else 'TCS'} u/s {req.section} on {req.party_name} — ₹{req.tds_amount:,.2f}",
         "source": "tds_tcs", "posted_by": str(current_user.id), "created_at": now_iso,
     })
-    # TDS Payable account = "2200"
-    for acct, dr, cr in [("2200", 0, req.tds_amount), ("2000", req.tds_amount, 0)]:
+    # TDS Payable account = "2200", Accounts Payable = "2000". Resolve to the
+    # real chart_of_accounts id (not the literal code) — journal_lines.account_id
+    # must match chart_of_accounts.id or these lines silently vanish from
+    # Trial Balance / Balance Sheet / P&L, since every report looks entries up
+    # by real account id, never by code.
+    tds_payable_id = await get_default_account_id(req.company_id, "2200")
+    payable_id = await get_default_account_id(req.company_id, "2000")
+    for acct, dr, cr in [(tds_payable_id, 0, req.tds_amount), (payable_id, req.tds_amount, 0)]:
+        if not acct:
+            continue
         await db.journal_lines.insert_one({
             "id": str(uuid.uuid4()), "entry_id": entry_id,
             "company_id": req.company_id, "account_id": acct,
