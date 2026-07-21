@@ -229,7 +229,8 @@ let quotations = [
 
 let companies = [
   { id: "co-1", name: "M. Desai & Associates", gstin: "24AALCP5501B1ZW", state: "Gujarat", email: "info.mdesaiassociates@gmail.com" },
-  { id: "co-2", name: "Star Enterprise", gstin: "24DEFAC1234D1Z2", state: "Gujarat", email: "contact@starent.co.in" }
+  { id: "co-2", name: "Star Enterprise", gstin: "24DEFAC1234D1Z2", state: "Gujarat", email: "contact@starent.co.in" },
+  { id: "co-3", name: "Prodigist Ventures Private Limited", gstin: "24PROPV1234P1Z5", state: "Gujarat", email: "contact@prodigistventures.com" }
 ];
 
 let invoices = [
@@ -283,19 +284,23 @@ let purchaseInvoices = [
 ];
 
 let bankAccounts = [
-  { id: "bank-1", bank_name: "HDFC Bank A/c", account_holder: "M. Desai & Associates", account_number_masked: "XXXX5678", current_balance: 1450000, is_primary: true, company_id: "co-1", status: "active" },
-  { id: "bank-2", bank_name: "State Bank of India", account_holder: "Star Enterprise", account_number_masked: "XXXX1234", current_balance: 75000, is_primary: false, company_id: "co-2", status: "active" }
+  { id: "bank-1", bank_name: "HDFC Bank A/c", account_holder: "M. Desai & Associates", account_number_masked: "XXXX5678", opening_balance: 1450000, current_balance: 1450000, is_primary: true, company_id: "co-1", coa_id: "coa-1002", status: "active" },
+  { id: "bank-2", bank_name: "State Bank of India", account_holder: "Star Enterprise", account_number_masked: "XXXX1234", opening_balance: 75000, current_balance: 75000, is_primary: false, company_id: "co-2", coa_id: "coa-1003", status: "active" },
+  { id: "bank-3", bank_name: "State Bank of India", account_holder: "Prodigist Ventures Private Limited", account_number_masked: "XXXX3522", opening_balance: 24423.50, current_balance: 24423.50, is_primary: false, company_id: "co-3", coa_id: "coa-1004", status: "active" }
 ];
 
 let bankTransactions = [
   { id: "txn-1", bank_account_id: "bank-1", date: "2026-04-10", description: "NEFT FROM CLIENT ABC CORP", debit: 0, credit: 14160, reference: "UTR0012345", matched_type: "sale", matched_id: "inv-1", matched_label: "INV-2026-001 · ABC Corp Ltd", ignored: false },
   { id: "txn-2", bank_account_id: "bank-1", date: "2026-04-12", description: "RTGS TO SUPPLIER DEF CORP", debit: 5900, credit: 0, reference: "UTR0056789", matched_type: null, matched_id: null, matched_label: null, ignored: false },
-  { id: "txn-3", bank_account_id: "bank-1", date: "2026-04-15", description: "MONTHLY SALARY DISBURSEMENT", debit: 45000, credit: 0, reference: "SALAPR26", matched_type: null, matched_id: null, matched_label: null, ignored: false }
+  { id: "txn-3", bank_account_id: "bank-1", date: "2026-04-15", description: "MONTHLY SALARY DISBURSEMENT", debit: 45000, credit: 0, reference: "SALAPR26", matched_type: null, matched_id: null, matched_label: null, ignored: false },
+  { id: "txn-4", bank_account_id: "bank-3", date: "2026-04-18", description: "SOFTWARE SUBSCRIPTION RENEWAL", debit: 2500, credit: 0, reference: "UPI982341", matched_type: null, matched_id: null, matched_label: null, ignored: false }
 ];
 
 let chartOfAccounts = [
   { id: "coa-1001", code: "1001", name: "Cash in Hand", type: "asset", sub_type: "cash_and_equivalents" },
-  { id: "coa-1002", code: "1002", name: "HDFC Bank A/c", type: "asset", sub_type: "bank_accounts" },
+  { id: "coa-1002", code: "1002", name: "HDFC Bank A/c", type: "asset", sub_type: "bank_accounts", company_id: "co-1" },
+  { id: "coa-1003", code: "1003", name: "SBI Bank A/c (Star Enterprise)", type: "asset", sub_type: "bank_accounts", company_id: "co-2" },
+  { id: "coa-1004", code: "1004", name: "SBI Bank A/c (Prodigist Ventures)", type: "asset", sub_type: "bank_accounts", company_id: "co-3" },
   { id: "coa-1200", code: "1200", name: "Accounts Receivable (Sundry Debtors)", type: "asset", sub_type: "current_assets" },
   { id: "coa-1300", code: "1300", name: "Input CGST", type: "asset", sub_type: "current_assets" },
   { id: "coa-1301", code: "1301", name: "Input SGST", type: "asset", sub_type: "current_assets" },
@@ -711,13 +716,43 @@ function postSalesInvoiceJournal(inv: any) {
   });
 }
 
+function getBankCoa(bankAccount: any) {
+  if (!bankAccount) {
+    return chartOfAccounts.find(c => c.code === "1002") || chartOfAccounts[0];
+  }
+  if (bankAccount.coa_id) {
+    const found = chartOfAccounts.find(c => c.id === bankAccount.coa_id);
+    if (found) return found;
+  }
+  const masked = bankAccount.account_number_masked || bankAccount.account_number || "";
+  const existing = chartOfAccounts.find(c =>
+    c.sub_type === "bank_accounts" &&
+    c.company_id === bankAccount.company_id
+  );
+  if (existing) {
+    bankAccount.coa_id = existing.id;
+    return existing;
+  }
+  const newCode = String(1002 + chartOfAccounts.filter(c => c.sub_type === "bank_accounts").length);
+  const newCoa = {
+    id: `coa-${bankAccount.id}`,
+    code: newCode,
+    name: `${bankAccount.bank_name} (${bankAccount.account_holder || masked})`,
+    type: "asset",
+    sub_type: "bank_accounts",
+    company_id: bankAccount.company_id
+  };
+  chartOfAccounts.push(newCoa);
+  bankAccount.coa_id = newCoa.id;
+  return newCoa;
+}
+
 function postSalesPaymentJournal(inv: any, payment: any) {
   const jeId = `je-sales-pay-${inv.invoice_no}`;
   journalEntries = journalEntries.filter(je => je.id !== jeId);
   
-  const bankAccount = bankAccounts.find(b => b.id === payment.bank_account_id) || bankAccounts[0];
-  const bankCoaId = bankAccount?.id === "bank-2" ? "coa-1003" : "coa-1002";
-  const bankName = bankAccount?.bank_name || "HDFC Bank A/c";
+  const bankAccount = bankAccounts.find(b => b.id === payment.bank_account_id) || bankAccounts.find(b => b.company_id === inv.company_id) || bankAccounts[0];
+  const bankCoa = getBankCoa(bankAccount);
   
   journalEntries.push({
     id: jeId,
@@ -731,7 +766,7 @@ function postSalesPaymentJournal(inv: any, payment: any) {
     company_id: inv.company_id,
     status: "posted",
     lines: [
-      { id: `jel-sp-${inv.id}-1`, account_id: bankCoaId, account_name: `${bankCoaId === "coa-1002" ? "1002" : "1003"} ${bankName}`, debit: payment.amount, credit: 0, memo: `Receipt Ref: ${payment.reference}` },
+      { id: `jel-sp-${inv.id}-1`, account_id: bankCoa.id, account_name: `${bankCoa.code} ${bankCoa.name}`, debit: payment.amount, credit: 0, memo: `Receipt Ref: ${payment.reference}` },
       { id: `jel-sp-${inv.id}-2`, account_id: "coa-1200", account_name: "1200 Accounts Receivable (Sundry Debtors)", debit: 0, credit: payment.amount, memo: inv.client_name }
     ]
   });
@@ -780,9 +815,8 @@ function postPurchasePaymentJournal(bill: any, payment: any) {
   const jeId = `je-pur-pay-${bill.invoice_no}`;
   journalEntries = journalEntries.filter(je => je.id !== jeId);
   
-  const bankAccount = bankAccounts.find(b => b.id === payment.bank_account_id) || bankAccounts[0];
-  const bankCoaId = bankAccount?.id === "bank-2" ? "coa-1003" : "coa-1002";
-  const bankName = bankAccount?.bank_name || "HDFC Bank A/c";
+  const bankAccount = bankAccounts.find(b => b.id === payment.bank_account_id) || bankAccounts.find(b => b.company_id === bill.company_id) || bankAccounts[0];
+  const bankCoa = getBankCoa(bankAccount);
   
   journalEntries.push({
     id: jeId,
@@ -797,24 +831,31 @@ function postPurchasePaymentJournal(bill: any, payment: any) {
     status: "posted",
     lines: [
       { id: `jel-pp-${bill.id}-1`, account_id: "coa-2100", account_name: "2100 Accounts Payable (Sundry Creditors)", debit: payment.amount, credit: 0, memo: bill.supplier_name },
-      { id: `jel-pp-${bill.id}-2`, account_id: bankCoaId, account_name: `${bankCoaId === "coa-1002" ? "1002" : "1003"} ${bankName}`, debit: 0, credit: payment.amount, memo: `Payment Ref: ${payment.reference}` }
+      { id: `jel-pp-${bill.id}-2`, account_id: bankCoa.id, account_name: `${bankCoa.code} ${bankCoa.name}`, debit: 0, credit: payment.amount, memo: `Payment Ref: ${payment.reference}` }
     ]
   });
 }
 
 function recomputeBankBalances() {
   for (const acc of bankAccounts) {
-    const bankCoaId = acc.id === "bank-2" ? "coa-1003" : "coa-1002";
-    let balance = acc.id === "bank-2" ? 75000 : 1450000;
-    
-    for (const je of journalEntries) {
-      for (const line of je.lines) {
-        if (line.account_id === bankCoaId) {
-          balance += (line.debit || 0) - (line.credit || 0);
+    const coa = getBankCoa(acc);
+    let balance = Number(acc.opening_balance || 0);
+
+    const txns = bankTransactions.filter(t => t.bank_account_id === acc.id);
+    if (txns.length > 0) {
+      const net = txns.reduce((s, t) => s + Number(t.credit || 0) - Number(t.debit || 0), 0);
+      balance += net;
+    } else {
+      for (const je of journalEntries) {
+        if (je.company_id && acc.company_id && je.company_id !== acc.company_id) continue;
+        for (const line of je.lines) {
+          if (line.account_id === coa.id) {
+            balance += Number(line.debit || 0) - Number(line.credit || 0);
+          }
         }
       }
     }
-    acc.balance = balance;
+    acc.current_balance = Math.round(balance * 100) / 100;
   }
 }
 
@@ -855,7 +896,7 @@ function syncLedgersWithInvoicesAndBills() {
           date: inv.invoice_date,
           mode: "bank",
           reference: "REC-AUTO",
-          bank_account_id: "bank-1"
+          bank_account_id: bankAccounts.find(b => b.company_id === inv.company_id)?.id || "bank-1"
         });
       }
     } else {
@@ -885,7 +926,7 @@ function syncLedgersWithInvoicesAndBills() {
           date: bill.invoice_date,
           mode: "bank",
           reference: "PAY-AUTO",
-          bank_account_id: "bank-1"
+          bank_account_id: bankAccounts.find(b => b.company_id === bill.company_id)?.id || "bank-1"
         });
       }
     } else {
@@ -903,6 +944,12 @@ function getAccountBalances(companyId: string | undefined, dateFrom?: string, da
   
   for (const coa of chartOfAccounts) {
     balances[coa.id] = 0;
+    if (coa.sub_type === "bank_accounts") {
+      const linked = bankAccounts.find(b => b.coa_id === coa.id || (b.company_id && b.company_id === coa.company_id));
+      if (linked && (!companyId || linked.company_id === companyId)) {
+        balances[coa.id] = Number(linked.opening_balance || 0);
+      }
+    }
   }
   
   for (const je of journalEntries) {
@@ -924,6 +971,17 @@ function getAccountBalances(companyId: string | undefined, dateFrom?: string, da
           }
         }
       }
+    }
+  }
+
+  // Synchronize bank account COA balances with bank transactions when statement records exist
+  for (const acc of bankAccounts) {
+    if (companyId && acc.company_id && acc.company_id !== companyId) continue;
+    const coa = getBankCoa(acc);
+    const txns = bankTransactions.filter(t => t.bank_account_id === acc.id);
+    if (txns.length > 0) {
+      const netTxns = txns.reduce((s, t) => s + Number(t.credit || 0) - Number(t.debit || 0), 0);
+      balances[coa.id] = Math.round((Number(acc.opening_balance || 0) + netTxns) * 100) / 100;
     }
   }
   
@@ -1690,6 +1748,9 @@ Instructions:
             const isDebit = txn.debit > 0;
             const amount = isDebit ? txn.debit : txn.credit;
             const jeId = "je-bank-" + txn.id;
+            const bankAcc = bankAccounts.find(b => b.id === txn.bank_account_id) || bankAccounts[0];
+            const targetCompanyId = bankAcc.company_id || "co-1";
+            const bankCoa = getBankCoa(bankAcc);
             
             journalEntries = journalEntries.filter(je => je.id !== jeId);
             journalEntries.push({
@@ -1701,13 +1762,13 @@ Instructions:
               voucher_no: `JV-${Date.now().toString().slice(-4)}`,
               total_debit: amount,
               total_credit: amount,
-              company_id: "co-1",
+              company_id: targetCompanyId,
               status: "posted",
               lines: isDebit ? [
                 { id: "jel-b1", account_id: coaHead.id, account_name: `${coaHead.code} ${coaHead.name}`, debit: amount, credit: 0, memo: txn.description },
-                { id: "jel-b2", account_id: "coa-1002", account_name: "1002 HDFC Bank A/c", debit: 0, credit: amount, memo: txn.description }
+                { id: "jel-b2", account_id: bankCoa.id, account_name: `${bankCoa.code} ${bankCoa.name}`, debit: 0, credit: amount, memo: txn.description }
               ] : [
-                { id: "jel-b1", account_id: "coa-1002", account_name: "1002 HDFC Bank A/c", debit: amount, credit: 0, memo: txn.description },
+                { id: "jel-b1", account_id: bankCoa.id, account_name: `${bankCoa.code} ${bankCoa.name}`, debit: amount, credit: 0, memo: txn.description },
                 { id: "jel-b2", account_id: coaHead.id, account_name: `${coaHead.code} ${coaHead.name}`, debit: 0, credit: amount, memo: txn.description }
               ]
             });
@@ -1739,6 +1800,10 @@ apiRouter.post("/bank-transactions/:id/match", (req, res) => {
   txn.matched_type = matched_type;
   txn.matched_id = matched_id;
   txn.matched_label = matched_label;
+
+  const bankAcc = bankAccounts.find(b => b.id === txn.bank_account_id) || bankAccounts[0];
+  const targetCompanyId = bankAcc.company_id || "co-1";
+  const bankCoa = getBankCoa(bankAcc);
   
   if (matched_type === "sale" && matched_id) {
     const sale = invoices.find(i => i.id === matched_id);
@@ -1774,7 +1839,10 @@ apiRouter.post("/bank-transactions/:id/match", (req, res) => {
     }
   } else if ((matched_type === "expense" || matched_type === "suspense") && post_journal) {
     const ledgerName = matched_label || "Suspense Account";
-    const coaHead = chartOfAccounts.find(c => c.name.includes(ledgerName)) || chartOfAccounts.find(c => c.code === "9998")!;
+    let coaHead = chartOfAccounts.find(c => c.id === matched_id || c.name.toLowerCase() === ledgerName.toLowerCase());
+    if (!coaHead) {
+      coaHead = chartOfAccounts.find(c => c.name.includes(ledgerName)) || chartOfAccounts.find(c => c.code === "9998")!;
+    }
     const isDebit = txn.debit > 0;
     const amount = isDebit ? txn.debit : txn.credit;
     const jeId = "je-bank-" + txn.id;
@@ -1789,13 +1857,13 @@ apiRouter.post("/bank-transactions/:id/match", (req, res) => {
       voucher_no: `JV-${Date.now().toString().slice(-4)}`,
       total_debit: amount,
       total_credit: amount,
-      company_id: "co-1",
+      company_id: targetCompanyId,
       status: "posted",
       lines: isDebit ? [
         { id: "jel-b1", account_id: coaHead.id, account_name: `${coaHead.code} ${coaHead.name}`, debit: amount, credit: 0, memo: txn.description },
-        { id: "jel-b2", account_id: "coa-1002", account_name: "1002 HDFC Bank A/c", debit: 0, credit: amount, memo: txn.description }
+        { id: "jel-b2", account_id: bankCoa.id, account_name: `${bankCoa.code} ${bankCoa.name}`, debit: 0, credit: amount, memo: txn.description }
       ] : [
-        { id: "jel-b1", account_id: "coa-1002", account_name: "1002 HDFC Bank A/c", debit: amount, credit: 0, memo: txn.description },
+        { id: "jel-b1", account_id: bankCoa.id, account_name: `${bankCoa.code} ${bankCoa.name}`, debit: amount, credit: 0, memo: txn.description },
         { id: "jel-b2", account_id: coaHead.id, account_name: `${coaHead.code} ${coaHead.name}`, debit: 0, credit: amount, memo: txn.description }
       ]
     });
@@ -1842,6 +1910,10 @@ apiRouter.post("/bank-transactions/:id/unmatch", (req, res) => {
 apiRouter.post("/bank-transactions/:id/edit-match", (req, res) => {
   const txn = bankTransactions.find(t => t.id === req.params.id);
   if (!txn) return res.status(404).json({ error: "Transaction not found" });
+
+  const bankAcc = bankAccounts.find(b => b.id === txn.bank_account_id) || bankAccounts[0];
+  const targetCompanyId = bankAcc.company_id || "co-1";
+  const bankCoa = getBankCoa(bankAcc);
   
   if (txn.matched_id) {
     const matched_type = txn.matched_type;
@@ -1895,7 +1967,10 @@ apiRouter.post("/bank-transactions/:id/edit-match", (req, res) => {
     }
   } else if ((matched_type === "expense" || matched_type === "suspense") && post_journal) {
     const ledgerName = matched_label || "Suspense Account";
-    const coaHead = chartOfAccounts.find(c => c.name.includes(ledgerName)) || chartOfAccounts.find(c => c.code === "9998")!;
+    let coaHead = chartOfAccounts.find(c => c.id === matched_id || c.name.toLowerCase() === ledgerName.toLowerCase());
+    if (!coaHead) {
+      coaHead = chartOfAccounts.find(c => c.name.includes(ledgerName)) || chartOfAccounts.find(c => c.code === "9998")!;
+    }
     const isDebit = txn.debit > 0;
     const amount = isDebit ? txn.debit : txn.credit;
     const jeId = "je-bank-" + txn.id;
@@ -1908,14 +1983,14 @@ apiRouter.post("/bank-transactions/:id/edit-match", (req, res) => {
       voucher_no: `JV-${Date.now().toString().slice(-4)}`,
       total_debit: amount,
       total_credit: amount,
-      company_id: "co-1",
+      company_id: targetCompanyId,
       status: "posted",
       lines: isDebit ? [
         { id: "jel-b1", account_id: coaHead.id, account_name: `${coaHead.code} ${coaHead.name}`, debit: amount, credit: 0, memo: txn.description },
-        { id: "jel-b2", account_id: "coa-1002", account_name: "1002 HDFC Bank A/c", debit: 0, credit: amount, memo: txn.description }
+        { id: "jel-b2", account_id: bankCoa.id, account_name: `${bankCoa.code} ${bankCoa.name}`, debit: 0, credit: amount, memo: txn.description }
       ] : [
-        { id: "jel-b1", account_id: "coa-1002", account_name: "1002 HDFC Bank A/c", debit: amount, credit: 0, memo: txn.description },
-        { id: "jel-b2", account_id: coaHead.id, account_name: `${coaHead.code} ${coaHead.name}`, debit: 0, credit: amount, memo: txn.description }
+        { id: "jel-b1", account_id: bankCoa.id, account_name: `${bankCoa.code} ${bankCoa.name}`, debit: amount, credit: 0, memo: txn.description },
+        { id: "jel-b2", account_id: coaHead.id, account_name: `${coaHead.code} ${coaHead.name}`, debit: amount, credit: 0, memo: txn.description }
       ]
     });
   }
@@ -1935,16 +2010,33 @@ apiRouter.post("/bank-transactions/:id/reject-suggestion", (req, res) => {
   res.json({ success: true });
 });
 
-// Chart of Accounts
-apiRouter.get("/chart-of-accounts", (req, res) => res.json(chartOfAccounts));
+// Chart of Accounts (persisted globally across companies)
+apiRouter.get("/chart-of-accounts", (req, res) => {
+  const { company_id } = req.query;
+  let list = chartOfAccounts;
+  if (company_id && company_id !== "all" && company_id !== "") {
+    list = chartOfAccounts.filter(c => 
+      !c.company_id || 
+      c.company_id === "global" || 
+      c.company_id === company_id || 
+      c.is_custom || 
+      c.type === "expense" || 
+      c.type === "income"
+    );
+  }
+  res.json(list);
+});
+
 apiRouter.post("/chart-of-accounts", (req, res) => {
   const body = req.body;
   const newCOA = {
     id: "coa-" + Date.now(),
-    code: body.code,
+    code: body.code || String(5010 + chartOfAccounts.length),
     name: body.name,
     type: body.type || "expense",
-    sub_type: body.sub_type || "operating_expense"
+    sub_type: body.sub_type || "operating_expense",
+    company_id: "global", // Persisted globally so it is available across all companies
+    is_custom: true
   };
   chartOfAccounts.push(newCOA);
   res.json(newCOA);
@@ -2101,9 +2193,14 @@ apiRouter.delete("/journal-entries/:id", (req, res) => {
 // Accounting Reports Dynamic Calculations
 apiRouter.get("/reports/trial-balance", (req, res) => {
   const { company_id, date_from, date_to } = req.query;
-  const balances = getAccountBalances(company_id as string || undefined, date_from as string, date_to as string);
+  const cid = (company_id as string) || undefined;
+  const balances = getAccountBalances(cid, date_from as string, date_to as string);
   
-  const rows = chartOfAccounts.map(coa => {
+  const coaList = chartOfAccounts.filter(c =>
+    !cid || !c.company_id || c.company_id === "global" || c.company_id === cid || c.is_custom || c.type === "expense"
+  );
+  
+  const rows = coaList.map(coa => {
     const bal = balances[coa.id] || 0;
     const isDr = coa.type === "asset" || coa.type === "expense";
     return {
@@ -2124,13 +2221,18 @@ apiRouter.get("/reports/trial-balance", (req, res) => {
 
 apiRouter.get("/reports/profit-loss", (req, res) => {
   const { company_id, date_from, date_to } = req.query;
-  const balances = getAccountBalances(company_id as string || undefined, date_from as string, date_to as string);
+  const cid = (company_id as string) || undefined;
+  const balances = getAccountBalances(cid, date_from as string, date_to as string);
   
-  const income = chartOfAccounts
+  const coaList = chartOfAccounts.filter(c =>
+    !cid || !c.company_id || c.company_id === "global" || c.company_id === cid || c.is_custom || c.type === "expense" || c.type === "income"
+  );
+
+  const income = coaList
     .filter(coa => coa.type === "income")
     .map(coa => ({ name: coa.name, amount: balances[coa.id] || 0 }));
     
-  const expenses = chartOfAccounts
+  const expenses = coaList
     .filter(coa => coa.type === "expense")
     .map(coa => ({ name: coa.name, amount: balances[coa.id] || 0 }));
     
@@ -2143,25 +2245,30 @@ apiRouter.get("/reports/profit-loss", (req, res) => {
 
 apiRouter.get("/reports/balance-sheet", (req, res) => {
   const { company_id, date_from, date_to } = req.query;
-  const balances = getAccountBalances(company_id as string || undefined, date_from as string, date_to as string);
+  const cid = (company_id as string) || undefined;
+  const balances = getAccountBalances(cid, date_from as string, date_to as string);
   
-  const assets = chartOfAccounts
+  const coaList = chartOfAccounts.filter(c =>
+    !cid || !c.company_id || c.company_id === "global" || c.company_id === cid || c.is_custom
+  );
+
+  const assets = coaList
     .filter(coa => coa.type === "asset")
     .map(coa => ({ name: coa.name, amount: balances[coa.id] || 0 }));
     
-  const liabilities = chartOfAccounts
+  const liabilities = coaList
     .filter(coa => coa.type === "liability")
     .map(coa => ({ name: coa.name, amount: balances[coa.id] || 0 }));
     
-  const pnl_income = chartOfAccounts
+  const pnl_income = coaList
     .filter(coa => coa.type === "income")
     .reduce((s, coa) => s + (balances[coa.id] || 0), 0);
-  const pnl_expense = chartOfAccounts
+  const pnl_expense = coaList
     .filter(coa => coa.type === "expense")
     .reduce((s, coa) => s + (balances[coa.id] || 0), 0);
   const net_profit = pnl_income - pnl_expense;
   
-  const equity = chartOfAccounts
+  const equity = coaList
     .filter(coa => coa.type === "equity")
     .map(coa => ({ name: coa.name, amount: balances[coa.id] || 0 }));
     
@@ -2176,10 +2283,13 @@ apiRouter.get("/reports/balance-sheet", (req, res) => {
 
 apiRouter.get("/reports/mis-compliance", (req, res) => {
   const { company_id, date_from, date_to } = req.query;
-  const balances = getAccountBalances(company_id as string || undefined, date_from as string, date_to as string);
+  const cid = (company_id as string) || undefined;
+  const balances = getAccountBalances(cid, date_from as string, date_to as string);
   
   // 1. Core ledger figures
-  const bankBalance = (balances["coa-1002"] || 0) + (balances["coa-1003"] || 0);
+  const bankBalance = chartOfAccounts
+    .filter(c => c.sub_type === "bank_accounts" && (!cid || !c.company_id || c.company_id === cid))
+    .reduce((s, c) => s + (balances[c.id] || 0), 0);
   const cashBalance = balances["coa-1001"] || 0;
   const receivables = balances["coa-1200"] || 0;
   const payables = balances["coa-2100"] || 0;
