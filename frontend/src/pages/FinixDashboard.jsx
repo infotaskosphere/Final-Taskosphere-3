@@ -97,41 +97,38 @@ function FinixDashboardInner() {
       }
       setRevenue(revTotal);
 
-      // Extract Receivables (Account 1100)
+      // Extract Receivables (Account 1200 / 1100)
       let arTotal = 0;
       if (tbData?.rows) {
-        const arAcct = tbData.rows.find(r => r.code === '1100');
+        const arAcct = tbData.rows.find(r => r.code === '1200' || r.code === '1100');
         arTotal = arAcct ? ((arAcct.debit || 0) - (arAcct.credit || 0)) : 0;
       }
       if (!arTotal && bsData?.assets) {
-        const arRow = bsData.assets.find(a => a.code === '1100' || a.name?.toLowerCase().includes('receivable'));
+        const arRow = bsData.assets.find(a => a.code === '1200' || a.code === '1100' || a.name?.toLowerCase().includes('receivable'));
         arTotal = arRow ? arRow.amount : 0;
       }
       setReceivables(arTotal);
 
-      // Extract Bank and Cash Balances (1000 and 1010)
+      // Extract Bank and Cash Balances (1001, 1002, 1003, 1000, 1010)
       let liquidCash = 0;
       if (tbData?.rows) {
-        const cashAcct = tbData.rows.find(r => r.code === '1000');
-        const bankAcct = tbData.rows.find(r => r.code === '1010');
-        const cashVal = cashAcct ? ((cashAcct.debit || 0) - (cashAcct.credit || 0)) : 0;
-        const bankVal = bankAcct ? ((bankAcct.debit || 0) - (bankAcct.credit || 0)) : 0;
-        liquidCash = cashVal + bankVal;
+        const cashAccts = tbData.rows.filter(r => ['1001', '1002', '1003', '1000', '1010'].includes(r.code));
+        liquidCash = cashAccts.reduce((sum, r) => sum + ((r.debit || 0) - (r.credit || 0)), 0);
       }
       if (!liquidCash && bsData?.assets) {
-        const cashRow = bsData.assets.find(a => a.code === '1000' || a.code === '1010' || a.name?.toLowerCase().includes('cash') || a.name?.toLowerCase().includes('bank'));
-        liquidCash = cashRow ? cashRow.amount : 0;
+        const cashRows = bsData.assets.filter(a => ['1001', '1002', '1003', '1000', '1010'].includes(a.code) || a.name?.toLowerCase().includes('cash') || a.name?.toLowerCase().includes('bank'));
+        liquidCash = cashRows.reduce((sum, item) => sum + (item.amount || 0), 0);
       }
       setCashAndBank(liquidCash);
 
-      // Extract Payables (Account 2000)
+      // Extract Payables (Account 2100 / 2000)
       let apTotal = 0;
       if (tbData?.rows) {
-        const apAcct = tbData.rows.find(r => r.code === '2000');
+        const apAcct = tbData.rows.find(r => r.code === '2100' || r.code === '2000');
         apTotal = apAcct ? Math.abs((apAcct.credit || 0) - (apAcct.debit || 0)) : 0;
       }
       if (!apTotal && bsData?.liabilities) {
-        const apRow = bsData.liabilities.find(l => l.code === '2000' || l.name?.toLowerCase().includes('payable'));
+        const apRow = bsData.liabilities.find(l => l.code === '2100' || l.code === '2000' || l.name?.toLowerCase().includes('payable'));
         apTotal = apRow ? apRow.amount : 0;
       }
       setPayables(apTotal);
