@@ -1002,7 +1002,7 @@ export default function ClientPortalDashboard() {
     { id: "drive", label: "My Drive", icon: "☁️" },
     user.can_view_tasks      && { id: "tasks",      label: "Tasks",      icon: "✅" },
     { id: "messages", label: "Messages", icon: "💬", badge: unreadMessages },
-    { id: "copilot",  label: "AI Copilot", icon: "🧠" },
+    { id: "copilot",  label: "AI Search", icon: "🧠" },
   ].filter(Boolean);
 
   return (
@@ -1268,7 +1268,7 @@ function CopilotTab() {
       const replyText = data?.reply || data?.response || data?.message || (typeof data === "string" ? data : null);
       setMessages(prev => [...prev, {
         role: "assistant",
-        content: replyText || `Taskosphere AI Copilot processed your request: "${userText}". All portal documents and accounts are up to date.`
+        content: replyText || `Taskosphere AI Search processed your request: "${userText}". All portal documents and accounts are up to date.`
       }]);
     } catch (err) {
       setMessages(prev => [...prev, {
@@ -1294,7 +1294,7 @@ function CopilotTab() {
   ];
 
   return (
-    <Section title="AI Copilot Assistant" icon="🧠">
+    <Section title="AI Search Assistant" icon="🧠">
       <div className="flex flex-col h-[500px] bg-gray-50 rounded-2xl border border-gray-100 overflow-hidden shadow-inner">
         {/* Messages body */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
