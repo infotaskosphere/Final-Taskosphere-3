@@ -817,7 +817,87 @@ function recomputeBankBalances() {
   }
 }
 
+function syncLedgersWithInvoicesAndBills() {
+  // 1. Remove journal entries that refer to deleted invoices or bills
+  const activeInvoiceNos = new Set(invoices.map(i => i.invoice_no));
+  const activeBillNos = new Set(purchaseInvoices.map(p => p.invoice_no));
+
+  journalEntries = journalEntries.filter(je => {
+    if (je.id.startsWith("je-sale-book-") || je.id.startsWith("je-sales-pay-")) {
+      return activeInvoiceNos.has(je.invoice_no);
+    }
+    if (je.id.startsWith("je-pur-book-") || je.id.startsWith("je-pur-pay-")) {
+      return activeBillNos.has(je.invoice_no);
+    }
+    return true;
+  });
+
+  // 2. Ensure all active invoices have Sales Booking journal entries
+  for (const inv of invoices) {
+    const jeId = `je-sale-book-${inv.invoice_no}`;
+    const existing = journalEntries.find(je => je.id === jeId);
+    if (!existing || Number(existing.total_debit) !== Number(inv.grand_total)) {
+      postSalesInvoiceJournal(inv);
+    }
+  }
+
+  // 3. Ensure all active invoices with payment have correct Payment journal entries
+  for (const inv of invoices) {
+    const jeId = `je-sales-pay-${inv.invoice_no}`;
+    const amountPaid = Number(inv.amount_paid || 0);
+    const existing = journalEntries.find(je => je.id === jeId);
+
+    if (amountPaid > 0) {
+      if (!existing || Number(existing.total_debit) !== amountPaid) {
+        postSalesPaymentJournal(inv, {
+          amount: amountPaid,
+          date: inv.invoice_date,
+          mode: "bank",
+          reference: "REC-AUTO",
+          bank_account_id: "bank-1"
+        });
+      }
+    } else {
+      journalEntries = journalEntries.filter(je => je.id !== jeId);
+    }
+  }
+
+  // 4. Ensure all active purchase invoices have Purchase Booking journal entries
+  for (const bill of purchaseInvoices) {
+    const jeId = `je-pur-book-${bill.invoice_no}`;
+    const existing = journalEntries.find(je => je.id === jeId);
+    if (!existing || Number(existing.total_debit) !== Number(bill.grand_total)) {
+      postPurchaseInvoiceJournal(bill);
+    }
+  }
+
+  // 5. Ensure all active purchase invoices with payment have correct Purchase Payment journal entries
+  for (const bill of purchaseInvoices) {
+    const jeId = `je-pur-pay-${bill.invoice_no}`;
+    const amountPaid = Number(bill.amount_paid || 0);
+    const existing = journalEntries.find(je => je.id === jeId);
+
+    if (amountPaid > 0) {
+      if (!existing || Number(existing.total_debit) !== amountPaid) {
+        postPurchasePaymentJournal(bill, {
+          amount: amountPaid,
+          date: bill.invoice_date,
+          mode: "bank",
+          reference: "PAY-AUTO",
+          bank_account_id: "bank-1"
+        });
+      }
+    } else {
+      journalEntries = journalEntries.filter(je => je.id !== jeId);
+    }
+  }
+
+  // 6. Recompute bank balances
+  recomputeBankBalances();
+}
+
 function getAccountBalances(companyId: string | undefined, dateFrom?: string, dateTo?: string) {
+  syncLedgersWithInvoicesAndBills();
   const balances: Record<string, number> = {};
   
   for (const coa of chartOfAccounts) {
