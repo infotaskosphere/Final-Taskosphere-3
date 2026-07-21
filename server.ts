@@ -2857,13 +2857,159 @@ apiRouter.post("/payments", (req, res) => {
   res.json(payment);
 });
 
-// ── AI COPILOT & INTELLIGENCE ROUTES (Gemini 3.6 Flash) ──────────────────────
+// ── AI SEARCH & ENTERPRISE DEEP SEARCH ENDPOINTS ─────────────────────────────
 
-// Copilot Chat Handler
+const handleSearchRequest = (req: express.Request, res: express.Response) => {
+  const queryStr = (req.query.query || req.query.q || req.query.search || "").toString().trim().toLowerCase();
+  const category = (req.query.category || "all").toString().toLowerCase();
+
+  if (!queryStr) {
+    return res.json({ query: "", category, results: [] });
+  }
+
+  const results: any[] = [];
+
+  // 1. Ledger / Journal Entries Search
+  if (category === "all" || category === "ledger") {
+    journalEntries.forEach(je => {
+      const lineText = je.lines?.map((l: any) => `${l.account_name} ${l.narration || ''}`).join(' ') || '';
+      const text = `${je.narration || ''} ${je.voucher_no || ''} ${lineText}`.toLowerCase();
+      if (text.includes(queryStr)) {
+        results.push({
+          source: "ledger",
+          title: je.narration || `Journal Voucher #${je.voucher_no || je.id}`,
+          snippet: `Voucher: ${je.voucher_no || je.id} | Date: ${je.entry_date}`,
+          amount: je.total_debit || je.total_credit || 0,
+          date: je.entry_date,
+          score: 0.95
+        });
+      }
+    });
+  }
+
+  // 2. Sales / Purchase Invoices
+  if (category === "all" || category === "documents" || category === "ledger") {
+    invoices.forEach(inv => {
+      const itemsText = inv.items?.map((i: any) => i.description).join(' ') || '';
+      const text = `${inv.invoice_no || ''} ${inv.client_name || ''} ${itemsText}`.toLowerCase();
+      if (text.includes(queryStr)) {
+        results.push({
+          source: "documents",
+          title: `Sales Invoice #${inv.invoice_no} - ${inv.client_name || 'Client'}`,
+          snippet: `Status: ${inv.status || 'Issued'} | Total: ₹${Number(inv.total_amount || inv.grand_total || 0).toLocaleString('en-IN')}`,
+          amount: inv.total_amount || inv.grand_total || 0,
+          date: inv.invoice_date || inv.date,
+          score: 0.98
+        });
+      }
+    });
+
+    purchaseInvoices.forEach(pur => {
+      const itemsText = pur.items?.map((i: any) => i.description).join(' ') || '';
+      const text = `${pur.invoice_no || ''} ${pur.supplier_name || ''} ${itemsText}`.toLowerCase();
+      if (text.includes(queryStr)) {
+        results.push({
+          source: "documents",
+          title: `Purchase Bill #${pur.invoice_no} - ${pur.supplier_name || 'Vendor'}`,
+          snippet: `Status: ${pur.status || 'Received'} | Total: ₹${Number(pur.total_amount || pur.grand_total || 0).toLocaleString('en-IN')}`,
+          amount: pur.total_amount || pur.grand_total || 0,
+          date: pur.invoice_date || pur.date,
+          score: 0.98
+        });
+      }
+    });
+  }
+
+  // 3. Bank Transactions & Accounts
+  if (category === "all" || category === "ledger" || category === "semantic") {
+    bankTransactions.forEach(bt => {
+      const text = `${bt.description || ''} ${bt.reference || ''}`.toLowerCase();
+      if (text.includes(queryStr)) {
+        results.push({
+          source: "ledger",
+          title: bt.description || `Bank Txn #${bt.reference || bt.id}`,
+          snippet: `Reference: ${bt.reference || bt.id} | Date: ${bt.date}`,
+          amount: bt.credit || bt.debit || 0,
+          date: bt.date,
+          score: 0.92
+        });
+      }
+    });
+
+    bankAccounts.forEach(ba => {
+      const text = `${ba.account_holder || ''} ${ba.bank_name || ''} ${ba.account_number_masked || ''}`.toLowerCase();
+      if (text.includes(queryStr)) {
+        results.push({
+          source: "semantic",
+          title: `Bank Account: ${ba.bank_name || 'Bank'} (${ba.account_number_masked || ba.id})`,
+          snippet: `Holder: ${ba.account_holder} | Balance: ₹${Number(ba.current_balance || 0).toLocaleString('en-IN')}`,
+          amount: ba.current_balance || 0,
+          date: new Date().toISOString().split('T')[0],
+          score: 0.94
+        });
+      }
+    });
+  }
+
+  // 4. Semantic / AI General Search on Clients, Chart of Accounts, Tasks
+  if (category === "all" || category === "semantic" || category === "documents") {
+    clients.forEach(c => {
+      const text = `${c.name || ''} ${c.gstin || ''} ${c.email || ''} ${c.city || ''}`.toLowerCase();
+      if (text.includes(queryStr)) {
+        results.push({
+          source: "semantic",
+          title: `Client: ${c.name}`,
+          snippet: `GSTIN: ${c.gstin || 'N/A'} | City: ${c.city || 'N/A'} | Email: ${c.email || 'N/A'}`,
+          date: new Date().toISOString().split('T')[0],
+          score: 0.90
+        });
+      }
+    });
+
+    chartOfAccounts.forEach(coa => {
+      const text = `${coa.code || ''} ${coa.name || ''} ${coa.type || ''}`.toLowerCase();
+      if (text.includes(queryStr)) {
+        results.push({
+          source: "semantic",
+          title: `Account: [${coa.code}] ${coa.name}`,
+          snippet: `Category: ${coa.type} (${coa.sub_type || 'General'})`,
+          date: new Date().toISOString().split('T')[0],
+          score: 0.88
+        });
+      }
+    });
+
+    tasks.forEach(t => {
+      const text = `${t.title || ''} ${t.description || ''} ${t.category || ''}`.toLowerCase();
+      if (text.includes(queryStr)) {
+        results.push({
+          source: "semantic",
+          title: `Compliance Task: ${t.title}`,
+          snippet: `Category: ${t.category || 'General'} | Status: ${t.status} | Priority: ${t.priority}`,
+          date: t.due_date || new Date().toISOString().split('T')[0],
+          score: 0.85
+        });
+      }
+    });
+  }
+
+  return res.json({
+    query: queryStr,
+    category,
+    results: results.slice(0, 50)
+  });
+};
+
+apiRouter.get("/v2/search", handleSearchRequest);
+apiRouter.get("/search", handleSearchRequest);
+
+// ── AI COPILOT / AI SEARCH ROUTES (Gemini 3.6 Flash) ─────────────────────────
+
+// Copilot / AI Search Handler
 const handleCopilotChat = async (req: express.Request, res: express.Response) => {
   const query = req.body?.query || req.body?.prompt || req.body?.message || "";
   if (!query) {
-    return res.json({ reply: "Hello! How can I assist you with your tasks, compliance, GST, or accounts today?" });
+    return res.json({ reply: "Hello! How can I assist you with your tasks, compliance, GST, bank transactions, or accounts today?" });
   }
 
   const ai = getGenAI();
@@ -2873,19 +3019,19 @@ const handleCopilotChat = async (req: express.Request, res: express.Response) =>
         model: "gemini-3.6-flash",
         contents: query,
         config: {
-          systemInstruction: "You are Taskosphere Enterprise Copilot, an AI assistant for Indian CA, tax, and accounting firms. Assist users with GST filing (GSTR-1, GSTR-3B, GSTR-2B ITC reconciliation), Income Tax compliance, ROC filings, task management, client management, invoices, and accounting. Keep answers concise, actionable, professional, and clear."
+          systemInstruction: "You are Taskosphere AI Search, an intelligent AI assistant and search engine for Indian CA, tax, accounting, and legal compliance firms. Assist users with GST filing (GSTR-1, GSTR-3B, GSTR-2B ITC reconciliation), Income Tax compliance, ROC filings, task management, client management, invoices, bank reconciliation, and accounting records. Keep answers concise, actionable, professional, and clear."
         }
       });
       if (response.text) {
         return res.json({ reply: response.text, response: response.text, message: response.text, status: "success" });
       }
     } catch (err: any) {
-      console.warn("Copilot Gemini API call failed:", err?.message || err);
+      console.warn("AI Search Gemini API call failed:", err?.message || err);
     }
   }
 
   const q = query.toLowerCase();
-  let reply = `I received your request regarding "${query}". `;
+  let reply = `I processed your search query regarding "${query}". `;
   if (q.includes("gst") || q.includes("itc") || q.includes("gstr")) {
     reply += "For GST reconciliation, compare your GSTR-2B portal downloads against your purchase register. Ensure supplier invoices are reflected in GSTR-2B prior to claiming Input Tax Credit under Section 16(2) of the CGST Act.";
   } else if (q.includes("task") || q.includes("due") || q.includes("pending")) {
@@ -2893,7 +3039,7 @@ const handleCopilotChat = async (req: express.Request, res: express.Response) =>
   } else if (q.includes("invoice") || q.includes("client") || q.includes("bill")) {
     reply += `Taskosphere currently manages ${clients.length} registered clients and ${salesInvoices.length} sales invoices. Use the Client Portal or Invoices tab to generate bills.`;
   } else {
-    reply += "Taskosphere AI Copilot is active and connected to your workspace. Ask me to summarize compliance tasks, verify ITC eligibility, or analyze client records.";
+    reply += "Taskosphere AI Search is active and connected to your workspace. Ask me to search compliance tasks, verify ITC eligibility, or analyze client records.";
   }
   return res.json({ reply, response: reply, message: reply, status: "success" });
 };
