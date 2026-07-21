@@ -5064,8 +5064,41 @@ async def _reconcile_and_sync_all_sales_and_payments_impl(company_id: str):
             # Find actual payments already on file
             existing_payments = await db.payments.find({"invoice_id": inv_id}).to_list(1000)
             recorded_total = sum(float(p.get("amount") or 0) for p in existing_payments)
-            
-            if target_paid > recorded_total:
+
+            # KEY FIX — Bank-statement-matched invoices must NOT get a second
+            # auto-generated payment record here.
+            #
+            # When a bank transaction is matched to an invoice, _auto_post_for_match
+            # in bank_accounts.py already posts the full journal entry:
+            #   Dr Bank Accounts (1010) / Cr Accounts Receivable (1100)
+            # It also sets `paid_bank_txn_id` on the invoice.
+            #
+            # Without this guard the reconcile loop would find target_paid >
+            # recorded_total (because no db.payments record exists for a bank match),
+            # auto-insert a payment, and call sync_payment_journal_entry — posting a
+            # *second* Dr Bank / Cr AR entry for every bank-matched receipt on every
+            # balance-sheet or trial-balance load.  That inflates the Bank Accounts
+            # balance on the balance sheet and drives Accounts Receivable negative.
+            bank_settled = bool(inv.get("paid_bank_txn_id"))
+
+            if bank_settled:
+                # Invoice was settled through bank statement reconciliation.
+                # Clean up any spurious auto-generated payments that previous
+                # reconcile runs may have already created for this invoice.
+                spurious = [p for p in existing_payments if p.get("auto_generated")]
+                for sp in spurious:
+                    _je_rows = await db.journal_entries.find(
+                        {"source": "payment", "source_id": sp["id"]}, {"_id": 0, "id": 1}
+                    ).to_list(20)
+                    if _je_rows:
+                        _je_ids = [r["id"] for r in _je_rows]
+                        await db.journal_lines.delete_many({"entry_id": {"$in": _je_ids}})
+                        await db.journal_entries.delete_many({"id": {"$in": _je_ids}})
+                    await db.payments.delete_one({"id": sp["id"]})
+                # Treat the invoice as fully paid — the bank match journal is the
+                # source of truth; no extra payment record is needed.
+                recorded_total = target_paid
+            elif target_paid > recorded_total:
                 # We have a shortfall in payments -> auto-create a payment record to cash or bank
                 shortfall = round(target_paid - recorded_total, 2)
                 if shortfall > 0.01:
