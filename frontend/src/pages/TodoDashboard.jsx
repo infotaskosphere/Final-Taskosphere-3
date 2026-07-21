@@ -20,6 +20,16 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Plus, Zap, Trash2, CheckCircle2, Sparkles, ShieldCheck,
   GripVertical, Settings2,
   RefreshCw, Target, TrendingUp, AlertCircle,
@@ -1127,7 +1137,9 @@ export default function TodoDashboard() {
   const [viewMode,     setViewMode]     = useState('list'); // 'list' | 'board'
 
   // ── Detail popup ──────────────────────────────────────────────────────────
-  const [selectedTodo, setSelectedTodo] = useState(null);
+  const [selectedTodo,    setSelectedTodo]    = useState(null);
+  const [todoToDelete,    setTodoToDelete]    = useState(null);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
   // ── Promote modal ─────────────────────────────────────────────────────────
   const [promoteTarget,    setPromoteTarget]    = useState(null);
@@ -1466,7 +1478,30 @@ export default function TodoDashboard() {
   };
 
   const handleToggle  = (id) => toggleMutation.mutate({ id });
-  const handleDelete  = (id) => deleteMutation.mutate(id);
+  const handleDelete  = (todoOrId) => {
+    let todoObj = null;
+    if (typeof todoOrId === 'object' && todoOrId !== null) {
+      todoObj = todoOrId;
+    } else {
+      todoObj = todos.find(t => (t.id || t._id) === todoOrId) || { id: todoOrId, title: 'this todo' };
+    }
+    setTodoToDelete(todoObj);
+    setDeleteModalOpen(true);
+  };
+
+  const handleConfirmDeleteTodo = () => {
+    if (!todoToDelete) return;
+    const targetId = todoToDelete.id || todoToDelete._id;
+    deleteMutation.mutate(targetId, {
+      onSettled: () => {
+        setDeleteModalOpen(false);
+        setTodoToDelete(null);
+        if (selectedTodo && (selectedTodo.id || selectedTodo._id) === targetId) {
+          setSelectedTodo(null);
+        }
+      }
+    });
+  };
 
   const handleOpenPromote = (todo) => {
     setSelectedTodo(null);
@@ -2373,12 +2408,60 @@ export default function TodoDashboard() {
           setSelectedTodo(t);
           setShowDupDialog(false);
         }}
-        onDelete={(t) => {
-          if (!window.confirm(`Delete todo "${t.title}"?`)) return;
-          deleteMutation.mutate(t.id);
-        }}
+        onDelete={(t) => handleDelete(t)}
         onView={(t) => { setSelectedTodo(t); setShowDupDialog(false); }}
       />
+
+      {/* ── Delete Confirmation Modal ───────────────────────────── */}
+      <AlertDialog open={deleteModalOpen} onOpenChange={(open) => {
+        if (!deleteMutation.isPending) {
+          setDeleteModalOpen(open);
+          if (!open) setTodoToDelete(null);
+        }
+      }}>
+        <AlertDialogContent className={`max-w-md rounded-2xl ${isDark ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-white border-slate-200 text-slate-900'}`}>
+          <AlertDialogHeader className="space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 flex items-center justify-center">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <AlertDialogTitle className="text-lg font-bold">Delete Todo?</AlertDialogTitle>
+              <AlertDialogDescription className={`text-sm mt-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                Are you sure you want to delete <span className="font-semibold text-slate-800 dark:text-slate-200">"{todoToDelete?.title || 'this todo'}"</span>? This action cannot be undone.
+              </AlertDialogDescription>
+            </div>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-6 flex items-center gap-2 sm:justify-end">
+            <AlertDialogCancel
+              onClick={() => { setDeleteModalOpen(false); setTodoToDelete(null); }}
+              disabled={deleteMutation.isPending}
+              className={`rounded-xl h-10 px-4 text-xs font-semibold ${isDark ? 'border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300' : ''}`}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleConfirmDeleteTodo();
+              }}
+              disabled={deleteMutation.isPending}
+              className="rounded-xl h-10 px-4 text-xs font-semibold bg-red-600 hover:bg-red-700 text-white flex items-center gap-2 shadow-md shadow-red-600/20"
+            >
+              {deleteMutation.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-4 h-4" />
+                  Delete Todo
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </motion.div>
   );
 }
