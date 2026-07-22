@@ -17,6 +17,7 @@ import {
   PageHeader, ReportCard, Row, EmptyState, DateFilterBar,
   fmtC, fmtN, fmtPct, currentFYLabel, COLORS,
 } from '@/components/reports/ReportShared.jsx';
+import { runVerifyAndFix, describeValidationResult } from '@/lib/verifyAndFixLedger';
 
 /* ═══════════════════════════════════════════════════════════════════════
    Tab registry — maps each of the 13 old standalone routes to one section
@@ -1097,6 +1098,26 @@ function ExtendedReportsInner() {
   const cardCls = isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200';
   const groupLabelCls = isDark ? 'text-slate-500' : 'text-slate-400';
 
+  // "Refresh" here does more than refetch — it re-syncs every invoice, bill,
+  // and payment into the ledger and reports whatever it could and couldn't
+  // fix, then remounts the active section (via refreshKey) so it pulls the
+  // corrected figures.
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      const summary = await runVerifyAndFix('');
+      const { variant, title, text } = describeValidationResult(summary);
+      toast[variant === 'warning' ? 'warning' : 'success'](title, { description: text });
+      setRefreshKey((k) => k + 1);
+    } catch {
+      toast.error('Could not refresh — please try again.');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   return (
     <div className={`min-h-screen ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
       <div className="p-4 md:p-6 space-y-5 max-w-[1200px] mx-auto">
@@ -1105,6 +1126,8 @@ function ExtendedReportsInner() {
           title="Extended Accounting Reports"
           subtitle="Day book, cash flow, aging, bank reconciliation, depreciation, TDS/TCS, ratios and more — all in one place."
           isDark={isDark}
+          onRefresh={handleRefresh}
+          refreshing={refreshing}
         />
 
         {/* Grouped, grid-aligned sub-nav — 13 sections read as ledger
@@ -1160,19 +1183,19 @@ function ExtendedReportsInner() {
         <GuidanceNote pageKey="extended-reports" isDark={isDark} />
 
         <div>
-          {tab === 'day-book' && <DayBookSection isDark={isDark} />}
-          {tab === 'cash-bank-book' && <CashBankBookSection isDark={isDark} />}
-          {tab === 'cash-flow' && <CashFlowSection isDark={isDark} />}
-          {tab === 'outstanding' && <OutstandingSection isDark={isDark} />}
-          {tab === 'bank-reconciliation' && <BankReconciliationSection isDark={isDark} />}
-          {tab === 'depreciation' && <DepreciationSection isDark={isDark} />}
-          {tab === 'tds-tcs' && <TdsTcsSection isDark={isDark} />}
-          {tab === 'financial-ratios' && <FinancialRatiosSection isDark={isDark} />}
-          {tab === 'comparative' && <ComparativeSection isDark={isDark} />}
-          {tab === 'yearly' && <YearlySection isDark={isDark} />}
-          {tab === 'opening-balances' && <OpeningBalancesSection isDark={isDark} />}
-          {tab === 'audit-trail' && <AuditTrailSection isDark={isDark} />}
-          {tab === 'bulk-import' && <BulkImportSection isDark={isDark} />}
+          {tab === 'day-book' && <DayBookSection key={refreshKey} isDark={isDark} />}
+          {tab === 'cash-bank-book' && <CashBankBookSection key={refreshKey} isDark={isDark} />}
+          {tab === 'cash-flow' && <CashFlowSection key={refreshKey} isDark={isDark} />}
+          {tab === 'outstanding' && <OutstandingSection key={refreshKey} isDark={isDark} />}
+          {tab === 'bank-reconciliation' && <BankReconciliationSection key={refreshKey} isDark={isDark} />}
+          {tab === 'depreciation' && <DepreciationSection key={refreshKey} isDark={isDark} />}
+          {tab === 'tds-tcs' && <TdsTcsSection key={refreshKey} isDark={isDark} />}
+          {tab === 'financial-ratios' && <FinancialRatiosSection key={refreshKey} isDark={isDark} />}
+          {tab === 'comparative' && <ComparativeSection key={refreshKey} isDark={isDark} />}
+          {tab === 'yearly' && <YearlySection key={refreshKey} isDark={isDark} />}
+          {tab === 'opening-balances' && <OpeningBalancesSection key={refreshKey} isDark={isDark} />}
+          {tab === 'audit-trail' && <AuditTrailSection key={refreshKey} isDark={isDark} />}
+          {tab === 'bulk-import' && <BulkImportSection key={refreshKey} isDark={isDark} />}
         </div>
       </div>
     </div>
