@@ -747,6 +747,73 @@ async def get_ledger(
     return {"account": acct, "lines": lines, "closing_balance": running}
 
 
+# ── Ledger drill-down by account code ───────────────────────────────────────
+# Trial Balance / P&L / Balance Sheet rows are keyed by account *code*
+# ("1010", "4000", ...) rather than a single account_id — in "All Companies"
+# view the same code maps to a different chart_of_accounts._id in every
+# company's book. This endpoint resolves every matching account for the
+# given code (optionally scoped to one company) and returns their combined
+# transaction history with a running balance, so any report head can be made
+# clickable without the frontend needing to know which company owns which id.
+@router.get("/reports/ledger-by-code")
+async def get_ledger_by_code(
+    code: str = Query(...),
+    company_id: str = Query(""),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+):
+    if not _perm_view_journal(current_user) and not _perm_reports(current_user):
+        raise HTTPException(403, "Access denied.")
+
+    acct_q: dict = {"code": code}
+    if company_id:
+        acct_q["company_id"] = company_id
+    accounts = await db.chart_of_accounts.find(acct_q, {"_id": 0}).to_list(2000)
+    if not accounts:
+        raise HTTPException(404, "Account not found.")
+
+    account_ids = [a["id"] for a in accounts]
+    if company_id:
+        await _reconcile_one_book(company_id)
+    else:
+        await _reconcile_all_books(await _all_book_ids())
+
+    q: dict = {"account_id": {"$in": account_ids}}
+    if date_from or date_to:
+        q["entry_date"] = {}
+        if date_from:
+            q["entry_date"]["$gte"] = date_from
+        if date_to:
+            q["entry_date"]["$lte"] = date_to
+    lines = await db.journal_lines.find(q, {"_id": 0}).sort("entry_date", 1).to_list(20000)
+
+    # Enrich with the same voucher/party context list_journal_entries()
+    # provides, so the drill-down reads like a mini Journal Entries view
+    # instead of raw debit/credit rows.
+    entry_ids = list({l["entry_id"] for l in lines})
+    entries = await db.journal_entries.find({"id": {"$in": entry_ids}}, {"_id": 0}).to_list(len(entry_ids) or 1)
+    entries_by_id = {e["id"]: e for e in entries}
+
+    typ = accounts[0]["type"]
+    is_debit_normal = typ in ("asset", "expense")
+    running = 0.0
+    for l in lines:
+        e = entries_by_id.get(l["entry_id"], {})
+        l["narration"] = e.get("narration")
+        l["source"] = e.get("source")
+        l["source_id"] = e.get("source_id")
+        l["company_id"] = e.get("company_id", l.get("company_id"))
+        delta = (l["debit"] - l["credit"]) if is_debit_normal else (l["credit"] - l["debit"])
+        running = round(running + delta, 2)
+        l["running_balance"] = running
+
+    return {
+        "code": code, "name": accounts[0]["name"], "type": typ,
+        "lines": lines, "closing_balance": running,
+    }
+
+
 # ── Trial Balance ─────────────────────────────────────────────────────────
 @router.get("/reports/trial-balance")
 async def trial_balance(
@@ -1760,6 +1827,3 @@ async def finix_chat(req: FinixChatRequest, current_user: User = Depends(get_cur
             "To activate my full Gemini generative analytical co-pilot capabilities, please configure the `GEMINI_API_KEY` on your environment server."
         )
         return {"response": fallback_msg}
-
-
-
