@@ -276,6 +276,36 @@ async def _store_message(sent_by, to, message, message_type, context_id, status_
 
 # ── Multi-session endpoints ──────────────────────────────────────────────────
 
+@router.get("/numbers")
+async def list_numbers(current_user: User = Depends(get_current_user)):
+    """Connected WhatsApp numbers for the Hub's per-number filter row.
+    The frontend (WhatsAppHub.jsx) has been calling GET /whatsapp/numbers
+    since it was built, but this endpoint never existed — every call 404'd
+    and was silently swallowed, so the filter row simply never appeared.
+    Reuses the same bridge+label join as /sessions, filtered to connected
+    numbers only, plus a per-number conversation count from the Hub's own
+    contacts collection so the badge counts in the UI have real data."""
+    bridge_sessions = await _get_cached_sessions()
+    db = _db()
+    db_records = await db["whatsapp_sessions"].find({}).to_list(100)
+    labels = {d["session_id"]: d for d in db_records}
+
+    result = []
+    for s in bridge_sessions:
+        if s.get("status") != "connected":
+            continue
+        sid = s["sessionId"]
+        db_rec = labels.get(sid, {})
+        conv_count = await db["whatsapp_hub_contacts"].count_documents({"session_id": sid})
+        result.append({
+            "id": sid,
+            "number": s.get("phoneNumber"),
+            "label": db_rec.get("label") or s.get("displayName") or s.get("phoneNumber") or sid,
+            "conversation_count": conv_count,
+        })
+    return {"numbers": result}
+
+
 @router.get("/sessions")
 async def list_sessions(current_user: User = Depends(get_current_user)):
     # FIX: uses 15s cache — all concurrent callers share one bridge hit per window
