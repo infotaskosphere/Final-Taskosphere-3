@@ -1,0 +1,32 @@
+// content.js
+// Injected by Chrome into the TaskoSphere frontend page.
+// Bridges postMessage() calls from the webpage to the background service worker.
+
+window.addEventListener("message", (event) => {
+
+  // Only accept messages from known TaskoSphere origins
+  const allowedOrigins = [
+    "https://final-taskosphere-frontend.onrender.com",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173"
+  ];
+
+  if (!allowedOrigins.includes(event.origin)) return;
+  if (!event.data || !event.data.type) return;
+
+  if (event.data.type === "SET_TOKEN") {
+    chrome.runtime.sendMessage({
+      type: "SET_TOKEN",
+      token: event.data.token
+    });
+  }
+
+  if (event.data.type === "CLEAR_TOKEN") {
+    chrome.runtime.sendMessage({
+      type: "CLEAR_TOKEN"
+    });
+  }
+
+});
