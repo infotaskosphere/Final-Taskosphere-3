@@ -13,10 +13,14 @@ class SemanticSearch:
         
         # Build search rules based on semantic keywords
         if "rent" in q:
-            search_filter["narrative"] = {"$regex": "rent", "$options": "i"}
+            search_filter["narration"] = {"$regex": "rent", "$options": "i"}
         elif "salary" in q or "payroll" in q:
-            search_filter["narrative"] = {"$regex": "salary|payroll", "$options": "i"}
+            search_filter["narration"] = {"$regex": "salary|payroll", "$options": "i"}
         elif "tax" in q or "gst" in q:
-            search_filter["narrative"] = {"$regex": "tax|gst", "$options": "i"}
+            search_filter["narration"] = {"$regex": "tax|gst", "$options": "i"}
+        else:
+            # No recognised semantic keyword — fall back to a plain narration match
+            # instead of returning up to 100 unrelated journals.
+            search_filter["narration"] = {"$regex": query_text, "$options": "i"}
             
         return await db.journals.find(search_filter).to_list(100)
