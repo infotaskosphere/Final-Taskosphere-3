@@ -1423,7 +1423,13 @@ export default function WhatsAppHub() {
   const loadContacts = useCallback(async () => {
     setLoadingC(true);
     try {
-      const { data } = await api.get('/whatsapp/hub/inbox?limit=500');
+      // FIX: selectedNumber (the per-number filter row) was only ever used
+      // to highlight a button — it was never passed to the inbox fetch, so
+      // clicking a number never actually filtered anything. Now forwarded
+      // as session_id, matching how /whatsapp/hub/inbox already supports
+      // filtering by session_id server-side.
+      const params = selectedNumber ? `&session_id=${encodeURIComponent(selectedNumber)}` : '';
+      const { data } = await api.get(`/whatsapp/hub/inbox?limit=500${params}`);
       const { plain, dedupedGroups } = splitContactsAndGroups(data.contacts || []);
       setContacts(plain);
       setGroups(dedupedGroups);
@@ -1435,7 +1441,7 @@ export default function WhatsAppHub() {
       // what actually went wrong.
       setInboxError(err?.response?.data?.detail || err.message || 'Failed to load chats');
     } finally { setLoadingC(false); }
-  }, []);
+  }, [selectedNumber]);
 
   const loadArchived = useCallback(async () => {
     try {
