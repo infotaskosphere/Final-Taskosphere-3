@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   BookOpen, Landmark, Activity, AlertTriangle, ArrowLeftRight, TrendingDown,
   Shield, BarChart3, TrendingUp, CalendarRange, Scale, CheckCircle2, Upload,
   ChevronDown, ChevronRight, Plus, Play, Link2, Unlink, Loader2, Building2,
+  ShieldAlert, ExternalLink, CheckCircle,
 } from 'lucide-react';
 import { ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
@@ -336,7 +337,8 @@ function OutstandingSection({ isDark, companyId }) {
 function BankReconciliationSection({ isDark, companyId }) {
   const [bankAccounts, setBankAccounts] = useState([]);
   const [selectedBank, setSelectedBank] = useState('');
-  const [recon, setRecon] = useState(null);
+  const [transactions, setTransactions] = useState([]);
+  const [intel, setIntel] = useState(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
 
@@ -354,16 +356,21 @@ function BankReconciliationSection({ isDark, companyId }) {
       }
     } catch { toast.error('Failed to load bank accounts'); setLoading(false); }
   };
-  const loadRecon = async (bankId) => {
+
+  const loadAll = async (bankId) => {
     if (!bankId) { setLoading(false); return; }
     setLoading(true);
     try {
-      const { data } = await api.get(`/bank-reconciliation/${bankId}`);
-      setRecon(data);
+      const [txnsRes, intelRes] = await Promise.all([
+        api.get(`/bank-accounts/${bankId}/transactions`),
+        api.get(`/bank-accounts/${bankId}/intelligence`),
+      ]);
+      setTransactions(txnsRes.data || []);
+      setIntel(intelRes.data || null);
     } catch { toast.error('Failed to load reconciliation data'); } finally { setLoading(false); }
   };
   useEffect(() => { loadBankAccounts(); }, [companyId]);
-  useEffect(() => { if (selectedBank) loadRecon(selectedBank); }, [selectedBank]);
+  useEffect(() => { if (selectedBank) loadAll(selectedBank); }, [selectedBank]);
 
   const handleUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -371,27 +378,31 @@ function BankReconciliationSection({ isDark, companyId }) {
     setUploading(true);
     try {
       const form = new FormData();
-      form.append('bank_account_id', selectedBank);
       form.append('file', file);
-      await api.post('/bank-reconciliation/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } });
-      toast.success('Statement uploaded');
-      loadRecon(selectedBank);
+      form.append('auto_match', 'true');
+      const { data } = await api.post(`/bank-accounts/${selectedBank}/upload-statement`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+      if (data?.success === false) {
+        toast.warning('No transactions read', { description: (data.warnings || [])[0] });
+      } else {
+        toast.success(`${data.transactions_saved} transaction${data.transactions_saved === 1 ? '' : 's'} imported`, {
+          description: `${data.auto_matched} auto-matched · ${data.auto_posted} auto-posted · ${data.auto_suspensed} parked to Suspense for review`,
+        });
+      }
+      loadAll(selectedBank);
     } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Upload failed — ensure the file is CSV or Excel with date/narration/debit/credit columns.');
+      toast.error(err?.response?.data?.detail || 'Upload failed — please try again.');
     } finally { setUploading(false); e.target.value = ''; }
   };
-  const matchRow = async (statementId, rowId, entryId) => {
+
+  const unmatchRow = async (txnId) => {
     try {
-      await api.post(`/bank-reconciliation/${selectedBank}/match`, { statement_id: statementId, row_id: rowId, entry_id: entryId });
-      toast.success('Matched'); loadRecon(selectedBank);
-    } catch { toast.error('Failed to match'); }
-  };
-  const unmatchRow = async (statementId, rowId) => {
-    try {
-      await api.post(`/bank-reconciliation/${selectedBank}/unmatch`, { statement_id: statementId, row_id: rowId, entry_id: '' });
-      toast.success('Unmatched'); loadRecon(selectedBank);
+      await api.post(`/bank-transactions/${txnId}/unmatch`, { reason: '' });
+      toast.success('Unmatched'); loadAll(selectedBank);
     } catch { toast.error('Failed to unmatch'); }
   };
+
+  const stats = intel?.statistics;
+  const anomalies = intel?.anomalies || [];
 
   return (
     <div className="space-y-4">
@@ -401,51 +412,83 @@ function BankReconciliationSection({ isDark, companyId }) {
           {bankAccounts.map((b) => <option key={b.id} value={b.id}>{b.account_name || b.bank_name} ({fmtC(b.current_balance)})</option>)}
         </select>
         <label className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold cursor-pointer border ${isDark ? 'border-slate-600 text-slate-200 hover:bg-slate-700' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
-          <Upload className="h-4 w-4" /> {uploading ? 'Uploading…' : 'Upload Statement (CSV / Excel)'}
+          <Upload className="h-4 w-4" /> {uploading ? 'Reading, matching & posting…' : 'Upload Statement (CSV / Excel / PDF)'}
           <input type="file" accept=".csv,.xlsx,.xls,.pdf" className="hidden" onChange={handleUpload} disabled={!selectedBank || uploading} />
         </label>
+        {selectedBank && (
+          <Link to="/bank-accounts" className="ml-auto text-xs inline-flex items-center gap-1 text-blue-600 hover:underline">
+            Manage matches in Bank Accounts <ExternalLink className="h-3 w-3" />
+          </Link>
+        )}
       </div>
-      {loading ? <ContentLoader /> : !recon || recon.statements.length === 0 ? (
-        <ReportCard title="Statements" isDark={isDark}><EmptyState text="No statement uploaded yet for this bank account." /></ReportCard>
+
+      {loading ? <ContentLoader /> : !selectedBank ? (
+        <ReportCard title="Statements" isDark={isDark}><EmptyState text="No bank account selected." /></ReportCard>
       ) : (
-        recon.statements.map((stmt) => (
-          <ReportCard key={stmt.id} title={stmt.filename} isDark={isDark}
-            action={<span className="text-xs text-slate-400">{stmt.matched_rows}/{stmt.total_rows} matched · uploaded {new Date(stmt.uploaded_at).toLocaleDateString('en-IN')}</span>}>
-            <div className="overflow-x-auto">
-              <div className="grid grid-cols-[90px_1fr_90px_90px_90px] gap-2 text-[11px] uppercase font-bold text-slate-400 pb-2 border-b" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
-                <span>Date</span><span>Narration</span><span className="text-right">Debit</span><span className="text-right">Credit</span><span className="text-right">Action</span>
-              </div>
-              {(stmt.rows || []).map((r) => (
-                <div key={r.id} className="grid grid-cols-[90px_1fr_90px_90px_90px] gap-2 py-1.5 text-sm items-center">
-                  <span className="text-xs text-slate-400">{r.statement_date}</span>
-                  <span className={isDark ? 'text-slate-200' : 'text-slate-700'}>{r.narration || '—'}</span>
-                  <span className="text-right font-mono">{r.debit ? fmtC(r.debit) : ''}</span>
-                  <span className="text-right font-mono">{r.credit ? fmtC(r.credit) : ''}</span>
-                  <span className="text-right">
-                    {r.matched ? (
-                      <button onClick={() => unmatchRow(stmt.id, r.id)} className="text-xs inline-flex items-center gap-1 text-emerald-600 hover:text-rose-600"><Unlink className="h-3.5 w-3.5" /> Matched</button>
-                    ) : (
-                      <button onClick={() => { const entryId = window.prompt('Enter journal entry ID to match this row to:'); if (entryId) matchRow(stmt.id, r.id, entryId); }} className="text-xs inline-flex items-center gap-1 text-slate-400 hover:text-blue-600"><Link2 className="h-3.5 w-3.5" /> Match</button>
-                    )}
-                  </span>
+        <>
+          {stats && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                ['Transactions', stats.total_transactions],
+                ['Reconciled', `${stats.reconciliation_rate}%`],
+                ['Auto-parked (Suspense)', stats.auto_suspensed],
+                ['Unmatched', stats.unmatched],
+              ].map(([label, val]) => (
+                <div key={label} className={`rounded-2xl border p-3 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                  <div className="text-[11px] uppercase font-bold text-slate-400">{label}</div>
+                  <div className={`text-xl font-bold mt-1 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{val}</div>
                 </div>
               ))}
             </div>
+          )}
+
+          {anomalies.length > 0 && (
+            <ReportCard title="Flagged for review" isDark={isDark}
+              action={<span className="text-xs inline-flex items-center gap-1 text-amber-600"><ShieldAlert className="h-3.5 w-3.5" /> {anomalies.length} anomal{anomalies.length === 1 ? 'y' : 'ies'}</span>}>
+              <div className="space-y-2">
+                {anomalies.slice(0, 25).map((a) => (
+                  <div key={a.bank_transaction_id} className={`rounded-xl border p-2.5 text-sm ${isDark ? 'border-amber-900/40 bg-amber-950/20' : 'border-amber-200 bg-amber-50'}`}>
+                    <div className="flex justify-between">
+                      <span className={isDark ? 'text-slate-200' : 'text-slate-700'}>{a.narration || '—'}</span>
+                      <span className="font-mono">{fmtC(a.amount)}</span>
+                    </div>
+                    <div className="text-xs text-amber-700 mt-1">{a.flags.join(' · ')}</div>
+                  </div>
+                ))}
+              </div>
+            </ReportCard>
+          )}
+
+          <ReportCard title="Transactions" isDark={isDark}
+            action={<span className="text-xs text-slate-400">{transactions.length} row{transactions.length === 1 ? '' : 's'}</span>}>
+            {transactions.length === 0 ? (
+              <EmptyState text="No statement uploaded yet for this bank account." />
+            ) : (
+              <div className="overflow-x-auto">
+                <div className="grid grid-cols-[90px_1fr_90px_90px_120px] gap-2 text-[11px] uppercase font-bold text-slate-400 pb-2 border-b" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                  <span>Date</span><span>Narration</span><span className="text-right">Debit</span><span className="text-right">Credit</span><span className="text-right">Status</span>
+                </div>
+                {transactions.slice(0, 200).map((t) => (
+                  <div key={t.id} className="grid grid-cols-[90px_1fr_90px_90px_120px] gap-2 py-1.5 text-sm items-center">
+                    <span className="text-xs text-slate-400">{t.date}</span>
+                    <span className={isDark ? 'text-slate-200' : 'text-slate-700'}>{t.description || '—'}</span>
+                    <span className="text-right font-mono">{t.debit ? fmtC(t.debit) : ''}</span>
+                    <span className="text-right font-mono">{t.credit ? fmtC(t.credit) : ''}</span>
+                    <span className="text-right">
+                      {t.matched_type === 'suspense' ? (
+                        <span className="text-xs inline-flex items-center gap-1 text-amber-600"><AlertTriangle className="h-3.5 w-3.5" /> In Suspense</span>
+                      ) : t.matched_type ? (
+                        <button onClick={() => unmatchRow(t.id)} className="text-xs inline-flex items-center gap-1 text-emerald-600 hover:text-rose-600"><CheckCircle className="h-3.5 w-3.5" /> Matched</button>
+                      ) : (
+                        <Link to="/bank-accounts" className="text-xs inline-flex items-center gap-1 text-slate-400 hover:text-blue-600"><Link2 className="h-3.5 w-3.5" /> Match</Link>
+                      )}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </ReportCard>
-        ))
-      )}
-      {recon && recon.unmatched_journal_lines?.length > 0 && (
-        <ReportCard title="Recent Unreconciled Journal Lines" isDark={isDark}>
-          <p className="text-xs text-slate-400 mb-2">Use these entry IDs when matching a statement row above.</p>
-          {recon.unmatched_journal_lines.slice(0, 50).map((l) => (
-            <div key={l.id} className="grid grid-cols-[90px_1fr_90px_90px] gap-2 py-1 text-xs">
-              <span className="text-slate-400">{l.entry_date}</span>
-              <span className={isDark ? 'text-slate-300' : 'text-slate-600'}>Entry {l.entry_id} — {l.memo || ''}</span>
-              <span className="text-right font-mono">{l.debit ? fmtC(l.debit) : ''}</span>
-              <span className="text-right font-mono">{l.credit ? fmtC(l.credit) : ''}</span>
-            </div>
-          ))}
-        </ReportCard>
+        </>
       )}
     </div>
   );
