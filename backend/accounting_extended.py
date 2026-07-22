@@ -971,6 +971,47 @@ async def set_opening_balances(
 # Bank Reconciliation
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _sniff_delimited_table(file_bytes: bytes) -> Optional["pd.DataFrame"]:
+    """Many Indian bank exports (SBI, HDFC, ICICI...) label a plain tab- or
+    comma-delimited text file with a `.xls` extension, and prefix the real
+    transaction table with a dozen+ lines of account-info banner. This
+    can't be read by pd.read_excel (it isn't a real Excel file), so we
+    decode it as text, find the header row by looking for the line that
+    contains both a date-like column and an amount-like column, and parse
+    from there.
+    """
+    for encoding in ('utf-8', 'utf-8-sig', 'latin-1'):
+        try:
+            text = file_bytes.decode(encoding)
+            break
+        except Exception:
+            text = None
+    if text is None:
+        return None
+
+    lines = text.splitlines()
+    header_idx = None
+    delimiter = None
+    for i, line in enumerate(lines):
+        low = line.lower()
+        has_date = any(k in low for k in ('date', 'txn date', 'value date'))
+        has_amount = any(k in low for k in ('debit', 'credit', 'withdrawal', 'deposit'))
+        if has_date and has_amount:
+            header_idx = i
+            delimiter = '\t' if line.count('\t') >= line.count(',') else ','
+            break
+    if header_idx is None:
+        return None
+
+    try:
+        return pd.read_csv(
+            io.StringIO(text), sep=delimiter, skiprows=header_idx,
+            dtype=str, engine='python', on_bad_lines='skip',
+        )
+    except Exception:
+        return None
+
+
 def _parse_bank_statement(file_bytes: bytes, filename: str) -> List[dict]:
     """Parse CSV / Excel bank statement into list of {date, narration, debit, credit, balance}."""
     fname = filename.lower()
@@ -978,7 +1019,14 @@ def _parse_bank_statement(file_bytes: bytes, filename: str) -> List[dict]:
 
     try:
         if fname.endswith(('.xlsx', '.xls')):
-            df = pd.read_excel(io.BytesIO(file_bytes), dtype=str)
+            try:
+                df = pd.read_excel(io.BytesIO(file_bytes), dtype=str)
+            except Exception:
+                # Not a real Excel file — likely a delimited text export
+                # mislabeled with an .xls extension. Fall back to sniffing.
+                df = _sniff_delimited_table(file_bytes)
+                if df is None:
+                    return []
         elif fname.endswith('.csv'):
             df = pd.read_csv(io.BytesIO(file_bytes), dtype=str, encoding='utf-8', on_bad_lines='skip')
         elif fname.endswith('.pdf'):
@@ -1003,18 +1051,32 @@ def _parse_bank_statement(file_bytes: bytes, filename: str) -> List[dict]:
 
         df.columns = [str(c).strip().lower().replace(' ', '_') for c in df.columns]
 
-        # Map common column name variants
+        # Map common column name variants. Short abbreviations ('cr', 'dr')
+        # must match a whole underscore-delimited token, not just appear as
+        # a substring — otherwise e.g. "description" (which contains "cr")
+        # gets mistaken for the credit column and every credit amount
+        # silently parses as 0.
+        def _col_matches(col: str, keywords: List[str]) -> bool:
+            tokens = col.split('_')
+            for k in keywords:
+                if len(k.rstrip('.')) <= 3:
+                    if k.rstrip('.') in tokens:
+                        return True
+                elif k in col:
+                    return True
+            return False
+
         col_map = {}
         for col in df.columns:
-            if any(k in col for k in ['date', 'txn_date', 'value_date', 'posting']):
+            if _col_matches(col, ['date', 'txn_date', 'value_date', 'posting']):
                 col_map.setdefault('date', col)
-            if any(k in col for k in ['narration', 'description', 'particulars', 'remarks', 'details']):
+            if _col_matches(col, ['narration', 'description', 'particulars', 'remarks', 'details']):
                 col_map.setdefault('narration', col)
-            if any(k in col for k in ['debit', 'withdrawal', 'dr', 'dr.']):
+            if _col_matches(col, ['debit', 'withdrawal', 'dr', 'dr.']):
                 col_map.setdefault('debit', col)
-            if any(k in col for k in ['credit', 'deposit', 'cr', 'cr.']):
+            if _col_matches(col, ['credit', 'deposit', 'cr', 'cr.']):
                 col_map.setdefault('credit', col)
-            if any(k in col for k in ['balance', 'closing', 'running']):
+            if _col_matches(col, ['balance', 'closing', 'running']):
                 col_map.setdefault('balance', col)
 
         for _, row in df.iterrows():
