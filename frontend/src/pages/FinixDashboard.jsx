@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import {
   BarChart3, RefreshCw, CheckCircle2, AlertTriangle, Building2,
   TrendingUp, TrendingDown, Landmark, Receipt, Sparkles, Send, Brain, HelpCircle,
-  ArrowRight, ShieldCheck, PieChart as PieIcon, LineChart as LineIcon,
+  ArrowRight, ShieldCheck, ShieldAlert, PieChart as PieIcon, LineChart as LineIcon, Clock,
 } from 'lucide-react';
 import { ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
@@ -15,8 +15,19 @@ import {
 import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
+import { runVerifyAndFix, describeValidationResult } from '@/lib/verifyAndFixLedger';
 
 const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+
+// Friendly display copy for each backend validation rule, keyed by the
+// `rule` string reconciliation_validator.py returns. Used to render the
+// Integrity Shield from real check results instead of static claims.
+const INTEGRITY_CHECKS = [
+  { rule: 'Accounts Receivable = Outstanding', title: 'Ledger Balance Reconciliation', okText: 'Accounts receivable matches invoice outstandings exactly. No leakage detected.' },
+  { rule: 'Bank Accounts (GL) = Real Bank Statement Balance', title: 'Bank Ledger Compliance', okText: 'Ledger bank balance matches the imported bank statement balance.' },
+  { rule: 'GST + Non-GST + Export + Exempt Sales = Revenue', title: 'GST Portal Return Sync Integrity', okText: 'GST/non-GST/export/exempt sales buckets add up to total revenue.' },
+  { rule: 'Trial Balance Debits = Credits', title: 'Trial Balance Integrity', okText: 'Every posted journal entry balances — total debits equal total credits.' },
+];
 
 export default function FinixDashboard() {
   return (
@@ -46,6 +57,13 @@ function FinixDashboardInner() {
   
   // AI Insights
   const [insights, setInsights] = useState([]);
+
+  // Real-time data-integrity status, driven by the backend validation
+  // engine — replaces static "Zero leakages verified" claims with actual
+  // pass/fail results the person can trust.
+  const [verifying, setVerifying] = useState(false);
+  const [validation, setValidation] = useState(null); // { passed, totalMismatches, reports, bankIssue }
+  const [lastVerifiedAt, setLastVerifiedAt] = useState(null);
   
   // Chatbot State
   const [chatMessages, setChatMessages] = useState([
