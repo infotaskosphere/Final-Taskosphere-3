@@ -332,6 +332,7 @@ async def process_document(
                 now = datetime.now(timezone.utc).isoformat()
                 new_record = {
                     "document_id": document_id,
+                    "company_id": company_id,
                     "fingerprint": fingerprint,
                     "document_type": classified_doc_type,
                     "vendor_name": parsed["vendor_name"],
@@ -475,6 +476,7 @@ async def process_document(
         now = datetime.now(timezone.utc).isoformat()
         new_record = {
             "document_id": document_id,
+            "company_id": company_id,
             "fingerprint": fingerprint,
             "document_type": classified_doc_type,
             "vendor_name": parsed["vendor_name"],
@@ -590,6 +592,7 @@ async def update_accounting_memory(doc: dict, entry: dict, user_id: str):
             # Create a new memory record if it didn't exist
             new_record = {
                 "document_id": doc.get("id") or str(uuid.uuid4()),
+                "company_id": doc.get("company_id"),
                 "fingerprint": fingerprint,
                 "document_type": doc_type,
                 "vendor_name": vendor_name,
@@ -727,6 +730,3 @@ async def ai_copilot_query_bridge(body: CopilotQueryRequest):
     except Exception as e:
         logger.error(f"Failed to execute copilot bridge query: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-
-
-
