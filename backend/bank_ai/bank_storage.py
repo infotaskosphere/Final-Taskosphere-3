@@ -30,11 +30,11 @@ class BankStorage:
                 # Index for status querying
                 await db.bank_transaction_history.create_index("status")
 
-            if hasattr(db.bank_reconciliation, "create_index"):
+            if hasattr(db.bank_reconciliation_matches, "create_index"):
                 # Index for tracking matches by bank transaction and ledger transaction
-                await db.bank_reconciliation.create_index("bank_transaction_id")
-                await db.bank_reconciliation.create_index("accounting_transaction_id")
-                await db.bank_reconciliation.create_index("status")
+                await db.bank_reconciliation_matches.create_index("bank_transaction_id")
+                await db.bank_reconciliation_matches.create_index("accounting_transaction_id")
+                await db.bank_reconciliation_matches.create_index("status")
 
             if hasattr(db.bank_rules, "create_index"):
                 # Index on active rules sorted by priority
@@ -160,7 +160,7 @@ class BankStorage:
             recon_record["id"] = str(uuid.uuid4())
         recon_record["created_at"] = datetime.now(timezone.utc).isoformat()
         
-        await db.bank_reconciliation.insert_one(recon_record)
+        await db.bank_reconciliation_matches.insert_one(recon_record)
         return recon_record["id"]
 
     @staticmethod
@@ -169,7 +169,7 @@ class BankStorage:
         if bank_account_id:
             query["bank_account_id"] = bank_account_id
         
-        cursor = db.bank_reconciliation.find(query).sort("created_at", -1).limit(limit)
+        cursor = db.bank_reconciliation_matches.find(query).sort("created_at", -1).limit(limit)
         results = []
         async for doc in cursor:
             doc.pop("_id", None)
