@@ -3687,11 +3687,30 @@ async def update_invoice_status(
     fields_to_set = {"status": new_status, "updated_at": now_iso}
 
     # Real receipts already on file for this invoice (formal "Record
-    # Payment" flow, imports, bank matches, etc.) — these already have their
-    # own journal entries, so we must not double-count them.
+    # Payment" flow, imports, etc.) — these already have their own journal
+    # entries, so we must not double-count them.
     existing_payments = await db.payments.find({"invoice_id": inv_id}, {"_id": 0}).to_list(500)
     recorded_total = round(sum(float(p.get("amount") or 0) for p in existing_payments), 2)
     auto_payment = next((p for p in existing_payments if p.get("auto_generated")), None)
+
+    # Bank reconciliation (see bank_accounts.py _auto_post_for_match) settles
+    # an invoice by posting Dr Bank / Cr AR directly and stamping
+    # paid_bank_txn_id / journal_entry_id onto the invoice — it never creates
+    # a `payments` doc. Without this check, re-toggling (or a background job
+    # re-touching) an already bank-matched invoice's status to "paid" reads
+    # recorded_total as 0 above, sees a full "shortfall", and posts a SECOND
+    # Dr Bank / Cr AR for the same receipt — a phantom deposit that inflates
+    # the Bank Accounts (1010) ledger balance with no real money behind it,
+    # even though Trial Balance still looks "Balanced" (both sides of the
+    # duplicate entry move together). This was the root cause of Bank
+    # Accounts in Trial Balance/Balance Sheet reading far higher than the
+    # real bank statement balance. Fold in whatever the bank match already
+    # recorded so we never re-post on top of it.
+    if inv.get("paid_bank_txn_id") and inv.get("journal_entry_id"):
+        je_exists = await db.journal_entries.find_one({"id": inv["journal_entry_id"]}, {"_id": 0, "id": 1})
+        if je_exists:
+            bank_settled_amount = float(inv.get("amount_paid") or inv.get("grand_total") or 0)
+            recorded_total = round(max(recorded_total, bank_settled_amount), 2)
 
     if new_status == "paid":
         grand = float(inv.get("grand_total") or 0)
@@ -5513,4 +5532,3 @@ async def delete_unprepared_income(income_id: str, current_user: User = Depends(
         
     await db.unprepared_incomes.delete_one({"id": income_id})
     return {"success": True}
-
