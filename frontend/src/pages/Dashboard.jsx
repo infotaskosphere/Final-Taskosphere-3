@@ -720,53 +720,40 @@ const DonutMetricCard = memo(function DonutMetricCard({ isDark, title, centerVal
 
   return (
     <div
-      className={`group relative rounded-xl shadow-sm border p-5 min-w-0 h-full flex flex-col overflow-hidden transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 ${
+      className={`group relative rounded-xl shadow-sm border p-5 min-w-0 h-full flex flex-col overflow-hidden transition-colors duration-200 hover:shadow-md ${
         isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'
       } ${onCardClick ? 'cursor-pointer' : ''}`}
       onClick={onCardClick}
       role={onCardClick ? 'button' : undefined}
     >
-      {/* subtle top accent bar tinted to the dominant segment */}
-      <div className="absolute top-0 left-0 right-0 h-[3px]" style={{ background: `linear-gradient(90deg, ${dominantColor}, transparent)` }} />
+      {/* flat top accent — solid, not a fading gradient */}
+      <div className="absolute top-0 left-0 right-0 h-[3px]" style={{ background: dominantColor }} />
 
       <div className="flex items-center justify-between mb-4">
         <h3 className={`text-sm font-semibold break-words ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{title}</h3>
         {onCardClick && (
-          <ChevronRight className={`h-3.5 w-3.5 flex-shrink-0 opacity-0 group-hover:opacity-60 -translate-x-1 group-hover:translate-x-0 transition-all ${isDark ? 'text-slate-400' : 'text-slate-400'}`} />
+          <ChevronRight className={`h-3.5 w-3.5 flex-shrink-0 opacity-0 group-hover:opacity-60 transition-opacity ${isDark ? 'text-slate-400' : 'text-slate-400'}`} />
         )}
       </div>
 
       <div className="flex items-center gap-5 flex-1 min-w-0">
-        <div className="relative flex-shrink-0" style={{ width: 152, height: 152 }}>
-          {/* soft color-matched glow behind the donut */}
-          <div
-            className="absolute inset-3 rounded-full blur-xl opacity-25 pointer-events-none"
-            style={{ background: dominantColor }}
-          />
+        <div className="relative flex-shrink-0" style={{ width: 148, height: 148 }}>
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
-              <defs>
-                {pieData.map((d, i) => (
-                  <linearGradient key={i} id={`donut-grad-${title.replace(/\s+/g,'')}-${i}`} x1="0" y1="0" x2="1" y2="1">
-                    <stop offset="0%" stopColor={d.color} stopOpacity={1} />
-                    <stop offset="100%" stopColor={d.color} stopOpacity={0.75} />
-                  </linearGradient>
-                ))}
-              </defs>
               <Pie
                 data={pieData}
                 dataKey="value"
                 nameKey="name"
-                innerRadius={48}
+                innerRadius={50}
                 outerRadius={72}
                 startAngle={90}
                 endAngle={-270}
-                paddingAngle={total > 0 && pieData.length > 1 ? 3.5 : 0}
-                cornerRadius={7}
-                stroke={isDark ? '#0f172a' : '#ffffff'}
-                strokeWidth={2}
+                paddingAngle={total > 0 && pieData.length > 1 ? 2 : 0}
+                cornerRadius={2}
+                stroke={isDark ? '#1e293b' : '#ffffff'}
+                strokeWidth={1.5}
                 isAnimationActive={true}
-                animationDuration={650}
+                animationDuration={500}
                 animationEasing="ease-out"
                 onMouseEnter={(_, i) => setActiveIndex(i)}
                 onMouseLeave={() => setActiveIndex(-1)}
@@ -775,13 +762,11 @@ const DonutMetricCard = memo(function DonutMetricCard({ isDark, title, centerVal
                 {pieData.map((d, i) => (
                   <Cell
                     key={i}
-                    fill={`url(#donut-grad-${title.replace(/\s+/g,'')}-${i})`}
+                    fill={d.color}
                     style={{
                       cursor: !d._empty && onSegmentClick ? 'pointer' : 'default',
-                      filter: activeIndex === i ? 'brightness(1.12) drop-shadow(0 6px 10px rgba(0,0,0,0.18))' : 'none',
-                      transform: activeIndex === i ? 'scale(1.045)' : 'scale(1)',
-                      transformOrigin: 'center',
-                      transition: 'all 200ms ease',
+                      opacity: activeIndex === -1 || activeIndex === i ? 1 : 0.55,
+                      transition: 'opacity 150ms ease',
                     }}
                   />
                 ))}
@@ -791,7 +776,7 @@ const DonutMetricCard = memo(function DonutMetricCard({ isDark, title, centerVal
             </PieChart>
           </ResponsiveContainer>
           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-            <span className={`text-[26px] font-extrabold leading-none tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+            <span className={`text-[24px] font-bold leading-none tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
               {centerValue}
             </span>
             <span className={`text-[10px] mt-1.5 font-medium uppercase tracking-wider ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
@@ -806,21 +791,23 @@ const DonutMetricCard = memo(function DonutMetricCard({ isDark, title, centerVal
               <button
                 type="button"
                 key={i}
+                onMouseEnter={() => setActiveIndex(i)}
+                onMouseLeave={() => setActiveIndex(-1)}
                 onClick={(e) => { e.stopPropagation(); if (onSegmentClick) onSegmentClick(d); }}
                 className={`w-full text-xs px-2 py-1.5 rounded-lg transition-colors ${
-                  onSegmentClick ? (isDark ? 'hover:bg-slate-700/60' : 'hover:bg-slate-100') : 'cursor-default'
+                  onSegmentClick ? (isDark ? 'hover:bg-slate-700/60' : 'hover:bg-slate-50') : 'cursor-default'
                 }`}
               >
                 <div className="flex items-center justify-between gap-2 min-w-0">
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 shadow-sm" style={{ background: d.color }} />
+                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: d.color }} />
                     <span className={`break-words text-left ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{d.name}</span>
                   </div>
-                  <span className={`font-bold flex-shrink-0 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                  <span className={`font-semibold flex-shrink-0 tabular-nums ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
                     {d.value}{d.suffix || ''}
                   </span>
                 </div>
-                <div className={`mt-1 h-1 rounded-full overflow-hidden ${isDark ? 'bg-slate-700/60' : 'bg-slate-100'}`}>
+                <div className={`mt-1.5 h-[3px] rounded-full overflow-hidden ${isDark ? 'bg-slate-700/50' : 'bg-slate-100'}`}>
                   <div
                     className="h-full rounded-full transition-all duration-500"
                     style={{ width: `${pct}%`, background: d.color }}
