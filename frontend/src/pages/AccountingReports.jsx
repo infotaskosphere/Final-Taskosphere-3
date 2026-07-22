@@ -5,12 +5,13 @@ import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import {
   BarChart3, RefreshCw, CheckCircle2, AlertTriangle, Download, Building2,
-  ChevronLeft, ChevronRight, Scale,
+  ChevronLeft, ChevronRight, Scale, X, Loader2,
 } from 'lucide-react';
 import { ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
@@ -379,12 +380,86 @@ function ReportCard({ title, children, isDark }) {
   );
 }
 
-function Row({ label, value, isDark, bold }) {
+function Row({ label, value, isDark, bold, onClick }) {
+  const clickable = typeof onClick === 'function';
   return (
-    <div className="flex items-center justify-between py-1.5 gap-3">
-      <span className={`text-sm ${bold ? 'font-bold' : ''} ${isDark ? 'text-slate-200' : 'text-slate-700'} min-w-0 truncate`}>{label}</span>
+    <div
+      onClick={onClick}
+      className={`flex items-center justify-between py-1.5 gap-3 ${clickable ? 'cursor-pointer rounded-lg px-2 -mx-2 transition-colors hover:bg-blue-50 dark:hover:bg-slate-700/60' : ''}`}
+    >
+      <span className={`text-sm ${bold ? 'font-bold' : ''} ${isDark ? 'text-slate-200' : 'text-slate-700'} min-w-0 truncate ${clickable ? 'hover:underline' : ''}`}>{label}</span>
       <span className={`text-sm font-mono shrink-0 ${bold ? 'font-bold' : ''} ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{fmtC(value)}</span>
     </div>
+  );
+}
+
+// Drill-down drawer shared by Trial Balance, P&L, and Balance Sheet — any
+// report head can open this to see every transaction behind its total.
+function AccountLedgerDrawer({ open, onOpenChange, code, companyId, dateFrom, dateTo, isDark }) {
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!open || !code) return;
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    setData(null);
+    api.get('/reports/ledger-by-code', {
+      params: { code, company_id: companyId || '', date_from: dateFrom, date_to: dateTo },
+    })
+      .then(({ data }) => { if (!cancelled) setData(data); })
+      .catch(() => { if (!cancelled) setError('Could not load transactions for this account.'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [open, code, companyId, dateFrom, dateTo]);
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className={`w-full sm:max-w-xl overflow-y-auto ${isDark ? 'bg-slate-900 border-slate-700' : ''}`}>
+        <SheetHeader>
+          <SheetTitle className={isDark ? 'text-slate-100' : ''}>
+            {data ? `${data.code} — ${data.name}` : 'Account ledger'}
+          </SheetTitle>
+        </SheetHeader>
+
+        {loading && (
+          <div className="flex items-center justify-center py-16 gap-2 text-sm text-slate-400">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading transactions…
+          </div>
+        )}
+        {!loading && error && <p className="text-sm text-rose-500 py-8 text-center">{error}</p>}
+        {!loading && data && (
+          <div className="mt-4 space-y-3">
+            <div className="flex items-center justify-between text-sm">
+              <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>{data.lines.length} transactions</span>
+              <span className={`font-mono font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                Closing: {fmtC(data.closing_balance)}
+              </span>
+            </div>
+            {data.lines.length === 0 ? (
+              <p className="text-sm text-slate-400 py-8 text-center">No transactions posted to this account in the selected period.</p>
+            ) : (
+              <div className="grid grid-cols-[80px_1fr_90px_90px_100px] gap-2 text-[11px] uppercase font-bold text-slate-400 pb-2 border-b" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                <span>Date</span><span>Narration</span><span className="text-right">Debit</span><span className="text-right">Credit</span><span className="text-right">Balance</span>
+              </div>
+            )}
+            {data.lines.map((l, i) => (
+              <div key={i} className="grid grid-cols-[80px_1fr_90px_90px_100px] gap-2 py-1.5 text-xs border-b" style={{ borderColor: isDark ? '#1e293b' : '#f1f5f9' }}>
+                <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>{l.entry_date}</span>
+                <span className={`min-w-0 truncate ${isDark ? 'text-slate-200' : 'text-slate-700'}`} title={l.narration || l.memo}>
+                  {l.narration || l.memo || '—'}
+                </span>
+                <span className="text-right font-mono">{l.debit ? fmtC(l.debit) : ''}</span>
+                <span className="text-right font-mono">{l.credit ? fmtC(l.credit) : ''}</span>
+                <span className={`text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{fmtC(l.running_balance)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -436,6 +511,12 @@ function AccountingReportsInner() {
   const [partyLoading, setPartyLoading] = useState(false);
   const [clients, setClients] = useState([]);
   const [purchaseInvoices, setPurchaseInvoices] = useState([]);
+
+  // Drill-down drawer — clicking any account head in Trial Balance, P&L, or
+  // Balance Sheet opens this with that account's full transaction history.
+  const [ledgerDrawerOpen, setLedgerDrawerOpen] = useState(false);
+  const [ledgerCode, setLedgerCode] = useState(null);
+  const openLedger = (code) => { setLedgerCode(code); setLedgerDrawerOpen(true); };
 
   const fetchCompanies = async () => {
     try {
@@ -851,8 +932,12 @@ function AccountingReportsInner() {
                   <span>Account</span><span className="text-right">Debit</span><span className="text-right">Credit</span>
                 </div>
                 {tbPageRows.map(r => (
-                  <div key={r.account_id} className="grid grid-cols-[1fr_120px_120px] gap-2 py-1.5 text-sm">
-                    <span className={`${isDark ? 'text-slate-200' : 'text-slate-700'} min-w-0 truncate`}>{r.code} — {r.name}</span>
+                  <div
+                    key={r.account_id}
+                    onClick={() => openLedger(r.code)}
+                    className="grid grid-cols-[1fr_120px_120px] gap-2 py-1.5 text-sm cursor-pointer rounded-lg px-2 -mx-2 transition-colors hover:bg-blue-50 dark:hover:bg-slate-700/60"
+                  >
+                    <span className={`${isDark ? 'text-slate-200' : 'text-slate-700'} min-w-0 truncate hover:underline`}>{r.code} — {r.name}</span>
                     <span className="text-right font-mono">{r.debit ? fmtC(r.debit) : ''}</span>
                     <span className="text-right font-mono">{r.credit ? fmtC(r.credit) : ''}</span>
                   </div>
@@ -894,12 +979,12 @@ function AccountingReportsInner() {
           <div className="grid md:grid-cols-2 gap-4">
             <ReportCard title={`Income — ${dateFrom} to ${dateTo}`} isDark={isDark}>
               {(pnl?.income || []).length === 0 ? <p className="text-sm text-slate-400 py-4">No income posted in this period.</p> :
-                pnl.income.map(r => <Row key={r.code} label={r.name} value={r.amount} isDark={isDark} />)}
+                pnl.income.map(r => <Row key={r.code} label={r.name} value={r.amount} isDark={isDark} onClick={() => openLedger(r.code)} />)}
               <Row label="Total Income" value={pnl?.total_income} isDark={isDark} bold />
             </ReportCard>
             <ReportCard title={`Expenses — ${dateFrom} to ${dateTo}`} isDark={isDark}>
               {(pnl?.expenses || []).length === 0 ? <p className="text-sm text-slate-400 py-4">No expenses posted in this period.</p> :
-                pnl.expenses.map(r => <Row key={r.code} label={r.name} value={r.amount} isDark={isDark} />)}
+                pnl.expenses.map(r => <Row key={r.code} label={r.name} value={r.amount} isDark={isDark} onClick={() => openLedger(r.code)} />)}
               <Row label="Total Expenses" value={pnl?.total_expense} isDark={isDark} bold />
             </ReportCard>
           </div>
@@ -913,18 +998,18 @@ function AccountingReportsInner() {
           <div className="grid md:grid-cols-2 gap-4">
             <ReportCard title={`Assets — as of ${dateTo}`} isDark={isDark}>
               {(balanceSheet?.assets || []).length === 0 ? <p className="text-sm text-slate-400 py-4">No assets posted yet.</p> :
-                balanceSheet.assets.map(r => <Row key={r.code} label={r.name} value={r.amount} isDark={isDark} />)}
+                balanceSheet.assets.map(r => <Row key={r.code} label={r.name} value={r.amount} isDark={isDark} onClick={() => openLedger(r.code)} />)}
               <Row label="Total Assets" value={balanceSheet?.total_assets} isDark={isDark} bold />
             </ReportCard>
             <div className="space-y-4">
               <ReportCard title={`Liabilities — as of ${dateTo}`} isDark={isDark}>
                 {(balanceSheet?.liabilities || []).length === 0 ? <p className="text-sm text-slate-400 py-4">No liabilities posted yet.</p> :
-                  balanceSheet.liabilities.map(r => <Row key={r.code} label={r.name} value={r.amount} isDark={isDark} />)}
+                  balanceSheet.liabilities.map(r => <Row key={r.code} label={r.name} value={r.amount} isDark={isDark} onClick={() => openLedger(r.code)} />)}
                 <Row label="Total Liabilities" value={balanceSheet?.total_liabilities} isDark={isDark} bold />
               </ReportCard>
               <ReportCard title={`Equity — as of ${dateTo}`} isDark={isDark}>
                 {(balanceSheet?.equity || []).length === 0 ? <p className="text-sm text-slate-400 py-4">No equity posted yet.</p> :
-                  balanceSheet.equity.map(r => <Row key={r.code} label={r.name} value={r.amount} isDark={isDark} />)}
+                  balanceSheet.equity.map(r => <Row key={r.code} label={r.name} value={r.amount} isDark={isDark} onClick={() => openLedger(r.code)} />)}
                 <Row label="Total Equity" value={balanceSheet?.total_equity} isDark={isDark} bold />
               </ReportCard>
             </div>
@@ -1243,6 +1328,16 @@ function AccountingReportsInner() {
         </TabsContent>
 
       </Tabs>
+
+      <AccountLedgerDrawer
+        open={ledgerDrawerOpen}
+        onOpenChange={setLedgerDrawerOpen}
+        code={ledgerCode}
+        companyId={companyId}
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+        isDark={isDark}
+      />
     </div>
   );
 }
