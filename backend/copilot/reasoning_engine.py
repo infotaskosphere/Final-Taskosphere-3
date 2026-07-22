@@ -25,14 +25,14 @@ class ReasoningEngine:
                     from google import genai
                     client = genai.Client(api_key=gemini_key)
                     response = client.models.generate_content(
-                        model='gemini-3.6-flash',
+                        model='gemini-2.5-flash',
                         contents=final_prompt,
                     )
                     if response.text:
                         return {
                             "text": response.text,
                             "provider": "gemini",
-                            "model": "gemini-3.6-flash",
+                            "model": "gemini-2.5-flash",
                             "tokens": len(response.text) // 4
                         }
             except Exception as e:
