@@ -58,11 +58,7 @@ import {
   BellRing,
   Pencil,
   Power,
-  Sparkles,
-  Brain,
   TrendingDown,
-  ShieldAlert,
-  Gauge,
 } from 'lucide-react';
 
 const API_BASE = api.defaults.baseURL;
@@ -716,6 +712,7 @@ const DonutMetricCard = memo(function DonutMetricCard({ isDark, title, centerVal
     : [{ name: 'empty', value: 1, color: isDark ? '#334155' : '#e2e8f0', _empty: true }];
 
   const [activeIndex, setActiveIndex] = React.useState(-1);
+  const dominantColor = (data.find(d => d.value > 0) || {}).color || COLORS.mediumBlue;
 
   const handleSegmentClick = (entry) => {
     if (entry && !entry._empty && onSegmentClick) onSegmentClick(entry);
@@ -723,15 +720,29 @@ const DonutMetricCard = memo(function DonutMetricCard({ isDark, title, centerVal
 
   return (
     <div
-      className={`group rounded-xl shadow-sm border p-5 min-w-0 h-full flex flex-col transition-all duration-200 hover:shadow-md ${
+      className={`group relative rounded-xl shadow-sm border p-5 min-w-0 h-full flex flex-col overflow-hidden transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 ${
         isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'
       } ${onCardClick ? 'cursor-pointer' : ''}`}
       onClick={onCardClick}
       role={onCardClick ? 'button' : undefined}
     >
-      <h3 className={`text-sm font-semibold mb-3 break-words ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{title}</h3>
+      {/* subtle top accent bar tinted to the dominant segment */}
+      <div className="absolute top-0 left-0 right-0 h-[3px]" style={{ background: `linear-gradient(90deg, ${dominantColor}, transparent)` }} />
+
+      <div className="flex items-center justify-between mb-4">
+        <h3 className={`text-sm font-semibold break-words ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{title}</h3>
+        {onCardClick && (
+          <ChevronRight className={`h-3.5 w-3.5 flex-shrink-0 opacity-0 group-hover:opacity-60 -translate-x-1 group-hover:translate-x-0 transition-all ${isDark ? 'text-slate-400' : 'text-slate-400'}`} />
+        )}
+      </div>
+
       <div className="flex items-center gap-5 flex-1 min-w-0">
-        <div className="relative flex-shrink-0" style={{ width: 140, height: 140 }}>
+        <div className="relative flex-shrink-0" style={{ width: 152, height: 152 }}>
+          {/* soft color-matched glow behind the donut */}
+          <div
+            className="absolute inset-3 rounded-full blur-xl opacity-25 pointer-events-none"
+            style={{ background: dominantColor }}
+          />
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <defs>
@@ -746,15 +757,17 @@ const DonutMetricCard = memo(function DonutMetricCard({ isDark, title, centerVal
                 data={pieData}
                 dataKey="value"
                 nameKey="name"
-                innerRadius={44}
-                outerRadius={66}
+                innerRadius={48}
+                outerRadius={72}
                 startAngle={90}
                 endAngle={-270}
-                paddingAngle={total > 0 && pieData.length > 1 ? 3 : 0}
-                cornerRadius={6}
+                paddingAngle={total > 0 && pieData.length > 1 ? 3.5 : 0}
+                cornerRadius={7}
                 stroke={isDark ? '#0f172a' : '#ffffff'}
                 strokeWidth={2}
                 isAnimationActive={true}
+                animationDuration={650}
+                animationEasing="ease-out"
                 onMouseEnter={(_, i) => setActiveIndex(i)}
                 onMouseLeave={() => setActiveIndex(-1)}
                 onClick={(entry) => handleSegmentClick(entry)}
@@ -765,8 +778,8 @@ const DonutMetricCard = memo(function DonutMetricCard({ isDark, title, centerVal
                     fill={`url(#donut-grad-${title.replace(/\s+/g,'')}-${i})`}
                     style={{
                       cursor: !d._empty && onSegmentClick ? 'pointer' : 'default',
-                      filter: activeIndex === i ? 'brightness(1.1) drop-shadow(0 4px 8px rgba(0,0,0,0.15))' : 'none',
-                      transform: activeIndex === i ? 'scale(1.04)' : 'scale(1)',
+                      filter: activeIndex === i ? 'brightness(1.12) drop-shadow(0 6px 10px rgba(0,0,0,0.18))' : 'none',
+                      transform: activeIndex === i ? 'scale(1.045)' : 'scale(1)',
                       transformOrigin: 'center',
                       transition: 'all 200ms ease',
                     }}
@@ -778,7 +791,7 @@ const DonutMetricCard = memo(function DonutMetricCard({ isDark, title, centerVal
             </PieChart>
           </ResponsiveContainer>
           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-            <span className={`text-2xl font-extrabold leading-none tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+            <span className={`text-[26px] font-extrabold leading-none tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
               {centerValue}
             </span>
             <span className={`text-[10px] mt-1.5 font-medium uppercase tracking-wider ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
@@ -786,25 +799,36 @@ const DonutMetricCard = memo(function DonutMetricCard({ isDark, title, centerVal
             </span>
           </div>
         </div>
-        <div className="flex-1 min-w-0 space-y-2">
-          {data.map((d, i) => (
-            <button
-              type="button"
-              key={i}
-              onClick={(e) => { e.stopPropagation(); if (onSegmentClick) onSegmentClick(d); }}
-              className={`w-full flex items-center justify-between gap-2 text-xs px-2 py-1.5 rounded-lg transition-colors ${
-                onSegmentClick ? (isDark ? 'hover:bg-slate-700/60' : 'hover:bg-slate-100') : 'cursor-default'
-              }`}
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 shadow-sm" style={{ background: d.color }} />
-                <span className={`break-words text-left ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{d.name}</span>
-              </div>
-              <span className={`font-bold flex-shrink-0 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
-                {d.value}{d.suffix || ''}
-              </span>
-            </button>
-          ))}
+        <div className="flex-1 min-w-0 space-y-2.5">
+          {data.map((d, i) => {
+            const pct = total > 0 ? Math.round((d.value / total) * 100) : 0;
+            return (
+              <button
+                type="button"
+                key={i}
+                onClick={(e) => { e.stopPropagation(); if (onSegmentClick) onSegmentClick(d); }}
+                className={`w-full text-xs px-2 py-1.5 rounded-lg transition-colors ${
+                  onSegmentClick ? (isDark ? 'hover:bg-slate-700/60' : 'hover:bg-slate-100') : 'cursor-default'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2 min-w-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 shadow-sm" style={{ background: d.color }} />
+                    <span className={`break-words text-left ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{d.name}</span>
+                  </div>
+                  <span className={`font-bold flex-shrink-0 ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                    {d.value}{d.suffix || ''}
+                  </span>
+                </div>
+                <div className={`mt-1 h-1 rounded-full overflow-hidden ${isDark ? 'bg-slate-700/60' : 'bg-slate-100'}`}>
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{ width: `${pct}%`, background: d.color }}
+                  />
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
       {footer}
@@ -895,141 +919,6 @@ const WeeklyTrendChart = memo(function WeeklyTrendChart({ isDark, tasks = [], on
       <div className="flex items-center gap-4 mt-2 text-[11px]">
         <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: COLORS.mediumBlue }} /><span className={isDark ? 'text-slate-400' : 'text-slate-500'}>Created ({totalCreated})</span></span>
         <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: COLORS.emeraldGreen }} /><span className={isDark ? 'text-slate-400' : 'text-slate-500'}>Completed ({totalCompleted})</span></span>
-      </div>
-    </div>
-  );
-});
-
-// ── AI Insights — heuristic, on-device analysis of live dashboard data ──────
-const AIInsightsCard = memo(function AIInsightsCard({
-  isDark, myTaskCount, overdueTaskCount, completionRate, pendingTodosCount,
-  teamTaskBreakdown = [], hasCrossVisibility, navigate,
-}) {
-  const insights = React.useMemo(() => {
-    const list = [];
-
-    if (overdueTaskCount > 0) {
-      list.push({
-        icon: ShieldAlert,
-        tone: 'red',
-        text: `${overdueTaskCount} task${overdueTaskCount > 1 ? 's are' : ' is'} overdue — clearing these first will have the biggest impact on your on-time rate.`,
-        action: () => navigate('/tasks?filter=overdue'),
-        cta: 'Review overdue',
-      });
-    }
-
-    if (completionRate >= 70 && myTaskCount > 0) {
-      list.push({
-        icon: TrendingUp,
-        tone: 'green',
-        text: `Strong pace — you're closing tasks at a ${completionRate}% completion rate. Keep the momentum going.`,
-      });
-    } else if (myTaskCount > 0 && completionRate < 40) {
-      list.push({
-        icon: Gauge,
-        tone: 'amber',
-        text: `Completion rate is at ${completionRate}%. Try tackling 1–2 small tasks first to build momentum today.`,
-        action: () => navigate('/tasks?filter=my-tasks'),
-        cta: 'View my tasks',
-      });
-    }
-
-    if (hasCrossVisibility && teamTaskBreakdown.length > 1) {
-      const sorted = [...teamTaskBreakdown].sort((a, b) => b.pendingCount - a.pendingCount);
-      const busiest = sorted[0], lightest = sorted[sorted.length - 1];
-      if (busiest && lightest && busiest.pendingCount - lightest.pendingCount >= 3) {
-        list.push({
-          icon: Users,
-          tone: 'violet',
-          text: `Workload looks uneven — ${busiest.name.split(' ')[0]} has ${busiest.pendingCount} pending vs. ${lightest.name.split(' ')[0]}'s ${lightest.pendingCount}. Consider rebalancing.`,
-          action: () => navigate('/tasks?filter=team'),
-          cta: 'View team tasks',
-        });
-      }
-    }
-
-    if (pendingTodosCount > 5) {
-      list.push({
-        icon: CheckSquare,
-        tone: 'blue',
-        text: `${pendingTodosCount} to-dos are piling up. A quick 10-minute sweep could clear most of the quick ones.`,
-        action: () => navigate('/todos'),
-        cta: 'Open to-dos',
-      });
-    }
-
-    if (list.length === 0) {
-      list.push({
-        icon: Sparkles,
-        tone: 'green',
-        text: 'Everything looks under control — no overdue tasks, no bottlenecks detected. Nice work!',
-      });
-    }
-
-    return list.slice(0, 4);
-  }, [myTaskCount, overdueTaskCount, completionRate, pendingTodosCount, teamTaskBreakdown, hasCrossVisibility, navigate]);
-
-  const toneStyles = {
-    red:    { bg: isDark ? 'bg-red-900/20' : 'bg-red-50',       icon: 'text-red-500',     ring: isDark ? 'ring-red-800/40' : 'ring-red-100' },
-    green:  { bg: isDark ? 'bg-emerald-900/20' : 'bg-emerald-50', icon: 'text-emerald-500', ring: isDark ? 'ring-emerald-800/40' : 'ring-emerald-100' },
-    amber:  { bg: isDark ? 'bg-amber-900/20' : 'bg-amber-50',   icon: 'text-amber-500',   ring: isDark ? 'ring-amber-800/40' : 'ring-amber-100' },
-    violet: { bg: isDark ? 'bg-violet-900/20' : 'bg-violet-50', icon: 'text-violet-500',  ring: isDark ? 'ring-violet-800/40' : 'ring-violet-100' },
-    blue:   { bg: isDark ? 'bg-blue-900/20' : 'bg-blue-50',     icon: 'text-blue-500',    ring: isDark ? 'ring-blue-800/40' : 'ring-blue-100' },
-  };
-
-  return (
-    <div
-      className={`relative rounded-xl border p-5 overflow-hidden ${
-        isDark ? 'border-slate-700' : 'border-slate-200'
-      }`}
-      style={{
-        background: isDark
-          ? 'linear-gradient(135deg, rgba(31,111,178,0.10), rgba(124,58,237,0.08))'
-          : 'linear-gradient(135deg, rgba(31,111,178,0.05), rgba(124,58,237,0.04))',
-      }}
-    >
-      <div className="flex items-center gap-2 mb-4">
-        <div className="p-1.5 rounded-lg" style={{ background: `linear-gradient(135deg, ${COLORS.mediumBlue}, #7c3aed)` }}>
-          <Brain className="h-4 w-4 text-white" />
-        </div>
-        <h3 className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>AI Insights</h3>
-        <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${
-          isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-800 text-white'
-        }`}>
-          Beta
-        </span>
-        <Sparkles className="h-3.5 w-3.5 text-amber-400 ml-auto" />
-      </div>
-
-      <div className="space-y-2.5">
-        {insights.map((ins, i) => {
-          const t = toneStyles[ins.tone] || toneStyles.blue;
-          const Icon = ins.icon;
-          return (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, x: -8 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.06, ...springPhysics.card }}
-              className={`flex items-start gap-3 rounded-lg p-3 ring-1 ${t.bg} ${t.ring}`}
-            >
-              <div className={`mt-0.5 flex-shrink-0 ${t.icon}`}>
-                <Icon className="h-4 w-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className={`text-xs leading-relaxed ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{ins.text}</p>
-                {ins.action && (
-                  <button
-                    onClick={ins.action}
-                    className={`mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold ${t.icon} hover:underline`}
-                  >
-                    {ins.cta} <ChevronRight className="h-3 w-3" />
-                  </button>
-                )}
-              </div>
-            </motion.div>
-          );
-        })}
       </div>
     </div>
   );
@@ -1233,10 +1122,9 @@ export default function Dashboard() {
   const [selectedTodo,      setSelectedTodo]      = useState(null);
   const [selectedPerformer, setSelectedPerformer] = useState(null);
   const [showCustomize,     setShowCustomize]     = useState(false);
-  const DASHBOARD_SECTIONS = ['metrics','ai_insights','pie_charts','tasks_row','assigned_tasks','performers','quick_access'];
+  const DASHBOARD_SECTIONS = ['metrics','pie_charts','tasks_row','assigned_tasks','performers','quick_access'];
   const DASHBOARD_LABELS = {
     metrics:         { name:'Key Metrics',          icon:'📊', desc:'6 stat cards — tasks, todos, overdue, DSC…' },
-    ai_insights:     { name:'AI Insights',          icon:'🧠', desc:'Smart, auto-generated tips based on your live data' },
     pie_charts:      { name:'Charts & Trends',      icon:'📈', desc:'Task overview donuts plus a 7-day trend diagram' },
     tasks_row:       { name:'Tasks & Deadlines',    icon:'📋', desc:'Recent tasks and compliance deadlines' },
     assigned_tasks:  { name:'Assigned Tasks',       icon:'✅', desc:'Tasks assigned to you and by you' },
@@ -1882,7 +1770,7 @@ export default function Dashboard() {
         isDark={isDark}
       />
 
-      <motion.div className="space-y-4 sm:space-y-5 w-full min-w-0 overflow-x-hidden" variants={containerVariants} initial="hidden" animate="visible">
+      <motion.div className="space-y-5 sm:space-y-6 w-full min-w-0 overflow-x-hidden" variants={containerVariants} initial="hidden" animate="visible">
 
         {/* WELCOME BANNER + ATTENDANCE (side by side, matched height) */}
         <motion.div variants={itemVariants}>
@@ -2151,7 +2039,7 @@ export default function Dashboard() {
         <React.Fragment key="metrics">
         {/* KEY METRICS — 6 EQUAL CARDS */}
         <motion.div
-          className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 [&>*]:min-w-0"
+          className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 [&>*]:min-w-0"
           variants={itemVariants}
         >
 
@@ -2355,22 +2243,6 @@ export default function Dashboard() {
         </motion.div>
         </React.Fragment>
           );
-          if (sectionId === 'ai_insights') return (
-        <React.Fragment key="ai_insights">
-        <motion.div variants={itemVariants}>
-          <AIInsightsCard
-            isDark={isDark}
-            myTaskCount={myTaskCount}
-            overdueTaskCount={overdueTaskCount}
-            completionRate={completionRate}
-            pendingTodosCount={pendingTodos.length}
-            teamTaskBreakdown={teamTaskBreakdown}
-            hasCrossVisibility={hasCrossVisibility}
-            navigate={navigate}
-          />
-        </motion.div>
-        </React.Fragment>
-          );
           if (sectionId === 'pie_charts') return (
         <React.Fragment key="pie_charts">
         {/* 7-DAY TREND DIAGRAM */}
@@ -2456,7 +2328,7 @@ export default function Dashboard() {
           if (sectionId === 'tasks_row') return (
         <React.Fragment key="tasks_row">
         {/* RECENT TASKS + DEADLINES — 2 EQUAL COLUMNS */}
-        <motion.div className="grid grid-cols-1 lg:grid-cols-2 gap-3 min-w-0 items-stretch [&>*]:h-full" variants={itemVariants}>
+        <motion.div className="grid grid-cols-1 lg:grid-cols-2 gap-4 min-w-0 items-stretch [&>*]:h-full" variants={itemVariants}>
 
           {/* Recent Tasks */}
           <SectionCard>
@@ -2557,7 +2429,7 @@ export default function Dashboard() {
         <React.Fragment key="assigned_tasks">
         {/* ASSIGNED TASKS */}
         {showTaskSection && (
-          <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-3 gap-3">
+          <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-3 gap-4 items-stretch [&>*]:h-full">
             <SectionCard className="hover:shadow-md transition">
               <CardHeaderRow
                 iconBg={isDark ? 'bg-emerald-900/40' : 'bg-emerald-50'}
@@ -2719,7 +2591,7 @@ export default function Dashboard() {
           if (sectionId === 'performers') return (
         <React.Fragment key="performers">
         {/* STAR PERFORMERS + REMINDERS + VISITS */}
-        <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+        <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 items-stretch [&>*]:h-full">
 
           {/* Star Performers */}
           <SectionCard>
@@ -2827,7 +2699,7 @@ export default function Dashboard() {
           if (sectionId === 'quick_access') return (
         <React.Fragment key="quick_access">
         {/* QUICK ACCESS TILES */}
-        <motion.div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 [&>*]:min-w-0" variants={itemVariants}>
+        <motion.div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 [&>*]:min-w-0" variants={itemVariants}>
           {[
             {
               path:'/leads',
