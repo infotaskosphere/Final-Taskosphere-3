@@ -121,6 +121,51 @@ async def _trial_balance_snapshot(company_id: str) -> Dict[str, Any]:
     }
 
 
+async def _bank_reality_check(company_id: str) -> Dict[str, float]:
+    """Compares the GL's Bank Accounts (1010) balance against the real,
+    ground-truth balance of every connected bank account (opening_balance +
+    imported statement transactions, or the statement's own running
+    balance_after where available — see bank_accounts.list_bank_accounts).
+
+    Unlike the other six checks, this one is NOT self-healing: a mismatch
+    here almost always means a real-world receipt/payment got posted to the
+    ledger twice (e.g. once via manual payment entry, once via bank
+    reconciliation) or a bank transaction was imported but never matched —
+    re-running the invoice→journal sync pipeline does not fix either case.
+    It only widens the two figures being compared, so it is reported as a
+    hard mismatch every time rather than attempted-and-cleared."""
+    acct_q = {"code": "1010"}
+    if company_id:
+        acct_q["company_id"] = company_id
+    bank_gl_ids = {a["id"] for a in await db.chart_of_accounts.find(acct_q, {"_id": 0, "id": 1}).to_list(2000)}
+    gl_balance = 0.0
+    if bank_gl_ids:
+        lines = await db.journal_lines.find(
+            {"account_id": {"$in": list(bank_gl_ids)}}, {"_id": 0, "debit": 1, "credit": 1}
+        ).to_list(200000)
+        gl_balance = sum((l.get("debit") or 0) - (l.get("credit") or 0) for l in lines)
+
+    ba_q = {"company_id": company_id} if company_id else {}
+    bank_accounts = await db.bank_accounts.find(ba_q, {"_id": 0, "id": 1, "opening_balance": 1}).to_list(500)
+    real_balance = 0.0
+    for ba in bank_accounts:
+        latest_txn = await db.bank_transactions.find_one(
+            {"bank_account_id": ba["id"], "balance_after": {"$ne": None}},
+            sort=[("date", -1), ("created_at", -1), ("id", -1)],
+        )
+        if latest_txn and latest_txn.get("balance_after") is not None:
+            real_balance += float(latest_txn["balance_after"])
+        else:
+            txns = await db.bank_transactions.find(
+                {"bank_account_id": ba["id"]}, {"_id": 0, "debit": 1, "credit": 1}
+            ).to_list(100000)
+            real_balance += float(ba.get("opening_balance") or 0) + sum(
+                float(t.get("credit") or 0) - float(t.get("debit") or 0) for t in txns
+            )
+
+    return {"gl_balance": _round2(gl_balance), "real_balance": _round2(real_balance)}
+
+
 async def _customer_ledger_total(company_id: str) -> float:
     """Sum of the Accounts Receivable movements that resolve to a named
     customer. invoicing.py posts every sale/payment onto the single
@@ -185,11 +230,12 @@ async def run_validation_engine(company_id: str = "", auto_fix: bool = True) -> 
         inv = await _invoice_totals(company_id)
         tb = await _trial_balance_snapshot(company_id)
         cust_total = await _customer_ledger_total(company_id)
-        return inv, tb, cust_total
+        bank = await _bank_reality_check(company_id)
+        return inv, tb, cust_total, bank
 
-    inv, tb, cust_total = await _snapshot()
+    inv, tb, cust_total, bank = await _snapshot()
 
-    def _check(inv, tb, cust_total) -> List[Dict[str, Any]]:
+    def _check(inv, tb, cust_total, bank) -> List[Dict[str, Any]]:
         mismatches = []
 
         diff = _round2(inv["revenue"] - (inv["collections"] + inv["outstanding"]))
@@ -236,9 +282,21 @@ async def run_validation_engine(company_id: str = "", auto_fix: bool = True) -> 
                 "expected": inv["revenue"], "actual": gst_total, "diff": diff,
             })
 
+        diff = _round2(bank["gl_balance"] - bank["real_balance"])
+        if abs(diff) > TOLERANCE:
+            mismatches.append({
+                "rule": "Bank Accounts (GL) = Real Bank Statement Balance",
+                "expected": bank["real_balance"], "actual": bank["gl_balance"], "diff": diff,
+                "note": "Not auto-fixable by re-sync — usually means a receipt/payment was "
+                        "posted to the ledger twice, or a bank transaction hasn't been matched "
+                        "yet. Check Bank Accounts \u2192 unmatched transactions and look for "
+                        "invoices whose journal entry was posted from both a manual payment "
+                        "and a bank match.",
+            })
+
         return mismatches
 
-    mismatches = _check(inv, tb, cust_total)
+    mismatches = _check(inv, tb, cust_total, bank)
     healed = False
 
     if mismatches and auto_fix:
@@ -247,8 +305,8 @@ async def run_validation_engine(company_id: str = "", auto_fix: bool = True) -> 
         # disagrees after that, the drift is real and gets logged for
         # investigation rather than silently patched.
         await _reconcile_one_book(company_id)
-        inv, tb, cust_total = await _snapshot()
-        remaining = _check(inv, tb, cust_total)
+        inv, tb, cust_total, bank = await _snapshot()
+        remaining = _check(inv, tb, cust_total, bank)
         healed = len(remaining) < len(mismatches)
         mismatches = remaining
 
@@ -265,6 +323,7 @@ async def run_validation_engine(company_id: str = "", auto_fix: bool = True) -> 
             "customer_ledger_total": cust_total,
             "gst_sales": inv["gst_sales"], "non_gst_sales": inv["non_gst_sales"],
             "export_sales": inv["export_sales"], "exempt_sales": inv["exempt_sales"],
+            "bank_gl_balance": bank["gl_balance"], "bank_real_balance": bank["real_balance"],
         },
     }
 
