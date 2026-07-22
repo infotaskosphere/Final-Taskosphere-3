@@ -10,7 +10,7 @@ import { format, parseISO, isToday, isTomorrow, startOfDay } from 'date-fns';
 import { formatInTimeZone } from 'date-fns-tz';
 import { toast } from 'sonner';
 
-import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -58,6 +58,11 @@ import {
   BellRing,
   Pencil,
   Power,
+  Sparkles,
+  Brain,
+  TrendingDown,
+  ShieldAlert,
+  Gauge,
 } from 'lucide-react';
 
 const API_BASE = api.defaults.baseURL;
@@ -807,6 +812,229 @@ const DonutMetricCard = memo(function DonutMetricCard({ isDark, title, centerVal
   );
 });
 
+// ── Weekly Trend Diagram — created vs completed, last 7 days ────────────────
+const WeeklyTrendChart = memo(function WeeklyTrendChart({ isDark, tasks = [], onCardClick }) {
+  const data = React.useMemo(() => {
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - i);
+      days.push(d);
+    }
+    return days.map((day) => {
+      const next = new Date(day); next.setDate(next.getDate() + 1);
+      let created = 0, completed = 0;
+      for (const t of tasks) {
+        if (t.created_at) {
+          const c = new Date(t.created_at);
+          if (c >= day && c < next) created++;
+        }
+        if (t.status === 'completed' && t.updated_at) {
+          const u = new Date(t.updated_at);
+          if (u >= day && u < next) completed++;
+        }
+      }
+      return { label: format(day, 'EEE'), created, completed };
+    });
+  }, [tasks]);
+
+  const totalCreated   = data.reduce((s, d) => s + d.created, 0);
+  const totalCompleted = data.reduce((s, d) => s + d.completed, 0);
+  const netTrend        = totalCreated === 0 ? 0 : Math.round(((totalCompleted - totalCreated) / Math.max(totalCreated, 1)) * 100);
+
+  return (
+    <div
+      onClick={onCardClick}
+      className={`group rounded-xl shadow-sm border p-5 min-w-0 h-full flex flex-col transition-all duration-200 hover:shadow-md ${
+        isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'
+      } ${onCardClick ? 'cursor-pointer' : ''}`}
+    >
+      <div className="flex items-start justify-between mb-1">
+        <div>
+          <h3 className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>7-Day Task Trend</h3>
+          <p className={`text-[11px] mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Created vs. Completed</p>
+        </div>
+        <div className={`flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full ${
+          netTrend >= 0
+            ? isDark ? 'bg-emerald-900/30 text-emerald-400' : 'bg-emerald-50 text-emerald-600'
+            : isDark ? 'bg-red-900/30 text-red-400' : 'bg-red-50 text-red-600'
+        }`}>
+          {netTrend >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+          {Math.abs(netTrend)}%
+        </div>
+      </div>
+      <div className="flex-1 min-h-[140px] -ml-2 mt-2">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+            <defs>
+              <linearGradient id="trend-created" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={COLORS.mediumBlue} stopOpacity={0.35} />
+                <stop offset="100%" stopColor={COLORS.mediumBlue} stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="trend-completed" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={COLORS.emeraldGreen} stopOpacity={0.4} />
+                <stop offset="100%" stopColor={COLORS.emeraldGreen} stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid vertical={false} stroke={isDark ? '#1e293b' : '#f1f5f9'} />
+            <XAxis dataKey="label" tick={{ fontSize: 10, fill: isDark ? '#64748b' : '#94a3b8' }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 10, fill: isDark ? '#64748b' : '#94a3b8' }} axisLine={false} tickLine={false} width={22} allowDecimals={false} />
+            <Tooltip
+              contentStyle={{
+                background: isDark ? '#1e293b' : '#fff',
+                border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
+                borderRadius: 10, fontSize: 12,
+              }}
+            />
+            <Area type="monotone" dataKey="created" stroke={COLORS.mediumBlue} strokeWidth={2} fill="url(#trend-created)" name="Created" />
+            <Area type="monotone" dataKey="completed" stroke={COLORS.emeraldGreen} strokeWidth={2} fill="url(#trend-completed)" name="Completed" />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="flex items-center gap-4 mt-2 text-[11px]">
+        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: COLORS.mediumBlue }} /><span className={isDark ? 'text-slate-400' : 'text-slate-500'}>Created ({totalCreated})</span></span>
+        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: COLORS.emeraldGreen }} /><span className={isDark ? 'text-slate-400' : 'text-slate-500'}>Completed ({totalCompleted})</span></span>
+      </div>
+    </div>
+  );
+});
+
+// ── AI Insights — heuristic, on-device analysis of live dashboard data ──────
+const AIInsightsCard = memo(function AIInsightsCard({
+  isDark, myTaskCount, overdueTaskCount, completionRate, pendingTodosCount,
+  teamTaskBreakdown = [], hasCrossVisibility, navigate,
+}) {
+  const insights = React.useMemo(() => {
+    const list = [];
+
+    if (overdueTaskCount > 0) {
+      list.push({
+        icon: ShieldAlert,
+        tone: 'red',
+        text: `${overdueTaskCount} task${overdueTaskCount > 1 ? 's are' : ' is'} overdue — clearing these first will have the biggest impact on your on-time rate.`,
+        action: () => navigate('/tasks?filter=overdue'),
+        cta: 'Review overdue',
+      });
+    }
+
+    if (completionRate >= 70 && myTaskCount > 0) {
+      list.push({
+        icon: TrendingUp,
+        tone: 'green',
+        text: `Strong pace — you're closing tasks at a ${completionRate}% completion rate. Keep the momentum going.`,
+      });
+    } else if (myTaskCount > 0 && completionRate < 40) {
+      list.push({
+        icon: Gauge,
+        tone: 'amber',
+        text: `Completion rate is at ${completionRate}%. Try tackling 1–2 small tasks first to build momentum today.`,
+        action: () => navigate('/tasks?filter=my-tasks'),
+        cta: 'View my tasks',
+      });
+    }
+
+    if (hasCrossVisibility && teamTaskBreakdown.length > 1) {
+      const sorted = [...teamTaskBreakdown].sort((a, b) => b.pendingCount - a.pendingCount);
+      const busiest = sorted[0], lightest = sorted[sorted.length - 1];
+      if (busiest && lightest && busiest.pendingCount - lightest.pendingCount >= 3) {
+        list.push({
+          icon: Users,
+          tone: 'violet',
+          text: `Workload looks uneven — ${busiest.name.split(' ')[0]} has ${busiest.pendingCount} pending vs. ${lightest.name.split(' ')[0]}'s ${lightest.pendingCount}. Consider rebalancing.`,
+          action: () => navigate('/tasks?filter=team'),
+          cta: 'View team tasks',
+        });
+      }
+    }
+
+    if (pendingTodosCount > 5) {
+      list.push({
+        icon: CheckSquare,
+        tone: 'blue',
+        text: `${pendingTodosCount} to-dos are piling up. A quick 10-minute sweep could clear most of the quick ones.`,
+        action: () => navigate('/todos'),
+        cta: 'Open to-dos',
+      });
+    }
+
+    if (list.length === 0) {
+      list.push({
+        icon: Sparkles,
+        tone: 'green',
+        text: 'Everything looks under control — no overdue tasks, no bottlenecks detected. Nice work!',
+      });
+    }
+
+    return list.slice(0, 4);
+  }, [myTaskCount, overdueTaskCount, completionRate, pendingTodosCount, teamTaskBreakdown, hasCrossVisibility, navigate]);
+
+  const toneStyles = {
+    red:    { bg: isDark ? 'bg-red-900/20' : 'bg-red-50',       icon: 'text-red-500',     ring: isDark ? 'ring-red-800/40' : 'ring-red-100' },
+    green:  { bg: isDark ? 'bg-emerald-900/20' : 'bg-emerald-50', icon: 'text-emerald-500', ring: isDark ? 'ring-emerald-800/40' : 'ring-emerald-100' },
+    amber:  { bg: isDark ? 'bg-amber-900/20' : 'bg-amber-50',   icon: 'text-amber-500',   ring: isDark ? 'ring-amber-800/40' : 'ring-amber-100' },
+    violet: { bg: isDark ? 'bg-violet-900/20' : 'bg-violet-50', icon: 'text-violet-500',  ring: isDark ? 'ring-violet-800/40' : 'ring-violet-100' },
+    blue:   { bg: isDark ? 'bg-blue-900/20' : 'bg-blue-50',     icon: 'text-blue-500',    ring: isDark ? 'ring-blue-800/40' : 'ring-blue-100' },
+  };
+
+  return (
+    <div
+      className={`relative rounded-xl border p-5 overflow-hidden ${
+        isDark ? 'border-slate-700' : 'border-slate-200'
+      }`}
+      style={{
+        background: isDark
+          ? 'linear-gradient(135deg, rgba(31,111,178,0.10), rgba(124,58,237,0.08))'
+          : 'linear-gradient(135deg, rgba(31,111,178,0.05), rgba(124,58,237,0.04))',
+      }}
+    >
+      <div className="flex items-center gap-2 mb-4">
+        <div className="p-1.5 rounded-lg" style={{ background: `linear-gradient(135deg, ${COLORS.mediumBlue}, #7c3aed)` }}>
+          <Brain className="h-4 w-4 text-white" />
+        </div>
+        <h3 className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>AI Insights</h3>
+        <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${
+          isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-800 text-white'
+        }`}>
+          Beta
+        </span>
+        <Sparkles className="h-3.5 w-3.5 text-amber-400 ml-auto" />
+      </div>
+
+      <div className="space-y-2.5">
+        {insights.map((ins, i) => {
+          const t = toneStyles[ins.tone] || toneStyles.blue;
+          const Icon = ins.icon;
+          return (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: i * 0.06, ...springPhysics.card }}
+              className={`flex items-start gap-3 rounded-lg p-3 ring-1 ${t.bg} ${t.ring}`}
+            >
+              <div className={`mt-0.5 flex-shrink-0 ${t.icon}`}>
+                <Icon className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className={`text-xs leading-relaxed ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{ins.text}</p>
+                {ins.action && (
+                  <button
+                    onClick={ins.action}
+                    className={`mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold ${t.icon} hover:underline`}
+                  >
+                    {ins.cta} <ChevronRight className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          );
+        })}
+      </div>
+    </div>
+  );
+});
+
 const CardHeaderRow = memo(function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge, compact = false }) {
   return (
     <div className={`flex items-center justify-between border-b border-slate-200 dark:border-slate-700 min-w-0 gap-2 ${compact ? 'px-3 py-2' : 'px-4 py-3'}`}>
@@ -1005,10 +1233,11 @@ export default function Dashboard() {
   const [selectedTodo,      setSelectedTodo]      = useState(null);
   const [selectedPerformer, setSelectedPerformer] = useState(null);
   const [showCustomize,     setShowCustomize]     = useState(false);
-  const DASHBOARD_SECTIONS = ['metrics','pie_charts','tasks_row','assigned_tasks','performers','quick_access'];
+  const DASHBOARD_SECTIONS = ['metrics','ai_insights','pie_charts','tasks_row','assigned_tasks','performers','quick_access'];
   const DASHBOARD_LABELS = {
     metrics:         { name:'Key Metrics',          icon:'📊', desc:'6 stat cards — tasks, todos, overdue, DSC…' },
-    pie_charts:      { name:'Pie Charts',           icon:'🥧', desc:'Task overview, tasks by type, completion donuts' },
+    ai_insights:     { name:'AI Insights',          icon:'🧠', desc:'Smart, auto-generated tips based on your live data' },
+    pie_charts:      { name:'Charts & Trends',      icon:'📈', desc:'Task overview donuts plus a 7-day trend diagram' },
     tasks_row:       { name:'Tasks & Deadlines',    icon:'📋', desc:'Recent tasks and compliance deadlines' },
     assigned_tasks:  { name:'Assigned Tasks',       icon:'✅', desc:'Tasks assigned to you and by you' },
     performers:      { name:'Performers & Todos',   icon:'🌟', desc:'Star performers, to-do list and client visits' },
@@ -2126,8 +2355,28 @@ export default function Dashboard() {
         </motion.div>
         </React.Fragment>
           );
+          if (sectionId === 'ai_insights') return (
+        <React.Fragment key="ai_insights">
+        <motion.div variants={itemVariants}>
+          <AIInsightsCard
+            isDark={isDark}
+            myTaskCount={myTaskCount}
+            overdueTaskCount={overdueTaskCount}
+            completionRate={completionRate}
+            pendingTodosCount={pendingTodos.length}
+            teamTaskBreakdown={teamTaskBreakdown}
+            hasCrossVisibility={hasCrossVisibility}
+            navigate={navigate}
+          />
+        </motion.div>
+        </React.Fragment>
+          );
           if (sectionId === 'pie_charts') return (
         <React.Fragment key="pie_charts">
+        {/* 7-DAY TREND DIAGRAM */}
+        <motion.div className="grid grid-cols-1 gap-4 [&>*]:min-w-0" variants={itemVariants}>
+          <WeeklyTrendChart isDark={isDark} tasks={tasks} onCardClick={() => navigate('/tasks')} />
+        </motion.div>
         {/* TASK OVERVIEW / TASKS BY TYPE — INTERACTIVE DONUT CARDS */}
         <motion.div
           className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 [&>*]:min-w-0 items-stretch"
