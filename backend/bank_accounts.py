@@ -1218,6 +1218,67 @@ async def list_transactions(
     return items
 
 
+@router.get("/bank-accounts/{bank_account_id}/intelligence")
+async def get_bank_account_intelligence(bank_account_id: str, current_user: User = Depends(get_current_user)):
+    """
+    Reconciliation statistics + fraud/anomaly flags computed directly from
+    the live `bank_transactions` collection — i.e. the same data
+    /upload-statement and /transactions actually use.
+
+    (The older Phase 8 BankStatistics module reads from
+    bank_transaction_history / bank_reconciliation instead, which nothing
+    in the live upload path writes to, so it always reports zeros. This
+    endpoint reuses Phase 8's FraudDetector — which is DB-agnostic, just a
+    pure function over a transaction list — against the real data instead.)
+    """
+    if not _perm_view_bank(current_user):
+        raise HTTPException(403, "Access denied.")
+
+    txns = await db.bank_transactions.find({"bank_account_id": bank_account_id}, {"_id": 0}).sort("date", -1).to_list(20000)
+
+    total = len(txns)
+    matched = sum(1 for t in txns if t.get("matched_type") and t.get("matched_type") != "suspense")
+    suspensed = sum(1 for t in txns if t.get("matched_type") == "suspense")
+    unmatched = total - matched - suspensed
+    total_debit = round(sum(float(t.get("debit") or 0) for t in txns), 2)
+    total_credit = round(sum(float(t.get("credit") or 0) for t in txns), 2)
+
+    statistics = {
+        "total_transactions": total,
+        "matched": matched,
+        "auto_suspensed": suspensed,
+        "unmatched": unmatched,
+        "reconciliation_rate": round((matched / total) * 100, 1) if total else 0.0,
+        "total_debit": total_debit,
+        "total_credit": total_credit,
+        "net_movement": round(total_credit - total_debit, 2),
+    }
+
+    # Normalise into the generic {id, amount, date, narration, type, bank_account_id}
+    # shape FraudDetector.analyse_transactions expects.
+    normalised = []
+    for t in txns:
+        debit, credit = float(t.get("debit") or 0), float(t.get("credit") or 0)
+        normalised.append({
+            "id": t.get("id"),
+            "amount": debit or credit,
+            "date": t.get("date"),
+            "narration": t.get("description") or "",
+            "type": "debit" if debit else "credit",
+            "bank_account_id": t.get("bank_account_id"),
+        })
+
+    anomalies = []
+    try:
+        from backend.bank_ai.fraud_detector import FraudDetector
+        anomalies = await FraudDetector.analyse_transactions(normalised)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"[bank_intelligence] fraud scan failed: {e}")
+
+    return {"statistics": statistics, "anomalies": anomalies}
+
+
 class ManualMatchInput(BaseModel):
     matched_type: str  # purchase | sale | expense | suspense
     matched_id: str    # for purchase/sale: invoice id; for expense/suspense: chart_of_accounts.id
