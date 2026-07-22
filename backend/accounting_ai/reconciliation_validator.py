@@ -330,7 +330,7 @@ async def run_validation_engine(company_id: str = "", auto_fix: bool = True) -> 
     if mismatches:
         logger.warning(f"[reconciliation-event] company={company_id or '(default book)'} "
                         f"mismatches={[m['rule'] for m in mismatches]}")
-        await db.reconciliation_events.insert_one({**report, "_id": None})
+        await db.reconciliation_events.insert_one({**report})
         report.pop("_id", None)
 
     return report
