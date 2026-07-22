@@ -16,6 +16,7 @@ import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
 import { GuidanceNote } from '@/components/ui/GuidanceNote.jsx';
+import { runVerifyAndFix, describeValidationResult } from '@/lib/verifyAndFixLedger';
 
 const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2', emeraldGreen: '#1FAF5A', amber: '#F59E0B', coral: '#FF6B6B' };
 const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
@@ -518,6 +519,24 @@ function AccountingReportsInner() {
   const [ledgerCode, setLedgerCode] = useState(null);
   const openLedger = (code) => { setLedgerCode(code); setLedgerDrawerOpen(true); };
 
+  // "Refresh" re-syncs every invoice/bill/payment into the ledger (not just
+  // a plain refetch) and reports what it fixed vs. what still needs a
+  // manual look — see backend/accounting_ai/reconciliation_validator.py.
+  const [verifying, setVerifying] = useState(false);
+  const handleVerifyAndRefresh = async () => {
+    setVerifying(true);
+    try {
+      const summary = await runVerifyAndFix(companyId);
+      const { variant, title, text } = describeValidationResult(summary);
+      toast[variant === 'warning' ? 'warning' : 'success'](title, { description: text });
+      await fetchAll();
+    } catch {
+      toast.error('Could not refresh — please try again.');
+    } finally {
+      setVerifying(false);
+    }
+  };
+
   const fetchCompanies = async () => {
     try {
       const { data } = await api.get('/companies/list');
@@ -884,8 +903,14 @@ function AccountingReportsInner() {
             >
               <Scale className="h-3.5 w-3.5 mr-1" /> Add Opening Balance
             </Button>
-            <Button onClick={() => fetchAll()} size="sm" variant="outline" className="h-8 bg-white/10 border-white/25 text-white hover:bg-white/20 text-xs">
-              <RefreshCw className="h-3.5 w-3.5" />
+            <Button
+              onClick={handleVerifyAndRefresh}
+              disabled={verifying}
+              size="sm" variant="outline"
+              className="h-8 bg-white/10 border-white/25 text-white hover:bg-white/20 text-xs font-semibold"
+              title="Re-syncs every invoice, bill, and payment into the ledger and fixes accounts that drifted"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 mr-1 ${verifying ? 'animate-spin' : ''}`} /> {verifying ? 'Verifying…' : 'Verify & Fix'}
             </Button>
           </div>
         </div>
