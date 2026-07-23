@@ -1451,17 +1451,26 @@ function AccountingReportsInner() {
                               {Array.isArray(m.culprits) && m.culprits.length > 0 && (
                                 <div className="mt-2 border-t pt-2" style={{ borderColor: isDark ? '#334155' : '#fde68a' }}>
                                   <p className={`text-[10px] font-bold uppercase tracking-wide mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                                    Invoices to check
+                                    {m.culprits[0]?.entry_id ? 'Journal entries to check' : 'Invoices to check'}
                                   </p>
                                   <ul className="space-y-1">
-                                    {m.culprits.map((c) => (
-                                      <li key={c.id} className="text-[11px] flex items-center justify-between gap-2">
-                                        <span className={`truncate ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                          {c.invoice_number} — {c.client_name}
-                                        </span>
-                                        <span className="font-mono text-rose-500 shrink-0">{fmtC(c.diff)}</span>
-                                      </li>
-                                    ))}
+                                    {m.culprits.map((c) =>
+                                      c.entry_id ? (
+                                        <li key={c.entry_id} className="text-[11px] flex items-center justify-between gap-2">
+                                          <span className={`truncate ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                                            {c.date} — {c.narration} <span className="opacity-60">({c.source})</span>
+                                          </span>
+                                          <span className="font-mono text-rose-500 shrink-0">{fmtC(c.net_amount)}</span>
+                                        </li>
+                                      ) : (
+                                        <li key={c.id} className="text-[11px] flex items-center justify-between gap-2">
+                                          <span className={`truncate ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                                            {c.invoice_number} — {c.client_name}
+                                          </span>
+                                          <span className="font-mono text-rose-500 shrink-0">{fmtC(c.diff)}</span>
+                                        </li>
+                                      )
+                                    )}
                                   </ul>
                                 </div>
                               )}
