@@ -29,7 +29,10 @@ class PaymentMatcher:
 
         # 1. Amount matching
         bank_amount = float(bank_txn.get("amount", 0.0))
-        cand_amount = float(candidate.get("total_amount") or candidate.get("amount") or candidate.get("total") or 0.0)
+        cand_amount = float(
+            candidate.get("grand_total") or candidate.get("total_amount")
+            or candidate.get("amount") or candidate.get("total") or 0.0
+        )
         
         if abs(bank_amount - cand_amount) < 0.01:
             score += 50
@@ -103,9 +106,11 @@ class PaymentMatcher:
                 min_amt = bank_amount * 0.90
                 max_amt = bank_amount * 1.10
                 
-                # Fetch pending or unpaid invoices
+                # Fetch pending or unpaid invoices. Invoices store their total as
+                # `grand_total`, not `total_amount` — querying the wrong field name
+                # matched zero documents, which made this fuzzy matcher a no-op.
                 cursor = db.invoices.find({
-                    "total_amount": {"$gte": min_amt, "$lte": max_amt},
+                    "grand_total": {"$gte": min_amt, "$lte": max_amt},
                     "status": {"$ne": "paid"}
                 }).limit(50)
                 
@@ -114,11 +119,13 @@ class PaymentMatcher:
                     inv["match_type"] = "invoice"
                     candidates.append(inv)
             else:
-                # Debit: search purchase bills/expenses
+                # Debit: search purchase bills/expenses. Bills live in
+                # `purchase_invoices` (with a `grand_total` field) — `purchases` is
+                # not a collection anything in this app writes to.
                 min_amt = bank_amount * 0.90
                 max_amt = bank_amount * 1.10
-                cursor = db.purchases.find({
-                    "total_amount": {"$gte": min_amt, "$lte": max_amt},
+                cursor = db.purchase_invoices.find({
+                    "grand_total": {"$gte": min_amt, "$lte": max_amt},
                     "status": {"$ne": "paid"}
                 }).limit(50)
                 
