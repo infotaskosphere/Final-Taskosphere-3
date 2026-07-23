@@ -13,7 +13,7 @@ import requests
 import httpx
 import shutil
 import pandas as pd
-from datetime import datetime, date, timezone, timedelta
+from datetime import datetime, date, timezone, timedelta, time as dtime
 from collections import Counter
 
 # --- FIXED ROUTER IMPORTS ---
@@ -41,6 +41,9 @@ from backend.accounting_extended import create_accounting_extended_indexes
 from backend.bank_accounts import router as bank_accounts_router
 from backend.permission_governance import router as permission_governance_router
 from backend.security.rate_limiter import RateLimiter
+from backend.security.audit_security import AuditSecurity
+from backend.security.session_manager import SessionManager
+from backend.security.security_monitor import SecurityMonitor
 from backend.visits import router as visits_router
 from backend.leads import router as leads_router
 from backend.interviews import router as interviews_router
@@ -2190,6 +2193,16 @@ async def _enforce_auth_rate_limit(request: Request, identifier: str, limit_per_
     key = f"auth:{client_ip}:{(identifier or '').lower()}"
     try:
         if await RateLimiter.is_rate_limited(key, limit_per_minute=limit_per_minute):
+            try:
+                await AuditSecurity.log_security_event(
+                    event_type="rate_limit_blocked",
+                    actor_id=identifier or "unknown",
+                    company_id="",
+                    severity="warning",
+                    details=f"Rate limit exceeded from {client_ip} for '{identifier}'.",
+                )
+            except Exception:
+                pass
             raise HTTPException(
                 status_code=429,
                 detail="Too many attempts. Please wait a minute and try again.",
@@ -2372,10 +2385,21 @@ async def self_register(user_data: UserCreate, request: Request):
 @api_router.post("/auth/login", response_model=Token)
 async def login(credentials: UserLogin, request: Request):
     await _enforce_auth_rate_limit(request, credentials.email, limit_per_minute=10)
+    client_ip = request.client.host if request and request.client else "unknown"
 
     user = await db.users.find_one({"email": credentials.email}, {"_id": 0})
 
     if not user or not verify_password(credentials.password, user["password"]):
+        try:
+            await AuditSecurity.log_security_event(
+                event_type="login_failed",
+                actor_id=credentials.email,
+                company_id="",
+                severity="warning",
+                details=f"Failed login attempt from {client_ip}.",
+            )
+        except Exception:
+            pass
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     user_status = user.get("status")
@@ -2393,17 +2417,91 @@ async def login(credentials: UserLogin, request: Request):
     user_obj = User(**{k: v for k, v in user.items() if k != "password"})
     access_token = create_access_token({"sub": user_obj.id})
 
+    # Off-hours access notice (informational only — does not block login).
+    now_hour = datetime.now().time()
+    is_off_hours = now_hour > dtime(23, 0) or now_hour < dtime(5, 0)
+
+    session_token = None
+    try:
+        session_token = await SessionManager.create_user_session(
+            user_id=user_obj.id,
+            client_ip=client_ip,
+            user_agent=request.headers.get("user-agent", "unknown"),
+        )
+        await AuditSecurity.log_security_event(
+            event_type="login_success",
+            actor_id=user_obj.id,
+            company_id="",
+            severity="info" if not is_off_hours else "warning",
+            details=f"Login from {client_ip}" + (" (off-hours access)" if is_off_hours else ""),
+        )
+    except Exception:
+        logger.warning("Session tracking / audit log failed on login; continuing.")
+
     return {
         "access_token": access_token,
         "token_type": "bearer",
         "user": user_obj,
         "consent_given": True,
+        "session_token": session_token,
     }
+
+
+@api_router.post("/auth/logout")
+async def logout(
+    request: Request,
+    session_token: Optional[str] = Body(default=None, embed=True),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Revokes the session record created at login. Note: this does NOT
+    invalidate the JWT itself (the token remains cryptographically valid
+    until it expires — see ACCESS_TOKEN_EXPIRE_MINUTES in dependencies.py).
+    This lets a super-admin portal show/revoke "active sessions" for
+    auditing purposes without changing the stateless-JWT auth model.
+    """
+    revoked = False
+    if session_token:
+        try:
+            revoked = await SessionManager.revoke_session(session_token)
+        except Exception:
+            logger.warning("Session revoke failed on logout.")
+    try:
+        await AuditSecurity.log_security_event(
+            event_type="logout",
+            actor_id=current_user.id,
+            company_id="",
+            severity="info",
+            details="User logged out.",
+        )
+    except Exception:
+        pass
+    return {"message": "Logged out.", "session_revoked": revoked}
 
 
 @api_router.get("/auth/me", response_model=User)
 async def get_me(current_user: User = Depends(get_current_user)):
     return current_user
+
+
+@api_router.get("/security/scan")
+async def security_scan(current_user: User = Depends(require_admin())):
+    """
+    Admin-only security health check: counts recent critical/warning events
+    logged by AuditSecurity (failed logins, rate-limit trips, off-hours
+    access, password resets). Foundation for the super-admin security
+    dashboard — extend with more event types as new checks are added.
+    """
+    return await SecurityMonitor.run_security_scan()
+
+
+@api_router.get("/security/events")
+async def security_events(
+    limit: int = Query(50, ge=1, le=500),
+    current_user: User = Depends(require_admin()),
+):
+    """Admin-only: recent security events (login failures, resets, etc.)."""
+    return await AuditSecurity.get_recent_security_events(limit=limit)
 
 
 # ── Forgot / Reset Password → moved to backend/auth_password_reset.py ─────────
