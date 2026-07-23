@@ -31,6 +31,7 @@ Sales/Receivable/Outstanding — it reuses:
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 import logging
+import math
 
 from backend.dependencies import db
 
@@ -192,7 +193,19 @@ async def _bank_reality_check(company_id: str) -> Dict[str, float]:
             sort=[("date", -1), ("created_at", -1), ("id", -1)],
         )
         if latest_txn and latest_txn.get("balance_after") is not None:
-            real_balance += float(latest_txn["balance_after"])
+            # Defensive: balance_after can originate from an AI-parsed bank
+            # statement import. Skip anything that isn't a finite number
+            # (NaN/Infinity/garbage) rather than letting it into the report,
+            # where it would later crash JSON serialization of the response
+            # (Starlette's JSONResponse rejects NaN/Infinity outright) and
+            # surface to the client as an opaque generic 500 instead of a
+            # useful error.
+            try:
+                val = float(latest_txn["balance_after"])
+            except (TypeError, ValueError):
+                val = None
+            if val is not None and math.isfinite(val):
+                real_balance += val
         else:
             txns = await db.bank_transactions.find(
                 {"bank_account_id": ba["id"]}, {"_id": 0, "debit": 1, "credit": 1}
