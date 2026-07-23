@@ -434,51 +434,51 @@ function FinixDashboardInner() {
         <div className="space-y-8">
 
           {/* ── KPI Cards ── */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6 items-stretch">
             
             {/* Card 1: Revenue */}
-            <div className={`p-6 rounded-3xl shadow-sm border transition-all duration-300 hover:shadow-md ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'}`}>
+            <div className={`h-full flex flex-col justify-between p-6 rounded-3xl shadow-sm border transition-all duration-300 hover:shadow-md ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'}`}>
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-bold uppercase tracking-wider text-emerald-500">Sales & Revenue</span>
-                <TrendingUp className="w-5 h-5 text-emerald-500" />
+                <TrendingUp className="w-5 h-5 text-emerald-500 shrink-0" />
               </div>
-              <h2 className="text-3xl font-extrabold font-mono tracking-tight">{fmtC(revenue)}</h2>
+              <h2 className="text-3xl font-extrabold font-mono tracking-tight break-all">{fmtC(revenue)}</h2>
               <div className="flex items-center gap-1.5 mt-2.5 text-xs text-slate-400">
                 <span className="font-semibold text-emerald-500">Matched with Sales ledgers</span>
               </div>
             </div>
 
             {/* Card 2: Accounts Receivable */}
-            <div className={`p-6 rounded-3xl shadow-sm border transition-all duration-300 hover:shadow-md ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'}`}>
+            <div className={`h-full flex flex-col justify-between p-6 rounded-3xl shadow-sm border transition-all duration-300 hover:shadow-md ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'}`}>
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-bold uppercase tracking-wider text-amber-500">Accounts Receivable</span>
-                <Receipt className="w-5 h-5 text-amber-500" />
+                <Receipt className="w-5 h-5 text-amber-500 shrink-0" />
               </div>
-              <h2 className="text-3xl font-extrabold font-mono tracking-tight">{fmtC(receivables)}</h2>
+              <h2 className="text-3xl font-extrabold font-mono tracking-tight break-all">{fmtC(receivables)}</h2>
               <div className="flex items-center gap-1.5 mt-2.5 text-xs text-slate-400">
                 <span className="font-semibold text-amber-500">Total Outstanding Due</span>
               </div>
             </div>
 
             {/* Card 3: Cash & Bank */}
-            <div className={`p-6 rounded-3xl shadow-sm border transition-all duration-300 hover:shadow-md ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'}`}>
+            <div className={`h-full flex flex-col justify-between p-6 rounded-3xl shadow-sm border transition-all duration-300 hover:shadow-md ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'}`}>
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-bold uppercase tracking-wider text-blue-500">Bank & Cash Balance</span>
-                <Landmark className="w-5 h-5 text-blue-500" />
+                <Landmark className="w-5 h-5 text-blue-500 shrink-0" />
               </div>
-              <h2 className="text-3xl font-extrabold font-mono tracking-tight">{fmtC(cashAndBank)}</h2>
+              <h2 className="text-3xl font-extrabold font-mono tracking-tight break-all">{fmtC(cashAndBank)}</h2>
               <div className="flex items-center gap-1.5 mt-2.5 text-xs text-slate-400">
                 <span className="font-semibold text-blue-500">Real-time Liquid Reserves</span>
               </div>
             </div>
 
             {/* Card 4: Accounts Payable */}
-            <div className={`p-6 rounded-3xl shadow-sm border transition-all duration-300 hover:shadow-md ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'}`}>
+            <div className={`h-full flex flex-col justify-between p-6 rounded-3xl shadow-sm border transition-all duration-300 hover:shadow-md ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'}`}>
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-bold uppercase tracking-wider text-purple-500">Accounts Payable</span>
-                <TrendingDown className="w-5 h-5 text-purple-500" />
+                <TrendingDown className="w-5 h-5 text-purple-500 shrink-0" />
               </div>
-              <h2 className="text-3xl font-extrabold font-mono tracking-tight">{fmtC(payables)}</h2>
+              <h2 className="text-3xl font-extrabold font-mono tracking-tight break-all">{fmtC(payables)}</h2>
               <div className="flex items-center gap-1.5 mt-2.5 text-xs text-slate-400">
                 <span className="font-semibold text-purple-500">Vendor Outstandings</span>
               </div>
@@ -507,7 +507,7 @@ function FinixDashboardInner() {
                 </div>
                 <div className="h-80 w-full font-mono text-xs">
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                       <defs>
                         <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor="#1FAF5A" stopOpacity={0.2}/>
@@ -531,15 +531,15 @@ function FinixDashboardInner() {
               </div>
 
               {/* Grid: Expense Pie Chart & Quick Action Widgets */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-stretch">
                 
                 {/* Expense Breakdown */}
-                <div className={`p-6 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800/60 border-slate-700/80' : 'bg-white border-slate-100'}`}>
+                <div className={`h-full flex flex-col p-6 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800/60 border-slate-700/80' : 'bg-white border-slate-100'}`}>
                   <h3 className="font-extrabold text-lg flex items-center gap-2 mb-4">
                     <PieIcon className="w-5 h-5 text-emerald-500" />
                     Operating Cost Distribution
                   </h3>
-                  <div className="h-64 w-full text-xs">
+                  <div className="flex-1 min-h-[16rem] w-full text-xs">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
@@ -563,12 +563,12 @@ function FinixDashboardInner() {
                 </div>
 
                 {/* AI Auditing Summary */}
-                <div className={`p-6 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800/60 border-slate-700/80' : 'bg-white border-slate-100'}`}>
+                <div className={`h-full flex flex-col p-6 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800/60 border-slate-700/80' : 'bg-white border-slate-100'}`}>
                   <h3 className="font-extrabold text-lg flex items-center gap-2 mb-4">
                     <Brain className="w-5 h-5 text-emerald-500" />
                     Autonomous Integrity Shield
                   </h3>
-                  <div className="space-y-4">
+                  <div className="flex-1 flex flex-col justify-between gap-4">
                     <div className="flex items-start gap-3">
                       <div className="p-2 bg-emerald-500/10 rounded-xl shrink-0">
                         <CheckCircle2 className="w-5 h-5 text-emerald-500" />
