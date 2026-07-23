@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { toast } from 'sonner';
-import { NotebookPen, Plus, RefreshCw, Trash2, X, CheckSquare, Square, XCircle, Building2, ChevronLeft, ChevronRight, Pencil, AlertTriangle } from 'lucide-react';
+import { NotebookPen, Plus, RefreshCw, Trash2, X, CheckSquare, Square, XCircle, Building2, ChevronLeft, ChevronRight, Pencil, AlertTriangle, ShieldCheck } from 'lucide-react';
+import ExistingRecordsPanel from '@/components/ExistingRecordsPanel.jsx';
 import GifLoader, { MiniLoader, ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -34,6 +35,7 @@ function JournalEntriesInner() {
 
   const [companies, setCompanies] = useState([]);
   const [companyId, setCompanyId] = useState('');
+  const [showExistingRecords, setShowExistingRecords] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [total, setTotal] = useState(0);
@@ -424,6 +426,7 @@ function JournalEntriesInner() {
                 <SelectItem value="100">100 / page</SelectItem>
               </SelectContent>
             </Select>
+            <Button onClick={() => setShowExistingRecords(true)} variant="outline" className="h-10 bg-white/10 border-white/20 text-white hover:bg-white/20 rounded-full text-xs md:text-sm font-medium transition-all"><ShieldCheck className="h-4 w-4 mr-1.5" /> Existing records</Button>
             <Button onClick={() => setShowNew(true)} variant="outline" className="h-10 bg-white/10 border-white/20 text-white hover:bg-white/20 rounded-full text-xs md:text-sm font-medium transition-all"><Plus className="h-4 w-4 mr-1.5" /> New entry</Button>
             <Button onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))} variant="outline" className="h-10 bg-white/10 border-white/20 text-white hover:bg-white/20 rounded-full text-xs md:text-sm font-medium transition-all">
               {selectMode ? <><XCircle className="h-4 w-4 mr-1.5" /> Cancel select</> : <><CheckSquare className="h-4 w-4 mr-1.5" /> Select</>}
@@ -610,6 +613,14 @@ function JournalEntriesInner() {
               <span>New Journal Entry (Tally-Style Voucher)</span>
             </DialogTitle>
           </DialogHeader>
+          <button
+            type="button"
+            onClick={() => setShowExistingRecords(true)}
+            className="flex items-center gap-2 text-xs font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 rounded-xl px-3 py-2 hover:bg-emerald-100 dark:hover:bg-emerald-950/50 transition-all -mt-1"
+          >
+            <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+            Booking a payment or receipt? Check existing sale/purchase records first, so you don't post it twice.
+          </button>
           <div className="space-y-4 mt-2">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-500/5 p-3 rounded-xl border border-slate-200/40 dark:border-slate-800/40">
               <div>
@@ -877,6 +888,15 @@ function JournalEntriesInner() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <ExistingRecordsPanel
+        open={showExistingRecords}
+        onOpenChange={setShowExistingRecords}
+        companyId={companyId}
+        isDark={isDark}
+        title="Existing sale & purchase records"
+        description="Everything already booked in Invoicing and Purchases. Check here before posting a manual entry for a payment or receipt — if it's already recorded, matching it on the Bank page keeps the books duplicate-free instead."
+      />
     </div>
   );
 }
