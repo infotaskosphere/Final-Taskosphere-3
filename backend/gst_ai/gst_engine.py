@@ -112,5 +112,3 @@ class GSTEngine:
                 return False, "Invalid GST mix: CGST/SGST and IGST cannot both be non-zero"
 
         return True, "GST calculations are balanced and valid."
-class Optional:
-    pass
