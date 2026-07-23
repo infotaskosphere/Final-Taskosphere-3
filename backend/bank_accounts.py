@@ -964,13 +964,19 @@ async def _auto_post_for_match(company_id: str, txn: dict, match: dict, created_
 
 
     if match["type"] == "purchase":
-        purchases_acct_id = await get_default_account_id(company_id, "5000")  # Purchases
-        if not purchases_acct_id:
+        # NOTE: the purchase invoice's own expense (Dr <expense head> / Dr GST
+        # Input, Cr Accounts Payable) was already posted when the bill was
+        # first saved (see sync_purchase_journal_entry). Settling it via a
+        # bank statement match is a PAYMENT, not a fresh purchase — it must
+        # clear the payable, not re-debit the expense a second time. This
+        # mirrors the zte_purchase branch above, which does this correctly.
+        payable_acct_id = await get_default_account_id(company_id, "2000")  # Accounts Payable
+        if not payable_acct_id:
             return None
         entry = await try_auto_post(
-            company_id, txn["date"], f"Payment to {match['label']} (bank statement)",
+            company_id, txn["date"], f"Payment to {match['label']} — settles Purchase Bill (bank statement)",
             [
-                {"account_id": purchases_acct_id, "account_name": "Purchases", "debit": txn["debit"], "credit": 0},
+                {"account_id": payable_acct_id, "account_name": "Accounts Payable", "debit": txn["debit"], "credit": 0},
                 {"account_id": bank_acct_id, "account_name": "Bank Accounts", "debit": 0, "credit": txn["debit"]},
             ],
             "bank", txn["id"], created_by,
