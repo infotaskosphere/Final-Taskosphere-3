@@ -21,58 +21,62 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/passwords", tags=["password-repository"])
 
 # ── Encryption bootstrap ──────────────────────────────────────────────────────
-try:
-    from cryptography.fernet import Fernet, InvalidToken
-    _env_key = os.getenv("PASSWORD_REPO_KEY", "").strip()
-    if _env_key:
-        try:
-            _fernet_key = _env_key.encode()
-            Fernet(_fernet_key)
-        except Exception:
-            _fernet_key = base64.urlsafe_b64encode(
-                hashlib.sha256(_env_key.encode()).digest()
-            )
-    else:
-        _seed = os.getenv("MONGO_URI", "taskosphere-default-seed-2024")
-        _fernet_key = base64.urlsafe_b64encode(
-            hashlib.sha256(_seed.encode()).digest()
+# SECURITY: This module stores real client credentials (GST/MCA/portal
+# passwords). It must NEVER derive its key from an unrelated secret
+# (MONGO_URI), fall back to a hardcoded seed, or silently store passwords in
+# a reversible, non-encrypted format (base64) if the crypto library is
+# missing. Any of those would let anyone with DB or repo access decrypt every
+# stored client password.
+from cryptography.fernet import Fernet, InvalidToken
+
+_env_key = os.getenv("PASSWORD_REPO_KEY", "").strip()
+
+if not _env_key:
+    if os.getenv("ENV_MODE") == "production":
+        raise RuntimeError(
+            "PASSWORD_REPO_KEY environment variable is not set. Refusing to "
+            "start in production without an explicit encryption key for the "
+            "password vault. Generate one with: "
+            "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
         )
-        logger.warning(
-            "PASSWORD_REPO_KEY not set — using derived key. "
-            "Set PASSWORD_REPO_KEY in .env for production security."
-        )
-    _fernet = Fernet(_fernet_key)
-    ENCRYPTION_AVAILABLE = True
-except ImportError:
-    _fernet = None
-    ENCRYPTION_AVAILABLE = False
+    _env_key = Fernet.generate_key().decode()
     logger.warning(
-        "cryptography package not installed — passwords stored as base64 only. "
-        "Run: pip install cryptography"
+        "PASSWORD_REPO_KEY not set — generated a random development-only "
+        "key. Previously stored vault passwords will NOT decrypt, and this "
+        "key will not survive a restart. Set PASSWORD_REPO_KEY in .env "
+        "before deploying."
     )
+
+try:
+    _fernet_key = _env_key.encode()
+    Fernet(_fernet_key)  # validate it's a proper Fernet key
+except Exception:
+    # Allow a human-chosen passphrase too, but derive a proper key from it
+    # deterministically via its own value only (never another secret).
+    _fernet_key = base64.urlsafe_b64encode(hashlib.sha256(_env_key.encode()).digest())
+
+_fernet = Fernet(_fernet_key)
+ENCRYPTION_AVAILABLE = True
 
 def _encrypt(plain: str) -> str:
     if not plain:
         return ""
-    if ENCRYPTION_AVAILABLE and _fernet:
-        return _fernet.encrypt(plain.encode()).decode()
-    return base64.b64encode(plain.encode()).decode()
+    return _fernet.encrypt(plain.encode()).decode()
 
 def _decrypt(cipher: str) -> str:
     if not cipher:
         return ""
-    if ENCRYPTION_AVAILABLE and _fernet:
-        try:
-            return _fernet.decrypt(cipher.encode()).decode()
-        except Exception:
-            try:
-                return base64.b64decode(cipher).decode()
-            except Exception:
-                return "[decryption failed]"
     try:
-        return base64.b64decode(cipher).decode()
+        return _fernet.decrypt(cipher.encode()).decode()
     except Exception:
-        return cipher
+        # Backward-compat: records written before this fix (when the old
+        # code could silently fall back to base64-only "encryption") won't
+        # be valid Fernet tokens. Try to recover them once so they aren't
+        # lost; they should be re-saved through _encrypt() to be re-secured.
+        try:
+            return base64.b64decode(cipher).decode()
+        except Exception:
+            return "[decryption failed]"
 
 # ── Pydantic schemas ──────────────────────────────────────────────────────────
 PORTAL_TYPES = [
