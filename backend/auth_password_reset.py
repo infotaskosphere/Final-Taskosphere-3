@@ -19,6 +19,7 @@ from dateutil import parser as dateutil_parser
 
 from backend.dependencies import db
 from backend.security.rate_limiter import RateLimiter
+from backend.security.audit_security import AuditSecurity
 
 logger      = logging.getLogger(__name__)
 router      = APIRouter()
@@ -185,4 +186,14 @@ async def reset_password(data: ResetPasswordRequest, request: Request):
 
     await db.password_reset_tokens.delete_many({"email": email})
     logger.info(f"Password reset successful for {email}")
+    try:
+        await AuditSecurity.log_security_event(
+            event_type="password_reset",
+            actor_id=email,
+            company_id="",
+            severity="warning",
+            details="Password reset via OTP flow.",
+        )
+    except Exception:
+        pass
     return {"message": "Password updated successfully."}
