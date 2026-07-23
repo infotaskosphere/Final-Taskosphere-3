@@ -1,114 +1,178 @@
-"""
-GST Engine — Decides and calculates GST types (CGST, SGST, IGST, Cess), Reverse Charge (RCM), and ITC eligibility.
-Performs deterministic tax split validation relative to company state vs vendor state.
-"""
-
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, List, Optional
 import logging
+from backend.gst_ai.gst_classifier import GSTClassifier
+from backend.gst_ai.gst_validator import GSTValidator
+from backend.gst_ai.itc_engine import ITCEngine
+from backend.gst_ai.rcm_engine import RCMEngine
+from backend.gst_ai.gst_learning import GSTLearningEngine
+from backend.gst_ai.gst_audit import GSTAuditLogger
+from backend.gst_ai.gst_storage import GSTStorage
 
 logger = logging.getLogger("gst_engine")
 
 class GSTEngine:
-    @staticmethod
-    def determine_gst_split(
-        company_gstin: str,
-        vendor_gstin: str,
-        total_tax_amount: float
-    ) -> Dict[str, float]:
-        """Calculates CGST, SGST, and IGST splits based on Indian GST guidelines.
-        First 2 digits of GSTIN indicate state code.
-        Same State -> Intra-state (CGST + SGST split 50/50)
-        Different State -> Inter-state (IGST 100%)
-        """
-        cgst = 0.0
-        sgst = 0.0
-        igst = 0.0
-
-        company_gstin = str(company_gstin or "").strip()
-        vendor_gstin = str(vendor_gstin or "").strip()
-        total_tax_amount = round(float(total_tax_amount or 0.0), 2)
-
-        if total_tax_amount <= 0:
-            return {"cgst": 0.0, "sgst": 0.0, "igst": 0.0}
-
-        # Safe defaults if either GSTIN is missing
-        if not company_gstin or not vendor_gstin or len(company_gstin) < 2 or len(vendor_gstin) < 2:
-            # Assume CGST/SGST split by default as fallback
-            cgst = round(total_tax_amount / 2, 2)
-            sgst = round(total_tax_amount - cgst, 2)
-            return {"cgst": cgst, "sgst": sgst, "igst": 0.0}
-
-        company_state = company_gstin[:2]
-        vendor_state = vendor_gstin[:2]
-
-        if company_state == vendor_state:
-            # Intra-state
-            cgst = round(total_tax_amount / 2, 2)
-            sgst = round(total_tax_amount - cgst, 2)
-        else:
-            # Inter-state
-            igst = total_tax_amount
-
-        return {"cgst": cgst, "sgst": sgst, "igst": igst}
-
-    @staticmethod
-    def evaluate_rcm(vendor_profile: Optional[Dict[str, Any]] = None, extracted_data: Optional[Dict[str, Any]] = None) -> bool:
-        """Determines if Reverse Charge Mechanism (RCM) is applicable.
-        E.g., unregistered GTA services, legal expenses from advocates, or explicit RCM flag.
-        """
-        if vendor_profile and vendor_profile.get("is_rcm_applicable"):
-            return True
-            
-        if extracted_data:
-            desc = str(extracted_data.get("notes") or "").lower() + " " + " ".join(
-                str(item.get("description") or "").lower() for item in extracted_data.get("line_items", [])
-            )
-            if "reverse charge" in desc or "rcm" in desc or "legal fees" in desc or "advocate" in desc:
-                return True
-
-        return False
-
-    @staticmethod
-    def check_itc_eligibility(account_code: str, vendor_profile: Optional[Dict[str, Any]] = None) -> str:
-        """Determines Input Tax Credit (ITC) eligibility status under CGST Sec 17(5).
-        Returns: "ELIGIBLE" | "BLOCKED" | "PARTIALLY_ELIGIBLE"
-        Blocked credits apply to: Food & beverages, motor vehicles, personal usage, etc.
-        """
-        # Blocked expense accounts by code
-        # E.g., 5600 (Travel & Conveyance - blocked for personal or unregistered travel),
-        # 5300 (Office & Admin Expenses if it relates to office pantry/catering)
-        code = str(account_code).strip()
-        if code in ("5600", "5300"):
-            # Check vendor profile flags too
-            if vendor_profile and vendor_profile.get("itc_status") == "blocked":
-                return "BLOCKED"
-            return "PARTIALLY_ELIGIBLE"
-            
-        if vendor_profile and vendor_profile.get("itc_status") == "eligible":
-            return "ELIGIBLE"
-
-        return "ELIGIBLE"
-
     @classmethod
-    def validate_gst_calculations(
+    async def process_gst(
         cls,
-        taxable_value: float,
-        cgst: float,
-        sgst: float,
-        igst: float,
-        total_tax: float
-    ) -> Tuple[bool, str]:
-        """Validates that computed tax parameters reconcile mathematically.
-        Also guarantees CGST = SGST, and either IGST or CGST/SGST is populated, but not both.
+        invoice_data: Dict[str, Any],
+        company_id: str,
+        user_id: str,
+        rule_version: str = "v1.0.0"
+    ) -> Dict[str, Any]:
         """
-        total_calc = round(cgst + sgst + igst, 2)
-        if abs(total_calc - round(total_tax, 2)) > 0.05:
-            return False, f"Sum of CGST ({cgst}) + SGST ({sgst}) + IGST ({igst}) does not match total tax ({total_tax})"
+        Coordinates full GST processing pipeline for an incoming transaction/invoice.
+        """
+        try:
+            logger.info("Initializing GST Intelligence processing.")
+            
+            # 1. Classification
+            classification = GSTClassifier.classify_transaction(invoice_data)
+            logger.info(f"Transaction classified as: {classification}")
 
-        if cgst > 0 or sgst > 0:
-            if abs(cgst - sgst) > 0.02:
-                return False, f"Asymmetrical GST: CGST ({cgst}) must equal SGST ({sgst})"
-            if igst > 0:
-                return False, "Invalid GST mix: CGST/SGST and IGST cannot both be non-zero"
+            # 2. Validation
+            validation_report = GSTValidator.validate_invoice(invoice_data)
+            logger.info(f"Validation completed. Is valid: {validation_report['is_valid']}")
 
-        return True, "GST calculations are balanced and valid."
+            # 3. ITC calculation (for Purchases / Inward supplies)
+            is_purchase = invoice_data.get("is_purchase", True)
+            itc_report = {}
+            if is_purchase:
+                # Apply vendor defaults/history learning check
+                itc_category = invoice_data.get("itc_category") or "general_inputs"
+                
+                # Check for historical recommendation
+                gstin = (invoice_data.get("supplier_gstin") or "").strip()
+                suggested_cat = await GSTLearningEngine.get_smart_recommendation(gstin, "itc_category", itc_category)
+                if suggested_cat:
+                    logger.info(f"Applying learned ITC category suggestion: {suggested_cat}")
+                    invoice_data["itc_category"] = suggested_cat
+                    itc_category = suggested_cat
+
+                itc_report = await ITCEngine.analyze_itc_eligibility(invoice_data)
+                logger.info(f"ITC Eligibility computed. Eligible total: {itc_report['eligible_total']}")
+
+            # 4. RCM Impact
+            rcm_report = await RCMEngine.process_rcm_impact(invoice_data)
+            if rcm_report["rcm_applicable"]:
+                logger.info("RCM treatment is applicable on transaction.")
+
+            # 5. Generate Posting Instructions
+            # Map taxes to standard COA asset (GST Input Credit) and liability (GST Output Payable)
+            posting_instructions = []
+            
+            # If RCM, load RCM posting instructions
+            if rcm_report["rcm_applicable"]:
+                posting_instructions.extend(rcm_report["posting_instructions"])
+            else:
+                # Standard non-RCM posting instructions
+                igst = float(invoice_data.get("igst") or 0.0)
+                cgst = float(invoice_data.get("cgst") or 0.0)
+                sgst = float(invoice_data.get("sgst") or 0.0)
+                
+                if is_purchase:
+                    # Inward supplies claim Input Credit (Asset)
+                    if igst > 0:
+                        posting_instructions.append({
+                            "account_code": "1200", # GST Input Credit
+                            "account_name": "GST Input Credit (IGST)",
+                            "debit": igst,
+                            "credit": 0.0,
+                            "memo": f"Purchase GST IGST on invoice {invoice_data.get('invoice_no') or invoice_data.get('invoice_number')}"
+                        })
+                    if cgst > 0:
+                        posting_instructions.append({
+                            "account_code": "1200",
+                            "account_name": "GST Input Credit (CGST)",
+                            "debit": cgst,
+                            "credit": 0.0,
+                            "memo": f"Purchase GST CGST on invoice {invoice_data.get('invoice_no') or invoice_data.get('invoice_number')}"
+                        })
+                    if sgst > 0:
+                        posting_instructions.append({
+                            "account_code": "1200",
+                            "account_name": "GST Input Credit (SGST)",
+                            "debit": sgst,
+                            "credit": 0.0,
+                            "memo": f"Purchase GST SGST on invoice {invoice_data.get('invoice_no') or invoice_data.get('invoice_number')}"
+                        })
+                else:
+                    # Outward supplies incur Output Payable (Liability)
+                    if igst > 0:
+                        posting_instructions.append({
+                            "account_code": "2100", # GST Output Payable
+                            "account_name": "GST Output Payable (IGST)",
+                            "debit": 0.0,
+                            "credit": igst,
+                            "memo": f"Sales GST IGST on invoice {invoice_data.get('invoice_no') or invoice_data.get('invoice_number')}"
+                        })
+                    if cgst > 0:
+                        posting_instructions.append({
+                            "account_code": "2100",
+                            "account_name": "GST Output Payable (CGST)",
+                            "debit": 0.0,
+                            "credit": cgst,
+                            "memo": f"Sales GST CGST on invoice {invoice_data.get('invoice_no') or invoice_data.get('invoice_number')}"
+                        })
+                    if sgst > 0:
+                        posting_instructions.append({
+                            "account_code": "2100",
+                            "account_name": "GST Output Payable (SGST)",
+                            "debit": 0.0,
+                            "credit": sgst,
+                            "memo": f"Sales GST SGST on invoice {invoice_data.get('invoice_no') or invoice_data.get('invoice_number')}"
+                        })
+
+            # Compile Full Results
+            results = {
+                "invoice_no": invoice_data.get("invoice_no") or invoice_data.get("invoice_number"),
+                "gst_treatment_classification": classification,
+                "validation_report": validation_report,
+                "itc_report": itc_report,
+                "rcm_report": rcm_report,
+                "posting_instructions": posting_instructions
+            }
+
+            # 6. Immutable Audit Logging
+            ai_recommendation = {
+                "classification": classification,
+                "itc_eligible": itc_report.get("eligible_total", 0.0) if is_purchase else 0.0,
+                "rcm_applicable": rcm_report["rcm_applicable"]
+            }
+            
+            await GSTAuditLogger.log_decision(
+                company_id=company_id,
+                user_id=user_id,
+                document_id=invoice_data.get("id") or "txn_direct",
+                action="AUTO_POSTED" if validation_report["is_valid"] else "PENDING_REVIEW",
+                invoice_no=results["invoice_no"],
+                ai_recommendation=ai_recommendation,
+                final_outcome=results,
+                validation_report=validation_report,
+                rule_version=rule_version
+            )
+
+            # 7. Store processing history via Storage engine
+            history_record = {
+                "company_id": company_id,
+                "invoice_id": invoice_data.get("id") or "txn_direct",
+                "invoice_no": results["invoice_no"],
+                "classification": classification,
+                "is_valid": validation_report["is_valid"],
+                "results": results
+            }
+            await GSTStorage.save_processing_history(history_record)
+
+            logger.info("GST processing pipeline executed successfully.")
+            return results
+
+        except Exception as e:
+            logger.error(f"Critical error in GST processing pipeline: {e}", exc_info=True)
+            # If GST engine fails, preserve existing flow with fallback to prevent losing user data
+            return {
+                "invoice_no": invoice_data.get("invoice_no") or invoice_data.get("invoice_number"),
+                "gst_treatment_classification": "Intra-State Supply",
+                "validation_report": {"is_valid": False, "errors": [f"GST Engine failure: {str(e)}"]},
+                "itc_report": {},
+                "rcm_report": {"rcm_applicable": False, "tax_impact": {}},
+                "posting_instructions": []
+            }
