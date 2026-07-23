@@ -363,9 +363,26 @@ async def validation_engine_report(company_id: str = Query(""), current_user: Us
     if not _perm_reports(current_user):
         raise HTTPException(403, "Access denied. Request access from your admin in Permission Governance.")
     from backend.accounting_ai.reconciliation_validator import run_validation_engine, run_validation_engine_all_books
-    if company_id:
-        return await run_validation_engine(company_id, auto_fix=True)
-    return {"books": await run_validation_engine_all_books()}
+    try:
+        if company_id:
+            return await run_validation_engine(company_id, auto_fix=True)
+        return {"books": await run_validation_engine_all_books()}
+    except Exception as exc:
+        # Previously this endpoint had no guard, so any exception deep in the
+        # reconcile/rebuild pipeline (bad invoice data, a missing account,
+        # etc.) surfaced to the client as a bare 500 with no explanation —
+        # and no company_id context in the server log to trace it back.
+        # Log the full traceback with context, then return a clean message
+        # instead of letting FastAPI's default handler swallow the detail.
+        logging.getLogger("accounting_core").exception(
+            f"validation-engine endpoint failed for company_id={company_id or '(all books)'}"
+        )
+        raise HTTPException(
+            500,
+            f"Ledger verification failed while processing "
+            f"{'company ' + company_id if company_id else 'one of the books'}: "
+            f"{type(exc).__name__}: {exc}. Check the backend logs for the full traceback.",
+        )
 
 
 @router.post("/journal-entries")
