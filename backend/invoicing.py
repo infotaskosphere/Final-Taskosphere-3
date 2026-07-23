@@ -2950,6 +2950,49 @@ async def list_purchase_invoices(
     items = await db.purchase_invoices.find(q, {"_id": 0}).sort("created_at", -1).skip(skip).limit(page_size).to_list(page_size)
     return {"purchase_invoices": items, "total": total, "page": page, "page_size": page_size}
 
+async def _classify_purchase_ledger(company_id: str, supplier_name: str, supplier_gstin: str = "", notes: str = "") -> dict:
+    """Runs the same AI ledger-mapping cascade the Zero-Touch Entry engine uses
+    (vendor profile → learned history → keyword rules → chart-of-accounts
+    default) against a regular Purchase Invoice — manual, AI-scanned, or a
+    bulk GSTR-2B import — so every purchase is booked to the correct expense
+    HEAD (e.g. Rent Expense, Software & Cloud, Professional Fees) instead of
+    always landing in the generic 'Purchases' bucket. Also resolves the
+    accounting NATURE (expense/income) and CATEGORY (direct cost_of_service vs
+    indirect operating_expense) straight from the Chart of Accounts, per
+    standard Indian accounting principles (Trading A/c vs P&L classification).
+    Never raises — always falls back to the safe generic Purchases account."""
+    try:
+        from backend.accounting_ai.ledger_mapper import LedgerMapper
+        from backend.accounting_ai.chart_of_accounts import ChartOfAccountsManager
+        from backend.ai.vendor_learning import apply_vendor_defaults
+
+        vendor_profile = await apply_vendor_defaults(supplier_name, supplier_gstin, {})
+        extracted = {
+            "document_type": "PURCHASE",
+            "vendor_or_customer_name": supplier_name,
+            "tax_registration_number": supplier_gstin,
+            "line_items": [{"description": notes}] if notes else [],
+        }
+        code, name, confidence = await LedgerMapper.resolve_ledger(company_id, extracted, vendor_profile)
+        acct = await ChartOfAccountsManager.lookup_by_code(company_id, code) or {}
+        return {
+            "expense_ledger_code": code,
+            "expense_ledger_name": name,
+            "classification_confidence": round(float(confidence), 2),
+            "expense_nature": acct.get("type") or "expense",
+            "expense_category": acct.get("sub_type") or "operating_expense",
+        }
+    except Exception as e:
+        logger.warning(f"Purchase ledger classification failed for '{supplier_name}', falling back to Purchases: {e}")
+        return {
+            "expense_ledger_code": "5000",
+            "expense_ledger_name": "Purchases",
+            "classification_confidence": 0.5,
+            "expense_nature": "expense",
+            "expense_category": "cost_of_service",
+        }
+
+
 @router.post("/purchase-invoices/upload")
 async def upload_purchase_invoice(file: UploadFile = File(...), client_id: Optional[str] = Form(None), company_id: Optional[str] = Form(None), current_user: User = Depends(get_current_user)):
     if not _perm(current_user):
@@ -2997,6 +3040,9 @@ async def upload_purchase_invoice(file: UploadFile = File(...), client_id: Optio
         # Cr Accounts Payable entry an accountant would make by hand.
         "status": "outstanding", "amount_paid": 0.0, "amount_due": round(grand_total_val, 2),
     }
+    doc.update(await _classify_purchase_ledger(
+        company_id or "", doc["supplier_name"], supplier_gstin, parsed.get("raw_text_excerpt", "")[:500]
+    ))
     await db.purchase_invoices.insert_one(doc)
     if matched_client:
         await db.clients.update_one({"id": matched_client["id"]}, {"$set": {"last_purchase_invoice_at": now}, "$inc": {"purchase_invoice_count": 1}})
@@ -3064,12 +3110,140 @@ async def create_purchase_invoice(data: PurchaseInvoiceCreate, current_user: Use
         "amount_paid": 0.0,
         "amount_due": round(data.grand_total, 2),
     }
+    doc.update(await _classify_purchase_ledger(data.company_id or "", data.supplier_name, data.supplier_gstin or ""))
     await db.purchase_invoices.insert_one(doc)
     if data.client_id:
         await db.clients.update_one({"id": data.client_id}, {"$set": {"last_purchase_invoice_at": now}, "$inc": {"purchase_invoice_count": 1}})
     await sync_purchase_journal_entry(doc["id"])
     doc.pop("_id", None)
     return {"purchase_invoice": doc}
+
+
+@router.post("/purchase-invoices/upload-gstr2b")
+async def upload_gstr2b_purchases(
+    file: UploadFile = File(...),
+    company_id: str = Form(...),
+    client_id: Optional[str] = Form(None),
+    current_user: User = Depends(get_current_user),
+):
+    """Bulk-add Purchase Book entries directly from a GSTR-2B Excel export
+    downloaded from the GST portal — instead of uploading each vendor bill
+    one at a time. Reuses the exact same B2B-sheet reader the GST
+    Reconciliation module already relies on (`_parse_portal`), so column
+    detection, GSTIN/invoice-number cleanup, and ITC-eligibility logic stay
+    identical across both features.
+
+    For every invoice on the 2B:
+      1. Supplier is matched to an existing Client by GSTIN (falling back to
+         the 2B trade name if no client is linked yet).
+      2. Duplicate check against invoice_no + supplier_gstin already in the
+         Purchase Book, so re-uploading the same 2B (or a revised one) never
+         double-books a bill.
+      3. The AI ledger-mapping cascade classifies the bill into the correct
+         expense head/nature/category (same engine as manual + AI-scanned
+         purchase invoices — see `_classify_purchase_ledger`).
+      4. The bill is posted straight to the ledger: Dr Expense Head + Dr GST
+         Input Credit, Cr Accounts Payable — exactly like any other purchase
+         invoice, so it immediately shows up in Trial Balance / P&L / Payables
+         and is available for the bank-statement auto-matching engine to
+         settle once the vendor is actually paid.
+    """
+    if not _perm(current_user):
+        raise HTTPException(403, "Access denied")
+    filename = file.filename or "gstr2b.xlsx"
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext not in {"xlsx", "xls"}:
+        raise HTTPException(400, "Please upload the GSTR-2B Excel file downloaded from the GST portal (.xlsx or .xls).")
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(400, "Uploaded file is empty")
+
+    from backend.gst_reconciliation import _parse_portal, _itc_eligibility, _normalise_date as _gst_normalise_date
+
+    try:
+        portal_df = _parse_portal(contents, filename)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"Could not read this as a GSTR-2B B2B Excel export: {e}")
+
+    if portal_df is None or portal_df.empty:
+        return {"created": 0, "duplicates": 0, "ineligible_itc": 0, "total_rows_in_file": 0, "total_value": 0.0, "rows": []}
+
+    access = _client_access_query_for_purchase(current_user)
+    clients = await db.clients.find(access, {"_id": 0, "id": 1, "company_name": 1, "gstin": 1, "client_gstin": 1}).to_list(5000)
+    gstin_to_client: dict = {}
+    for c in clients:
+        for g in (c.get("gstin"), c.get("client_gstin")):
+            if g:
+                gstin_to_client[str(g).upper()] = c
+
+    created = duplicates = ineligible = 0
+    total_value = 0.0
+    results: List[dict] = []
+    now = datetime.now(timezone.utc).isoformat()
+
+    for _, row in portal_df.iterrows():
+        record = row.to_dict()
+        supplier_gstin = (record.get("gstin") or "").upper()
+        invoice_no = record.get("invoice_no") or ""
+        if not supplier_gstin or not invoice_no:
+            continue
+
+        duplicate_q = {"invoice_no": invoice_no, "supplier_gstin": supplier_gstin, "created_by": current_user.id}
+        if await db.purchase_invoices.find_one(duplicate_q, {"_id": 0, "id": 1}):
+            duplicates += 1
+            continue
+
+        matched_client = gstin_to_client.get(supplier_gstin)
+        supplier_name = (record.get("trade_name") or (matched_client or {}).get("company_name") or "Unknown Supplier").strip()
+
+        taxable = _money_to_float(record.get("taxable_value"))
+        igst, cgst, sgst, cess = (
+            _money_to_float(record.get("igst")), _money_to_float(record.get("cgst")),
+            _money_to_float(record.get("sgst")), _money_to_float(record.get("cess")),
+        )
+        total_gst = round(igst + cgst + sgst + cess, 2)
+        grand_total = _money_to_float(record.get("invoice_value")) or round(taxable + total_gst, 2)
+        invoice_date = _gst_normalise_date(record.get("invoice_date") or "") or date.today().isoformat()
+        itc = _itc_eligibility({**record, "igst": igst, "cgst": cgst, "sgst": sgst})
+
+        doc = {
+            "id": str(uuid.uuid4()), "company_id": company_id, "client_id": (matched_client or {}).get("id", client_id or ""),
+            "client_name": (matched_client or {}).get("company_name", ""), "supplier_name": supplier_name,
+            "supplier_gstin": supplier_gstin, "buyer_name": "", "buyer_gstin": "", "invoice_no": invoice_no,
+            "invoice_date": invoice_date, "taxable_amount": round(taxable, 2), "total_gst": total_gst,
+            "grand_total": round(grand_total, 2), "currency": "INR",
+            "file_name": filename, "file_size": 0,
+            "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "parse_confidence": 1.0, "raw_text_excerpt": f"Imported from GSTR-2B ({record.get('invoice_type') or 'B2B'} invoice, place of supply {record.get('place_of_supply') or 'N/A'})",
+            "created_by": current_user.id, "created_at": now, "updated_at": now,
+            "status": "outstanding", "amount_paid": 0.0, "amount_due": round(grand_total, 2),
+            "source": "gstr2b", "gstr2b_itc_eligible": bool(itc.get("eligible")), "gstr2b_itc_reason": itc.get("reason", ""),
+            "gstr2b_place_of_supply": record.get("place_of_supply") or "",
+        }
+        doc.update(await _classify_purchase_ledger(company_id, supplier_name, supplier_gstin))
+        await db.purchase_invoices.insert_one(doc)
+        if matched_client:
+            await db.clients.update_one({"id": matched_client["id"]}, {"$set": {"last_purchase_invoice_at": now}, "$inc": {"purchase_invoice_count": 1}})
+        await sync_purchase_journal_entry(doc["id"])
+
+        created += 1
+        if not itc.get("eligible"):
+            ineligible += 1
+        total_value += grand_total
+        results.append({
+            "supplier_name": supplier_name, "supplier_gstin": supplier_gstin, "invoice_no": invoice_no,
+            "invoice_date": invoice_date, "grand_total": round(grand_total, 2),
+            "expense_ledger_name": doc.get("expense_ledger_name"), "expense_category": doc.get("expense_category"),
+            "itc_eligible": bool(itc.get("eligible")), "itc_reason": itc.get("reason", ""),
+            "matched_client": bool(matched_client),
+        })
+
+    return {
+        "created": created, "duplicates": duplicates, "ineligible_itc": ineligible,
+        "total_rows_in_file": int(len(portal_df)), "total_value": round(total_value, 2), "rows": results,
+    }
 
 
 class PurchaseInvoiceUpdate(BaseModel):
@@ -4861,8 +5035,20 @@ async def sync_purchase_journal_entry(invoice_id: str):
 
     # 4. Get default ledger account IDs
     payable_id = await get_default_account_id(company_id, "2000")   # Accounts Payable
-    purchases_id = await get_default_account_id(company_id, "5000")  # Purchases (expense)
     gst_input_id = await get_default_account_id(company_id, "1200")  # GST Input Credit
+
+    # Debit the AI-classified expense head (set at creation time by
+    # _classify_purchase_ledger — manual, AI-scanned, and GSTR-2B bulk
+    # imports all go through it) instead of always the generic "Purchases"
+    # account, so the P&L reflects the correct expense head/category/nature
+    # per standard accounting principles. Older records created before this
+    # classification existed fall back to Purchases (5000) unchanged.
+    expense_code = inv.get("expense_ledger_code") or "5000"
+    expense_name = inv.get("expense_ledger_name") or "Purchases"
+    purchases_id = await get_default_account_id(company_id, expense_code)
+    if not purchases_id:
+        purchases_id = await get_default_account_id(company_id, "5000")
+        expense_name = "Purchases"
 
     if not payable_id or not purchases_id or not gst_input_id:
         return
@@ -4870,7 +5056,7 @@ async def sync_purchase_journal_entry(invoice_id: str):
     purchase_amount = round(grand_total - total_gst, 2)
 
     lines = [
-        {"account_id": purchases_id, "account_name": "Purchases", "debit": purchase_amount, "credit": 0.0, "memo": f"Purchase Bill {invoice_no} from {supplier_name}"},
+        {"account_id": purchases_id, "account_name": expense_name, "debit": purchase_amount, "credit": 0.0, "memo": f"Purchase Bill {invoice_no} from {supplier_name}"},
         {"account_id": payable_id, "account_name": "Accounts Payable", "debit": 0.0, "credit": grand_total, "memo": f"Bill {invoice_no} payable to {supplier_name}"},
     ]
     if total_gst > 0:
