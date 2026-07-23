@@ -57,6 +57,7 @@ async def _send_birthday_wishes():
     """
     from backend.server import db
     from backend.whatsapp_integration import send_whatsapp_notification, get_auto_settings
+    from backend.dependencies import personal_birthday_candidates
 
     if not await _is_wa_connected():
         logger.info("[WA Scheduler] Birthday job skipped — WhatsApp not connected")
@@ -83,37 +84,21 @@ async def _send_birthday_wishes():
 
         targets = []  # (phone, name) pairs to wish
 
-        # Check main client birthday
-        bday_raw = client.get("birthday")
-        if bday_raw:
+        # personal_birthday_candidates() already excludes a company's Date
+        # of Incorporation — it only returns the client's own birthday when
+        # client_type == "proprietor" (an individual), plus every contact
+        # person's birthday (directors/partners are always real people).
+        for person in personal_birthday_candidates(client):
+            bday_raw = person["birthday"]
             try:
                 if isinstance(bday_raw, str):
                     bday = date.fromisoformat(bday_raw[:10])
                 else:
                     bday = bday_raw
                 if bday.month == today_month and bday.day == today_day:
-                    name = client.get("company_name") or "Valued Client"
-                    phone = _fmt_phone(client.get("phone"))
+                    phone = _fmt_phone(person["phone"])
                     if phone:
-                        targets.append((phone, name))
-            except (ValueError, TypeError):
-                pass
-
-        # Check contact persons' birthdays
-        for cp in client.get("contact_persons") or []:
-            cp_bday_raw = cp.get("birthday")
-            if not cp_bday_raw:
-                continue
-            try:
-                if isinstance(cp_bday_raw, str):
-                    cp_bday = date.fromisoformat(str(cp_bday_raw)[:10])
-                else:
-                    cp_bday = cp_bday_raw
-                if cp_bday.month == today_month and cp_bday.day == today_day:
-                    cp_name = cp.get("name") or client.get("company_name") or "Friend"
-                    cp_phone = _fmt_phone(cp.get("phone"))
-                    if cp_phone:
-                        targets.append((cp_phone, cp_name))
+                        targets.append((phone, person["name"]))
             except (ValueError, TypeError):
                 pass
 
