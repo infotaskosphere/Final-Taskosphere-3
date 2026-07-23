@@ -449,6 +449,7 @@ class Token(BaseModel):
     token_type: str
     user: User
     consent_given: Optional[bool] = None  # Fixed: was 'Noner'
+    session_token: Optional[str] = None  # for POST /auth/logout
 
 
 # ======================
