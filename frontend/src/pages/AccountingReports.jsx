@@ -5,8 +5,9 @@ import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import {
   BarChart3, RefreshCw, CheckCircle2, AlertTriangle, Download, Building2,
-  ChevronLeft, ChevronRight, Scale, X, Loader2,
+  ChevronLeft, ChevronRight, Scale, X, Loader2, ShieldCheck,
 } from 'lucide-react';
+import ExistingRecordsPanel from '@/components/ExistingRecordsPanel.jsx';
 import { ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -491,6 +492,7 @@ function AccountingReportsInner() {
   const [misData, setMisData] = useState(null);
   const [companies, setCompanies] = useState([]);
   const [companyId, setCompanyId] = useState('');
+  const [showExistingRecords, setShowExistingRecords] = useState(false);
   const [activeTab, setActiveTab] = useState('trial-balance');
 
   // Unified date filter — applies to every tab.
@@ -890,6 +892,9 @@ function AccountingReportsInner() {
               className="h-8 rounded-md px-2 bg-white/10 border border-white/25 text-white text-xs"
             />
             <Button onClick={applyDateFilters} size="sm" variant="outline" className="h-8 bg-white/10 border-white/25 text-white hover:bg-white/20 text-xs">Apply</Button>
+            <Button onClick={() => setShowExistingRecords(true)} size="sm" variant="outline" className="h-8 bg-white/10 border-white/25 text-white hover:bg-white/20 text-xs">
+              <ShieldCheck className="h-3.5 w-3.5 mr-1" /> Existing records
+            </Button>
             <Button onClick={downloadActiveReport} size="sm" variant="outline" className="h-8 bg-white/10 border-white/25 text-white hover:bg-white/20 text-xs">
               <Download className="h-3.5 w-3.5 mr-1" /> Download
             </Button>
@@ -1502,6 +1507,15 @@ function AccountingReportsInner() {
         dateFrom={dateFrom}
         dateTo={dateTo}
         isDark={isDark}
+      />
+
+      <ExistingRecordsPanel
+        open={showExistingRecords}
+        onOpenChange={setShowExistingRecords}
+        companyId={companyId}
+        isDark={isDark}
+        title="Existing sale & purchase records"
+        description="A quick reference while you review these reports — every Sale invoice and Purchase bill already on file, so you can confirm a figure is already booked before adding anything new."
       />
     </div>
   );
