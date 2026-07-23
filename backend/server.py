@@ -205,6 +205,7 @@ from backend.dependencies import (
     get_team_user_ids,
     get_cross_visibility_union,
     get_user_permissions,   # moved to dependencies — single source of truth
+    personal_birthday_candidates,
 )
 
 # External Services
@@ -6799,12 +6800,13 @@ async def get_upcoming_birthdays(
     today = date.today()
     upcoming = []
     for client in clients:
-        if client.get("birthday"):
+        for person in personal_birthday_candidates(client):
+            raw = person["birthday"]
             try:
                 bday = (
-                    date.fromisoformat(client["birthday"])
-                    if isinstance(client["birthday"], str)
-                    else client["birthday"]
+                    date.fromisoformat(raw[:10])
+                    if isinstance(raw, str)
+                    else raw
                 )
                 # Added leap year guard
                 try:
@@ -6818,8 +6820,15 @@ async def get_upcoming_birthdays(
                         this_year_bday = bday.replace(year=today.year + 1, day=28)
                 days_until = (this_year_bday - today).days
                 if 0 <= days_until <= days:
-                    client["days_until_birthday"] = days_until
-                    upcoming.append(client)
+                    upcoming.append({
+                        "client_id": client.get("id"),
+                        "company_name": client.get("company_name"),
+                        "person_name": person["name"],
+                        "phone": person["phone"],
+                        "email": person["email"],
+                        "birthday": raw,
+                        "days_until_birthday": days_until,
+                    })
             except (ValueError, TypeError):
                 continue
     return sorted(upcoming, key=lambda x: x["days_until_birthday"])
@@ -6840,40 +6849,45 @@ async def send_birthday_wish_manual(
 
     sent_to, failed, no_email = [], [], []
 
-    # Main client email
+    # Main client email — only when the client itself IS an individual.
+    # A pvt_ltd/llp/partnership/etc. has a Date of Incorporation, not a
+    # birthday, even though some import flows store it in this same field;
+    # only a proprietorship has no legal identity separate from its owner.
     client_name = client.get("company_name") or "Valued Client"
     client_email = client.get("email")
     wa_sent_to = []
+    is_individual = (client.get("client_type") or "").strip().lower() == "proprietor"
 
-    if client_email:
-        ok = await send_birthday_email(client_email, client_name)
-        (sent_to if ok else failed).append(client_email)
-    else:
-        no_email.append(client_name)
+    if is_individual:
+        if client_email:
+            ok = await send_birthday_email(client_email, client_name)
+            (sent_to if ok else failed).append(client_email)
+        else:
+            no_email.append(client_name)
 
-    # WhatsApp birthday wish for main client
-    client_phone = "".join(c for c in (client.get("phone") or "") if c.isdigit())
-    if len(client_phone) == 10:
-        client_phone = "91" + client_phone
-    if client_phone:
-        try:
-            from backend.whatsapp_integration import send_whatsapp_notification
+        # WhatsApp birthday wish for main client
+        client_phone = "".join(c for c in (client.get("phone") or "") if c.isdigit())
+        if len(client_phone) == 10:
+            client_phone = "91" + client_phone
+        if client_phone:
+            try:
+                from backend.whatsapp_integration import send_whatsapp_notification
 
-            wa_msg = (
-                f"🎂 *Happy Birthday, {client_name}!*\n\n"
-                f"Wishing you a wonderful birthday filled with joy and prosperity! 🎉\n\n"
-                f"Best wishes,\n_Taskosphere Team_"
-            )
-            await send_whatsapp_notification(
-                to=client_phone,
-                message=wa_msg,
-                message_type="birthday",
-                context_id=client_id,
-                sent_by=current_user.id,
-            )
-            wa_sent_to.append(client_phone)
-        except Exception as wa_err:
-            logger.warning(f"WhatsApp birthday failed for {client_name}: {wa_err}")
+                wa_msg = (
+                    f"🎂 *Happy Birthday, {client_name}!*\n\n"
+                    f"Wishing you a wonderful birthday filled with joy and prosperity! 🎉\n\n"
+                    f"Best wishes,\n_Taskosphere Team_"
+                )
+                await send_whatsapp_notification(
+                    to=client_phone,
+                    message=wa_msg,
+                    message_type="birthday",
+                    context_id=client_id,
+                    sent_by=current_user.id,
+                )
+                wa_sent_to.append(client_phone)
+            except Exception as wa_err:
+                logger.warning(f"WhatsApp birthday failed for {client_name}: {wa_err}")
 
     # Contact persons
     for cp in client.get("contact_persons") or []:
@@ -11691,7 +11705,8 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
             "certificate_number": 1, "expiry_date": 1,
         }).to_list(length=None),
         db.clients.find(client_query, {
-            "_id": 0, "id": 1, "birthday": 1,
+            "_id": 0, "id": 1, "birthday": 1, "client_type": 1,
+            "contact_persons": 1, "company_name": 1,
         }).to_list(length=None),
         db.compliance_masters.find(
             {"is_closed": True}, {"_id": 0, "name": 1, "calendar_due_date_id": 1}
@@ -11757,12 +11772,13 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     upcoming_birthdays = 0
 
     for client in clients:
-        if client.get("birthday"):
+        for person in personal_birthday_candidates(client):
+            raw = person["birthday"]
             try:
                 bday = (
-                    date.fromisoformat(client["birthday"])
-                    if isinstance(client["birthday"], str)
-                    else client["birthday"]
+                    date.fromisoformat(raw[:10])
+                    if isinstance(raw, str)
+                    else raw
                 )
                 try:
                     this_year_bday = bday.replace(year=today.year)
