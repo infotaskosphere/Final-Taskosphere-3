@@ -1,4 +1,6 @@
 import os
+import logging
+import secrets as _secrets
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 from fastapi import Depends, HTTPException, status
@@ -7,6 +9,8 @@ from jose import jwt, JWTError
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from backend.models import User, AuditLog
+
+logger = logging.getLogger("dependencies")
 
 # ==========================================================
 # ENVIRONMENT & DATABASE (MOCK OR REAL)
@@ -252,7 +256,42 @@ else:
 # ==========================================================
 # JWT / AUTH CONFIG
 # ==========================================================
-JWT_SECRET = os.getenv("JWT_SECRET", "mock_secret_key_for_taskosphere_development")
+def _resolve_jwt_secret() -> str:
+    """
+    Resolves the JWT signing secret.
+
+    SECURITY: There must never be a hardcoded fallback secret here. A shared,
+    publicly-known default (as this file previously used) lets anyone forge
+    valid auth tokens for any user, including admins, on any deployment that
+    forgets to set JWT_SECRET.
+
+    - In production (ENV_MODE=production): missing JWT_SECRET is a fatal
+      startup error.
+    - In development: we generate a random, process-local secret so local
+      dev keeps working without a .env file, but we log a loud warning and
+      tokens will NOT survive a server restart (by design).
+    """
+    secret = os.getenv("JWT_SECRET")
+    if secret and secret.strip():
+        return secret.strip()
+
+    if os.getenv("ENV_MODE") == "production":
+        raise RuntimeError(
+            "JWT_SECRET environment variable is not set. Refusing to start "
+            "in production without an explicit, secret JWT signing key. "
+            "Set JWT_SECRET to a long random value (e.g. `openssl rand -hex 32`)."
+        )
+
+    generated = _secrets.token_hex(32)
+    logger.warning(
+        "JWT_SECRET is not set. Generated a random development-only secret. "
+        "All existing tokens are invalid and new tokens will not survive a "
+        "restart. Set JWT_SECRET in your .env before deploying."
+    )
+    return generated
+
+
+JWT_SECRET = _resolve_jwt_secret()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
