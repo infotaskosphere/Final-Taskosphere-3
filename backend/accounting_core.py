@@ -28,6 +28,13 @@ from backend.models import User
 
 router = APIRouter(tags=["Accounting"])
 
+# Module-level logger. NOTE: this was previously missing even though
+# `post_gst_engine_entries` and `finix_chat` below call `logger.error(...)` —
+# without this, any exception hitting those except-blocks would raise a
+# `NameError: name 'logger' is not defined` instead of actually logging the
+# original error, silently hiding real failures.
+logger = logging.getLogger(__name__)
+
 
 async def _empty_coro(val):
     """Trivial coroutine that returns a constant — used as a no-op arm in
@@ -424,6 +431,23 @@ async def list_journal_entries(
     page = min(page, total_pages)
     skip = (page - 1) * page_size
     entries = await db.journal_entries.find(q, {"_id": 0}).sort("entry_date", -1).skip(skip).limit(page_size).to_list(page_size)
+
+    # Defensive: a small number of legacy/corrupt journal_entries documents
+    # (e.g. written before every insert consistently included "id", or
+    # created by an older import/migration path outside post_journal_entry)
+    # can be missing the "id" field entirely. A direct `e["id"]` access below
+    # would raise KeyError on the very first such document and 500 the whole
+    # page/export for everyone. Filter those out instead, and log which ones
+    # were skipped so the bad documents can be found and cleaned up in Mongo.
+    good_entries, bad_entries = [], []
+    for e in entries:
+        (good_entries if "id" in e else bad_entries).append(e)
+    if bad_entries:
+        logger.warning(
+            "list_journal_entries: skipping %d entries missing 'id' (company_id=%s): %s",
+            len(bad_entries), company_id or "(all)", bad_entries,
+        )
+    entries = good_entries
 
     ids = [e["id"] for e in entries]
     lines = await db.journal_lines.find({"entry_id": {"$in": ids}}, {"_id": 0}).to_list(10000)
