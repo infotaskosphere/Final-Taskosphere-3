@@ -7,17 +7,18 @@ Handles forgot-password OTP flow:
 """
 
 import os
-import random
+import secrets
 import logging
 import httpx
 
 from datetime import datetime, timezone, timedelta
 from passlib.context import CryptContext
 from pydantic import BaseModel
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from dateutil import parser as dateutil_parser
 
 from backend.dependencies import db
+from backend.security.rate_limiter import RateLimiter
 
 logger      = logging.getLogger(__name__)
 router      = APIRouter()
@@ -84,18 +85,39 @@ async def _send_otp_email(to_email: str, subject: str, body: str) -> None:
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+async def _enforce_otp_rate_limit(request: Request, email: str, limit_per_minute: int):
+    """
+    Throttles OTP request/verify by client IP + email, so an attacker can't
+    spam OTP emails or brute-force a 6-digit OTP within its 10-minute window.
+    """
+    client_ip = request.client.host if request and request.client else "unknown"
+    key = f"otp:{client_ip}:{(email or '').lower()}"
+    try:
+        if await RateLimiter.is_rate_limited(key, limit_per_minute=limit_per_minute):
+            raise HTTPException(
+                status_code=429,
+                detail="Too many attempts. Please wait a minute and try again.",
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.warning("Rate limiter check failed; allowing request through.")
+
+
 @router.post("/auth/forgot-password")
-async def forgot_password(data: ForgotPasswordRequest):
+async def forgot_password(data: ForgotPasswordRequest, request: Request):
     """
     Always returns 200 to prevent email enumeration.
     Generates a 6-digit OTP, stores it in DB, emails it via Brevo.
     OTP expires in 10 minutes.
     """
     email = data.email.strip().lower()
+    await _enforce_otp_rate_limit(request, email, limit_per_minute=3)
+
     user  = await db.users.find_one({"email": email}, {"_id": 0})
 
     if user:
-        otp        = str(random.randint(100000, 999999))
+        otp        = str(secrets.randbelow(900000) + 100000)
         expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
 
         await db.password_reset_tokens.delete_many({"email": email})
@@ -127,9 +149,11 @@ async def forgot_password(data: ForgotPasswordRequest):
 
 
 @router.post("/auth/reset-password")
-async def reset_password(data: ResetPasswordRequest):
+async def reset_password(data: ResetPasswordRequest, request: Request):
     """Verifies the OTP and updates the user's password."""
     email  = data.email.strip().lower()
+    await _enforce_otp_rate_limit(request, email, limit_per_minute=10)
+
     record = await db.password_reset_tokens.find_one(
         {"email": email, "token": data.token.strip()}
     )
