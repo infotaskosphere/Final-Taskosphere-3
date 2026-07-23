@@ -375,11 +375,14 @@ const DashboardLayout = ({ children }) => {
   };
 
   const NavDivider = ({ label }) => (
-    <div className={`mt-4 mb-2 ${collapsed ? 'px-2' : 'px-3'}`}>
+    <div className={`mt-5 mb-2 ${collapsed ? 'px-2' : 'px-3'}`}>
       {!collapsed && label ? (
-        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">
-          {label}
-        </p>
+        <div className="flex items-center gap-2.5 px-1">
+          <p className="text-[10.5px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">
+            {label}
+          </p>
+          <div className="flex-1 border-t" style={{ borderColor: COLORS.sidebarBorder }} />
+        </div>
       ) : (
         <div className="border-t mx-1" style={{ borderColor: COLORS.sidebarBorder }} />
       )}
