@@ -1,409 +1,819 @@
-"""
-Purchases module — "Accounts › Purchase" page.
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { format, parseISO } from 'date-fns';
+import { toast } from 'sonner';
+import {
+  UploadCloud, Search, RefreshCw, Building2, FileText, IndianRupee,
+  CheckCircle2, AlertTriangle, ShoppingBag, X, Database, Edit, Trash2, Wallet, Ban, FileSpreadsheet
+} from 'lucide-react';
+import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import api from '@/lib/api';
+import { useDark } from '@/hooks/useDark';
+import { GuidanceNote } from '@/components/ui/GuidanceNote.jsx';
 
-Lets a user upload a vendor/purchase invoice (PDF or image). The document is
-read by the app (Gemini for structured extraction, with a regex fallback for
-GSTIN / invoice number / date / amount), the vendor name is fuzzy-matched
-against the existing Clients list, and — once the user confirms — the
-invoice record is saved and linked to that company so it shows up wherever
-that company's purchase history is displayed (e.g. inside the client's
-profile in the Clients page).
-"""
+const COLORS = {
+  deepBlue: '#0D3B66',
+  mediumBlue: '#1F6FB2',
+  emeraldGreen: '#1FAF5A',
+  amber: '#F59E0B',
+  coral: '#FF6B6B',
+};
 
-import re
-import json
-import uuid
-import base64
-from io import BytesIO
-from datetime import datetime, timezone
-from typing import Optional, List
+const PURCHASE_STATUS_META = {
+  outstanding:    { label: 'Outstanding',     bg: '#FEF3C7', fg: '#B45309', border: '#FDE68A' },
+  partially_paid: { label: 'Partially Paid',  bg: '#DBEAFE', fg: '#1D4ED8', border: '#BFDBFE' },
+  paid:           { label: 'Paid',            bg: '#DCFCE7', fg: '#15803D', border: '#BBF7D0' },
+  cancelled:      { label: 'Cancelled',       bg: '#F1F5F9', fg: '#64748B', border: '#E2E8F0' },
+};
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import Response
-from pydantic import BaseModel
+const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 
-from backend.dependencies import db, get_current_user
-from backend.models import User
+const fmtDate = (value) => {
+  if (!value) return '—';
+  try { return format(parseISO(value), 'dd MMM yyyy'); }
+  catch { return value; }
+};
 
-# Reuse the vision helpers already built for the AI Document Reader instead
-# of duplicating the Groq integration.
-from backend.ai_document_reader import _groq_vision, _groq_vision_multipage
+function Purchase() {
+  const isDark = useDark();
+  const fileRef = useRef(null);
+  const gstr2bFileRef = useRef(null);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [purchaseInvoices, setPurchaseInvoices] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [companies, setCompanies] = useState([]);
+  const [search, setSearch] = useState('');
+  const [selectedClientId, setSelectedClientId] = useState('auto');
+  const [selectedCompanyId, setSelectedCompanyId] = useState('none');
+  const [file, setFile] = useState(null);
 
-router = APIRouter(tags=["Purchases"])
+  // GSTR-2B bulk-import state
+  const [gstr2bFile, setGstr2bFile] = useState(null);
+  const [gstr2bCompanyId, setGstr2bCompanyId] = useState('none');
+  const [gstr2bUploading, setGstr2bUploading] = useState(false);
+  const [gstr2bResult, setGstr2bResult] = useState(null);
 
-MAX_FILE_BYTES = 8 * 1024 * 1024  # 8 MB
+  // Editing state
+  const [editingInvoice, setEditingInvoice] = useState(null);
+  const [editForm, setEditForm] = useState({
+    supplier_name: '',
+    invoice_no: '',
+    invoice_date: '',
+    grand_total: 0,
+    total_gst: 0,
+    taxable_amount: 0,
+    client_id: '',
+    company_id: '',
+    supplier_gstin: '',
+    buyer_gstin: '',
+  });
+  const [savingEdit, setSavingEdit] = useState(false);
 
-GSTIN_REGEX = re.compile(r"\b\d{2}[A-Z]{5}\d{4}[A-Z]{1}[A-Z\d]{1}Z[A-Z\d]{1}\b")
-INVOICE_NO_REGEX = re.compile(r"invoice\s*(?:no\.?|number|#)\s*[:\-]?\s*([A-Za-z0-9\-\/]{2,30})", re.I)
-DATE_REGEX = re.compile(r"(?:invoice\s*date|dated?|date)\s*[:\-]?\s*([0-3]?\d[\/\-.][01]?\d[\/\-.]\d{2,4})", re.I)
-AMOUNT_REGEX = re.compile(
-    r"(?:grand\s*total|total\s*amount|amount\s*payable|net\s*payable|total\s*due|invoice\s*total)"
-    r"\s*[:\-]?\s*(?:rs\.?|inr|₹)?\s*([\d,]+\.?\d*)",
-    re.I,
-)
+  // Payment recording state
+  const [payingInvoice, setPayingInvoice] = useState(null);
+  const [payForm, setPayForm] = useState({ amount: 0, payment_date: format(new Date(), 'yyyy-MM-dd'), payment_mode: 'bank', bank_account_id: '', reference_no: '', notes: '' });
+  const [savingPayment, setSavingPayment] = useState(false);
+  const [bankAccounts, setBankAccounts] = useState([]);
 
-
-# ── Models ────────────────────────────────────────────────────────────────
-class PurchaseCreate(BaseModel):
-    client_id: Optional[str] = None
-    client_name: str = ""
-    vendor_name: str = ""
-    invoice_no: str = ""
-    invoice_date: str = ""
-    amount: float = 0.0
-    gstin: str = ""
-    notes: str = ""
-
-
-class Purchase(PurchaseCreate):
-    id: str
-    file_name: Optional[str] = None
-    file_mime: Optional[str] = None
-    created_by: str
-    created_at: str
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────
-def _regex_extract(text: str) -> dict:
-    data = {}
-    if not text:
-        return data
-    m = GSTIN_REGEX.search(text)
-    if m:
-        data["gstin"] = m.group(0)
-    m = INVOICE_NO_REGEX.search(text)
-    if m:
-        data["invoice_no"] = m.group(1).strip()
-    m = DATE_REGEX.search(text)
-    if m:
-        data["invoice_date_raw"] = m.group(1).strip()
-    m = AMOUNT_REGEX.search(text)
-    if m:
-        try:
-            data["amount"] = float(m.group(1).replace(",", ""))
-        except ValueError:
-            pass
-    return data
-
-
-def _normalize_date(raw: str) -> str:
-    """Best-effort conversion of a dd/mm/yyyy-ish string to YYYY-MM-DD."""
-    if not raw:
-        return ""
-    raw = raw.strip()
-    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%d/%m/%y", "%d-%m-%y", "%Y-%m-%d", "%Y/%m/%d"):
-        try:
-            return datetime.strptime(raw, fmt).strftime("%Y-%m-%d")
-        except ValueError:
-            continue
-    return raw
-
-
-def _norm_company(s: str) -> str:
-    s = (s or "").lower()
-    s = re.sub(r"\b(pvt\.?|private|ltd\.?|limited|llp|inc\.?|co\.?|company|the|enterprises|traders|industries)\b", "", s)
-    s = re.sub(r"[^a-z0-9]+", " ", s).strip()
-    return s
-
-
-async def _match_clients(vendor_name: str) -> List[dict]:
-    if not vendor_name:
-        return []
-    clients = await db.clients.find({}, {"_id": 0, "id": 1, "company_name": 1}).to_list(5000)
-    target = _norm_company(vendor_name)
-    if not target:
-        return []
-    target_tokens = set(target.split())
-    scored = []
-    for c in clients:
-        cn = _norm_company(c.get("company_name"))
-        if not cn:
-            continue
-        tokens = set(cn.split())
-        if not tokens:
-            continue
-        overlap = len(target_tokens & tokens)
-        union = len(target_tokens | tokens) or 1
-        score = overlap / union
-        if cn == target:
-            score = 1.0
-        elif target in cn or cn in target:
-            score = max(score, 0.85)
-        if score >= 0.3:
-            scored.append({"client_id": c["id"], "company_name": c.get("company_name", ""), "score": round(score, 2)})
-    scored.sort(key=lambda x: -x["score"])
-    return scored[:5]
-
-
-async def _extract_text_from_upload(contents: bytes, filename: str) -> str:
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-
-    if ext == "pdf":
-        text_content = ""
-        try:
-            import pdfplumber
-
-            pages = []
-            with pdfplumber.open(BytesIO(contents)) as pdf:
-                for page in pdf.pages[:10]:
-                    t = page.extract_text()
-                    if t and t.strip():
-                        pages.append(t.strip())
-            text_content = "\n".join(pages)
-        except Exception:
-            text_content = ""
-
-        if text_content.strip():
-            return text_content
-
-        # Scanned PDF — no text layer → render pages to images → Groq vision
-        try:
-            import pdfplumber
-
-            page_images = []
-            with pdfplumber.open(BytesIO(contents)) as pdf:
-                for page in pdf.pages[:3]:
-                    pil_img = page.to_image(resolution=150).original
-                    if pil_img.mode not in ("RGB", "L"):
-                        pil_img = pil_img.convert("RGB")
-                    buf = BytesIO()
-                    pil_img.save(buf, format="JPEG", quality=85)
-                    page_images.append((base64.b64encode(buf.getvalue()).decode(), "image/jpeg"))
-            if not page_images:
-                return ""
-            prompt = (
-                "Transcribe all readable text from these invoice pages, verbatim. "
-                "Preserve numbers, labels, and totals exactly as printed."
-            )
-            return await _groq_vision_multipage(page_images, prompt)
-        except Exception:
-            return ""
-
-    if ext in ("jpg", "jpeg", "png", "webp"):
-        try:
-            from PIL import Image as PILImage
-
-            img = PILImage.open(BytesIO(contents))
-            if img.mode not in ("RGB", "L"):
-                img = img.convert("RGB")
-            buf = BytesIO()
-            img.save(buf, format="JPEG", quality=85)
-            img_b64 = base64.b64encode(buf.getvalue()).decode()
-        except Exception as e:
-            raise HTTPException(status_code=422, detail=f"Could not open image: {e}")
-        prompt = (
-            "Transcribe all readable text from this invoice image, verbatim. "
-            "Preserve numbers, labels, and totals exactly as printed."
-        )
-        return await _groq_vision(img_b64, "image/jpeg", prompt)
-
-    raise HTTPException(
-        status_code=415,
-        detail=f"Unsupported file type '.{ext}'. Upload a PDF or image (JPG/PNG/WEBP) of the invoice.",
-    )
-
-
-async def _ai_extract_fields(text_content: str) -> dict:
-    import os as _os
-
-    gemini_key = _os.environ.get("GEMINI_API_KEY", "")
-    if not gemini_key:
-        return {}
-    try:
-        import google.generativeai as genai
-
-        genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
-        prompt = (
-            "You are reading a purchase/vendor invoice. Extract these fields as STRICT JSON only, "
-            "no markdown fences, no explanation:\n"
-            '{"vendor_name": "", "invoice_no": "", "invoice_date": "YYYY-MM-DD or empty", '
-            '"amount": 0, "gstin": "", "notes": "one short line summarising what was purchased"}\n'
-            "vendor_name = the company that ISSUED the invoice (the seller/supplier), never the buyer.\n"
-            "amount = the final grand total payable, as a plain number with no currency symbol or commas.\n"
-            "If a field is not present, use an empty string (or 0 for amount).\n\n"
-            f"Invoice text:\n{text_content[:12000]}"
-        )
-        resp = await model.generate_content_async(prompt)
-        raw = re.sub(r"```[a-zA-Z]*", "", resp.text.strip()).replace("```", "").strip()
-        parsed = json.loads(raw)
-        return parsed if isinstance(parsed, dict) else {}
-    except Exception:
-        return {}
-
-
-# ── Routes ────────────────────────────────────────────────────────────────
-@router.post("/purchases/parse-invoice")
-async def parse_purchase_invoice(
-    file: UploadFile = File(...), current_user: User = Depends(get_current_user)
-):
-    """Read an uploaded vendor invoice and return extracted fields + suggested
-    company matches from the Clients list. Does NOT save anything yet."""
-    contents = await file.read()
-    if len(contents) > MAX_FILE_BYTES:
-        raise HTTPException(status_code=413, detail="File too large — please upload a file under 8 MB.")
-    filename = file.filename or "invoice"
-
-    text_content = await _extract_text_from_upload(contents, filename)
-    if not text_content or not text_content.strip():
-        raise HTTPException(
-            status_code=422,
-            detail="Could not extract any text from this invoice. Try a clearer scan or a different file.",
-        )
-
-    parsed = await _ai_extract_fields(text_content)
-    fallback = _regex_extract(text_content)
-    for k, v in fallback.items():
-        if k == "invoice_date_raw":
-            if not parsed.get("invoice_date"):
-                parsed["invoice_date"] = _normalize_date(v)
-            continue
-        if not parsed.get(k):
-            parsed[k] = v
-    if parsed.get("invoice_date"):
-        parsed["invoice_date"] = _normalize_date(str(parsed["invoice_date"]))
-
-    vendor_name = (parsed.get("vendor_name") or "").strip()
-    matches = await _match_clients(vendor_name)
-
-    # Request vendor recommendations from the Vendor Learning Engine
-    recommendations = None
-    try:
-        from backend.ai.vendor_learning import apply_vendor_defaults
-        gst_val = (parsed.get("gstin") or "").strip().upper()
-        enriched = await apply_vendor_defaults(vendor_name, gst_val, parsed.copy())
-        vendor_confidence = enriched.get("vendor_confidence", 0.0)
-        # Apply recommendations only when confidence exceeds a configurable threshold (0.60)
-        if vendor_confidence >= 0.60:
-            recommendations = {
-                "default_ledger": enriched.get("default_ledger"),
-                "expense_category": enriched.get("expense_category"),
-                "cost_centre": enriched.get("cost_centre"),
-                "department": enriched.get("department"),
-                "preferred_gst_treatment": enriched.get("preferred_gst_treatment"),
-                "preferred_tds_section": enriched.get("preferred_tds_section"),
-                "suggested_narration": enriched.get("suggested_narration"),
-                "confidence_score": vendor_confidence
-            }
-    except Exception as exc:
-        pass
-
-    return {
-        "filename": filename,
-        "vendor_name": vendor_name,
-        "invoice_no": (parsed.get("invoice_no") or "").strip(),
-        "invoice_date": (parsed.get("invoice_date") or "").strip(),
-        "amount": parsed.get("amount") or 0,
-        "gstin": (parsed.get("gstin") or "").strip().upper(),
-        "notes": (parsed.get("notes") or "").strip(),
-        "suggested_matches": matches,
-        "vendor_recommendations": recommendations,
-        "raw_text_preview": text_content[:600],
+  const fetchAll = async () => {
+    setLoading(true);
+    try {
+      const [purchasesR, clientsR, companiesR] = await Promise.allSettled([
+        api.get('/purchase-invoices', { params: { page_size: 500 } }),
+        api.get('/clients', { params: { page_size: 1000 } }),
+        api.get('/companies/list'),
+      ]);
+      setPurchaseInvoices(purchasesR.status === 'fulfilled' ? (purchasesR.value.data?.purchase_invoices || []) : []);
+      setClients(clientsR.status === 'fulfilled' ? (clientsR.value.data?.clients || clientsR.value.data || []) : []);
+      setCompanies(companiesR.status === 'fulfilled' ? (companiesR.value.data || []) : []);
+    } catch {
+      toast.error('Failed to load purchase data');
+    } finally {
+      setLoading(false);
     }
+  };
 
+  useEffect(() => { fetchAll(); }, []);
 
-@router.post("/purchases", response_model=Purchase)
-async def create_purchase(
-    client_id: str = Form(""),
-    client_name: str = Form(""),
-    vendor_name: str = Form(""),
-    invoice_no: str = Form(""),
-    invoice_date: str = Form(""),
-    amount: float = Form(0.0),
-    gstin: str = Form(""),
-    notes: str = Form(""),
-    file: Optional[UploadFile] = File(None),
-    current_user: User = Depends(get_current_user),
-):
-    """Save a (reviewed/confirmed) purchase invoice, linked to a company in
-    the Clients list when one was matched or picked by the user."""
-    if client_id:
-        client = await db.clients.find_one({"id": client_id}, {"_id": 0, "company_name": 1})
-        if not client:
-            raise HTTPException(status_code=404, detail="Selected company not found in Clients.")
-        if not client_name:
-            client_name = client.get("company_name", "")
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return purchaseInvoices;
+    return purchaseInvoices.filter(inv =>
+      (inv.client_name || '').toLowerCase().includes(q) ||
+      (inv.supplier_name || '').toLowerCase().includes(q) ||
+      (inv.invoice_no || '').toLowerCase().includes(q) ||
+      (inv.supplier_gstin || '').toLowerCase().includes(q)
+    );
+  }, [purchaseInvoices, search]);
 
-    doc = {
-        "id": str(uuid.uuid4()),
-        "client_id": client_id or None,
-        "client_name": client_name.strip(),
-        "vendor_name": vendor_name.strip(),
-        "invoice_no": invoice_no.strip(),
-        "invoice_date": invoice_date.strip(),
-        "amount": float(amount or 0),
-        "gstin": gstin.strip().upper(),
-        "notes": notes.strip(),
-        "file_name": None,
-        "file_mime": None,
-        "file_b64": None,
-        "created_by": current_user.id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+  const stats = useMemo(() => {
+    const total = purchaseInvoices.reduce((s, inv) => s + Number(inv.grand_total || 0), 0);
+    const outstanding = purchaseInvoices
+      .filter(inv => inv.status !== 'cancelled')
+      .reduce((s, inv) => s + Number(inv.amount_due ?? inv.grand_total ?? 0), 0);
+    const linked = purchaseInvoices.filter(inv => inv.client_id).length;
+    const suppliers = new Set(purchaseInvoices.map(inv => inv.supplier_name).filter(Boolean)).size;
+    const reviewCount = purchaseInvoices.filter(inv => !inv.client_id || inv.needs_amount_review).length;
+    return { total, outstanding, linked, suppliers, count: purchaseInvoices.length, unmatched: reviewCount };
+  }, [purchaseInvoices]);
+
+  const handleUpload = async () => {
+    if (!file) { toast.error('Select an invoice first'); return; }
+    const form = new FormData();
+    form.append('file', file);
+    if (selectedClientId !== 'auto') form.append('client_id', selectedClientId);
+    if (selectedCompanyId !== 'none') form.append('company_id', selectedCompanyId);
+
+    setUploading(true);
+    try {
+      const { data } = await api.post('/purchase-invoices/upload', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      if (data?.duplicate) toast.info('Invoice already exists. Showing saved entry.');
+      else toast.success(data?.matched_client ? `Invoice linked to ${data.matched_client.company_name}` : 'Invoice saved. No client match found.');
+      setFile(null);
+      if (fileRef.current) fileRef.current.value = '';
+      await fetchAll();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to read invoice');
+    } finally {
+      setUploading(false);
     }
+  };
 
-    if file is not None:
-        contents = await file.read()
-        if len(contents) > MAX_FILE_BYTES:
-            raise HTTPException(status_code=413, detail="File too large — please upload a file under 8 MB.")
-        if contents:
-            doc["file_name"] = file.filename
-            doc["file_mime"] = file.content_type or "application/octet-stream"
-            doc["file_b64"] = base64.b64encode(contents).decode()
+  const handleGstr2bUpload = async () => {
+    if (!gstr2bFile) { toast.error('Select a GSTR-2B Excel file first'); return; }
+    if (gstr2bCompanyId === 'none') { toast.error('Select which company/book this GSTR-2B belongs to'); return; }
+    const form = new FormData();
+    form.append('file', gstr2bFile);
+    form.append('company_id', gstr2bCompanyId);
 
-    await db.purchases.insert_one(doc)
-    return doc
-
-
-@router.get("/purchases")
-async def list_purchases(
-    client_id: Optional[str] = Query(None),
-    search: Optional[str] = Query(None),
-    current_user: User = Depends(get_current_user),
-):
-    q: dict = {}
-    if client_id:
-        q["client_id"] = client_id
-    if search:
-        rx = {"$regex": re.escape(search), "$options": "i"}
-        q["$or"] = [
-            {"vendor_name": rx},
-            {"client_name": rx},
-            {"invoice_no": rx},
-            {"gstin": rx},
-        ]
-    items = await db.purchases.find(q, {"_id": 0, "file_b64": 0}).sort("created_at", -1).to_list(2000)
-    return items
-
-
-@router.get("/purchases/{purchase_id}")
-async def get_purchase(purchase_id: str, current_user: User = Depends(get_current_user)):
-    doc = await db.purchases.find_one({"id": purchase_id}, {"_id": 0, "file_b64": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Purchase invoice not found")
-    return doc
+    setGstr2bUploading(true);
+    setGstr2bResult(null);
+    try {
+      const { data } = await api.post('/purchase-invoices/upload-gstr2b', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setGstr2bResult(data);
+      if (data.created > 0) {
+        toast.success(`Added ${data.created} purchase bill${data.created === 1 ? '' : 's'} from GSTR-2B${data.duplicates ? ` (${data.duplicates} already existed)` : ''}`);
+      } else if (data.duplicates > 0) {
+        toast.info(`All ${data.duplicates} invoices in this GSTR-2B are already in the Purchase Book.`);
+      } else {
+        toast.info('No B2B invoices found in this GSTR-2B file.');
+      }
+      setGstr2bFile(null);
+      if (gstr2bFileRef.current) gstr2bFileRef.current.value = '';
+      await fetchAll();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to read GSTR-2B file');
+    } finally {
+      setGstr2bUploading(false);
+    }
+  };
 
 
-@router.get("/purchases/{purchase_id}/file")
-async def download_purchase_file(purchase_id: str, current_user: User = Depends(get_current_user)):
-    doc = await db.purchases.find_one({"id": purchase_id}, {"_id": 0})
-    if not doc or not doc.get("file_b64"):
-        raise HTTPException(status_code=404, detail="No file attached to this purchase invoice.")
-    raw = base64.b64decode(doc["file_b64"])
-    return Response(
-        content=raw,
-        media_type=doc.get("file_mime") or "application/octet-stream",
-        headers={"Content-Disposition": f'inline; filename="{doc.get("file_name") or "invoice"}"'},
-    )
+  const startEdit = (inv) => {
+    setEditingInvoice(inv);
+    setEditForm({
+      supplier_name: inv.supplier_name || '',
+      invoice_no: inv.invoice_no || '',
+      invoice_date: inv.invoice_date || '',
+      grand_total: inv.grand_total || 0,
+      total_gst: inv.total_gst || 0,
+      taxable_amount: inv.taxable_amount || 0,
+      client_id: inv.client_id || '',
+      company_id: inv.company_id || '',
+      supplier_gstin: inv.supplier_gstin || '',
+      buyer_gstin: inv.buyer_gstin || '',
+    });
+  };
 
+  const handleSaveEdit = async () => {
+    setSavingEdit(true);
+    try {
+      await api.put(`/purchase-invoices/${editingInvoice.id}`, {
+        supplier_name: editForm.supplier_name,
+        invoice_no: editForm.invoice_no,
+        invoice_date: editForm.invoice_date,
+        grand_total: parseFloat(editForm.grand_total) || 0,
+        total_gst: parseFloat(editForm.total_gst) || 0,
+        taxable_amount: parseFloat(editForm.taxable_amount) || 0,
+        client_id: editForm.client_id === 'none' ? '' : editForm.client_id,
+        company_id: editForm.company_id === 'none' ? '' : editForm.company_id,
+        supplier_gstin: editForm.supplier_gstin,
+        buyer_gstin: editForm.buyer_gstin,
+      });
+      toast.success('Purchase invoice updated successfully');
+      setEditingInvoice(null);
+      await fetchAll();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to update purchase invoice');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
 
-@router.delete("/purchases/{purchase_id}")
-async def delete_purchase(purchase_id: str, current_user: User = Depends(get_current_user)):
-    result = await db.purchases.delete_one({"id": purchase_id})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Purchase invoice not found")
-        
-    # Phase 7 integration: Ensures that subsequent automatic reports or
-    # learning engines reflect any adjustments or deletions.
-    
-    return {"success": True}
+  const handleDelete = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this purchase invoice?')) return;
+    try {
+      await api.delete(`/purchase-invoices/${id}`);
+      toast.success('Purchase invoice deleted');
+      await fetchAll();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to delete purchase invoice');
+    }
+  };
 
+  const startPayment = (inv) => {
+    setPayingInvoice(inv);
+    setPayForm({
+      amount: Number(inv.amount_due ?? inv.grand_total ?? 0),
+      payment_date: format(new Date(), 'yyyy-MM-dd'),
+      payment_mode: 'bank',
+      bank_account_id: '',
+      reference_no: '',
+      notes: '',
+    });
+    setBankAccounts([]);
+    api.get('/bank-accounts', { params: { company_id: inv.company_id || '' } })
+      .then(r => {
+        const accts = r.data || [];
+        setBankAccounts(accts);
+        const primary = accts.find(a => a.is_primary) || accts[0];
+        if (primary) setPayForm(p => ({ ...p, bank_account_id: primary.id }));
+      })
+      .catch(() => setBankAccounts([]));
+  };
+
+  const handleSavePayment = async () => {
+    if (!payingInvoice) return;
+    const amt = parseFloat(payForm.amount) || 0;
+    if (amt <= 0) { toast.error('Enter a payment amount greater than zero'); return; }
+    if (payForm.payment_mode !== 'cash' && bankAccounts.length > 1 && !payForm.bank_account_id) {
+      toast.error('Select which bank account this was paid from');
+      return;
+    }
+    setSavingPayment(true);
+    try {
+      const dueNow = Number(payingInvoice.amount_due ?? payingInvoice.grand_total ?? 0);
+      const status = amt >= dueNow - 0.01 ? 'paid' : 'partially_paid';
+      const { data } = await api.patch(`/purchase-invoices/${payingInvoice.id}/status`, {
+        status,
+        amount: amt,
+        payment_date: payForm.payment_date,
+        payment_mode: payForm.payment_mode,
+        bank_account_id: payForm.payment_mode !== 'cash' ? (payForm.bank_account_id || null) : null,
+        reference_no: payForm.reference_no,
+        notes: payForm.notes,
+      });
+      toast.success(data.status === 'paid' ? 'Marked as paid — payment entry posted to ledger' : 'Payment recorded — ledger updated');
+      setPayingInvoice(null);
+      await fetchAll();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to record payment');
+    } finally {
+      setSavingPayment(false);
+    }
+  };
+
+  const handleCancelInvoice = async (inv) => {
+    if (!window.confirm(`Mark bill ${inv.invoice_no || ''} as cancelled? Its ledger entry will be removed.`)) return;
+    try {
+      await api.patch(`/purchase-invoices/${inv.id}/status`, { status: 'cancelled' });
+      toast.success('Bill cancelled and removed from the ledger');
+      await fetchAll();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to cancel bill');
+    }
+  };
+
+  if (loading) return <GifLoader />;
+
+  return (
+    <div className={`min-h-screen ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
+      <div className="p-4 md:p-6 space-y-5 max-w-[1600px] mx-auto">
+        <div className="rounded-3xl overflow-hidden shadow-xl" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+          <div className="p-6 md:p-7 flex flex-col lg:flex-row lg:items-center justify-between gap-5 text-white">
+            <div className="flex items-start gap-4">
+              <div className="h-14 w-14 rounded-2xl bg-white/15 border border-white/20 flex items-center justify-center shadow-lg">
+                <ShoppingBag className="h-7 w-7" />
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-[0.25em] text-blue-100 font-bold">Accounts</p>
+                <h1 className="text-2xl md:text-3xl font-bold tracking-tight mt-1">Purchase</h1>
+                <p className="text-sm text-blue-100 mt-1 max-w-2xl">
+                  Upload supplier invoices. The app reads invoice details, matches the concerned client/company, and lists the purchase under that client.
+                </p>
+              </div>
+            </div>
+            <Button onClick={fetchAll} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20">
+              <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+            </Button>
+          </div>
+        </div>
+
+        <GuidanceNote pageKey="purchase" isDark={isDark} />
+
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+          {[
+            { label: 'Purchase Invoices', value: stats.count, icon: FileText, color: COLORS.mediumBlue },
+            { label: 'Total Purchase', value: fmtC(stats.total), icon: IndianRupee, color: COLORS.emeraldGreen },
+            { label: 'Outstanding to Pay', value: fmtC(stats.outstanding), icon: Wallet, color: stats.outstanding ? COLORS.coral : COLORS.emeraldGreen },
+            { label: 'Needs Review', value: stats.unmatched, icon: AlertTriangle, color: stats.unmatched ? COLORS.amber : COLORS.emeraldGreen },
+          ].map((s) => (
+            <div key={s.label} className={`rounded-2xl border p-4 shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest font-bold text-slate-400">{s.label}</p>
+                  <p className={`text-xl font-bold mt-1 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{s.value}</p>
+                </div>
+                <div className="h-10 w-10 rounded-xl flex items-center justify-center text-white" style={{ background: s.color }}>
+                  <s.icon className="h-5 w-5" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="grid lg:grid-cols-[420px_1fr] gap-5">
+          <div className="space-y-5 h-fit">
+          <div className={`rounded-3xl border shadow-sm p-5 h-fit ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <div className="flex items-center gap-3 mb-5">
+              <div className="h-10 w-10 rounded-xl flex items-center justify-center text-white" style={{ background: COLORS.mediumBlue }}>
+                <UploadCloud className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Upload purchase invoice</h2>
+                <p className="text-xs text-slate-400">PDF and image invoices are supported.</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Concerned company</label>
+                <Select value={selectedClientId} onValueChange={setSelectedClientId}>
+                  <SelectTrigger className={`mt-2 rounded-xl ${isDark ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50'}`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Auto-detect from invoice</SelectItem>
+                    {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.company_name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Sales company/book</label>
+                <Select value={selectedCompanyId} onValueChange={setSelectedCompanyId}>
+                  <SelectTrigger className={`mt-2 rounded-xl ${isDark ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50'}`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Not specified</SelectItem>
+                    {companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className={`border-2 border-dashed rounded-2xl p-5 text-center ${isDark ? 'border-slate-700 bg-slate-900/60' : 'border-blue-100 bg-blue-50/60'}`}>
+                <input ref={fileRef} type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv" className="hidden" onChange={e => setFile(e.target.files?.[0] || null)} />
+                <UploadCloud className="h-9 w-9 mx-auto mb-3" style={{ color: COLORS.mediumBlue }} />
+                <p className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{file ? file.name : 'Choose invoice file'}</p>
+                {file && <p className="text-xs text-slate-400 mt-1">{(file.size / 1024).toFixed(0)} KB</p>}
+                <div className="mt-4 flex justify-center gap-2">
+                  <Button type="button" variant="outline" onClick={() => fileRef.current?.click()} className="rounded-xl">
+                    Browse
+                  </Button>
+                  {file && (
+                    <Button type="button" variant="ghost" onClick={() => { setFile(null); if (fileRef.current) fileRef.current.value = ''; }} className="rounded-xl">
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              <Button onClick={handleUpload} disabled={uploading || !file} className="w-full rounded-xl text-white" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                {uploading ? <MiniLoader height={18} /> : <><Database className="h-4 w-4 mr-2" /> Read & Add to Company</>}
+              </Button>
+            </div>
+          </div>
+
+          {/* ── GSTR-2B bulk import ── */}
+          <div className={`rounded-3xl border shadow-sm p-5 h-fit ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <div className="flex items-center gap-3 mb-5">
+              <div className="h-10 w-10 rounded-xl flex items-center justify-center text-white" style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen}, #0F5C63)` }}>
+                <FileSpreadsheet className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Import GSTR-2B report</h2>
+                <p className="text-xs text-slate-400">Bulk-add every B2B bill from the portal Excel in one go.</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Company/book</label>
+                <Select value={gstr2bCompanyId} onValueChange={setGstr2bCompanyId}>
+                  <SelectTrigger className={`mt-2 rounded-xl ${isDark ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50'}`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Select company…</SelectItem>
+                    {companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className={`border-2 border-dashed rounded-2xl p-5 text-center ${isDark ? 'border-slate-700 bg-slate-900/60' : 'border-emerald-100 bg-emerald-50/60'}`}>
+                <input ref={gstr2bFileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={e => setGstr2bFile(e.target.files?.[0] || null)} />
+                <FileSpreadsheet className="h-9 w-9 mx-auto mb-3" style={{ color: COLORS.emeraldGreen }} />
+                <p className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{gstr2bFile ? gstr2bFile.name : 'Choose GSTR-2B Excel (B2B sheet)'}</p>
+                {gstr2bFile && <p className="text-xs text-slate-400 mt-1">{(gstr2bFile.size / 1024).toFixed(0)} KB</p>}
+                <div className="mt-4 flex justify-center gap-2">
+                  <Button type="button" variant="outline" onClick={() => gstr2bFileRef.current?.click()} className="rounded-xl">
+                    Browse
+                  </Button>
+                  {gstr2bFile && (
+                    <Button type="button" variant="ghost" onClick={() => { setGstr2bFile(null); if (gstr2bFileRef.current) gstr2bFileRef.current.value = ''; }} className="rounded-xl">
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              <Button onClick={handleGstr2bUpload} disabled={gstr2bUploading || !gstr2bFile} className="w-full rounded-xl text-white" style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen}, #0F5C63)` }}>
+                {gstr2bUploading ? <MiniLoader height={18} /> : <><Database className="h-4 w-4 mr-2" /> Import into Purchase Book</>}
+              </Button>
+
+              {gstr2bResult && (
+                <div className={`rounded-2xl border p-3 text-xs space-y-1 ${isDark ? 'bg-slate-900/60 border-slate-700 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+                  <div className="flex justify-between"><span>Bills added</span><span className="font-bold text-emerald-500">{gstr2bResult.created}</span></div>
+                  <div className="flex justify-between"><span>Already in Purchase Book</span><span className="font-semibold">{gstr2bResult.duplicates}</span></div>
+                  <div className="flex justify-between"><span>ITC not eligible</span><span className="font-semibold">{gstr2bResult.ineligible_itc}</span></div>
+                  <div className="flex justify-between"><span>Total value imported</span><span className="font-semibold">{fmtC(gstr2bResult.total_value)}</span></div>
+                </div>
+              )}
+            </div>
+          </div>
+          </div>
+
+          <div className={`rounded-3xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <div className="p-4 border-b flex flex-col md:flex-row md:items-center justify-between gap-3" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+              <div>
+                <h2 className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Purchase invoice list</h2>
+                <p className="text-xs text-slate-400">{filtered.length} invoices shown · {stats.suppliers} suppliers</p>
+              </div>
+              <div className={`flex items-center gap-2 rounded-xl border px-3 h-10 min-w-[260px] ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                <Search className="h-4 w-4 text-slate-400" />
+                <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search supplier, company, GSTIN..." className="border-0 bg-transparent h-9 px-0 focus-visible:ring-0" />
+              </div>
+            </div>
+
+            <div className="divide-y" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+              {filtered.length === 0 ? (
+                <div className="py-20 text-center">
+                  <FileText className="h-12 w-12 mx-auto text-slate-300 mb-3" />
+                  <p className="text-sm font-semibold text-slate-400">No purchase invoices found</p>
+                  <p className="text-xs text-slate-400 mt-1">Upload an invoice to start the purchase list.</p>
+                </div>
+              ) : filtered.map(inv => (
+                <div key={inv.id} className={`p-4 transition ${isDark ? 'hover:bg-slate-700/60' : 'hover:bg-slate-50'}`}>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{inv.invoice_no || 'No invoice no.'}</p>
+                        {inv.client_id ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Linked</span>
+                        ) : (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Review</span>
+                        )}
+                        {inv.needs_amount_review && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200" title="The totals read from this invoice didn't reconcile — please verify the amount against the file.">
+                            Verify amount
+                          </span>
+                        )}
+                        {(() => {
+                          const sm = PURCHASE_STATUS_META[inv.status || 'outstanding'] || PURCHASE_STATUS_META.outstanding;
+                          return (
+                            <span
+                              className="text-[10px] font-bold px-2 py-0.5 rounded-full border"
+                              style={{ background: sm.bg, color: sm.fg, borderColor: sm.border }}
+                              title={inv.amount_paid ? `Paid ${fmtC(inv.amount_paid)} of ${fmtC(inv.grand_total)}` : undefined}
+                            >
+                              {sm.label}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                      <p className="text-sm text-slate-500 mt-1 truncate">
+                        {inv.supplier_name || 'Unknown supplier'} {inv.supplier_gstin ? `· ${inv.supplier_gstin}` : ''}
+                      </p>
+                      <p className="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
+                        <Building2 className="h-3.5 w-3.5" /> {inv.client_name || inv.buyer_name || 'No concerned company matched'} · {fmtDate(inv.invoice_date)}
+                      </p>
+                    </div>
+                    <div className="text-right flex-shrink-0 flex flex-col items-end">
+                      <p className={`text-lg font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{fmtC(inv.grand_total)}</p>
+                      <p className="text-xs text-slate-400">GST {fmtC(inv.total_gst)}</p>
+                      {inv.status !== 'cancelled' && Number(inv.amount_due) > 0 && (
+                        <p className="text-xs font-semibold" style={{ color: COLORS.coral }}>Due {fmtC(inv.amount_due)}</p>
+                      )}
+                      <p className="text-[10px] text-slate-400 mt-1 truncate max-w-[180px]">{inv.file_name}</p>
+                      <div className="flex items-center gap-2 mt-2">
+                        {inv.status !== 'paid' && inv.status !== 'cancelled' && (
+                          <Button
+                            size="sm"
+                            onClick={() => startPayment(inv)}
+                            className="h-7 rounded-lg text-white px-2 text-xs"
+                            style={{ background: COLORS.emeraldGreen }}
+                            title="Record payment — posts a ledger entry"
+                          >
+                            <Wallet className="h-3.5 w-3.5 mr-1" /> Record Payment
+                          </Button>
+                        )}
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => startEdit(inv)}
+                          className="h-7 w-7 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/40"
+                          title="Edit purchase invoice"
+                        >
+                          <Edit className="h-3.5 w-3.5" />
+                        </Button>
+                        {inv.status !== 'cancelled' && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => handleCancelInvoice(inv)}
+                            className="h-7 w-7 rounded-lg text-slate-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/40"
+                            title="Cancel bill (removes it from the ledger)"
+                          >
+                            <Ban className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => handleDelete(inv.id)}
+                          className="h-7 w-7 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40"
+                          title="Delete purchase invoice"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <Dialog open={editingInvoice !== null} onOpenChange={(open) => { if (!open) setEditingInvoice(null); }}>
+        <DialogContent className={`sm:max-w-2xl max-h-[90vh] overflow-y-auto ${isDark ? 'bg-slate-900 text-slate-100 border-slate-800' : 'bg-white text-slate-900'}`}>
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold flex items-center gap-2">
+              <ShoppingBag className="h-5 w-5 text-blue-500" />
+              Edit Purchase Invoice Details
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Supplier / Vendor Name</label>
+              <Input
+                value={editForm.supplier_name}
+                onChange={(e) => setEditForm({ ...editForm, supplier_name: e.target.value })}
+                className="mt-1 rounded-xl"
+                placeholder="Supplier name"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Invoice No</label>
+              <Input
+                value={editForm.invoice_no}
+                onChange={(e) => setEditForm({ ...editForm, invoice_no: e.target.value })}
+                className="mt-1 rounded-xl"
+                placeholder="Invoice number"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Invoice Date</label>
+              <Input
+                type="date"
+                value={editForm.invoice_date}
+                onChange={(e) => setEditForm({ ...editForm, invoice_date: e.target.value })}
+                className="mt-1 rounded-xl"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Grand Total Amount (₹)</label>
+              <Input
+                type="number"
+                step="0.01"
+                value={editForm.grand_total}
+                onChange={(e) => setEditForm({ ...editForm, grand_total: e.target.value })}
+                className="mt-1 rounded-xl"
+                placeholder="0.00"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Total GST (₹)</label>
+              <Input
+                type="number"
+                step="0.01"
+                value={editForm.total_gst}
+                onChange={(e) => setEditForm({ ...editForm, total_gst: e.target.value })}
+                className="mt-1 rounded-xl"
+                placeholder="0.00"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Taxable Amount (₹)</label>
+              <Input
+                type="number"
+                step="0.01"
+                value={editForm.taxable_amount}
+                onChange={(e) => setEditForm({ ...editForm, taxable_amount: e.target.value })}
+                className="mt-1 rounded-xl"
+                placeholder="0.00"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Concerned Company / Client</label>
+              <Select
+                value={editForm.client_id || 'none'}
+                onValueChange={(val) => setEditForm({ ...editForm, client_id: val })}
+              >
+                <SelectTrigger className={`mt-1 rounded-xl ${isDark ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50'}`}>
+                  <SelectValue placeholder="Select client" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No matched company</SelectItem>
+                  {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.company_name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Sales Company / Book</label>
+              <Select
+                value={editForm.company_id || 'none'}
+                onValueChange={(val) => setEditForm({ ...editForm, company_id: val })}
+              >
+                <SelectTrigger className={`mt-1 rounded-xl ${isDark ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50'}`}>
+                  <SelectValue placeholder="Select book" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Not specified</SelectItem>
+                  {companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Supplier GSTIN</label>
+              <Input
+                value={editForm.supplier_gstin}
+                onChange={(e) => setEditForm({ ...editForm, supplier_gstin: e.target.value.toUpperCase() })}
+                className="mt-1 rounded-xl"
+                placeholder="Supplier GSTIN"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Buyer GSTIN</label>
+              <Input
+                value={editForm.buyer_gstin}
+                onChange={(e) => setEditForm({ ...editForm, buyer_gstin: e.target.value.toUpperCase() })}
+                className="mt-1 rounded-xl"
+                placeholder="Buyer GSTIN"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-4 border-t" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+            <Button variant="outline" onClick={() => setEditingInvoice(null)} className="rounded-xl">
+              Cancel
+            </Button>
+            <Button onClick={handleSaveEdit} disabled={savingEdit} className="rounded-xl text-white" style={{ background: COLORS.mediumBlue }}>
+              {savingEdit ? <MiniLoader height={18} /> : 'Save Changes'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={payingInvoice !== null} onOpenChange={(open) => { if (!open) setPayingInvoice(null); }}>
+        <DialogContent className={`sm:max-w-md ${isDark ? 'bg-slate-900 text-slate-100 border-slate-800' : 'bg-white text-slate-900'}`}>
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold flex items-center gap-2">
+              <Wallet className="h-5 w-5 text-emerald-500" />
+              Record Payment
+            </DialogTitle>
+          </DialogHeader>
+
+          {payingInvoice && (
+            <div className="space-y-4 my-2">
+              <div className={`rounded-xl p-3 text-sm ${isDark ? 'bg-slate-800' : 'bg-slate-50'}`}>
+                <p className="font-semibold">{payingInvoice.invoice_no || 'No invoice no.'} — {payingInvoice.supplier_name}</p>
+                <p className="text-slate-400 text-xs mt-1">
+                  Bill total {fmtC(payingInvoice.grand_total)} · Due {fmtC(payingInvoice.amount_due ?? payingInvoice.grand_total)}
+                </p>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Amount Paid (₹)</label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={payForm.amount}
+                  onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })}
+                  className="mt-1 rounded-xl"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Payment Date</label>
+                  <Input
+                    type="date"
+                    value={payForm.payment_date}
+                    onChange={(e) => setPayForm({ ...payForm, payment_date: e.target.value })}
+                    className="mt-1 rounded-xl"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Mode</label>
+                  <Select value={payForm.payment_mode} onValueChange={(v) => setPayForm({ ...payForm, payment_mode: v })}>
+                    <SelectTrigger className={`mt-1 rounded-xl ${isDark ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50'}`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="bank">Bank / NEFT / UPI</SelectItem>
+                      <SelectItem value="cash">Cash</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {payForm.payment_mode !== 'cash' && bankAccounts.length > 0 && (
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Bank Account</label>
+                  <Select value={payForm.bank_account_id} onValueChange={(v) => setPayForm({ ...payForm, bank_account_id: v })}>
+                    <SelectTrigger className={`mt-1 rounded-xl ${isDark ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50'}`}>
+                      <SelectValue placeholder="Select bank account" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {bankAccounts.map(a => (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.bank_name} · {a.account_number_masked}{a.is_primary ? ' (Primary)' : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              <div>
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Reference No. (optional)</label>
+                <Input
+                  value={payForm.reference_no}
+                  onChange={(e) => setPayForm({ ...payForm, reference_no: e.target.value })}
+                  className="mt-1 rounded-xl"
+                  placeholder="UTR / cheque no."
+                />
+              </div>
+
+              <p className="text-xs text-slate-400">
+                This posts a ledger entry — Dr Accounts Payable, Cr {payForm.payment_mode === 'cash' ? 'Cash in Hand' : 'Bank Accounts'}.
+              </p>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-4 border-t" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+            <Button variant="outline" onClick={() => setPayingInvoice(null)} className="rounded-xl">
+              Cancel
+            </Button>
+            <Button onClick={handleSavePayment} disabled={savingPayment} className="rounded-xl text-white" style={{ background: COLORS.emeraldGreen }}>
+              {savingPayment ? <MiniLoader height={18} /> : 'Save Payment'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+export default Purchase;
