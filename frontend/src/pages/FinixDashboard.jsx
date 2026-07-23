@@ -353,41 +353,69 @@ function FinixDashboardInner() {
 
   return (
     <div className={`p-6 min-h-screen ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800'}`}>
-      
-      {/* ── Header ── */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
-        <div>
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-6 h-6 text-emerald-500 animate-pulse" />
-            <h1 className="text-3xl font-extrabold tracking-tight">Finix Dashboard</h1>
-          </div>
-          <p className={`text-sm mt-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-            Autonomous AI-Powered Financial Control Center & Smart Auditing Engine
-          </p>
-        </div>
 
-        {/* Company Dropdown */}
-        <div className="flex items-center gap-3">
-          <Building2 className={`w-5 h-5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`} />
-          <Select value={companyId} onValueChange={handleCompanyChange}>
-            <SelectTrigger className={`h-11 w-[260px] rounded-2xl border ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100' : 'bg-white border-slate-200 text-slate-800'}`}>
-              <SelectValue placeholder="Select Company" />
-            </SelectTrigger>
-            <SelectContent>
-              {companies.map((c) => (
-                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => fetchMetrics(companyId)}
-            disabled={loading || !companyId}
-            className={`h-11 w-11 rounded-2xl ${isDark ? 'bg-slate-800 border-slate-700 hover:bg-slate-700' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          </Button>
+      {/* ── Header — branded Finix banner, echoes the app's own navy→teal
+           header palette (deepBlue #0D3B66 → emeraldGreen #1FAF5A) so it
+           reads as part of the same product family rather than a bolted-on
+           page ── */}
+      <div
+        className="relative overflow-hidden rounded-3xl mb-8 shadow-lg"
+        style={{ background: 'linear-gradient(115deg, #0A2E52 0%, #0D3B66 38%, #0F5C63 72%, #12806B 100%)' }}
+      >
+        {/* Faint decorative circuit glow, echoes the logo's own circuit motif */}
+        <div
+          className="pointer-events-none absolute -right-10 -top-16 w-64 h-64 rounded-full opacity-20"
+          style={{ background: 'radial-gradient(circle, #5CCB5F 0%, transparent 70%)' }}
+        />
+        <div
+          className="pointer-events-none absolute -left-16 -bottom-20 w-72 h-72 rounded-full opacity-10"
+          style={{ background: 'radial-gradient(circle, #2B8CD1 0%, transparent 70%)' }}
+        />
+
+        <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-5 px-6 py-5 md:px-8 md:py-6">
+          {/* Brand block */}
+          <div className="flex items-center gap-4">
+            <div className="shrink-0 rounded-2xl bg-white/95 p-2 shadow-md ring-1 ring-white/40">
+              <img src="/finix-icon.png" alt="Finix" className="w-11 h-11 md:w-12 md:h-12 object-contain" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2.5">
+                <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white">
+                  FIN<span style={{ background: 'linear-gradient(90deg, #5CCB5F, #7FE3C4)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' }}>IX</span>
+                </h1>
+                <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/10 border border-white/20 text-[10px] font-bold uppercase tracking-wider text-emerald-200">
+                  <Sparkles className="w-3 h-3" /> AI Accounting
+                </span>
+              </div>
+              <p className="text-xs md:text-sm mt-1 text-slate-200/80 tracking-wide">
+                Automate &middot; Analyze &middot; Ascend — Autonomous Financial Control Center &amp; Smart Auditing Engine
+              </p>
+            </div>
+          </div>
+
+          {/* Company Dropdown */}
+          <div className="flex items-center gap-3">
+            <Building2 className="w-5 h-5 text-slate-200/70 hidden sm:block" />
+            <Select value={companyId} onValueChange={handleCompanyChange}>
+              <SelectTrigger className="h-11 w-[240px] md:w-[260px] rounded-2xl border border-white/20 bg-white/10 backdrop-blur-sm text-white placeholder:text-white/60 [&>span]:text-white">
+                <SelectValue placeholder="Select Company" />
+              </SelectTrigger>
+              <SelectContent>
+                {companies.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => fetchMetrics(companyId)}
+              disabled={loading || !companyId}
+              className="h-11 w-11 rounded-2xl border-white/20 bg-white/10 backdrop-blur-sm text-white hover:bg-white/20 hover:text-white"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            </Button>
+          </div>
         </div>
       </div>
 
