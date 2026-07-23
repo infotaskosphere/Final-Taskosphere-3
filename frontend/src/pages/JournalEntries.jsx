@@ -101,17 +101,28 @@ function JournalEntriesInner() {
   // Best-effort: which entries are currently causing a mismatch. This
   // never blocks or errors the page — if it fails, entries just render
   // without highlighting instead of the page breaking.
-  const fetchFlagged = async (cid = companyId) => {
+  const fetchFlagged = async (cid = companyId, force = false) => {
     try {
-      const summary = await runVerifyAndFix(cid);
+      const summary = await runVerifyAndFix(cid, { force });
       setValidationReport(summary);
     } catch { /* non-fatal — highlighting is a bonus */ }
   };
 
   useEffect(() => {
     fetchCompanies();
-    fetchAll({ companyId: '', page: 1, pageSize });
-    fetchFlagged('');
+    // Sequenced, not parallel: the entries/accounts fetch is what the user
+    // is waiting on to see the page. fetchFlagged('') re-syncs and
+    // validates every company's book on the backend, which is heavy — firing
+    // it at the same moment as the main fetch made both compete for the
+    // same backend/DB capacity and slowed the whole page down. Running it
+    // after the main fetch resolves keeps the page responsive; the
+    // "Needs Attention" badge just fills in a beat later. It's also now
+    // cached for a minute (see verifyAndFixLedger.js), so re-visiting this
+    // page shortly after doesn't re-trigger the full engine again.
+    (async () => {
+      await fetchAll({ companyId: '', page: 1, pageSize });
+      fetchFlagged('');
+    })();
   }, []);
 
   const onCompanyChange = (cid) => {
@@ -197,7 +208,7 @@ function JournalEntriesInner() {
       (async () => {
         const { data } = await api.post('/journal-entries/resync', { company_id: companyId || undefined });
         await fetchAll();
-        fetchFlagged();
+        fetchFlagged(companyId, true);
         return data;
       })(),
       {
