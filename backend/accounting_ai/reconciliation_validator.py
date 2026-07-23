@@ -266,6 +266,54 @@ async def _customer_ledger_total(company_id: str) -> float:
     return _round2(total)
 
 
+async def _manual_entries_on_account(company_id: str, code: str, auto_sources: set, limit: int = 20) -> List[Dict[str, Any]]:
+    """Find journal entries touching account `code` whose source is NOT
+    one of the invoice-sync pipeline's own sources (e.g. not 'sale' /
+    'payment'). Re-running the invoice→journal sync can only rebuild
+    entries IT created — it has no authority to touch or undo an entry
+    someone posted by hand (source='manual'), via an opening balance, or
+    via another subsystem (e.g. GST intelligence). When a rule still
+    fails after resync, one of these is almost always why, so we name it
+    instead of only re-reporting the aggregate diff."""
+    acct_q: dict = {"code": code}
+    if company_id:
+        acct_q["company_id"] = company_id
+    acct_ids = {a["id"] for a in await db.chart_of_accounts.find(acct_q, {"_id": 0, "id": 1}).to_list(2000)}
+    if not acct_ids:
+        return []
+
+    lines = await db.journal_lines.find(
+        {"account_id": {"$in": list(acct_ids)}}, {"_id": 0, "entry_id": 1, "debit": 1, "credit": 1}
+    ).to_list(200000)
+    if not lines:
+        return []
+
+    net_by_entry: Dict[str, float] = {}
+    for l in lines:
+        net_by_entry[l["entry_id"]] = net_by_entry.get(l["entry_id"], 0.0) + (l.get("debit") or 0) - (l.get("credit") or 0)
+
+    entries = await db.journal_entries.find(
+        {"id": {"$in": list(net_by_entry.keys())}, "source": {"$nin": list(auto_sources)}},
+        {"_id": 0, "id": 1, "entry_date": 1, "narration": 1, "source": 1, "source_id": 1},
+    ).to_list(200000)
+
+    culprits = []
+    for e in entries:
+        net = _round2(net_by_entry.get(e["id"], 0.0))
+        if abs(net) <= TOLERANCE:
+            continue
+        culprits.append({
+            "entry_id": e["id"],
+            "date": e.get("entry_date"),
+            "narration": e.get("narration") or "(no narration)",
+            "source": e.get("source") or "manual",
+            "net_amount": net,
+        })
+
+    culprits.sort(key=lambda c: abs(c["net_amount"]), reverse=True)
+    return culprits[:limit]
+
+
 async def run_validation_engine(company_id: str = "", auto_fix: bool = True) -> Dict[str, Any]:
     """Run every consistency check for one book (company_id="" = the
     default/manual book). Rebuilds the GL from invoices first via the
@@ -380,6 +428,50 @@ async def run_validation_engine(company_id: str = "", auto_fix: bool = True) -> 
                     "Aggregate mismatch persists but no single invoice is individually "
                     "broken — likely several invoices each off by a sub-tolerance "
                     "rounding amount that adds up. Check recently edited invoices."
+                )
+
+    # AR = Outstanding and Customer Ledger = AR both key off the same
+    # control account (1100). If either survives the resync, the usual
+    # cause is a journal entry posted straight to 1100 outside the
+    # invoice→journal pipeline (source != sale/payment) — name it instead
+    # of only re-reporting the diff.
+    if any(m["rule"] in ("Accounts Receivable = Outstanding", "Customer Ledger Total = Accounts Receivable")
+           for m in mismatches):
+        ar_culprits = await _manual_entries_on_account(company_id, "1100", {"sale", "payment"})
+        for m in mismatches:
+            if m["rule"] in ("Accounts Receivable = Outstanding", "Customer Ledger Total = Accounts Receivable"):
+                m["culprits"] = ar_culprits
+                m["note"] = (
+                    f"{len(ar_culprits)} journal entry(ies) post directly to Accounts "
+                    "Receivable (1100) outside the invoice/payment sync — see "
+                    "'culprits'. Re-running Verify & Fix will not resolve this; open "
+                    "each entry in Journal Entries and confirm it's correct (e.g. a "
+                    "manual write-off or opening balance) or remove it if it's a "
+                    "duplicate of something the invoice sync already posted." if ar_culprits else
+                    "Aggregate mismatch persists but no single manual entry accounts "
+                    "for it — likely several small manual postings to 1100 adding up, "
+                    "or a client_name missing on a recent invoice/payment (Customer "
+                    "Ledger only counts postings it can attribute to a named client)."
+                )
+
+    # Sales Ledger = Invoice Revenue keys off account 4000. Same logic:
+    # a manual entry posted straight to Sales outside the invoice sync is
+    # the usual reason it survives a resync.
+    if any(m["rule"] == "Sales Ledger = Invoice Revenue" for m in mismatches):
+        sales_culprits = await _manual_entries_on_account(company_id, "4000", {"sale"})
+        for m in mismatches:
+            if m["rule"] == "Sales Ledger = Invoice Revenue":
+                m["culprits"] = sales_culprits
+                m["note"] = (
+                    f"{len(sales_culprits)} journal entry(ies) post directly to Sales "
+                    "(4000) outside the invoice sync — see 'culprits'. Re-running "
+                    "Verify & Fix will not resolve this; open each entry in Journal "
+                    "Entries and confirm it's a legitimate manual adjustment (e.g. a "
+                    "discount or write-off) or remove it if it duplicates an invoice "
+                    "posting." if sales_culprits else
+                    "Aggregate mismatch persists but no single manual entry accounts "
+                    "for it — likely several small manual postings to 4000 adding up. "
+                    "Check recently added Journal Entries for account code 4000."
                 )
 
     report = {
