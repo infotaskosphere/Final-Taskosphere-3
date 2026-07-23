@@ -1,5 +1,16 @@
 import api from '@/lib/api';
 
+// ─── Short-lived result cache ──────────────────────────────────────────────
+// /reports/validation-engine is expensive — with companyId='' it re-syncs
+// and re-validates every company's book sequentially on the backend. Several
+// pages (Journal Entries, Extended Reports, Accounting Reports) all call
+// this on mount/tab-switch, so without a cache, simply navigating back and
+// forth to Journal Entries re-runs a full all-books ledger rebuild every
+// single time. Cache keeps repeat calls within the TTL instant; pass
+// { force: true } (e.g. from an explicit "Refresh" button) to bypass it.
+const _cache = new Map(); // key: companyId||'__all__' -> { data, ts }
+const CACHE_TTL_MS = 60_000;
+
 /**
  * Re-syncs every invoice/bill/payment into the ledger and runs the
  * consistency engine (Revenue=Collections+Outstanding, TB Debits=Credits,
@@ -10,12 +21,19 @@ import api from '@/lib/api';
  * via GET /reports/validation-engine.
  *
  * @param {string} companyId - pass '' to run across every book (all companies).
+ * @param {{force?: boolean}} opts - pass force:true to bypass the cache and re-run.
  * @returns {Promise<object>} validation report (or { books: [...] } when companyId is '').
  */
-export async function runVerifyAndFix(companyId = '') {
+export async function runVerifyAndFix(companyId = '', { force = false } = {}) {
+  const key = companyId || '__all__';
+  const cached = _cache.get(key);
+  if (!force && cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+    return cached.data;
+  }
   const { data } = await api.get('/reports/validation-engine', {
     params: companyId ? { company_id: companyId } : {},
   });
+  _cache.set(key, { data, ts: Date.now() });
   return data;
 }
 
