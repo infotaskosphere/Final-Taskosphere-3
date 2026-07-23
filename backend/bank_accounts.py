@@ -31,6 +31,7 @@ Suspense Review workflow until it's reclassified to its real head.
 """
 
 import re
+import math
 import uuid
 import base64
 from io import BytesIO
@@ -340,6 +341,23 @@ def _parse_amount(val) -> float:
         return 0.0
 
 
+def _clean_balance(val):
+    """Sanitize an AI-extracted running balance (statement's own
+    'balance_after' column). Unlike debit/credit, this value isn't run
+    through _parse_amount() at the call sites below, so a malformed or
+    non-numeric value from the AI extraction (e.g. a stray "NaN" token,
+    an unparsable string) could otherwise reach the DB unchanged and later
+    blow up JSON serialization when a report reads it back as a float.
+    Returns None (no known balance for this row) if val is missing or
+    doesn't resolve to a finite number; otherwise returns a finite float."""
+    if val is None:
+        return None
+    parsed = _parse_amount(val)
+    if not math.isfinite(parsed):
+        return None
+    return parsed
+
+
 def _parse_stmt_date(val) -> str:
     if val is None:
         return ""
@@ -553,7 +571,7 @@ async def _parse_pdf_statement_via_ai(contents: bytes, filename: str) -> List[di
                             "reference": str(r.get("reference", "")).strip(),
                             "debit": round(abs(_parse_amount(r.get("debit"))), 2),
                             "credit": round(abs(_parse_amount(r.get("credit"))), 2),
-                            "balance_after": r.get("balance_after"),
+                            "balance_after": _clean_balance(r.get("balance_after")),
                         })
                 except Exception as page_err:
                     import logging
@@ -618,7 +636,7 @@ async def _parse_pdf_statement_via_ai(contents: bytes, filename: str) -> List[di
             "reference": str(r.get("reference", "")).strip(),
             "debit": round(abs(_parse_amount(r.get("debit"))), 2),
             "credit": round(abs(_parse_amount(r.get("credit"))), 2),
-            "balance_after": r.get("balance_after"),
+            "balance_after": _clean_balance(r.get("balance_after")),
         })
     return out
 
