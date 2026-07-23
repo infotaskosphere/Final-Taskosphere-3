@@ -89,6 +89,44 @@ async def _invoice_totals(company_id: str) -> Dict[str, float]:
     }
 
 
+async def _revenue_culprits(company_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+    """Pinpoint which invoice(s) are breaking Revenue = Collections + Outstanding.
+
+    The aggregate check in `_check()` only tells you the totals disagree by
+    some rupee amount — it can't tell you *which* invoice caused it. Since
+    Revenue/Collections/Outstanding are summed straight from each invoice's
+    own grand_total / amount_paid / amount_due, any single invoice where
+    those three don't add up is, by construction, the source of some (or
+    all) of the aggregate drift. This walks every invoice and reports the
+    ones that don't reconcile individually, worst offenders first, so the
+    drift can be fixed at its source instead of just re-observed."""
+    q: dict = {"invoice_type": "tax_invoice", "status": {"$ne": "cancelled"}}
+    if company_id:
+        q["company_id"] = company_id
+    invs = await db.invoices.find(
+        q, {"_id": 0, "id": 1, "invoice_number": 1, "client_name": 1,
+            "grand_total": 1, "amount_paid": 1, "amount_due": 1}
+    ).to_list(200000)
+
+    culprits = []
+    for i in invs:
+        grand = _round2(i.get("grand_total"))
+        paid = _round2(i.get("amount_paid"))
+        due = _round2(i.get("amount_due"))
+        diff = _round2(grand - (paid + due))
+        if abs(diff) > TOLERANCE:
+            culprits.append({
+                "id": i.get("id"),
+                "invoice_number": i.get("invoice_number") or "(no number)",
+                "client_name": i.get("client_name") or "",
+                "grand_total": grand, "amount_paid": paid, "amount_due": due,
+                "diff": diff,
+            })
+
+    culprits.sort(key=lambda c: abs(c["diff"]), reverse=True)
+    return culprits[:limit]
+
+
 async def _trial_balance_snapshot(company_id: str) -> Dict[str, Any]:
     """Pull the account-level totals the validator needs directly from
     journal_lines / chart_of_accounts — the same data trial_balance()
@@ -310,6 +348,27 @@ async def run_validation_engine(company_id: str = "", auto_fix: bool = True) -> 
         healed = len(remaining) < len(mismatches)
         mismatches = remaining
 
+    # If Revenue = Collections + Outstanding is still broken after the
+    # rebuild, it's not something re-syncing can fix (the invoice's own
+    # fields don't add up) — name the specific invoice(s) so the mismatch
+    # can be resolved at the source instead of only being re-reported.
+    if any(m["rule"] == "Revenue = Collections + Outstanding" for m in mismatches):
+        culprits = await _revenue_culprits(company_id)
+        for m in mismatches:
+            if m["rule"] == "Revenue = Collections + Outstanding":
+                m["culprits"] = culprits
+                m["note"] = (
+                    f"{len(culprits)} invoice(s) have grand_total != amount_paid + "
+                    "amount_due individually — see 'culprits' for exact invoice IDs. "
+                    "Re-running Verify & Fix will not resolve this until those "
+                    "invoices' amount_paid/amount_due are corrected (e.g. by opening "
+                    "and re-saving them, or via Import if they came in from a legacy "
+                    "migration)." if culprits else
+                    "Aggregate mismatch persists but no single invoice is individually "
+                    "broken — likely several invoices each off by a sub-tolerance "
+                    "rounding amount that adds up. Check recently edited invoices."
+                )
+
     report = {
         "company_id": company_id,
         "checked_at": datetime.now(timezone.utc).isoformat(),
@@ -338,10 +397,25 @@ async def run_validation_engine(company_id: str = "", auto_fix: bool = True) -> 
 
 async def run_validation_engine_all_books() -> List[Dict[str, Any]]:
     """Run the engine across every book — used by the 'All Companies'
-    view and by the scheduled/health-check entry point."""
+    view and by the scheduled/health-check entry point.
+
+    Each book is isolated: if one book's reconcile/check pipeline throws
+    (bad data, a missing account, etc.), that book gets an error entry
+    instead of killing the request for every other book's report."""
     from backend.accounting_core import _all_book_ids
 
     reports = []
     for book_id in await _all_book_ids():
-        reports.append(await run_validation_engine(book_id))
+        try:
+            reports.append(await run_validation_engine(book_id))
+        except Exception as exc:
+            logger.exception(f"[reconciliation-event] book={book_id or '(default book)'} crashed")
+            reports.append({
+                "company_id": book_id,
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+                "passed": False,
+                "error": f"{type(exc).__name__}: {exc}",
+                "mismatches": [],
+                "healed_by_rebuild": False,
+            })
     return reports
