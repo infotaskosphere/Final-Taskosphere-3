@@ -12,6 +12,44 @@ from backend.models import User, AuditLog
 
 logger = logging.getLogger("dependencies")
 
+
+def personal_birthday_candidates(client: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Returns every entry on this client record that is a genuine PERSONAL
+    birthday — never a company's Date of Incorporation.
+
+    Some client-creation flows (MDS/MCA Excel import, the Lead→Client
+    conversion form, and the main Add/Edit Client form) mislabel their
+    "Date of Incorporation" input but still write the value into the
+    client's top-level `birthday` field. For an actual registered entity
+    (pvt_ltd, llp, partnership, huf, trust, public_ltd, section_8) that
+    field is therefore that company's incorporation date, not anyone's
+    birthday, and must never trigger a birthday popup, email, or WhatsApp
+    wish. A "proprietor" client is the one exception — a sole
+    proprietorship has no legal identity separate from its owner, so its
+    top-level `birthday` genuinely is that person's birthday.
+
+    Contact persons (directors/partners/trustees) are always real
+    individuals, so their birthdays are always included regardless of the
+    parent client's type.
+    """
+    candidates: List[Dict[str, Any]] = []
+    if (client.get("client_type") or "").strip().lower() == "proprietor" and client.get("birthday"):
+        candidates.append({
+            "name": client.get("company_name") or "Valued Client",
+            "phone": client.get("phone"),
+            "email": client.get("email"),
+            "birthday": client["birthday"],
+        })
+    for cp in client.get("contact_persons") or []:
+        if cp.get("birthday"):
+            candidates.append({
+                "name": cp.get("name") or client.get("company_name") or "Friend",
+                "phone": cp.get("phone"),
+                "email": cp.get("email"),
+                "birthday": cp["birthday"],
+            })
+    return candidates
+
 # ==========================================================
 # ENVIRONMENT & DATABASE (MOCK OR REAL)
 # ==========================================================
