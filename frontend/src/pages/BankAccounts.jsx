@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import {
   Landmark, Plus, UploadCloud, RefreshCw, CheckCircle2, AlertTriangle, AlertCircle, Sparkles, Check,
   Trash2, Link2, Unlink, X, ChevronRight, Search, Edit3, Eye, History, Ban, BookOpen,
+  ShieldCheck, FileCheck2,
 } from 'lucide-react';
 import GifLoader, { MiniLoader, ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
@@ -11,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext.jsx';
@@ -18,6 +20,7 @@ import RequestAccessGate from '@/components/RequestAccessGate.jsx';
 import { mirrorBankToSettings, bankFromAccount } from '@/lib/bankSync';
 import { GuidanceNote } from '@/components/ui/GuidanceNote.jsx';
 import { useNavigate } from 'react-router-dom';
+import ExistingRecordsPanel from '@/components/ExistingRecordsPanel.jsx';
 
 const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2', emeraldGreen: '#1FAF5A', amber: '#F59E0B', coral: '#FF6B6B' };
 const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
@@ -176,6 +179,10 @@ function BankAccountsInner() {
   // Futuristic AI Copilot & Fast Local Feed Search States
   const [txnSearchText, setTxnSearchText] = useState('');
   const [isAutoMatching, setIsAutoMatching] = useState(false);
+
+  // ─── Pre-upload duplicate check + friendlier drop zone ────────────────
+  const [showExistingRecords, setShowExistingRecords] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
 
   // Helper to explain WHY an invoice has been suggested
   const getScoreReason = (txn, inv) => {
@@ -372,6 +379,28 @@ function BankAccountsInner() {
       setProgress({ ...steps[i], step: i + 1, total: steps.length });
     }, 1200);
     return () => clearInterval(timer);
+  };
+
+  const fmtFileSize = (bytes) => {
+    if (!bytes && bytes !== 0) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true); };
+  const handleDragLeave = (e) => { e.preventDefault(); setIsDragging(false); };
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const dropped = e.dataTransfer?.files?.[0];
+    if (!dropped) return;
+    const ext = (dropped.name.split('.').pop() || '').toLowerCase();
+    if (!['csv', 'xlsx', 'xls', 'pdf'].includes(ext)) {
+      toast.error('Unsupported file type — upload a CSV, XLSX, or PDF statement.');
+      return;
+    }
+    setFile(dropped);
   };
 
   const handleUpload = async () => {
@@ -952,22 +981,83 @@ function BankAccountsInner() {
             ) : (
               <>
                 <div className={`rounded-3xl border shadow-sm p-5 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="h-10 w-10 rounded-xl flex items-center justify-center text-white" style={{ background: COLORS.mediumBlue }}>
-                      <UploadCloud className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <h2 className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Upload statement — {selected.bank_name}</h2>
-                      <p className="text-xs text-slate-400">CSV, XLSX, or PDF exports. Large PDFs auto-batch (3 pages/req, parallel).</p>
+                  <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="h-10 w-10 rounded-xl flex items-center justify-center text-white shrink-0" style={{ background: COLORS.mediumBlue }}>
+                        <UploadCloud className="h-5 w-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <h2 className={`font-bold truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Upload statement — {selected.bank_name}</h2>
+                        <p className="text-xs text-slate-400">CSV, XLSX, or PDF exports. Large PDFs auto-batch (3 pages/req, parallel).</p>
+                      </div>
                     </div>
                   </div>
-                  <div className={`border-2 border-dashed rounded-2xl p-5 text-center ${isDark ? 'border-slate-700 bg-slate-900/60' : 'border-blue-100 bg-blue-50/60'}`}>
+
+                  {/* Duplicate-avoidance banner — surfaces what's already on file
+                      (from the Invoicing/Purchases cache loaded for this company)
+                      so the user can confirm nothing gets booked twice before
+                      reading a statement in. */}
+                  {(() => {
+                    const openSales = invoiceCache.filter(r => !r.isPurchase && !['paid', 'cancelled'].includes((r.status || '').toLowerCase()));
+                    const openPurchases = invoiceCache.filter(r => r.isPurchase && (r.payment_status || 'unpaid').toLowerCase() !== 'paid');
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => setShowExistingRecords(true)}
+                        className={`w-full mb-4 rounded-2xl border px-4 py-3 flex items-center gap-3 text-left transition-all hover:shadow-md ${
+                          isDark ? 'bg-emerald-950/20 border-emerald-800/40 hover:bg-emerald-950/30' : 'bg-emerald-50/70 border-emerald-200 hover:bg-emerald-50'
+                        }`}
+                      >
+                        <div className="h-9 w-9 rounded-xl flex items-center justify-center text-white shrink-0" style={{ background: COLORS.emeraldGreen }}>
+                          <ShieldCheck className="h-4.5 w-4.5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className={`text-sm font-bold ${isDark ? 'text-emerald-300' : 'text-emerald-800'}`}>
+                            {invoiceLoading ? 'Checking existing records…' : `${openSales.length} open sale${openSales.length === 1 ? '' : 's'} · ${openPurchases.length} open purchase${openPurchases.length === 1 ? '' : 's'} already on file`}
+                          </p>
+                          <p className={`text-[11px] ${isDark ? 'text-emerald-400/80' : 'text-emerald-700/80'}`}>Review before uploading — matching statement lines link to these automatically, so nothing is entered twice.</p>
+                        </div>
+                        <Badge variant="outline" className={`shrink-0 text-[10px] ${isDark ? 'border-emerald-700 text-emerald-300' : 'border-emerald-300 text-emerald-700'}`}>Review</Badge>
+                      </button>
+                    );
+                  })()}
+
+                  <div
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    className={`border-2 border-dashed rounded-2xl p-6 text-center transition-all ${
+                      isDragging
+                        ? (isDark ? 'border-blue-400 bg-blue-950/40 scale-[1.01]' : 'border-blue-400 bg-blue-100/60 scale-[1.01]')
+                        : (isDark ? 'border-slate-700 bg-slate-900/60' : 'border-blue-100 bg-blue-50/60')
+                    }`}
+                  >
                     <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls,.pdf" className="hidden" onChange={e => setFile(e.target.files?.[0] || null)} />
-                    <UploadCloud className="h-9 w-9 mx-auto mb-3" style={{ color: COLORS.mediumBlue }} />
-                    <p className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{file ? file.name : 'Choose statement file'}</p>
+                    {!file ? (
+                      <>
+                        <UploadCloud className="h-9 w-9 mx-auto mb-3" style={{ color: COLORS.mediumBlue }} />
+                        <p className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Drag &amp; drop your statement here</p>
+                        <p className="text-xs text-slate-400 mt-1">or</p>
+                        <div className="mt-3">
+                          <Button type="button" variant="outline" onClick={() => fileRef.current?.click()} className="rounded-xl">Browse files</Button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className={`flex items-center gap-3 rounded-xl p-3 mb-1 text-left ${isDark ? 'bg-slate-800 border border-slate-700' : 'bg-white border border-slate-200'}`}>
+                        <div className="h-10 w-10 rounded-lg flex items-center justify-center text-white shrink-0" style={{ background: COLORS.mediumBlue }}>
+                          <FileCheck2 className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{file.name}</p>
+                          <p className="text-[11px] text-slate-400">{fmtFileSize(file.size)} · {(file.name.split('.').pop() || '').toUpperCase()}</p>
+                        </div>
+                        <button type="button" onClick={() => { setFile(null); if (fileRef.current) fileRef.current.value = ''; }} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 shrink-0">
+                          <X className="h-4 w-4 text-slate-400" />
+                        </button>
+                      </div>
+                    )}
                     <div className="mt-4 flex justify-center gap-2">
-                      <Button type="button" variant="outline" onClick={() => fileRef.current?.click()} className="rounded-xl">Browse</Button>
-                      {file && <Button type="button" variant="ghost" onClick={() => { setFile(null); if (fileRef.current) fileRef.current.value = ''; }} className="rounded-xl"><X className="h-4 w-4" /></Button>}
+                      {file && <Button type="button" variant="outline" onClick={() => fileRef.current?.click()} className="rounded-xl">Change file</Button>}
                       <Button onClick={handleUpload} disabled={uploading || !file} className="rounded-xl text-white" style={{ background: COLORS.deepBlue }}>
                         {uploading ? <MiniLoader height={18} /> : 'Read & Match'}
                       </Button>
@@ -1573,6 +1663,15 @@ function BankAccountsInner() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <ExistingRecordsPanel
+        open={showExistingRecords}
+        onOpenChange={setShowExistingRecords}
+        companyId={selected?.company_id || ''}
+        isDark={isDark}
+        title="Existing sale & purchase records"
+        description="Everything already booked for this company, before you read in a new statement. A statement line that matches one of these will link to it automatically — nothing gets entered twice."
+      />
     </div>
   );
 }
