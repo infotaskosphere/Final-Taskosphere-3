@@ -1929,23 +1929,90 @@ async def manual_reconcile_transaction_api(
 ):
     """
     Triggers manual reconciliation, posting necessary ledger updates and ML feedback.
+
+    NOTE: this used to delegate to backend.bank_ai.reconciliation_engine.
+    ReconciliationEngine.manual_reconcile, a legacy module that (a) looked the
+    transaction up in `bank_transaction_history` — a collection nothing in the
+    live app writes to, so real transactions were never found — and (b) when it
+    did post, set invoice.status="paid" without updating amount_paid/amount_due
+    and tagged the journal entry with a source the invoice-sync engine doesn't
+    recognize as "already settled." That caused the sync job to later post a
+    SECOND Dr Bank / Cr Accounts Receivable entry for the same receipt, which
+    Verify & Fix could never repair (it can only rebuild entries it created
+    itself). This now posts through the same guarded, single write path
+    (_auto_post_for_match) that /bank-accounts/run-ai-auto-match already uses,
+    so there is exactly one journal entry per receipt and the invoice's
+    amount_paid/amount_due/status stay in sync with it.
     """
     if not _perm_view_bank(current_user):
         raise HTTPException(403, "Access denied.")
-    
-    from backend.bank_ai.reconciliation_engine import ReconciliationEngine
-    res = await ReconciliationEngine.manual_reconcile(
-        bank_transaction_id=txn_id,
-        matched_record_id=payload.matched_record_id,
-        matched_record_type=payload.matched_record_type,
-        category=payload.category,
-        coa_account_id=payload.coa_account_id,
-        company_id=payload.company_id,
-        user_id=current_user.id
+
+    txn = await db.bank_transactions.find_one({"id": txn_id}, {"_id": 0})
+    if not txn:
+        raise HTTPException(404, "Transaction not found.")
+
+    company_id = payload.company_id or txn.get("company_id", "")
+    match: Optional[dict] = None
+    matched_label = None
+
+    if payload.matched_record_type == "invoice" and payload.matched_record_id:
+        inv = await db.invoices.find_one({"id": payload.matched_record_id}, {"_id": 0})
+        if not inv:
+            raise HTTPException(404, "Matched invoice not found.")
+        matched_label = f"Invoice #{inv.get('invoice_no', '')} - {inv.get('client_name', '')}"
+        match = {
+            "type": "sale", "id": inv["id"],
+            "label": inv.get("client_name") or inv.get("invoice_no") or "Sale invoice",
+            "grand_total": float(inv.get("grand_total") or 0),
+        }
+    elif payload.matched_record_type in ("bill", "purchase") and payload.matched_record_id:
+        bill = await db.purchase_invoices.find_one({"id": payload.matched_record_id}, {"_id": 0})
+        if not bill:
+            raise HTTPException(404, "Matched purchase bill not found.")
+        matched_label = f"Bill #{bill.get('invoice_no', '')} - {bill.get('supplier_name', '')}"
+        match = {
+            "type": "purchase", "id": bill["id"],
+            "label": bill.get("supplier_name") or bill.get("invoice_no") or "Purchase invoice",
+            "grand_total": float(bill.get("grand_total") or 0),
+        }
+    elif payload.coa_account_id:
+        acct = await db.chart_of_accounts.find_one({"id": payload.coa_account_id}, {"_id": 0})
+        if not acct:
+            raise HTTPException(404, "Ledger account not found.")
+        acct_type = acct.get("type") if acct.get("type") in (
+            "expense", "suspense", "asset", "liability", "revenue"
+        ) else "expense"
+        matched_label = acct.get("name", "Account")
+        match = {"type": acct_type, "id": acct["id"], "label": acct.get("name", "Account"), "company_id": company_id}
+    else:
+        raise HTTPException(400, "Provide either matched_record_id/matched_record_type or coa_account_id.")
+
+    entry_id = await _auto_post_for_match(company_id, txn, match, current_user.id)
+    if not entry_id:
+        raise HTTPException(
+            409,
+            "Could not post this match — the invoice/bill may already be settled by a "
+            "different bank transaction. Check Bank Accounts \u2192 unmatched transactions."
+        )
+
+    await db.bank_transactions.update_one(
+        {"id": txn_id},
+        {"$set": {
+            "matched_type": match["type"], "matched_id": match["id"],
+            "matched_label": matched_label, "journal_entry_id": entry_id,
+            "pending_approval": False,
+        }},
     )
-    if res.get("status") == "error":
-        raise HTTPException(400, res["message"])
-    return res
+
+    # Reinforcement learning feedback — unchanged behavior from before.
+    if payload.category and txn.get("description"):
+        import re as _re
+        pattern = _re.sub(r"\d+", "", txn.get("description", "")).strip()[:30]
+        if len(pattern) > 5:
+            from backend.bank_ai.bank_storage import BankStorage
+            await BankStorage.update_reinforcement_feedback(pattern, payload.category, +1)
+
+    return {"status": "success", "message": "Transaction reconciled.", "journal_entry_id": entry_id}
 
 
 @router.get("/bank-transactions/{txn_id}/audit-trail")
