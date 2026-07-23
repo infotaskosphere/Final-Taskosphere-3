@@ -523,10 +523,12 @@ function AccountingReportsInner() {
   // a plain refetch) and reports what it fixed vs. what still needs a
   // manual look — see backend/accounting_ai/reconciliation_validator.py.
   const [verifying, setVerifying] = useState(false);
+  const [validationReport, setValidationReport] = useState(null);
   const handleVerifyAndRefresh = async () => {
     setVerifying(true);
     try {
       const summary = await runVerifyAndFix(companyId);
+      setValidationReport(summary);
       const { variant, title, text } = describeValidationResult(summary);
       toast[variant === 'warning' ? 'warning' : 'success'](title, { description: text });
       await fetchAll();
@@ -536,6 +538,18 @@ function AccountingReportsInner() {
       setVerifying(false);
     }
   };
+
+  // /reports/validation-engine returns either a single report (company_id set)
+  // or { books: [...] } (all companies) — normalize to a flat list either way
+  // so the Fix Errors tab can render both shapes the same way.
+  const validationBooks = useMemo(() => {
+    if (!validationReport) return [];
+    return Array.isArray(validationReport.books) ? validationReport.books : [validationReport];
+  }, [validationReport]);
+  const validationMismatchCount = useMemo(
+    () => validationBooks.reduce((sum, b) => sum + (b?.mismatches?.length || 0), 0),
+    [validationBooks]
+  );
 
   const fetchCompanies = async () => {
     try {
@@ -920,12 +934,20 @@ function AccountingReportsInner() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid grid-cols-5 w-full h-auto min-h-11 bg-slate-100 dark:bg-slate-800 rounded-xl p-1 gap-1 border border-slate-200/50 dark:border-slate-700/50">
+        <TabsList className="grid grid-cols-6 w-full h-auto min-h-11 bg-slate-100 dark:bg-slate-800 rounded-xl p-1 gap-1 border border-slate-200/50 dark:border-slate-700/50">
           <TabsTrigger value="trial-balance" className="h-auto min-h-9 py-1.5 text-[10px] xs:text-[11px] sm:text-xs md:text-sm font-semibold rounded-lg transition-all whitespace-normal break-words leading-tight flex items-center justify-center text-center px-1 data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-slate-900 dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:text-white">Trial Balance</TabsTrigger>
           <TabsTrigger value="pnl" className="h-auto min-h-9 py-1.5 text-[10px] xs:text-[11px] sm:text-xs md:text-sm font-semibold rounded-lg transition-all whitespace-normal break-words leading-tight flex items-center justify-center text-center px-1 data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-slate-900 dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:text-white">Profit &amp; Loss</TabsTrigger>
           <TabsTrigger value="balance-sheet" className="h-auto min-h-9 py-1.5 text-[10px] xs:text-[11px] sm:text-xs md:text-sm font-semibold rounded-lg transition-all whitespace-normal break-words leading-tight flex items-center justify-center text-center px-1 data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-slate-900 dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:text-white">Balance Sheet</TabsTrigger>
           <TabsTrigger value="party-ledger" className="h-auto min-h-9 py-1.5 text-[10px] xs:text-[11px] sm:text-xs md:text-sm font-semibold rounded-lg transition-all whitespace-normal break-words leading-tight flex items-center justify-center text-center px-1 data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-slate-900 dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:text-white">Party Ledger</TabsTrigger>
           <TabsTrigger value="mis-compliance" className="h-auto min-h-9 py-1.5 text-[10px] xs:text-[11px] sm:text-xs md:text-sm font-semibold rounded-lg transition-all whitespace-normal break-words leading-tight flex items-center justify-center text-center px-1 data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-slate-900 dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:text-white">MIS &amp; Compliance</TabsTrigger>
+          <TabsTrigger value="fix-errors" className="h-auto min-h-9 py-1.5 text-[10px] xs:text-[11px] sm:text-xs md:text-sm font-semibold rounded-lg transition-all whitespace-normal break-words leading-tight flex items-center justify-center text-center px-1 gap-1 data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-slate-900 dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:text-white">
+            Fix Errors
+            {validationMismatchCount > 0 && (
+              <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-white text-[9px] font-bold leading-none">
+                {validationMismatchCount}
+              </span>
+            )}
+          </TabsTrigger>
         </TabsList>
 
         {/* ── Trial Balance ── */}
@@ -1350,6 +1372,115 @@ function AccountingReportsInner() {
               )}
             </>
           )}
+        </TabsContent>
+
+        {/* ── Fix Errors (Verify & Fix results) ── */}
+        <TabsContent value="fix-errors" className="mt-4">
+          <ReportCard title="Ledger Verification — Fix Errors" isDark={isDark}>
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <p className={`text-xs max-w-xl ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                Checks Revenue = Collections + Outstanding, Trial Balance Debits = Credits, Accounts
+                Receivable = Outstanding, Customer Ledger = Accounts Receivable, Sales Ledger = Invoice
+                Revenue, GST buckets = Revenue, and Bank GL = Real Bank Balance — then re-syncs every
+                invoice/bill/payment once and re-checks before reporting a real mismatch.
+              </p>
+              <Button
+                onClick={handleVerifyAndRefresh}
+                disabled={verifying}
+                size="sm" variant="outline"
+                className="h-8 text-xs font-semibold shrink-0"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 mr-1 ${verifying ? 'animate-spin' : ''}`} /> {verifying ? 'Verifying…' : 'Run Verify & Fix'}
+              </Button>
+            </div>
+
+            {!validationReport ? (
+              <p className="text-sm text-slate-400 py-6 text-center">
+                No verification has been run yet for this period — click "Run Verify &amp; Fix" above.
+              </p>
+            ) : (
+              <div className="space-y-4">
+                {validationBooks.map((book, idx) => (
+                  <div
+                    key={book?.company_id || idx}
+                    className={`rounded-2xl border p-4 ${isDark ? 'bg-slate-900/40 border-slate-700' : 'bg-slate-50 border-slate-200'}`}
+                  >
+                    {book?.error ? (
+                      <div className="flex items-start gap-2 text-rose-500">
+                        <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                        <div>
+                          <p className="text-sm font-semibold">Check failed for this book</p>
+                          <p className="text-xs mt-1 break-words">{book.error}</p>
+                        </div>
+                      </div>
+                    ) : book?.passed ? (
+                      <div className="flex items-center gap-2 text-emerald-500">
+                        <CheckCircle2 className="h-4 w-4 shrink-0" />
+                        <p className="text-sm font-semibold">
+                          All checks passed{book.healed_by_rebuild ? ' — fixed automatically by re-sync' : ''}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 text-amber-500">
+                          <AlertTriangle className="h-4 w-4 shrink-0" />
+                          <p className="text-sm font-semibold">
+                            {book?.mismatches?.length || 0} discrepanc{(book?.mismatches?.length || 0) === 1 ? 'y' : 'ies'} found
+                            {book?.healed_by_rebuild ? ' — some fixed automatically by re-sync, see remaining below' : ''}
+                          </p>
+                        </div>
+                        <div className="space-y-2">
+                          {(book?.mismatches || []).map((m, i) => (
+                            <div
+                              key={i}
+                              className={`rounded-xl border p-3 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-amber-50 border-amber-200'}`}
+                            >
+                              <p className={`text-xs font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{m.rule}</p>
+                              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs font-mono">
+                                <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>
+                                  Expected: <b className={isDark ? 'text-slate-200' : 'text-slate-800'}>{fmtC(m.expected)}</b>
+                                </span>
+                                <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>
+                                  Actual: <b className={isDark ? 'text-slate-200' : 'text-slate-800'}>{fmtC(m.actual)}</b>
+                                </span>
+                                <span className="text-rose-500 font-semibold">Diff: {fmtC(m.diff)}</span>
+                              </div>
+                              {m.note && (
+                                <p className={`text-[11px] mt-2 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{m.note}</p>
+                              )}
+                              {Array.isArray(m.culprits) && m.culprits.length > 0 && (
+                                <div className="mt-2 border-t pt-2" style={{ borderColor: isDark ? '#334155' : '#fde68a' }}>
+                                  <p className={`text-[10px] font-bold uppercase tracking-wide mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                    Invoices to check
+                                  </p>
+                                  <ul className="space-y-1">
+                                    {m.culprits.map((c) => (
+                                      <li key={c.id} className="text-[11px] flex items-center justify-between gap-2">
+                                        <span className={`truncate ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                                          {c.invoice_number} — {c.client_name}
+                                        </span>
+                                        <span className="font-mono text-rose-500 shrink-0">{fmtC(c.diff)}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {book?.checked_at && (
+                      <p className={`text-[10px] mt-3 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                        Last checked: {new Date(book.checked_at).toLocaleString('en-IN')}
+                        {validationBooks.length > 1 ? ` — Company: ${book.company_id || '(default book)'}` : ''}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </ReportCard>
         </TabsContent>
 
       </Tabs>
