@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { toast } from 'sonner';
-import { NotebookPen, Plus, RefreshCw, Trash2, X, CheckSquare, Square, XCircle, Building2, ChevronLeft, ChevronRight, Pencil, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { NotebookPen, Plus, RefreshCw, Trash2, X, CheckSquare, Square, XCircle, Building2, ChevronLeft, ChevronRight, Pencil, AlertTriangle, ShieldCheck, FileDown, FileSpreadsheet, FileText } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import ExistingRecordsPanel from '@/components/ExistingRecordsPanel.jsx';
 import GifLoader, { MiniLoader, ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
@@ -9,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
@@ -44,6 +48,7 @@ function JournalEntriesInner() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [exportingReport, setExportingReport] = useState(false);
 
   // Edit state — only manual entries can be edited; auto-posted entries
   // must be corrected at the source document (invoice/bill/payment).
@@ -378,6 +383,134 @@ function JournalEntriesInner() {
     }
   };
 
+  // ── Full report export (Excel / PDF) ────────────────────────────────────
+  // Pulls every journal entry matching the current company filter (not just
+  // the current page) by walking the paginated /journal-entries endpoint at
+  // its max page_size, then flattens each entry's Dr/Cr lines into rows.
+  const fetchAllEntriesForExport = async () => {
+    const size = 500;
+    let pg = 1;
+    let totalPagesLocal = 1;
+    const all = [];
+    do {
+      const { data } = await api.get('/journal-entries', { params: { company_id: companyId, page: pg, page_size: size } });
+      all.push(...(data?.entries || []));
+      totalPagesLocal = data?.total_pages || 1;
+      pg += 1;
+    } while (pg <= totalPagesLocal);
+    return all;
+  };
+
+  const buildReportRows = (allEntries) => {
+    const rows = [];
+    for (const e of allEntries) {
+      const party = e.customer_name || e.vendor_name || '';
+      const base = {
+        date: fmtDate(e.entry_date),
+        voucher: e.voucher_no || '',
+        invoice: e.invoice_no || '',
+        narration: e.narration || 'No narration',
+        source: SOURCE_LABEL[e.source] || e.source || '',
+        party,
+      };
+      const lines = e.lines && e.lines.length ? e.lines : [{ account_name: '', debit: e.total_debit, credit: '' }];
+      lines.forEach((l) => {
+        rows.push({
+          ...base,
+          account: l.account_name || '',
+          debit: Number(l.debit || 0),
+          credit: Number(l.credit || 0),
+        });
+      });
+    }
+    return rows;
+  };
+
+  const handleExportReport = async (format = 'excel') => {
+    setExportingReport(true);
+    try {
+      const allEntries = await fetchAllEntriesForExport();
+      if (!allEntries.length) {
+        toast.error('No journal entries to export for the current filter');
+        return;
+      }
+      const rows = buildReportRows(allEntries);
+      const activeCompany = companies.find((c) => c.id === companyId);
+      const scopeLabel = activeCompany ? activeCompany.name : 'All Companies';
+      const dateStr = format === 'pdf' ? null : new Date().toISOString().slice(0, 10);
+      const fileBase = `Journal_Entries_Report_${(activeCompany?.name || 'AllCompanies').replace(/[^a-z0-9]+/gi, '_')}`;
+
+      if (format === 'excel') {
+        const header = ['Date', 'Voucher No', 'Invoice/Bill No', 'Narration', 'Source', 'Party', 'Ledger Account', 'Debit (₹)', 'Credit (₹)'];
+        const aoa = [header, ...rows.map(r => [r.date, r.voucher, r.invoice, r.narration, r.source, r.party, r.account, r.debit || '', r.credit || ''])];
+        const totalDebit = rows.reduce((s, r) => s + (r.debit || 0), 0);
+        const totalCredit = rows.reduce((s, r) => s + (r.credit || 0), 0);
+        aoa.push([]);
+        aoa.push(['', '', '', '', '', '', 'TOTAL', totalDebit, totalCredit]);
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        ws['!cols'] = [{ wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 40 }, { wch: 10 }, { wch: 22 }, { wch: 26 }, { wch: 14 }, { wch: 14 }];
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Journal Entries');
+        XLSX.writeFile(wb, `${fileBase}_${dateStr}.xlsx`);
+        toast.success('Journal entries exported to Excel');
+      } else {
+        const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+        const W = doc.internal.pageSize.getWidth();
+        const H = doc.internal.pageSize.getHeight();
+        const genDate = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
+
+        doc.setFillColor(13, 59, 102);
+        doc.rect(0, 0, W, 22, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.text('JOURNAL ENTRIES REPORT', 12, 10);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.text(`${scopeLabel}  ·  Generated ${genDate}  ·  ${allEntries.length} entries`, 12, 17);
+
+        autoTable(doc, {
+          startY: 26,
+          head: [['Date', 'Voucher', 'Narration', 'Source', 'Party', 'Ledger Account', 'Debit (₹)', 'Credit (₹)']],
+          body: rows.map(r => [r.date, r.voucher || r.invoice || '—', r.narration, r.source, r.party || '—', r.account, r.debit ? r.debit.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '', r.credit ? r.credit.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '']),
+          styles: { fontSize: 7.5, cellPadding: 1.6, overflow: 'linebreak' },
+          headStyles: { fillColor: [31, 111, 178], textColor: [255, 255, 255], fontStyle: 'bold' },
+          alternateRowStyles: { fillColor: [248, 250, 252] },
+          columnStyles: {
+            0: { cellWidth: 22 }, 1: { cellWidth: 28 }, 2: { cellWidth: 70 }, 3: { cellWidth: 20 },
+            4: { cellWidth: 40 }, 5: { cellWidth: 48 }, 6: { cellWidth: 25, halign: 'right' }, 7: { cellWidth: 25, halign: 'right' },
+          },
+          margin: { left: 12, right: 12 },
+          didDrawPage: () => {
+            const pageCount = doc.internal.getNumberOfPages();
+            const curPage = doc.internal.getCurrentPageInfo().pageNumber;
+            doc.setFontSize(7);
+            doc.setTextColor(100, 116, 139);
+            doc.text('Confidential — Journal Entries Report', 12, H - 4);
+            doc.text(`Page ${curPage} of ${pageCount}`, W - 12, H - 4, { align: 'right' });
+          },
+        });
+
+        const totalDebit = rows.reduce((s, r) => s + (r.debit || 0), 0);
+        const totalCredit = rows.reduce((s, r) => s + (r.credit || 0), 0);
+        const finalY = doc.lastAutoTable.finalY || 30;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.setTextColor(13, 59, 102);
+        doc.text(`Total Debit: ₹${totalDebit.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, W - 90, finalY + 8);
+        doc.text(`Total Credit: ₹${totalCredit.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, W - 90, finalY + 14);
+
+        doc.save(`${fileBase}.pdf`);
+        toast.success('Journal entries exported to PDF');
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to export journal entries report');
+    } finally {
+      setExportingReport(false);
+    }
+  };
+
   if (loading) return <ContentLoader />;
 
   // NOTE: DashboardLayout already applies page padding + max-width + background,
@@ -397,10 +530,13 @@ function JournalEntriesInner() {
               <p className="text-sm text-blue-100 mt-1 max-w-2xl">Every Purchase, Sale, and matched Bank transaction posts here automatically. Post manual entries for anything else.</p>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2 lg:justify-end items-center">
+          {/* Action grid — 4 columns × 2 rows so every control shares the exact
+              same width/height; each is tinted a different shade so the row
+              stays scannable at a glance (mirrors the Invoicing page style). */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full lg:w-[600px] xl:w-[660px] shrink-0">
             <Select value={companyId || '__all__'} onValueChange={onCompanyChange}>
-              <SelectTrigger className="h-10 w-[170px] bg-white/10 border-white/20 text-white rounded-full text-xs md:text-sm font-medium hover:bg-white/15 transition-all">
-                <Building2 className="h-3.5 w-3.5 mr-1.5 shrink-0" />
+              <SelectTrigger className="h-11 w-full bg-white/10 border-white/20 text-white rounded-xl text-xs sm:text-sm font-semibold hover:bg-white/20 transition-all backdrop-blur-sm gap-1.5 justify-center">
+                <Building2 className="h-4 w-4 shrink-0" />
                 <SelectValue placeholder="All Companies" />
               </SelectTrigger>
               <SelectContent>
@@ -408,16 +544,9 @@ function JournalEntriesInner() {
                 {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
               </SelectContent>
             </Select>
-            <Button 
-              onClick={handleDeleteAll} 
-              variant="outline" 
-              className="h-10 w-[170px] bg-white/10 border-white/20 text-white hover:bg-rose-600/30 hover:text-white hover:border-rose-400/30 rounded-full text-xs md:text-sm font-medium transition-all"
-            >
-              <Trash2 className="h-3.5 w-3.5 mr-1.5 shrink-0" />
-              Delete All
-            </Button>
+
             <Select value={String(pageSize)} onValueChange={onPageSizeChange}>
-              <SelectTrigger className="h-10 w-[130px] bg-white/10 border-white/20 text-white rounded-full text-xs md:text-sm font-medium hover:bg-white/15 transition-all">
+              <SelectTrigger className="h-11 w-full bg-sky-400/20 border-sky-300/30 text-white rounded-xl text-xs sm:text-sm font-semibold hover:bg-sky-400/30 transition-all backdrop-blur-sm justify-center">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -426,12 +555,50 @@ function JournalEntriesInner() {
                 <SelectItem value="100">100 / page</SelectItem>
               </SelectContent>
             </Select>
-            <Button onClick={() => setShowExistingRecords(true)} variant="outline" className="h-10 bg-white/10 border-white/20 text-white hover:bg-white/20 rounded-full text-xs md:text-sm font-medium transition-all"><ShieldCheck className="h-4 w-4 mr-1.5" /> Existing records</Button>
-            <Button onClick={() => setShowNew(true)} variant="outline" className="h-10 bg-white/10 border-white/20 text-white hover:bg-white/20 rounded-full text-xs md:text-sm font-medium transition-all"><Plus className="h-4 w-4 mr-1.5" /> New entry</Button>
-            <Button onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))} variant="outline" className="h-10 bg-white/10 border-white/20 text-white hover:bg-white/20 rounded-full text-xs md:text-sm font-medium transition-all">
-              {selectMode ? <><XCircle className="h-4 w-4 mr-1.5" /> Cancel select</> : <><CheckSquare className="h-4 w-4 mr-1.5" /> Select</>}
+
+            <Button onClick={() => setShowExistingRecords(true)} variant="outline" className="h-11 w-full bg-indigo-400/20 border-indigo-300/30 text-white hover:bg-indigo-400/30 rounded-xl text-xs sm:text-sm font-semibold backdrop-blur-sm transition-all gap-1.5">
+              <ShieldCheck className="h-4 w-4" /> Existing records
             </Button>
-            <Button onClick={handleRefresh} variant="outline" className="h-10 bg-white/10 border-white/20 text-white hover:bg-white/20 rounded-full text-xs md:text-sm font-medium transition-all"><RefreshCw className="h-4 w-4 mr-1.5" /> Refresh</Button>
+
+            <Button onClick={() => setShowNew(true)} variant="outline" className="h-11 w-full bg-emerald-400/25 border-emerald-300/40 text-white hover:bg-emerald-400/35 rounded-xl text-xs sm:text-sm font-semibold backdrop-blur-sm transition-all gap-1.5">
+              <Plus className="h-4 w-4" /> New entry
+            </Button>
+
+            <Button onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))} variant="outline" className="h-11 w-full bg-amber-400/20 border-amber-300/30 text-white hover:bg-amber-400/30 rounded-xl text-xs sm:text-sm font-semibold backdrop-blur-sm transition-all gap-1.5">
+              {selectMode ? <><XCircle className="h-4 w-4" /> Cancel select</> : <><CheckSquare className="h-4 w-4" /> Select</>}
+            </Button>
+
+            <Button onClick={handleRefresh} variant="outline" className="h-11 w-full bg-cyan-400/20 border-cyan-300/30 text-white hover:bg-cyan-400/30 rounded-xl text-xs sm:text-sm font-semibold backdrop-blur-sm transition-all gap-1.5">
+              <RefreshCw className="h-4 w-4" /> Refresh
+            </Button>
+
+            <Button
+              onClick={handleDeleteAll}
+              variant="outline"
+              className="h-11 w-full bg-rose-500/20 border-rose-300/30 text-white hover:bg-rose-500/35 hover:border-rose-400/40 rounded-xl text-xs sm:text-sm font-semibold backdrop-blur-sm transition-all gap-1.5"
+            >
+              <Trash2 className="h-4 w-4" /> Delete All
+            </Button>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  disabled={exportingReport}
+                  className="h-11 w-full bg-violet-400/20 border-violet-300/30 text-white hover:bg-violet-400/35 rounded-xl text-xs sm:text-sm font-semibold backdrop-blur-sm transition-all gap-1.5 disabled:opacity-60"
+                >
+                  <FileDown className="h-4 w-4" /> {exportingReport ? 'Exporting…' : 'Export Report'}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => handleExportReport('excel')} className="gap-2 cursor-pointer">
+                  <FileSpreadsheet className="h-4 w-4 text-emerald-600" /> Export as Excel
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExportReport('pdf')} className="gap-2 cursor-pointer">
+                  <FileText className="h-4 w-4 text-rose-600" /> Export as PDF
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </div>
