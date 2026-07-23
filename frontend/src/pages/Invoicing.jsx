@@ -5893,7 +5893,25 @@ function Invoicing() {
     // the console instead of silently showing wrong totals.
     const _mismatch = Math.round((total_revenue - (total_collected + total_outstanding)) * 100) / 100;
     if (Math.abs(_mismatch) > 0.05) {
+      // Find the actual offending invoice(s) instead of only logging the
+      // aggregate gap — since Revenue/Collections/Outstanding are each
+      // summed straight from grand_total/amount_paid/amount_due, any
+      // invoice where those three don't individually add up is, by
+      // construction, a source of the aggregate drift.
+      const _culprits = recognized
+        .map(i => {
+          const grand = num(i.grand_total);
+          const diff = round2(grand - (calcPaid(i) + calcDue(i)));
+          return { id: i.id, invoice_number: i.invoice_number || '(no number)', grand_total: grand, amount_paid: calcPaid(i), amount_due: calcDue(i), diff };
+        })
+        .filter(c => Math.abs(c.diff) > 0.05)
+        .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
       console.warn(`[accounting-reconciliation] Revenue (${total_revenue.toFixed(2)}) != Collections (${total_collected.toFixed(2)}) + Outstanding (${total_outstanding.toFixed(2)}), diff=${_mismatch}`);
+      if (_culprits.length) {
+        console.warn(`[accounting-reconciliation] ${_culprits.length} invoice(s) with grand_total != amount_paid + amount_due:`, _culprits);
+      } else {
+        console.warn('[accounting-reconciliation] No single invoice is individually broken — likely several invoices each off by a small rounding amount that adds up. Try Verify & Fix on Accounting Reports.');
+      }
     }
     return { total_revenue, total_outstanding, total_collected, total_gst, total_invoices, month_revenue, month_invoices, overdue_count, paid_count, draft_count, monthly_trend, top_clients };
   }, [invoices, companyFilter, yearFilter]);
