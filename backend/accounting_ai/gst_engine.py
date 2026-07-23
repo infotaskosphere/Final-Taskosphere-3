@@ -3,7 +3,7 @@ GST Engine — Decides and calculates GST types (CGST, SGST, IGST, Cess), Revers
 Performs deterministic tax split validation relative to company state vs vendor state.
 """
 
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 import logging
 
 logger = logging.getLogger("gst_engine")
@@ -112,5 +112,3 @@ class GSTEngine:
                 return False, "Invalid GST mix: CGST/SGST and IGST cannot both be non-zero"
 
         return True, "GST calculations are balanced and valid."
-class Optional:
-    pass
