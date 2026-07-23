@@ -40,6 +40,7 @@ from backend.accounting_extended import router as accounting_ext_router
 from backend.accounting_extended import create_accounting_extended_indexes
 from backend.bank_accounts import router as bank_accounts_router
 from backend.permission_governance import router as permission_governance_router
+from backend.security.rate_limiter import RateLimiter
 from backend.visits import router as visits_router
 from backend.leads import router as leads_router
 from backend.interviews import router as interviews_router
@@ -2179,6 +2180,28 @@ async def update_todo(
     return {"message": "Todo updated successfully"}
 
 
+async def _enforce_auth_rate_limit(request: Request, identifier: str, limit_per_minute: int = 10):
+    """
+    Throttles unauthenticated auth endpoints (login, self-register, OTP) by
+    client IP + the email/identifier being targeted, so a single attacker
+    can't brute-force passwords or OTP codes. Raises 429 if exceeded.
+    """
+    client_ip = request.client.host if request and request.client else "unknown"
+    key = f"auth:{client_ip}:{(identifier or '').lower()}"
+    try:
+        if await RateLimiter.is_rate_limited(key, limit_per_minute=limit_per_minute):
+            raise HTTPException(
+                status_code=429,
+                detail="Too many attempts. Please wait a minute and try again.",
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        # Fail open on infra errors (e.g. rate-limit store unavailable) —
+        # we don't want a DB hiccup to lock everyone out of login.
+        logger.warning("Rate limiter check failed; allowing request through.")
+
+
 # REGISTER Endpoint
 @api_router.post("/auth/register", response_model=Token)
 async def register(
@@ -2284,13 +2307,15 @@ async def register(
 
 
 @api_router.post("/auth/self-register", response_model=Token)
-async def self_register(user_data: UserCreate):
+async def self_register(user_data: UserCreate, request: Request):
     """
     Public self-registration endpoint — no auth token required.
     Role is always forced to 'staff' and status is always 'pending_approval'.
     An admin must approve the account before the user can log in.
     Used by the public /register page.
     """
+    await _enforce_auth_rate_limit(request, user_data.email, limit_per_minute=5)
+
     existing = await db.users.find_one({"email": user_data.email}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -2345,7 +2370,9 @@ async def self_register(user_data: UserCreate):
 
 
 @api_router.post("/auth/login", response_model=Token)
-async def login(credentials: UserLogin):
+async def login(credentials: UserLogin, request: Request):
+    await _enforce_auth_rate_limit(request, credentials.email, limit_per_minute=10)
+
     user = await db.users.find_one({"email": credentials.email}, {"_id": 0})
 
     if not user or not verify_password(credentials.password, user["password"]):
