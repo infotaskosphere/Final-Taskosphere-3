@@ -1,16 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { toast } from 'sonner';
-import { NotebookPen, Plus, RefreshCw, Trash2, X, CheckSquare, Square, XCircle, Building2, ChevronLeft, ChevronRight, Pencil } from 'lucide-react';
+import { NotebookPen, Plus, RefreshCw, Trash2, X, CheckSquare, Square, XCircle, Building2, ChevronLeft, ChevronRight, Pencil, AlertTriangle } from 'lucide-react';
 import GifLoader, { MiniLoader, ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
 import { GuidanceNote } from '@/components/ui/GuidanceNote.jsx';
+import { runVerifyAndFix } from '@/lib/verifyAndFixLedger';
 
 const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2', emeraldGreen: '#1FAF5A', amber: '#F59E0B', coral: '#FF6B6B' };
 const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
@@ -49,6 +51,14 @@ function JournalEntriesInner() {
   const [editLines, setEditLines] = useState([]);
   const [editSaving, setEditSaving] = useState(false);
 
+  // Which entries are the ones breaking a books-of-accounts check right
+  // now — powers the "Needs Attention" tab and the amber highlight below.
+  // Sourced from the same engine as Accounting Reports → Fix Errors
+  // (backend/accounting_ai/reconciliation_validator.py), so a duplicate or
+  // stray manual posting shows up here with the exact same reasoning.
+  const [validationReport, setValidationReport] = useState(null);
+  const [viewTab, setViewTab] = useState('all');
+
   const fetchCompanies = async () => {
     try {
       const { data } = await api.get('/companies/list');
@@ -81,13 +91,28 @@ function JournalEntriesInner() {
       setLoading(false);
     }
   };
-  useEffect(() => { fetchCompanies(); fetchAll({ companyId: '', page: 1, pageSize }); }, []);
+  // Best-effort: which entries are currently causing a mismatch. This
+  // never blocks or errors the page — if it fails, entries just render
+  // without highlighting instead of the page breaking.
+  const fetchFlagged = async (cid = companyId) => {
+    try {
+      const summary = await runVerifyAndFix(cid);
+      setValidationReport(summary);
+    } catch { /* non-fatal — highlighting is a bonus */ }
+  };
+
+  useEffect(() => {
+    fetchCompanies();
+    fetchAll({ companyId: '', page: 1, pageSize });
+    fetchFlagged('');
+  }, []);
 
   const onCompanyChange = (cid) => {
     const val = cid === '__all__' ? '' : cid;
     setCompanyId(val);
     setPage(1);
     fetchAll({ companyId: val, page: 1 });
+    fetchFlagged(val);
   };
 
   const onPageSizeChange = (size) => {
@@ -108,6 +133,29 @@ function JournalEntriesInner() {
     const credit = lines.reduce((s, l) => s + Number(l.credit || 0), 0);
     return { debit, credit, balanced: Math.abs(debit - credit) < 0.01 && debit > 0 };
   }, [lines]);
+
+  // Flatten { books: [...] } (all-companies) or a single report into
+  // entry_id -> { rules, note }. Only mismatch culprits with an entry_id
+  // are journal entries (invoice culprits use `id`/`invoice_number` and
+  // belong to Sales, not here) — see reconciliation_validator.py.
+  const flaggedMap = useMemo(() => {
+    const books = validationReport
+      ? (Array.isArray(validationReport.books) ? validationReport.books : [validationReport])
+      : [];
+    const map = {};
+    for (const book of books) {
+      for (const m of (book?.mismatches || [])) {
+        for (const c of (m.culprits || [])) {
+          if (!c.entry_id) continue;
+          if (!map[c.entry_id]) map[c.entry_id] = { rules: [], note: m.note || '' };
+          if (!map[c.entry_id].rules.includes(m.rule)) map[c.entry_id].rules.push(m.rule);
+        }
+      }
+    }
+    return map;
+  }, [validationReport]);
+  const flaggedCount = Object.keys(flaggedMap).length;
+  const visibleEntries = viewTab === 'flagged' ? entries.filter(e => flaggedMap[e.id]) : entries;
 
   const updateLine = (idx, patch) => {
     setLines(ls => ls.map((l, i) => i === idx ? { ...l, ...patch } : l));
@@ -142,6 +190,7 @@ function JournalEntriesInner() {
       (async () => {
         const { data } = await api.post('/journal-entries/resync', { company_id: companyId || undefined });
         await fetchAll();
+        fetchFlagged();
         return data;
       })(),
       {
@@ -171,6 +220,7 @@ function JournalEntriesInner() {
       setNarration('');
       setLines([emptyLine('Dr'), emptyLine('Cr')]);
       await fetchAll();
+      fetchFlagged();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to post journal entry');
     } finally {
@@ -184,6 +234,7 @@ function JournalEntriesInner() {
       await api.delete(`/journal-entries/${id}`);
       toast.success('Journal entry deleted');
       await fetchAll();
+      fetchFlagged();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to delete');
     }
@@ -241,6 +292,7 @@ function JournalEntriesInner() {
       toast.success('Journal entry updated');
       closeEdit();
       await fetchAll();
+      fetchFlagged();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to update journal entry');
     } finally {
@@ -276,6 +328,7 @@ function JournalEntriesInner() {
       }
       exitSelectMode();
       await fetchAll();
+      fetchFlagged();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Bulk delete failed');
     } finally {
@@ -315,6 +368,7 @@ function JournalEntriesInner() {
       
       setPage(1);
       await fetchAll({ page: 1 });
+      fetchFlagged();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to delete all journal entries');
     } finally {
@@ -381,6 +435,27 @@ function JournalEntriesInner() {
 
       <GuidanceNote pageKey="journal-entries" isDark={isDark} />
 
+      <Tabs value={viewTab} onValueChange={setViewTab} className="w-full">
+        <TabsList className="grid grid-cols-2 w-full max-w-md h-auto min-h-11 bg-slate-100 dark:bg-slate-800 rounded-xl p-1 gap-1 border border-slate-200/50 dark:border-slate-700/50">
+          <TabsTrigger value="all" className="h-auto min-h-9 py-1.5 text-xs sm:text-sm font-semibold rounded-lg transition-all data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-slate-900 dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:text-white">
+            All Entries
+          </TabsTrigger>
+          <TabsTrigger value="flagged" className="h-auto min-h-9 py-1.5 text-xs sm:text-sm font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-slate-900 dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:text-white">
+            Needs Attention
+            {flaggedCount > 0 && (
+              <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-white text-[9px] font-bold leading-none">
+                {flaggedCount}
+              </span>
+            )}
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+      {viewTab === 'flagged' && (
+        <p className={`text-xs -mt-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+          Entries on this page that are breaking a books-of-accounts check (see Accounting Reports → Fix Errors). Switch pages or the company filter above if you're looking for one that isn't here.
+        </p>
+      )}
+
       {selectMode && (
         <div className={`sticky top-2 z-10 rounded-2xl border shadow-sm px-4 py-3 flex items-center justify-between gap-3 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <button onClick={toggleSelectAll} className={`flex items-center gap-2 text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
@@ -406,13 +481,21 @@ function JournalEntriesInner() {
 
       <div className={`rounded-3xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <div className="divide-y" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
-          {entries.length === 0 ? (
+          {visibleEntries.length === 0 ? (
             <div className="py-20 text-center">
               <NotebookPen className="h-12 w-12 mx-auto text-slate-300 mb-3" />
-              <p className="text-sm font-semibold text-slate-400">No journal entries yet</p>
+              <p className="text-sm font-semibold text-slate-400">
+                {viewTab === 'flagged' ? 'No flagged entries on this page — nice!' : 'No journal entries yet'}
+              </p>
             </div>
-          ) : entries.map(e => (
-            <div key={e.id} className={`p-4 flex gap-3 ${selectMode && selectedIds.has(e.id) ? (isDark ? 'bg-blue-950/30' : 'bg-blue-50/60') : ''}`}>
+          ) : visibleEntries.map(e => {
+            const flag = flaggedMap[e.id];
+            const isManual = e.source === 'manual' || !e.source;
+            return (
+            <div
+              key={e.id}
+              className={`p-4 flex gap-3 ${selectMode && selectedIds.has(e.id) ? (isDark ? 'bg-blue-950/30' : 'bg-blue-50/60') : ''} ${flag ? (isDark ? 'bg-amber-950/20 border-l-4 border-amber-500' : 'bg-amber-50/70 border-l-4 border-amber-400') : ''}`}
+            >
               {selectMode && (
                 <button onClick={() => toggleSelected(e.id)} className="mt-0.5 flex-shrink-0">
                   {selectedIds.has(e.id)
@@ -431,6 +514,11 @@ function JournalEntriesInner() {
                           {e.customer_name || e.vendor_name}
                         </span>
                       )}
+                      {flag && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                          <AlertTriangle className="h-3 w-3" /> Causing a mismatch
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-slate-400 mt-1 flex flex-wrap gap-x-3">
                       <span>{fmtDate(e.entry_date)}</span>
@@ -442,8 +530,14 @@ function JournalEntriesInner() {
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
                     <p className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{fmtC(e.total_debit)}</p>
-                    {!selectMode && (e.source === 'manual' || !e.source) && (
-                      <button onClick={() => openEdit(e)} title="Edit entry" className="text-slate-300 hover:text-blue-500"><Pencil className="h-4 w-4" /></button>
+                    {!selectMode && (
+                      <button
+                        onClick={() => openEdit(e)}
+                        title={isManual ? 'Edit entry' : 'Auto-posted — must be corrected at the source document'}
+                        className={isManual ? 'text-slate-300 hover:text-blue-500' : 'text-slate-300 hover:text-slate-400'}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
                     )}
                     {!selectMode && (
                       <button onClick={() => deleteEntry(e.id)} title="Delete entry" className="text-slate-300 hover:text-rose-500"><Trash2 className="h-4 w-4" /></button>
@@ -458,9 +552,36 @@ function JournalEntriesInner() {
                     </div>
                   ))}
                 </div>
+                {flag && (
+                  <div className={`mt-2.5 p-2.5 rounded-lg border flex items-start gap-2 ${isDark ? 'bg-amber-950/30 border-amber-800/40' : 'bg-amber-50 border-amber-200'}`}>
+                    <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-[11px] font-bold ${isDark ? 'text-amber-300' : 'text-amber-800'}`}>
+                        Breaking: {flag.rules.join('; ')}
+                      </p>
+                      <p className={`text-[11px] mt-0.5 ${isDark ? 'text-amber-200/80' : 'text-amber-700'}`}>
+                        This is why that check fails in Accounting Reports → Fix Errors.{' '}
+                        {isManual
+                          ? 'Delete this entry if it\u2019s a mistake or duplicate, or edit the amount so it matches the correct figure.'
+                          : 'It\u2019s auto-posted, so correct the underlying invoice/bill/payment instead of editing here — or delete this entry only if it\u2019s a duplicate.'}
+                      </p>
+                      <div className="flex gap-2 mt-1.5">
+                        {isManual && (
+                          <button onClick={() => openEdit(e)} className="text-[11px] font-bold px-2.5 py-1 rounded-md bg-blue-600 text-white hover:bg-blue-700 transition-colors">
+                            Edit amount
+                          </button>
+                        )}
+                        <button onClick={() => deleteEntry(e.id)} className="text-[11px] font-bold px-2.5 py-1 rounded-md bg-rose-600 text-white hover:bg-rose-700 transition-colors">
+                          Delete entry
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
