@@ -992,6 +992,29 @@ async def _auto_post_for_match(company_id: str, txn: dict, match: dict, created_
         if not ar_acct_id:
             return None
 
+        # ── Guard: refuse to settle an invoice a DIFFERENT bank transaction
+        # already settled ──────────────────────────────────────────────────
+        # If invoice.status is already "paid" with a journal_entry_id from an
+        # earlier match, and this call is for a different bank transaction,
+        # posting again would Dr Bank / Cr AR a second time for money that
+        # was only received once — turning "invoice already shows Paid" into
+        # a duplicate ledger entry instead of a no-op. This is the case the
+        # de-dup block below does NOT cover (that one only handles a manual
+        # `payments` receipt recorded before the bank line arrives — the
+        # opposite order to this one).
+        current_inv = await db.invoices.find_one(
+            {"id": match["id"]}, {"_id": 0, "status": 1, "journal_entry_id": 1, "paid_bank_txn_id": 1}
+        )
+        if (current_inv and current_inv.get("status") == "paid" and current_inv.get("journal_entry_id")
+                and current_inv.get("paid_bank_txn_id") != txn.get("id")):
+            import logging
+            logging.getLogger("bank_accounts").warning(
+                f"[dup-match-blocked] invoice={match['id']} already settled by bank_txn="
+                f"{current_inv.get('paid_bank_txn_id')}; refused second settlement from "
+                f"bank_txn={txn.get('id')}"
+            )
+            return None
+
         # ── De-duplicate before posting ──────────────────────────────────────
         # If the invoice already has payment records in db.payments (i.e. the
         # user manually recorded the receipt before uploading the bank statement),
@@ -1044,6 +1067,31 @@ async def _auto_post_for_match(company_id: str, txn: dict, match: dict, created_
                 },
             )
     return entry["id"] if entry else None
+
+
+async def _already_settled_by_other_txn(matched_type: str, matched_id: str, txn_id: str) -> Optional[str]:
+    """Returns the OTHER bank_transaction id that already settled this
+    invoice/purchase, or None if it's free to settle. Used by manual/edit
+    match (which pick a target explicitly, bypassing the "already paid"
+    filter that protects the candidate-search paths in _match_transaction)
+    so a user picking an already-settled invoice gets a clear 409 instead
+    of a transaction silently left "matched" with no journal entry — see
+    the matching guard inside _auto_post_for_match's sale branch."""
+    if matched_type == "sale":
+        inv = await db.invoices.find_one(
+            {"id": matched_id, "status": "paid", "journal_entry_id": {"$ne": None}},
+            {"_id": 0, "paid_bank_txn_id": 1},
+        )
+        if inv and inv.get("paid_bank_txn_id") and inv.get("paid_bank_txn_id") != txn_id:
+            return inv["paid_bank_txn_id"]
+    elif matched_type == "purchase":
+        pur = await db.purchase_invoices.find_one(
+            {"id": matched_id, "payment_status": "paid", "journal_entry_id": {"$ne": None}},
+            {"_id": 0, "paid_bank_txn_id": 1},
+        )
+        if pur and pur.get("paid_bank_txn_id") and pur.get("paid_bank_txn_id") != txn_id:
+            return pur["paid_bank_txn_id"]
+    return None
 
 
 
@@ -1407,13 +1455,18 @@ async def run_ai_auto_match(payload: Optional[AIAutoMatchInput] = None, current_
     if not unmatched:
         return {"success": True, "message": "No unmatched transactions found.", "matchedCount": 0}
 
-    open_sales = await db.invoices.find({"status": {"$ne": "paid"}}, {"_id": 0}).to_list(1000)
-    open_purchases = await db.purchase_invoices.find({"status": {"$ne": "paid"}}, {"_id": 0}).to_list(1000)
+    # NOTE: not pre-filtered by company_id — a multi-company setup mixes
+    # every open invoice/bill here, so the per-candidate loop below checks
+    # company_id against the transaction's own company before considering it.
+    open_sales = await db.invoices.find({"status": {"$ne": "paid"}}, {"_id": 0}).to_list(5000)
+    open_purchases = await db.purchase_invoices.find({"status": {"$ne": "paid"}}, {"_id": 0}).to_list(5000)
     coa_items = await db.chart_of_accounts.find({}, {"_id": 0}).to_list(1000)
 
     matched_count = 0
+    posted_count = 0
     for txn in unmatched:
         txn_id = txn.get("id")
+        txn_company = txn.get("company_id", "")
         desc = (txn.get("description") or "").strip().lower()
         debit = float(txn.get("debit") or 0)
         credit = float(txn.get("credit") or 0)
@@ -1423,11 +1476,30 @@ async def run_ai_auto_match(payload: Optional[AIAutoMatchInput] = None, current_
         # 1. Match Sales (Credits)
         if credit > 0:
             for s in open_sales:
+                if txn_company and s.get("company_id", "") != txn_company:
+                    continue  # never match a bank line to another company's invoice
                 inv_no = (s.get("invoice_no") or "").lower()
                 client_name = (s.get("client_name") or s.get("party_name") or "").lower()
                 tot = float(s.get("grand_total") or s.get("total_amount") or 0)
 
                 if (inv_no and inv_no in desc) or (client_name and len(client_name) > 3 and client_name in desc) or (tot > 0 and abs(tot - amt) < 0.01):
+                    # Post the actual Dr Bank / Cr Accounts Receivable entry
+                    # through the shared, audited pipeline — this used to
+                    # only flip invoice.status/amount_due with NO journal
+                    # entry at all, which silently broke Accounts
+                    # Receivable = Outstanding for every invoice matched
+                    # this way. _auto_post_for_match also carries the
+                    # already-settled-by-a-different-transaction guard, so
+                    # a false/duplicate match here is refused instead of
+                    # double-posting.
+                    entry_id = await _auto_post_for_match(
+                        txn_company, txn,
+                        {"type": "sale", "id": s.get("id"),
+                         "label": s.get("client_name") or s.get("invoice_no") or "Sale invoice", "grand_total": tot},
+                        current_user.id,
+                    )
+                    if not entry_id:
+                        continue  # already settled elsewhere, or posting failed — try the next candidate
                     await db.bank_transactions.update_one(
                         {"id": txn_id},
                         {"$set": {
@@ -1435,25 +1507,39 @@ async def run_ai_auto_match(payload: Optional[AIAutoMatchInput] = None, current_
                             "matched_id": s.get("id"),
                             "matched_label": f"Invoice #{s.get('invoice_no', '')} - {s.get('client_name', '')}",
                             "confidence_score": 95,
-                            "pending_approval": False
+                            "pending_approval": False,
+                            "journal_entry_id": entry_id,
                         }}
                     )
-                    await db.invoices.update_one(
-                        {"id": s.get("id")},
-                        {"$set": {"status": "paid", "amount_due": 0}}
-                    )
                     matched_count += 1
+                    posted_count += 1
                     matched = True
+                    # Stop this invoice being grabbed again by a LATER
+                    # transaction in this same batch — the in-memory list
+                    # never reflected the DB update above, which is exactly
+                    # how the same invoice could be double-matched within
+                    # one "Run AI Auto-Match" click.
+                    open_sales.remove(s)
                     break
 
         # 2. Match Purchases (Debits)
         if not matched and debit > 0:
             for p in open_purchases:
+                if txn_company and p.get("company_id", "") != txn_company:
+                    continue  # never match a bank line to another company's bill
                 inv_no = (p.get("invoice_no") or "").lower()
                 supplier_name = (p.get("supplier_name") or p.get("vendor_name") or "").lower()
                 tot = float(p.get("grand_total") or p.get("total_amount") or 0)
 
                 if (inv_no and inv_no in desc) or (supplier_name and len(supplier_name) > 3 and supplier_name in desc) or (tot > 0 and abs(tot - amt) < 0.01):
+                    entry_id = await _auto_post_for_match(
+                        txn_company, txn,
+                        {"type": "purchase", "id": p.get("id"),
+                         "label": p.get("supplier_name") or p.get("invoice_no") or "Purchase invoice", "grand_total": tot},
+                        current_user.id,
+                    )
+                    if not entry_id:
+                        continue
                     await db.bank_transactions.update_one(
                         {"id": txn_id},
                         {"$set": {
@@ -1461,15 +1547,14 @@ async def run_ai_auto_match(payload: Optional[AIAutoMatchInput] = None, current_
                             "matched_id": p.get("id"),
                             "matched_label": f"Bill #{p.get('invoice_no', '')} - {p.get('supplier_name', '')}",
                             "confidence_score": 92,
-                            "pending_approval": False
+                            "pending_approval": False,
+                            "journal_entry_id": entry_id,
                         }}
                     )
-                    await db.purchase_invoices.update_one(
-                        {"id": p.get("id")},
-                        {"$set": {"status": "paid", "amount_due": 0}}
-                    )
                     matched_count += 1
+                    posted_count += 1
                     matched = True
+                    open_purchases.remove(p)
                     break
 
         # 3. Match Chart of Accounts keywords (Salary, Rent, Interest, Taxes, Bank Charges)
@@ -1515,6 +1600,19 @@ async def manual_match_transaction(txn_id: str, payload: ManualMatchInput, curre
         raise HTTPException(400, "This transaction is already matched to that record.")
     if txn.get("matched_type"):
         raise HTTPException(400, "This transaction is already matched — use Edit Match to change it.")
+
+    if payload.post_journal and payload.matched_type in ("sale", "purchase"):
+        other_txn_id = await _already_settled_by_other_txn(payload.matched_type, payload.matched_id, txn_id)
+        if other_txn_id:
+            kind = "invoice" if payload.matched_type == "sale" else "bill"
+            raise HTTPException(
+                409,
+                f"That {kind} is already marked Paid — it was settled by a different bank "
+                f"transaction (id {other_txn_id}). Matching this transaction to it too would "
+                f"post a second receipt for money that was only received once. If this really "
+                f"is a separate payment, match it to the correct invoice/bill instead; if it's "
+                f"a duplicate bank line, ignore or delete this transaction.",
+            )
 
     update = {"matched_type": payload.matched_type, "matched_id": payload.matched_id, "matched_label": payload.matched_label}
     if payload.post_journal:
@@ -1566,6 +1664,19 @@ async def edit_match_transaction(txn_id: str, payload: ManualMatchInput, current
         raise HTTPException(400, "This transaction isn't matched yet — use Match instead of Edit Match.")
     if txn.get("matched_type") == payload.matched_type and txn.get("matched_id") == payload.matched_id:
         raise HTTPException(400, "This transaction is already matched to that record.")
+
+    if payload.post_journal and payload.matched_type in ("sale", "purchase"):
+        other_txn_id = await _already_settled_by_other_txn(payload.matched_type, payload.matched_id, txn_id)
+        if other_txn_id:
+            kind = "invoice" if payload.matched_type == "sale" else "bill"
+            raise HTTPException(
+                409,
+                f"That {kind} is already marked Paid — it was settled by a different bank "
+                f"transaction (id {other_txn_id}). Re-matching this transaction to it too would "
+                f"post a second receipt for money that was only received once. If this really "
+                f"is a separate payment, match it to the correct invoice/bill instead; if it's "
+                f"a duplicate bank line, ignore or delete this transaction.",
+            )
 
     previous_match = {"type": txn.get("matched_type"), "id": txn.get("matched_id"), "label": txn.get("matched_label")}
     await _revert_match_effects(txn)
