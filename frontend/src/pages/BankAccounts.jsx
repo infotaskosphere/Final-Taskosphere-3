@@ -938,38 +938,44 @@ function BankAccountsInner() {
           ))}
         </div>
 
-        <div className="grid lg:grid-cols-[300px_1fr] gap-5">
-          <div className={`rounded-3xl border shadow-sm p-4 h-fit ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 px-2 mb-2">Your bank accounts</p>
+        <div className="space-y-5">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 px-1 mb-2">Your bank accounts</p>
             {accounts.length === 0 ? (
-              <p className="text-sm text-slate-400 p-3">No bank accounts yet. Add one to get started.</p>
-            ) : accounts.map(a => (
-              <button key={a.id} onClick={() => setSelected(a)}
-                className={`w-full text-left rounded-2xl p-3 mb-2 border transition flex items-center justify-between gap-2 ${
-                  selected?.id === a.id ? 'border-blue-300 bg-blue-50/60'
-                  : isDark ? 'border-slate-700 hover:bg-slate-700/40' : 'border-slate-100 hover:bg-slate-50'
-                }`}>
-                <div className="min-w-0">
-                  <p className={`font-bold text-sm truncate ${isDark && selected?.id !== a.id ? 'text-slate-100' : 'text-slate-900'}`}>{a.bank_name}</p>
-                  <p className="text-xs text-slate-400 truncate">{a.account_number_masked || a.account_holder}</p>
-                  {a.company_id && companies.find(c => c.id === a.company_id) && (
-                    <p className="text-[10px] text-blue-500 font-semibold truncate mt-0.5">
-                      {companies.find(c => c.id === a.company_id)?.name}
-                    </p>
-                  )}
-                  <p className="text-sm font-bold mt-1" style={{ color: COLORS.emeraldGreen }}>{fmtC(a.current_balance)}</p>
-                </div>
-                <div className="flex flex-col items-end gap-2">
-                  <ChevronRight className="h-4 w-4 text-slate-300" />
-                  <div className="flex items-center gap-2">
-                    <Edit3 className="h-3.5 w-3.5 text-slate-400 hover:text-blue-500 cursor-pointer"
-                      onClick={(e) => { e.stopPropagation(); openEditAccount(a); }} />
-                    <Trash2 className="h-3.5 w-3.5 text-slate-400 hover:text-rose-500 cursor-pointer"
-                      onClick={(e) => { e.stopPropagation(); deleteAccount(a.id); }} />
-                  </div>
-                </div>
-              </button>
-            ))}
+              <div className={`rounded-3xl border shadow-sm p-6 text-center ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                <p className="text-sm text-slate-400">No bank accounts yet. Add one to get started.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                {accounts.map(a => (
+                  <button key={a.id} onClick={() => setSelected(a)}
+                    className={`w-full text-left rounded-2xl p-4 border shadow-sm transition flex items-center justify-between gap-2 ${
+                      selected?.id === a.id ? 'border-blue-300 bg-blue-50/60'
+                      : isDark ? 'bg-slate-800 border-slate-700 hover:bg-slate-700/40' : 'bg-white border-slate-200 hover:bg-slate-50'
+                    }`}>
+                    <div className="min-w-0">
+                      <p className={`font-bold text-sm truncate ${isDark && selected?.id !== a.id ? 'text-slate-100' : 'text-slate-900'}`}>{a.bank_name}</p>
+                      <p className="text-xs text-slate-400 truncate">{a.account_number_masked || a.account_holder}</p>
+                      {a.company_id && companies.find(c => c.id === a.company_id) && (
+                        <p className="text-[10px] text-blue-500 font-semibold truncate mt-0.5">
+                          {companies.find(c => c.id === a.company_id)?.name}
+                        </p>
+                      )}
+                      <p className="text-sm font-bold mt-1" style={{ color: COLORS.emeraldGreen }}>{fmtC(a.current_balance)}</p>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <ChevronRight className="h-4 w-4 text-slate-300" />
+                      <div className="flex items-center gap-2">
+                        <Edit3 className="h-3.5 w-3.5 text-slate-400 hover:text-blue-500 cursor-pointer"
+                          onClick={(e) => { e.stopPropagation(); openEditAccount(a); }} />
+                        <Trash2 className="h-3.5 w-3.5 text-slate-400 hover:text-rose-500 cursor-pointer"
+                          onClick={(e) => { e.stopPropagation(); deleteAccount(a.id); }} />
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="space-y-4">
