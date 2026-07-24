@@ -3126,12 +3126,16 @@ async def upload_gstr2b_purchases(
     client_id: Optional[str] = Form(None),
     current_user: User = Depends(get_current_user),
 ):
-    """Bulk-add Purchase Book entries directly from a GSTR-2B Excel export
+    """Bulk-add Purchase Book entries directly from a GSTR-2B export
     downloaded from the GST portal — instead of uploading each vendor bill
-    one at a time. Reuses the exact same B2B-sheet reader the GST
-    Reconciliation module already relies on (`_parse_portal`), so column
-    detection, GSTIN/invoice-number cleanup, and ITC-eligibility logic stay
-    identical across both features.
+    one at a time. Accepts the Excel export (.xlsx/.xls), the PDF export, or
+    a ZIP file bundling any number of either (e.g. a full year of monthly
+    GSTR-2B downloads zipped together) — `_parse_portal_any` dispatches to
+    the right reader and, for a ZIP, reads and combines every file inside it.
+    Reuses the exact same B2B-table reader the GST Reconciliation module
+    already relies on, so column detection, GSTIN/invoice-number cleanup,
+    and ITC-eligibility logic stay identical across every format and both
+    features.
 
     For every invoice on the 2B:
       1. Supplier is matched to an existing Client by GSTIN (falling back to
@@ -3152,20 +3156,24 @@ async def upload_gstr2b_purchases(
         raise HTTPException(403, "Access denied")
     filename = file.filename or "gstr2b.xlsx"
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    if ext not in {"xlsx", "xls"}:
-        raise HTTPException(400, "Please upload the GSTR-2B Excel file downloaded from the GST portal (.xlsx or .xls).")
+    if ext not in {"xlsx", "xls", "pdf", "zip"}:
+        raise HTTPException(
+            400,
+            "Please upload the GSTR-2B report downloaded from the GST portal — Excel (.xlsx/.xls), "
+            "PDF, or a ZIP file containing one or more of these (e.g. several months at once).",
+        )
     contents = await file.read()
     if not contents:
         raise HTTPException(400, "Uploaded file is empty")
 
-    from backend.gst_reconciliation import _parse_portal, _itc_eligibility, _normalise_date as _gst_normalise_date
+    from backend.gst_reconciliation import _parse_portal_any, _itc_eligibility, _normalise_date as _gst_normalise_date
 
     try:
-        portal_df = _parse_portal(contents, filename)
+        portal_df = _parse_portal_any(contents, filename)
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(400, f"Could not read this as a GSTR-2B B2B Excel export: {e}")
+        raise HTTPException(400, f"Could not read this as a GSTR-2B B2B export: {e}")
 
     if portal_df is None or portal_df.empty:
         return {"created": 0, "duplicates": 0, "ineligible_itc": 0, "total_rows_in_file": 0, "total_value": 0.0, "rows": []}
@@ -3178,6 +3186,14 @@ async def upload_gstr2b_purchases(
             if g:
                 gstin_to_client[str(g).upper()] = c
 
+    _CONTENT_TYPES = {
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "xls": "application/vnd.ms-excel",
+        "pdf": "application/pdf",
+        "zip": "application/zip",
+    }
+    content_type = _CONTENT_TYPES.get(ext, "application/octet-stream")
+
     created = duplicates = ineligible = 0
     total_value = 0.0
     results: List[dict] = []
@@ -3185,6 +3201,12 @@ async def upload_gstr2b_purchases(
 
     for _, row in portal_df.iterrows():
         record = row.to_dict()
+        # When the upload was a ZIP, each row is tagged with which member
+        # file it came from (e.g. "042025_...GSTR2B....xlsx") — use that for
+        # traceability instead of the ZIP's own name.
+        source_file = record.get("source_file") or filename
+        source_ext = source_file.rsplit(".", 1)[-1].lower() if "." in source_file else ext
+        row_content_type = _CONTENT_TYPES.get(source_ext, content_type)
         supplier_gstin = (record.get("gstin") or "").upper()
         invoice_no = record.get("invoice_no") or ""
         if not supplier_gstin or not invoice_no:
@@ -3214,8 +3236,8 @@ async def upload_gstr2b_purchases(
             "supplier_gstin": supplier_gstin, "buyer_name": "", "buyer_gstin": "", "invoice_no": invoice_no,
             "invoice_date": invoice_date, "taxable_amount": round(taxable, 2), "total_gst": total_gst,
             "grand_total": round(grand_total, 2), "currency": "INR",
-            "file_name": filename, "file_size": 0,
-            "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "file_name": source_file, "file_size": 0,
+            "content_type": row_content_type,
             "parse_confidence": 1.0, "raw_text_excerpt": f"Imported from GSTR-2B ({record.get('invoice_type') or 'B2B'} invoice, place of supply {record.get('place_of_supply') or 'N/A'})",
             "created_by": current_user.id, "created_at": now, "updated_at": now,
             "status": "outstanding", "amount_paid": 0.0, "amount_due": round(grand_total, 2),
@@ -3240,9 +3262,11 @@ async def upload_gstr2b_purchases(
             "matched_client": bool(matched_client),
         })
 
+    files_processed = portal_df["source_file"].nunique() if "source_file" in portal_df.columns else 1
     return {
         "created": created, "duplicates": duplicates, "ineligible_itc": ineligible,
         "total_rows_in_file": int(len(portal_df)), "total_value": round(total_value, 2), "rows": results,
+        "files_processed": int(files_processed),
     }
 
 
