@@ -3,7 +3,7 @@ import { format, parseISO } from 'date-fns';
 import { toast } from 'sonner';
 import {
   UploadCloud, Search, RefreshCw, Building2, FileText, IndianRupee,
-  CheckCircle2, AlertTriangle, ShoppingBag, X, Database, Edit, Trash2, Wallet, Ban
+  CheckCircle2, AlertTriangle, ShoppingBag, X, Database, Edit, Trash2, Wallet, Ban, FileSpreadsheet
 } from 'lucide-react';
 import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
@@ -40,6 +40,7 @@ const fmtDate = (value) => {
 function Purchase() {
   const isDark = useDark();
   const fileRef = useRef(null);
+  const gstr2bFileRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [purchaseInvoices, setPurchaseInvoices] = useState([]);
@@ -49,6 +50,12 @@ function Purchase() {
   const [selectedClientId, setSelectedClientId] = useState('auto');
   const [selectedCompanyId, setSelectedCompanyId] = useState('none');
   const [file, setFile] = useState(null);
+
+  // GSTR-2B bulk-import state
+  const [gstr2bFile, setGstr2bFile] = useState(null);
+  const [gstr2bCompanyId, setGstr2bCompanyId] = useState('none');
+  const [gstr2bUploading, setGstr2bUploading] = useState(false);
+  const [gstr2bResult, setGstr2bResult] = useState(null);
 
   // Editing state
   const [editingInvoice, setEditingInvoice] = useState(null);
@@ -135,6 +142,45 @@ function Purchase() {
       toast.error(err.response?.data?.detail || 'Failed to read invoice');
     } finally {
       setUploading(false);
+    }
+  };
+
+  const GSTR2B_ACCEPTED_EXT = ['xlsx', 'xls', 'pdf', 'zip'];
+
+  const handleGstr2bUpload = async () => {
+    if (!gstr2bFile) { toast.error('Select a GSTR-2B file first (Excel, PDF, or a ZIP of either)'); return; }
+    const ext = gstr2bFile.name.split('.').pop()?.toLowerCase();
+    if (!GSTR2B_ACCEPTED_EXT.includes(ext)) {
+      toast.error('Unsupported file type. Upload the GSTR-2B Excel (.xlsx/.xls), PDF, or a ZIP containing them.');
+      return;
+    }
+    if (gstr2bCompanyId === 'none') { toast.error('Select which company/book this GSTR-2B belongs to'); return; }
+    const form = new FormData();
+    form.append('file', gstr2bFile);
+    form.append('company_id', gstr2bCompanyId);
+
+    setGstr2bUploading(true);
+    setGstr2bResult(null);
+    try {
+      const { data } = await api.post('/purchase-invoices/upload-gstr2b', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setGstr2bResult(data);
+      const fileNote = data.files_processed > 1 ? ` across ${data.files_processed} files` : '';
+      if (data.created > 0) {
+        toast.success(`Added ${data.created} purchase bill${data.created === 1 ? '' : 's'} from GSTR-2B${fileNote}${data.duplicates ? ` (${data.duplicates} already existed)` : ''}`);
+      } else if (data.duplicates > 0) {
+        toast.info(`All ${data.duplicates} invoices in this GSTR-2B${fileNote} are already in the Purchase Book.`);
+      } else {
+        toast.info('No B2B invoices found in this GSTR-2B upload.');
+      }
+      setGstr2bFile(null);
+      if (gstr2bFileRef.current) gstr2bFileRef.current.value = '';
+      await fetchAll();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to read GSTR-2B file');
+    } finally {
+      setGstr2bUploading(false);
     }
   };
 
@@ -302,6 +348,7 @@ function Purchase() {
         </div>
 
         <div className="grid lg:grid-cols-[420px_1fr] gap-5">
+          <div className="space-y-5 h-fit">
           <div className={`rounded-3xl border shadow-sm p-5 h-fit ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
             <div className="flex items-center gap-3 mb-5">
               <div className="h-10 w-10 rounded-xl flex items-center justify-center text-white" style={{ background: COLORS.mediumBlue }}>
@@ -361,6 +408,69 @@ function Purchase() {
                 {uploading ? <MiniLoader height={18} /> : <><Database className="h-4 w-4 mr-2" /> Read & Add to Company</>}
               </Button>
             </div>
+          </div>
+
+          {/* ── GSTR-2B bulk import ── */}
+          <div className={`rounded-3xl border shadow-sm p-5 h-fit ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <div className="flex items-center gap-3 mb-5">
+              <div className="h-10 w-10 rounded-xl flex items-center justify-center text-white" style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen}, #0F5C63)` }}>
+                <FileSpreadsheet className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Import GSTR-2B report</h2>
+                <p className="text-xs text-slate-400">Bulk-add every B2B bill from a portal Excel, PDF, or a zipped batch of months — in one go.</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Company/book</label>
+                <Select value={gstr2bCompanyId} onValueChange={setGstr2bCompanyId}>
+                  <SelectTrigger className={`mt-2 rounded-xl ${isDark ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50'}`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Select company…</SelectItem>
+                    {companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className={`border-2 border-dashed rounded-2xl p-5 text-center ${isDark ? 'border-slate-700 bg-slate-900/60' : 'border-emerald-100 bg-emerald-50/60'}`}>
+                <input ref={gstr2bFileRef} type="file" accept=".xlsx,.xls,.pdf,.zip" className="hidden" onChange={e => setGstr2bFile(e.target.files?.[0] || null)} />
+                <FileSpreadsheet className="h-9 w-9 mx-auto mb-3" style={{ color: COLORS.emeraldGreen }} />
+                <p className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{gstr2bFile ? gstr2bFile.name : 'Choose GSTR-2B file — Excel, PDF, or ZIP'}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Accepts .xlsx, .xls, .pdf, or a .zip bundling several monthly exports</p>
+                {gstr2bFile && <p className="text-xs text-slate-400 mt-1">{(gstr2bFile.size / 1024).toFixed(0)} KB</p>}
+                <div className="mt-4 flex justify-center gap-2">
+                  <Button type="button" variant="outline" onClick={() => gstr2bFileRef.current?.click()} className="rounded-xl">
+                    Browse
+                  </Button>
+                  {gstr2bFile && (
+                    <Button type="button" variant="ghost" onClick={() => { setGstr2bFile(null); if (gstr2bFileRef.current) gstr2bFileRef.current.value = ''; }} className="rounded-xl">
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              <Button onClick={handleGstr2bUpload} disabled={gstr2bUploading || !gstr2bFile} className="w-full rounded-xl text-white" style={{ background: `linear-gradient(135deg, ${COLORS.emeraldGreen}, #0F5C63)` }}>
+                {gstr2bUploading ? <MiniLoader height={18} /> : <><Database className="h-4 w-4 mr-2" /> Import into Purchase Book</>}
+              </Button>
+
+              {gstr2bResult && (
+                <div className={`rounded-2xl border p-3 text-xs space-y-1 ${isDark ? 'bg-slate-900/60 border-slate-700 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+                  {gstr2bResult.files_processed > 1 && (
+                    <div className="flex justify-between"><span>Files combined</span><span className="font-semibold">{gstr2bResult.files_processed}</span></div>
+                  )}
+                  <div className="flex justify-between"><span>Bills added</span><span className="font-bold text-emerald-500">{gstr2bResult.created}</span></div>
+                  <div className="flex justify-between"><span>Already in Purchase Book</span><span className="font-semibold">{gstr2bResult.duplicates}</span></div>
+                  <div className="flex justify-between"><span>ITC not eligible</span><span className="font-semibold">{gstr2bResult.ineligible_itc}</span></div>
+                  <div className="flex justify-between"><span>Total value imported</span><span className="font-semibold">{fmtC(gstr2bResult.total_value)}</span></div>
+                </div>
+              )}
+            </div>
+          </div>
           </div>
 
           <div className={`rounded-3xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
