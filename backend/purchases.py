@@ -145,8 +145,15 @@ function Purchase() {
     }
   };
 
+  const GSTR2B_ACCEPTED_EXT = ['xlsx', 'xls', 'pdf', 'zip'];
+
   const handleGstr2bUpload = async () => {
-    if (!gstr2bFile) { toast.error('Select a GSTR-2B Excel file first'); return; }
+    if (!gstr2bFile) { toast.error('Select a GSTR-2B file first (Excel, PDF, or a ZIP of either)'); return; }
+    const ext = gstr2bFile.name.split('.').pop()?.toLowerCase();
+    if (!GSTR2B_ACCEPTED_EXT.includes(ext)) {
+      toast.error('Unsupported file type. Upload the GSTR-2B Excel (.xlsx/.xls), PDF, or a ZIP containing them.');
+      return;
+    }
     if (gstr2bCompanyId === 'none') { toast.error('Select which company/book this GSTR-2B belongs to'); return; }
     const form = new FormData();
     form.append('file', gstr2bFile);
@@ -159,12 +166,13 @@ function Purchase() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setGstr2bResult(data);
+      const fileNote = data.files_processed > 1 ? ` across ${data.files_processed} files` : '';
       if (data.created > 0) {
-        toast.success(`Added ${data.created} purchase bill${data.created === 1 ? '' : 's'} from GSTR-2B${data.duplicates ? ` (${data.duplicates} already existed)` : ''}`);
+        toast.success(`Added ${data.created} purchase bill${data.created === 1 ? '' : 's'} from GSTR-2B${fileNote}${data.duplicates ? ` (${data.duplicates} already existed)` : ''}`);
       } else if (data.duplicates > 0) {
-        toast.info(`All ${data.duplicates} invoices in this GSTR-2B are already in the Purchase Book.`);
+        toast.info(`All ${data.duplicates} invoices in this GSTR-2B${fileNote} are already in the Purchase Book.`);
       } else {
-        toast.info('No B2B invoices found in this GSTR-2B file.');
+        toast.info('No B2B invoices found in this GSTR-2B upload.');
       }
       setGstr2bFile(null);
       if (gstr2bFileRef.current) gstr2bFileRef.current.value = '';
@@ -411,7 +419,7 @@ function Purchase() {
               </div>
               <div>
                 <h2 className={`font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Import GSTR-2B report</h2>
-                <p className="text-xs text-slate-400">Bulk-add every B2B bill from the portal Excel in one go.</p>
+                <p className="text-xs text-slate-400">Bulk-add every B2B bill from a portal Excel, PDF, or a zipped batch of months — in one go.</p>
               </div>
             </div>
 
@@ -430,9 +438,10 @@ function Purchase() {
               </div>
 
               <div className={`border-2 border-dashed rounded-2xl p-5 text-center ${isDark ? 'border-slate-700 bg-slate-900/60' : 'border-emerald-100 bg-emerald-50/60'}`}>
-                <input ref={gstr2bFileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={e => setGstr2bFile(e.target.files?.[0] || null)} />
+                <input ref={gstr2bFileRef} type="file" accept=".xlsx,.xls,.pdf,.zip" className="hidden" onChange={e => setGstr2bFile(e.target.files?.[0] || null)} />
                 <FileSpreadsheet className="h-9 w-9 mx-auto mb-3" style={{ color: COLORS.emeraldGreen }} />
-                <p className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{gstr2bFile ? gstr2bFile.name : 'Choose GSTR-2B Excel (B2B sheet)'}</p>
+                <p className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{gstr2bFile ? gstr2bFile.name : 'Choose GSTR-2B file — Excel, PDF, or ZIP'}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Accepts .xlsx, .xls, .pdf, or a .zip bundling several monthly exports</p>
                 {gstr2bFile && <p className="text-xs text-slate-400 mt-1">{(gstr2bFile.size / 1024).toFixed(0)} KB</p>}
                 <div className="mt-4 flex justify-center gap-2">
                   <Button type="button" variant="outline" onClick={() => gstr2bFileRef.current?.click()} className="rounded-xl">
@@ -452,6 +461,9 @@ function Purchase() {
 
               {gstr2bResult && (
                 <div className={`rounded-2xl border p-3 text-xs space-y-1 ${isDark ? 'bg-slate-900/60 border-slate-700 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+                  {gstr2bResult.files_processed > 1 && (
+                    <div className="flex justify-between"><span>Files combined</span><span className="font-semibold">{gstr2bResult.files_processed}</span></div>
+                  )}
                   <div className="flex justify-between"><span>Bills added</span><span className="font-bold text-emerald-500">{gstr2bResult.created}</span></div>
                   <div className="flex justify-between"><span>Already in Purchase Book</span><span className="font-semibold">{gstr2bResult.duplicates}</span></div>
                   <div className="flex justify-between"><span>ITC not eligible</span><span className="font-semibold">{gstr2bResult.ineligible_itc}</span></div>
