@@ -1042,7 +1042,7 @@ export default function ActionCenter() {
 
   return (
     <>
-    <motion.div className="min-h-screen p-5 md:p-6 lg:p-8 space-y-5"
+    <motion.div className="min-h-full space-y-5"
       style={{ background: isDark ? D_DARK.bg : "#f8fafc" }}
       variants={containerV} initial="hidden" animate="visible">
 
