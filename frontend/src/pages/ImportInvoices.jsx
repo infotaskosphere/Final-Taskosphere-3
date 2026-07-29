@@ -210,7 +210,7 @@ export default function ImportInvoices() {
   // RENDER
   // ══════════════════════════════════════════════════════════════════════
   return (
-    <div className="p-4 md:p-6 min-h-screen" style={{ background: dark ? '#0f172a' : '#f1f5f9' }}>
+    <div className="min-h-full" style={{ background: dark ? '#0f172a' : '#f1f5f9' }}>
 
       {/* Header */}
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
