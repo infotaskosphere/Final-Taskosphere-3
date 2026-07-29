@@ -271,16 +271,16 @@ const SectionTab = ({ sectionId, isDark, activeSectionId, navigate, checkNavPerm
   return (
     <button
       onClick={() => navigate(meta.landingPath)}
-      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex-shrink-0 cursor-pointer ${
+      className={`relative flex items-center gap-1.5 px-3 h-full text-xs font-semibold whitespace-nowrap transition-colors flex-shrink-0 cursor-pointer border-b-2 ${
         isActive
-          ? 'text-white'
+          ? ''
           : isDark
-            ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-            : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
+            ? 'text-slate-400 hover:text-slate-200 border-transparent'
+            : 'text-slate-500 hover:text-slate-800 border-transparent'
       }`}
       style={isActive ? {
-        background: `linear-gradient(135deg, ${COLORS.mediumBlue}, ${COLORS.sidebarActive})`,
-        boxShadow: '0 2px 8px rgba(46,139,230,0.35)',
+        color: isDark ? '#ffffff' : COLORS.deepBlue,
+        borderColor: COLORS.mediumBlue,
       } : {}}
     >
       <Icon className="h-3.5 w-3.5 flex-shrink-0" />
@@ -430,18 +430,17 @@ const DashboardLayout = ({ children }) => {
           to={item.path}
           title={collapsed ? item.label : undefined}
           className={`relative flex items-center gap-3 min-w-0
-            ${collapsed ? 'justify-center px-0 py-3' : 'px-3 py-2.5'}
-            rounded-xl transition-all duration-200 group
-            ${isActive ? 'text-white' : 'text-slate-300 hover:text-white hover:bg-white/[0.07]'}`}
+            ${collapsed ? 'justify-center px-0 py-3' : 'pl-3.5 pr-3 py-2.5'}
+            rounded-lg transition-all duration-150 group
+            ${isActive ? 'text-white' : 'text-slate-300 hover:text-white hover:bg-white/[0.06]'}`}
           style={isActive ? {
-            background: `linear-gradient(135deg, ${COLORS.mediumBlue}, ${COLORS.sidebarActive})`,
-            boxShadow: '0 4px 14px rgba(46,139,230,0.35)',
+            background: 'rgba(255,255,255,0.08)',
           } : {}}
         >
-          {isActive && !collapsed && (
+          {isActive && (
             <span
-              className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full"
-              style={{ background: 'rgba(255,255,255,0.6)' }}
+              className="absolute left-0 top-1/2 -translate-y-1/2 rounded-r-full"
+              style={{ width: 3, height: collapsed ? '60%' : '68%', background: COLORS.sidebarActive }}
             />
           )}
           <Icon
@@ -453,9 +452,6 @@ const DashboardLayout = ({ children }) => {
             <span className="font-medium text-sm whitespace-nowrap tracking-tight truncate">
               {item.label}
             </span>
-          )}
-          {isActive && collapsed && (
-            <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-white/70" />
           )}
           {collapsed && (
             <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-800 text-white text-xs font-medium rounded-lg whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 translate-x-1 group-hover:translate-x-0 transition-all duration-200 z-[100] shadow-lg">
