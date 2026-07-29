@@ -6132,7 +6132,7 @@ export default function Clients() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen p-5 md:p-7 space-y-5" style={{ background: isDark ? '#0f172a' : '#F4F6FA' }}>
+    <div className="min-h-full space-y-5" style={{ background: isDark ? '#0f172a' : '#F4F6FA' }}>
 
       {/* PAGE HEADER */}
       <div className="relative overflow-hidden rounded-2xl border border-slate-200/80 shadow-sm" style={{ background: 'linear-gradient(135deg, #0D3B66 0%, #1F6FB2 60%, #2a85cc 100%)' }}>
