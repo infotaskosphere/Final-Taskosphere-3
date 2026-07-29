@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import { useActivityTracker } from '@/hooks/useActivityTracker';
@@ -37,6 +37,8 @@ const COLORS = {
 const SIDEBAR_EXPANDED  = 280;
 const SIDEBAR_COLLAPSED = 80;
 const HEADER_H          = 76;
+const SECTION_BAR_H     = 48;
+const TOTAL_HEADER_H    = HEADER_H + SECTION_BAR_H;
 
 // NAV_GROUPS: items with no `permission` key are visible to ALL authenticated users
 // (matching <Protected> routes). Items with a `permission` key are only shown
@@ -61,6 +63,7 @@ const NAV_GROUPS = [
     id: 'compliance',
     dividerLabel: 'Compliance',
     items: [
+      { path: '/compliance-dashboard', icon: LayoutDashboard, label: 'Compliance Dashboard' },
       // Compliance Calendar is now embedded inside Compliance Tracker — single unified page
       { path: '/compliance',         icon: ShieldCheck,    label: 'Compliance Tracker',  permission: 'can_view_compliance' },
       { path: '/gst-reconciliation', icon: ArrowLeftRight, label: 'GST Reconciliation', permission: 'can_view_gst_reconciliation' },
@@ -71,6 +74,7 @@ const NAV_GROUPS = [
     id: 'records',
     dividerLabel: 'Records',
     items: [
+      { path: '/records-dashboard', icon: LayoutDashboard, label: 'Records Dashboard' },
       // Permission-based modules — only visible when user has the flag
       { path: '/dsc',       icon: FileText,  label: 'DSC Register',      permission: 'can_view_all_dsc'     },
       { path: '/documents', icon: FileText,  label: 'Document Register', permission: 'can_view_documents'   },
@@ -83,6 +87,7 @@ const NAV_GROUPS = [
     id: 'proposals',
     dividerLabel: 'Client Proposals',
     items: [
+      { path: '/client-proposals-dashboard', icon: LayoutDashboard, label: 'Client Proposals Dashboard' },
       { path: '/leads',      icon: Target,   label: 'Lead Management', permission: 'can_view_all_leads'    },
       { path: '/quotations', icon: Receipt,  label: 'Quotations',      permission: 'can_create_quotations' },
     ],
@@ -184,6 +189,52 @@ const NAV_GROUPS = [
     ],
   },
 ];
+
+// SECTION_META: the 7 top-level headings shown in the section switcher bar.
+// Each maps 1:1 to a NAV_GROUPS id — clicking a heading navigates to that
+// section's landing page and the sidebar collapses to show only that
+// group's items (see `activeSectionId` / sidebar render below).
+const SECTION_META = {
+  core:       { label: 'Taskosphere',            icon: LayoutDashboard, landingPath: '/dashboard' },
+  accounts:   { label: 'Finix',                  icon: CreditCard,     landingPath: '/finix-dashboard' },
+  compliance: { label: 'Compliance',             icon: ShieldCheck,    landingPath: '/compliance-dashboard' },
+  records:    { label: 'Records',                icon: FileText,       landingPath: '/records-dashboard' },
+  proposals:  { label: 'Client Proposals',       icon: Target,         landingPath: '/client-proposals-dashboard' },
+  admin:      { label: 'Admin',                  icon: Users,          landingPath: '/reports' },
+  settings:   { label: 'Settings',               icon: Settings,       landingPath: '/settings/general' },
+};
+const SECTION_ORDER = ['core', 'accounts', 'compliance', 'records', 'proposals', 'admin', 'settings'];
+
+// Extra route prefixes that belong to a section but aren't themselves
+// sidebar links (e.g. Extended Accounts Reports sub-pages, opened from
+// inside Finix Dashboard rather than the sidebar).
+const EXTRA_SECTION_PREFIXES = [
+  ['/day-book', 'accounts'], ['/cash-bank-book', 'accounts'], ['/cash-flow', 'accounts'],
+  ['/outstanding-report', 'accounts'], ['/bank-reconciliation', 'accounts'], ['/depreciation', 'accounts'],
+  ['/tds-tcs', 'accounts'], ['/financial-ratios', 'accounts'], ['/comparative-report', 'accounts'],
+  ['/yearly-report', 'accounts'], ['/opening-balances', 'accounts'], ['/accounting-audit-trail', 'accounts'],
+  ['/bulk-import', 'accounts'], ['/due-dates', 'accounts'], ['/import-invoices', 'accounts'],
+  ['/settings', 'settings'],
+];
+
+// Resolves the current URL to a NAV_GROUPS id, so the sidebar + section
+// bar can figure out which heading is "active" purely from the route —
+// no separate state to keep in sync.
+function getSectionForPath(pathname) {
+  let best = null;
+  for (const group of NAV_GROUPS) {
+    for (const item of group.items) {
+      if (pathname === item.path || pathname.startsWith(item.path + '/')) {
+        if (!best || item.path.length > best.path.length) best = { path: item.path, groupId: group.id };
+      }
+    }
+  }
+  if (best) return best.groupId;
+  for (const [prefix, groupId] of EXTRA_SECTION_PREFIXES) {
+    if (pathname === prefix || pathname.startsWith(prefix + '/')) return groupId;
+  }
+  return 'core';
+}
 
 const springSnap = { type: 'spring', stiffness: 500, damping: 28 };
 const springMed  = { type: 'spring', stiffness: 400, damping: 24 };
@@ -315,6 +366,12 @@ const DashboardLayout = ({ children }) => {
     (!i.exact && location.pathname.startsWith(i.path + '/') && i.path !== '/')
   )?.label || 'Dashboard';
 
+  // Which top-level heading (Taskosphere Dashboard / Finix Dashboard /
+  // Compliance / Records / Client Proposals / Admin / Settings) the
+  // current route belongs to — drives both the section bar highlight
+  // and which single NAV_GROUPS group the sidebar renders.
+  const activeSectionId = useMemo(() => getSectionForPath(location.pathname), [location.pathname]);
+
   const sidebarPx = collapsed ? SIDEBAR_COLLAPSED : SIDEBAR_EXPANDED;
   const offsetPx  = isDesktop ? sidebarPx : 0;
 
@@ -419,27 +476,27 @@ const DashboardLayout = ({ children }) => {
           }
         `}
         style={{
-          top:         HEADER_H,
-          height:      `calc(100% - ${HEADER_H}px)`,
+          top:         TOTAL_HEADER_H,
+          height:      `calc(100% - ${TOTAL_HEADER_H}px)`,
           width:       sidebarPx,
           background:  `linear-gradient(180deg, ${COLORS.sidebarBg} 0%, ${COLORS.sidebarBgSoft} 100%)`,
           borderRight: `1px solid ${COLORS.sidebarBorder}`,
           boxShadow:   '10px 0 30px rgba(0,0,0,0.25)',
         }}
       >
-        {/* Nav scroll container */}
+        {/* Nav scroll container — only the ACTIVE section's group is shown here.
+            Switch sections via the heading bar directly under the header. */}
         <div
           ref={sidebarNavRef}
           className="flex-1 overflow-y-auto overflow-x-hidden slim-scroll sidebar-scroll py-4"
         >
-          {NAV_GROUPS.map((group) => {
+          {NAV_GROUPS.filter((group) => group.id === activeSectionId).map((group) => {
             const visibleGroupItems = group.items.filter(
               (item) => checkNavPermission(item)
             );
             if (visibleGroupItems.length === 0) return null;
             return (
               <div key={group.id} className="mb-2">
-                {group.dividerLabel && <NavDivider label={group.dividerLabel} />}
                 <div className={`space-y-1 ${collapsed ? 'px-2' : 'px-3'}`}>
                   {visibleGroupItems.map((item) => (
                     <NavItem key={item.path} item={item} />
@@ -743,12 +800,56 @@ const DashboardLayout = ({ children }) => {
         </div>
       </header>
 
+      {/* ── Section switcher — the 7 top-level headings. Clicking one jumps to
+          that section's landing page; the sidebar below then narrows to show
+          only that section's tabs (see activeSectionId). ── */}
+      <div
+        className="fixed left-0 right-0 z-[44] flex items-center gap-1.5 px-3 sm:px-5 overflow-x-auto slim-scroll"
+        style={{
+          top:          HEADER_H,
+          height:       SECTION_BAR_H,
+          background:   isDark ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.97)',
+          borderBottom: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
+          backdropFilter: 'blur(6px)',
+        }}
+      >
+        {SECTION_ORDER.map((sectionId) => {
+          const meta = SECTION_META[sectionId];
+          const group = NAV_GROUPS.find((g) => g.id === sectionId);
+          const hasVisibleItems = group?.items.some((item) => checkNavPermission(item));
+          if (!hasVisibleItems) return null;
+
+          const Icon = meta.icon;
+          const isActive = sectionId === activeSectionId;
+          return (
+            <button
+              key={sectionId}
+              onClick={() => navigate(meta.landingPath)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex-shrink-0 cursor-pointer ${
+                isActive
+                  ? 'text-white'
+                  : isDark
+                    ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
+              }`}
+              style={isActive ? {
+                background: `linear-gradient(135deg, ${COLORS.mediumBlue}, ${COLORS.sidebarActive})`,
+                boxShadow: '0 2px 8px rgba(46,139,230,0.35)',
+              } : {}}
+            >
+              <Icon className="h-3.5 w-3.5 flex-shrink-0" />
+              {meta.label}
+            </button>
+          );
+        })}
+      </div>
+
       {/* ── Main content wrapper ── */}
       <div
         className="transition-all duration-300 ease-in-out min-h-screen flex flex-col"
         style={{
           marginLeft: offsetPx,
-          paddingTop:  HEADER_H,
+          paddingTop:  TOTAL_HEADER_H,
           minWidth:    0,
           maxWidth:    '100%',
           overflowX:   'hidden',
