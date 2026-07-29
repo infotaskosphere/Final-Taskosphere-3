@@ -90,8 +90,8 @@ export default function TaskAudit() {
   }
 
   return (
-    <div style={{ background: pageBg, minHeight: "100vh" }} className="transition-colors duration-200">
-      <div className="p-4 md:p-6 space-y-6 max-w-7xl mx-auto">
+    <div style={{ background: pageBg, minHeight: "100%" }} className="transition-colors duration-200">
+      <div className="space-y-6 w-full">
 
         {/* ── Banner — matches Dashboard style ── */}
         <div
