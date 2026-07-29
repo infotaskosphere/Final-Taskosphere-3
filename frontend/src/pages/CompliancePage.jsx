@@ -3745,8 +3745,8 @@ export default function CompliancePage(){
         onReset={cpReset}
         isDark={isDark}
       />
-    <div className="min-h-screen p-3 sm:p-4 md:p-6 lg:p-8" style={{background:isDark?D.bg:'#f8fafc'}}>
-      <motion.div className="max-w-[1600px] mx-auto space-y-6" variants={containerVariants} initial="hidden" animate="visible">
+    <div className="min-h-full" style={{background:isDark?D.bg:'#f8fafc'}}>
+      <motion.div className="w-full space-y-6" variants={containerVariants} initial="hidden" animate="visible">
 
         {cpOrder.map((sectionId) => {
 
