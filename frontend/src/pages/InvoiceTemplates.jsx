@@ -196,10 +196,37 @@ function buildUpiUrl(company, inv) {
   rawTn = rawTn.replace(/[^a-zA-Z0-9\s.\-]/g, '').replace(/\s+/g, ' ').trim();
   
   const am = pendingAmount > 0 ? '&am=' + pendingAmount.toFixed(2) : '';
-  
+
+  // Merchant Category Code: tags this as a merchant (P2M) transaction rather than a
+  // generic P2P transfer, matching how a bank-issued merchant QR is classified.
+  // Only included if the company has one on file (set in Invoice/Quotation Settings).
+  const mcRaw = (company.upi_mcc || '').trim();
+  const mc = mcRaw ? '&mc=' + mcRaw.replace(/[^0-9]/g, '') : '';
+
   // Return raw UPI link with literal spaces. It will be encoded ONCE when converted to QR image URL,
   // meaning scanning devices will decode it to standard spaces (no %20 or % symbol issues).
-  return 'upi://pay?pa=' + pa + '&pn=' + rawName + am + '&tn=' + rawTn + '&cu=INR';
+  return 'upi://pay?pa=' + pa + '&pn=' + rawName + am + mc + '&tn=' + rawTn + '&cu=INR';
+}
+
+// Preferred entry point for rendering a payment QR on an invoice. If the company has
+// uploaded their bank's own registered Merchant/UPI QR image (e.g. YONO SBI, BHIM SBI
+// Pay), that image is used as-is — bank-issued merchant QRs are pre-vetted P2M
+// transactions and far less prone to being declined by the receiving bank than a QR we
+// build ourselves from a raw upi://pay link. Falls back to the dynamic link-based QR
+// (with amount pre-filled) when no bank QR image has been uploaded for the company.
+function getPaymentQrHTML(company, inv, size, label) {
+  size = size || 90;
+  if (!company) return '';
+  const bankQrImage = company.upi_qr_image_base64 || company.upi_qr_image_url;
+  if (bankQrImage) {
+    const lbl = label || 'Scan to Pay via UPI';
+    return '<div style="text-align:center;flex-shrink:0">'
+      + '<img src="' + bankQrImage + '" alt="UPI QR" style="width:' + size + 'px;height:' + size + 'px;display:block;object-fit:contain;border-radius:4px;border:1px solid #E0E0E0;margin:0 auto"/>'
+      + '<div style="font-size:8px;color:#9E9E9E;margin-top:3px;line-height:1.3">' + lbl + '</div>'
+      + '<div style="font-size:7px;color:#BDBDBD;margin-top:1px;line-height:1.3;max-width:' + (size+30) + 'px">Enter the amount shown above after scanning</div>'
+      + '</div>';
+  }
+  return getQrHTML(buildUpiUrl(company, inv), size, label);
 }
 
 function getQrHTML(upiUrl, size, label) {
@@ -207,10 +234,15 @@ function getQrHTML(upiUrl, size, label) {
   label = label || 'Scan to Pay (Balance Due)';
   if (!upiUrl) return '';
   const enc = encodeURIComponent(upiUrl);
+  // Note: occasionally a UPI app shows "Receiver's bank does not allow payments to this
+  // bank account" - this is a transient decline from the RECEIVING bank/NPCI switch, not
+  // a problem with this QR's data (retrying the exact same QR moments later typically
+  // succeeds). The line below sets that expectation so payers don't assume the QR is broken.
   return '<div style="text-align:center;flex-shrink:0">'
     + '<img src="https://api.qrserver.com/v1/create-qr-code/?data=' + enc + '&size=' + size + 'x' + size + '&qzone=1&margin=0"'
     + ' alt="UPI QR" style="width:' + size + 'px;height:' + size + 'px;display:block;border-radius:4px;border:1px solid #E0E0E0;margin:0 auto"/>'
     + '<div style="font-size:8px;color:#9E9E9E;margin-top:3px;line-height:1.3">' + label + '</div>'
+    + '<div style="font-size:7px;color:#BDBDBD;margin-top:1px;line-height:1.3;max-width:' + (size+30) + 'px">If payment fails/declines, please retry after a minute or use bank details</div>'
     + '</div>';
 }
 
@@ -319,13 +351,12 @@ function totalsHTML(inv) {
 function bankQrHTML(company, inv) {
   if (!company || !company.upi_id) return '';
   if (company.show_qr_code === false) return '';
-  const upiUrl = buildUpiUrl(company, inv);
-  if (!upiUrl) return '';
   const pendingAmt = parseFloat((inv && inv.amount_due) || 0);
   const qrLabel = pendingAmt > 0
     ? 'Scan to Pay \u00B7 Balance Due: ' + fmtC(pendingAmt)
     : 'Scan to Pay via UPI';
-  const qr = getQrHTML(upiUrl, 82, qrLabel);
+  const qr = getPaymentQrHTML(company, inv, 82, qrLabel);
+  if (!qr) return '';
   if (!company.bank_name && !company.bank_account_no && !company.bank_account) {
     return '<div style="text-align:center;margin:8px 0">' + qr + '</div>';
   }
@@ -734,10 +765,9 @@ function tplTheme6(inv, company, theme) {
 function tplTheme7(inv, company, theme) {
   const {primary:p, secondary:s, light:l, accent:a} = theme;
   const logo = getLogoHTML(company, theme, 54, 'rounded', 'on-color');
-  const upiUrl    = buildUpiUrl(company, inv);
   const pendingAmt= parseFloat((inv && inv.amount_due) || 0);
   const qrLabel   = pendingAmt > 0 ? 'Balance Due: ' + fmtC(pendingAmt) : 'Scan to Pay';
-  const qr        = getQrHTML(upiUrl, 80, qrLabel);
+  const qr        = getPaymentQrHTML(company, inv, 80, qrLabel);
   const isInter   = inv.is_interstate;
   var sbBank = '';
   if (company && company.bank_name) {
@@ -1103,7 +1133,7 @@ function tplTallyTheme(inv, company, theme) {
       + (company.upi_id ? '<div style="font-size:10px"><strong>UPI:</strong> ' + company.upi_id + '</div>' : '');
   }
   var qrBlock = (company && company.upi_id)
-    ? '<hr class="dash"/>' + getQrHTML(buildUpiUrl(company, inv), 80, (inv.amount_due||0) > 0 ? 'Balance Due: ' + fmtC(inv.amount_due) : 'Scan to Pay via UPI')
+    ? '<hr class="dash"/>' + getPaymentQrHTML(company, inv, 80, (inv.amount_due||0) > 0 ? 'Balance Due: ' + fmtC(inv.amount_due) : 'Scan to Pay via UPI')
     : '';
   return '<!DOCTYPE html><html><head><meta charset="UTF-8"/><title>' + (inv.invoice_no||'Invoice') + '</title>'
     + '<style>' + TALLY_CSS + '</style></head><body><div class="page">'
@@ -1166,8 +1196,7 @@ function tplThermal1(inv, company, theme) {
   const isInter    = inv.is_interstate;
   const items      = inv.items || [];
   const pendingAmt = parseFloat((inv && inv.amount_due) || 0);
-  const upiUrl     = buildUpiUrl(company, inv);
-  const qr         = upiUrl ? getQrHTML(upiUrl, 80, pendingAmt > 0 ? 'Balance: ' + fmtC(pendingAmt) : 'Scan to Pay') : '';
+  const qr         = company && company.upi_id ? getPaymentQrHTML(company, inv, 80, pendingAmt > 0 ? 'Balance: ' + fmtC(pendingAmt) : 'Scan to Pay') : '';
   var igstRows = isInter
     ? '<tr><td>IGST</td><td class="r">' + fmtC(inv.total_igst) + '</td></tr>'
     : '<tr><td>CGST</td><td class="r">' + fmtC(inv.total_cgst) + '</td></tr><tr><td>SGST</td><td class="r">' + fmtC(inv.total_sgst) + '</td></tr>';
@@ -1228,8 +1257,7 @@ function tplThermal2(inv, company, theme) {
   const isInter    = inv.is_interstate;
   const items      = inv.items || [];
   const pendingAmt = parseFloat((inv && inv.amount_due) || 0);
-  const upiUrl     = buildUpiUrl(company, inv);
-  const qr         = upiUrl ? getQrHTML(upiUrl, 90, pendingAmt > 0 ? 'Balance: ' + fmtC(pendingAmt) : 'Scan to Pay') : '';
+  const qr         = company && company.upi_id ? getPaymentQrHTML(company, inv, 90, pendingAmt > 0 ? 'Balance: ' + fmtC(pendingAmt) : 'Scan to Pay') : '';
   var igstRows = isInter
     ? '<tr><td>IGST</td><td class="r">' + fmtC(inv.total_igst) + '</td></tr>'
     : '<tr><td>CGST</td><td class="r">' + fmtC(inv.total_cgst) + '</td></tr><tr><td>SGST/UTGST</td><td class="r">' + fmtC(inv.total_sgst) + '</td></tr>';
