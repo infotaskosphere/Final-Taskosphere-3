@@ -404,7 +404,7 @@ export default function Interviews() {
   const getDeptConfig = (dept) => DEPARTMENTS.find(d => d.value === dept) || { color: '#475569', bg: '#F8FAFC' };
 
   return (
-    <div className={`min-h-screen p-5 md:p-6 lg:p-8 space-y-5 ${dark ? 'bg-slate-950' : 'bg-slate-50'}`}>
+    <div className={`min-h-full space-y-5 ${dark ? 'bg-slate-950' : 'bg-slate-50'}`}>
       {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
