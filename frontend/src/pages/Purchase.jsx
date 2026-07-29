@@ -302,8 +302,8 @@ function Purchase() {
   if (loading) return <GifLoader />;
 
   return (
-    <div className={`min-h-screen ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
-      <div className="p-4 md:p-6 space-y-5 max-w-[1600px] mx-auto">
+    <div className={`min-h-full ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
+      <div className="space-y-5 w-full">
         <div className="rounded-3xl overflow-hidden shadow-xl" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
           <div className="p-6 md:p-7 flex flex-col lg:flex-row lg:items-center justify-between gap-5 text-white">
             <div className="flex items-start gap-4">
