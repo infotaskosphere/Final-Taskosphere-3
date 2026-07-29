@@ -2105,7 +2105,7 @@ export default function Quotations() {
   // RENDER
   // ══════════════════════════════════════════════════════════════════════════
   return (
-    <div className={`min-h-screen p-5 md:p-7 space-y-5 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
+    <div className={`min-h-full space-y-5 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
 
       {/* ── PAGE HEADER ───────────────────────────────────────────────────── */}
       <div className="relative overflow-hidden rounded-2xl border border-slate-200/80 shadow-sm"
