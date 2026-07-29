@@ -24,17 +24,20 @@ const VisitsPage = lazy(() => import('./pages/VisitsPage.jsx'));
 const AIDocumentReader = lazy(() => import('./pages/AIDocumentReader.jsx'));
 
 /* ── Compliance ───────────────────────────────────────────────────────── */
+const ComplianceDashboard = lazy(() => import('./pages/ComplianceDashboard.jsx'));
 const CompliancePage = lazy(() => import('./pages/CompliancePage.jsx'));
 const GSTReconciliation = lazy(() => import('./pages/GSTReconciliation.jsx'));
 const TrademarkSphere = lazy(() => import('./pages/TrademarkSphere.jsx'));
 
 /* ── Records ──────────────────────────────────────────────────────────── */
+const RecordsDashboard = lazy(() => import('./pages/RecordsDashboard.jsx'));
 const DSCRegister = lazy(() => import('./pages/DSCRegister.jsx'));
 const DocumentRegister = lazy(() => import('./pages/DocumentsRegister.jsx'));
 const Clients = lazy(() => import('./pages/Clients.jsx'));
 const PasswordRepository = lazy(() => import('./pages/Passvault.jsx'));
 
 /* ── Client proposals ─────────────────────────────────────────────────── */
+const ClientProposalsDashboard = lazy(() => import('./pages/ClientProposalsDashboard.jsx'));
 const LeadsPage = lazy(() => import('./pages/Leads.jsx'));
 const Quotations = lazy(() => import('./pages/Quotations.jsx'));
 
@@ -123,17 +126,20 @@ export default function AppRoutes() {
         <Route path="/ai-reader" element={<Protected><AIDocumentReader /></Protected>} />
 
         {/* ── Compliance ── */}
+        <Route path="/compliance-dashboard" element={<Protected><ComplianceDashboard /></Protected>} />
         <Route path="/compliance" element={<Protected><CompliancePage /></Protected>} />
         <Route path="/gst-reconciliation" element={<Protected><GSTReconciliation /></Protected>} />
         <Route path="/trademark-sphere" element={<Protected><TrademarkSphere /></Protected>} />
 
         {/* ── Records ── */}
+        <Route path="/records-dashboard" element={<Protected><RecordsDashboard /></Protected>} />
         <Route path="/dsc" element={<Protected><DSCRegister /></Protected>} />
         <Route path="/documents" element={<Protected><DocumentRegister /></Protected>} />
         <Route path="/clients" element={<Protected><Clients /></Protected>} />
         <Route path="/passwords" element={<Protected><PasswordRepository /></Protected>} />
 
         {/* ── Client proposals ── */}
+        <Route path="/client-proposals-dashboard" element={<Protected><ClientProposalsDashboard /></Protected>} />
         <Route path="/leads" element={<Protected><LeadsPage /></Protected>} />
         <Route path="/quotations" element={<Protected><Quotations /></Protected>} />
 
