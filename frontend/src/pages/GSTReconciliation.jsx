@@ -6706,8 +6706,8 @@ export default function GSTReconciliation() {
   const activeTabMeta = TABS.find(t => t.id === activeTab);
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 p-4 md:p-6">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-full bg-slate-50 dark:bg-slate-900">
+      <div className="w-full">
 
         {/* ── Dashboard-Style Banner ── */}
         <motion.div
