@@ -204,6 +204,11 @@ const SECTION_META = {
   settings:   { label: 'Settings',               icon: Settings,       landingPath: '/settings/general' },
 };
 const SECTION_ORDER = ['core', 'accounts', 'compliance', 'records', 'proposals', 'admin', 'settings'];
+// Business-software convention: primary work sections sit on the left,
+// Admin / Settings are pinned to the far right of the same row, separated
+// by a vertical divider (mirrors the QuickBooks/Xero/NetSuite pattern).
+const SECTION_ORDER_LEFT  = ['core', 'accounts', 'compliance', 'records', 'proposals'];
+const SECTION_ORDER_RIGHT = ['admin', 'settings'];
 
 // Extra route prefixes that belong to a section but aren't themselves
 // sidebar links (e.g. Extended Accounts Reports sub-pages, opened from
@@ -250,6 +255,38 @@ const PAGE_VARIANTS = {
     opacity: 0, y: -8,
     transition: { duration: 0.16, ease: 'easeIn' },
   },
+};
+
+// Single tab in the section switcher bar — shared by the left-aligned
+// primary sections and the right-aligned Admin / Settings group so both
+// stay pixel-identical (same height, padding, font-size, active state).
+const SectionTab = ({ sectionId, isDark, activeSectionId, navigate, checkNavPermission }) => {
+  const meta = SECTION_META[sectionId];
+  const group = NAV_GROUPS.find((g) => g.id === sectionId);
+  const hasVisibleItems = group?.items.some((item) => checkNavPermission(item));
+  if (!hasVisibleItems) return null;
+
+  const Icon = meta.icon;
+  const isActive = sectionId === activeSectionId;
+  return (
+    <button
+      onClick={() => navigate(meta.landingPath)}
+      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex-shrink-0 cursor-pointer ${
+        isActive
+          ? 'text-white'
+          : isDark
+            ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+            : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
+      }`}
+      style={isActive ? {
+        background: `linear-gradient(135deg, ${COLORS.mediumBlue}, ${COLORS.sidebarActive})`,
+        boxShadow: '0 2px 8px rgba(46,139,230,0.35)',
+      } : {}}
+    >
+      <Icon className="h-3.5 w-3.5 flex-shrink-0" />
+      {meta.label}
+    </button>
+  );
 };
 
 const DashboardLayout = ({ children }) => {
@@ -813,35 +850,44 @@ const DashboardLayout = ({ children }) => {
           backdropFilter: 'blur(6px)',
         }}
       >
-        {SECTION_ORDER.map((sectionId) => {
-          const meta = SECTION_META[sectionId];
-          const group = NAV_GROUPS.find((g) => g.id === sectionId);
-          const hasVisibleItems = group?.items.some((item) => checkNavPermission(item));
-          if (!hasVisibleItems) return null;
+        {/* Primary sections — left aligned */}
+        {SECTION_ORDER_LEFT.map((sectionId) => (
+          <SectionTab
+            key={sectionId}
+            sectionId={sectionId}
+            isDark={isDark}
+            activeSectionId={activeSectionId}
+            navigate={navigate}
+            checkNavPermission={checkNavPermission}
+          />
+        ))}
 
-          const Icon = meta.icon;
-          const isActive = sectionId === activeSectionId;
-          return (
-            <button
-              key={sectionId}
-              onClick={() => navigate(meta.landingPath)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex-shrink-0 cursor-pointer ${
-                isActive
-                  ? 'text-white'
-                  : isDark
-                    ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
-              }`}
-              style={isActive ? {
-                background: `linear-gradient(135deg, ${COLORS.mediumBlue}, ${COLORS.sidebarActive})`,
-                boxShadow: '0 2px 8px rgba(46,139,230,0.35)',
-              } : {}}
-            >
-              <Icon className="h-3.5 w-3.5 flex-shrink-0" />
-              {meta.label}
-            </button>
-          );
-        })}
+        {/* Spacer pushes Admin / Settings to the far right of the same row */}
+        <div className="flex-1 min-w-[8px]" />
+
+        {/* Vertical divider — separates day-to-day sections from admin/config,
+            the way business software (QuickBooks/Xero/NetSuite) does it. */}
+        <div
+          className="hidden sm:block flex-shrink-0"
+          style={{
+            width:  1,
+            height: 22,
+            background: isDark ? '#334155' : '#e2e8f0',
+            marginRight: 6,
+          }}
+        />
+
+        {/* Admin / Settings — pinned far right */}
+        {SECTION_ORDER_RIGHT.map((sectionId) => (
+          <SectionTab
+            key={sectionId}
+            sectionId={sectionId}
+            isDark={isDark}
+            activeSectionId={activeSectionId}
+            navigate={navigate}
+            checkNavPermission={checkNavPermission}
+          />
+        ))}
       </div>
 
       {/* ── Main content wrapper ── */}
