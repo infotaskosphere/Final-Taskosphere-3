@@ -6451,7 +6451,7 @@ const fetchAll = useCallback(async () => {
   // ── I. JSX return ─────────────────────────────────────────────────────────
 
   return (
-    <div className={`min-h-screen p-5 md:p-7 space-y-5 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
+    <div className={`min-h-full space-y-5 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
       {/* PAGE HEADER */}
       <div className="relative overflow-hidden rounded-2xl shadow-sm" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 60%, #1a8fcc 100%)` }}>
         <div className="absolute right-0 top-0 w-72 h-72 rounded-full -mr-24 -mt-24 opacity-10" style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)' }} />
