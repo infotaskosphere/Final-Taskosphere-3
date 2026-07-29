@@ -1,0 +1,121 @@
+import React, { useEffect, useState } from 'react';
+import {
+  ShieldCheck, ArrowLeftRight, Shield, AlertTriangle, CalendarClock,
+  CheckCircle2, Layers, ListChecks,
+} from 'lucide-react';
+import api from '@/lib/api';
+import useDark from '@/hooks/useDark';
+import { useAuth } from '@/contexts/AuthContext.jsx';
+import { HubBanner, StatCard, LinkCard, HUB_COLORS } from '@/components/SectionHub.jsx';
+
+// Every module that lives inside the "Compliance" sidebar section. Each
+// entry is only shown to users who hold the matching permission (admins
+// always see everything) — same rule DashboardLayout's sidebar uses.
+const MODULES = [
+  {
+    path: '/compliance', icon: ShieldCheck, label: 'Compliance Tracker',
+    description: 'Track statutory filings, due dates and assignment status across every client.',
+    color: HUB_COLORS.mediumBlue, permission: 'can_view_compliance',
+  },
+  {
+    path: '/gst-reconciliation', icon: ArrowLeftRight, label: 'GST Reconciliation',
+    description: 'Match GSTR-2B / purchase register data and resolve ITC mismatches.',
+    color: HUB_COLORS.emeraldGreen, permission: 'can_view_gst_reconciliation',
+  },
+  {
+    path: '/trademark-sphere', icon: Shield, label: 'Trademark Sphere',
+    description: 'Run trademark class searches, view verdicts and manage bulk searches.',
+    color: '#7C3AED', permission: 'can_view_trademark_sphere',
+  },
+];
+
+export default function ComplianceDashboard() {
+  const isDark = useDark();
+  const { user, hasPermission } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [summary, setSummary] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await api.get('/compliance/dashboard/summary', { _silent: true });
+        if (!cancelled) setSummary(data);
+      } catch {
+        /* module may not be enabled for this user — hub still renders */
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const canSee = (m) => {
+    if (!m.permission) return true;
+    if (user?.role === 'admin') return true;
+    return hasPermission(m.permission);
+  };
+  const visibleModules = MODULES.filter(canSee);
+
+  const stats = [
+    { label: 'Compliance Types', value: summary?.total_compliance_types ?? '—', loading },
+    { label: 'Overall Filed', value: summary ? `${summary.overall_pct}%` : '—', loading },
+    { label: 'Overdue', value: summary?.overdue ?? '—', loading },
+  ];
+
+  return (
+    <div>
+      <HubBanner
+        icon={ShieldCheck}
+        eyebrow="Compliance"
+        title="Compliance Dashboard"
+        subtitle="A single hub for statutory tracking, GST reconciliation and trademark monitoring."
+        isDark={isDark}
+        stats={stats}
+      />
+
+      {/* KPI row */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+        <StatCard icon={ListChecks} label="Assignments" value={summary?.total_assignments ?? '—'} loading={loading} color={HUB_COLORS.mediumBlue} isDark={isDark} />
+        <StatCard icon={CheckCircle2} label="Completed / Filed" value={summary?.completed_or_filed ?? '—'} loading={loading} color={HUB_COLORS.emeraldGreen} isDark={isDark} />
+        <StatCard icon={AlertTriangle} label="Overdue" value={summary?.overdue ?? '—'} loading={loading} color="#EF4444" isDark={isDark} />
+        <StatCard icon={CalendarClock} label="Due This Month" value={summary?.due_this_month ?? '—'} loading={loading} color="#F59E0B" isDark={isDark} />
+      </div>
+
+      <h2 className={`text-sm font-extrabold uppercase tracking-widest mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+        Compliance Modules
+      </h2>
+      {visibleModules.length === 0 ? (
+        <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+          You don't have access to any compliance modules yet. Contact your admin to request access.
+        </p>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {visibleModules.map((m) => (
+            <LinkCard key={m.path} {...m} isDark={isDark} />
+          ))}
+        </div>
+      )}
+
+      {summary?.by_category && Object.keys(summary.by_category).length > 0 && (
+        <div className="mt-8">
+          <h2 className={`text-sm font-extrabold uppercase tracking-widest mb-3 flex items-center gap-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            <Layers className="h-4 w-4" /> By Category
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(summary.by_category).map(([cat, count]) => (
+              <span
+                key={cat}
+                className={`text-xs font-semibold px-3 py-1.5 rounded-full border ${
+                  isDark ? 'bg-slate-800/60 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-600'
+                }`}
+              >
+                {cat}: <span style={{ color: HUB_COLORS.mediumBlue }}>{count}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
