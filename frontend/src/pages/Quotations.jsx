@@ -351,9 +351,9 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
     name: '', address: '', phone: '', email: '', website: '', gstin: '', pan: '',
     has_gst: true,
     bank_account_name: '', bank_name: '', bank_account_no: '', bank_ifsc: '',
-    bank_branch: '', bank_account_type: 'Current', upi_id: '',
+    bank_branch: '', bank_account_type: 'Current', upi_id: '', upi_mcc: '',
     linked_bank_account_id: '',
-    logo_base64: null, tm_logo_base64: null, signature_base64: null,
+    logo_base64: null, tm_logo_base64: null, signature_base64: null, upi_qr_image_base64: null,
     smtp_host: '', smtp_port: 587, smtp_user: '', smtp_password: '', smtp_from_name: '',
   });
   const [saving, setSaving] = useState(false);
@@ -361,6 +361,7 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
   const logoInputRef = useRef(null);
   const tmLogoInputRef = useRef(null);
   const sigInputRef  = useRef(null);
+  const qrImageInputRef = useRef(null);
 
   useEffect(() => {
     if (editingCompany) {
@@ -380,10 +381,12 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
         bank_branch: editingCompany.bank_branch || '',
         bank_account_type: editingCompany.bank_account_type || 'Current',
         upi_id: editingCompany.upi_id || '',
+        upi_mcc: editingCompany.upi_mcc || '',
         linked_bank_account_id: editingCompany.linked_bank_account_id || '',
         logo_base64: editingCompany.logo_base64 || null,
         tm_logo_base64: editingCompany.tm_logo_base64 || null,
         signature_base64: editingCompany.signature_base64 || null,
+        upi_qr_image_base64: editingCompany.upi_qr_image_base64 || null,
         smtp_host: editingCompany.smtp_host || '',
         smtp_port: editingCompany.smtp_port || 587,
         smtp_user: editingCompany.smtp_user || '',
@@ -417,6 +420,34 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
         canvas.width = w; canvas.height = h;
         canvas.getContext('2d').drawImage(img, 0, 0, w, h);
         setForm(prev => ({ ...prev, [field]: canvas.toDataURL('image/jpeg', QUALITY) }));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Separate from handleFileChange: QR codes must stay lossless (PNG, not JPEG) and
+  // at higher resolution, since compression artifacts or heavy downscaling can corrupt
+  // fine module detail and make the code unscannable. We only downscale if the source
+  // image is unusually large, and never re-encode as lossy JPEG.
+  const handleQrFileChange = (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 640;
+        let w = img.width, h = img.height;
+        if (w > MAX || h > MAX) {
+          if (w > h) { h = Math.round(h * MAX / w); w = MAX; } else { w = Math.round(w * MAX / h); h = MAX; }
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          setForm(prev => ({ ...prev, upi_qr_image_base64: canvas.toDataURL('image/png') }));
+        } else {
+          // Small/already-appropriately-sized source — keep the original bytes as-is.
+          setForm(prev => ({ ...prev, upi_qr_image_base64: reader.result }));
+        }
       };
       img.src = reader.result;
     };
@@ -568,6 +599,34 @@ function CompanyManager({ onClose, onSaved, editingCompany }) {
                 <Input name={f.name} value={form[f.name]} onChange={handleChange} className="h-9 rounded-xl text-sm" />
               </div>
             ))}
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Bank's UPI QR Code <span className="text-slate-400 font-normal">(recommended)</span></Label>
+              <p className="text-[10px] text-slate-400 -mt-0.5">
+                Upload the merchant QR image your bank generated (e.g. YONO SBI / BHIM SBI Pay). When set, invoices
+                show this image instead of a QR we build ourselves — bank-issued QRs are registered merchant
+                transactions and are far less likely to be declined by the receiving bank than a generic link-based QR.
+              </p>
+              <Input type="file" accept="image/*" onChange={handleQrFileChange} className="h-9 rounded-xl text-sm" ref={qrImageInputRef} />
+              {form.upi_qr_image_base64 && (
+                <div className="flex items-center gap-2">
+                  <img src={form.upi_qr_image_base64} alt="UPI QR" className="h-16 w-16 object-contain rounded border bg-white p-1" />
+                  <Button variant="outline" size="sm" onClick={() => { setForm(p => ({ ...p, upi_qr_image_base64: null })); if (qrImageInputRef.current) qrImageInputRef.current.value = ''; }}>Remove</Button>
+                </div>
+              )}
+              {!form.upi_qr_image_base64 && (
+                <p className="text-[10px] text-amber-600">No bank QR uploaded yet — invoices will fall back to a QR generated from the UPI ID above.</p>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Merchant Category Code <span className="text-slate-400 font-normal">(optional)</span></Label>
+              <p className="text-[10px] text-slate-400 -mt-0.5">
+                Only used for the fallback QR when no bank QR image is uploaded above — tags it as a merchant (business)
+                payment instead of a generic transfer. Your bank can confirm this code if your UPI ID is merchant-registered.
+              </p>
+              <Input name="upi_mcc" value={form.upi_mcc} onChange={handleChange} placeholder="e.g. 8931" className="h-9 rounded-xl text-sm" />
+            </div>
 
             <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2 mt-4"><Tag className="h-4 w-4" />Logo &amp; Signature</h4>
             <div className="space-y-1.5">
