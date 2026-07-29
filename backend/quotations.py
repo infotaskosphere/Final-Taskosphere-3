@@ -1552,6 +1552,15 @@ async def create_company(
         "bank_branch": data.get("bank_branch", ""),
         "bank_account_type": data.get("bank_account_type", "Current"),
         "upi_id": data.get("upi_id", ""),
+        # Preferred: the bank's own registered Merchant/UPI QR image (e.g. YONO SBI,
+        # BHIM SBI Pay). Bank-certified merchant QRs are treated by the receiving bank
+        # as pre-vetted P2M transactions and are far less likely to be declined than a
+        # QR we generate ourselves from a raw upi://pay link. When present, invoices
+        # render this image directly instead of building a dynamic QR.
+        "upi_qr_image_base64": data.get("upi_qr_image_base64"),
+        # Optional Merchant Category Code, used to tag our own generated upi://pay
+        # link as a merchant (P2M) transaction when no bank QR image is uploaded.
+        "upi_mcc": data.get("upi_mcc", ""),
         "linked_bank_account_id": data.get("linked_bank_account_id", ""),
         "logo_base64": data.get("logo_base64"),
         "tm_logo_base64": data.get("tm_logo_base64"),
@@ -1635,6 +1644,8 @@ async def update_company(
         "bank_branch",
         "bank_account_type",
         "upi_id",
+        "upi_qr_image_base64",
+        "upi_mcc",
         "bank_account_holder",
         "linked_bank_account_id",
         "logo_base64",
@@ -1646,11 +1657,11 @@ async def update_company(
         "smtp_password",
         "smtp_from_name",
     ]
-    # Allow explicit null to clear tm_logo_base64
+    # Allow explicit null to clear tm_logo_base64 / upi_qr_image_base64
     update = {
         k: data[k]
         for k in allowed
-        if k in data and (data[k] is not None or k == "tm_logo_base64")
+        if k in data and (data[k] is not None or k in ("tm_logo_base64", "upi_qr_image_base64"))
     }
     await db.companies.update_one({"id": company_id}, {"$set": update})
     updated = await db.companies.find_one({"id": company_id}, {"_id": 0})
