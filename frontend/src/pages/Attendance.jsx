@@ -3344,11 +3344,11 @@ export default function Attendance() {
       />
 
       <motion.div
-        className="min-h-screen p-3 sm:p-4 md:p-5 lg:p-6 overflow-x-hidden"
+        className="min-h-full overflow-x-hidden"
         style={{ background: isDark ? D.bg : '#f8fafc' }}
         variants={containerVariants} initial="hidden" animate="visible"
       >
-        <div className="max-w-[1600px] mx-auto w-full space-y-4">
+        <div className="w-full space-y-4">
         {/* ══ PAGE HEADER ══════════════════════════════════════════════════════ */}
         <motion.div variants={itemVariants}>
           <div
