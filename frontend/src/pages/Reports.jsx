@@ -502,7 +502,7 @@ export default function Reports() {
       isDark={dark}
     />
     <motion.div variants={cV} initial="hidden" animate="visible"
-      className="space-y-4 p-4 md:p-6 min-h-screen"
+      className="space-y-4 min-h-full"
       style={{background:t.pageBg}}>
 
       {/* ══ HEADER — Dashboard-style banner ══ */}
