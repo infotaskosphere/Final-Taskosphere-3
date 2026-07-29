@@ -1340,7 +1340,7 @@ export default function LeadsPage() {
 
   return (
     <motion.div
-      className={`space-y-4 p-2 md:p-4 min-h-screen rounded-2xl ${isDark ? 'bg-[#0f172a]' : ''}`}
+      className={`space-y-4 min-h-full rounded-2xl ${isDark ? 'bg-[#0f172a]' : ''}`}
       variants={containerVariants} initial="hidden" animate="visible">
 
       {/* ── Header Banner (Dashboard-style) ── */}
