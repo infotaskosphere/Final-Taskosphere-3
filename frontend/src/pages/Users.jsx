@@ -2886,7 +2886,7 @@ export default function Users() {
 
   return (
     <motion.div
-      className={`space-y-5 p-5 md:p-8 min-h-screen ${isDark ? 'bg-[#0a0f1c]' : 'bg-slate-50'}`}
+      className={`space-y-5 min-h-full ${isDark ? 'bg-[#0a0f1c]' : 'bg-slate-50'}`}
       initial="hidden" animate="visible" variants={containerVariants}>
 
       {/* ── Page Header ── */}
