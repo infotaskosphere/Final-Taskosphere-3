@@ -1783,7 +1783,7 @@ export default function Dashboard() {
               <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
                 <div className="flex-1 min-w-0 flex items-center gap-3.5">
                   <img
-                    src="/icon-mark-light.png"
+                    src="/icon-mark-onblue.png"
                     alt="Taskosphere"
                     className="hidden sm:block flex-shrink-0 object-contain"
                     style={{ height: 42, width: 42 }}
