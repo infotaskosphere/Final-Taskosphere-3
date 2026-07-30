@@ -472,7 +472,7 @@ export default function StaffActivity() {
     try {
       const doc = new jsPDF('p', 'mm', 'a4'); let y = 15;
       doc.setFontSize(18); doc.setTextColor(13, 59, 102);
-      doc.text('Staff Activity Report', 15, y); y += 8;
+      doc.text('Team Activity Report', 15, y); y += 8;
       doc.setFontSize(10); doc.setTextColor(100);
       doc.text('Staff: ' + (selectedStaff?.full_name || '—') + '   Date: ' + selDate, 15, y); y += 12;
       doc.setFontSize(13); doc.setTextColor(13, 59, 102); doc.text('Session Overview', 15, y); y += 7;
