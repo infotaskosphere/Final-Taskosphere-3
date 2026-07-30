@@ -1787,16 +1787,14 @@ export default function Dashboard() {
                     style={{
                       height: 44,
                       width: 44,
-                      background: 'rgba(255,255,255,0.18)',
-                      border: '1px solid rgba(255,255,255,0.25)',
-                      backdropFilter: 'blur(6px)',
+                      background: 'linear-gradient(135deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.25) 100%)',
                     }}
                   >
                     <img
                       src="/icon-mark.png"
                       alt="Taskosphere"
                       className="object-contain"
-                      style={{ height: 28, width: 28 }}
+                      style={{ height: 30, width: 30 }}
                     />
                   </div>
                   <div className="min-w-0">
@@ -2054,8 +2052,14 @@ export default function Dashboard() {
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
             onClick={() => navigate('/tasks?filter=my-tasks')}
-            className={`${metricCardCls} ${metricCardDefault}`}
-            style={{ borderLeftWidth: 3, borderLeftColor: isDark ? '#60a5fa' : COLORS.deepBlue }}
+            className={`${metricCardCls} ${isDark ? 'border-slate-700 hover:border-slate-600' : 'border-slate-200/80 hover:border-slate-300'}`}
+            style={{
+              borderLeftWidth: 3, borderLeftColor: isDark ? '#60a5fa' : COLORS.deepBlue,
+              background: isDark
+                ? 'linear-gradient(150deg, rgba(96,165,250,0.10) 0%, rgba(30,41,59,1) 55%)'
+                : `linear-gradient(150deg, ${COLORS.deepBlue}0d 0%, #ffffff 55%)`,
+              boxShadow: isDark ? 'none' : '0 1px 2px rgba(13,59,102,0.04)',
+            }}
           >
             <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
               <div className="flex items-start justify-between">
@@ -2066,8 +2070,8 @@ export default function Dashboard() {
                   </p>
                 </div>
                 <div
-                  className="p-2 rounded-lg group-hover:scale-110 transition-transform flex-shrink-0"
-                  style={{ backgroundColor: isDark ? 'rgba(96,165,250,0.12)' : `${COLORS.deepBlue}12` }}
+                  className="p-2 rounded-lg group-hover:scale-110 transition-transform flex-shrink-0 shadow-sm"
+                  style={{ background: isDark ? 'linear-gradient(135deg, rgba(96,165,250,0.25), rgba(96,165,250,0.08))' : `linear-gradient(135deg, ${COLORS.deepBlue}22, ${COLORS.deepBlue}0a)` }}
                 >
                   <Briefcase className="h-4 w-4" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }} />
                 </div>
@@ -2084,13 +2088,17 @@ export default function Dashboard() {
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
             onClick={() => navigate('/tasks?filter=today_new')}
-            style={{ borderLeftWidth: 3, borderLeftColor: isDark ? '#a5b4fc' : '#4338ca' }}
+            style={{
+              borderLeftWidth: 3, borderLeftColor: isDark ? '#a5b4fc' : '#4338ca',
+              background: todayNewTasks.length > 0
+                ? (isDark ? 'linear-gradient(150deg, rgba(129,140,248,0.16) 0%, rgba(30,41,59,1) 55%)' : 'linear-gradient(150deg, #e0e7ff 0%, #ffffff 60%)')
+                : (isDark ? 'linear-gradient(150deg, rgba(165,180,252,0.08) 0%, rgba(30,41,59,1) 55%)' : 'linear-gradient(150deg, #4338ca0d 0%, #ffffff 55%)'),
+              boxShadow: isDark ? 'none' : '0 1px 2px rgba(67,56,202,0.04)',
+            }}
             className={`${metricCardCls} ${
               todayNewTasks.length > 0
-                ? isDark
-                  ? 'bg-indigo-900/20 border-indigo-800 hover:border-indigo-700'
-                  : 'bg-indigo-50/60 border-indigo-200 hover:border-indigo-300'
-                : metricCardDefault
+                ? isDark ? 'border-indigo-800 hover:border-indigo-700' : 'border-indigo-200 hover:border-indigo-300'
+                : isDark ? 'border-slate-700 hover:border-slate-600' : 'border-slate-200/80 hover:border-slate-300'
             }`}
           >
             <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
@@ -2102,8 +2110,8 @@ export default function Dashboard() {
                   </p>
                 </div>
                 <div
-                  className="p-2 rounded-lg group-hover:scale-110 transition-transform flex-shrink-0"
-                  style={{ backgroundColor: isDark ? 'rgba(165,180,252,0.12)' : '#e0e7ff' }}
+                  className="p-2 rounded-lg group-hover:scale-110 transition-transform flex-shrink-0 shadow-sm"
+                  style={{ background: isDark ? 'linear-gradient(135deg, rgba(165,180,252,0.28), rgba(165,180,252,0.08))' : 'linear-gradient(135deg, #c7d2fe, #eef2ff)' }}
                 >
                   <Zap className="h-4 w-4" style={{ color: isDark ? '#a5b4fc' : '#4338ca' }} />
                 </div>
@@ -2122,13 +2130,17 @@ export default function Dashboard() {
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
             onClick={() => navigate('/todos')}
-            style={{ borderLeftWidth: 3, borderLeftColor: isDark ? '#93c5fd' : COLORS.mediumBlue }}
+            style={{
+              borderLeftWidth: 3, borderLeftColor: isDark ? '#93c5fd' : COLORS.mediumBlue,
+              background: pendingTodos.length > 0
+                ? (isDark ? 'linear-gradient(150deg, rgba(147,197,253,0.16) 0%, rgba(30,41,59,1) 55%)' : `linear-gradient(150deg, ${COLORS.mediumBlue}1a 0%, #ffffff 60%)`)
+                : (isDark ? 'linear-gradient(150deg, rgba(147,197,253,0.08) 0%, rgba(30,41,59,1) 55%)' : `linear-gradient(150deg, ${COLORS.mediumBlue}0d 0%, #ffffff 55%)`),
+              boxShadow: isDark ? 'none' : '0 1px 2px rgba(31,111,178,0.04)',
+            }}
             className={`${metricCardCls} ${
               pendingTodos.length > 0
-                ? isDark
-                  ? 'bg-blue-900/20 border-blue-800 hover:border-blue-700'
-                  : 'bg-blue-50/60 border-blue-200 hover:border-blue-300'
-                : metricCardDefault
+                ? isDark ? 'border-blue-800 hover:border-blue-700' : 'border-blue-200 hover:border-blue-300'
+                : isDark ? 'border-slate-700 hover:border-slate-600' : 'border-slate-200/80 hover:border-slate-300'
             }`}
           >
             <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
@@ -2140,8 +2152,8 @@ export default function Dashboard() {
                   </p>
                 </div>
                 <div
-                  className="p-2 rounded-lg group-hover:scale-110 transition-transform flex-shrink-0"
-                  style={{ backgroundColor: isDark ? 'rgba(31,111,178,0.2)' : `${COLORS.mediumBlue}12` }}
+                  className="p-2 rounded-lg group-hover:scale-110 transition-transform flex-shrink-0 shadow-sm"
+                  style={{ background: isDark ? 'linear-gradient(135deg, rgba(147,197,253,0.28), rgba(147,197,253,0.08))' : `linear-gradient(135deg, ${COLORS.mediumBlue}28, ${COLORS.mediumBlue}0a)` }}
                 >
                   <CheckSquare className="h-4 w-4" style={{ color: isDark ? '#93c5fd' : COLORS.mediumBlue }} />
                 </div>
@@ -2158,13 +2170,17 @@ export default function Dashboard() {
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
             onClick={() => navigate('/tasks?filter=overdue')}
-            style={{ borderLeftWidth: 3, borderLeftColor: COLORS.coral }}
+            style={{
+              borderLeftWidth: 3, borderLeftColor: COLORS.coral,
+              background: overdueTaskCount > 0
+                ? (isDark ? 'linear-gradient(150deg, rgba(255,107,107,0.16) 0%, rgba(30,41,59,1) 55%)' : `linear-gradient(150deg, ${COLORS.coral}1a 0%, #ffffff 60%)`)
+                : (isDark ? 'linear-gradient(150deg, rgba(255,107,107,0.08) 0%, rgba(30,41,59,1) 55%)' : `linear-gradient(150deg, ${COLORS.coral}0d 0%, #ffffff 55%)`),
+              boxShadow: isDark ? 'none' : '0 1px 2px rgba(255,107,107,0.05)',
+            }}
             className={`${metricCardCls} ${
               overdueTaskCount > 0
-                ? isDark
-                  ? 'bg-red-900/20 border-red-800 hover:border-red-700'
-                  : 'bg-red-50/60 border-red-200 hover:border-red-300'
-                : metricCardDefault
+                ? isDark ? 'border-red-800 hover:border-red-700' : 'border-red-200 hover:border-red-300'
+                : isDark ? 'border-slate-700 hover:border-slate-600' : 'border-slate-200/80 hover:border-slate-300'
             }`}
           >
             <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
@@ -2176,8 +2192,8 @@ export default function Dashboard() {
                   </p>
                 </div>
                 <div
-                  className="p-2 rounded-lg group-hover:scale-110 transition-transform flex-shrink-0"
-                  style={{ backgroundColor: `${COLORS.coral}18` }}
+                  className="p-2 rounded-lg group-hover:scale-110 transition-transform flex-shrink-0 shadow-sm"
+                  style={{ background: `linear-gradient(135deg, ${COLORS.coral}30, ${COLORS.coral}0a)` }}
                 >
                   <AlertCircle className="h-4 w-4" style={{ color: COLORS.coral }} />
                 </div>
@@ -2194,13 +2210,17 @@ export default function Dashboard() {
             whileHover={{ y: -3, transition: springPhysics.card }}
             whileTap={{ scale: 0.985 }}
             onClick={() => hasCrossVisibility && !usersLoading && navigate('/tasks?filter=team')}
-            style={{ borderLeftWidth: 3, borderLeftColor: hasCrossVisibility ? '#7c3aed' : (isDark ? '#334155' : '#e2e8f0') }}
+            style={{
+              borderLeftWidth: 3, borderLeftColor: hasCrossVisibility ? '#7c3aed' : (isDark ? '#334155' : '#e2e8f0'),
+              background: hasCrossVisibility && teamTaskTotal > 0
+                ? (isDark ? 'linear-gradient(150deg, rgba(167,139,250,0.16) 0%, rgba(30,41,59,1) 55%)' : 'linear-gradient(150deg, #ede9fe 0%, #ffffff 60%)')
+                : (isDark ? 'linear-gradient(150deg, rgba(148,163,184,0.06) 0%, rgba(30,41,59,1) 55%)' : 'linear-gradient(150deg, #7c3aed0d 0%, #ffffff 55%)'),
+              boxShadow: isDark ? 'none' : '0 1px 2px rgba(124,58,237,0.04)',
+            }}
             className={`${metricCardCls} ${
               hasCrossVisibility && teamTaskTotal > 0
-                ? isDark
-                  ? 'bg-violet-900/20 border-violet-800 hover:border-violet-700'
-                  : 'bg-violet-50/60 border-violet-200 hover:border-violet-300'
-                : metricCardDefault
+                ? isDark ? 'border-violet-800 hover:border-violet-700' : 'border-violet-200 hover:border-violet-300'
+                : isDark ? 'border-slate-700 hover:border-slate-600' : 'border-slate-200/80 hover:border-slate-300'
             }`}
           >
             <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
@@ -2228,8 +2248,8 @@ export default function Dashboard() {
                   )}
                 </div>
                 <div
-                  className="p-2 rounded-lg group-hover:scale-110 transition-transform flex-shrink-0"
-                  style={{ backgroundColor: hasCrossVisibility ? (isDark ? 'rgba(167,139,250,0.15)' : '#ede9fe') : (isDark ? 'rgba(71,85,105,0.2)' : '#f8fafc') }}
+                  className="p-2 rounded-lg group-hover:scale-110 transition-transform flex-shrink-0 shadow-sm"
+                  style={{ background: hasCrossVisibility ? (isDark ? 'linear-gradient(135deg, rgba(167,139,250,0.28), rgba(167,139,250,0.08))' : 'linear-gradient(135deg, #ddd6fe, #f5f3ff)') : (isDark ? 'rgba(71,85,105,0.2)' : '#f8fafc') }}
                 >
                   <Users className="h-4 w-4" style={{ color: hasCrossVisibility ? '#7c3aed' : (isDark ? '#475569' : '#cbd5e1') }} />
                 </div>
