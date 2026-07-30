@@ -375,7 +375,14 @@ function FinixDashboardInner() {
         <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-5 px-6 py-5 md:px-8 md:py-6">
           {/* Brand block */}
           <div className="flex items-center gap-4">
-            <div className="shrink-0 rounded-2xl bg-white/95 p-2 shadow-md ring-1 ring-white/40">
+            <div
+              className="shrink-0 rounded-2xl p-2 shadow-md"
+              style={{
+                background: 'rgba(255,255,255,0.16)',
+                border: '1px solid rgba(255,255,255,0.25)',
+                backdropFilter: 'blur(6px)',
+              }}
+            >
               <img src="/finix-icon.png" alt="Finix" className="w-11 h-11 md:w-12 md:h-12 object-contain" />
             </div>
             <div>
