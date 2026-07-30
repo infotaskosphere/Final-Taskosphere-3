@@ -1,11 +1,10 @@
-import React, { Suspense, memo, useCallback } from "react";
-import { BrowserRouter, useLocation } from "react-router-dom";
+import React, { Suspense, memo } from "react";
+import { BrowserRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { Toaster } from "@/components/ui/sonner";
 import AppRoutes from "./AppRoutes.jsx";
 import { useLoading } from "./lib/api";
-import { AnimatePresence } from "framer-motion";
 import GifLoader from "@/components/ui/GifLoader.jsx";
 import ReminderPopupManager from "@/components/layout/ReminderPopupManager.jsx";
 import { BulkWASenderProvider } from "@/components/BulkWASenderContext";
@@ -35,22 +34,6 @@ const BottomLoadingBar = memo(function BottomLoadingBar() {
     />
   );
 });
-
-/* ── AnimatePresence wrapper ───────────────────────────────────────── */
-// Extracted so it only re-renders on location changes, not provider updates.
-// initial={false} skips the entry animation on first render = faster paint.
-// mode="wait" ensures the exit animation completes before the next page mounts,
-// but we keep it because it prevents layout flicker during transitions.
-function AnimatedRoutes() {
-  const location = useLocation();
-  return (
-    <AnimatePresence mode="wait" initial={false}>
-      {/* Key on pathname only — ignores search/hash so query param changes
-          don't trigger full remount (e.g. /tasks?filter=xyz stays mounted) */}
-      <AppRoutes key={location.pathname} />
-    </AnimatePresence>
-  );
-}
 
 /* ── Query client ──────────────────────────────────────────────────── */
 // Created outside the component so it survives re-renders.
@@ -93,7 +76,7 @@ export default function App() {
               <MinimizedFormsDock />
 
               <Suspense fallback={<GifLoader />}>
-                <AnimatedRoutes />
+                <AppRoutes />
               </Suspense>
 
               <Toaster position="top-right" richColors />
