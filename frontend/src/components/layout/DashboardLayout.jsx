@@ -36,8 +36,8 @@ const COLORS = {
 
 const SIDEBAR_EXPANDED  = 280;
 const SIDEBAR_COLLAPSED = 80;
-const HEADER_H          = 76;
-const SECTION_BAR_H     = 48;
+const HEADER_H          = 64;
+const SECTION_BAR_H     = 40;
 const TOTAL_HEADER_H    = HEADER_H + SECTION_BAR_H;
 
 // NAV_GROUPS: items with no `permission` key are visible to ALL authenticated users
@@ -204,11 +204,12 @@ const SECTION_META = {
   settings:   { label: 'Settings',               icon: Settings,       landingPath: '/settings/general' },
 };
 const SECTION_ORDER = ['core', 'accounts', 'compliance', 'records', 'proposals', 'admin', 'settings'];
-// Business-software convention: primary work sections sit on the left,
-// Admin / Settings are pinned to the far right of the same row, separated
-// by a vertical divider (mirrors the QuickBooks/Xero/NetSuite pattern).
-const SECTION_ORDER_LEFT  = ['core', 'accounts', 'compliance', 'records', 'proposals'];
-const SECTION_ORDER_RIGHT = ['admin', 'settings'];
+// Admin + Settings render as their own right-aligned cluster in the section
+// bar (common ERP/business-software convention — day-to-day modules on the
+// left, account/system controls pinned to the right).
+const RIGHT_ALIGNED_SECTIONS = ['admin', 'settings'];
+const LEFT_SECTIONS  = SECTION_ORDER.filter((id) => !RIGHT_ALIGNED_SECTIONS.includes(id));
+const RIGHT_SECTIONS = SECTION_ORDER.filter((id) => RIGHT_ALIGNED_SECTIONS.includes(id));
 
 // Extra route prefixes that belong to a section but aren't themselves
 // sidebar links (e.g. Extended Accounts Reports sub-pages, opened from
@@ -255,38 +256,6 @@ const PAGE_VARIANTS = {
     opacity: 0, y: -8,
     transition: { duration: 0.16, ease: 'easeIn' },
   },
-};
-
-// Single tab in the section switcher bar — shared by the left-aligned
-// primary sections and the right-aligned Admin / Settings group so both
-// stay pixel-identical (same height, padding, font-size, active state).
-const SectionTab = ({ sectionId, isDark, activeSectionId, navigate, checkNavPermission }) => {
-  const meta = SECTION_META[sectionId];
-  const group = NAV_GROUPS.find((g) => g.id === sectionId);
-  const hasVisibleItems = group?.items.some((item) => checkNavPermission(item));
-  if (!hasVisibleItems) return null;
-
-  const Icon = meta.icon;
-  const isActive = sectionId === activeSectionId;
-  return (
-    <button
-      onClick={() => navigate(meta.landingPath)}
-      className={`relative flex items-center gap-1.5 px-3 h-full text-xs font-semibold whitespace-nowrap transition-colors flex-shrink-0 cursor-pointer border-b-2 ${
-        isActive
-          ? ''
-          : isDark
-            ? 'text-slate-400 hover:text-slate-200 border-transparent'
-            : 'text-slate-500 hover:text-slate-800 border-transparent'
-      }`}
-      style={isActive ? {
-        color: isDark ? '#ffffff' : COLORS.deepBlue,
-        borderColor: COLORS.mediumBlue,
-      } : {}}
-    >
-      <Icon className="h-3.5 w-3.5 flex-shrink-0" />
-      {meta.label}
-    </button>
-  );
 };
 
 const DashboardLayout = ({ children }) => {
@@ -430,17 +399,18 @@ const DashboardLayout = ({ children }) => {
           to={item.path}
           title={collapsed ? item.label : undefined}
           className={`relative flex items-center gap-3 min-w-0
-            ${collapsed ? 'justify-center px-0 py-3' : 'pl-3.5 pr-3 py-2.5'}
-            rounded-lg transition-all duration-150 group
-            ${isActive ? 'text-white' : 'text-slate-300 hover:text-white hover:bg-white/[0.06]'}`}
+            ${collapsed ? 'justify-center px-0 py-3' : 'px-3 py-2.5'}
+            rounded-xl transition-all duration-200 group
+            ${isActive ? 'text-white' : 'text-slate-300 hover:text-white hover:bg-white/[0.07]'}`}
           style={isActive ? {
-            background: 'rgba(255,255,255,0.08)',
+            background: `linear-gradient(135deg, ${COLORS.mediumBlue}, ${COLORS.sidebarActive})`,
+            boxShadow: '0 4px 14px rgba(46,139,230,0.35)',
           } : {}}
         >
-          {isActive && (
+          {isActive && !collapsed && (
             <span
-              className="absolute left-0 top-1/2 -translate-y-1/2 rounded-r-full"
-              style={{ width: 3, height: collapsed ? '60%' : '68%', background: COLORS.sidebarActive }}
+              className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full"
+              style={{ background: 'rgba(255,255,255,0.6)' }}
             />
           )}
           <Icon
@@ -453,6 +423,9 @@ const DashboardLayout = ({ children }) => {
               {item.label}
             </span>
           )}
+          {isActive && collapsed && (
+            <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-white/70" />
+          )}
           {collapsed && (
             <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-800 text-white text-xs font-medium rounded-lg whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 translate-x-1 group-hover:translate-x-0 transition-all duration-200 z-[100] shadow-lg">
               {item.label}
@@ -463,6 +436,38 @@ const DashboardLayout = ({ children }) => {
       </motion.div>
     );
   };
+
+  // Flat, bottom-border tab style — matches the density/feel of ordinary
+  // business software (Zoho Books, QuickBooks, NetSuite module switchers)
+  // rather than a floating pill. Used for both the left and right clusters
+  // in the section bar.
+  const renderSectionTabs = (sectionIds) => sectionIds.map((sectionId) => {
+    const meta = SECTION_META[sectionId];
+    const group = NAV_GROUPS.find((g) => g.id === sectionId);
+    const hasVisibleItems = group?.items.some((item) => checkNavPermission(item));
+    if (!hasVisibleItems) return null;
+
+    const Icon = meta.icon;
+    const isActive = sectionId === activeSectionId;
+    return (
+      <button
+        key={sectionId}
+        onClick={() => navigate(meta.landingPath)}
+        className={`flex items-center gap-1.5 px-2.5 h-full text-[12.5px] font-semibold whitespace-nowrap flex-shrink-0 cursor-pointer border-b-2 transition-colors ${
+          isActive
+            ? isDark
+              ? 'text-white border-blue-400'
+              : 'text-slate-900 border-blue-600'
+            : isDark
+              ? 'text-slate-400 border-transparent hover:text-slate-200'
+              : 'text-slate-500 border-transparent hover:text-slate-800'
+        }`}
+      >
+        <Icon className="h-3.5 w-3.5 flex-shrink-0" />
+        {meta.label}
+      </button>
+    );
+  });
 
   const NavDivider = ({ label }) => (
     <div className={`mt-5 mb-2 ${collapsed ? 'px-2' : 'px-3'}`}>
@@ -587,7 +592,7 @@ const DashboardLayout = ({ children }) => {
                   src="/icon-192.png"
                   alt="Task-O-Sphere"
                   className="object-contain block"
-                  style={{ height: 56, width: 56 }}
+                  style={{ height: 46, width: 46 }}
                 />
               ) : (
                 <img
@@ -595,13 +600,7 @@ const DashboardLayout = ({ children }) => {
                   src={isDark ? '/logo-dark.png' : '/logo-lite.png'}
                   alt="Task-O-Sphere"
                   className="object-contain block mx-auto transition-opacity duration-150"
-                  style={{ height: 60, maxWidth: isDesktop ? sidebarPx - 24 : 200 }}
-                />
-              )}
-              {hasUnread && (
-                <span
-                  className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full border-2"
-                  style={{ background: COLORS.emeraldGreen, borderColor: isDark ? '#0f172a' : '#ffffff' }}
+                  style={{ height: 48, maxWidth: isDesktop ? sidebarPx - 24 : 200 }}
                 />
               )}
             </div>
@@ -835,56 +834,32 @@ const DashboardLayout = ({ children }) => {
 
       {/* ── Section switcher — the 7 top-level headings. Clicking one jumps to
           that section's landing page; the sidebar below then narrows to show
-          only that section's tabs (see activeSectionId). ── */}
+          only that section's tabs (see activeSectionId). Admin + Settings
+          are pinned to the right, separated by a divider — day-to-day
+          modules on the left, system/account controls on the right, the
+          way most business software (Zoho, QuickBooks, NetSuite) lays out
+          a module switcher. ── */}
       <div
-        className="fixed left-0 right-0 z-[44] flex items-center gap-1.5 px-3 sm:px-5 overflow-x-auto slim-scroll"
+        className="fixed left-0 right-0 z-[44] flex items-center px-3 sm:px-5 overflow-x-auto slim-scroll"
         style={{
           top:          HEADER_H,
           height:       SECTION_BAR_H,
-          background:   isDark ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.97)',
+          background:   isDark ? '#0f172a' : '#ffffff',
           borderBottom: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
-          backdropFilter: 'blur(6px)',
         }}
       >
-        {/* Primary sections — left aligned */}
-        {SECTION_ORDER_LEFT.map((sectionId) => (
-          <SectionTab
-            key={sectionId}
-            sectionId={sectionId}
-            isDark={isDark}
-            activeSectionId={activeSectionId}
-            navigate={navigate}
-            checkNavPermission={checkNavPermission}
-          />
-        ))}
-
-        {/* Spacer pushes Admin / Settings to the far right of the same row */}
+        {renderSectionTabs(LEFT_SECTIONS)}
         <div className="flex-1 min-w-[8px]" />
-
-        {/* Vertical divider — separates day-to-day sections from admin/config,
-            the way business software (QuickBooks/Xero/NetSuite) does it. */}
-        <div
-          className="hidden sm:block flex-shrink-0"
-          style={{
-            width:  1,
-            height: 22,
-            background: isDark ? '#334155' : '#e2e8f0',
-            marginRight: 6,
-          }}
-        />
-
-        {/* Admin / Settings — pinned far right */}
-        {SECTION_ORDER_RIGHT.map((sectionId) => (
-          <SectionTab
-            key={sectionId}
-            sectionId={sectionId}
-            isDark={isDark}
-            activeSectionId={activeSectionId}
-            navigate={navigate}
-            checkNavPermission={checkNavPermission}
-          />
-        ))}
+        {RIGHT_SECTIONS.length > 0 && (
+          <div
+            className="flex items-center flex-shrink-0"
+            style={{ borderLeft: isDark ? '1px solid #334155' : '1px solid #e2e8f0', marginLeft: 4, paddingLeft: 4 }}
+          >
+            {renderSectionTabs(RIGHT_SECTIONS)}
+          </div>
+        )}
       </div>
+
 
       {/* ── Main content wrapper ── */}
       <div
