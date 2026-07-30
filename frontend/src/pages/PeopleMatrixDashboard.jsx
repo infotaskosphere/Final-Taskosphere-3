@@ -15,7 +15,7 @@ const MODULES = [
     color: HUB_COLORS.mediumBlue, permission: 'can_view_user_page', countKey: 'users',
   },
   {
-    path: '/staff-activity', icon: Activity, label: 'Staff Activity',
+    path: '/staff-activity', icon: Activity, label: 'Team Activity',
     description: 'Monitor login sessions, productivity and desktop activity.',
     color: HUB_COLORS.emeraldGreen, adminOnly: true, countKey: 'activityToday',
   },
