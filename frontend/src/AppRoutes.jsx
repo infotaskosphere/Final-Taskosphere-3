@@ -1,8 +1,9 @@
 import React, { lazy, Suspense } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import DashboardLayout from '@/components/layout/DashboardLayout.jsx';
 import GifLoader from '@/components/ui/GifLoader.jsx';
+import { AnimatePresence, motion } from 'framer-motion';
 
 /* ── Auth pages (no sidebar) ─────────────────────────────────────────── */
 const Login = lazy(() => import('./pages/Login.jsx'));
@@ -78,16 +79,44 @@ function AuthLoading() {
   return <GifLoader />;
 }
 
-// Wraps every internal app page: bounces unauthenticated users to /login
-// and renders the shared sidebar + header (DashboardLayout) around the
-// page. Per-module permission checks (e.g. Accounting Reports, Passwords,
-// Users) are handled inside each page itself via RequestAccessGate /
-// role checks, not here — this guard only enforces "is signed in".
-function Protected({ children }) {
+// Renders ONCE and stays mounted for every internal-app navigation — the
+// sidebar/header (DashboardLayout) no longer unmounts + remounts on every
+// route change the way the old per-route <Protected> wrapper caused (it
+// was re-created inside a tree that App.jsx keyed by pathname, so every
+// click fully tore down and rebuilt the whole layout: sidebar nav list,
+// notification polling effect, section-bar computation, etc.). Now only
+// the page content under <Outlet/> swaps, which is what actually needs
+// to change between pages — this is what makes navigation feel instant.
+function ProtectedLayout() {
   const { user, loading } = useAuth();
   if (loading) return <AuthLoading />;
   if (!user) return <Navigate to="/login" replace />;
-  return <DashboardLayout>{children}</DashboardLayout>;
+  return (
+    <DashboardLayout>
+      <AnimatedOutlet />
+    </DashboardLayout>
+  );
+}
+
+// Small opacity-only cross-fade on the page content itself. Deliberately
+// cheap (no layout-shifting slide/scale) so it never becomes the
+// bottleneck — this replaced the old app-wide "wait for exit, then
+// mount" transition that used to block on every navigation.
+function AnimatedOutlet() {
+  const location = useLocation();
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.div
+        key={location.pathname}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.12, ease: 'easeOut' }}
+      >
+        <Outlet />
+      </motion.div>
+    </AnimatePresence>
+  );
 }
 
 // Wraps /login, /register, /forgot-password: an already-signed-in user
@@ -114,76 +143,83 @@ export default function AppRoutes() {
         <Route path="/client-portal/login" element={<ClientPortalLogin />} />
         <Route path="/client-portal/dashboard" element={<ClientPortalDashboard />} />
 
+        {/* ── Everything below shares ONE persistent DashboardLayout instance
+            (mounted once by ProtectedLayout) instead of each page getting
+            its own — this is the fix for sluggish page-to-page navigation. ── */}
+        <Route element={<ProtectedLayout />}>
+
         {/* ── Core ── */}
-        <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
-        <Route path="/tasks" element={<Protected><Tasks /></Protected>} />
-        <Route path="/todos" element={<Protected><TodoDashboard /></Protected>} />
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/tasks" element={<Tasks />} />
+        <Route path="/todos" element={<TodoDashboard />} />
         <Route path="/todo" element={<Navigate to="/todos" replace />} />
-        <Route path="/attendance" element={<Protected><Attendance /></Protected>} />
-        <Route path="/reminders" element={<Protected><Reminders /></Protected>} />
-        <Route path="/action-center" element={<Protected><ActionCenter /></Protected>} />
-        <Route path="/visits" element={<Protected><VisitsPage /></Protected>} />
-        <Route path="/ai-reader" element={<Protected><AIDocumentReader /></Protected>} />
+        <Route path="/attendance" element={<Attendance />} />
+        <Route path="/reminders" element={<Reminders />} />
+        <Route path="/action-center" element={<ActionCenter />} />
+        <Route path="/visits" element={<VisitsPage />} />
+        <Route path="/ai-reader" element={<AIDocumentReader />} />
 
         {/* ── Compliance ── */}
-        <Route path="/compliance-dashboard" element={<Protected><ComplianceDashboard /></Protected>} />
-        <Route path="/compliance" element={<Protected><CompliancePage /></Protected>} />
-        <Route path="/gst-reconciliation" element={<Protected><GSTReconciliation /></Protected>} />
-        <Route path="/trademark-sphere" element={<Protected><TrademarkSphere /></Protected>} />
+        <Route path="/compliance-dashboard" element={<ComplianceDashboard />} />
+        <Route path="/compliance" element={<CompliancePage />} />
+        <Route path="/gst-reconciliation" element={<GSTReconciliation />} />
+        <Route path="/trademark-sphere" element={<TrademarkSphere />} />
 
         {/* ── Records ── */}
-        <Route path="/records-dashboard" element={<Protected><RecordsDashboard /></Protected>} />
-        <Route path="/dsc" element={<Protected><DSCRegister /></Protected>} />
-        <Route path="/documents" element={<Protected><DocumentRegister /></Protected>} />
-        <Route path="/clients" element={<Protected><Clients /></Protected>} />
-        <Route path="/passwords" element={<Protected><PasswordRepository /></Protected>} />
+        <Route path="/records-dashboard" element={<RecordsDashboard />} />
+        <Route path="/dsc" element={<DSCRegister />} />
+        <Route path="/documents" element={<DocumentRegister />} />
+        <Route path="/clients" element={<Clients />} />
+        <Route path="/passwords" element={<PasswordRepository />} />
 
         {/* ── Client proposals ── */}
-        <Route path="/client-proposals-dashboard" element={<Protected><ClientProposalsDashboard /></Protected>} />
-        <Route path="/leads" element={<Protected><LeadsPage /></Protected>} />
-        <Route path="/quotations" element={<Protected><Quotations /></Protected>} />
+        <Route path="/client-proposals-dashboard" element={<ClientProposalsDashboard />} />
+        <Route path="/leads" element={<LeadsPage />} />
+        <Route path="/quotations" element={<Quotations />} />
 
         {/* ── Accounts ── */}
-        <Route path="/finix-dashboard" element={<Protected><FinixDashboard /></Protected>} />
-        <Route path="/invoicing" element={<Protected><Invoicing /></Protected>} />
-        <Route path="/purchase" element={<Protected><Purchase /></Protected>} />
-        <Route path="/bank-accounts" element={<Protected><BankAccounts /></Protected>} />
-        <Route path="/chart-of-accounts" element={<Protected><ChartOfAccounts /></Protected>} />
-        <Route path="/journal-entries" element={<Protected><JournalEntries /></Protected>} />
-        <Route path="/accounting-reports" element={<Protected><AccountingReports /></Protected>} />
-        <Route path="/zero-touch-entry" element={<Protected><ZeroTouchEntry /></Protected>} />
-        <Route path="/gst-portal-sync" element={<Protected><GSTPortalSync /></Protected>} />
-        <Route path="/accounting-integrity" element={<Protected><AccountingIntegrity /></Protected>} />
-        <Route path="/day-book" element={<Protected><ExtendedReports /></Protected>} />
-        <Route path="/cash-bank-book" element={<Protected><ExtendedReports /></Protected>} />
-        <Route path="/cash-flow" element={<Protected><ExtendedReports /></Protected>} />
-        <Route path="/outstanding-report" element={<Protected><ExtendedReports /></Protected>} />
-        <Route path="/bank-reconciliation" element={<Protected><ExtendedReports /></Protected>} />
-        <Route path="/depreciation" element={<Protected><ExtendedReports /></Protected>} />
-        <Route path="/tds-tcs" element={<Protected><ExtendedReports /></Protected>} />
-        <Route path="/financial-ratios" element={<Protected><ExtendedReports /></Protected>} />
-        <Route path="/comparative-report" element={<Protected><ExtendedReports /></Protected>} />
-        <Route path="/yearly-report" element={<Protected><ExtendedReports /></Protected>} />
-        <Route path="/opening-balances" element={<Protected><ExtendedReports /></Protected>} />
-        <Route path="/accounting-audit-trail" element={<Protected><ExtendedReports /></Protected>} />
-        <Route path="/bulk-import" element={<Protected><ExtendedReports /></Protected>} />
-        <Route path="/due-dates" element={<Protected><DueDates /></Protected>} />
-        <Route path="/import-invoices" element={<Protected><ImportInvoices /></Protected>} />
+        <Route path="/finix-dashboard" element={<FinixDashboard />} />
+        <Route path="/invoicing" element={<Invoicing />} />
+        <Route path="/purchase" element={<Purchase />} />
+        <Route path="/bank-accounts" element={<BankAccounts />} />
+        <Route path="/chart-of-accounts" element={<ChartOfAccounts />} />
+        <Route path="/journal-entries" element={<JournalEntries />} />
+        <Route path="/accounting-reports" element={<AccountingReports />} />
+        <Route path="/zero-touch-entry" element={<ZeroTouchEntry />} />
+        <Route path="/gst-portal-sync" element={<GSTPortalSync />} />
+        <Route path="/accounting-integrity" element={<AccountingIntegrity />} />
+        <Route path="/day-book" element={<ExtendedReports />} />
+        <Route path="/cash-bank-book" element={<ExtendedReports />} />
+        <Route path="/cash-flow" element={<ExtendedReports />} />
+        <Route path="/outstanding-report" element={<ExtendedReports />} />
+        <Route path="/bank-reconciliation" element={<ExtendedReports />} />
+        <Route path="/depreciation" element={<ExtendedReports />} />
+        <Route path="/tds-tcs" element={<ExtendedReports />} />
+        <Route path="/financial-ratios" element={<ExtendedReports />} />
+        <Route path="/comparative-report" element={<ExtendedReports />} />
+        <Route path="/yearly-report" element={<ExtendedReports />} />
+        <Route path="/opening-balances" element={<ExtendedReports />} />
+        <Route path="/accounting-audit-trail" element={<ExtendedReports />} />
+        <Route path="/bulk-import" element={<ExtendedReports />} />
+        <Route path="/due-dates" element={<DueDates />} />
+        <Route path="/import-invoices" element={<ImportInvoices />} />
 
         {/* ── Admin ── */}
-        <Route path="/reports" element={<Protected><Reports /></Protected>} />
-        <Route path="/task-audit" element={<Protected><TaskAudit /></Protected>} />
-        <Route path="/users" element={<Protected><Users /></Protected>} />
-        <Route path="/interviews" element={<Protected><Interviews /></Protected>} />
-        <Route path="/staff-activity" element={<Protected><StaffActivity /></Protected>} />
-        <Route path="/client-portal-manager/*" element={<Protected><ClientPortalManagerPage /></Protected>} />
-        <Route path="/whatsapp-hub" element={<Protected><WhatsAppHub /></Protected>} />
+        <Route path="/reports" element={<Reports />} />
+        <Route path="/task-audit" element={<TaskAudit />} />
+        <Route path="/users" element={<Users />} />
+        <Route path="/interviews" element={<Interviews />} />
+        <Route path="/staff-activity" element={<StaffActivity />} />
+        <Route path="/client-portal-manager/*" element={<ClientPortalManagerPage />} />
+        <Route path="/whatsapp-hub" element={<WhatsAppHub />} />
 
         {/* ── Settings ── */}
         <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
-        <Route path="/settings/general" element={<Protected><GeneralSettings /></Protected>} />
-        <Route path="/settings/email" element={<Protected><EmailSettings /></Protected>} />
-        <Route path="/settings/whatsapp" element={<Protected><WhatsAppSettings /></Protected>} />
+        <Route path="/settings/general" element={<GeneralSettings />} />
+        <Route path="/settings/email" element={<EmailSettings />} />
+        <Route path="/settings/whatsapp" element={<WhatsAppSettings />} />
+
+        </Route>
 
         {/* ── Root & fallback ── */}
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
