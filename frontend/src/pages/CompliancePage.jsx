@@ -16,7 +16,7 @@ import {
   ArrowLeft, StickyNote, ShieldCheck, AlertTriangle,
   Info, Repeat, LayoutGrid, List, MessageSquare, Send,
   BarChart3, ChevronLeft, TrendingUp, Settings2, Sparkles,
-  IndianRupee, Download, FileSpreadsheet, Filter,
+  IndianRupee, Download, FileSpreadsheet, Filter, CalendarClock,
 } from 'lucide-react';
 import LayoutCustomizer from '@/components/layout/LayoutCustomizer';
 import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
