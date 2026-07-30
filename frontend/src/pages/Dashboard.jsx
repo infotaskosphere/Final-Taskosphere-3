@@ -2028,7 +2028,7 @@ export default function Dashboard() {
         <React.Fragment key="metrics">
         {/* KEY METRICS — 6 EQUAL CARDS */}
         <motion.div
-          className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 [&>*]:min-w-0"
+          className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 [&>*]:min-w-0 items-stretch"
           variants={itemVariants}
         >
 
@@ -2046,11 +2046,11 @@ export default function Dashboard() {
               boxShadow: isDark ? 'none' : '0 1px 2px rgba(13,59,102,0.04)',
             }}
           >
-            <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
+            <CardContent className="p-3.5 flex flex-col justify-between h-[100px] overflow-hidden">
               <div className="flex items-start justify-between">
                 <div className="min-w-0 flex-1 mr-2">
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">My Task</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
+                  <p className="text-xl font-bold mt-1 tracking-tight" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
                     {myTaskCount}
                   </p>
                 </div>
@@ -2061,7 +2061,7 @@ export default function Dashboard() {
                   <Briefcase className="h-4 w-4" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }} />
                 </div>
               </div>
-              <div className={`flex items-center gap-1 mt-3 text-xs font-medium group-hover:text-blue-500 transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              <div className={`flex items-center gap-1 mt-2 text-xs font-medium group-hover:text-blue-500 transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                 <span>View all</span>
                 <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
               </div>
@@ -2086,11 +2086,11 @@ export default function Dashboard() {
                 : isDark ? 'border-slate-700 hover:border-slate-600' : 'border-slate-200/80 hover:border-slate-300'
             }`}
           >
-            <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
+            <CardContent className="p-3.5 flex flex-col justify-between h-[100px] overflow-hidden">
               <div className="flex items-start justify-between">
                 <div className="min-w-0 flex-1 mr-2">
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">New Today</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: isDark ? '#a5b4fc' : '#4338ca' }}>
+                  <p className="text-xl font-bold mt-1 tracking-tight" style={{ color: isDark ? '#a5b4fc' : '#4338ca' }}>
                     {todayNewTasks.length}
                   </p>
                 </div>
@@ -2101,7 +2101,7 @@ export default function Dashboard() {
                   <Zap className="h-4 w-4" style={{ color: isDark ? '#a5b4fc' : '#4338ca' }} />
                 </div>
               </div>
-              <div className={`flex items-center gap-1 mt-3 text-xs font-medium transition-colors ${
+              <div className={`flex items-center gap-1 mt-2 text-xs font-medium transition-colors ${
                 todayNewTasks.length > 0 ? 'text-indigo-500' : isDark ? 'text-slate-500' : 'text-slate-400'
               } group-hover:text-indigo-500`}>
                 <span>{todayNewTasks.length > 0 ? `${todayNewTasks.length} assigned today` : 'None today'}</span>
@@ -2128,11 +2128,11 @@ export default function Dashboard() {
                 : isDark ? 'border-slate-700 hover:border-slate-600' : 'border-slate-200/80 hover:border-slate-300'
             }`}
           >
-            <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
+            <CardContent className="p-3.5 flex flex-col justify-between h-[100px] overflow-hidden">
               <div className="flex items-start justify-between">
                 <div className="min-w-0 flex-1 mr-2">
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Todo</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: isDark ? '#93c5fd' : COLORS.mediumBlue }}>
+                  <p className="text-xl font-bold mt-1 tracking-tight" style={{ color: isDark ? '#93c5fd' : COLORS.mediumBlue }}>
                     {pendingTodos.length}
                   </p>
                 </div>
@@ -2143,7 +2143,7 @@ export default function Dashboard() {
                   <CheckSquare className="h-4 w-4" style={{ color: isDark ? '#93c5fd' : COLORS.mediumBlue }} />
                 </div>
               </div>
-              <div className={`flex items-center gap-1 mt-3 text-xs font-medium group-hover:text-blue-500 transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              <div className={`flex items-center gap-1 mt-2 text-xs font-medium group-hover:text-blue-500 transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                 <span>View all</span>
                 <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
               </div>
@@ -2168,11 +2168,11 @@ export default function Dashboard() {
                 : isDark ? 'border-slate-700 hover:border-slate-600' : 'border-slate-200/80 hover:border-slate-300'
             }`}
           >
-            <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
+            <CardContent className="p-3.5 flex flex-col justify-between h-[100px] overflow-hidden">
               <div className="flex items-start justify-between">
                 <div className="min-w-0 flex-1 mr-2">
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Overdue</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: COLORS.coral }}>
+                  <p className="text-xl font-bold mt-1 tracking-tight" style={{ color: COLORS.coral }}>
                     {overdueTaskCount}
                   </p>
                 </div>
@@ -2183,7 +2183,7 @@ export default function Dashboard() {
                   <AlertCircle className="h-4 w-4" style={{ color: COLORS.coral }} />
                 </div>
               </div>
-              <div className={`flex items-center gap-1 mt-3 text-xs font-medium group-hover:text-red-500 transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              <div className={`flex items-center gap-1 mt-2 text-xs font-medium group-hover:text-red-500 transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                 <span>View all</span>
                 <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
               </div>
@@ -2208,24 +2208,22 @@ export default function Dashboard() {
                 : isDark ? 'border-slate-700 hover:border-slate-600' : 'border-slate-200/80 hover:border-slate-300'
             }`}
           >
-            <CardContent className="p-4 flex flex-col justify-between min-h-[110px]">
+            <CardContent className="p-3.5 flex flex-col justify-between h-[100px] overflow-hidden">
               <div className="flex items-start justify-between">
                 <div className="min-w-0 flex-1 mr-2">
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Team Task</p>
-                  <p className="text-2xl font-bold mt-1 tracking-tight"
+                  <p className="text-xl font-bold mt-1 tracking-tight"
                     style={{ color: hasCrossVisibility ? (isDark ? '#a78bfa' : '#7c3aed') : (isDark ? '#475569' : '#94a3b8') }}>
                     {hasCrossVisibility ? teamTaskTotal : 0}
                   </p>
                   {!usersLoading && hasCrossVisibility && teamTaskBreakdown.length > 0 && (
-                    <div className="mt-1 space-y-0.5 max-h-[36px] overflow-hidden">
-                      {teamTaskBreakdown.slice(0, 2).map(m => (
+                    <div className="mt-0.5 space-y-0 max-h-[16px] overflow-hidden">
+                      {teamTaskBreakdown.slice(0, 1).map(m => (
                         <p key={m.id} className="text-[9px] text-slate-400 truncate">
                           {m.name.split(' ')[0].toLowerCase()}: {m.pendingCount}
+                          {teamTaskBreakdown.length > 1 ? ` +${teamTaskBreakdown.length - 1} more` : ''}
                         </p>
                       ))}
-                      {teamTaskBreakdown.length > 2 && (
-                        <p className="text-[9px] text-slate-400">+{teamTaskBreakdown.length - 2} more</p>
-                      )}
                     </div>
                   )}
                   {!hasCrossVisibility && (
@@ -2239,7 +2237,7 @@ export default function Dashboard() {
                   <Users className="h-4 w-4" style={{ color: hasCrossVisibility ? '#7c3aed' : (isDark ? '#475569' : '#cbd5e1') }} />
                 </div>
               </div>
-              <div className={`flex items-center gap-1 mt-3 text-xs font-medium transition-colors ${hasCrossVisibility ? 'group-hover:text-violet-500' : ''} ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              <div className={`flex items-center gap-1 mt-2 text-xs font-medium transition-colors ${hasCrossVisibility ? 'group-hover:text-violet-500' : ''} ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                 {hasCrossVisibility ? (
                   <>
                     <span>View team</span>
