@@ -569,7 +569,9 @@ const DashboardLayout = ({ children }) => {
         className="fixed top-0 left-0 right-0 z-50 flex items-center transition-all duration-300 ease-in-out backdrop-blur-md"
         style={{
           height:       HEADER_H,
-          background:   isDark ? 'rgba(15,23,42,0.92)' : 'rgba(255,255,255,0.95)',
+          background:   isDark
+            ? 'linear-gradient(90deg, rgba(15,23,42,0.94) 0%, rgba(23,37,64,0.94) 100%)'
+            : `linear-gradient(90deg, rgba(255,255,255,0.95) 0%, ${COLORS.deepBlue}0d 100%)`,
           borderBottom: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
           overflow:     'visible',
         }}
