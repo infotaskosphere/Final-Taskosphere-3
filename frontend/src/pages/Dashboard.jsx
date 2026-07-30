@@ -1782,12 +1782,23 @@ export default function Dashboard() {
             <div className="relative">
               <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
                 <div className="flex-1 min-w-0 flex items-center gap-3.5">
-                  <img
-                    src="/logo-lite.png"
-                    alt="Taskosphere"
-                    className="hidden sm:block flex-shrink-0 object-contain"
-                    style={{ height: 30, width: 'auto' }}
-                  />
+                  <div
+                    className="hidden sm:flex flex-shrink-0 items-center justify-center rounded-xl"
+                    style={{
+                      height: 44,
+                      width: 44,
+                      background: 'rgba(255,255,255,0.18)',
+                      border: '1px solid rgba(255,255,255,0.25)',
+                      backdropFilter: 'blur(6px)',
+                    }}
+                  >
+                    <img
+                      src="/icon-512.png"
+                      alt="Taskosphere"
+                      className="object-contain"
+                      style={{ height: 28, width: 28 }}
+                    />
+                  </div>
                   <div className="min-w-0">
                     <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-1 flex items-center gap-1.5">
                       <GreetIcon className="h-3 w-3" />
