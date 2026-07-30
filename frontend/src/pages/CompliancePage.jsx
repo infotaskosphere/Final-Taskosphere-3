@@ -1348,6 +1348,12 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
   const[popupCommentsLoading,setPopupCommentsLoading]=useState(false);
   const[popupCommentText,setPopupCommentText]=useState('');
   const[popupSending,setPopupSending]=useState(false);
+  // Hover preview of comments on the Cmts column — lets you see comments
+  // without opening the popup. Cached per client_id so repeat hovers on
+  // the same row (or other rows for the same client) don't refetch.
+  const[rowCommentsCache,setRowCommentsCache]=useState({}); // {client_id: comment[]}
+  const[rowCommentsLoading,setRowCommentsLoading]=useState({}); // {client_id: bool}
+  const[hoveredCommentRow,setHoveredCommentRow]=useState(null); // assignment id
   // Row detail modal
   const[detailRow,setDetailRow]=useState(null); // assignment object
 
@@ -1370,6 +1376,21 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
     finally{setPopupCommentsLoading(false);}
   },[compliance.id]);
 
+  // Fetch (once, then cache) comments for a client so hovering the Cmts
+  // icon can show a preview inline without opening the popup.
+  const loadRowCommentsPreview=useCallback(async(a)=>{
+    if(rowCommentsCache[a.client_id]!==undefined)return; // already cached
+    setRowCommentsLoading(prev=>({...prev,[a.client_id]:true}));
+    try{
+      const res=await api.get(`/compliance/${compliance.id}/comments?client_id=${a.client_id}`);
+      setRowCommentsCache(prev=>({...prev,[a.client_id]:Array.isArray(res.data)?res.data:[]}));
+    }catch{
+      setRowCommentsCache(prev=>({...prev,[a.client_id]:[]}));
+    }finally{
+      setRowCommentsLoading(prev=>({...prev,[a.client_id]:false}));
+    }
+  },[compliance.id,rowCommentsCache]);
+
   const submitPopupComment=useCallback(async()=>{
     if(!popupCommentText.trim()||!commentPopup)return;
     setPopupSending(true);
@@ -1379,6 +1400,9 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
         client_id:commentPopup.clientId,
       });
       setPopupComments(prev=>[res.data,...prev]);
+      // Keep the hover-preview cache in sync so it reflects the new comment
+      // immediately, without needing a refetch on the next hover.
+      setRowCommentsCache(prev=>({...prev,[commentPopup.clientId]:[res.data,...(prev[commentPopup.clientId]||[])]}));
       setPopupCommentText('');
       toast.success('Comment added');
     }catch{toast.error('Failed to add comment');}
@@ -1803,7 +1827,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
             <div>Client Name</div>
             <div>Status</div>
             <div>Assigned To</div>
-            <div>Notes</div>
+            <div>Date</div>
             <div>Govt Fee (₹)</div>
             <div>SRN</div>
             <div>Applicability</div>
@@ -1862,24 +1886,15 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                     <div className="min-w-0 flex-shrink-0">
                       <p className="text-xs truncate" style={{color:isDark?D.muted:'#64748b'}}>{a.assigned_to_name||userMap[a.assigned_to]||'—'}</p>
                     </div>
-                    <div className="min-w-0 flex-shrink-0" onClick={e=>e.stopPropagation()}>
-                      {isEditNote?(
-                        <div className="flex items-center gap-1">
-                          <input autoFocus value={editingNote.value} onChange={e=>setEditingNote(n=>({...n,value:e.target.value}))}
-                            onKeyDown={e=>{if(e.key==='Enter')saveNote(a.id,editingNote.value);if(e.key==='Escape')setEditingNote(null);}}
-                            className="flex-1 px-2 py-0.5 border rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                            style={{backgroundColor:isDark?D.raised:'#fff',borderColor:isDark?D.border:'#d1d5db',color:isDark?D.text:'#1e293b'}} placeholder="Add note…"/>
-                          <button onClick={()=>saveNote(a.id,editingNote.value)} className="text-emerald-500"><CheckCircle2 className="w-3.5 h-3.5"/></button>
-                          <button onClick={()=>setEditingNote(null)} className="text-red-400"><X className="w-3 h-3"/></button>
-                        </div>
-                      ):(
-                        <button onClick={()=>setEditingNote({id:a.id,value:a.notes||''})}
-                          className="w-full text-left text-xs truncate hover:opacity-70 transition-opacity flex items-center gap-1 group/note"
-                          style={{color:a.notes?(isDark?D.muted:'#64748b'):(isDark?D.dimmer:'#cbd5e1')}}>
-                          <StickyNote className="w-3 h-3 opacity-0 group-hover/note:opacity-60 flex-shrink-0"/>
-                          {a.notes||<span className="italic">add note</span>}
-                        </button>
-                      )}
+                    <div className="min-w-0 flex-shrink-0">
+                      {/* Auto-set by the backend the day both Govt Fee + SRN are
+                          saved (see saveGovtFee / govt-fee endpoint) — no manual
+                          entry needed, this just displays it. */}
+                      <span className="text-xs tabular-nums flex items-center gap-1"
+                        style={{color:a.payment_date?(isDark?D.muted:'#64748b'):(isDark?D.dimmer:'#cbd5e1')}}>
+                        <CalendarClock className="w-3 h-3 flex-shrink-0 opacity-60"/>
+                        {a.payment_date?fmtDate(a.payment_date):<span className="italic">—</span>}
+                      </span>
                     </div>
                     {/* Govt Fee cell */}
                     <div className="min-w-0 flex-shrink-0" onClick={e=>e.stopPropagation()}>
@@ -2002,7 +2017,10 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                       )}
                     </div>
 
-                    <div className="flex-shrink-0 flex items-center justify-center" onClick={e=>e.stopPropagation()}>
+                    <div className="flex-shrink-0 flex items-center justify-center relative"
+                      onClick={e=>e.stopPropagation()}
+                      onMouseEnter={()=>{setHoveredCommentRow(a.id);loadRowCommentsPreview(a);}}
+                      onMouseLeave={()=>setHoveredCommentRow(null)}>
                       <button
                         onClick={e=>{e.stopPropagation();openCommentPopup(a);}}
                         title="Add / view comments"
@@ -2010,6 +2028,43 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                         style={{backgroundColor:isDark?'rgba(59,130,246,0.12)':'rgba(59,130,246,0.08)',color:'#3B82F6'}}>
                         <MessageSquare className="w-3.5 h-3.5"/>
                       </button>
+
+                      {/* Hover preview — see comments without opening the popup */}
+                      <AnimatePresence>
+                        {hoveredCommentRow===a.id&&(
+                          <motion.div
+                            initial={{opacity:0,y:-4}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-4}}
+                            transition={{duration:0.12}}
+                            className="absolute right-0 top-full mt-1.5 z-50 w-64 rounded-xl shadow-xl border overflow-hidden text-left"
+                            style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#e2e8f0'}}>
+                            <div className="px-3 py-2 border-b" style={{borderColor:isDark?D.border:'#e2e8f0',backgroundColor:isDark?D.raised:'#f8fafc'}}>
+                              <p className="text-[10px] font-black uppercase tracking-wider" style={{color:isDark?D.dimmer:'#94a3b8'}}>Comments</p>
+                            </div>
+                            <div className="max-h-52 overflow-y-auto p-2.5 space-y-2.5" style={{scrollbarWidth:'thin'}}>
+                              {rowCommentsLoading[a.client_id]?(
+                                <div className="flex justify-center py-3"><Loader2 className="w-4 h-4 animate-spin text-blue-500"/></div>
+                              ):(rowCommentsCache[a.client_id]||[]).length===0?(
+                                <p className="text-[11px] text-center py-3" style={{color:isDark?D.dimmer:'#94a3b8'}}>No comments yet</p>
+                              ):(<>
+                                {(rowCommentsCache[a.client_id]||[]).slice(0,4).map(c=>(
+                                  <div key={c.id}>
+                                    <div className="flex items-center gap-1.5 mb-0.5">
+                                      <span className="text-[10px] font-bold" style={{color:isDark?D.text:'#0f172a'}}>{c.author_name}</span>
+                                      <span className="text-[9px]" style={{color:isDark?D.dimmer:'#94a3b8'}}>{timeAgo(c.created_at)}</span>
+                                    </div>
+                                    <p className="text-[11px] leading-snug line-clamp-2" style={{color:isDark?D.muted:'#374151'}}>{c.text}</p>
+                                  </div>
+                                ))}
+                                {(rowCommentsCache[a.client_id]||[]).length>4&&(
+                                  <p className="text-[10px] text-center pt-0.5" style={{color:'#3B82F6'}}>
+                                    +{(rowCommentsCache[a.client_id]||[]).length-4} more — click to view all
+                                  </p>
+                                )}
+                              </>)}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
                     <div className="flex-shrink-0">
                       <p className="text-[11px] tabular-nums" style={{color:isDark?D.dimmer:'#94a3b8'}}>{timeAgo(a.updated_at)}</p>
@@ -3745,8 +3800,8 @@ export default function CompliancePage(){
         onReset={cpReset}
         isDark={isDark}
       />
-    <div className="min-h-full" style={{background:isDark?D.bg:'#f8fafc'}}>
-      <motion.div className="w-full space-y-6" variants={containerVariants} initial="hidden" animate="visible">
+    <div className="min-h-screen p-3 sm:p-4 md:p-6 lg:p-8" style={{background:isDark?D.bg:'#f8fafc'}}>
+      <motion.div className="max-w-[1600px] mx-auto space-y-6" variants={containerVariants} initial="hidden" animate="visible">
 
         {cpOrder.map((sectionId) => {
 
