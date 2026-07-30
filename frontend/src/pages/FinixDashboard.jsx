@@ -375,7 +375,6 @@ function FinixDashboardInner() {
         <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-5 px-6 py-5 md:px-8 md:py-6">
           {/* Brand block */}
           <div className="flex items-center gap-4">
-            <img src="/finix-icon-onblue.png" alt="Finix" className="shrink-0 w-12 h-12 md:w-14 md:h-14 object-contain" />
             <div>
               <div className="flex items-center gap-2.5">
                 <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white">
