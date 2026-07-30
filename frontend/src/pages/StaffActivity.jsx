@@ -415,14 +415,26 @@ export default function StaffActivity() {
   const keystrokeCount  = todayEvents.reduce((s, a) => s + (a.keystrokes || 0), 0);
   const mouseClicks     = todayEvents.reduce((s, a) => s + (a.mouse_clicks || 0), 0);
   const mouseDistance   = todayEvents.reduce((s, a) => s + (a.mouse_distance || 0), 0);
-  const idlePercent     = totalActive + totalIdle > 0 ? Math.round(totalIdle / (totalActive + totalIdle) * 100) : 0;
-  const productivityScore = summary.productivity_percent
+  const hasTimeData     = totalActive + totalIdle > 0;
+  const idlePercent     = hasTimeData ? Math.round(totalIdle / (totalActive + totalIdle) * 100) : 0;
+  // Backend summary is authoritative whenever it actually has data for this
+  // date (checked via total_duration, not a truthy check on the percent —
+  // a real 0% score is valid data and must not fall through to the estimate
+  // below). Otherwise fall back to a client-side estimate from raw events,
+  // but only if there IS some raw activity — with zero events/zero time
+  // recorded, idlePercent defaults to 0 which previously produced a
+  // fabricated 50% "baseline" score for staff with no activity at all.
+  const hasSummaryData = typeof summary.productivity_percent === 'number' && (summary.total_duration || 0) > 0;
+  const hasFallbackData = hasTimeData || keystrokeCount > 0 || mouseClicks > 0;
+  const productivityScore = hasSummaryData
     ? Math.round(summary.productivity_percent)
-    : Math.min(100, Math.round(
-        ((100 - idlePercent) * 0.5) +
-        (Math.min(50, keystrokeCount / 100)) +
-        (Math.min(20, mouseClicks / 100))
-      ));
+    : hasFallbackData
+      ? Math.min(100, Math.round(
+          ((100 - idlePercent) * 0.5) +
+          (Math.min(50, keystrokeCount / 100)) +
+          (Math.min(20, mouseClicks / 100))
+        ))
+      : 0;
 
   // FILES
   const fileCreated    = todayEvents.filter(a => a.type === 'file_create'  || a.event_type === 'file_create').length;
