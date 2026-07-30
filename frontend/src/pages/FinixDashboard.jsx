@@ -375,15 +375,7 @@ function FinixDashboardInner() {
         <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-5 px-6 py-5 md:px-8 md:py-6">
           {/* Brand block */}
           <div className="flex items-center gap-4">
-            <div
-              className="shrink-0 rounded-2xl p-2"
-              style={{
-                background: 'linear-gradient(135deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.25) 100%)',
-                backdropFilter: 'blur(6px)',
-              }}
-            >
-              <img src="/finix-icon.png" alt="Finix" className="w-11 h-11 md:w-12 md:h-12 object-contain" />
-            </div>
+            <img src="/finix-icon-light.png" alt="Finix" className="shrink-0 w-12 h-12 md:w-14 md:h-14 object-contain" />
             <div>
               <div className="flex items-center gap-2.5">
                 <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white">
