@@ -32,6 +32,7 @@ const TrademarkSphere = lazy(() => import('./pages/TrademarkSphere.jsx'));
 
 /* ── Records ──────────────────────────────────────────────────────────── */
 const RecordsDashboard = lazy(() => import('./pages/RecordsDashboard.jsx'));
+const PeopleMatrixDashboard = lazy(() => import('./pages/PeopleMatrixDashboard.jsx'));
 const DSCRegister = lazy(() => import('./pages/DSCRegister.jsx'));
 const DocumentRegister = lazy(() => import('./pages/DocumentsRegister.jsx'));
 const Clients = lazy(() => import('./pages/Clients.jsx'));
@@ -205,6 +206,7 @@ export default function AppRoutes() {
         <Route path="/import-invoices" element={<ImportInvoices />} />
 
         {/* ── Admin ── */}
+        <Route path="/people-matrix" element={<PeopleMatrixDashboard />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/task-audit" element={<TaskAudit />} />
         <Route path="/users" element={<Users />} />
