@@ -352,7 +352,7 @@ function FinixDashboardInner() {
   const COLORS_CHART = ['#1FAF5A', '#FF6B6B', '#3B82F6', '#FF9F43'];
 
   return (
-    <div className={`min-h-full ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800'}`}>
+    <div className={`p-6 min-h-screen ${isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800'}`}>
 
       {/* ── Header — branded Finix banner, echoes the app's own navy→teal
            header palette (deepBlue #0D3B66 → emeraldGreen #1FAF5A) so it
