@@ -592,7 +592,7 @@ const DashboardLayout = ({ children }) => {
                   src="/icon-192.png"
                   alt="Task-O-Sphere"
                   className="object-contain block"
-                  style={{ height: 46, width: 46 }}
+                  style={{ height: 52, width: 52 }}
                 />
               ) : (
                 <img
@@ -600,7 +600,7 @@ const DashboardLayout = ({ children }) => {
                   src={isDark ? '/logo-dark.png' : '/logo-lite.png'}
                   alt="Task-O-Sphere"
                   className="object-contain block mx-auto transition-opacity duration-150"
-                  style={{ height: 48, maxWidth: isDesktop ? sidebarPx - 24 : 200 }}
+                  style={{ height: 54, maxWidth: isDesktop ? sidebarPx - 24 : 200 }}
                 />
               )}
             </div>
