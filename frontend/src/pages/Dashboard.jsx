@@ -1782,12 +1782,6 @@ export default function Dashboard() {
             <div className="relative">
               <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
                 <div className="flex-1 min-w-0 flex items-center gap-3.5">
-                  <img
-                    src="/icon-mark-onblue.png"
-                    alt="Taskosphere"
-                    className="hidden sm:block flex-shrink-0 object-contain"
-                    style={{ height: 42, width: 42 }}
-                  />
                   <div className="min-w-0">
                     <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-1 flex items-center gap-1.5">
                       <GreetIcon className="h-3 w-3" />
