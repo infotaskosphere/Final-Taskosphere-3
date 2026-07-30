@@ -3508,12 +3508,28 @@ export default function CompliancePage(){
     fetchAdhocFees();
     fetchLinkedFees();
     if (!adhocClients.length) {
-      api.get('/clients', { params: { page_size: 2000 } })
-        .then(r => {
-          const list = r.data?.clients || r.data || [];
-          setAdhocClients(list.map(c => ({ id: c.id, name: c.company_name || c.name })));
-        })
-        .catch(() => setAdhocClients([]));
+      // Backend caps page_size at 500 (server.py: le=500) — requesting 2000
+      // in one call gets a silent 422 rejection. Page through in chunks of
+      // 500 instead to reliably fetch the full client list.
+      (async () => {
+        const PAGE_SIZE = 500;
+        let page = 1;
+        let all = [];
+        try {
+          while (true) {
+            const r = await api.get('/clients', { params: { page, page_size: PAGE_SIZE } });
+            const batch = r.data?.clients || r.data || [];
+            all = all.concat(batch);
+            if (batch.length < PAGE_SIZE) break; // last page
+            page += 1;
+          }
+          setAdhocClients(all.map(c => ({ id: c.id, name: c.company_name || c.name })));
+        } catch (err) {
+          console.error('Failed to load clients for Govt Fee dialog:', err?.response?.status, err?.response?.data);
+          toast.error('Could not load client list — please refresh and try again');
+          setAdhocClients([]);
+        }
+      })();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageView, refreshKey, user?.id]);
