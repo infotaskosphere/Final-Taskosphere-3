@@ -168,6 +168,7 @@ const NAV_GROUPS = [
     id: 'admin',
     dividerLabel: 'Admin',
     items: [
+      { path: '/people-matrix',  icon: LayoutDashboard, label: 'People Matrix' },
       // Reports — Admin only
       { path: '/reports',        icon: BarChart3,  label: 'Reports', adminOnly: true },
       { path: '/task-audit',     icon: Activity,   label: 'Task Audit Log',   permission: 'can_view_audit_logs'  },
@@ -200,7 +201,7 @@ const SECTION_META = {
   compliance: { label: 'Compliance',             icon: ShieldCheck,    landingPath: '/compliance-dashboard' },
   records:    { label: 'Records',                icon: FileText,       landingPath: '/records-dashboard' },
   proposals:  { label: 'Client Proposals',       icon: Target,         landingPath: '/client-proposals-dashboard' },
-  admin:      { label: 'Admin',                  icon: Users,          landingPath: '/reports' },
+  admin:      { label: 'Admin',                  icon: Users,          landingPath: '/people-matrix' },
   settings:   { label: 'Settings',               icon: Settings,       landingPath: '/settings/general' },
 };
 const SECTION_ORDER = ['core', 'accounts', 'compliance', 'records', 'proposals', 'admin', 'settings'];
@@ -400,17 +401,17 @@ const DashboardLayout = ({ children }) => {
           title={collapsed ? item.label : undefined}
           className={`relative flex items-center gap-3 min-w-0
             ${collapsed ? 'justify-center px-0 py-3' : 'px-3 py-2.5'}
-            rounded-xl transition-all duration-200 group
-            ${isActive ? 'text-white' : 'text-slate-300 hover:text-white hover:bg-white/[0.07]'}`}
-          style={isActive ? {
-            background: `linear-gradient(135deg, ${COLORS.mediumBlue}, ${COLORS.sidebarActive})`,
-            boxShadow: '0 4px 14px rgba(46,139,230,0.35)',
-          } : {}}
+            rounded-lg transition-colors duration-150 group
+            ${isActive ? 'bg-white/[0.09] text-white' : 'text-slate-300 hover:text-white hover:bg-white/[0.07]'}`}
         >
-          {isActive && !collapsed && (
+          {isActive && (
             <span
-              className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full"
-              style={{ background: 'rgba(255,255,255,0.6)' }}
+              className={`absolute left-0 rounded-r-full ${
+                collapsed
+                  ? 'top-1/2 -translate-y-1/2 w-[3px] h-7'
+                  : 'top-1/2 -translate-y-1/2 w-[3px] h-5'
+              }`}
+              style={{ background: COLORS.mediumBlue }}
             />
           )}
           <Icon
@@ -422,9 +423,6 @@ const DashboardLayout = ({ children }) => {
             <span className="font-medium text-sm whitespace-nowrap tracking-tight truncate">
               {item.label}
             </span>
-          )}
-          {isActive && collapsed && (
-            <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-white/70" />
           )}
           {collapsed && (
             <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-800 text-white text-xs font-medium rounded-lg whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 translate-x-1 group-hover:translate-x-0 transition-all duration-200 z-[100] shadow-lg">
