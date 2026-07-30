@@ -376,10 +376,9 @@ function FinixDashboardInner() {
           {/* Brand block */}
           <div className="flex items-center gap-4">
             <div
-              className="shrink-0 rounded-2xl p-2 shadow-md"
+              className="shrink-0 rounded-2xl p-2"
               style={{
-                background: 'rgba(255,255,255,0.16)',
-                border: '1px solid rgba(255,255,255,0.25)',
+                background: 'linear-gradient(135deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.25) 100%)',
                 backdropFilter: 'blur(6px)',
               }}
             >
@@ -444,10 +443,15 @@ function FinixDashboardInner() {
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6 items-stretch">
             
             {/* Card 1: Revenue */}
-            <div className={`h-full flex flex-col justify-between p-6 rounded-3xl shadow-sm border transition-all duration-300 hover:shadow-md ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'}`}>
+            <div
+              className={`h-full flex flex-col justify-between p-6 rounded-3xl shadow-sm border transition-all duration-300 hover:shadow-md hover:-translate-y-0.5 ${isDark ? 'border-slate-700' : 'border-emerald-100/70'}`}
+              style={{ background: isDark ? 'linear-gradient(150deg, rgba(16,185,129,0.12) 0%, rgba(30,41,59,0.9) 55%)' : 'linear-gradient(150deg, #ecfdf5 0%, #ffffff 60%)' }}
+            >
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-bold uppercase tracking-wider text-emerald-500">Sales & Revenue</span>
-                <TrendingUp className="w-5 h-5 text-emerald-500 shrink-0" />
+                <div className="p-1.5 rounded-lg shrink-0" style={{ background: isDark ? 'linear-gradient(135deg, rgba(16,185,129,0.3), rgba(16,185,129,0.08))' : 'linear-gradient(135deg, #a7f3d0, #ecfdf5)' }}>
+                  <TrendingUp className="w-4 h-4 text-emerald-600" />
+                </div>
               </div>
               <h2 className="text-3xl font-extrabold font-mono tracking-tight break-all">{fmtC(revenue)}</h2>
               <div className="flex items-center gap-1.5 mt-2.5 text-xs text-slate-400">
@@ -456,10 +460,15 @@ function FinixDashboardInner() {
             </div>
 
             {/* Card 2: Accounts Receivable */}
-            <div className={`h-full flex flex-col justify-between p-6 rounded-3xl shadow-sm border transition-all duration-300 hover:shadow-md ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'}`}>
+            <div
+              className={`h-full flex flex-col justify-between p-6 rounded-3xl shadow-sm border transition-all duration-300 hover:shadow-md hover:-translate-y-0.5 ${isDark ? 'border-slate-700' : 'border-amber-100/70'}`}
+              style={{ background: isDark ? 'linear-gradient(150deg, rgba(245,158,11,0.12) 0%, rgba(30,41,59,0.9) 55%)' : 'linear-gradient(150deg, #fffbeb 0%, #ffffff 60%)' }}
+            >
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-bold uppercase tracking-wider text-amber-500">Accounts Receivable</span>
-                <Receipt className="w-5 h-5 text-amber-500 shrink-0" />
+                <div className="p-1.5 rounded-lg shrink-0" style={{ background: isDark ? 'linear-gradient(135deg, rgba(245,158,11,0.3), rgba(245,158,11,0.08))' : 'linear-gradient(135deg, #fde68a, #fffbeb)' }}>
+                  <Receipt className="w-4 h-4 text-amber-600" />
+                </div>
               </div>
               <h2 className="text-3xl font-extrabold font-mono tracking-tight break-all">{fmtC(receivables)}</h2>
               <div className="flex items-center gap-1.5 mt-2.5 text-xs text-slate-400">
@@ -468,10 +477,15 @@ function FinixDashboardInner() {
             </div>
 
             {/* Card 3: Cash & Bank */}
-            <div className={`h-full flex flex-col justify-between p-6 rounded-3xl shadow-sm border transition-all duration-300 hover:shadow-md ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'}`}>
+            <div
+              className={`h-full flex flex-col justify-between p-6 rounded-3xl shadow-sm border transition-all duration-300 hover:shadow-md hover:-translate-y-0.5 ${isDark ? 'border-slate-700' : 'border-blue-100/70'}`}
+              style={{ background: isDark ? 'linear-gradient(150deg, rgba(59,130,246,0.12) 0%, rgba(30,41,59,0.9) 55%)' : 'linear-gradient(150deg, #eff6ff 0%, #ffffff 60%)' }}
+            >
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-bold uppercase tracking-wider text-blue-500">Bank & Cash Balance</span>
-                <Landmark className="w-5 h-5 text-blue-500 shrink-0" />
+                <div className="p-1.5 rounded-lg shrink-0" style={{ background: isDark ? 'linear-gradient(135deg, rgba(59,130,246,0.3), rgba(59,130,246,0.08))' : 'linear-gradient(135deg, #bfdbfe, #eff6ff)' }}>
+                  <Landmark className="w-4 h-4 text-blue-600" />
+                </div>
               </div>
               <h2 className="text-3xl font-extrabold font-mono tracking-tight break-all">{fmtC(cashAndBank)}</h2>
               <div className="flex items-center gap-1.5 mt-2.5 text-xs text-slate-400">
@@ -480,10 +494,15 @@ function FinixDashboardInner() {
             </div>
 
             {/* Card 4: Accounts Payable */}
-            <div className={`h-full flex flex-col justify-between p-6 rounded-3xl shadow-sm border transition-all duration-300 hover:shadow-md ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'}`}>
+            <div
+              className={`h-full flex flex-col justify-between p-6 rounded-3xl shadow-sm border transition-all duration-300 hover:shadow-md hover:-translate-y-0.5 ${isDark ? 'border-slate-700' : 'border-purple-100/70'}`}
+              style={{ background: isDark ? 'linear-gradient(150deg, rgba(168,85,247,0.12) 0%, rgba(30,41,59,0.9) 55%)' : 'linear-gradient(150deg, #faf5ff 0%, #ffffff 60%)' }}
+            >
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-bold uppercase tracking-wider text-purple-500">Accounts Payable</span>
-                <TrendingDown className="w-5 h-5 text-purple-500 shrink-0" />
+                <div className="p-1.5 rounded-lg shrink-0" style={{ background: isDark ? 'linear-gradient(135deg, rgba(168,85,247,0.3), rgba(168,85,247,0.08))' : 'linear-gradient(135deg, #e9d5ff, #faf5ff)' }}>
+                  <TrendingDown className="w-4 h-4 text-purple-600" />
+                </div>
               </div>
               <h2 className="text-3xl font-extrabold font-mono tracking-tight break-all">{fmtC(payables)}</h2>
               <div className="flex items-center gap-1.5 mt-2.5 text-xs text-slate-400">
