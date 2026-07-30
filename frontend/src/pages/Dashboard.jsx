@@ -1793,7 +1793,7 @@ export default function Dashboard() {
                     }}
                   >
                     <img
-                      src="/icon-512.png"
+                      src="/icon-mark.png"
                       alt="Taskosphere"
                       className="object-contain"
                       style={{ height: 28, width: 28 }}
