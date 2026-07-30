@@ -165,16 +165,23 @@ const NAV_GROUPS = [
     ],
   },
   {
+    // People Matrix — standalone HRMS module, a peer to Taskosphere / Finix /
+    // Compliance / Records / Client Proposals (not an Admin sub-page).
+    id: 'people-matrix',
+    dividerLabel: 'People Matrix',
+    items: [
+      { path: '/people-matrix',  icon: LayoutDashboard, label: 'People Matrix Dashboard' },
+      { path: '/users',          icon: Users,      label: 'Users',            permission: 'can_view_user_page'   },
+      { path: '/staff-activity', icon: Activity,   label: 'Team Activity',    adminOnly: true                    },
+      { path: '/interviews',     icon: Briefcase,  label: 'Employee Interviews', permission: 'can_view_interviews'  },
+      { path: '/reports',        icon: BarChart3,  label: 'Reports', adminOnly: true },
+    ],
+  },
+  {
     id: 'admin',
     dividerLabel: 'Admin',
     items: [
-      { path: '/people-matrix',  icon: LayoutDashboard, label: 'People Matrix' },
-      // Reports — Admin only
-      { path: '/reports',        icon: BarChart3,  label: 'Reports', adminOnly: true },
       { path: '/task-audit',     icon: Activity,   label: 'Task Audit Log',   permission: 'can_view_audit_logs'  },
-      { path: '/users',          icon: Users,      label: 'Users',            permission: 'can_view_user_page'   },
-      { path: '/interviews',     icon: Briefcase,  label: 'Employee Interviews', permission: 'can_view_interviews'  },
-      { path: '/staff-activity', icon: Activity,   label: 'Staff Activity',   adminOnly: true                    },
       { path: '/client-portal-manager', icon: Building2, label: 'Client Portal', permission: 'can_view_client_portal' },
       { path: '/whatsapp-hub', icon: MessageCircle, label: 'Unified Inbox', permission: 'can_access_whatsapp_hub' },
     ],
@@ -191,20 +198,21 @@ const NAV_GROUPS = [
   },
 ];
 
-// SECTION_META: the 7 top-level headings shown in the section switcher bar.
+// SECTION_META: the 8 top-level headings shown in the section switcher bar.
 // Each maps 1:1 to a NAV_GROUPS id — clicking a heading navigates to that
 // section's landing page and the sidebar collapses to show only that
 // group's items (see `activeSectionId` / sidebar render below).
 const SECTION_META = {
-  core:       { label: 'Taskosphere',            icon: LayoutDashboard, landingPath: '/dashboard' },
-  accounts:   { label: 'Finix',                  icon: CreditCard,     landingPath: '/finix-dashboard' },
-  compliance: { label: 'Compliance',             icon: ShieldCheck,    landingPath: '/compliance-dashboard' },
-  records:    { label: 'Records',                icon: FileText,       landingPath: '/records-dashboard' },
-  proposals:  { label: 'Client Proposals',       icon: Target,         landingPath: '/client-proposals-dashboard' },
-  admin:      { label: 'Admin',                  icon: Users,          landingPath: '/people-matrix' },
-  settings:   { label: 'Settings',               icon: Settings,       landingPath: '/settings/general' },
+  core:          { label: 'Taskosphere',            icon: LayoutDashboard, landingPath: '/dashboard' },
+  accounts:      { label: 'Finix',                  icon: CreditCard,     landingPath: '/finix-dashboard' },
+  compliance:    { label: 'Compliance',             icon: ShieldCheck,    landingPath: '/compliance-dashboard' },
+  records:       { label: 'Records',                icon: FileText,       landingPath: '/records-dashboard' },
+  proposals:     { label: 'Client Proposals',       icon: Target,         landingPath: '/client-proposals-dashboard' },
+  'people-matrix': { label: 'People Matrix',        icon: Fingerprint,    landingPath: '/people-matrix' },
+  admin:         { label: 'Admin',                  icon: Lock,           landingPath: '/task-audit' },
+  settings:      { label: 'Settings',               icon: Settings,       landingPath: '/settings/general' },
 };
-const SECTION_ORDER = ['core', 'accounts', 'compliance', 'records', 'proposals', 'admin', 'settings'];
+const SECTION_ORDER = ['core', 'accounts', 'compliance', 'records', 'proposals', 'people-matrix', 'admin', 'settings'];
 // Admin + Settings render as their own right-aligned cluster in the section
 // bar (common ERP/business-software convention — day-to-day modules on the
 // left, account/system controls pinned to the right).
