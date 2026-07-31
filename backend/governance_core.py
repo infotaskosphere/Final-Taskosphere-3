@@ -102,6 +102,11 @@ def has_page_access(user: User, module_key: str, page_flag: str) -> bool:
 _VIEW_ONLY_ACTIONS = {"view", "export"}
 _MANAGE_ACTIONS = {"create", "edit", "delete", "approve", "print", "share"}
 
+# The full action-layer vocabulary, in the canonical display order used by
+# the Permission Matrix UI (see permission_governance.py's action-catalog
+# endpoint, which serves this list to the frontend).
+ALL_ACTIONS = ["view", "create", "edit", "delete", "export", "approve", "print", "share"]
+
 
 def has_action_access(user: User, module_key: str, page_flag: str, action: str) -> bool:
     """Can the user perform `action` (view/create/edit/delete/export/approve/
