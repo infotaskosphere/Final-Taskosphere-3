@@ -11,6 +11,13 @@ from pydantic import BaseModel, Field, ConfigDict
 
 from backend.dependencies import db, get_current_user, check_module_permission
 from backend.models import User
+from backend.invoicing import (
+    _compute_invoice_totals,
+    _company_has_gst,
+    _next_invoice_no,
+    sync_invoice_journal_entry,
+    recalculate_invoice_accounting,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/compliance", tags=["compliance"])
@@ -610,6 +617,24 @@ async def list_assignments(
         user_map = {u["id"]: u["full_name"] for u in users}
     for a in items:
         a["assigned_to_name"] = user_map.get(a.get("assigned_to", ""), "")
+
+    # Self-heal any legacy/stale records with a missing or blank client_name —
+    # re-resolve from the clients collection (by client_id) and persist the
+    # fix so it doesn't need repairing again on the next read.
+    stale = [a for a in items if not (a.get("client_name") or "").strip() and a.get("client_id")]
+    if stale:
+        stale_client_ids = list({a["client_id"] for a in stale})
+        stale_clients = await db.clients.find(
+            {"id": {"$in": stale_client_ids}}, {"_id": 0, "id": 1, "company_name": 1}
+        ).to_list(len(stale_client_ids))
+        stale_name_map = {c["id"]: c.get("company_name") for c in stale_clients if c.get("company_name")}
+        for a in stale:
+            fixed_name = stale_name_map.get(a["client_id"])
+            if fixed_name:
+                a["client_name"] = fixed_name
+                await db.compliance_assignments.update_one(
+                    {"id": a["id"]}, {"$set": {"client_name": fixed_name, "updated_at": _now()}}
+                )
 
     return {"total": total, "page": page, "limit": limit, "items": items}
 
@@ -1253,6 +1278,144 @@ async def list_compliance_for_client(
     return {"items": items}
 
 
+async def _sync_govt_fee_to_invoice(
+    assignment: dict,
+    compliance_name: str,
+    current_user: User,
+) -> None:
+    """
+    Push a compliance's Govt Fee + SRN into the client's invoicing as a
+    "ROC Filing Fees" line item — automatically, the moment both fields are
+    saved together on the Compliance tracker.
+
+    Target invoice:
+      - The client's most recent DRAFT invoice, if one exists.
+      - Otherwise a new draft invoice is created for them.
+
+    Idempotency: the line item created for a given compliance assignment is
+    tagged internally (via InvoiceItem.product_id, which is never shown on
+    the printed invoice) with f"compliance_govt_fee:{assignment_id}". If the
+    same assignment's fee/SRN is edited later, that exact line item is
+    updated in place rather than duplicated — even across multiple draft
+    invoices, in case the client's active draft changed in the meantime.
+    """
+    client_id = assignment.get("client_id")
+    if not client_id:
+        return
+
+    amount = float(assignment.get("govt_fees_amount") or 0)
+    srn    = (assignment.get("govt_fees_srn") or "").strip()
+    if amount <= 0 or not srn:
+        return
+
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not client:
+        return
+
+    marker = f"compliance_govt_fee:{assignment['id']}"
+    description = "ROC Filing Fees"
+    item_details = f"{compliance_name or 'Compliance Filing'} · SRN: {srn}"
+
+    def _make_item(existing_item: Optional[dict] = None) -> dict:
+        base = dict(existing_item) if existing_item else {
+            "product_id": marker, "hsn_sac": None, "quantity": 1.0, "unit": "service",
+            "discount_pct": 0.0, "gst_rate": 0.0, "cgst_rate": 0.0, "sgst_rate": 0.0,
+            "igst_rate": 0.0,
+        }
+        base.update({
+            "product_id":  marker,
+            "description": description,
+            "item_details": item_details,
+            "unit_price":  amount,
+        })
+        return base
+
+    # 1. Look for an existing line item already tagged for this assignment,
+    #    on ANY of the client's invoices (in case the draft it lived on was
+    #    since finalised/changed) — update it in place if found.
+    tagged_invoice = await db.invoices.find_one(
+        {"client_id": client_id, "items.product_id": marker}, {"_id": 0}
+    )
+    if tagged_invoice:
+        items = tagged_invoice.get("items") or []
+        new_items = []
+        found = False
+        for it in items:
+            if it.get("product_id") == marker:
+                new_items.append(_make_item(it))
+                found = True
+            else:
+                new_items.append(it)
+        if not found:
+            new_items.append(_make_item())
+        target_invoice, target_is_new = tagged_invoice, False
+        target_invoice["items"] = new_items
+    else:
+        # 2. No existing line for this assignment yet — find the client's
+        #    most recent draft invoice to append to.
+        draft = await db.invoices.find_one(
+            {"client_id": client_id, "status": "draft"},
+            {"_id": 0}, sort=[("created_at", -1)],
+        )
+        if draft:
+            target_invoice, target_is_new = draft, False
+            target_invoice["items"] = (draft.get("items") or []) + [_make_item()]
+        else:
+            # 3. No draft exists — create a fresh one for this client.
+            companies = await db.companies.find({}, {"_id": 0, "id": 1}).sort("created_at", 1).to_list(1)
+            company_id = companies[0]["id"] if companies else ""
+            now = _now()
+            address_parts = [client.get("address"), client.get("city"), client.get("state")]
+            target_invoice = {
+                "id": str(uuid.uuid4()),
+                "invoice_type": "tax_invoice",
+                "company_id": company_id,
+                "client_id": client_id,
+                "lead_id": None, "quotation_id": None,
+                "client_name": client.get("company_name") or "",
+                "client_address": ", ".join([p for p in address_parts if p]),
+                "client_email": client.get("email") or "",
+                "client_phone": client.get("phone") or "",
+                "client_gstin": client.get("gstin") or "",
+                "client_state": client.get("state") or "",
+                "invoice_date": now[:10],
+                "due_date": now[:10],
+                "supply_state": "", "is_interstate": False,
+                "items": [_make_item()],
+                "gst_rate": 18.0, "discount_amount": 0.0, "shipping_charges": 0.0,
+                "other_charges": 0.0, "advance_received": 0.0,
+                "payment_terms": "Due on receipt", "notes": "", "terms_conditions": "",
+                "reference_no": "", "is_recurring": False, "recurrence_pattern": "monthly",
+                "recurrence_end": None, "next_invoice_date": None,
+                "status": "draft",
+                "invoice_template": "prestige", "invoice_theme": "classic_blue",
+                "invoice_custom_color": "#0D3B66",
+                "amount_paid": 0.0, "amount_due": 0.0, "pdf_drive_link": "",
+                "created_by": current_user.id, "created_at": now, "updated_at": now,
+            }
+            target_invoice["invoice_no"] = await _next_invoice_no(
+                prefix="INV", company_id=company_id, separator="/",
+                include_fy=True, fy_format="short", include_month=False,
+                number_padding=3, invoice_type="tax_invoice",
+            )
+            target_is_new = True
+
+    has_gst = await _company_has_gst(target_invoice.get("company_id") or "")
+    target_invoice = _compute_invoice_totals(target_invoice, has_gst)
+    target_invoice["updated_at"] = _now()
+
+    if target_is_new:
+        await db.invoices.insert_one({**target_invoice, "_id": target_invoice["id"]})
+    else:
+        await db.invoices.update_one({"id": target_invoice["id"]}, {"$set": target_invoice})
+
+    try:
+        await sync_invoice_journal_entry(target_invoice["id"])
+        await recalculate_invoice_accounting(target_invoice["id"])
+    except Exception:
+        logger.exception("Invoice accounting sync failed after govt-fee auto-sync (invoice %s)", target_invoice["id"])
+
+
 @router.patch("/{compliance_id}/assignments/{assignment_id}/govt-fee")
 async def update_assignment_govt_fee(
     compliance_id: str,
@@ -1360,6 +1523,17 @@ async def update_assignment_govt_fee(
         update_op,
     )
     doc = await db.compliance_assignments.find_one({"id": assignment_id}, {"_id": 0})
+
+    # Auto-sync into invoicing: only when amount and/or SRN actually changed
+    # (avoids rewriting the invoice on unrelated edits, e.g. toggling Reimbursed).
+    if (amount_changed or srn_changed) and eff_amount > 0 and eff_srn:
+        cm = await db.compliance_masters.find_one({"id": compliance_id}, {"_id": 0, "name": 1})
+        try:
+            await _sync_govt_fee_to_invoice(doc, (cm or {}).get("name") or "", current_user)
+        except Exception:
+            # Never let an invoicing hiccup block the compliance save itself.
+            logger.exception("Govt-fee → invoice auto-sync failed for assignment %s", assignment_id)
+
     return doc
 
 
