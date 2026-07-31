@@ -40,6 +40,7 @@ from backend.accounting_extended import router as accounting_ext_router
 from backend.accounting_extended import create_accounting_extended_indexes
 from backend.bank_accounts import router as bank_accounts_router
 from backend.permission_governance import router as permission_governance_router
+from backend.governed_modules import ALL_GOVERNED_ROUTERS
 from backend.security.rate_limiter import RateLimiter
 from backend.security.audit_security import AuditSecurity
 from backend.security.session_manager import SessionManager
@@ -13996,6 +13997,8 @@ app.include_router(gst_portal_sync_router)       # already has /api/gst-portal p
 app.include_router(accounting_lock_router)       # already has /api/accounting-integrity prefix
 api_router.include_router(bank_accounts_router)
 api_router.include_router(permission_governance_router)
+for _governed_router in ALL_GOVERNED_ROUTERS:
+    api_router.include_router(_governed_router)
 app.include_router(ai_document_reader_router)
 api_router.include_router(trademark_sphere_router)
 app.include_router(trademark_portals_router)  # already has /api/... prefix
