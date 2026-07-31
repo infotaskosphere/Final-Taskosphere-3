@@ -1073,7 +1073,7 @@ export default function Dashboard() {
   const isDark = useDark();
 
   // ── Auth & Navigation ─────────────────────────────────────────────────────
-  const { user: authUser, hasPermission } = useAuth();
+  const { user: authUser, hasPermission, logout } = useAuth();
   const user = authUser || {
     id: '', full_name: 'User', role: 'staff',
     permissions: { view_other_tasks: [], can_view_all_tasks: false }
@@ -1480,6 +1480,16 @@ export default function Dashboard() {
           setActionDone(true);
           setMustPunchIn(false);
         }
+
+        if (action === 'punch_out') {
+          // Auto-logout on punch-out: session should end here, including
+          // "keep signed in" sessions (see AuthContext.jsx logout()).
+          setLoading(false);
+          await logout();
+          navigate('/login', { replace: true });
+          return;
+        }
+
         const updated = await apiFetch('/attendance/today');
         if (updated) setTodayAttendance(updated);
       } else {
@@ -1490,7 +1500,7 @@ export default function Dashboard() {
       toast.error('Network error');
     }
     setLoading(false);
-  }, [apiFetch, API_BASE, getAuthHeader]);
+  }, [apiFetch, API_BASE, getAuthHeader, logout, navigate]);
 
   // ── Duration Helper ───────────────────────────────────────────────────────
   const getTodayDuration = useCallback(() => {
