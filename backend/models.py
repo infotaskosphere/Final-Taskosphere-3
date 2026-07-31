@@ -34,6 +34,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_all_leads": True,
           "can_edit_tasks": True,
           "can_edit_clients": True,
+          "can_approve_clients": True,
           "can_edit_dsc": True,
           "can_edit_documents": True,
           "can_edit_due_dates": True,
@@ -119,6 +120,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_all_leads": False,       # ADMIN_GRANTED_ONLY (Leads Pipeline not in default spec)
           "can_edit_tasks": True,            # Tasks → EDIT/UPDATE (Own + Team)
           "can_edit_clients": False,         # ADMIN_GRANTED_ONLY
+          "can_approve_clients": False,      # ADMIN_GRANTED_ONLY
           "can_edit_dsc": False,             # ADMIN_GRANTED_ONLY
           "can_edit_documents": False,       # ADMIN_GRANTED_ONLY
           "can_edit_due_dates": True,        # Compliance Calendar → EDIT/UPDATE (Own + Team)
@@ -197,6 +199,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_all_leads": False,       # ADMIN_GRANTED_ONLY (Leads Pipeline not in default spec)
           "can_edit_tasks": True,            # Tasks → EDIT/UPDATE (Own)
           "can_edit_clients": False,         # ADMIN_GRANTED_ONLY
+          "can_approve_clients": False,      # ADMIN_GRANTED_ONLY
           "can_edit_dsc": False,             # ADMIN_GRANTED_ONLY
           "can_edit_documents": False,       # ADMIN_GRANTED_ONLY
           "can_edit_due_dates": True,        # Compliance Calendar → EDIT/UPDATE (Own)
@@ -317,16 +320,15 @@ MODULE_HIERARCHY: Dict[str, Dict[str, Any]] = {
     "records": {
         "flag": "can_access_records",
         "label": "Records",
-        "description": "DSC Register, Document Register, Clients, Password Vault, Templates and Uploads.",
+        "description": "DSC Register, Document Register, Clients (with approval workflow) and Password Vault.",
         "pages": [
             {"flag": "can_view_all_dsc",   "label": "DSC Register", "actions": ["view", "export"]},
             {"flag": "can_view_documents", "label": "Document Register", "actions": ["view", "export"]},
             {"flag": "can_view_passwords", "label": "Password Vault (view)", "actions": ["view"]},
             {"flag": "can_edit_passwords", "label": "Password Vault (manage)", "actions": ["create", "edit", "delete"]},
-            {"flag": "can_view_templates", "label": "Templates (view)", "actions": ["view"]},
-            {"flag": "can_manage_templates", "label": "Templates (manage)", "actions": ["create", "edit", "delete"]},
-            {"flag": "can_view_uploads",   "label": "Uploads (view)", "actions": ["view", "export"]},
-            {"flag": "can_manage_uploads", "label": "Uploads (manage)", "actions": ["create", "edit", "delete"]},
+            {"flag": "can_view_all_clients", "label": "Clients — visibility of other users' clients", "actions": ["view"]},
+            {"flag": "can_edit_clients",     "label": "Clients — edit / update any client", "actions": ["edit", "update"]},
+            {"flag": "can_approve_clients",  "label": "Clients — approve newly added clients", "actions": ["approve"]},
         ],
     },
     "proposals": {
@@ -400,6 +402,8 @@ class UserPermissions(BaseModel):
     can_view_all_leads: bool = False
     can_edit_tasks: bool = False
     can_edit_clients: bool = False
+    # Approve / reject client records created by other users (admin workflow)
+    can_approve_clients: bool = False
     can_edit_dsc: bool = False
     can_edit_documents: bool = False
     can_edit_due_dates: bool = False
@@ -507,10 +511,6 @@ class UserPermissions(BaseModel):
     # scope, granted the same way as every other page flag above, through
     # Permission Governance. Nothing here changes any existing flag's
     # behaviour or default.
-    can_view_templates: bool = False
-    can_manage_templates: bool = False
-    can_view_uploads: bool = False
-    can_manage_uploads: bool = False
     can_view_client_discussion: bool = False
     can_manage_client_discussion: bool = False
     can_view_leave: bool = False
@@ -1146,6 +1146,14 @@ class Client(ClientBase):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_by: str
     created_at: Optional[Any] = None
+    # ── Client approval workflow ─────────────────────────────────────────
+    # Any user may add a client, but a client created by a non-admin stays
+    # "pending" until an admin (or a user with can_approve_clients) approves
+    # it. Pending clients are only visible to their creator and approvers.
+    approval_status: str = "approved"          # approved | pending | rejected
+    approved_by: Optional[str] = None
+    approved_at: Optional[Any] = None
+    rejection_reason: Optional[str] = None
 
 
 class MasterClientForm(BaseModel):
