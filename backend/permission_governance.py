@@ -33,7 +33,7 @@ from backend.dependencies import (
     get_team_user_ids,
     create_audit_log,
 )
-from backend.models import User, DEFAULT_ROLE_PERMISSIONS
+from backend.models import User, DEFAULT_ROLE_PERMISSIONS, MODULE_HIERARCHY
 
 router = APIRouter(tags=["Permission Governance"])
 
@@ -50,6 +50,49 @@ GOVERNED_MODULES = {
     "post_journal_entries": {"flag": "can_post_journal_entries",    "label": "Journal Entries (post)"},
     "accounting_reports":  {"flag": "can_view_accounting_reports",  "label": "Accounting Reports"},
 }
+
+
+# =============================================================================
+# MAIN PERMISSION MODULE HIERARCHY
+# Six main permission modules — Taskosphere, Finix, Compliance, Records,
+# Client Proposals, People Matrix — each with a master "module access" flag
+# and a set of individual page-level flags nested beneath it (see
+# MODULE_HIERARCHY in backend/models.py for the full mapping). A page flag
+# can only ever be effectively usable while its parent module's master flag
+# is also True; `_enforce_module_hierarchy` guarantees that on every save,
+# regardless of what the client sends.
+# =============================================================================
+_MODULE_TO_PAGE_FLAGS = {
+    m["flag"]: [p["flag"] for p in m["pages"]] for m in MODULE_HIERARCHY.values()
+}
+
+
+def _enforce_module_hierarchy(permissions: dict) -> dict:
+    """
+    Returns a copy of `permissions` with every page-level flag forced to
+    False wherever its parent module's master flag is False (or missing).
+    Only touches flags that belong to a module and are present in the
+    payload — everything else passes through untouched.
+    """
+    result = dict(permissions)
+    for module_flag, page_flags in _MODULE_TO_PAGE_FLAGS.items():
+        module_on = bool(result.get(module_flag, False))
+        if not module_on:
+            for page_flag in page_flags:
+                if page_flag in result:
+                    result[page_flag] = False
+    return result
+
+
+@router.get("/permission-governance/module-tree")
+async def get_module_hierarchy(current_user: User = Depends(get_current_user)):
+    """
+    The 6 main permission modules and their nested pages, for the
+    Users → Permissions → Modules tab to render. Available to any
+    authenticated user (read-only) so the permissions dialog can display it
+    consistently for whoever is viewing it.
+    """
+    return [{"module": key, **value} for key, value in MODULE_HIERARCHY.items()]
 
 
 class AccessRequestCreate(BaseModel):
@@ -337,6 +380,9 @@ async def update_user_permissions(
         if not existing:
             raise HTTPException(status_code=404, detail="User not found")
         old_permissions = existing.get("permissions", {})
+        # Guarantee the module hierarchy holds even if the client sent a page
+        # flag as True while its parent module flag is False.
+        permissions = _enforce_module_hierarchy(permissions)
         await db.users.update_one(
             {"id": user_id}, {"$set": {"permissions": permissions}}
         )
@@ -384,6 +430,8 @@ async def update_user_permissions(
                 safe_permissions[key] = val
 
         old_permissions = existing.get("permissions", {})
+        # Same hierarchy guarantee as the admin path above.
+        safe_permissions = _enforce_module_hierarchy(safe_permissions)
         await db.users.update_one(
             {"id": user_id}, {"$set": {"permissions": safe_permissions}}
         )
