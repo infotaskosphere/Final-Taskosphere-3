@@ -21,23 +21,38 @@ from pydantic import BaseModel, Field, ConfigDict, EmailStr, field_validator
 from bson import ObjectId
 
 from backend.dependencies import db, get_current_user, create_audit_log, _get_perm
+from backend.governance_core import has_action_access
 
 router = APIRouter(prefix="/interviews", tags=["Employee Interviews"])
 logger = logging.getLogger(__name__)
 
 
 # ====================== PERMISSIONS ======================
+# Employee Interviews sits under People Matrix > "can_view_interviews" in
+# MODULE_HIERARCHY (backend/models.py), which now declares actions
+# ["view", "create", "edit", "export"] for this page. `assert_can_manage`
+# stays the single gate every route below already calls; it now also
+# consults the centralized Action layer (backend/governance_core.py) so an
+# admin can optionally restrict a specific user to read-only Interviews
+# access via their `governance_matrix`. Nobody's access changes unless an
+# admin explicitly sets that up — has_action_access() falls back to True
+# when governance_matrix has no entry for this page, which is true for
+# every account today.
 
 
-def _can_manage(current_user) -> bool:
-    """Admin always has access. Other roles need can_view_interviews permission."""
+def _can_manage(current_user, action: str = "view") -> bool:
+    """Admin always has access. Other roles need can_view_interviews permission,
+    and — if an admin has explicitly restricted this user's Interviews actions
+    via the Permission Matrix — the specific `action` requested."""
     if getattr(current_user, "role", None) == "admin":
         return True
-    return bool(_get_perm(current_user, "can_view_interviews"))
+    if not _get_perm(current_user, "can_view_interviews"):
+        return False
+    return has_action_access(current_user, "can_view_interviews", action)
 
 
-def assert_can_manage(current_user):
-    if not _can_manage(current_user):
+def assert_can_manage(current_user, action: str = "view"):
+    if not _can_manage(current_user, action):
         raise HTTPException(
             status_code=403,
             detail="You do not have permission to access Employee Interviews",
@@ -798,7 +813,7 @@ async def get_candidate(candidate_id: str, current_user=Depends(get_current_user
 async def create_candidate(
     payload: CandidateCreate, current_user=Depends(get_current_user)
 ):
-    assert_can_manage(current_user)
+    assert_can_manage(current_user, "create")
     doc = payload.model_dump()
     doc.update(
         {
@@ -824,7 +839,7 @@ async def create_candidate(
 async def update_candidate(
     candidate_id: str, payload: CandidateUpdate, current_user=Depends(get_current_user)
 ):
-    assert_can_manage(current_user)
+    assert_can_manage(current_user, "edit")
     oid = validate_obj_id(candidate_id)
     existing = await db.interview_candidates.find_one({"_id": oid})
     if not existing:
@@ -848,7 +863,7 @@ async def update_candidate(
 
 @router.delete("/{candidate_id}")
 async def delete_candidate(candidate_id: str, current_user=Depends(get_current_user)):
-    assert_can_manage(current_user)
+    assert_can_manage(current_user, "delete")
     oid = validate_obj_id(candidate_id)
     existing = await db.interview_candidates.find_one({"_id": oid})
     if not existing:
