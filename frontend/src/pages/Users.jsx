@@ -656,7 +656,7 @@ const MODULE_TREE = [
     footnote: 'These core pages are open to every signed-in user today and don\u2019t yet have separate page-level toggles \u2014 this switch controls the whole module at once.',
   },
   {
-    key: 'finix', flag: 'can_access_finix', label: 'Finix', icon: CreditCard, accent: ACCOUNTS_ACCENT,
+    key: 'finix', flag: 'can_access_finix', label: 'Finix', icon: CreditCard, accent: '#15803D',
     desc: 'Accounting & finance — Sale, Purchase, Bank Accounts, Chart of Accounts, Journal Entries and Accounting Reports.',
     pages: pagesWithWritePerms(ACCOUNT_PAGE_PERMS, ACCOUNT_WRITE_PERMS),
   },
