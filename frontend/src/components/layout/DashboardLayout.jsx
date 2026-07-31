@@ -10,6 +10,8 @@ import {
   CreditCard, Fingerprint, Bell, Shield, ShieldCheck, ArrowLeftRight, MessageCircle,
   Building2, Zap, Briefcase, ShoppingBag, Landmark, BookOpen, NotebookPen,
   ScanLine, Lock, Search, Loader2,
+  Wallet, CalendarOff, TrendingUp, UserPlus,
+  Database, FolderOpen, MessagesSquare,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -81,6 +83,8 @@ const NAV_GROUPS = [
       // Clients — always visible to all authenticated users.
       { path: '/clients',   icon: Users,     label: 'Clients' },
       { path: '/passwords', icon: KeyRound,  label: 'Password Vault',    permission: 'can_view_passwords'   },
+      { path: '/templates', icon: FolderOpen, label: 'Templates',        permission: 'can_view_templates'   },
+      { path: '/uploads',   icon: FolderOpen, label: 'Uploads',          permission: 'can_view_uploads'     },
     ],
   },
   {
@@ -90,6 +94,7 @@ const NAV_GROUPS = [
       { path: '/client-proposals-dashboard', icon: LayoutDashboard, label: 'Client Proposals Dashboard' },
       { path: '/leads',      icon: Target,   label: 'Lead Management', permission: 'can_view_all_leads'    },
       { path: '/quotations', icon: Receipt,  label: 'Quotations',      permission: 'can_create_quotations' },
+      { path: '/client-discussion', icon: MessagesSquare, label: 'Client Discussion', permission: 'can_view_client_discussion' },
     ],
   },
   {
@@ -175,13 +180,22 @@ const NAV_GROUPS = [
       { path: '/staff-activity', icon: Activity,   label: 'Team Activity',    adminOnly: true                    },
       { path: '/interviews',     icon: Briefcase,  label: 'Employee Interviews', permission: 'can_view_interviews'  },
       { path: '/reports',        icon: BarChart3,  label: 'Reports', adminOnly: true },
+      { path: '/leave',          icon: CalendarOff,   label: 'Leave',       permission: 'can_view_leave'       },
+      { path: '/payroll',        icon: Wallet,        label: 'Payroll',     permission: 'can_view_payroll'     },
+      { path: '/hr',              icon: Briefcase,    label: 'HR',          permission: 'can_view_hr'          },
+      { path: '/recruitment',     icon: UserPlus,     label: 'Recruitment', permission: 'can_view_recruitment' },
+      { path: '/performance',     icon: TrendingUp,   label: 'Performance', permission: 'can_view_performance' },
     ],
   },
   {
     id: 'admin',
     dividerLabel: 'Admin',
     items: [
-      { path: '/task-audit',     icon: Activity,   label: 'Task Audit Log',   permission: 'can_view_audit_logs'  },
+      { path: '/admin-dashboard', icon: LayoutDashboard, label: 'Admin Dashboard', adminOnly: true },
+      { path: '/permission-matrix', icon: ShieldCheck, label: 'Permission Matrix', adminOnly: true },
+      { path: '/task-audit',     icon: Activity,   label: 'Audit Logs',   permission: 'can_view_audit_logs'  },
+      { path: '/master-data',    icon: Database,   label: 'Master Data', adminOnly: true },
+      { path: '/roles',          icon: Fingerprint, label: 'Roles', adminOnly: true },
       { path: '/client-portal-manager', icon: Building2, label: 'Client Portal', permission: 'can_view_client_portal' },
       { path: '/whatsapp-hub', icon: MessageCircle, label: 'Unified Inbox', permission: 'can_access_whatsapp_hub' },
     ],
@@ -209,7 +223,7 @@ const SECTION_META = {
   records:       { label: 'Records',                icon: FileText,       landingPath: '/records-dashboard' },
   proposals:     { label: 'Client Proposals',       icon: Target,         landingPath: '/client-proposals-dashboard' },
   'people-matrix': { label: 'People Matrix',        icon: Fingerprint,    landingPath: '/people-matrix' },
-  admin:         { label: 'Admin',                  icon: Lock,           landingPath: '/task-audit' },
+  admin:         { label: 'Admin',                  icon: Lock,           landingPath: '/admin-dashboard' },
   settings:      { label: 'Settings',               icon: Settings,       landingPath: '/settings/general' },
 };
 const SECTION_ORDER = ['core', 'accounts', 'compliance', 'records', 'proposals', 'people-matrix', 'admin', 'settings'];
