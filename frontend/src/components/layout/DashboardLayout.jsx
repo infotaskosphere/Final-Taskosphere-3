@@ -83,8 +83,7 @@ const NAV_GROUPS = [
       // Clients — always visible to all authenticated users.
       { path: '/clients',   icon: Users,     label: 'Clients' },
       { path: '/passwords', icon: KeyRound,  label: 'Password Vault',    permission: 'can_view_passwords'   },
-      { path: '/templates', icon: FolderOpen, label: 'Templates',        permission: 'can_view_templates'   },
-      { path: '/uploads',   icon: FolderOpen, label: 'Uploads',          permission: 'can_view_uploads'     },
+      { path: '/client-approvals', icon: UserPlus, label: 'Client Approvals' },
     ],
   },
   {
@@ -290,6 +289,27 @@ function getSectionForPath(pathname) {
   return 'core';
 }
 
+// Titles for routes that exist but have no sidebar entry, so the header name
+// next to the logo still matches the page the user is looking at.
+const EXTRA_PAGE_TITLES = {
+  '/users': 'Users',
+  '/people-matrix': 'People Matrix Dashboard',
+  '/team-activity': 'Team Activity',
+  '/interviews': 'Employee Interviews',
+  '/reports': 'Reports',
+  '/leave': 'Leave',
+  '/payroll': 'Payroll',
+  '/hr': 'HR',
+  '/recruitment': 'Recruitment',
+  '/performance': 'Performance',
+  '/admin-dashboard': 'Admin Dashboard',
+  '/task-audit': 'Task Audit',
+  '/client-portal-manager': 'Client Portal Manager',
+  '/settings': 'Settings',
+  '/records-dashboard': 'Records Dashboard',
+  '/client-approvals': 'Client Approvals',
+};
+
 const springSnap = { type: 'spring', stiffness: 500, damping: 28 };
 const springMed  = { type: 'spring', stiffness: 400, damping: 24 };
 const springSoft = { type: 'spring', stiffness: 300, damping: 20 };
@@ -425,10 +445,35 @@ const DashboardLayout = ({ children }) => {
 
   const allNavItems     = NAV_GROUPS.flatMap(g => g.items);
   const visibleNavItems = allNavItems.filter(i => checkNavPermission(i));
-  const activeLabel     = visibleNavItems.find(i =>
-    i.path === location.pathname ||
-    (!i.exact && location.pathname.startsWith(i.path + '/') && i.path !== '/')
-  )?.label || 'Dashboard';
+
+  // The title shown right next to the Task-O-Sphere logo must ALWAYS match the
+  // page currently on screen. It is resolved purely from the URL (longest
+  // matching nav path wins), never from permission-filtered lists — otherwise a
+  // page the user can open but that is hidden in the sidebar would leave the
+  // previous page's name stuck in the header.
+  const activeLabel = useMemo(() => {
+    const path = location.pathname;
+    let best = null;
+    for (const item of allNavItems) {
+      if (path === item.path || path.startsWith(item.path + '/')) {
+        if (!best || item.path.length > best.path.length) best = item;
+      }
+    }
+    if (best) return best.label;
+    if (EXTRA_PAGE_TITLES[path]) return EXTRA_PAGE_TITLES[path];
+    const matchedPrefix = Object.keys(EXTRA_PAGE_TITLES)
+      .filter(k => path.startsWith(k + '/'))
+      .sort((a, b) => b.length - a.length)[0];
+    if (matchedPrefix) return EXTRA_PAGE_TITLES[matchedPrefix];
+    const slug = path.split('/').filter(Boolean).pop();
+    if (!slug) return 'Dashboard';
+    return slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  }, [location.pathname]);
+
+  // Keep the browser tab title in sync with the header title too.
+  useEffect(() => {
+    document.title = `${activeLabel} · Task-O-Sphere`;
+  }, [activeLabel]);
 
   // Which top-level heading (Taskosphere Dashboard / Finix Dashboard /
   // Compliance / Records / Client Proposals / Admin / Settings) the
