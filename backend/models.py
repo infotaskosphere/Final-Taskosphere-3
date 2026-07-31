@@ -92,6 +92,13 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_post_journal_entries": True,
           "can_view_accounting_reports": True,
           "can_match_bank": True,          # Match / Edit Match / Unmatch bank reconciliations
+          # ── Main permission module hierarchy — admin has every module on ──
+          "can_access_taskosphere": True,
+          "can_access_finix": True,
+          "can_access_compliance": True,
+          "can_access_records": True,
+          "can_access_proposals": True,
+          "can_access_people_matrix": True,
       },
       "manager": {
           # Manager: SCOPE = OWN + SAME_DEPARTMENT (Own + Team)
@@ -164,6 +171,14 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_post_journal_entries": False,
           "can_view_accounting_reports": False,
           "can_match_bank": True,          # Manager: Match / Edit Match / Unmatch by default (still gated by can_view_bank to reach the page)
+          # ── Main permission module hierarchy — Taskosphere always on, the
+          # other five are ADMIN_GRANTED_ONLY via the Permission Governance portal.
+          "can_access_taskosphere": True,
+          "can_access_finix": False,
+          "can_access_compliance": False,
+          "can_access_records": False,
+          "can_access_proposals": False,
+          "can_access_people_matrix": False,
       },
       "staff": {
           # Staff: SCOPE = OWN only
@@ -234,8 +249,101 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_post_journal_entries": False,
           "can_view_accounting_reports": False,
           "can_match_bank": False,          # Staff: view-only by default; admin can grant Match/Edit Match/Unmatch via Permission Governance
+          # ── Main permission module hierarchy — Taskosphere always on, the
+          # other five are ADMIN_GRANTED_ONLY via the Permission Governance portal.
+          "can_access_taskosphere": True,
+          "can_access_finix": False,
+          "can_access_compliance": False,
+          "can_access_records": False,
+          "can_access_proposals": False,
+          "can_access_people_matrix": False,
       },
   }
+
+# ────────────────────────────────────────────────
+# MAIN PERMISSION MODULE HIERARCHY
+# ────────────────────────────────────────────────
+# Single source of truth for the "Permission Governance" hierarchy shown on
+# the Users → Permissions → Modules tab. Six main permission modules
+# (Taskosphere, Finix, Compliance, Records, Client Proposals, People Matrix)
+# each own a master "module access" flag plus a set of individual page-level
+# flags that already existed in this system. A page flag can only ever be
+# effectively True while its parent module's master flag is also True —
+# enforced in backend/permission_governance.py::_enforce_module_hierarchy
+# every time permissions are saved, and mirrored in the frontend so a page
+# toggle is greyed out until its module is switched on.
+#
+# NOTE: Taskosphere (Tasks, To-Do, Attendance, Reminders, Action Center,
+# Client Visits, AI Document Reader) has no individual page-level flags of
+# its own today — those pages have always been open to every authenticated
+# user. Its entry below therefore only carries the module master flag; the
+# Dashboard route itself is intentionally left out of this hierarchy so that
+# turning Taskosphere off can never create a redirect loop (denied-access
+# redirects always land on /dashboard).
+MODULE_HIERARCHY: Dict[str, Dict[str, Any]] = {
+    "taskosphere": {
+        "flag": "can_access_taskosphere",
+        "label": "Taskosphere",
+        "description": "Core workspace — Tasks, To-Do, Attendance, Reminders, Action Center, Client Visits and AI Document Reader.",
+        "pages": [],
+    },
+    "finix": {
+        "flag": "can_access_finix",
+        "label": "Finix",
+        "description": "Accounting & finance — Sales, Purchase, Bank Accounts, Chart of Accounts, Journal Entries and Accounting Reports.",
+        "pages": [
+            {"flag": "can_view_accounting_reports", "label": "Finix Dashboard & Accounting Reports"},
+            {"flag": "can_view_sale",                "label": "Sales / Invoicing"},
+            {"flag": "can_view_purchase",             "label": "Purchase"},
+            {"flag": "can_view_bank",                 "label": "Bank Accounts"},
+            {"flag": "can_view_chart_of_accounts",    "label": "Chart of Accounts (view)"},
+            {"flag": "can_manage_chart_of_accounts",  "label": "Chart of Accounts (manage)"},
+            {"flag": "can_view_journal_entries",      "label": "Journal Entries (view)"},
+            {"flag": "can_post_journal_entries",       "label": "Journal Entries & Zero Touch Entry (post)"},
+            {"flag": "can_match_bank",                "label": "Bank Reconciliation (match/unmatch)"},
+        ],
+    },
+    "compliance": {
+        "flag": "can_access_compliance",
+        "label": "Compliance",
+        "description": "Compliance Tracker, GST Reconciliation and Trademark Sphere.",
+        "pages": [
+            {"flag": "can_view_compliance",          "label": "Compliance Tracker (view)"},
+            {"flag": "can_manage_compliance",        "label": "Compliance Tracker (manage)"},
+            {"flag": "can_view_gst_reconciliation",  "label": "GST Reconciliation"},
+            {"flag": "can_view_trademark_sphere",    "label": "Trademark Sphere"},
+        ],
+    },
+    "records": {
+        "flag": "can_access_records",
+        "label": "Records",
+        "description": "DSC Register, Document Register, Clients and Password Vault.",
+        "pages": [
+            {"flag": "can_view_all_dsc",   "label": "DSC Register"},
+            {"flag": "can_view_documents", "label": "Document Register"},
+            {"flag": "can_view_passwords", "label": "Password Vault (view)"},
+            {"flag": "can_edit_passwords", "label": "Password Vault (manage)"},
+        ],
+    },
+    "proposals": {
+        "flag": "can_access_proposals",
+        "label": "Client Proposals",
+        "description": "Lead management and quotations.",
+        "pages": [
+            {"flag": "can_view_all_leads",    "label": "Lead Management"},
+            {"flag": "can_create_quotations", "label": "Quotations"},
+        ],
+    },
+    "people_matrix": {
+        "flag": "can_access_people_matrix",
+        "label": "People Matrix",
+        "description": "User directory and Employee Interviews (HRMS).",
+        "pages": [
+            {"flag": "can_view_user_page",  "label": "User Directory"},
+            {"flag": "can_view_interviews", "label": "Employee Interviews"},
+        ],
+    },
+}
 
 # ======================
 # CORE USER & PERMISSIONS
@@ -338,6 +446,18 @@ class UserPermissions(BaseModel):
     # Admin: always True. Manager: True by default. Staff: False by default —
     # grant via Permission Governance for permission-based access.
     can_match_bank: bool = False
+    # ── Main permission module hierarchy (see MODULE_HIERARCHY above) ────────
+    # Master "module access" flags for the six main areas of the app, shown on
+    # Users → Permissions → Modules. A page-level flag above can only ever be
+    # effectively True while its parent module flag here is also True.
+    # Taskosphere has always been open to every authenticated user, so it
+    # defaults True for every role; the other five default to admin-only.
+    can_access_taskosphere: bool = True
+    can_access_finix: bool = False
+    can_access_compliance: bool = False
+    can_access_records: bool = False
+    can_access_proposals: bool = False
+    can_access_people_matrix: bool = False
 
     model_config = ConfigDict(extra="ignore")
 
