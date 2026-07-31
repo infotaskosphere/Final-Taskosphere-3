@@ -10903,27 +10903,37 @@ async def import_clients_from_csv(
 @api_router.post("/clients", response_model=Client)
 async def create_client(
     payload: dict,
-    current_user: User = Depends(check_module_permission("clients", "create")),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Create a new client.
-    Issue #5 + #6: requires clients.create permission (can_edit_clients flag).
-    Admin always passes via check_module_permission.
+
+    ANY signed-in user may add a client — no special permission is needed.
+    What differs is what happens next: an admin (or a user with
+    can_approve_clients) creates it as approved, everyone else creates it as
+    "pending" and it only joins the master list once an approver signs it off
+    from Records ▸ Client Approvals.
     """
-    if current_user.role != "admin":
-        perms = get_user_permissions(current_user)
-        if not perms.get("can_edit_clients", False) and not perms.get(
-            "can_view_all_clients", False
-        ):
-            raise HTTPException(
-                status_code=403, detail="You do not have permission to create clients"
-            )
     try:
         client_data = ClientCreate(
             **{k: v for k, v in payload.items() if k in ClientCreate.model_fields}
         )
         client = Client(**client_data.model_dump(), created_by=current_user.id)
         doc = client.model_dump()
+
+        # ── Approval workflow ────────────────────────────────────────────
+        # Any user can add a client, but unless they are an admin (or hold
+        # can_approve_clients) the record is created as "pending" and only
+        # becomes part of the master list once an admin approves it.
+        perms_now = get_user_permissions(current_user)
+        auto_approve = current_user.role == "admin" or perms_now.get(
+            "can_approve_clients", False
+        )
+        doc["approval_status"] = "approved" if auto_approve else "pending"
+        doc["approved_by"] = current_user.id if auto_approve else None
+        doc["approved_at"] = (
+            datetime.now(timezone.utc).isoformat() if auto_approve else None
+        )
 
         # ── safe_iso: handles None, str, date, datetime — never crashes ──────
         def safe_iso(val):
@@ -11108,10 +11118,100 @@ async def get_user_assigned_clients(
     return {"user_id": user_id, "count": len(results), "clients": results}
 
 
+@api_router.get("/clients/pending")
+async def list_pending_clients(current_user: User = Depends(get_current_user)):
+    """Clients awaiting admin approval.
+
+    Approvers (admin / can_approve_clients) see every pending client;
+    everyone else only sees the ones they submitted themselves.
+    """
+    perms = get_user_permissions(current_user)
+    is_approver = current_user.role == "admin" or perms.get("can_approve_clients", False)
+    query = {"approval_status": "pending"}
+    if not is_approver:
+        query["created_by"] = current_user.id
+    rows = (
+        await db.clients.find(query, {"_id": 0})
+        .sort("created_at", -1)
+        .to_list(500)
+    )
+    return {"items": rows, "total": len(rows), "can_approve": is_approver}
+
+
+@api_router.post("/clients/{client_id}/approve")
+async def approve_client(client_id: str, current_user: User = Depends(get_current_user)):
+    perms = get_user_permissions(current_user)
+    if current_user.role != "admin" and not perms.get("can_approve_clients", False):
+        raise HTTPException(status_code=403, detail="Not authorized to approve clients")
+    existing = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Client not found")
+    await db.clients.update_one(
+        {"id": client_id},
+        {
+            "$set": {
+                "approval_status": "approved",
+                "approved_by": current_user.id,
+                "approved_at": datetime.now(timezone.utc).isoformat(),
+                "rejection_reason": None,
+            }
+        },
+    )
+    return {"success": True, "id": client_id, "approval_status": "approved"}
+
+
+@api_router.post("/clients/{client_id}/reject")
+async def reject_client(
+    client_id: str, payload: dict = Body(default={}), current_user: User = Depends(get_current_user)
+):
+    perms = get_user_permissions(current_user)
+    if current_user.role != "admin" and not perms.get("can_approve_clients", False):
+        raise HTTPException(status_code=403, detail="Not authorized to reject clients")
+    existing = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Client not found")
+    await db.clients.update_one(
+        {"id": client_id},
+        {
+            "$set": {
+                "approval_status": "rejected",
+                "approved_by": current_user.id,
+                "approved_at": datetime.now(timezone.utc).isoformat(),
+                "rejection_reason": (payload or {}).get("reason") or "",
+            }
+        },
+    )
+    return {"success": True, "id": client_id, "approval_status": "rejected"}
+
+
+def _pending_visibility_clause(current_user, permissions):
+    """Pending clients are only visible to their creator and to approvers."""
+    if current_user.role == "admin" or permissions.get("can_approve_clients", False):
+        return None
+    return {
+        "$or": [
+            {"approval_status": {"$in": [None, "approved"]}},
+            {"approval_status": {"$exists": False}},
+            {"created_by": current_user.id},
+        ]
+    }
+
+
 def _build_clients_access_query(current_user, permissions, team_ids=None):
-    """Helper: build the MongoDB access-control query for a given user."""
+    """Helper: build the MongoDB access-control query for a given user.
+
+    Visibility rules (Records → Clients):
+      • admin                      → every client
+      • can_view_all_clients       → every client
+      • everyone else              → only clients assigned to them (plus the
+        ones they created and any explicitly granted in assigned_clients)
+    Pending (unapproved) clients are hidden from everyone except their
+    creator and users who can approve clients.
+    """
+    pending_clause = _pending_visibility_clause(current_user, permissions)
+
     if current_user.role == "admin" or permissions.get("can_view_all_clients", False):
-        return {}
+        return {} if pending_clause is None else pending_clause
 
     extra_clients = permissions.get("assigned_clients", []) or []
     or_clauses = [
@@ -11124,7 +11224,10 @@ def _build_clients_access_query(current_user, permissions, team_ids=None):
     if current_user.role == "manager" and team_ids:
         or_clauses.append({"assigned_to": {"$in": team_ids}})
         or_clauses.append({"assignments.user_id": {"$in": team_ids}})
-    return {"$or": or_clauses}
+    access = {"$or": or_clauses}
+    if pending_clause is None:
+        return access
+    return {"$and": [access, pending_clause]}
 
 
 def _normalize_client_dates(client: dict) -> dict:
@@ -11324,7 +11427,11 @@ async def update_client(
             or in_assignments
         ):
             raise HTTPException(
-                status_code=403, detail="Not authorized to edit this client"
+                status_code=403,
+                detail=(
+                    "Not authorized to edit this client. Ask an admin for the "
+                    "\"Clients — edit / update any client\" permission."
+                ),
             )
 
     # ── Whitelist: only persist known fields ────────────────────────
