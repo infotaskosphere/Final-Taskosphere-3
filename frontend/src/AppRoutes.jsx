@@ -33,6 +33,7 @@ const GSTReconciliation = lazy(() => import('./pages/GSTReconciliation.jsx'));
 const TrademarkSphere = lazy(() => import('./pages/TrademarkSphere.jsx'));
 
 /* ── Records ──────────────────────────────────────────────────────────── */
+const ClientApprovals = lazy(() => import('./pages/ClientApprovals.jsx'));
 const RecordsDashboard = lazy(() => import('./pages/RecordsDashboard.jsx'));
 const PeopleMatrixDashboard = lazy(() => import('./pages/PeopleMatrixDashboard.jsx'));
 const DSCRegister = lazy(() => import('./pages/DSCRegister.jsx'));
@@ -75,8 +76,6 @@ const Payroll = lazy(() => import('./pages/governed/Payroll.jsx'));
 const HR = lazy(() => import('./pages/governed/HR.jsx'));
 const Recruitment = lazy(() => import('./pages/governed/Recruitment.jsx'));
 const Performance = lazy(() => import('./pages/governed/Performance.jsx'));
-const Templates = lazy(() => import('./pages/governed/Templates.jsx'));
-const Uploads = lazy(() => import('./pages/governed/Uploads.jsx'));
 const ClientDiscussion = lazy(() => import('./pages/governed/ClientDiscussion.jsx'));
 const MasterData = lazy(() => import('./pages/governed/MasterData.jsx'));
 const Roles = lazy(() => import('./pages/governed/Roles.jsx'));
@@ -193,6 +192,7 @@ export default function AppRoutes() {
 
         {/* ── Records ── */}
         <Route path="/records-dashboard" element={<ModuleGate module="records"><RecordsDashboard /></ModuleGate>} />
+        <Route path="/client-approvals" element={<ModuleGate module="records"><ClientApprovals /></ModuleGate>} />
         <Route path="/dsc" element={<ModuleGate module="records"><DSCRegister /></ModuleGate>} />
         <Route path="/documents" element={<ModuleGate module="records"><DocumentRegister /></ModuleGate>} />
         <Route path="/clients" element={<ModuleGate module="records"><Clients /></ModuleGate>} />
@@ -246,10 +246,6 @@ export default function AppRoutes() {
         <Route path="/hr" element={<ModuleGate module="peopleMatrix"><PageGuard module="people_matrix" page="can_view_hr"><HR /></PageGuard></ModuleGate>} />
         <Route path="/recruitment" element={<ModuleGate module="peopleMatrix"><PageGuard module="people_matrix" page="can_view_recruitment"><Recruitment /></PageGuard></ModuleGate>} />
         <Route path="/performance" element={<ModuleGate module="peopleMatrix"><PageGuard module="people_matrix" page="can_view_performance"><Performance /></PageGuard></ModuleGate>} />
-
-        {/* ── Records: Templates / Uploads ── */}
-        <Route path="/templates" element={<ModuleGate module="records"><PageGuard module="records" page="can_view_templates"><Templates /></PageGuard></ModuleGate>} />
-        <Route path="/uploads" element={<ModuleGate module="records"><PageGuard module="records" page="can_view_uploads"><Uploads /></PageGuard></ModuleGate>} />
 
         {/* ── Client Proposals: Client Discussion ── */}
         <Route path="/client-discussion" element={<ModuleGate module="proposals"><PageGuard module="proposals" page="can_view_client_discussion"><ClientDiscussion /></PageGuard></ModuleGate>} />
