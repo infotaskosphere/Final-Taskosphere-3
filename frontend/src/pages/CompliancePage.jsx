@@ -1870,7 +1870,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                       <span className="text-[11px] font-bold tabular-nums" style={{color:isDark?D.dimmer:'#94a3b8'}}>{idx+1}</span>
                     </div>
                     <div className="min-w-0">
-                      <button onClick={()=>setDetailRow(a)} className="text-sm font-semibold truncate text-left w-full hover:underline transition-all" style={{color:isDark?D.text:'#0f172a'}}>{a.client_name}</button>
+                      <button onClick={()=>setDetailRow(a)} className="text-sm font-semibold truncate text-left w-full hover:underline transition-all" style={{color:isDark?D.text:'#0f172a'}}>{a.client_name || <span className="italic" style={{color:isDark?D.dimmer:'#94a3b8'}}>Unknown client</span>}</button>
                     </div>
                     <div className="relative flex-shrink-0" onClick={e=>e.stopPropagation()}>
                       <StatusPill status={a.status} size="xs" onClick={()=>setOpenDropdown(d=>d===a.id?null:a.id)}/>
@@ -3365,7 +3365,12 @@ function ComplianceCalendarPanel({ isDark, showAddCal, setShowAddCal }) {
 
 // ── Main Page ──────────────────────────────────────────────────────────────
 const COMPLIANCE_SECTIONS = ['banner', 'stats', 'filters', 'content'];
-const COMPLIANCE_LABELS   = { banner: 'Header Banner', stats: 'Stats Cards', filters: 'Filters & Search', content: 'Compliance Grid' };
+const COMPLIANCE_LABELS   = {
+  banner:  { name: 'Header Banner',    icon: '🏷️', desc: 'Title, back button and status' },
+  stats:   { name: 'Stats Cards',      icon: '📊', desc: 'Total / overdue / completed counts' },
+  filters: { name: 'Filters & Search', icon: '🔍', desc: 'Search box and category filters' },
+  content: { name: 'Compliance Grid',  icon: '📋', desc: 'Client list and compliance calendar' },
+};
 
 export default function CompliancePage(){
   const isDark=useDark();
