@@ -269,11 +269,11 @@ const MetricCard = memo(function MetricCard({ label, value, sub, accent, icon: I
     `}
     style={active ? { ringColor: accent, borderColor: accent } : {}}
   >
-    <div className="p-4 flex flex-col justify-between min-h-[110px]">
+    <div className="p-3.5 flex flex-col justify-between h-[100px] overflow-hidden">
       <div className="flex items-start justify-between">
         <div className="min-w-0 flex-1 mr-2">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
-          <p className="text-2xl font-bold mt-1 tracking-tight" style={{ color: accent }}>
+          <p className="text-xl font-bold mt-1 tracking-tight" style={{ color: accent }}>
             {value}
           </p>
           {sub && <p className="text-[10px] mt-0.5 text-slate-400">{sub}</p>}
@@ -296,7 +296,7 @@ const MetricCard = memo(function MetricCard({ label, value, sub, accent, icon: I
           />
         </div>
       ) : (
-        <div className={`flex items-center gap-1 mt-3 text-xs font-medium group-hover:opacity-80 transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+        <div className={`flex items-center gap-1 mt-2 text-xs font-medium group-hover:opacity-80 transition-colors ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
           <span>{active ? '✓ filtered' : 'click to filter'}</span>
           <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
         </div>
@@ -335,7 +335,7 @@ const TeamTaskCard = memo(function TeamTaskCard({ stats, hasCrossVisibility, use
       }
     `}
   >
-    <div className="p-4 flex flex-col justify-between min-h-[110px]">
+    <div className="p-3.5 flex flex-col justify-between h-[100px] overflow-hidden">
       {/* TOP ROW — identical layout to other cards */}
       <div className="flex items-start justify-between">
         <div className="min-w-0 flex-1 mr-2">
@@ -346,7 +346,7 @@ const TeamTaskCard = memo(function TeamTaskCard({ stats, hasCrossVisibility, use
             initial={{ opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.25 }}
-            className="text-2xl font-bold mt-1 tracking-tight"
+            className="text-xl font-bold mt-1 tracking-tight"
             style={{ color: hasCrossVisibility ? (isDark ? '#a78bfa' : '#7c3aed') : (isDark ? '#475569' : '#94a3b8') }}
           >
             {hasCrossVisibility ? stats.teamTask : 0}
@@ -354,15 +354,13 @@ const TeamTaskCard = memo(function TeamTaskCard({ stats, hasCrossVisibility, use
 
           {/* Per-member breakdown — compact, matches dashboard */}
           {!usersLoading && hasCrossVisibility && teamTaskBreakdown.length > 0 && (
-            <div className="mt-1 space-y-0.5">
-              {teamTaskBreakdown.slice(0, 2).map(m => (
+            <div className="mt-0.5 max-h-[16px] overflow-hidden">
+              {teamTaskBreakdown.slice(0, 1).map(m => (
                 <p key={m.id} className="text-[9px] text-slate-400 truncate">
                   {m.name.split(' ')[0].toLowerCase()}: {m.pendingCount}
+                  {teamTaskBreakdown.length > 1 ? ` +${teamTaskBreakdown.length - 1} more` : ''}
                 </p>
               ))}
-              {teamTaskBreakdown.length > 2 && (
-                <p className="text-[9px] text-slate-400">+{teamTaskBreakdown.length - 2} more</p>
-              )}
             </div>
           )}
           {!hasCrossVisibility && (
@@ -380,7 +378,7 @@ const TeamTaskCard = memo(function TeamTaskCard({ stats, hasCrossVisibility, use
       </div>
 
       {/* BOTTOM ROW — identical to other cards */}
-      <div className={`flex items-center gap-1 mt-3 text-xs font-medium transition-colors ${hasCrossVisibility ? 'group-hover:text-violet-500' : ''} ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+      <div className={`flex items-center gap-1 mt-2 text-xs font-medium transition-colors ${hasCrossVisibility ? 'group-hover:text-violet-500' : ''} ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
         {hasCrossVisibility ? (
           <>
             <span>{filterTeamOnly ? '✓ filtering team' : 'click to filter'}</span>
@@ -2454,7 +2452,7 @@ export default function Tasks() {
 
       <motion.div
         variants={itemVariants}
-        className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 [&>*]:min-w-0"
+        className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 [&>*]:min-w-0 items-stretch"
       >
         {/* 1. My Task */}
         <MetricCard
