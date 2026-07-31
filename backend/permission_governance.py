@@ -1,504 +1,1403 @@
-"""
-Permission Governance — "Admin › Permission Governance" page.
-
-Purpose
--------
-The Accounts module (Purchase, Sale, Bank, Chart of Accounts, Journal
-Entries, Accounting Reports) is sensitive: it can see money movement across
-every client. Admin has full access to all of it by default. Everyone else
-starts with NO access and must submit an access request from the gated
-page they tried to open; an admin then approves or rejects it here. An
-approval flips exactly the one permission flag involved for that user —
-nothing else changes about their account.
-
-This module intentionally does not touch the legacy `can_manage_invoices` /
-`can_create_quotations` flags that Purchase/Sale already recognised before
-this feature existed — those keep working as-is so nobody who already had
-access loses it. Going forward, prefer granting the specific
-`can_view_purchase` / `can_view_sale` / `can_view_bank` / ... flags below
-through this portal instead.
-"""
-
 import uuid
-from datetime import datetime, timezone
-from typing import Optional, List
+import re
+from datetime import datetime, date, timedelta, timezone
+from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, model_validator, Field, ConfigDict, EmailStr, field_validator
+from enum import Enum
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+# Timezone Configuration
+india_tz = timezone(timedelta(hours=5, minutes=30))
 
-from backend.dependencies import (
-    db,
-    get_current_user,
-    get_user_permissions,
-    get_team_user_ids,
-    create_audit_log,
-)
-from backend.models import User, DEFAULT_ROLE_PERMISSIONS, MODULE_HIERARCHY
+# ────────────────────────────────────────────────
+# ROLE ENUM
+# ────────────────────────────────────────────────
+class UserRole(str, Enum):
+    admin = "admin"
+    manager = "manager"
+    staff = "staff"
 
-router = APIRouter(tags=["Permission Governance"])
+# ────────────────────────────────────────────────
+# DEFAULT ROLE PERMISSION TEMPLATES
+# ────────────────────────────────────────────────
+DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
+      "admin": {
+          # Admin has GLOBAL scope with ALL permissions (VIEW CREATE EDIT DELETE UPDATE)
+          "can_view_tasks": True,            # GATE: access /tasks endpoint
+          "can_view_clients": True,           # GATE: access /clients endpoint
+          "can_view_all_tasks": True,
+          "can_view_all_clients": True,
+          "can_view_all_dsc": True,
+          "can_view_documents": True,
+          "can_view_all_duedates": True,
+          "can_view_reports": True,
+          "can_view_attendance": True,
+          "can_view_all_leads": True,
+          "can_edit_tasks": True,
+          "can_edit_clients": True,
+          "can_edit_dsc": True,
+          "can_edit_documents": True,
+          "can_edit_due_dates": True,
+          "can_edit_users": True,
+          "can_download_reports": True,
+          "can_manage_users": True,
+          "can_manage_settings": True,
+          "can_assign_tasks": True,
+          "can_assign_clients": True,
+          "can_view_staff_activity": True,
+          "can_send_reminders": True,
+          "can_view_user_page": True,
+          "can_view_audit_logs": True,
+          "can_view_selected_users_reports": True,
+          "can_view_todo_dashboard": True,
+          "can_use_chat": True,
+          "can_view_staff_rankings": True,
+          "can_delete_data": True,
+          "can_delete_tasks": True,
+          "can_connect_email": True,
+          "can_view_own_data": True,
+          "can_create_quotations": True,
+          "can_manage_invoices": True,
+          "can_view_passwords": True,
+          "can_edit_passwords": True,
+          "view_password_departments": [],   # empty = all (admin sees everything)
+          "can_view_compliance": True,       # Compliance Tracker — view all categories
+          "can_manage_compliance": True,     # Create / edit / delete compliance masters
+          "can_view_gst_reconciliation": True,  # GST Reconciliation — admin always has access
+          "can_view_trademark_sphere": True,    # Trademark Sphere — admin always has access
+          "can_access_whatsapp_hub": True,    # WhatsApp Hub
+          "can_view_all_visits": True,
+          "can_edit_attendance": True,
+          "can_edit_visits": True,
+          "can_delete_visits": True,
+          "can_delete_own_visits": True,
+          "view_other_visits": [],
+          "view_other_tasks": [],
+          "view_other_attendance": [],
+          "view_other_reports": [],
+          "view_other_todos": [],
+          "view_other_activity": [],
+                    "can_access_whatsapp_hub": False,     # ADMIN_GRANTED_ONLY
+          "can_view_interviews": True,          # Admin always has interview access
+          "assigned_clients": [],
+          # ── Accounts module governance (Bank / Chart of Accounts / Journal) ──
+          # Admin has full access by default. Manager/staff must be granted
+          # these explicitly by an admin via the Permission Governance portal
+          # (Users → Permission Governance → approve an access request).
+          "can_view_purchase": True,
+          "can_view_sale": True,
+          "can_view_bank": True,
+          "can_view_chart_of_accounts": True,
+          "can_manage_chart_of_accounts": True,
+          "can_view_journal_entries": True,
+          "can_post_journal_entries": True,
+          "can_view_accounting_reports": True,
+          "can_match_bank": True,          # Match / Edit Match / Unmatch bank reconciliations
+          # ── Main permission modules (Permission Governance hierarchy) ──────
+          # These are the 6 top-level module master switches. A page-level flag
+          # (e.g. can_view_bank) is only ever effectively usable when its
+          # parent module's master flag below is also True — see
+          # backend/permission_governance.py::_enforce_module_hierarchy and
+          # MODULE_HIERARCHY further down this file.
+          "can_access_taskosphere":   True,
+          "can_access_finix":         True,
+          "can_access_compliance":    True,
+          "can_access_records":       True,
+          "can_access_proposals":     True,
+          "can_access_people_matrix": True,
+      },
+      "manager": {
+          # Manager: SCOPE = OWN + SAME_DEPARTMENT (Own + Team)
+          # CROSS_VISIBILITY = SAME_DEPARTMENT_USERS
+          # DEFAULT: Only modules explicitly listed in the Manager permission spec are ON.
+          # Everything else is ADMIN_GRANTED_ONLY.
+          # DATA_ACCESS_RULE: resource.department == user.department
+          #   AND (resource.user_id == user.id OR resource.user_id IN SAME_DEPARTMENT_USERS)
+          "can_view_tasks": True,            # GATE: access /tasks endpoint (scope handled server-side)
+          "can_view_clients": True,          # GATE: access /clients endpoint (scope handled server-side)
+          "can_view_all_tasks": False,       # SCOPE handled server-side by department query
+          "can_view_all_clients": False,     # ADMIN_GRANTED_ONLY
+          "can_view_all_dsc": False,         # ADMIN_GRANTED_ONLY
+          "can_view_documents": False,       # ADMIN_GRANTED_ONLY
+          "can_view_all_duedates": True,     # Compliance Calendar → VIEW (Own + Team)
+          "can_view_reports": True,          # Reports → VIEW (Own + Team)
+          "can_view_attendance": True,       # Attendance → VIEW (Own + Team)
+          "can_view_all_leads": False,       # ADMIN_GRANTED_ONLY (Leads Pipeline not in default spec)
+          "can_edit_tasks": True,            # Tasks → EDIT/UPDATE (Own + Team)
+          "can_edit_clients": False,         # ADMIN_GRANTED_ONLY
+          "can_edit_dsc": False,             # ADMIN_GRANTED_ONLY
+          "can_edit_documents": False,       # ADMIN_GRANTED_ONLY
+          "can_edit_due_dates": True,        # Compliance Calendar → EDIT/UPDATE (Own + Team)
+          "can_edit_users": False,           # ADMIN_GRANTED_ONLY
+          "can_download_reports": True,      # Reports → VIEW includes export (Own + Team)
+          "can_manage_users": False,         # ADMIN_GRANTED_ONLY
+          "can_manage_settings": True,       # General Settings → VIEW, UPDATE (Own + Team)
+          "can_assign_tasks": False,         # ADMIN_GRANTED_ONLY
+          "can_assign_clients": False,       # ADMIN_GRANTED_ONLY
+          "can_view_staff_activity": False,  # Admin-only — not grantable to manager/staff
+          "can_send_reminders": False,       # ADMIN_GRANTED_ONLY
+          "can_view_user_page": False,       # ADMIN_GRANTED_ONLY
+          "can_view_audit_logs": False,      # ADMIN_GRANTED_ONLY
+          "can_view_selected_users_reports": True,  # Reports → VIEW (Team scope)
+          "can_view_todo_dashboard": True,   # To Do → VIEW (Own + Team)
+          "can_use_chat": False,             # ADMIN_GRANTED_ONLY
+          "can_view_staff_rankings": False,  # ADMIN_GRANTED_ONLY
+          "can_delete_data": False,          # ADMIN_GRANTED_ONLY
+          "can_delete_tasks": False,         # ADMIN_GRANTED_ONLY
+          "can_connect_email": True,         # Email Accounts → VIEW, CREATE, EDIT, UPDATE (Own + Team)
+          "can_view_own_data": True,         # Dashboard → VIEW
+          "can_create_quotations": False,    # ADMIN_GRANTED_ONLY (Quotations not in default spec)
+          "can_manage_invoices": False,      # ADMIN_GRANTED_ONLY
+          "can_view_passwords": False,       # ADMIN_GRANTED_ONLY
+          "can_edit_passwords": False,       # ADMIN_GRANTED_ONLY
+          "view_password_departments": [],   # defaults to own departments
+          "can_view_compliance": True,       # Compliance Tracker → VIEW (Own + Team)
+          "can_manage_compliance": True,     # Compliance Tracker → CREATE, EDIT, UPDATE (Own + Team)
+          "can_edit_attendance": True,       # Attendance → EDIT/UPDATE (Own + Team)
+          "can_view_all_visits": False,      # SCOPE handled server-side by department query
+          "can_edit_visits": True,           # Client Visits → EDIT/UPDATE (Own + Team)
+          "can_delete_visits": False,        # ADMIN_GRANTED_ONLY
+          "can_delete_own_visits": True,     # Always allowed
+          "view_other_visits": [],
+          "view_other_tasks": [],
+          "view_other_attendance": [],
+          "view_other_reports": [],
+          "view_other_todos": [],
+          "view_other_activity": [],
+                    "can_access_whatsapp_hub": False,     # ADMIN_GRANTED_ONLY
+          "can_view_interviews": False,         # ADMIN_GRANTED_ONLY
+          "assigned_clients": [],
+          # Accounts module governance — ADMIN_GRANTED_ONLY, request via Permission Governance
+          "can_view_purchase": False,
+          "can_view_sale": False,
+          "can_view_bank": False,
+          "can_view_chart_of_accounts": False,
+          "can_manage_chart_of_accounts": False,
+          "can_view_journal_entries": False,
+          "can_post_journal_entries": False,
+          "can_view_accounting_reports": False,
+          "can_match_bank": True,          # Manager: Match / Edit Match / Unmatch by default (still gated by can_view_bank to reach the page)
+          # ── Main permission modules ── mirrors what was already visible by
+          # default before this hierarchy existed: Finix's pages all defaulted
+          # to False (so the module master is off too); every other module's
+          # dashboard was open to everyone (so the module master is on).
+          "can_access_taskosphere":   True,
+          "can_access_finix":         False,
+          "can_access_compliance":    True,
+          "can_access_records":       True,
+          "can_access_proposals":     True,
+          "can_access_people_matrix": True,
+      },
+      "staff": {
+          # Staff: SCOPE = OWN only
+          # DEFAULT: Only modules explicitly listed in the Staff permission spec are ON.
+          # Everything else is ADMIN_GRANTED_ONLY.
+          # DATA_ACCESS_RULE: resource.department == user.department AND resource.user_id == user.id
+          "can_view_tasks": True,            # GATE: access /tasks endpoint (own scope enforced server-side)
+          "can_view_clients": True,          # GATE: access /clients endpoint (assigned scope enforced server-side)
+          "can_view_all_tasks": False,       # SCOPE: own only
+          "can_view_all_clients": False,     # ADMIN_GRANTED_ONLY
+          "can_view_all_dsc": False,         # ADMIN_GRANTED_ONLY
+          "can_view_documents": False,       # ADMIN_GRANTED_ONLY
+          "can_view_all_duedates": True,     # Compliance Calendar → VIEW (Own)
+          "can_view_reports": True,          # Reports → VIEW (Own)
+          "can_view_attendance": True,       # Attendance → VIEW (Own)
+          "can_view_all_leads": False,       # ADMIN_GRANTED_ONLY (Leads Pipeline not in default spec)
+          "can_edit_tasks": True,            # Tasks → EDIT/UPDATE (Own)
+          "can_edit_clients": False,         # ADMIN_GRANTED_ONLY
+          "can_edit_dsc": False,             # ADMIN_GRANTED_ONLY
+          "can_edit_documents": False,       # ADMIN_GRANTED_ONLY
+          "can_edit_due_dates": True,        # Compliance Calendar → EDIT/UPDATE (Own)
+          "can_edit_users": False,           # ADMIN_GRANTED_ONLY
+          "can_download_reports": True,      # Reports → VIEW includes export (Own)
+          "can_manage_users": False,         # ADMIN_GRANTED_ONLY
+          "can_manage_settings": True,       # General Settings → VIEW, UPDATE (Own)
+          "can_assign_tasks": False,         # ADMIN_GRANTED_ONLY
+          "can_assign_clients": False,       # ADMIN_GRANTED_ONLY
+          "can_view_staff_activity": False,  # Admin-only — not grantable to manager/staff
+          "can_send_reminders": False,       # ADMIN_GRANTED_ONLY
+          "can_view_user_page": False,       # ADMIN_GRANTED_ONLY
+          "can_view_audit_logs": False,      # ADMIN_GRANTED_ONLY
+          "can_view_selected_users_reports": False, # ADMIN_GRANTED_ONLY (staff sees own reports only)
+          "can_view_todo_dashboard": True,   # To Do → VIEW (Own)
+          "can_use_chat": False,             # ADMIN_GRANTED_ONLY
+          "can_view_staff_rankings": False,  # ADMIN_GRANTED_ONLY
+          "can_delete_data": False,          # ADMIN_GRANTED_ONLY
+          "can_delete_tasks": False,         # ADMIN_GRANTED_ONLY
+          "can_connect_email": True,         # Email Accounts → VIEW, CREATE, EDIT, UPDATE (Own)
+          "can_view_own_data": True,         # Dashboard → VIEW (Own)
+          "can_create_quotations": False,    # ADMIN_GRANTED_ONLY (Quotations not in default spec)
+          "can_manage_invoices": False,      # ADMIN_GRANTED_ONLY
+          "can_view_passwords": False,       # ADMIN_GRANTED_ONLY
+          "can_edit_passwords": False,       # ADMIN_GRANTED_ONLY
+          "view_password_departments": [],
+          "can_view_compliance": True,       # Compliance Tracker → VIEW (Own)
+          "can_manage_compliance": True,     # Compliance Tracker → CREATE, EDIT, UPDATE (Own)
+          "can_edit_attendance": True,       # Attendance → EDIT/UPDATE (Own)
+          "can_view_all_visits": False,      # SCOPE: own visits only (server-side scoped)
+          "can_edit_visits": True,           # Client Visits → EDIT/UPDATE (Own)
+          "can_delete_visits": False,        # ADMIN_GRANTED_ONLY
+          "can_delete_own_visits": True,     # Always allowed
+          "view_other_visits": [],
+          "view_other_tasks": [],
+          "view_other_attendance": [],
+          "view_other_reports": [],
+          "view_other_todos": [],
+          "view_other_activity": [],
+                    "can_access_whatsapp_hub": False,     # ADMIN_GRANTED_ONLY
+          "can_view_interviews": False,         # ADMIN_GRANTED_ONLY
+          "assigned_clients": [],
+          # Accounts module governance — ADMIN_GRANTED_ONLY, request via Permission Governance
+          "can_view_purchase": False,
+          "can_view_sale": False,
+          "can_view_bank": False,
+          "can_view_chart_of_accounts": False,
+          "can_manage_chart_of_accounts": False,
+          "can_view_journal_entries": False,
+          "can_post_journal_entries": False,
+          "can_view_accounting_reports": False,
+          "can_match_bank": False,          # Staff: view-only by default; admin can grant Match/Edit Match/Unmatch via Permission Governance
+          # ── Main permission modules ── same reasoning as the manager template.
+          "can_access_taskosphere":   True,
+          "can_access_finix":         False,
+          "can_access_compliance":    True,
+          "can_access_records":       True,
+          "can_access_proposals":     True,
+          "can_access_people_matrix": True,
+      },
+  }
 
-# The only flags requestable/grantable through this portal — keeps the
-# governance surface limited to the Accounts module, as requested, rather
-# than becoming a general-purpose permission editor.
-GOVERNED_MODULES = {
-    "purchase":            {"flag": "can_view_purchase",           "label": "Purchase"},
-    "sale":                {"flag": "can_view_sale",                "label": "Sale"},
-    "bank":                {"flag": "can_view_bank",                "label": "Bank Accounts"},
-    "chart_of_accounts":   {"flag": "can_view_chart_of_accounts",   "label": "Chart of Accounts"},
-    "manage_chart_of_accounts": {"flag": "can_manage_chart_of_accounts", "label": "Chart of Accounts (edit)"},
-    "journal_entries":     {"flag": "can_view_journal_entries",     "label": "Journal Entries"},
-    "post_journal_entries": {"flag": "can_post_journal_entries",    "label": "Journal Entries (post)"},
-    "accounting_reports":  {"flag": "can_view_accounting_reports",  "label": "Accounting Reports"},
-}
-
-
-# =============================================================================
+# ────────────────────────────────────────────────
 # MAIN PERMISSION MODULE HIERARCHY
-# Six main permission modules — Taskosphere, Finix, Compliance, Records,
-# Client Proposals, People Matrix — each with a master "module access" flag
-# and a set of individual page-level flags nested beneath it (see
-# MODULE_HIERARCHY in backend/models.py for the full mapping). A page flag
-# can only ever be effectively usable while its parent module's master flag
-# is also True; `_enforce_module_hierarchy` guarantees that on every save,
-# regardless of what the client sends.
-# =============================================================================
-_MODULE_TO_PAGE_FLAGS = {
-    m["flag"]: [p["flag"] for p in m["pages"]] for m in MODULE_HIERARCHY.values()
+# ────────────────────────────────────────────────
+# Single source of truth for the "Permission Governance" hierarchy shown on
+# the Users → Permissions → Modules tab. Six main permission modules
+# (Taskosphere, Finix, Compliance, Records, Client Proposals, People Matrix)
+# each own a master "module access" flag plus a set of individual page-level
+# flags that already existed in this system. A page flag can only ever be
+# effectively True while its parent module's master flag is also True —
+# enforced in backend/permission_governance.py::_enforce_module_hierarchy
+# every time permissions are saved, and mirrored in the frontend so a page
+# toggle is greyed out until its module is switched on.
+#
+# NOTE: Taskosphere (Tasks, To-Do, Attendance, Reminders, Action Center,
+# Client Visits, AI Document Reader) has no individual page-level flags of
+# its own today — those pages have always been open to every authenticated
+# user. Its entry below therefore only carries the module master flag; the
+# Dashboard route itself is intentionally left out of this hierarchy so that
+# turning Taskosphere off can never create a redirect loop (denied-access
+# redirects always land on /dashboard).
+MODULE_HIERARCHY: Dict[str, Dict[str, Any]] = {
+    "taskosphere": {
+        "flag": "can_access_taskosphere",
+        "label": "Taskosphere",
+        "description": "Core workspace — Tasks, To-Do, Attendance, Reminders, Action Center, Client Visits and AI Document Reader.",
+        "pages": [],
+    },
+    "finix": {
+        "flag": "can_access_finix",
+        "label": "Finix",
+        "description": "Accounting & finance — Sales, Purchase, Bank Accounts, Chart of Accounts, Journal Entries and Accounting Reports.",
+        "pages": [
+            {"flag": "can_view_accounting_reports", "label": "Finix Dashboard & Accounting Reports"},
+            {"flag": "can_view_sale",                "label": "Sales / Invoicing"},
+            {"flag": "can_view_purchase",             "label": "Purchase"},
+            {"flag": "can_view_bank",                 "label": "Bank Accounts"},
+            {"flag": "can_view_chart_of_accounts",    "label": "Chart of Accounts (view)"},
+            {"flag": "can_manage_chart_of_accounts",  "label": "Chart of Accounts (manage)"},
+            {"flag": "can_view_journal_entries",      "label": "Journal Entries (view)"},
+            {"flag": "can_post_journal_entries",       "label": "Journal Entries & Zero Touch Entry (post)"},
+            {"flag": "can_match_bank",                "label": "Bank Reconciliation (match/unmatch)"},
+        ],
+    },
+    "compliance": {
+        "flag": "can_access_compliance",
+        "label": "Compliance",
+        "description": "Compliance Tracker, GST Reconciliation and Trademark Sphere.",
+        "pages": [
+            {"flag": "can_view_compliance",          "label": "Compliance Tracker (view)"},
+            {"flag": "can_manage_compliance",        "label": "Compliance Tracker (manage)"},
+            {"flag": "can_view_gst_reconciliation",  "label": "GST Reconciliation"},
+            {"flag": "can_view_trademark_sphere",    "label": "Trademark Sphere"},
+        ],
+    },
+    "records": {
+        "flag": "can_access_records",
+        "label": "Records",
+        "description": "DSC Register, Document Register, Clients and Password Vault.",
+        "pages": [
+            {"flag": "can_view_all_dsc",   "label": "DSC Register"},
+            {"flag": "can_view_documents", "label": "Document Register"},
+            {"flag": "can_view_passwords", "label": "Password Vault (view)"},
+            {"flag": "can_edit_passwords", "label": "Password Vault (manage)"},
+        ],
+    },
+    "proposals": {
+        "flag": "can_access_proposals",
+        "label": "Client Proposals",
+        "description": "Lead management and quotations.",
+        "pages": [
+            {"flag": "can_view_all_leads",    "label": "Lead Management"},
+            {"flag": "can_create_quotations", "label": "Quotations"},
+        ],
+    },
+    "people_matrix": {
+        "flag": "can_access_people_matrix",
+        "label": "People Matrix",
+        "description": "User directory and Employee Interviews (HRMS).",
+        "pages": [
+            {"flag": "can_view_user_page",  "label": "User Directory"},
+            {"flag": "can_view_interviews", "label": "Employee Interviews"},
+        ],
+    },
 }
 
+# ======================
+# CORE USER & PERMISSIONS
+# ======================
+class UserPermissions(BaseModel):
+    can_view_tasks: bool = True       # GATE flag — all roles True by default
+    can_view_clients: bool = True      # GATE flag — all roles True by default
+    can_view_all_tasks: bool = False
+    can_view_all_clients: bool = False
+    can_view_all_dsc: bool = False
+    can_view_documents: bool = False
+    can_view_all_duedates: bool = False
+    can_view_reports: bool = False
+    can_view_attendance: bool = False
+    can_view_all_leads: bool = False
+    can_edit_tasks: bool = False
+    can_edit_clients: bool = False
+    can_edit_dsc: bool = False
+    can_edit_documents: bool = False
+    can_edit_due_dates: bool = False
+    can_edit_users: bool = False
+    can_download_reports: bool = False
+    can_manage_users: bool = False
+    can_manage_settings: bool = False
+    can_assign_tasks: bool = False
+    can_assign_clients: bool = False
+    can_view_staff_activity: bool = False
+    can_send_reminders: bool = False
+    can_view_user_page: bool = False
+    can_view_audit_logs: bool = False
+    can_view_selected_users_reports: bool = False
+    can_view_todo_dashboard: bool = False
+    can_use_chat: bool = False
+    can_view_staff_rankings: bool = False
+    can_delete_data: bool = False
+    can_delete_tasks: bool = False
+    can_connect_email: bool = True
+    can_view_own_data: bool = True
+    can_create_quotations: bool = False
+    # ── Invoicing & Billing ──────────────────────────────────────────────────
+    # Grants access to: create/edit/delete invoices, record payments,
+    # download PDFs, manage product catalog.
+    # Admin always has this regardless of the flag.
+    can_manage_invoices: bool = False
+    # ── Password Repository ──────────────────────────────────────────────────
+    can_view_passwords: bool = False
+    can_edit_passwords: bool = False
+    view_password_departments: List[str] = Field(default_factory=list)
+    # ── Compliance Tracker ───────────────────────────────────────────────────
+    # can_view_compliance  → access the Compliance Tracker page
+    #   admin:   all categories; manager/staff: own department categories only
+    # can_manage_compliance → create / edit / delete compliance masters
+    #   admin/manager: True by default; staff: False (update assignments only)
+    can_view_compliance: bool = False
+    can_manage_compliance: bool = False
+    # ── GST Reconciliation ───────────────────────────────────────────────────
+    # can_view_gst_reconciliation → access the GST Reconciliation page
+    #   Grant this to GST department users only.
+    #   Admin always has access regardless of this flag.
+    can_view_gst_reconciliation: bool = False
+    # ── Trademark Sphere ─────────────────────────────────────────────────────
+    # can_view_trademark_sphere → access the Trademark Sphere page
+    #   Admin always has access regardless of this flag.
+    can_view_trademark_sphere: bool = False
+    # ── Visit-specific permissions ───────────────────────────────────────────
+    can_view_all_visits: bool = False
+    can_edit_visits: bool = False
+    can_delete_visits: bool = False
+    can_delete_own_visits: bool = True
+    view_other_visits: List[str] = Field(default_factory=list)
+    # ── List permissions ─────────────────────────────────────────────────────
+    view_other_tasks: List[str] = Field(default_factory=list)
+    view_other_attendance: List[str] = Field(default_factory=list)
+    view_other_reports: List[str] = Field(default_factory=list)
+    view_other_todos: List[str] = Field(default_factory=list)
+    view_other_activity: List[str] = Field(default_factory=list)
+    assigned_clients: List[str] = Field(default_factory=list)
+    can_access_whatsapp_hub: bool = False
+    governed_users: List[str] = Field(default_factory=list)   # users this person can manage (when can_manage_users=True)
+    # ── Employee Interviews ──────────────────────────────────────────────────
+    # can_view_interviews → access the Employee Interviews page
+    #   Admin always has access. Grant explicitly to HR managers/staff.
+    can_view_interviews: bool = False
+    # ── Accounts module governance ───────────────────────────────────────────
+    # Purchase / Sale / Bank / Chart of Accounts / Journal Entries / Reports.
+    # Admin has all of these True by default (see DEFAULT_ROLE_PERMISSIONS).
+    # Manager/staff default to False and must be granted access by an admin
+    # via the Permission Governance portal (Users → Permission Governance),
+    # normally after the user submits an access request from the gated page.
+    can_view_purchase: bool = False
+    can_view_sale: bool = False
+    can_view_bank: bool = False
+    can_view_chart_of_accounts: bool = False
+    can_manage_chart_of_accounts: bool = False
+    can_view_journal_entries: bool = False
+    can_post_journal_entries: bool = False
+    can_view_accounting_reports: bool = False
+    # can_match_bank → Bank Accounts page: Match / Edit Match / Unmatch actions.
+    # Distinct from can_view_bank (which only gates read access to the page).
+    # Admin: always True. Manager: True by default. Staff: False by default —
+    # grant via Permission Governance for permission-based access.
+    can_match_bank: bool = False
 
-def _enforce_module_hierarchy(permissions: dict) -> dict:
+    # ── Main permission modules (Permission Governance hierarchy) ───────────
+    # Master switches for the 6 top-level modules shown on the
+    # Users → Permissions → Modules tab. See MODULE_HIERARCHY above for the
+    # full module → page mapping and enforcement rules.
+    can_access_taskosphere: bool = True
+    can_access_finix: bool = False
+    can_access_compliance: bool = True
+    can_access_records: bool = True
+    can_access_proposals: bool = True
+    can_access_people_matrix: bool = True
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class User(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    email: str
+    full_name: Optional[str] = None
+    role: UserRole = UserRole.staff
+    password: Optional[str] = None
+    consent_given: bool = False
+    departments: List[str] = Field(default_factory=list)
+    phone: Optional[str] = None
+    birthday: Optional[Any] = None
+    profile_picture: Optional[str] = None
+    punch_in_time: Optional[str] = "10:30"
+    grace_time: Optional[str] = "00:10"
+    punch_out_time: Optional[str] = "19:00"
+    telegram_id: Optional[int] = None
+    permissions: UserPermissions = Field(default_factory=UserPermissions)
+    created_at: Optional[Any] = None
+    is_active: bool = True
+    status: str = "pending_approval"
+    approved_by: Optional[str] = None
+    approved_at: Optional[Any] = None
+    company_id: Optional[str] = None
+    company_name: Optional[str] = None
+    # ── Employment / Payroll fields ──────────────────────────────────────────
+    joining_date: Optional[Any] = None          # Date the employee joined
+    training_period_end: Optional[Any] = None   # End date of the training / probation period
+    payroll_date: Optional[Any] = None          # Monthly payroll processing date (day of month or full date)
+    monthly_salary: Optional[float] = None      # Gross monthly salary (admin-set); used for salary-due calculation
+
+    @field_validator("monthly_salary", mode="before")
+    @classmethod
+    def empty_salary_to_none(cls, v):
+        if v == "" or v is None:
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    @field_validator("birthday", mode="before")
+    @classmethod
+    def empty_string_to_none(cls, v):
+        if v == "" or v is None:
+            return None
+        return v
+
+
+class UserCreate(BaseModel):
+    full_name: str
+    email: str
+    password: str
+    role: UserRole = UserRole.staff
+    departments: List[str] = Field(default_factory=list)
+    phone: Optional[str] = None
+    birthday: Optional[Any] = None
+    telegram_id: Optional[int] = None
+    punch_in_time: Optional[str] = "10:30"
+    grace_time: Optional[str] = "00:10"
+    punch_out_time: Optional[str] = "19:00"
+    profile_picture: Optional[str] = None
+    is_active: bool = True
+    permissions: Optional[Dict[str, Any]] = None
+    status: Optional[str] = "pending_approval"
+    company_id: Optional[str] = None
+    company_name: Optional[str] = None
+    # ── Employment / Payroll fields ──────────────────────────────────────────
+    joining_date: Optional[Any] = None
+    training_period_end: Optional[Any] = None
+    payroll_date: Optional[Any] = None
+    monthly_salary: Optional[float] = None
+
+
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    password: Optional[str] = None
+    role: Optional[UserRole] = None
+    departments: Optional[List[str]] = None
+    phone: Optional[str] = None
+    birthday: Optional[Any] = None
+    punch_in_time: Optional[str] = None
+    grace_time: Optional[str] = None
+    punch_out_time: Optional[str] = None
+    is_active: Optional[bool] = None
+    profile_picture: Optional[str] = None
+    telegram_id: Optional[int] = None
+    company_id: Optional[str] = None
+    company_name: Optional[str] = None
+    # ── Employment / Payroll fields ──────────────────────────────────────────
+    joining_date: Optional[Any] = None
+    training_period_end: Optional[Any] = None
+    payroll_date: Optional[Any] = None
+    monthly_salary: Optional[float] = None
+    model_config = ConfigDict(from_attributes=True, extra="ignore")
+
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+    user: User
+    consent_given: Optional[bool] = None  # Fixed: was 'Noner'
+    session_token: Optional[str] = None  # for POST /auth/logout
+
+
+# ======================
+# TODOS & TASKS
+# ======================
+class Todo(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    title: str
+    description: Optional[str] = None
+    is_completed: bool = False
+    status: str = "pending"
+    due_date: Optional[Any] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    completed_at: Optional[Any] = None
+
+
+class TodoCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    due_date: Optional[datetime] = None
+    is_completed: bool = False
+    status: str = "pending"
+    source: Optional[str] = "manual"      # 'manual' | 'email_sync' | 'auto'
+    auto_imported: Optional[bool] = False
+
+
+class TaskBase(BaseModel):
+    title: str
+    description: Optional[str] = None
+    assigned_to: Optional[str] = None
+    sub_assignees: List[str] = Field(default_factory=list)
+    due_date: Optional[Any] = None
+    priority: str = "medium"
+    status: str = "pending"
+    category: str = "other"          # legacy single-value (kept for backward compat)
+    categories: List[str] = Field(default_factory=list)  # multi-department support
+    client_id: Optional[str] = None
+    is_recurring: bool = False
+    recurrence_pattern: Optional[str] = "monthly"
+    recurrence_interval: Optional[int] = 1
+    recurrence_end_date: Optional[Any] = None
+    type: Optional[str] = None
+    # Per-task popup cadence override (minutes). None = use universal default.
+    popup_interval_minutes: Optional[int] = None
+
+
+class TaskCreate(TaskBase):
+    pass
+
+
+class BulkTaskCreate(BaseModel):
+    tasks: List[TaskCreate]
+
+
+class Task(TaskBase):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    created_by: str
+    created_at: Optional[Any] = None
+    updated_at: Optional[Any] = None
+    completed_at: Optional[Any] = None
+    parent_task_id: Optional[str] = None
+
+
+# ======================
+# ATTENDANCE
+# ======================
+class AttendanceProof(BaseModel):
     """
-    Returns a copy of `permissions` with every page-level flag forced to
-    False wherever its parent module's master flag is False (or missing).
-    Only touches flags that belong to a module and are present in the
-    payload — everything else passes through untouched.
+    Embedded proof document stored inside an attendance record.
+    All fields are optional — any combination of note / photos / documents is valid.
     """
-    result = dict(permissions)
-    for module_flag, page_flags in _MODULE_TO_PAGE_FLAGS.items():
-        module_on = bool(result.get(module_flag, False))
-        if not module_on:
-            for page_flag in page_flags:
-                if page_flag in result:
-                    result[page_flag] = False
-    return result
+    model_config = ConfigDict(extra="ignore")
+    note: Optional[str] = None
+    photos: List[str] = Field(default_factory=list)
+    documents: List[str] = Field(default_factory=list)
+    uploaded_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
-@router.get("/permission-governance/module-tree")
-async def get_module_hierarchy(current_user: User = Depends(get_current_user)):
-    """
-    The 6 main permission modules and their nested pages, for the
-    Users → Permissions → Modules tab to render. Available to any
-    authenticated user (read-only) so the permissions dialog can display it
-    consistently for whoever is viewing it.
-    """
-    return [{"module": key, **value} for key, value in MODULE_HIERARCHY.items()]
+class Attendance(BaseModel):
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    date: str
+    status: str = "absent"
+    punch_in: Optional[Any] = None
+    punch_out: Optional[Any] = None
+    duration_minutes: Optional[int] = 0
+    leave_reason: Optional[str] = None
+    is_late: bool = False
+    punched_out_early: bool = False
+    auto_marked: Optional[bool] = False
+    auto_punch_out: Optional[bool] = False
+    auto_punch_reason: Optional[str] = None
+    proof: Optional[AttendanceProof] = None
+    overtime_minutes: Optional[int] = 0
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalise_status(cls, v: Any) -> str:
+        if v is None or v == "":
+            return "absent"
+        return str(v)
+
+    @field_validator("duration_minutes", "overtime_minutes", mode="before")
+    @classmethod
+    def coerce_duration(cls, v: Any) -> int:
+        if v is None:
+            return 0
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 0
+
+    @field_validator("is_late", "punched_out_early", "auto_marked", "auto_punch_out", mode="before")
+    @classmethod
+    def coerce_bool(cls, v: Any) -> bool:
+        if v is None:
+            return False
+        if isinstance(v, bool):
+            return v
+        return bool(v)
 
 
-class AccessRequestCreate(BaseModel):
+class AttendanceBase(BaseModel):
+    punch_in: Any
+    punch_out: Optional[Any] = None
+
+
+class AttendanceCreate(BaseModel):
+    action: str
+
+
+# ======================
+# STAFF ACTIVITY
+# ======================
+class StaffActivityCreate(BaseModel):
+    app_name: str = "Taskosphere Web"
+    window_title: Optional[str] = None
+    url: Optional[str] = None
+    website: Optional[str] = None
+    category: str = "productivity"
+    duration_seconds: int = 0
+    idle: Optional[bool] = False
+    activity_type: str = "active_time"
+    description: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class StaffActivityLog(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    activity_type: str = "active_time"
+    app_name: str = "Taskosphere Web"
+    window_title: Optional[str] = None
+    url: Optional[str] = None
+    category: str = "other"
+    duration_seconds: int = 0
+    timestamp: Optional[Any] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class ActivityLog(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    date: str
+    screen_time_minutes: int = 0
+    tasks_completed: int = 0
+
+
+class ActivityLogUpdate(BaseModel):
+    screen_time_minutes: Optional[int] = None
+    tasks_completed: Optional[int] = None
+
+
+# ======================
+# DSC MANAGEMENT
+# ======================
+class DSCBase(BaseModel):
+    holder_name: str
+    dsc_type: Optional[str] = None
+    dsc_password: Optional[str] = None
+    serial_number: Optional[str] = None
+    associated_with: Optional[str] = None
+    entity_type: str = "firm"
+    issue_date: Any
+    expiry_date: Any
+    notes: Optional[str] = None
+    current_status: str = "IN"
+    current_location: str = "with_company"
+    taken_by: Optional[str] = None
+    taken_date: Optional[Any] = None
+    movement_log: List[Any] = Field(default_factory=list)
+
+
+class DSCCreate(DSCBase):
+    pass
+
+
+class DSC(DSCBase):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    created_by: str
+    created_at: Optional[Any] = None
+
+
+class DSCMovement(BaseModel):
+    movement_type: str
+    person_name: str
+    timestamp: Optional[Any] = None
+    notes: Optional[str] = None
+
+
+class DSCListResponse(BaseModel):
+    data: List[DSC]
+    total: int
+    page: int
+    limit: int
+
+
+class DSCMovementRequest(BaseModel):
+    movement_type: str
+    person_name: str
+    notes: Optional[str] = None
+
+
+class MovementUpdateRequest(BaseModel):
+    movement_type: str
+    person_name: Optional[str] = None
+    notes: Optional[str] = None
+
+
+# ======================
+# REMINDER MODELS
+# ======================
+class ReminderCreate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    title: str
+    description: Optional[str] = None
+    remind_at: Any
+    event_id: Optional[str] = None
+    source: Optional[str] = "manual"
+    priority: Optional[str] = "medium"
+    reminder_type: Optional[str] = "reminder"
+    related_task_id: Optional[str] = None
+    # Per-reminder popup cadence override (minutes). None = universal default.
+    popup_interval_minutes: Optional[int] = None
+
+
+class Reminder(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    title: str
+    description: Optional[str] = None
+    remind_at: Any
+    event_id: Optional[str] = None
+    source: Optional[str] = "manual"
+    priority: Optional[str] = "medium"
+    reminder_type: Optional[str] = "reminder"
+    related_task_id: Optional[str] = None
+    is_dismissed: bool = False
+    is_fired: bool = False
+    status: Optional[str] = None
+    popup_interval_minutes: Optional[int] = None
+    created_at: Optional[Any] = None
+    updated_at: Optional[Any] = None
+
+
+# ======================
+# DOCUMENT MANAGEMENT
+# ======================
+class DocumentBase(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    document_name: Optional[str] = None
+    document_type: Optional[str] = None
+    holder_name: Optional[str] = None
+    associated_with: Optional[str] = None
+    entity_type: str = "firm"
+    issue_date: Optional[Any] = None
+    valid_upto: Optional[Any] = None
+    notes: Optional[str] = None
+    current_status: str = "IN"
+    current_location: str = "with_company"
+    movement_log: List[Any] = Field(default_factory=list)
+
+    @field_validator("issue_date", "valid_upto", mode="before")
+    @classmethod
+    def coerce_date_fields(cls, v: Any) -> Any:
+        if v is None or v == "" or v == "null":
+            return None
+        if isinstance(v, (datetime, date)):
+            return v
+        if isinstance(v, str):
+            try:
+                return datetime.fromisoformat(v)
+            except ValueError:
+                return None
+        return v
+
+
+class DocumentCreate(DocumentBase):
+    pass
+
+
+class Document(DocumentBase):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    created_by: str
+    created_at: Optional[Any] = None
+
+    @field_validator("created_at", mode="before")
+    @classmethod
+    def coerce_created_at(cls, v: Any) -> Any:
+        if v is None or v == "":
+            return None
+        if isinstance(v, datetime):
+            return v
+        if isinstance(v, str):
+            try:
+                return datetime.fromisoformat(v)
+            except ValueError:
+                return None
+        return v
+
+
+class DocumentMovement(BaseModel):
+    movement_type: str
+    person_name: str
+    timestamp: Optional[Any] = None
+    notes: Optional[str] = None
+
+
+class DocumentMovementRequest(BaseModel):
+    movement_type: str
+    person_name: str
+    notes: Optional[str] = None
+
+
+class DocumentMovementUpdateRequest(BaseModel):
+    movement_id: str
+    movement_type: str
+    person_name: Optional[str] = None
+    notes: Optional[str] = None
+
+
+# ======================
+# CLIENT MANAGEMENT
+# ======================
+class ContactPerson(BaseModel):
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    designation: Optional[str] = None
+    birthday: Optional[Any] = None
+    din: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def clean_empty_contact_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            nullable = ["email", "phone", "designation", "birthday", "din"]
+            for field in nullable:
+                if field in data and data[field] == "":
+                    data[field] = None
+        return data
+
+
+class ClientDSC(BaseModel):
+    certificate_number: Optional[str] = None
+    holder_name: Optional[str] = None
+    issue_date: Optional[Any] = None
+    expiry_date: Optional[Any] = None
+    notes: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def clean_empty_dsc_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for field in ["certificate_number", "holder_name", "issue_date", "expiry_date", "notes"]:
+                if field in data and data[field] == "":
+                    data[field] = None
+        return data
+
+
+class ClientBase(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    company_name: str = Field(..., min_length=3, max_length=255)
+    client_type: str = Field(..., pattern="^(proprietor|pvt_ltd|llp|partnership|huf|trust|other|LLP|PVT_LTD|public_ltd|section_8)$")
+    client_type_label: Optional[str] = None
+    contact_persons: List[ContactPerson] = Field(default_factory=list)
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    date_of_incorporation: Optional[Any] = None
+    birthday: Optional[Any] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    status: Optional[str] = "active"
+    services: List[str] = Field(default_factory=list)
+    dsc_details: List[ClientDSC] = Field(default_factory=list)
+    assigned_to: Optional[str] = None
+    notes: Optional[str] = None
+    referred_by: Optional[str] = None
+    assignments: Optional[List[Dict[str, Any]]] = Field(
+        default_factory=list,
+        description="List of {user_id, services} assignments"
+    )
+    # ── Tax & Billing fields (populated from GST certificate or manual entry) ──
+    gstin: Optional[str] = None
+    pan: Optional[str] = None
+    gst_treatment: Optional[str] = None
+    place_of_supply: Optional[str] = None
+    default_payment_terms: Optional[str] = None
+    credit_limit: Optional[Any] = None
+    opening_balance: Optional[Any] = None
+    opening_balance_type: Optional[str] = None
+    tally_ledger_name: Optional[str] = None
+    tally_group: Optional[str] = None
+    website: Optional[str] = None
+    msme_number: Optional[str] = None
+    # ── Address fields: primary + GST certificate address (may differ) ─────────
+    gst_address: Optional[str] = None   # Principal place of business from GST REG-06
+    gst_city: Optional[str] = None
+    gst_state: Optional[str] = None
+    gst_pin: Optional[str] = None
+    # ── MCA / ROC fields (fetched from MCA portal API or parsed from MCA PDF) ──
+    cin: Optional[str] = None           # Corporate Identity Number (Pvt/Public Ltd)
+    llpin: Optional[str] = None         # LLP Identification Number
+    mca_fetch_date: Optional[str] = None  # ISO date when MCA data was last fetched
+    # ── ITR Client fields ──────────────────────────────────────────────────────
+    is_itr_client: Optional[bool] = False   # True when this client is an ITR-only client
+    itr_data: Optional[Dict[str, Any]] = None  # JSON blob: itr_type, AY, filing_status, income, etc.
+
+    @model_validator(mode="before")
+    @classmethod
+    def clean_empty_optional_strings(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            nullable_fields = [
+                "email", "phone", "referred_by", "notes", "assigned_to",
+                "birthday", "date_of_incorporation", "client_type_label",
+                "address", "city", "state",
+                "gstin", "pan", "gst_treatment", "place_of_supply",
+                "tally_ledger_name", "tally_group", "website", "msme_number",
+                "gst_address", "gst_city", "gst_state", "gst_pin",
+                "cin", "llpin", "mca_fetch_date",
+            ]
+            for field in nullable_fields:
+                if field in data and data[field] == "":
+                    data[field] = None
+        return data
+
+    @field_validator("phone", mode="before")
+    @classmethod
+    def validate_phone(cls, v) -> Optional[str]:
+        if v is None or str(v).strip() == "":
+            return None
+        cleaned = re.sub(r"\s|-|\+", "", str(v))
+        if not cleaned.isdigit():
+            raise ValueError("Phone number must contain only digits")
+        if not (10 <= len(cleaned) <= 15):
+            raise ValueError("Phone number must be 10-15 digits")
+        return v
+
+    @field_validator("company_name")
+    @classmethod
+    def validate_company_name(cls, v: str) -> str:
+        v = str(v).strip()
+        if len(v) < 3:
+            raise ValueError("Company name must be at least 3 characters long")
+        return v
+
+
+class ClientCreate(ClientBase):
+    pass
+
+
+class Client(ClientBase):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    created_by: str
+    created_at: Optional[Any] = None
+
+
+class MasterClientForm(BaseModel):
+    company_name: str
+    client_type: str
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    date_of_incorporation: Optional[Any] = None
+    gst_number: Optional[str] = None
+    pan_number: Optional[str] = None
+    tan_number: Optional[str] = None
+    assigned_to: Optional[str] = None
+    services: List[str] = Field(default_factory=list)
+    contact_persons: List[Any] = Field(default_factory=list)
+    notes: Optional[str] = None
+    referred_by: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def clean_empty_strings(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for k, v in data.items():
+                if v == "":
+                    data[k] = None
+        return data
+
+
+# ======================
+# LEADS MODEL
+# ======================
+class LeadBase(BaseModel):
+    company_name: str
+    contact_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    services: List[str] = Field(default_factory=list)
+    status: str = "new"
+    source: Optional[str] = None
+    notes: Optional[str] = None
+    assigned_to: Optional[str] = None
+    referred_by: Optional[str] = None
+
+
+class LeadCreate(LeadBase):
+    pass
+
+
+class Lead(LeadBase):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    created_by: str
+    created_at: Optional[Any] = None
+
+
+# ======================
+# DUE DATES & REMINDERS
+# ======================
+class DueDateBase(BaseModel):
+    title: str
+    description: Optional[str] = None
+    due_date: Any
+    reminder_days: int = 30
+    category: Optional[str] = None
+    department: str
+    assigned_to: Optional[str] = None
+    client_id: Optional[str] = None
+    status: str = "pending"
+
+    @field_validator("due_date", mode="before")
+    @classmethod
+    def coerce_due_date(cls, v: Any) -> Any:
+        if v is None or v == "":
+            raise ValueError("due_date is required")
+        if isinstance(v, (date, datetime)):
+            return v
+        if isinstance(v, str):
+            try:
+                return datetime.fromisoformat(v)
+            except ValueError:
+                pass
+            try:
+                return date.fromisoformat(v)
+            except ValueError:
+                raise ValueError(f"Invalid due_date format: {v}")
+        return v
+
+    @field_validator("reminder_days", mode="before")
+    @classmethod
+    def coerce_reminder_days(cls, v: Any) -> int:
+        if v is None:
+            return 30
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 30
+
+    @field_validator("department", mode="before")
+    @classmethod
+    def coerce_department(cls, v: Any) -> str:
+        if v is None or str(v).strip() == "":
+            raise ValueError("department is required")
+        return str(v).strip()
+
+
+class DueDateCreate(DueDateBase):
+    pass
+
+
+class DueDate(DueDateBase):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    created_by: str
+    created_at: Optional[Any] = None
+
+    @field_validator("created_at", mode="before")
+    @classmethod
+    def coerce_created_at(cls, v: Any) -> Any:
+        if v is None or v == "":
+            return None
+        if isinstance(v, datetime):
+            return v
+        if isinstance(v, str):
+            try:
+                return datetime.fromisoformat(v)
+            except ValueError:
+                return None
+        return v
+
+
+class BirthdayEmailRequest(BaseModel):
+    client_id: str
+
+
+# ======================
+# NOTIFICATIONS & AUDIT
+# ======================
+class NotificationBase(BaseModel):
+    title: str
+    message: str
+    type: str
+
+
+class Notification(NotificationBase):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    is_read: bool = False
+    created_at: Optional[Any] = None
+
+
+class AuditLog(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    user_name: str
+    action: str
     module: str
-    reason: str = ""
+    record_id: Optional[str] = None
+    old_data: Optional[dict] = None
+    new_data: Optional[dict] = None
+    timestamp: Optional[Any] = None
 
 
-class DecisionInput(BaseModel):
-    note: str = ""
+# ======================
+# DASHBOARD & METRICS
+# ======================
+class DashboardStats(BaseModel):
+    total_tasks: int
+    completed_tasks: int
+    pending_tasks: int
+    overdue_tasks: int
+    total_dsc: int
+    expiring_dsc_count: int
+    expiring_dsc_list: List[dict]
+    total_clients: int
+    upcoming_birthdays: int
+    upcoming_due_dates: int
+    team_workload: List[dict]
+    compliance_status: dict
+    expired_dsc_count: int = 0
 
 
-def _require_admin(user: User):
-    if getattr(user, "role", None) != "admin":
-        raise HTTPException(status_code=403, detail="Only an admin can do this.")
+class PerformanceMetric(BaseModel):
+    user_id: str
+    user_name: str
+    profile_picture: Optional[str] = None
+    attendance_percent: float = 0.0
+    total_hours: float = 0.0
+    task_completion_percent: float = 0.0
+    todo_ontime_percent: float = 0.0
+    timely_punchin_percent: float = 0.0
+    overall_score: float = 0.0
+    rank: int = 0
+    badge: str = "Good Performer"
+    # New ranking fields
+    attendance_score: float = 0.0
+    task_completion_score: float = 0.0
+    task_timeliness_score: float = 0.0
+    working_hours_score: float = 0.0
+    quality_score: float = 0.0
+    consistency_bonus: float = 0.0
+    no_auto_absent_bonus: float = 0.0
+    discipline_penalty: float = 0.0
+    auto_absent_count: int = 0
+    final_score: float = 0.0
 
 
-@router.get("/permission-governance/modules")
-async def list_governed_modules(current_user: User = Depends(get_current_user)):
-    """The list of requestable modules, for the request-access UI to render."""
-    return [{"module": k, **v} for k, v in GOVERNED_MODULES.items()]
+# ======================
+# HOLIDAY MODELS
+# ======================
+class HolidayCreate(BaseModel):
+    date: Any
+    name: str
+    description: Optional[str] = None
+    type: str = "manual"
+    status: Optional[str] = "confirmed"
 
 
-@router.post("/permission-governance/requests")
-async def create_access_request(
-    payload: AccessRequestCreate, current_user: User = Depends(get_current_user)
-):
-    """A non-admin user asks for access to one Accounts sub-module."""
-    if current_user.role == "admin":
-        return {"message": "Admins already have full access — nothing to request."}
-    if payload.module not in GOVERNED_MODULES:
-        raise HTTPException(status_code=400, detail="Unknown module.")
-
-    existing = await db.access_requests.find_one(
-        {"user_id": current_user.id, "module": payload.module, "status": "pending"}, {"_id": 0}
-    )
-    if existing:
-        return {"access_request": existing, "duplicate": True}
-
-    now = datetime.now(timezone.utc).isoformat()
-    doc = {
-        "id": str(uuid.uuid4()),
-        "user_id": current_user.id,
-        "user_name": current_user.full_name or current_user.email,
-        "user_email": current_user.email,
-        "module": payload.module,
-        "module_label": GOVERNED_MODULES[payload.module]["label"],
-        "reason": (payload.reason or "").strip()[:500],
-        "status": "pending",
-        "decided_by": None,
-        "decided_by_name": None,
-        "decided_at": None,
-        "decision_note": "",
-        "created_at": now,
-        "updated_at": now,
-    }
-    await db.access_requests.insert_one(doc)
-    doc.pop("_id", None)
-    return {"access_request": doc, "duplicate": False}
+class HolidayResponse(BaseModel):
+    date: Any
+    name: str
+    description: Optional[str] = None
+    status: str = "confirmed"
+    type: Optional[str] = "manual"
 
 
-@router.get("/permission-governance/requests/mine")
-async def my_access_requests(current_user: User = Depends(get_current_user)):
-    """A user checking the status of their own requests (for the gated page
-    to show 'pending approval' instead of the request button again)."""
-    items = await db.access_requests.find({"user_id": current_user.id}, {"_id": 0}).sort("created_at", -1).to_list(200)
-    return items
+# ======================
+# EMAIL INTEGRATION MODELS
+# ======================
+class EmailConnection(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    user_id: str
+    provider: str
+    method: str
+    email_address: Optional[str] = None
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
+    expires_at: Optional[str] = None
+    app_password_enc: Optional[str] = None
+    imap_host: Optional[str] = None
+    imap_port: Optional[int] = None
+    connected_at: Optional[str] = None
 
 
-@router.get("/permission-governance/requests")
-async def list_access_requests(
-    status: Optional[str] = Query(None, description="pending | approved | rejected"),
-    current_user: User = Depends(get_current_user),
-):
-    """Admin: the governance portal's inbox."""
-    _require_admin(current_user)
-    q = {}
-    if status:
-        q["status"] = status
-    items = await db.access_requests.find(q, {"_id": 0}).sort("created_at", -1).to_list(1000)
-    return items
+class ExtractedEvent(BaseModel):
+    title: str
+    event_type: str
+    date: Optional[str] = None
+    time: Optional[str] = None
+    location: Optional[str] = None
+    organizer: Optional[str] = None
+    description: Optional[str] = None
+    urgency: str = "medium"
+    source_subject: str
+    source_from: str
+    source_date: str
+    raw_snippet: Optional[str] = None
 
 
-async def _apply_flag(user_id: str, flag: str, value: bool):
-    await db.users.update_one({"id": user_id}, {"$set": {f"permissions.{flag}": value}})
+# ======================
+# PASSWORD REPOSITORY MODELS
+# ======================
 
-
-@router.post("/permission-governance/requests/{request_id}/approve")
-async def approve_access_request(
-    request_id: str, payload: DecisionInput, current_user: User = Depends(get_current_user)
-):
-    _require_admin(current_user)
-    reqdoc = await db.access_requests.find_one({"id": request_id}, {"_id": 0})
-    if not reqdoc:
-        raise HTTPException(status_code=404, detail="Access request not found.")
-    if reqdoc["status"] != "pending":
-        raise HTTPException(status_code=400, detail=f"Request already {reqdoc['status']}.")
-
-    module = GOVERNED_MODULES.get(reqdoc["module"])
-    if not module:
-        raise HTTPException(status_code=400, detail="Unknown module on this request.")
-
-    await _apply_flag(reqdoc["user_id"], module["flag"], True)
-    now = datetime.now(timezone.utc).isoformat()
-    await db.access_requests.update_one(
-        {"id": request_id},
-        {"$set": {
-            "status": "approved", "decided_by": current_user.id,
-            "decided_by_name": current_user.full_name or current_user.email,
-            "decided_at": now, "decision_note": (payload.note or "").strip()[:500], "updated_at": now,
-        }},
-    )
-    try:
-        await create_audit_log(current_user, "approve", "permission_governance", request_id,
-                                new_data={"user_id": reqdoc["user_id"], "flag": module["flag"]})
-    except Exception:
-        pass
-    return {"success": True}
-
-
-@router.post("/permission-governance/requests/{request_id}/reject")
-async def reject_access_request(
-    request_id: str, payload: DecisionInput, current_user: User = Depends(get_current_user)
-):
-    _require_admin(current_user)
-    reqdoc = await db.access_requests.find_one({"id": request_id}, {"_id": 0})
-    if not reqdoc:
-        raise HTTPException(status_code=404, detail="Access request not found.")
-    if reqdoc["status"] != "pending":
-        raise HTTPException(status_code=400, detail=f"Request already {reqdoc['status']}.")
-
-    now = datetime.now(timezone.utc).isoformat()
-    await db.access_requests.update_one(
-        {"id": request_id},
-        {"$set": {
-            "status": "rejected", "decided_by": current_user.id,
-            "decided_by_name": current_user.full_name or current_user.email,
-            "decided_at": now, "decision_note": (payload.note or "").strip()[:500], "updated_at": now,
-        }},
-    )
-    return {"success": True}
-
-
-@router.post("/permission-governance/users/{user_id}/revoke")
-async def revoke_module_access(user_id: str, module: str, current_user: User = Depends(get_current_user)):
-    """Admin revokes a previously-granted module flag directly (no request needed to remove access)."""
-    _require_admin(current_user)
-    mod = GOVERNED_MODULES.get(module)
-    if not mod:
-        raise HTTPException(status_code=400, detail="Unknown module.")
-    await _apply_flag(user_id, mod["flag"], False)
-    return {"success": True}
-
-
-@router.get("/permission-governance/grants")
-async def list_current_grants(current_user: User = Depends(get_current_user)):
-    """Admin: quick table of who currently has which Accounts-module flag on,
-    so revoking doesn't require hunting through the full Users page."""
-    _require_admin(current_user)
-    flags = [m["flag"] for m in GOVERNED_MODULES.values()]
-    projection = {"_id": 0, "id": 1, "full_name": 1, "email": 1, "role": 1}
-    for f in flags:
-        projection[f"permissions.{f}"] = 1
-    users = await db.users.find({}, projection).to_list(2000)
-    return users
-
-
-# =============================================================================
-# FULL PERMISSION MATRIX — GET & PUT /users/{user_id}/permissions
-# Moved here from server.py so that all permission management lives in one
-# place.  The router is already mounted on api_router in server.py, so the
-# URLs stay identical: /api/users/{user_id}/permissions.
-# =============================================================================
-
-# Boolean permission flags that a manager (with can_manage_users) is allowed
-# to view and edit for their direct-report staff.  They can only grant a flag
-# they themselves possess; ADMIN_ONLY_GRANTS are blocked regardless.
-BOOLEAN_PERM_KEYS = [
-    "can_view_all_tasks",
-    "can_view_all_clients",
-    "can_view_all_dsc",
-    "can_view_documents",
-    "can_view_all_duedates",
-    "can_view_reports",
-    "can_view_attendance",
-    "can_view_all_leads",
-    "can_edit_tasks",
-    "can_edit_clients",
-    "can_edit_dsc",
-    "can_edit_documents",
-    "can_edit_due_dates",
-    "can_edit_users",
-    "can_download_reports",
-    "can_manage_users",
-    "can_manage_settings",
-    "can_assign_tasks",
-    "can_assign_clients",
-    "can_view_staff_activity",
-    "can_view_user_page",
-    "can_view_audit_logs",
-    "can_view_selected_users_reports",
-    "can_view_todo_dashboard",
-    "can_use_chat",
-    "can_view_staff_rankings",
-    "can_connect_email",
-    "can_view_own_data",
-    "can_create_quotations",
-    "can_manage_invoices",
-    "can_view_passwords",
-    "can_edit_passwords",
-    "can_view_compliance",
-    "can_manage_compliance",
-    "can_view_all_visits",
-    "can_edit_visits",
+PORTAL_TYPES_LIST = [
+    "MCA", "DGFT", "TRADEMARK", "GST", "INCOME_TAX", "TDS",
+    "EPFO", "ESIC", "TRACES", "MSME", "RERA", "ROC", "OTHER",
 ]
 
-# Flags that only an admin can grant — a manager cannot escalate these even if
-# the manager somehow possessed them (defensive; they never should).
-ADMIN_ONLY_GRANTS = {
-    "can_delete_data",
-    "can_delete_tasks",
-    "can_delete_visits",
-    "can_send_reminders",
-}
+
+class PasswordEntryCreate(BaseModel):
+    """Payload to create a new portal credential entry."""
+    portal_name: str = Field(..., min_length=2, max_length=120)
+    portal_type: str = "OTHER"
+    url: Optional[str] = None
+    username: Optional[str] = None
+    password_plain: Optional[str] = None   # plain text — backend encrypts
+    department: str = "OTHER"
+    client_name: Optional[str] = None
+    client_id: Optional[str] = None
+    notes: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
 
 
-@router.get("/users/{user_id}/permissions")
-async def get_permissions(
-    user_id: str, current_user: User = Depends(get_current_user)
-):
-    """
-    Retrieve the permission dict for a user.
-    - Admin    : can fetch any user's permissions.
-    - Manager (with can_manage_users): can fetch their team staff permissions.
-    - Staff    : can only fetch their own permissions (read-only display).
-    """
-    # Admin always allowed
-    if current_user.role == "admin":
-        user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        return user.get("permissions", {})
-
-    # Any user can always fetch their OWN permissions
-    if user_id == current_user.id:
-        user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        return user.get("permissions", {})
-
-    # Manager with can_manage_users can fetch their direct-report staff permissions
-    perms = get_user_permissions(current_user)
-    if current_user.role == "manager" and perms.get("can_manage_users", False):
-        team_ids = await get_team_user_ids(current_user.id)
-        if user_id not in team_ids:
-            raise HTTPException(status_code=403, detail="User is not in your team")
-        target_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
-        if not target_user:
-            raise HTTPException(status_code=404, detail="User not found")
-        if target_user.get("role") in ("admin", "manager"):
-            raise HTTPException(
-                status_code=403,
-                detail="Managers can only view permissions of staff members",
-            )
-        return target_user.get("permissions", {})
-
-    raise HTTPException(status_code=403, detail="Not allowed")
+class PasswordEntryUpdate(BaseModel):
+    portal_name: Optional[str] = None
+    portal_type: Optional[str] = None
+    url: Optional[str] = None
+    username: Optional[str] = None
+    password_plain: Optional[str] = None
+    department: Optional[str] = None
+    client_name: Optional[str] = None
+    client_id: Optional[str] = None
+    notes: Optional[str] = None
+    tags: Optional[List[str]] = None
 
 
-@router.put("/users/{user_id}/permissions")
-async def update_user_permissions(
-    user_id: str,
-    permissions: dict,
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Update the permission dict for a user.
-    - Admin    : can update any user's permissions without restriction.
-    - Manager (with can_manage_users): can update their team staff permissions;
-      cannot escalate beyond their own level; ADMIN_ONLY_GRANTS are blocked.
-    - Staff    : not allowed.
-    """
-    # ── Admin path ────────────────────────────────────────────────────────────
-    if current_user.role == "admin":
-        existing = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
-        if not existing:
-            raise HTTPException(status_code=404, detail="User not found")
-        old_permissions = existing.get("permissions", {})
-        # Guarantee the module hierarchy holds even if the client sent a page
-        # flag as True while its parent module flag is False.
-        permissions = _enforce_module_hierarchy(permissions)
-        await db.users.update_one(
-            {"id": user_id}, {"$set": {"permissions": permissions}}
-        )
-        await create_audit_log(
-            current_user,
-            "UPDATE_PERMISSIONS",
-            "user",
-            record_id=user_id,
-            old_data=old_permissions,
-            new_data=permissions,
-        )
-        return {"message": "Permissions updated successfully"}
-
-    # ── Manager path ──────────────────────────────────────────────────────────
-    perms = get_user_permissions(current_user)
-    if current_user.role == "manager" and perms.get("can_manage_users", False):
-        team_ids = await get_team_user_ids(current_user.id)
-        if user_id not in team_ids:
-            raise HTTPException(status_code=403, detail="User is not in your team")
-        existing = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
-        if not existing:
-            raise HTTPException(status_code=404, detail="User not found")
-        if existing.get("role") in ("admin", "manager"):
-            raise HTTPException(
-                status_code=403,
-                detail="Managers can only update permissions of staff members",
-            )
-
-        # Managers CANNOT grant permissions they do not themselves possess,
-        # and can never grant ADMIN_ONLY_GRANTS regardless.
-        manager_perms = get_user_permissions(current_user)
-        safe_permissions = {}
-        for key, val in permissions.items():
-            if key in ADMIN_ONLY_GRANTS:
-                # Preserve whatever value is already stored — manager cannot change it
-                safe_permissions[key] = existing.get("permissions", {}).get(key, False)
-            elif key in BOOLEAN_PERM_KEYS and isinstance(val, bool):
-                # Manager can only grant a flag they themselves hold
-                if val and not manager_perms.get(key, False):
-                    safe_permissions[key] = False
-                else:
-                    safe_permissions[key] = val
-            else:
-                # List-type keys (view_other_tasks, assigned_clients, etc.) pass through
-                safe_permissions[key] = val
-
-        old_permissions = existing.get("permissions", {})
-        # Same hierarchy guarantee as the admin path above.
-        safe_permissions = _enforce_module_hierarchy(safe_permissions)
-        await db.users.update_one(
-            {"id": user_id}, {"$set": {"permissions": safe_permissions}}
-        )
-        await create_audit_log(
-            current_user,
-            "UPDATE_PERMISSIONS",
-            "user",
-            record_id=user_id,
-            old_data=old_permissions,
-            new_data=safe_permissions,
-        )
-        return {"message": "Permissions updated successfully"}
-
-    raise HTTPException(status_code=403, detail="Admin access required")
+class PasswordEntry(BaseModel):
+    """Public-facing model — never includes the encrypted password field."""
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    portal_name: str
+    portal_type: str
+    url: Optional[str] = None
+    username: Optional[str] = None
+    department: str
+    client_name: Optional[str] = None
+    client_id: Optional[str] = None
+    notes: Optional[str] = None
+    tags: List[str] = []
+    created_by: str
+    created_by_name: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    last_accessed_at: Optional[str] = None
+    has_password: bool = False
 
 
-# =============================================================================
-# PERMISSION SYNC — POST /auth/sync-permissions
-# Moved here from server.py.  Called by AuthContext on every session restore
-# to back-fill any permission flags that were added to DEFAULT_ROLE_PERMISSIONS
-# after the user account was created, without requiring a DB migration.
-# =============================================================================
+class PasswordRevealResponse(BaseModel):
+    id: str
+    username: Optional[str]
+    password: str
+    portal_name: str
 
-@router.post("/auth/sync-permissions")
-async def sync_my_permissions(current_user: User = Depends(get_current_user)):
-    """
-    Back-fills any permission flags that were absent from this user's DB record
-    (e.g. flags added to DEFAULT_ROLE_PERMISSIONS after the user was created).
 
-    Called automatically by AuthContext on every session restore; can also be
-    triggered manually from Settings.  Returns the updated user object.
-
-    Logic:
-      - Load DEFAULT_ROLE_PERMISSIONS for the user's role.
-      - For each key in the template that is MISSING from the stored permissions,
-        set it to the template default.  Existing DB values are never overwritten.
-    """
-    role = (
-        current_user.role
-        if isinstance(current_user.role, str)
-        else current_user.role.value
-    )
-    template = DEFAULT_ROLE_PERMISSIONS.get(role, {})
-
-    # Get the raw permissions dict from DB
-    user_doc = await db.users.find_one(
-        {"id": current_user.id}, {"_id": 0, "password": 0}
-    )
-    if not user_doc:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    stored_perms = user_doc.get("permissions", {})
-    if hasattr(stored_perms, "model_dump"):
-        stored_perms = stored_perms.model_dump()
-    elif not isinstance(stored_perms, dict):
-        stored_perms = {}
-
-    # Only fill keys that are entirely absent (never overwrite explicit DB values)
-    missing_keys = {k: v for k, v in template.items() if k not in stored_perms}
-
-    if missing_keys:
-        merged = {**stored_perms, **missing_keys}
-        await db.users.update_one(
-            {"id": current_user.id}, {"$set": {"permissions": merged}}
-        )
-        user_doc["permissions"] = merged
-
-    user_doc.pop("_id", None)
-    user_doc.pop("password", None)
-    return user_doc
+# ────────────────────────────────────────────────
+# OFFBOARDING REQUEST
+# ────────────────────────────────────────────────
+class OffboardRequest(BaseModel):
+    replacement_user_id: str
+    transfer_tasks: bool = True
+    transfer_clients: bool = True
+    transfer_dsc: bool = True
+    transfer_documents: bool = True
+    transfer_todos: bool = True
+    transfer_visits: bool = True
+    transfer_leads: bool = True
+    update_email: Optional[str] = None
+    delete_old_user: bool = True
+    notes: Optional[str] = None
