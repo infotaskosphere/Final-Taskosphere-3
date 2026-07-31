@@ -34,6 +34,7 @@ from backend.dependencies import (
     create_audit_log,
 )
 from backend.models import User, DEFAULT_ROLE_PERMISSIONS, MODULE_HIERARCHY
+from backend.governance_core import ALL_ACTIONS
 
 router = APIRouter(tags=["Permission Governance"])
 
@@ -87,12 +88,22 @@ def _enforce_module_hierarchy(permissions: dict) -> dict:
 @router.get("/permission-governance/module-tree")
 async def get_module_hierarchy(current_user: User = Depends(get_current_user)):
     """
-    The 6 main permission modules and their nested pages, for the
+    The 6 main permission modules and their nested pages (each page now also
+    carries its declared `actions` — see backend/governance_core.py), for the
     Users → Permissions → Modules tab to render. Available to any
     authenticated user (read-only) so the permissions dialog can display it
     consistently for whoever is viewing it.
     """
     return [{"module": key, **value} for key, value in MODULE_HIERARCHY.items()]
+
+
+@router.get("/permission-governance/action-catalog")
+async def get_action_catalog(current_user: User = Depends(get_current_user)):
+    """The full Action-layer vocabulary (View/Create/Edit/Delete/Export/
+    Approve/Print/Share), for the Permission Matrix UI's action toggles —
+    kept in one place (backend/governance_core.py) instead of hardcoded in
+    the frontend."""
+    return {"actions": ALL_ACTIONS}
 
 
 class AccessRequestCreate(BaseModel):
