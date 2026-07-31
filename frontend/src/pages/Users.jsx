@@ -648,6 +648,47 @@ const pagesWithWritePerms = (pagePerms, writePerms) => pagePerms.map(pg => ({
     .map(w => ({ permKey: w.permKey, label: w.label, desc: w.desc, icon: w.icon })),
 }));
 
+// Accounts (Finix) module for the legacy "Module Access" tab — renders each
+// page-level toggle from ACCOUNT_PAGE_PERMS as its own card, with any nested
+// write-permission toggles (from ACCOUNT_WRITE_PERMS) shown indented
+// underneath once their parent page flag is switched on. Mirrors the same
+// expand pattern used for the Password Vault section right below it.
+const AccountsModuleAccess = ({ permissions, setPermissions }) => {
+  const pages = pagesWithWritePerms(ACCOUNT_PAGE_PERMS, ACCOUNT_WRITE_PERMS);
+  return (
+    <div className="space-y-3">
+      {pages.map(pg => (
+        <div key={pg.permKey}>
+          <ModuleAccessCard
+            icon={pg.icon}
+            title={pg.label}
+            desc={pg.desc}
+            permKey={pg.permKey}
+            permissions={permissions}
+            setPermissions={setPermissions}
+            accentColor="#15803D"
+          />
+          {pg.writePerms.length > 0 && permissions[pg.permKey] && (
+            <div className="ml-5 mt-2 space-y-2">
+              {pg.writePerms.map(w => (
+                <PermToggleRow
+                  key={w.permKey}
+                  permKey={w.permKey}
+                  label={w.label}
+                  desc={w.desc}
+                  icon={w.icon}
+                  permissions={permissions}
+                  setPermissions={setPermissions}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const MODULE_TREE = [
   {
     key: 'taskosphere', flag: 'can_access_taskosphere', label: 'Taskosphere', icon: ClipboardList, accent: '#1F6FB2',
