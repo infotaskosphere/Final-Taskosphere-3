@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import DashboardLayout from '@/components/layout/DashboardLayout.jsx';
 import ModuleGate from '@/components/ModuleGate.jsx';
+import { PageGuard } from '@/components/governance/GovernanceGuards.jsx';
 import GifLoader from '@/components/ui/GifLoader.jsx';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -68,6 +69,20 @@ const StaffActivity = lazy(() => import('./pages/StaffActivity.jsx'));
 const ClientPortalManagerPage = lazy(() => import('./pages/ClientPortalManagerPage.jsx'));
 const WhatsAppHub = lazy(() => import('./pages/WhatsAppHub.jsx'));
 
+/* ── Governed modules (new pages — see backend/governed_modules.py) ─── */
+const Leave = lazy(() => import('./pages/governed/Leave.jsx'));
+const Payroll = lazy(() => import('./pages/governed/Payroll.jsx'));
+const HR = lazy(() => import('./pages/governed/HR.jsx'));
+const Recruitment = lazy(() => import('./pages/governed/Recruitment.jsx'));
+const Performance = lazy(() => import('./pages/governed/Performance.jsx'));
+const Templates = lazy(() => import('./pages/governed/Templates.jsx'));
+const Uploads = lazy(() => import('./pages/governed/Uploads.jsx'));
+const ClientDiscussion = lazy(() => import('./pages/governed/ClientDiscussion.jsx'));
+const MasterData = lazy(() => import('./pages/governed/MasterData.jsx'));
+const Roles = lazy(() => import('./pages/governed/Roles.jsx'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard.jsx'));
+const PermissionMatrix = lazy(() => import('./pages/PermissionMatrix.jsx'));
+
 /* ── Settings ─────────────────────────────────────────────────────────── */
 const GeneralSettings = lazy(() => import('./pages/GeneralSettings.jsx'));
 const WhatsAppSettings = lazy(() => import('./pages/WhatsAppSettings.jsx'));
@@ -127,6 +142,15 @@ function PublicOnly({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <AuthLoading />;
   if (user) return <Navigate to="/dashboard" replace />;
+  return children;
+}
+
+// Admin module is role-gated only, not flag-gated (see backend/models.py
+// MODULE_HIERARCHY["admin"] note) — every route under it uses this instead
+// of ModuleGate.
+function AdminOnly({ children }) {
+  const { user } = useAuth();
+  if (user?.role?.toLowerCase() !== 'admin') return <Navigate to="/dashboard" replace />;
   return children;
 }
 
@@ -215,6 +239,29 @@ export default function AppRoutes() {
         <Route path="/staff-activity" element={<StaffActivity />} />
         <Route path="/client-portal-manager/*" element={<ClientPortalManagerPage />} />
         <Route path="/whatsapp-hub" element={<WhatsAppHub />} />
+
+        {/* ── People Matrix: Leave / Payroll / HR / Recruitment / Performance ── */}
+        <Route path="/leave" element={<ModuleGate module="peopleMatrix"><PageGuard module="people_matrix" page="can_view_leave"><Leave /></PageGuard></ModuleGate>} />
+        <Route path="/payroll" element={<ModuleGate module="peopleMatrix"><PageGuard module="people_matrix" page="can_view_payroll"><Payroll /></PageGuard></ModuleGate>} />
+        <Route path="/hr" element={<ModuleGate module="peopleMatrix"><PageGuard module="people_matrix" page="can_view_hr"><HR /></PageGuard></ModuleGate>} />
+        <Route path="/recruitment" element={<ModuleGate module="peopleMatrix"><PageGuard module="people_matrix" page="can_view_recruitment"><Recruitment /></PageGuard></ModuleGate>} />
+        <Route path="/performance" element={<ModuleGate module="peopleMatrix"><PageGuard module="people_matrix" page="can_view_performance"><Performance /></PageGuard></ModuleGate>} />
+
+        {/* ── Records: Templates / Uploads ── */}
+        <Route path="/templates" element={<ModuleGate module="records"><PageGuard module="records" page="can_view_templates"><Templates /></PageGuard></ModuleGate>} />
+        <Route path="/uploads" element={<ModuleGate module="records"><PageGuard module="records" page="can_view_uploads"><Uploads /></PageGuard></ModuleGate>} />
+
+        {/* ── Client Proposals: Client Discussion ── */}
+        <Route path="/client-discussion" element={<ModuleGate module="proposals"><PageGuard module="proposals" page="can_view_client_discussion"><ClientDiscussion /></PageGuard></ModuleGate>} />
+
+        {/* ── Admin: Dashboard / Permission Matrix / Master Data / Roles ──
+            The Admin module is role-gated only (see MODULE_HIERARCHY["admin"]
+            in backend/models.py) — AdminOnly below checks role directly
+            instead of going through ModuleGate/PageGuard's flag lookups. ── */}
+        <Route path="/admin-dashboard" element={<AdminOnly><AdminDashboard /></AdminOnly>} />
+        <Route path="/permission-matrix" element={<AdminOnly><PermissionMatrix /></AdminOnly>} />
+        <Route path="/master-data" element={<AdminOnly><PageGuard module="admin" page="can_view_master_data"><MasterData /></PageGuard></AdminOnly>} />
+        <Route path="/roles" element={<AdminOnly><PageGuard module="admin" page="can_view_roles"><Roles /></PageGuard></AdminOnly>} />
 
         {/* ── Settings ── */}
         <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
