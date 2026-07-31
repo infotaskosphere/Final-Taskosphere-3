@@ -26,7 +26,7 @@ import {
   Building2, MessageSquare, MessageCircle, Wallet, IndianRupee, ChevronDown, ChevronUp,
   Landmark, CreditCard, ShoppingBag, BookOpen, NotebookPen, BarChart3,
   TrendingDown, CalendarClock, CalendarX2, CalendarCheck2, CalendarOff,
-  Minimize2,
+  Minimize2, Copy, ChevronsDownUp, ChevronsUpDown,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -648,47 +648,6 @@ const pagesWithWritePerms = (pagePerms, writePerms) => pagePerms.map(pg => ({
     .map(w => ({ permKey: w.permKey, label: w.label, desc: w.desc, icon: w.icon })),
 }));
 
-// Accounts (Finix) module for the legacy "Module Access" tab — renders each
-// page-level toggle from ACCOUNT_PAGE_PERMS as its own card, with any nested
-// write-permission toggles (from ACCOUNT_WRITE_PERMS) shown indented
-// underneath once their parent page flag is switched on. Mirrors the same
-// expand pattern used for the Password Vault section right below it.
-const AccountsModuleAccess = ({ permissions, setPermissions }) => {
-  const pages = pagesWithWritePerms(ACCOUNT_PAGE_PERMS, ACCOUNT_WRITE_PERMS);
-  return (
-    <div className="space-y-3">
-      {pages.map(pg => (
-        <div key={pg.permKey}>
-          <ModuleAccessCard
-            icon={pg.icon}
-            title={pg.label}
-            desc={pg.desc}
-            permKey={pg.permKey}
-            permissions={permissions}
-            setPermissions={setPermissions}
-            accentColor="#15803D"
-          />
-          {pg.writePerms.length > 0 && permissions[pg.permKey] && (
-            <div className="ml-5 mt-2 space-y-2">
-              {pg.writePerms.map(w => (
-                <PermToggleRow
-                  key={w.permKey}
-                  permKey={w.permKey}
-                  label={w.label}
-                  desc={w.desc}
-                  icon={w.icon}
-                  permissions={permissions}
-                  setPermissions={setPermissions}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-};
-
 const MODULE_TREE = [
   {
     key: 'taskosphere', flag: 'can_access_taskosphere', label: 'Taskosphere', icon: ClipboardList, accent: '#1F6FB2',
@@ -774,7 +733,7 @@ const MODULE_TREE = [
   },
 ];
 
-const ModuleGovernanceCard = ({ module, permissions, setPermissions }) => {
+const ModuleGovernanceCard = ({ module, permissions, setPermissions, expanded = true, onToggleExpanded, searchTerm = '' }) => {
   const { flag, label, desc, icon: Icon, accent, pages, footnote } = module;
   const masterOn  = !!permissions[flag];
   const pageKeys  = pages.flatMap(p => [p.permKey, ...(p.writePerms || []).map(w => w.permKey)]);
@@ -788,6 +747,36 @@ const ModuleGovernanceCard = ({ module, permissions, setPermissions }) => {
     if (!val) pageKeys.forEach(k => { next[k] = false; });
     return next;
   });
+
+  // "Select Entire Module" — turn the module on AND grant every page (and
+  // nested write-permission) flag beneath it in one click.
+  const selectEntireModule = (e) => {
+    e.stopPropagation();
+    setPermissions(prev => {
+      const next = { ...prev, [flag]: true };
+      pageKeys.forEach(k => { next[k] = true; });
+      return next;
+    });
+  };
+
+  // "Remove Entire Module" — same cascade as switching the module off.
+  const removeEntireModule = (e) => {
+    e.stopPropagation();
+    toggleMaster(false);
+  };
+
+  const q = searchTerm.trim().toLowerCase();
+  const visiblePages = q
+    ? pages.filter(pg =>
+        pg.label.toLowerCase().includes(q) ||
+        (pg.writePerms || []).some(w => w.label.toLowerCase().includes(q)))
+    : pages;
+  const moduleMatchesSearch = !q || label.toLowerCase().includes(q) || visiblePages.length > 0;
+  if (!moduleMatchesSearch) return null;
+
+  // While actively searching, force the section open so matches are visible
+  // regardless of the collapsed/expanded state the user left it in.
+  const showPages = pages.length > 0 && (expanded || !!q);
 
   return (
     <div className="space-y-3">
@@ -811,18 +800,39 @@ const ModuleGovernanceCard = ({ module, permissions, setPermissions }) => {
             )}
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">{desc}</p>
+          {pages.length > 0 && (
+            <div className="flex items-center gap-3 mt-1.5" onClick={e => e.stopPropagation()}>
+              <button type="button" onClick={selectEntireModule} className="text-[11px] font-bold hover:underline" style={{ color: accent }}>
+                Select entire module
+              </button>
+              <span className="text-slate-300 dark:text-slate-600">·</span>
+              <button type="button" onClick={removeEntireModule} className="text-[11px] font-bold text-slate-400 hover:text-red-500 hover:underline">
+                Remove entire module
+              </button>
+            </div>
+          )}
         </div>
-        <div className="flex-shrink-0 flex items-center" onClick={e => e.stopPropagation()}>
+        <div className="flex-shrink-0 flex items-center gap-2" onClick={e => e.stopPropagation()}>
+          {pages.length > 0 && onToggleExpanded && (
+            <button type="button" onClick={onToggleExpanded}
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+              aria-label={expanded ? 'Collapse module' : 'Expand module'}>
+              {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </button>
+          )}
           <Switch checked={masterOn} onCheckedChange={toggleMaster} />
         </div>
       </div>
 
-      {pages.length > 0 && (
+      {showPages && (
         <div className={`ml-5 space-y-2 transition-opacity ${masterOn ? '' : 'opacity-50 pointer-events-none select-none'}`}>
           <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 pt-1">
             {label} pages{!masterOn ? ' — turn on module access above to edit' : ''}
           </p>
-          {pages.map(pg => (
+          {visiblePages.length === 0 && q && (
+            <p className="text-xs text-slate-400 italic">No pages match "{searchTerm}" in this module.</p>
+          )}
+          {visiblePages.map(pg => (
             <React.Fragment key={pg.permKey}>
               <PermToggleRow permKey={pg.permKey} label={pg.label} desc={pg.desc} icon={pg.icon} permissions={permissions} setPermissions={setPermissions} />
               {permissions[pg.permKey] && (pg.writePerms || []).map(w => (
@@ -2650,6 +2660,11 @@ export default function Users() {
     joining_date: '', training_period_end: '', payroll_date: '', monthly_salary: '',
   });
   const [permissions, setPermissions] = useState({ ...EMPTY_PERMISSIONS });
+  // ── Permission Matrix (Modules tab) toolbar state ─────────────────────────
+  const [moduleMatrixSearch, setModuleMatrixSearch] = useState('');
+  const [collapsedModules,   setCollapsedModules]   = useState({}); // { [moduleKey]: true } = collapsed
+  const [copyFromUserId,     setCopyFromUserId]     = useState('');
+  const [copyingPerms,       setCopyingPerms]       = useState(false);
 
   // ── Minimize/restore: shrink the Add/Edit Team Member form to the global
   // dock so it can be resumed later, from any page, without losing progress.
@@ -2923,6 +2938,8 @@ export default function Users() {
     }
     setSelectedUserForPerms(userData);
     setActivePermTab('modules');
+    setModuleMatrixSearch('');
+    setCopyFromUserId('');
     await fetchPermissions(userData.id);
     setPermDialogOpen(true);
   }, [isAdmin, isManager, fetchPermissions]);
@@ -2963,6 +2980,29 @@ export default function Users() {
   const resetPermissionsToRole = useCallback((role) => {
     setPermissions({ ...(DEFAULT_ROLE_PERMISSIONS[role] || EMPTY_PERMISSIONS) });
     toast.info(`Reset to ${role} defaults — click Save to apply`);
+  }, []);
+
+  // "Copy Permissions From Another User" — reuses the existing
+  // GET /users/{id}/permissions endpoint (same one used to load the dialog
+  // in the first place), so no new API surface is introduced.
+  const copyPermissionsFromUser = useCallback(async (sourceUserId) => {
+    if (!sourceUserId) return;
+    setCopyingPerms(true);
+    try {
+      const { data } = await api.get(`/users/${sourceUserId}/permissions`);
+      setPermissions({ ...EMPTY_PERMISSIONS, ...data });
+      const sourceName = users.find(u => u.id === sourceUserId)?.full_name || 'selected user';
+      toast.info(`Copied permissions from ${sourceName} — click Save to apply`);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to load that user\u2019s permissions');
+    } finally {
+      setCopyingPerms(false);
+      setCopyFromUserId('');
+    }
+  }, [users]);
+
+  const toggleModuleCollapsed = useCallback((moduleKey) => {
+    setCollapsedModules(prev => ({ ...prev, [moduleKey]: !prev[moduleKey] }));
   }, []);
 
   const handleApprove = useCallback(async (userData) => {
@@ -4024,111 +4064,69 @@ export default function Users() {
             {activePermTab === 'modules' && (
               <div className="space-y-4">
                 <SectionHeader icon={Zap} title="Module Access" color={COLORS.violet} />
+
+                {/* ── Permission Matrix toolbar: search, expand/collapse all, copy from another user ── */}
+                <div className="flex flex-wrap items-center gap-2 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+                  <div className="relative flex-1 min-w-[180px]">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+                    <Input
+                      value={moduleMatrixSearch}
+                      onChange={e => setModuleMatrixSearch(e.target.value)}
+                      placeholder="Search modules & pages…"
+                      className="pl-8 h-9 rounded-lg text-xs"
+                    />
+                    {moduleMatrixSearch && (
+                      <button onClick={() => setModuleMatrixSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <button type="button"
+                    onClick={() => setCollapsedModules(prev => {
+                      const allCollapsed = MODULE_TREE.every(m => prev[m.key]);
+                      const next = {};
+                      MODULE_TREE.forEach(m => { next[m.key] = !allCollapsed; });
+                      return next;
+                    })}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:border-slate-300 transition-colors">
+                    <ChevronsDownUp className="h-3.5 w-3.5" /> Expand / Collapse All
+                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <Select value={copyFromUserId} onValueChange={setCopyFromUserId} disabled={copyingPerms}>
+                      <SelectTrigger className="h-9 w-[190px] rounded-lg text-xs">
+                        <SelectValue placeholder="Copy permissions from…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {users.filter(u => u.id !== selectedUserForPerms?.id).map(u => (
+                          <SelectItem key={u.id} value={u.id}>{u.full_name} ({u.role})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <button type="button" disabled={!copyFromUserId || copyingPerms}
+                      onClick={() => copyPermissionsFromUser(copyFromUserId)}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                      <Copy className="h-3.5 w-3.5" /> {copyingPerms ? 'Copying…' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 gap-3">
-                  <ModuleAccessCard icon={Target} title="Leads Pipeline" desc="Access and manage the global leads dashboard" permKey="can_view_all_leads" permissions={permissions} setPermissions={setPermissions} accentColor="#3B82F6" />
-                  <ModuleAccessCard icon={Receipt} title="Quotations" desc="Create, edit, export and send quotations to clients" permKey="can_create_quotations" permissions={permissions} setPermissions={setPermissions} accentColor="#8B5CF6" />
-                  <AccountsModuleAccess permissions={permissions} setPermissions={setPermissions} />
-                  <ModuleAccessCard icon={KeyRound} title="Password Vault" desc="Access the secure portal credentials repository" permKey="can_view_passwords" permissions={permissions} setPermissions={setPermissions} accentColor="#F59E0B" badge={permissions.can_edit_passwords ? 'Read / Write' : permissions.can_view_passwords ? 'Read Only' : undefined} />
-                  {permissions.can_view_passwords && (
-                    <div className="ml-5 space-y-3">
-                      <PermToggleRow permKey="can_edit_passwords" label="Vault Write Access" desc="Allow adding, editing and deleting portal credentials" icon={Pencil} permissions={permissions} setPermissions={setPermissions} />
-                      <div className={`p-4 rounded-xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                        <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                          Vault Department Scope
-                        </p>
-                        <p className="text-xs text-slate-400 dark:text-slate-500 mb-3">
-                          Leave empty to allow access to all departments. Select specific departments to restrict.
-                        </p>
-                        <div className="flex flex-wrap gap-2">
-                          {DEPARTMENTS.map(dept => {
-                            const isSelected = (permissions.view_password_departments || []).includes(dept.value);
-                            return (
-                              <button
-                                key={dept.value}
-                                onClick={() => setPermissions(prev => ({
-                                  ...prev,
-                                  view_password_departments: isSelected
-                                    ? prev.view_password_departments.filter(d => d !== dept.value)
-                                    : [...(prev.view_password_departments || []), dept.value],
-                                }))}
-                                className="px-3 py-1.5 rounded-xl text-xs font-bold border-2 transition-all hover:shadow-sm"
-                                style={isSelected
-                                  ? { background: dept.color, color: 'white', borderColor: dept.color }
-                                  : { background: dept.bg, color: dept.color, borderColor: `${dept.color}30` }
-                                }
-                              >
-                                {isSelected ? '✓ ' : ''}{dept.label}
-                              </button>
-                            );
-                          })}
-                        </div>
-                        {(permissions.view_password_departments || []).length === 0 && (
-                          <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-2 font-medium">
-                            ✓ Access to all departments (no restriction)
-                          </p>
-                        )}
-                        {(permissions.view_password_departments || []).length > 0 && (
-                          <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 font-medium">
-                            ⚠ Restricted to {(permissions.view_password_departments || []).join(', ')} only
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ── Compliance Tracker ─────────────────────────────── */}
-                  <ModuleAccessCard
-                    icon={ShieldCheck}
-                    title="Compliance Tracker"
-                    desc="View the Compliance Tracker page. Non-admins see only their department's categories (GST, ROC, TDS, etc.)"
-                    permKey="can_view_compliance"
-                    permissions={permissions}
-                    setPermissions={setPermissions}
-                    accentColor="#1F6FB2"
-                    badge={
-                      permissions.can_manage_compliance
-                        ? 'View + Manage'
-                        : permissions.can_view_compliance
-                        ? 'View Only'
-                        : undefined
-                    }
-                  />
-                  {permissions.can_view_compliance && (
-                    <div className="ml-5">
-                      <PermToggleRow
-                        permKey="can_manage_compliance"
-                        label="Manage Compliance Items"
-                        desc="Allow creating and editing compliance masters in their department. Delete is admin-only."
-                        icon={Pencil}
-                        permissions={permissions}
-                        setPermissions={setPermissions}
-                      />
-                    </div>
-                  )}
-
-                  {/* ── GST Reconciliation ──────────────────────────────── */}
-                  <ModuleAccessCard
-                    icon={FileText}
-                    title="GST Reconciliation"
-                    desc="Access the GST Reconciliation module. Grant to GST department users only."
-                    permKey="can_view_gst_reconciliation"
-                    permissions={permissions}
-                    setPermissions={setPermissions}
-                    accentColor="#065f46"
-                    badge={permissions.can_view_gst_reconciliation ? 'GST Access' : undefined}
-                  />
-
-                  {/* ── Trademark Sphere ────────────────────────────────── */}
-                  <ModuleAccessCard
-                    icon={ShieldCheck}
-                    title="Trademark Sphere"
-                    desc="Access the Trademark Sphere module to track, monitor and manage trademark applications from IP India."
-                    permKey="can_view_trademark_sphere"
-                    permissions={permissions}
-                    setPermissions={setPermissions}
-                    accentColor="#1D4ED8"
-                    badge={permissions.can_view_trademark_sphere ? 'Full Access' : undefined}
-                  />
+                  {/* ── Centralized Module → Page governance tree (Taskosphere, Finix,
+                      Compliance, Records, Client Proposals, People Matrix) — reuses the
+                      MODULE_HIERARCHY that backend/permission_governance.py and
+                      backend/governance_core.py already enforce, so there is exactly
+                      one place these flags are defined and one place they're gated. ── */}
+                  {MODULE_TREE.map(module => (
+                    <ModuleGovernanceCard
+                      key={module.key}
+                      module={module}
+                      permissions={permissions}
+                      setPermissions={setPermissions}
+                      expanded={!collapsedModules[module.key]}
+                      onToggleExpanded={() => toggleModuleCollapsed(module.key)}
+                      searchTerm={moduleMatrixSearch}
+                    />
+                  ))}
 
                   {/* ── Client Portal ─────────────────────────────────── */}
                   <ModuleAccessCard
