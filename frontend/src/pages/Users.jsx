@@ -139,6 +139,9 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_view_client_portal: true,
       can_manage_whatsapp: true,
       can_access_whatsapp_hub: true,
+      // ── Main permission modules ──
+      can_access_taskosphere: true, can_access_finix: true, can_access_compliance: true,
+      can_access_records: true, can_access_proposals: true, can_access_people_matrix: true,
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
       view_other_attendance: [], view_other_reports: [], view_other_todos: [],
       view_other_activity: [], view_other_visits: [],
@@ -195,6 +198,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_delete_own_visits: true,    // always allowed for own records
       can_manage_whatsapp: false,     // admin-granted only
       can_access_whatsapp_hub: false,  // ADMIN_GRANTED_ONLY
+      can_access_taskosphere: true, can_access_finix: false, can_access_compliance: true,
+      can_access_records: true, can_access_proposals: true, can_access_people_matrix: true,
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
       view_other_attendance: [], view_other_reports: [], view_other_todos: [],
       view_other_activity: [], view_other_visits: [],
@@ -251,6 +256,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_delete_own_visits: true,    // always allowed for own records
       can_manage_whatsapp: false,     // admin-granted only
       can_access_whatsapp_hub: false,  // ADMIN_GRANTED_ONLY
+      can_access_taskosphere: true, can_access_finix: false, can_access_compliance: true,
+      can_access_records: true, can_access_proposals: true, can_access_people_matrix: true,
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
       view_other_attendance: [], view_other_reports: [], view_other_todos: [],
       view_other_activity: [], view_other_visits: [],
@@ -278,6 +285,10 @@ const EMPTY_PERMISSIONS = {
   can_view_client_portal: false,
   can_manage_whatsapp: false,
   can_access_whatsapp_hub: false,  // ADMIN_GRANTED_ONLY
+  // ── Main permission modules ── all start off for a brand-new/blank form;
+  // Quick Reset templates above set sensible role defaults.
+  can_access_taskosphere: false, can_access_finix: false, can_access_compliance: false,
+  can_access_records: false, can_access_proposals: false, can_access_people_matrix: false,
   view_password_departments: [], assigned_clients: [], view_other_tasks: [],
   view_other_attendance: [], view_other_reports: [], view_other_todos: [],
   view_other_activity: [], view_other_visits: [],
@@ -485,7 +496,16 @@ const ModuleAccessBadges = ({ userData }) => {
 
 const PermissionMatrixSummary = ({ permissions }) => {
   // Include module-level perms (managed from the Modules tab) so coverage % is accurate
-  const MODULE_PERM_KEYS = ['can_manage_invoices', 'can_view_sale', 'can_view_purchase', 'can_view_bank', 'can_view_chart_of_accounts', 'can_view_journal_entries', 'can_view_accounting_reports', 'can_view_passwords', 'can_edit_passwords', 'can_view_gst_reconciliation', 'can_view_trademark_sphere', 'can_view_client_portal', 'can_manage_whatsapp'];
+  const MODULE_PERM_KEYS = [
+    'can_manage_invoices', 'can_view_sale', 'can_view_purchase', 'can_view_bank', 'can_view_chart_of_accounts',
+    'can_manage_chart_of_accounts', 'can_view_journal_entries', 'can_post_journal_entries', 'can_match_bank',
+    'can_view_accounting_reports', 'can_view_passwords', 'can_edit_passwords', 'can_view_gst_reconciliation',
+    'can_view_trademark_sphere', 'can_view_client_portal', 'can_manage_whatsapp', 'can_create_quotations',
+    'can_view_interviews',
+    // Main permission module master switches (Modules tab)
+    'can_access_taskosphere', 'can_access_finix', 'can_access_compliance',
+    'can_access_records', 'can_access_proposals', 'can_access_people_matrix',
+  ];
   const allPerms = [...GLOBAL_PERMS, ...OPS_PERMS, ...EDIT_PERMS];
   const granted  = allPerms.filter(p => permissions[p.key]).length
                  + MODULE_PERM_KEYS.filter(k => permissions[k]).length;
@@ -593,18 +613,24 @@ const SectionHeader = ({ icon: Icon, title, count, color }) => (
 );
 
 // ════════════════════════════════════════════════════════════════════════════════
-// ACCOUNTS MODULE — governs every page under the "Accounts" section. Admins can
-// grant/revoke all accounts pages at once (master toggle) or manage each page
-// individually below.
+// MAIN PERMISSION MODULE HIERARCHY (Modules tab)
+// ────────────────────────────────────────────────────────────────────────────
+// Mirrors backend/models.py::MODULE_HIERARCHY. Six main permission modules —
+// Taskosphere, Finix, Compliance, Records, Client Proposals, People Matrix —
+// each own one master "module access" flag plus the individual page-level
+// flags nested beneath it. A page toggle only takes effect while its
+// module's master switch is on; turning the module off cascades and clears
+// every page beneath it (the backend re-enforces this on every save
+// regardless of what this UI sends, so the two can never drift apart).
 // ════════════════════════════════════════════════════════════════════════════════
 const ACCOUNT_PAGE_PERMS = [
-  { permKey: 'can_manage_invoices',         label: 'Sale & Purchase Invoicing', desc: 'Create GST invoices, record payments, manage product catalog', icon: FileText },
+  { permKey: 'can_view_accounting_reports', label: 'Finix Dashboard & Accounting Reports', desc: 'View P&L, Balance Sheet, ledgers & other reports', icon: BarChart3 },
   { permKey: 'can_view_sale',               label: 'Sale',                      desc: 'View the Sale invoices page',                          icon: CreditCard },
   { permKey: 'can_view_purchase',           label: 'Purchase',                  desc: 'View the Purchase invoices page',                      icon: ShoppingBag },
   { permKey: 'can_view_bank',               label: 'Bank Accounts',             desc: 'Upload statements, view bank accounts & balances',     icon: Landmark },
   { permKey: 'can_view_chart_of_accounts',  label: 'Chart of Accounts',         desc: 'View the chart of accounts',                           icon: BookOpen },
   { permKey: 'can_view_journal_entries',    label: 'Journal Entries',           desc: 'View journal entries',                                 icon: NotebookPen },
-  { permKey: 'can_view_accounting_reports', label: 'Accounting Reports',        desc: 'View P&L, Balance Sheet, ledgers & other reports',     icon: BarChart3 },
+  { permKey: 'can_manage_invoices',         label: 'Sale & Purchase Invoicing', desc: 'Create GST invoices, record payments, manage product catalog', icon: FileText },
 ];
 
 // Write / manage sub-permissions shown nested under their parent page.
@@ -614,85 +640,166 @@ const ACCOUNT_WRITE_PERMS = [
   { parent: 'can_view_bank',              permKey: 'can_match_bank',               label: 'Match / Unmatch Transactions', desc: 'Match, edit-match and unmatch bank reconciliations', icon: Pencil },
 ];
 
-const ACCOUNTS_ACCENT = '#1FAF5A';
+// Small helper: build a module's `pages` array by attaching each page's
+// nested write-permission(s), if any, from a WRITE_PERMS list.
+const pagesWithWritePerms = (pagePerms, writePerms) => pagePerms.map(pg => ({
+  permKey: pg.permKey, label: pg.label, desc: pg.desc, icon: pg.icon,
+  writePerms: writePerms.filter(w => w.parent === pg.permKey)
+    .map(w => ({ permKey: w.permKey, label: w.label, desc: w.desc, icon: w.icon })),
+}));
 
-const AccountsModuleAccess = ({ permissions, setPermissions }) => {
-  const pageKeys     = ACCOUNT_PAGE_PERMS.map(p => p.permKey);
+const MODULE_TREE = [
+  {
+    key: 'taskosphere', flag: 'can_access_taskosphere', label: 'Taskosphere', icon: ClipboardList, accent: '#1F6FB2',
+    desc: 'The core workspace — Tasks, To-Do, Attendance, Reminders, Action Center, Client Visits and AI Document Reader.',
+    pages: [],
+    footnote: 'These core pages are open to every signed-in user today and don\u2019t yet have separate page-level toggles \u2014 this switch controls the whole module at once.',
+  },
+  {
+    key: 'finix', flag: 'can_access_finix', label: 'Finix', icon: CreditCard, accent: ACCOUNTS_ACCENT,
+    desc: 'Accounting & finance — Sale, Purchase, Bank Accounts, Chart of Accounts, Journal Entries and Accounting Reports.',
+    pages: pagesWithWritePerms(ACCOUNT_PAGE_PERMS, ACCOUNT_WRITE_PERMS),
+  },
+  {
+    key: 'compliance', flag: 'can_access_compliance', label: 'Compliance', icon: ShieldCheck, accent: '#1F6FB2',
+    desc: 'Compliance Tracker, GST Reconciliation and Trademark Sphere.',
+    pages: [
+      {
+        permKey: 'can_view_compliance', label: 'Compliance Tracker', desc: 'View the Compliance Tracker page (own department categories for non-admins)', icon: ShieldCheck,
+        writePerms: [{ permKey: 'can_manage_compliance', label: 'Manage Compliance Items', desc: 'Create and edit compliance masters in their department', icon: Pencil }],
+      },
+      { permKey: 'can_view_gst_reconciliation', label: 'GST Reconciliation', desc: 'Access the GST Reconciliation module — grant to GST department users only', icon: FileText },
+      { permKey: 'can_view_trademark_sphere',   label: 'Trademark Sphere',   desc: 'Track, monitor and manage trademark applications from IP India', icon: ShieldCheck },
+    ],
+  },
+  {
+    key: 'records', flag: 'can_access_records', label: 'Records', icon: FileText, accent: '#B45309',
+    desc: 'DSC Register, Document Register, Clients and Password Vault.',
+    pages: [
+      { permKey: 'can_view_all_dsc',   label: 'DSC Register',      desc: 'View all Digital Signature Certificates',       icon: Fingerprint },
+      { permKey: 'can_view_documents', label: 'Document Register', desc: 'Access the physical document register',        icon: FileText },
+      {
+        permKey: 'can_view_passwords', label: 'Password Vault', desc: 'Access the secure portal credentials repository', icon: KeyRound,
+        writePerms: [{ permKey: 'can_edit_passwords', label: 'Vault Write Access', desc: 'Allow adding, editing and deleting portal credentials', icon: Pencil }],
+        extra: ({ permissions, setPermissions }) => (
+          <div className="p-4 rounded-xl border bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Vault Department Scope</p>
+            <p className="text-xs text-slate-400 dark:text-slate-500 mb-3">Leave empty to allow access to all departments. Select specific departments to restrict.</p>
+            <div className="flex flex-wrap gap-2">
+              {DEPARTMENTS.map(dept => {
+                const isSelected = (permissions.view_password_departments || []).includes(dept.value);
+                return (
+                  <button key={dept.value} type="button"
+                    onClick={() => setPermissions(prev => ({
+                      ...prev,
+                      view_password_departments: isSelected
+                        ? prev.view_password_departments.filter(d => d !== dept.value)
+                        : [...(prev.view_password_departments || []), dept.value],
+                    }))}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold border-2 transition-all hover:shadow-sm"
+                    style={isSelected
+                      ? { background: dept.color, color: 'white', borderColor: dept.color }
+                      : { background: dept.bg, color: dept.color, borderColor: `${dept.color}30` }}>
+                    {isSelected ? '\u2713 ' : ''}{dept.label}
+                  </button>
+                );
+              })}
+            </div>
+            {(permissions.view_password_departments || []).length === 0 ? (
+              <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-2 font-medium">\u2713 Access to all departments (no restriction)</p>
+            ) : (
+              <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 font-medium">\u26a0 Restricted to {(permissions.view_password_departments || []).join(', ')} only</p>
+            )}
+          </div>
+        ),
+      },
+    ],
+  },
+  {
+    key: 'proposals', flag: 'can_access_proposals', label: 'Client Proposals', icon: Target, accent: '#7C3AED',
+    desc: 'Lead management and quotations.',
+    pages: [
+      { permKey: 'can_view_all_leads',    label: 'Lead Management', desc: 'Access and manage the global leads dashboard',            icon: Target },
+      { permKey: 'can_create_quotations', label: 'Quotations',      desc: 'Create, edit, export and send quotations to clients',     icon: Receipt },
+    ],
+  },
+  {
+    key: 'people_matrix', flag: 'can_access_people_matrix', label: 'People Matrix', icon: Fingerprint, accent: '#0F766E',
+    desc: 'User directory and Employee Interviews (HRMS).',
+    pages: [
+      { permKey: 'can_view_user_page',  label: 'User Directory',      desc: 'View the team members directory',                          icon: UsersIcon },
+      { permKey: 'can_view_interviews', label: 'Employee Interviews', desc: 'Access the Employee Interviews & candidate management page', icon: Briefcase },
+    ],
+  },
+];
+
+const ModuleGovernanceCard = ({ module, permissions, setPermissions }) => {
+  const { flag, label, desc, icon: Icon, accent, pages, footnote } = module;
+  const masterOn  = !!permissions[flag];
+  const pageKeys  = pages.flatMap(p => [p.permKey, ...(p.writePerms || []).map(w => w.permKey)]);
   const enabledCount = pageKeys.filter(k => permissions[k]).length;
-  const allOn        = enabledCount === pageKeys.length;
-  const accent       = ACCOUNTS_ACCENT;
 
-  const setAll = (val) => setPermissions(p => {
-    const next = { ...p };
-    pageKeys.forEach(k => { next[k] = val; });
-    // Turning the whole module off also revokes the nested write rights.
-    if (!val) ACCOUNT_WRITE_PERMS.forEach(w => { next[w.permKey] = false; });
+  const toggleMaster = (val) => setPermissions(prev => {
+    const next = { ...prev, [flag]: val };
+    // Turning the module off cascades: every page (and nested write) flag
+    // beneath it is cleared in the same update, matching what the backend
+    // guarantees on save (_enforce_module_hierarchy).
+    if (!val) pageKeys.forEach(k => { next[k] = false; });
     return next;
   });
 
   return (
     <div className="space-y-3">
-      {/* Master card — grants/revokes ALL accounts pages at once */}
       <div
-        onClick={() => setAll(!allOn)}
+        onClick={() => toggleMaster(!masterOn)}
         className="flex gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all hover:shadow-md"
-        style={enabledCount > 0
-          ? { borderColor: `${accent}40`, background: `${accent}06` }
-          : {}}
+        style={masterOn ? { borderColor: `${accent}40`, background: `${accent}06` } : {}}
       >
         <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition-all ${
-          enabledCount > 0 ? 'text-white shadow-md' : 'bg-slate-100 dark:bg-slate-700 text-slate-400'
-        }`}
-          style={enabledCount > 0 ? { background: `linear-gradient(135deg, ${accent}, ${accent}cc)` } : {}}>
-          <Wallet className="h-5 w-5" />
+          masterOn ? 'text-white shadow-md' : 'bg-slate-100 dark:bg-slate-700 text-slate-400'
+        }`} style={masterOn ? { background: `linear-gradient(135deg, ${accent}, ${accent}cc)` } : {}}>
+          <Icon className="h-5 w-5" />
         </div>
         <div className="flex-1 min-w-0 pt-0.5">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className={`font-semibold text-sm ${enabledCount > 0 ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300'}`}>Accounts</p>
-            {enabledCount > 0 && (
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md"
-                style={{ background: `${accent}15`, color: accent }}>
-                {allOn ? 'All pages' : `${enabledCount}/${pageKeys.length} pages`}
+            <p className={`font-bold text-sm ${masterOn ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300'}`}>{label}</p>
+            {pages.length > 0 && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md" style={{ background: `${accent}15`, color: accent }}>
+                {masterOn ? `${enabledCount}/${pageKeys.length} pages` : 'Access off'}
               </span>
             )}
           </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
-            All accounts pages — Sale, Purchase, Bank, Chart of Accounts, Journal Entries &amp; Reports
-          </p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">{desc}</p>
         </div>
         <div className="flex-shrink-0 flex items-center" onClick={e => e.stopPropagation()}>
-          <Switch checked={allOn} onCheckedChange={setAll} />
+          <Switch checked={masterOn} onCheckedChange={toggleMaster} />
         </div>
       </div>
 
-      {/* Individual page governance */}
-      <div className="ml-5 space-y-2">
-        <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 pt-1">All Accounts pages</p>
-        {ACCOUNT_PAGE_PERMS.map(pg => (
-          <React.Fragment key={pg.permKey}>
-            <PermToggleRow
-              permKey={pg.permKey}
-              label={pg.label}
-              desc={pg.desc}
-              icon={pg.icon}
-              permissions={permissions}
-              setPermissions={setPermissions}
-            />
-            {permissions[pg.permKey] && ACCOUNT_WRITE_PERMS.filter(w => w.parent === pg.permKey).map(w => (
-              <div className="ml-5" key={w.permKey}>
-                <PermToggleRow
-                  permKey={w.permKey}
-                  label={w.label}
-                  desc={w.desc}
-                  icon={w.icon}
-                  permissions={permissions}
-                  setPermissions={setPermissions}
-                />
-              </div>
-            ))}
-          </React.Fragment>
-        ))}
-      </div>
+      {pages.length > 0 && (
+        <div className={`ml-5 space-y-2 transition-opacity ${masterOn ? '' : 'opacity-50 pointer-events-none select-none'}`}>
+          <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 pt-1">
+            {label} pages{!masterOn ? ' — turn on module access above to edit' : ''}
+          </p>
+          {pages.map(pg => (
+            <React.Fragment key={pg.permKey}>
+              <PermToggleRow permKey={pg.permKey} label={pg.label} desc={pg.desc} icon={pg.icon} permissions={permissions} setPermissions={setPermissions} />
+              {permissions[pg.permKey] && (pg.writePerms || []).map(w => (
+                <div className="ml-5" key={w.permKey}>
+                  <PermToggleRow permKey={w.permKey} label={w.label} desc={w.desc} icon={w.icon} permissions={permissions} setPermissions={setPermissions} />
+                </div>
+              ))}
+              {permissions[pg.permKey] && pg.extra && (
+                <div className="ml-5">{pg.extra({ permissions, setPermissions })}</div>
+              )}
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+
+      {footnote && (
+        <p className="ml-5 text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed italic">{footnote}</p>
+      )}
     </div>
   );
 };
