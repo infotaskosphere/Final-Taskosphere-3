@@ -1815,7 +1815,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
         {/* Table */}
         <div className="flex-1 overflow-auto" style={{scrollbarWidth:'thin'}}>
           <div className="sticky top-0 z-10 grid px-4 py-2.5 gap-2 text-[10px] font-bold uppercase tracking-wider border-b whitespace-nowrap"
-            style={{gridTemplateColumns:'36px 44px 1fr 140px 110px 120px 110px 110px 110px 200px 44px 84px 36px',backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
+            style={{gridTemplateColumns:'36px 44px minmax(220px,1fr) 120px 110px 100px 100px 100px 100px 150px 44px 76px 36px',backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
             <div className="flex items-center justify-center">
               <button onClick={()=>allSelected?setSelectedIds(new Set()):setSelectedIds(new Set(items.map(a=>a.id)))}
                 className="w-4 h-4 rounded border-2 flex items-center justify-center"
@@ -1857,7 +1857,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                 return(
                   <motion.div key={a.id}
                     className="group grid px-4 py-2.5 items-center gap-2 transition-colors"
-                    style={{gridTemplateColumns:'36px 44px 1fr 140px 110px 120px 110px 110px 110px 200px 44px 84px 36px',backgroundColor:isSel?(isDark?'rgba(59,130,246,0.06)':'#eff6ff'):a.status==='filed'?(isDark?'rgba(31,175,90,0.10)':'#f0fdf4'):'transparent',borderLeft:a.status==='filed'?'3px solid #1FAF5A':'3px solid transparent'}}
+                    style={{gridTemplateColumns:'36px 44px minmax(220px,1fr) 120px 110px 100px 100px 100px 100px 150px 44px 76px 36px',backgroundColor:isSel?(isDark?'rgba(59,130,246,0.06)':'#eff6ff'):a.status==='filed'?(isDark?'rgba(31,175,90,0.10)':'#f0fdf4'):'transparent',borderLeft:a.status==='filed'?'3px solid #1FAF5A':'3px solid transparent'}}
                     whileHover={{backgroundColor:a.status==='filed'?(isDark?'rgba(31,175,90,0.14)':'#dcfce7'):(isDark?'rgba(255,255,255,0.03)':'#fafafa')}}>
                     <div className="flex items-center justify-center">
                       <button onClick={()=>setSelectedIds(prev=>{const s=new Set(prev);isSel?s.delete(a.id):s.add(a.id);return s;})}
