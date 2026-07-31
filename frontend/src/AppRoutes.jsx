@@ -2,6 +2,7 @@ import React, { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import DashboardLayout from '@/components/layout/DashboardLayout.jsx';
+import ModuleGate from '@/components/ModuleGate.jsx';
 import GifLoader from '@/components/ui/GifLoader.jsx';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -151,66 +152,66 @@ export default function AppRoutes() {
 
         {/* ── Core ── */}
         <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/tasks" element={<Tasks />} />
-        <Route path="/todos" element={<TodoDashboard />} />
+        <Route path="/tasks" element={<ModuleGate module="taskosphere"><Tasks /></ModuleGate>} />
+        <Route path="/todos" element={<ModuleGate module="taskosphere"><TodoDashboard /></ModuleGate>} />
         <Route path="/todo" element={<Navigate to="/todos" replace />} />
-        <Route path="/attendance" element={<Attendance />} />
-        <Route path="/reminders" element={<Reminders />} />
-        <Route path="/action-center" element={<ActionCenter />} />
-        <Route path="/visits" element={<VisitsPage />} />
-        <Route path="/ai-reader" element={<AIDocumentReader />} />
+        <Route path="/attendance" element={<ModuleGate module="taskosphere"><Attendance /></ModuleGate>} />
+        <Route path="/reminders" element={<ModuleGate module="taskosphere"><Reminders /></ModuleGate>} />
+        <Route path="/action-center" element={<ModuleGate module="taskosphere"><ActionCenter /></ModuleGate>} />
+        <Route path="/visits" element={<ModuleGate module="taskosphere"><VisitsPage /></ModuleGate>} />
+        <Route path="/ai-reader" element={<ModuleGate module="taskosphere"><AIDocumentReader /></ModuleGate>} />
 
         {/* ── Compliance ── */}
-        <Route path="/compliance-dashboard" element={<ComplianceDashboard />} />
-        <Route path="/compliance" element={<CompliancePage />} />
-        <Route path="/gst-reconciliation" element={<GSTReconciliation />} />
-        <Route path="/trademark-sphere" element={<TrademarkSphere />} />
+        <Route path="/compliance-dashboard" element={<ModuleGate module="compliance"><ComplianceDashboard /></ModuleGate>} />
+        <Route path="/compliance" element={<ModuleGate module="compliance"><CompliancePage /></ModuleGate>} />
+        <Route path="/gst-reconciliation" element={<ModuleGate module="compliance"><GSTReconciliation /></ModuleGate>} />
+        <Route path="/trademark-sphere" element={<ModuleGate module="compliance"><TrademarkSphere /></ModuleGate>} />
 
         {/* ── Records ── */}
-        <Route path="/records-dashboard" element={<RecordsDashboard />} />
-        <Route path="/dsc" element={<DSCRegister />} />
-        <Route path="/documents" element={<DocumentRegister />} />
-        <Route path="/clients" element={<Clients />} />
-        <Route path="/passwords" element={<PasswordRepository />} />
+        <Route path="/records-dashboard" element={<ModuleGate module="records"><RecordsDashboard /></ModuleGate>} />
+        <Route path="/dsc" element={<ModuleGate module="records"><DSCRegister /></ModuleGate>} />
+        <Route path="/documents" element={<ModuleGate module="records"><DocumentRegister /></ModuleGate>} />
+        <Route path="/clients" element={<ModuleGate module="records"><Clients /></ModuleGate>} />
+        <Route path="/passwords" element={<ModuleGate module="records"><PasswordRepository /></ModuleGate>} />
 
         {/* ── Client proposals ── */}
-        <Route path="/client-proposals-dashboard" element={<ClientProposalsDashboard />} />
-        <Route path="/leads" element={<LeadsPage />} />
-        <Route path="/quotations" element={<Quotations />} />
+        <Route path="/client-proposals-dashboard" element={<ModuleGate module="proposals"><ClientProposalsDashboard /></ModuleGate>} />
+        <Route path="/leads" element={<ModuleGate module="proposals"><LeadsPage /></ModuleGate>} />
+        <Route path="/quotations" element={<ModuleGate module="proposals"><Quotations /></ModuleGate>} />
 
         {/* ── Accounts ── */}
-        <Route path="/finix-dashboard" element={<FinixDashboard />} />
-        <Route path="/invoicing" element={<Invoicing />} />
-        <Route path="/purchase" element={<Purchase />} />
-        <Route path="/bank-accounts" element={<BankAccounts />} />
-        <Route path="/chart-of-accounts" element={<ChartOfAccounts />} />
-        <Route path="/journal-entries" element={<JournalEntries />} />
-        <Route path="/accounting-reports" element={<AccountingReports />} />
-        <Route path="/zero-touch-entry" element={<ZeroTouchEntry />} />
-        <Route path="/gst-portal-sync" element={<GSTPortalSync />} />
-        <Route path="/accounting-integrity" element={<AccountingIntegrity />} />
-        <Route path="/day-book" element={<ExtendedReports />} />
-        <Route path="/cash-bank-book" element={<ExtendedReports />} />
-        <Route path="/cash-flow" element={<ExtendedReports />} />
-        <Route path="/outstanding-report" element={<ExtendedReports />} />
-        <Route path="/bank-reconciliation" element={<ExtendedReports />} />
-        <Route path="/depreciation" element={<ExtendedReports />} />
-        <Route path="/tds-tcs" element={<ExtendedReports />} />
-        <Route path="/financial-ratios" element={<ExtendedReports />} />
-        <Route path="/comparative-report" element={<ExtendedReports />} />
-        <Route path="/yearly-report" element={<ExtendedReports />} />
-        <Route path="/opening-balances" element={<ExtendedReports />} />
-        <Route path="/accounting-audit-trail" element={<ExtendedReports />} />
-        <Route path="/bulk-import" element={<ExtendedReports />} />
-        <Route path="/due-dates" element={<DueDates />} />
-        <Route path="/import-invoices" element={<ImportInvoices />} />
+        <Route path="/finix-dashboard" element={<ModuleGate module="finix"><FinixDashboard /></ModuleGate>} />
+        <Route path="/invoicing" element={<ModuleGate module="finix"><Invoicing /></ModuleGate>} />
+        <Route path="/purchase" element={<ModuleGate module="finix"><Purchase /></ModuleGate>} />
+        <Route path="/bank-accounts" element={<ModuleGate module="finix"><BankAccounts /></ModuleGate>} />
+        <Route path="/chart-of-accounts" element={<ModuleGate module="finix"><ChartOfAccounts /></ModuleGate>} />
+        <Route path="/journal-entries" element={<ModuleGate module="finix"><JournalEntries /></ModuleGate>} />
+        <Route path="/accounting-reports" element={<ModuleGate module="finix"><AccountingReports /></ModuleGate>} />
+        <Route path="/zero-touch-entry" element={<ModuleGate module="finix"><ZeroTouchEntry /></ModuleGate>} />
+        <Route path="/gst-portal-sync" element={<ModuleGate module="finix"><GSTPortalSync /></ModuleGate>} />
+        <Route path="/accounting-integrity" element={<ModuleGate module="finix"><AccountingIntegrity /></ModuleGate>} />
+        <Route path="/day-book" element={<ModuleGate module="finix"><ExtendedReports /></ModuleGate>} />
+        <Route path="/cash-bank-book" element={<ModuleGate module="finix"><ExtendedReports /></ModuleGate>} />
+        <Route path="/cash-flow" element={<ModuleGate module="finix"><ExtendedReports /></ModuleGate>} />
+        <Route path="/outstanding-report" element={<ModuleGate module="finix"><ExtendedReports /></ModuleGate>} />
+        <Route path="/bank-reconciliation" element={<ModuleGate module="finix"><ExtendedReports /></ModuleGate>} />
+        <Route path="/depreciation" element={<ModuleGate module="finix"><ExtendedReports /></ModuleGate>} />
+        <Route path="/tds-tcs" element={<ModuleGate module="finix"><ExtendedReports /></ModuleGate>} />
+        <Route path="/financial-ratios" element={<ModuleGate module="finix"><ExtendedReports /></ModuleGate>} />
+        <Route path="/comparative-report" element={<ModuleGate module="finix"><ExtendedReports /></ModuleGate>} />
+        <Route path="/yearly-report" element={<ModuleGate module="finix"><ExtendedReports /></ModuleGate>} />
+        <Route path="/opening-balances" element={<ModuleGate module="finix"><ExtendedReports /></ModuleGate>} />
+        <Route path="/accounting-audit-trail" element={<ModuleGate module="finix"><ExtendedReports /></ModuleGate>} />
+        <Route path="/bulk-import" element={<ModuleGate module="finix"><ExtendedReports /></ModuleGate>} />
+        <Route path="/due-dates" element={<ModuleGate module="finix"><DueDates /></ModuleGate>} />
+        <Route path="/import-invoices" element={<ModuleGate module="finix"><ImportInvoices /></ModuleGate>} />
 
         {/* ── Admin ── */}
-        <Route path="/people-matrix" element={<PeopleMatrixDashboard />} />
+        <Route path="/people-matrix" element={<ModuleGate module="peopleMatrix"><PeopleMatrixDashboard /></ModuleGate>} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/task-audit" element={<TaskAudit />} />
-        <Route path="/users" element={<Users />} />
-        <Route path="/interviews" element={<Interviews />} />
+        <Route path="/users" element={<ModuleGate module="peopleMatrix"><Users /></ModuleGate>} />
+        <Route path="/interviews" element={<ModuleGate module="peopleMatrix"><Interviews /></ModuleGate>} />
         <Route path="/staff-activity" element={<StaffActivity />} />
         <Route path="/client-portal-manager/*" element={<ClientPortalManagerPage />} />
         <Route path="/whatsapp-hub" element={<WhatsAppHub />} />
