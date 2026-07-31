@@ -317,30 +317,69 @@ MODULE_HIERARCHY: Dict[str, Dict[str, Any]] = {
     "records": {
         "flag": "can_access_records",
         "label": "Records",
-        "description": "DSC Register, Document Register, Clients and Password Vault.",
+        "description": "DSC Register, Document Register, Clients, Password Vault, Templates and Uploads.",
         "pages": [
             {"flag": "can_view_all_dsc",   "label": "DSC Register"},
             {"flag": "can_view_documents", "label": "Document Register"},
             {"flag": "can_view_passwords", "label": "Password Vault (view)"},
             {"flag": "can_edit_passwords", "label": "Password Vault (manage)"},
+            {"flag": "can_view_templates", "label": "Templates (view)"},
+            {"flag": "can_manage_templates", "label": "Templates (manage)"},
+            {"flag": "can_view_uploads",   "label": "Uploads (view)"},
+            {"flag": "can_manage_uploads", "label": "Uploads (manage)"},
         ],
     },
     "proposals": {
         "flag": "can_access_proposals",
         "label": "Client Proposals",
-        "description": "Lead management and quotations.",
+        "description": "Lead management, quotations and client discussion threads.",
         "pages": [
             {"flag": "can_view_all_leads",    "label": "Lead Management"},
             {"flag": "can_create_quotations", "label": "Quotations"},
+            {"flag": "can_view_client_discussion",   "label": "Client Discussion (view)"},
+            {"flag": "can_manage_client_discussion", "label": "Client Discussion (manage)"},
         ],
     },
     "people_matrix": {
         "flag": "can_access_people_matrix",
         "label": "People Matrix",
-        "description": "User directory and Employee Interviews (HRMS).",
+        "description": "User directory, Attendance, Leave, Payroll, HR, Recruitment, Performance and Employee Interviews (HRMS).",
         "pages": [
             {"flag": "can_view_user_page",  "label": "User Directory"},
             {"flag": "can_view_interviews", "label": "Employee Interviews"},
+            {"flag": "can_view_leave",        "label": "Leave (view)"},
+            {"flag": "can_manage_leave",      "label": "Leave (manage)"},
+            {"flag": "can_view_payroll",      "label": "Payroll (view)"},
+            {"flag": "can_manage_payroll",    "label": "Payroll (manage)"},
+            {"flag": "can_view_hr",           "label": "HR (view)"},
+            {"flag": "can_manage_hr",         "label": "HR (manage)"},
+            {"flag": "can_view_recruitment",  "label": "Recruitment (view)"},
+            {"flag": "can_manage_recruitment","label": "Recruitment (manage)"},
+            {"flag": "can_view_performance",  "label": "Performance (view)"},
+            {"flag": "can_manage_performance","label": "Performance (manage)"},
+        ],
+    },
+    # Admin is intentionally NOT gated by a stored per-user flag the way the
+    # other six modules are — role == "admin" is itself the gate (see
+    # section 1 of the governance spec: "Admin should NEVER require any
+    # permission"). It is included here only so the module tree / dynamic
+    # sidebar can render it uniformly; `has_module_access()` in
+    # backend/governance_core.py special-cases "admin" to `user.role == "admin"`
+    # rather than looking up a flag.
+    "admin": {
+        "flag": "can_access_admin",
+        "label": "Admin",
+        "description": "Users, Permission Matrix, Audit Logs, Settings, Master Data, Roles and Activity Logs.",
+        "pages": [
+            {"flag": "can_view_user_page",     "label": "Users"},
+            {"flag": "can_manage_permissions", "label": "Permission Matrix"},
+            {"flag": "can_view_audit_logs",    "label": "Audit Logs"},
+            {"flag": "can_manage_settings",    "label": "Settings"},
+            {"flag": "can_view_master_data",   "label": "Master Data (view)"},
+            {"flag": "can_manage_master_data", "label": "Master Data (manage)"},
+            {"flag": "can_view_roles",         "label": "Roles (view)"},
+            {"flag": "can_manage_roles",       "label": "Roles (manage)"},
+            {"flag": "can_view_staff_activity","label": "Activity Logs"},
         ],
     },
 }
@@ -458,6 +497,55 @@ class UserPermissions(BaseModel):
     can_access_records: bool = False
     can_access_proposals: bool = False
     can_access_people_matrix: bool = False
+    # Admin is role-gated, not flag-gated (see MODULE_HIERARCHY["admin"] note
+    # above) — this flag exists only for uniform module-tree rendering and is
+    # never consulted by has_module_access() for real access decisions.
+    can_access_admin: bool = False
+
+    # ── New pages added under the centralized Governance & Permission Matrix
+    # (records, proposals, people_matrix, admin) — all default False / staff
+    # scope, granted the same way as every other page flag above, through
+    # Permission Governance. Nothing here changes any existing flag's
+    # behaviour or default.
+    can_view_templates: bool = False
+    can_manage_templates: bool = False
+    can_view_uploads: bool = False
+    can_manage_uploads: bool = False
+    can_view_client_discussion: bool = False
+    can_manage_client_discussion: bool = False
+    can_view_leave: bool = False
+    can_manage_leave: bool = False
+    can_view_payroll: bool = False
+    can_manage_payroll: bool = False
+    can_view_hr: bool = False
+    can_manage_hr: bool = False
+    can_view_recruitment: bool = False
+    can_manage_recruitment: bool = False
+    can_view_performance: bool = False
+    can_manage_performance: bool = False
+    can_view_master_data: bool = False
+    can_manage_master_data: bool = False
+    can_view_roles: bool = False
+    can_manage_roles: bool = False
+    can_manage_permissions: bool = False   # Admin → Permission Matrix (grant/revoke others' access)
+
+    # ── Centralized action-level + visibility governance (additive layer) ───
+    # `governance_matrix`: { "<module>.<page_flag>": ["view","create","edit",
+    #   "delete","export","approve", ...] } — fine-grained action grants on
+    # top of the page flags above. A page flag above still gates whether the
+    # page is reachable at all (VISIBILITY of the page); this matrix governs
+    # which ACTIONS are available once on it. Empty/absent = no per-action
+    # restriction beyond the legacy flags (see has_action_access() in
+    # backend/governance_core.py for the exact fallback rules — this keeps
+    # every page that predates this system working exactly as before).
+    governance_matrix: Dict[str, List[str]] = Field(default_factory=dict)
+    # `visibility_matrix`: { "<resource_type>": {"scope": "own"|"selected_users"
+    #   |"selected_departments"|"selected_roles"|"organization", "selected": [...]}}
+    # Generalizes the existing view_other_tasks / assigned_clients / etc.
+    # list-fields into one place for NEW resource types going forward.
+    # Existing resource types keep using their original list-fields — see
+    # has_visibility_access() for the mapping.
+    visibility_matrix: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="ignore")
 
