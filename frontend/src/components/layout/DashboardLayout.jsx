@@ -213,6 +213,31 @@ const SECTION_META = {
   settings:      { label: 'Settings',               icon: Settings,       landingPath: '/settings/general' },
 };
 const SECTION_ORDER = ['core', 'accounts', 'compliance', 'records', 'proposals', 'people-matrix', 'admin', 'settings'];
+
+// GROUP_MODULE_FLAG: maps each of the 6 main permission modules (Taskosphere /
+// Finix / Compliance / Records / Client Proposals / People Matrix) to its
+// master "module access" flag from the Permission Governance hierarchy
+// (see backend/models.py::MODULE_HIERARCHY). A user who lacks the module's
+// master flag never sees ANY item in that group, regardless of individual
+// page-level permission flags — those are always an additional, narrower
+// check on top of this one. Admin (Task Audit / Client Portal / Inbox) and
+// Settings are intentionally left out: they are not part of the 6 main
+// permission modules and keep working exactly as before.
+const GROUP_MODULE_FLAG = {
+  core:            'can_access_taskosphere',
+  accounts:        'can_access_finix',
+  compliance:      'can_access_compliance',
+  records:         'can_access_records',
+  proposals:       'can_access_proposals',
+  'people-matrix': 'can_access_people_matrix',
+};
+
+// Reverse lookup: nav item path → the NAV_GROUPS id it belongs to. Built
+// once from the static NAV_GROUPS config above.
+const ITEM_GROUP_ID = new Map();
+NAV_GROUPS.forEach((group) => {
+  group.items.forEach((item) => ITEM_GROUP_ID.set(item.path, group.id));
+});
 // Admin + Settings render as their own right-aligned cluster in the section
 // bar (common ERP/business-software convention — day-to-day modules on the
 // left, account/system controls pinned to the right).
@@ -367,6 +392,16 @@ const DashboardLayout = ({ children }) => {
 
   const checkNavPermission = (item) => {
     if (item.adminOnly) return user?.role === 'admin';
+
+    // Module-level gate: an item belonging to one of the 6 main permission
+    // modules is hidden entirely unless that module's master flag is on —
+    // admins always bypass this, same as every other permission check here.
+    if (user?.role !== 'admin') {
+      const groupId    = ITEM_GROUP_ID.get(item.path);
+      const moduleFlag = GROUP_MODULE_FLAG[groupId];
+      if (moduleFlag && !hasPermission(moduleFlag)) return false;
+    }
+
     const permission = item.permission;
     if (!permission) return true;
     if (user?.role === 'admin') return true;
