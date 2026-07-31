@@ -169,17 +169,8 @@ performance_router = _build_router(
     collection="performance_records", resource_type="performance", audit_module="performance",
 )
 
-# ── Records ───────────────────────────────────────────────────────────────
-templates_router = _build_router(
-    prefix="/templates", tag="Templates", module_key="records",
-    view_flag="can_view_templates", manage_flag="can_manage_templates",
-    collection="record_templates", resource_type="templates", audit_module="templates",
-)
-uploads_router = _build_router(
-    prefix="/uploads", tag="Uploads", module_key="records",
-    view_flag="can_view_uploads", manage_flag="can_manage_uploads",
-    collection="record_uploads", resource_type="uploads", audit_module="uploads",
-)
+# ── Records ──────────────────────────────────────────────────────────────
+# (Templates / Uploads registers were removed — unused in the product.)
 
 # ── Client Proposals ─────────────────────────────────────────────────────
 client_discussion_router = _build_router(
@@ -202,6 +193,6 @@ roles_router = _build_router(
 
 ALL_GOVERNED_ROUTERS: List[APIRouter] = [
     leave_router, payroll_router, hr_router, recruitment_router, performance_router,
-    templates_router, uploads_router, client_discussion_router,
+    client_discussion_router,
     master_data_router, roles_router,
 ]
