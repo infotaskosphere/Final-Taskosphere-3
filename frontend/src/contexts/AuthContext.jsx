@@ -34,21 +34,24 @@ export const AuthProvider = ({ children }) => {
     return { token, storedUser };
   };
 
-  const persistAuth = (token, userData, rememberMe = false) => {
+  const persistAuth = (token, userData, rememberMe = false, sessionToken = null) => {
     const storage = rememberMe ? localStorage : sessionStorage;
     storage.setItem("token", token);
     storage.setItem("user", JSON.stringify(userData));
+    if (sessionToken) storage.setItem("session_token", sessionToken);
     api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
   };
 
   const clearStorage = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
+    localStorage.removeItem("session_token");
     localStorage.removeItem("taskosphere_last_active");
     localStorage.removeItem("taskosphere_tab_closed");
     localStorage.removeItem("taskosphere_keep_signed_in"); // ← clear flag on logout
     sessionStorage.removeItem("token");
     sessionStorage.removeItem("user");
+    sessionStorage.removeItem("session_token");
     delete api.defaults.headers.common["Authorization"];
   };
 
@@ -189,8 +192,9 @@ export const AuthProvider = ({ children }) => {
   ============================================================ */
 
   const login = (responseData, rememberMe = false) => {
-    const token    = responseData?.access_token || responseData?.token;
-    const userData = responseData?.user || responseData?.data?.user;
+    const token       = responseData?.access_token || responseData?.token;
+    const userData    = responseData?.user || responseData?.data?.user;
+    const sessionToken = responseData?.session_token || responseData?.data?.session_token || null;
 
     if (!token || !userData) {
       console.error("Invalid login response:", responseData);
@@ -198,7 +202,7 @@ export const AuthProvider = ({ children }) => {
     }
 
     userData.permissions = normalizePermissions(userData.permissions);
-    persistAuth(token, userData, rememberMe);
+    persistAuth(token, userData, rememberMe, sessionToken);
     setUser(userData);
 
     // ── Auto-authenticate desktop agent (non-blocking) ──
@@ -209,18 +213,28 @@ export const AuthProvider = ({ children }) => {
 
   /* ============================================================
   Logout
-  NOTE: Call this from your Punch-Out handler too, so "keep signed in"
-  sessions are properly terminated on punch-out:
-    import { useAuth } from "@/contexts/AuthContext";
-    const { logout } = useAuth();
-    // inside punch-out handler:
-    await recordPunchOut(); // your existing punch-out API call
-    logout();
+  Also revokes the server-side session record via POST /auth/logout
+  (see backend/server.py). Called on manual logout, 6h inactivity,
+  and — per Dashboard.jsx's handlePunchAction — automatically after
+  a successful Punch Out, so "keep signed in" sessions are properly
+  terminated once the workday ends.
   ============================================================ */
 
   const logout = async () => {
+    const sessionToken =
+      localStorage.getItem("session_token") || sessionStorage.getItem("session_token");
+
     try {
       window.__STOP_ACTIVITY__ = true;
+      // Best-effort: revoke the session record on the backend so it no
+      // longer shows as "active" (e.g. in a super-admin sessions view).
+      // Fails silently if the token is already expired/missing/offline —
+      // local storage is cleared regardless so the user is logged out either way.
+      try {
+        await api.post("/auth/logout", { session_token: sessionToken || undefined });
+      } catch (revokeErr) {
+        console.warn("Session revoke on logout failed (non-fatal).", revokeErr);
+      }
       resetAgentAuth();
       clearStorage();
       setUser(null);
