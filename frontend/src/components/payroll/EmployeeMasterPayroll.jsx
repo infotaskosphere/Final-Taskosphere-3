@@ -1,10 +1,16 @@
-// EmployeeMasterPayroll.jsx — employee + salary structure master with UAN / ESIC IP
-// details, bulk Excel import and a downloadable template.
-// Renamed from EmployeeMaster.jsx to avoid collision with the existing
-// frontend/src/pages/EmployeeMaster.jsx (People Matrix HRMS page, backed by
-// backend/hr_core.py) — different component, different data source, same name.
+// EmployeeMasterPayroll.jsx — payroll setup (salary structure, PF, ESI, bank)
+// for employees, with bulk Excel import and a downloadable template.
+//
+// The roster itself is NOT owned here — it's the firm's real Users list
+// (People Matrix → Users). This page only lets you configure the
+// payroll-only fields Users doesn't have (PAN/Aadhaar, UAN/EPS/VPF, ESIC IP,
+// bank details, salary structure, monthly TDS) for a user that already
+// exists. "Add employee" therefore picks from users who don't have payroll
+// set up yet, instead of creating a free-floating record — name, DOB, date
+// of joining, department and active/inactive status always come straight
+// from Users and are shown read-only here so the two can never drift apart.
 import React, { useMemo, useRef, useState } from 'react';
-import { Plus, Pencil, Trash2, Upload, Download, Search } from 'lucide-react';
+import { Plus, Pencil, Trash2, Upload, Download, Search, Loader2, UserCog } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,16 +20,17 @@ import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { toast } from 'sonner';
-import { blankEmployee, upsertEmployee, removeEmployee, importEmployees } from '@/lib/payroll/store';
+import { blankEmployee, upsertEmployee, removeEmployee, importEmployees, listUnconfiguredUsers } from '@/lib/payroll/store';
 import { downloadEmployeeTemplate, parseEmployeeSheet } from '@/lib/payroll/exports';
 import { rupee } from '@/lib/payroll/statutory';
 
 const grossOf = (e) =>
   Object.values(e.structure || {}).reduce((s, v) => s + (Number(v) || 0), 0);
 
-export default function EmployeeMasterPayroll({ employees, onChange, canEdit = true }) {
+export default function EmployeeMasterPayroll({ employees, loading = false, onChange, canEdit = true }) {
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState(null);
+  const [picker, setPicker] = useState(null); // { loading, users } while "Add employee" is open
   const fileRef = useRef(null);
 
   const filtered = useMemo(() => {
@@ -36,11 +43,36 @@ export default function EmployeeMasterPayroll({ employees, onChange, canEdit = t
   }, [employees, query]);
 
   const save = () => {
-    if (!editing.name?.trim()) return toast.error('Name is required');
-    upsertEmployee({ ...editing, bank: { ...editing.bank, accountHolder: editing.bank?.accountHolder || editing.name } });
+    upsertEmployee(editing);
     setEditing(null);
     onChange();
-    toast.success('Employee saved');
+    toast.success('Payroll details saved');
+  };
+
+  const openAddPicker = async () => {
+    setPicker({ loading: true, users: [] });
+    try {
+      const users = await listUnconfiguredUsers();
+      setPicker({ loading: false, users });
+    } catch {
+      setPicker({ loading: false, users: [] });
+      toast.error('Could not load users');
+    }
+  };
+
+  const pickUser = (user) => {
+    const uid_ = user.id || user._id;
+    setEditing({
+      ...blankEmployee(),
+      id: uid_,
+      name: user.full_name || user.email,
+      dob: user.birthday || '',
+      doj: user.joining_date || '',
+      department: (user.departments || [])[0] || '',
+      designation: (user.departments || [])[0] || '',
+      monthlySalaryOnFile: user.monthly_salary ?? null,
+    });
+    setPicker(null);
   };
 
   const onImport = async (file) => {
@@ -48,9 +80,13 @@ export default function EmployeeMasterPayroll({ employees, onChange, canEdit = t
     try {
       const rows = await parseEmployeeSheet(file);
       const valid = rows.filter((r) => r.name);
-      importEmployees(valid);
+      const { matched, skipped } = await importEmployees(valid);
       onChange();
-      toast.success(`Imported ${valid.length} employees`);
+      if (skipped > 0) {
+        toast.warning(`Matched ${matched} to existing users, skipped ${skipped} — no matching user by email/name. Create them in Users first.`);
+      } else {
+        toast.success(`Updated payroll details for ${matched} employees`);
+      }
     } catch {
       toast.error('Could not read that file — use the template layout');
     }
@@ -67,7 +103,7 @@ export default function EmployeeMasterPayroll({ employees, onChange, canEdit = t
         <Button variant="outline" onClick={downloadEmployeeTemplate}><Download className="w-4 h-4 mr-2" />Template</Button>
         <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={(e) => onImport(e.target.files?.[0])} />
         <Button variant="outline" disabled={!canEdit} onClick={() => fileRef.current?.click()}><Upload className="w-4 h-4 mr-2" />Import</Button>
-        <Button disabled={!canEdit} onClick={() => setEditing(blankEmployee())}><Plus className="w-4 h-4 mr-2" />Add employee</Button>
+        <Button disabled={!canEdit} onClick={openAddPicker}><Plus className="w-4 h-4 mr-2" />Add employee</Button>
       </div>
 
       <Card className="overflow-x-auto">
@@ -84,10 +120,17 @@ export default function EmployeeMasterPayroll({ employees, onChange, canEdit = t
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.length === 0 && (
-              <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-10">No employees yet — add one or import the template.</TableCell></TableRow>
+            {loading && (
+              <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-10">
+                <Loader2 className="w-4 h-4 animate-spin inline mr-2" />Loading users…
+              </TableCell></TableRow>
             )}
-            {filtered.map((e) => (
+            {!loading && filtered.length === 0 && (
+              <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-10">
+                No users found. Add people under People Matrix → Users, then set up their payroll here.
+              </TableCell></TableRow>
+            )}
+            {!loading && filtered.map((e) => (
               <TableRow key={e.id}>
                 <TableCell className="font-mono text-xs">{e.code || '—'}</TableCell>
                 <TableCell>
@@ -96,12 +139,29 @@ export default function EmployeeMasterPayroll({ employees, onChange, canEdit = t
                 </TableCell>
                 <TableCell className="font-mono text-xs">{e.pf?.uan || <span className="text-muted-foreground">not covered</span>}</TableCell>
                 <TableCell className="font-mono text-xs">{e.esi?.ipNumber || <span className="text-muted-foreground">not covered</span>}</TableCell>
-                <TableCell className="text-right">{rupee(grossOf(e))}</TableCell>
-                <TableCell><Badge variant={e.status === 'active' ? 'default' : 'secondary'}>{e.status}</Badge></TableCell>
+                <TableCell className="text-right">
+                  {e.configured ? rupee(grossOf(e)) : (
+                    <span className="text-muted-foreground text-xs">
+                      {e.monthlySalaryOnFile ? `${rupee(e.monthlySalaryOnFile)} (on file)` : 'not set up'}
+                    </span>
+                  )}
+                </TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <Badge variant={e.status === 'active' ? 'default' : 'secondary'}>{e.status}</Badge>
+                    {!e.configured && <Badge variant="outline" className="text-amber-600 border-amber-300">payroll not set up</Badge>}
+                  </div>
+                </TableCell>
                 <TableCell>
                   <div className="flex justify-end gap-1">
-                    <Button size="icon" variant="ghost" disabled={!canEdit} onClick={() => setEditing(JSON.parse(JSON.stringify(e)))}><Pencil className="w-4 h-4" /></Button>
-                    <Button size="icon" variant="ghost" disabled={!canEdit} onClick={() => { removeEmployee(e.id); onChange(); }}><Trash2 className="w-4 h-4" /></Button>
+                    <Button size="icon" variant="ghost" title={e.configured ? 'Edit payroll details' : 'Set up payroll'}
+                      disabled={!canEdit} onClick={() => setEditing(JSON.parse(JSON.stringify(e)))}>
+                      {e.configured ? <Pencil className="w-4 h-4" /> : <UserCog className="w-4 h-4" />}
+                    </Button>
+                    <Button size="icon" variant="ghost" title="Reset payroll setup (does not delete the user)"
+                      disabled={!canEdit || !e.configured} onClick={() => { removeEmployee(e.id); onChange(); }}>
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
                   </div>
                 </TableCell>
               </TableRow>
@@ -110,24 +170,58 @@ export default function EmployeeMasterPayroll({ employees, onChange, canEdit = t
         </Table>
       </Card>
 
+      {/* Add employee — pick an existing user who isn't set up for payroll yet */}
+      <Dialog open={!!picker} onOpenChange={(o) => !o && setPicker(null)}>
+        <DialogContent className="max-w-lg max-h-[75vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Add employee to payroll</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground -mt-2">
+            Choose a user to set up salary structure, PF, ESI and bank details for. Not seeing someone?
+            Add them under People Matrix → Users first.
+          </p>
+          <div className="space-y-1 max-h-[45vh] overflow-y-auto">
+            {picker?.loading && (
+              <div className="text-center py-8 text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin inline mr-2" />Loading users…</div>
+            )}
+            {!picker?.loading && picker?.users.length === 0 && (
+              <div className="text-center py-8 text-muted-foreground text-sm">Every user already has payroll set up.</div>
+            )}
+            {!picker?.loading && picker?.users.map((u) => (
+              <button key={u.id || u._id} onClick={() => pickUser(u)}
+                className="w-full flex items-center justify-between gap-2 p-2.5 rounded-lg text-left hover:bg-muted">
+                <div>
+                  <div className="text-sm font-medium">{u.full_name || u.email}</div>
+                  <div className="text-xs text-muted-foreground">{[(u.departments || [])[0], u.email].filter(Boolean).join(' · ')}</div>
+                </div>
+                <Plus className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+              </button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Payroll setup dialog — personal/employment fields are read-only,
+          sourced from Users; only payroll-specific fields are editable. */}
       <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>{editing?.id ? 'Edit employee' : 'New employee'}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editing?.configured ? `Edit payroll — ${editing?.name}` : `Set up payroll — ${editing?.name}`}</DialogTitle></DialogHeader>
           {editing && (
             <div className="space-y-6">
-              <Section title="Personal & employment">
+              <Section title="Personal & employment (from Users — edit in People Matrix → Users)">
+                <ReadOnlyField label="Full name" value={editing.name} />
+                <ReadOnlyField label="Date of birth" value={editing.dob} />
+                <ReadOnlyField label="Date of joining" value={editing.doj} />
+                <ReadOnlyField label="Department" value={editing.department} />
+                <ReadOnlyField label="Mobile" value={editing.mobile} />
+                <ReadOnlyField label="Status" value={editing.status} />
+              </Section>
+
+              <Section title="Payroll identifiers & compliance details">
                 <Field label="Employee code" value={editing.code} onChange={(v) => setEditing({ ...editing, code: v })} />
-                <Field label="Full name" value={editing.name} onChange={(v) => setEditing({ ...editing, name: v })} />
                 <Field label="Father / husband name" value={editing.fatherName} onChange={(v) => setEditing({ ...editing, fatherName: v })} />
                 <Field label="Gender (M/F/T)" value={editing.gender} onChange={(v) => setEditing({ ...editing, gender: v })} />
-                <Field label="Date of birth" type="date" value={editing.dob} onChange={(v) => setEditing({ ...editing, dob: v })} />
-                <Field label="Date of joining" type="date" value={editing.doj} onChange={(v) => setEditing({ ...editing, doj: v })} />
-                <Field label="Date of leaving" type="date" value={editing.dol} onChange={(v) => setEditing({ ...editing, dol: v })} />
-                <Field label="Designation" value={editing.designation} onChange={(v) => setEditing({ ...editing, designation: v })} />
-                <Field label="Department" value={editing.department} onChange={(v) => setEditing({ ...editing, department: v })} />
                 <Field label="PAN" value={editing.pan} onChange={(v) => setEditing({ ...editing, pan: v.toUpperCase() })} />
                 <Field label="Aadhaar" value={editing.aadhaar} onChange={(v) => setEditing({ ...editing, aadhaar: v })} />
-                <Field label="Mobile" value={editing.mobile} onChange={(v) => setEditing({ ...editing, mobile: v })} />
+                <Field label="Date of leaving (if applicable)" type="date" value={editing.dol} onChange={(v) => setEditing({ ...editing, dol: v })} />
               </Section>
 
               <Section title="Salary structure (monthly)">
@@ -135,7 +229,10 @@ export default function EmployeeMasterPayroll({ employees, onChange, canEdit = t
                   <Field key={k} label={labelFor(k)} type="number" value={editing.structure[k]}
                     onChange={(v) => setEditing({ ...editing, structure: { ...editing.structure, [k]: Number(v) || 0 } })} />
                 ))}
-                <div className="col-span-full text-sm text-muted-foreground">Gross: <strong>{rupee(grossOf(editing))}</strong></div>
+                <div className="col-span-full text-sm text-muted-foreground">
+                  Gross: <strong>{rupee(grossOf(editing))}</strong>
+                  {editing.monthlySalaryOnFile ? ` · ${rupee(editing.monthlySalaryOnFile)} on file in Users` : ''}
+                </div>
               </Section>
 
               <Section title="Provident Fund">
@@ -162,7 +259,6 @@ export default function EmployeeMasterPayroll({ employees, onChange, canEdit = t
                 <Field label="IFSC" value={editing.bank.ifsc} onChange={(v) => setEditing({ ...editing, bank: { ...editing.bank, ifsc: v.toUpperCase() } })} />
                 <Field label="Bank name" value={editing.bank.bankName} onChange={(v) => setEditing({ ...editing, bank: { ...editing.bank, bankName: v } })} />
                 <Field label="Monthly TDS" type="number" value={editing.monthlyTds} onChange={(v) => setEditing({ ...editing, monthlyTds: Number(v) || 0 })} />
-                <Field label="Status (active/inactive)" value={editing.status} onChange={(v) => setEditing({ ...editing, status: v })} />
               </Section>
             </div>
           )}
@@ -194,6 +290,17 @@ function Field({ label, value, onChange, type = 'text' }) {
     <div className="space-y-1">
       <Label className="text-xs text-muted-foreground">{label}</Label>
       <Input type={type} value={value ?? ''} onChange={(e) => onChange(e.target.value)} />
+    </div>
+  );
+}
+
+function ReadOnlyField({ label, value }) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs text-muted-foreground">{label}</Label>
+      <div className="h-9 flex items-center px-3 rounded-md border bg-muted/40 text-sm text-muted-foreground">
+        {value || '—'}
+      </div>
     </div>
   );
 }
