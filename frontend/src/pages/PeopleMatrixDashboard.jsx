@@ -20,9 +20,9 @@ const MODULES = [
     color: HUB_COLORS.emeraldGreen, adminOnly: true, countKey: 'activityToday',
   },
   {
-    path: '/interviews', icon: Briefcase, label: 'Employee Interviews',
-    description: 'Track candidates, resumes and hiring pipeline status.',
-    color: '#7C3AED', permission: 'can_view_interviews', countKey: 'interviews',
+    path: '/recruitment', icon: Briefcase, label: 'Recruitment',
+    description: 'Track candidates, resumes and the hiring pipeline end-to-end.',
+    color: '#7C3AED', permission: 'can_view_recruitment', countKey: 'recruitment',
   },
   {
     path: '/reports', icon: BarChart3, label: 'Reports',
@@ -51,9 +51,9 @@ export default function PeopleMatrixDashboard() {
       setLoading(true);
       const today = new Date().toISOString().slice(0, 10);
       const requests = {
-        users:      api.get('/users', { _silent: true }),
-        interviews: api.get('/interviews', { _silent: true }),
-        activity:   api.get('/activity/summary', { params: { date_from: today, date_to: today + 'T23:59:59' }, _silent: true }),
+        users:       api.get('/users', { _silent: true }),
+        recruitment: api.get('/recruitment', { _silent: true }),
+        activity:    api.get('/activity/summary', { params: { date_from: today, date_to: today + 'T23:59:59' }, _silent: true }),
       };
       const keys = Object.keys(requests);
       const results = await Promise.allSettled(keys.map((k) => requests[k]));
@@ -82,7 +82,7 @@ export default function PeopleMatrixDashboard() {
   const stats = [
     { label: 'Total Staff',   value: fmt(counts.users),         loading },
     { label: 'Active Today',  value: fmt(counts.activityToday), loading },
-    { label: 'Candidates',    value: fmt(counts.interviews),    loading },
+    { label: 'Candidates',    value: fmt(counts.recruitment),    loading },
   ];
 
   return (
@@ -99,7 +99,7 @@ export default function PeopleMatrixDashboard() {
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-8">
         <StatCard icon={Users}    label="Total Staff"  value={fmt(counts.users)}         loading={loading} color={HUB_COLORS.mediumBlue}   isDark={isDark} />
         <StatCard icon={Activity} label="Active Today"  value={fmt(counts.activityToday)} loading={loading} color={HUB_COLORS.emeraldGreen} isDark={isDark} />
-        <StatCard icon={Briefcase} label="Candidates"   value={fmt(counts.interviews)}    loading={loading} color="#7C3AED"                  isDark={isDark} />
+        <StatCard icon={Briefcase} label="Candidates"   value={fmt(counts.recruitment)}    loading={loading} color="#7C3AED"                  isDark={isDark} />
       </div>
 
       <h2 className={`text-sm font-extrabold uppercase tracking-widest mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
