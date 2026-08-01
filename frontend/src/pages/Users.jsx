@@ -176,7 +176,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_send_reminders: false,      // admin-granted only
       can_view_user_page: false,      // admin-granted only
       can_view_audit_logs: false,     // admin-granted only
-      can_view_interviews: false,     // admin-granted only
+      can_view_recruitment: false,    // admin-granted only
+      can_manage_recruitment: false,  // admin-granted only
       can_view_selected_users_reports: true,  // Reports → VIEW (Team scope)
       can_view_todo_dashboard: true,  // To Do → VIEW (Own + Team)
       can_use_chat: false,            // admin-granted only
@@ -235,7 +236,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_send_reminders: false,      // admin-granted only
       can_view_user_page: false,      // admin-granted only
       can_view_audit_logs: false,     // admin-granted only
-      can_view_interviews: false,     // admin-granted only
+      can_view_recruitment: false,    // admin-granted only
+      can_manage_recruitment: false,  // admin-granted only
       can_view_selected_users_reports: false, // admin-granted only (staff sees own reports only)
       can_view_todo_dashboard: true,  // To Do → VIEW (Own)
       can_use_chat: false,            // admin-granted only
@@ -316,7 +318,8 @@ const GLOBAL_PERMS = [
   { key: 'can_view_client_portal',          label: 'Client Portal Manager',        desc: 'Access the Client Portal Manager (admin-level module)',   icon: Building2   },
   { key: 'can_manage_whatsapp',             label: 'WhatsApp Settings',            desc: 'Access and configure WhatsApp integration settings',     icon: MessageSquare },
   { key: 'can_access_whatsapp_hub', label: 'WhatsApp Hub', desc: 'Access the WhatsApp Hub multi-account inbox', icon: MessageCircle },
-  { key: 'can_view_interviews',     label: 'Employee Interviews', desc: 'Access the Employee Interviews & candidate management page', icon: Briefcase },
+  { key: 'can_view_recruitment',    label: 'Recruitment (view)',   desc: 'Access the Recruitment page — candidate pipeline & interviews', icon: Briefcase },
+  { key: 'can_manage_recruitment',  label: 'Recruitment (manage)', desc: 'Create, edit and delete candidates, and convert hires to users', icon: Briefcase },
 ];
 
 const OPS_PERMS = [
@@ -503,7 +506,7 @@ const PermissionMatrixSummary = ({ permissions }) => {
     'can_manage_chart_of_accounts', 'can_view_journal_entries', 'can_post_journal_entries', 'can_match_bank',
     'can_view_accounting_reports', 'can_view_passwords', 'can_edit_passwords', 'can_view_gst_reconciliation',
     'can_view_trademark_sphere', 'can_view_client_portal', 'can_manage_whatsapp', 'can_create_quotations',
-    'can_view_interviews',
+    'can_view_recruitment', 'can_manage_recruitment',
     // Main permission module master switches (Modules tab)
     'can_access_taskosphere', 'can_access_finix', 'can_access_compliance',
     'can_access_records', 'can_access_proposals', 'can_access_people_matrix',
@@ -748,10 +751,11 @@ const MODULE_TREE = [
   },
   {
     key: 'people_matrix', flag: 'can_access_people_matrix', label: 'People Matrix', icon: Fingerprint, accent: '#0F766E',
-    desc: 'User directory and Employee Interviews (HRMS).',
+    desc: 'User directory and Recruitment (HRMS).',
     pages: [
-      { permKey: 'can_view_user_page',  label: 'User Directory',      desc: 'View the team members directory',                          icon: UsersIcon },
-      { permKey: 'can_view_interviews', label: 'Employee Interviews', desc: 'Access the Employee Interviews & candidate management page', icon: Briefcase },
+      { permKey: 'can_view_user_page',    label: 'User Directory',        desc: 'View the team members directory',                                icon: UsersIcon },
+      { permKey: 'can_view_recruitment',  label: 'Recruitment (view)',    desc: 'Access the Recruitment page — candidate pipeline & interviews',  icon: Briefcase },
+      { permKey: 'can_manage_recruitment', label: 'Recruitment (manage)', desc: 'Create, edit and delete candidates, and convert hires to users', icon: Briefcase },
     ],
   },
 ];
