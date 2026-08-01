@@ -3,7 +3,7 @@
 // advice output.
 //
 // LOP (loss-of-pay) days are pulled automatically from the real Attendance
-// system (see lib/payroll/attendance.js) for the selected month whenever
+// system (see lib/payroll/linkAttendance.js) for the selected month whenever
 // settings.attendance.autoCalculateLop is on (the default). This only ever
 // prefills a value the person hasn't already set for this run — a saved
 // draft's numbers, or anything typed in by hand, are never silently
@@ -19,7 +19,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { toast } from 'sonner';
 import { computePayrollLine, summarise, MONTHS, rupee, periodLabel, dueDates } from '@/lib/payroll/statutory';
 import { getRun, saveRun } from '@/lib/payroll/store';
-import { attendanceSummaryForEmployees } from '@/lib/payroll/attendance';
+import { attendanceSummaryForEmployees } from '@/lib/payroll/linkAttendance';
 import { downloadSalaryRegister, downloadBankAdvice, downloadAllPayslips, downloadPayslip } from '@/lib/payroll/exports';
 
 export default function PayrollRun({ employees, employeesLoading = false, settings, month, year, setMonth, setYear, onSaved, canEdit = true }) {
