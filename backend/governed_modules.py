@@ -1,11 +1,17 @@
 """
-Governed Modules — the 10 pages named in the Governance & Permission Matrix
-spec that did not exist anywhere in this codebase yet:
+Governed Modules — the 9 remaining pages named in the Governance & Permission
+Matrix spec that did not exist anywhere in this codebase yet:
 
-    People Matrix : Leave, Payroll, HR, Recruitment, Performance
+    People Matrix : Leave, Payroll, HR, Performance
     Records       : Templates, Uploads
     Client Proposals : Client Discussion
     Admin         : Master Data, Roles
+
+(Recruitment used to be a stub here too, but it has been merged with the
+former "Employee Interviews" page into one full-featured module — see
+backend/recruitment.py — since a real candidate pipeline already existed
+and a second, disconnected generic-CRUD "Recruitment" page next to it was
+confusing and redundant.)
 
 Each is deliberately a thin, working CRUD skeleton (list / create / update /
 delete + audit log), not a fully-designed feature — the point of this file
@@ -158,11 +164,6 @@ hr_router = _build_router(
     view_flag="can_view_hr", manage_flag="can_manage_hr",
     collection="hr_records", resource_type="hr", audit_module="hr",
 )
-recruitment_router = _build_router(
-    prefix="/recruitment", tag="Recruitment", module_key="people_matrix",
-    view_flag="can_view_recruitment", manage_flag="can_manage_recruitment",
-    collection="recruitment_records", resource_type="recruitment", audit_module="recruitment",
-)
 performance_router = _build_router(
     prefix="/performance", tag="Performance", module_key="people_matrix",
     view_flag="can_view_performance", manage_flag="can_manage_performance",
@@ -192,7 +193,7 @@ roles_router = _build_router(
 )
 
 ALL_GOVERNED_ROUTERS: List[APIRouter] = [
-    leave_router, payroll_router, hr_router, recruitment_router, performance_router,
+    leave_router, payroll_router, hr_router, performance_router,
     client_discussion_router,
     master_data_router, roles_router,
 ]
