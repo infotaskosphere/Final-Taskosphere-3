@@ -120,6 +120,22 @@ export default function PayrollSettings({ settings, onChange, canEdit = true }) 
             <Switch checked={draft.payslip.showEmployerContribution} onCheckedChange={(v) => set('payslip.showEmployerContribution', v)} />
           </div>
         </Card>
+        <Card className="p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="font-semibold text-sm">Attendance → LOP</div>
+            <Switch checked={draft.attendance.autoCalculateLop} onCheckedChange={(v) => set('attendance.autoCalculateLop', v)} />
+          </div>
+          <div className="text-xs text-muted-foreground">
+            When on, loss-of-pay days on the Process payroll tab are pulled automatically from each
+            employee's attendance for the selected month, instead of being typed in by hand. It's
+            always still editable per employee before finalising.
+          </div>
+          <div className="flex items-center justify-between rounded-md border px-3 py-2">
+            <Label className="text-xs">Treat approved leave as LOP too</Label>
+            <Switch checked={draft.attendance.countLeaveAsLop} onCheckedChange={(v) => set('attendance.countLeaveAsLop', v)} />
+          </div>
+          <F label="Half-day / early-leave weight" type="number" v={draft.attendance.halfDayAsLop} on={(v) => set('attendance.halfDayAsLop', Number(v))} />
+        </Card>
       </div>
 
       <Card className="p-4 flex flex-wrap gap-2">
