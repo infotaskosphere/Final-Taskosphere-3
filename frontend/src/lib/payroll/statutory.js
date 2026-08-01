@@ -49,6 +49,15 @@ export const DEFAULT_SETTINGS = {
   gratuity: { enabled: true, rate: 4.81 },
   bonus: { enabled: true, minRate: 8.33, maxRate: 20, wageCeiling: 21000, calcCeiling: 7000 },
   payslip: { showEmployerContribution: true, footNote: 'This is a computer generated payslip.' },
+  // Loss-of-pay is derived from the real Attendance/Leave system
+  // (GET /attendance/history) instead of being typed in by hand. See
+  // frontend/src/lib/payroll/attendance.js for exactly how each status maps
+  // to LOP days — these three knobs are what a firm can tune from Settings.
+  attendance: {
+    autoCalculateLop: true,   // pull LOP days from attendance instead of manual entry
+    countLeaveAsLop: false,   // treat approved 'leave' records as LOP too (on if there's no separate paid-leave-balance policy)
+    halfDayAsLop: 0.5,        // weight for half-day / early-leave records
+  },
 };
 
 export const ESI_ZERO_WAGE_REASONS = [
