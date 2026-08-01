@@ -716,20 +716,17 @@ const DashboardLayout = ({ children }) => {
               <Menu className="h-5 w-5" />
             </button>
 
-            <AnimatePresence initial={false}>
-              <motion.h1
-                key={location.pathname}
-                className={`text-xs sm:text-sm font-semibold truncate min-w-0 tracking-tight max-w-[80px] xs:max-w-[130px] sm:max-w-[260px] ${
-                  isDark ? 'text-slate-100' : 'text-slate-800'
-                }`}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
-                transition={{ type: 'spring', stiffness: 400, damping: 26 }}
-              >
-                {activeLabel}
-              </motion.h1>
-            </AnimatePresence>
+            <motion.h1
+              key={location.pathname}
+              className={`text-xs sm:text-sm font-semibold truncate min-w-0 tracking-tight max-w-[80px] xs:max-w-[130px] sm:max-w-[260px] ${
+                isDark ? 'text-slate-100' : 'text-slate-800'
+              }`}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 26 }}
+            >
+              {activeLabel}
+            </motion.h1>
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
