@@ -10,7 +10,7 @@ import {
   CreditCard, Fingerprint, Bell, Shield, ShieldCheck, ArrowLeftRight, MessageCircle,
   Building2, Zap, Briefcase, ShoppingBag, Landmark, BookOpen, NotebookPen,
   ScanLine, Lock, Search, Loader2,
-  Wallet, CalendarOff, TrendingUp, UserPlus,
+  Wallet, CalendarOff, UserPlus,
   Database, FolderOpen, MessagesSquare,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -182,7 +182,6 @@ const NAV_GROUPS = [
       { path: '/payroll',        icon: Wallet,        label: 'Payroll',     permission: 'can_view_payroll'     },
       { path: '/hr',              icon: Briefcase,    label: 'HR',          permission: 'can_view_hr'          },
       { path: '/recruitment',     icon: UserPlus,     label: 'Recruitment', permission: 'can_view_recruitment' },
-      { path: '/performance',     icon: TrendingUp,   label: 'Performance', permission: 'can_view_performance' },
     ],
   },
   {
@@ -299,7 +298,6 @@ const EXTRA_PAGE_TITLES = {
   '/payroll': 'Payroll',
   '/hr': 'HR',
   '/recruitment': 'Recruitment',
-  '/performance': 'Performance',
   '/admin-dashboard': 'Admin Dashboard',
   '/task-audit': 'Task Audit',
   '/client-portal-manager': 'Client Portal Manager',
