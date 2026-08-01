@@ -1,11 +1,24 @@
 """
-Employee Interviews module.
+Recruitment module (formerly "Employee Interviews", merged with the generic
+"Recruitment" stub that used to live in backend/governed_modules.py).
 
-Lets HR/admin staff log every candidate interviewed, the pay scale offered,
-conditions, training period, department & experience — then, once a
-candidate is hired, convert them straight into a system User without
-re-typing anything (all fields pre-filled from the interview record but
-fully editable before the account is created).
+Lets HR/admin staff run the whole hiring pipeline in one place: log every
+candidate, where they came from (source), what they're interviewing for,
+rate them, track expected salary / notice period, record the pay scale
+offered, conditions and training period — then, once a candidate is hired,
+convert them straight into a system User without re-typing anything (all
+fields pre-filled from the candidate record but fully editable before the
+account is created).
+
+Adds, on top of what "Employee Interviews" already did:
+  - `source` (Referral / LinkedIn / Naukri / Indeed / Walk-in / Campus / Other)
+    so recruiters can see which channels actually produce hires.
+  - `expected_salary` and `notice_period`, captured alongside the offered
+    pay scale so there's no back-and-forth over email to find them again.
+  - `rating` (1-5), a quick recruiter gut-check independent of the AI score.
+  - `tags`, free-form labels (e.g. "urgent", "referral-bonus-eligible").
+  - `GET /recruitment/stats` — pipeline counts by status, hires this month,
+    and a source breakdown, for a dashboard summary strip on the page.
 """
 
 import io
@@ -14,7 +27,7 @@ import re
 import uuid
 import logging
 from datetime import datetime, timezone
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from pydantic import BaseModel, Field, ConfigDict, EmailStr, field_validator
@@ -23,39 +36,41 @@ from bson import ObjectId
 from backend.dependencies import db, get_current_user, create_audit_log, _get_perm
 from backend.governance_core import has_action_access
 
-router = APIRouter(prefix="/interviews", tags=["Employee Interviews"])
+router = APIRouter(prefix="/recruitment", tags=["Recruitment"])
 logger = logging.getLogger(__name__)
 
 
 # ====================== PERMISSIONS ======================
-# Employee Interviews sits under People Matrix > "can_view_interviews" in
-# MODULE_HIERARCHY (backend/models.py), which now declares actions
-# ["view", "create", "edit", "export"] for this page. `assert_can_manage`
-# stays the single gate every route below already calls; it now also
-# consults the centralized Action layer (backend/governance_core.py) so an
-# admin can optionally restrict a specific user to read-only Interviews
-# access via their `governance_matrix`. Nobody's access changes unless an
-# admin explicitly sets that up — has_action_access() falls back to True
-# when governance_matrix has no entry for this page, which is true for
-# every account today.
+# Recruitment sits under People Matrix > "can_view_recruitment" /
+# "can_manage_recruitment" in MODULE_HIERARCHY (backend/models.py), which
+# declares actions ["view", "export"] for the view flag and
+# ["create", "edit", "delete"] for the manage flag. `assert_can_manage`
+# stays the single gate every route below calls; it also consults the
+# centralized Action layer (backend/governance_core.py) so an admin can
+# optionally restrict a specific user to read-only Recruitment access via
+# their `governance_matrix`. Nobody's access changes unless an admin
+# explicitly sets that up — has_action_access() falls back to the plain
+# can_view_recruitment / can_manage_recruitment flags when governance_matrix
+# has no entry for this page, which is true for every account today.
 
 
 def _can_manage(current_user, action: str = "view") -> bool:
-    """Admin always has access. Other roles need can_view_interviews permission,
-    and — if an admin has explicitly restricted this user's Interviews actions
-    via the Permission Matrix — the specific `action` requested."""
+    """Admin always has access. Other roles need can_view_recruitment
+    permission, and — if an admin has explicitly restricted this user's
+    Recruitment actions via the Permission Matrix — the specific `action`
+    requested."""
     if getattr(current_user, "role", None) == "admin":
         return True
-    if not _get_perm(current_user, "can_view_interviews"):
+    if not _get_perm(current_user, "can_view_recruitment"):
         return False
-    return has_action_access(current_user, "can_view_interviews", action)
+    return has_action_access(current_user, "people_matrix", "can_view_recruitment", action)
 
 
 def assert_can_manage(current_user, action: str = "view"):
     if not _can_manage(current_user, action):
         raise HTTPException(
             status_code=403,
-            detail="You do not have permission to access Employee Interviews",
+            detail="You do not have permission to access Recruitment",
         )
 
 
@@ -85,6 +100,20 @@ class CandidateBase(BaseModel):
     attendance: Literal["pending", "attended", "not_attended"] = "pending"
     interview_feedback: Optional[str] = None
 
+    # ── Sourcing & pipeline extras (merged in from the Recruitment page) ────
+    source: Optional[
+        Literal[
+            "Referral", "LinkedIn", "Naukri", "Indeed", "Walk-in",
+            "Campus", "Job Portal", "Agency", "Other",
+        ]
+    ] = None
+    expected_salary: Optional[str] = None
+    notice_period: Optional[str] = None
+    rating: Optional[int] = Field(
+        None, ge=1, le=5, description="Recruiter's own 1-5 gut-check rating"
+    )
+    tags: List[str] = Field(default_factory=list)
+
     pay_scale_offered: Optional[str] = None
     conditions: Optional[str] = None
     training_period: Optional[str] = None
@@ -108,6 +137,8 @@ class CandidateBase(BaseModel):
         "interview_time",
         "interviewer",
         "interview_feedback",
+        "expected_salary",
+        "notice_period",
         "pay_scale_offered",
         "conditions",
         "training_period",
@@ -117,6 +148,21 @@ class CandidateBase(BaseModel):
     @classmethod
     def empty_to_none(cls, v):
         return None if v == "" else v
+
+    @field_validator("source", mode="before")
+    @classmethod
+    def source_empty_to_none(cls, v):
+        return None if v in ("", None) else v
+
+    @field_validator("rating", mode="before")
+    @classmethod
+    def rating_empty_to_none(cls, v):
+        if v in ("", None):
+            return None
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
 
     @field_validator("experience_years", mode="before")
     @classmethod
@@ -128,9 +174,9 @@ class CandidateBase(BaseModel):
         except (TypeError, ValueError):
             return None
 
-    @field_validator("skills", mode="before")
+    @field_validator("skills", "tags", mode="before")
     @classmethod
-    def skills_to_list(cls, v):
+    def csv_to_list(cls, v):
         if isinstance(v, str):
             return [s.strip() for s in v.split(",") if s.strip()]
         return v or []
@@ -155,6 +201,16 @@ class CandidateUpdate(BaseModel):
     interviewer: Optional[str] = None
     attendance: Optional[Literal["pending", "attended", "not_attended"]] = None
     interview_feedback: Optional[str] = None
+    source: Optional[
+        Literal[
+            "Referral", "LinkedIn", "Naukri", "Indeed", "Walk-in",
+            "Campus", "Job Portal", "Agency", "Other",
+        ]
+    ] = None
+    expected_salary: Optional[str] = None
+    notice_period: Optional[str] = None
+    rating: Optional[int] = Field(None, ge=1, le=5)
+    tags: Optional[List[str]] = None
     pay_scale_offered: Optional[str] = None
     conditions: Optional[str] = None
     training_period: Optional[str] = None
@@ -776,6 +832,7 @@ async def _ai_structure_resume(resume_text: str) -> dict:
 async def list_candidates(
     status_filter: Optional[str] = None,
     department: Optional[str] = None,
+    source: Optional[str] = None,
     search: Optional[str] = None,
     current_user=Depends(get_current_user),
 ):
@@ -785,6 +842,8 @@ async def list_candidates(
         query["status"] = status_filter
     if department:
         query["department"] = department
+    if source:
+        query["source"] = source
     if search:
         rx = {"$regex": re.escape(search), "$options": "i"}
         query["$or"] = [
@@ -798,6 +857,47 @@ async def list_candidates(
         await db.interview_candidates.find(query).sort("created_at", -1).to_list(1000)
     )
     return [normalize_doc(d) for d in docs]
+
+
+@router.get("/stats")
+async def recruitment_stats(current_user=Depends(get_current_user)):
+    """Pipeline summary for the dashboard strip at the top of the Recruitment
+    page: counts by status, hires this month, and a source breakdown."""
+    assert_can_manage(current_user)
+
+    docs = await db.interview_candidates.find({}, {"_id": 0}).to_list(5000)
+
+    by_status = {
+        "scheduled": 0, "in_review": 0, "selected": 0,
+        "on_hold": 0, "rejected": 0, "hired": 0,
+    }
+    by_source: Dict[str, int] = {}
+    now = datetime.now(timezone.utc)
+    hired_this_month = 0
+
+    for d in docs:
+        st = d.get("status") or "scheduled"
+        by_status[st] = by_status.get(st, 0) + 1
+
+        src = d.get("source") or "Unspecified"
+        by_source[src] = by_source.get(src, 0) + 1
+
+        if st == "hired":
+            updated_at = d.get("updated_at") or d.get("created_at")
+            try:
+                dt = datetime.fromisoformat(updated_at)
+                if dt.year == now.year and dt.month == now.month:
+                    hired_this_month += 1
+            except (TypeError, ValueError):
+                pass
+
+    return {
+        "total": len(docs),
+        "by_status": by_status,
+        "by_source": by_source,
+        "hired_this_month": hired_this_month,
+        "converted_to_user": sum(1 for d in docs if d.get("converted_user_id")),
+    }
 
 
 @router.get("/{candidate_id}")
@@ -828,7 +928,7 @@ async def create_candidate(
     await create_audit_log(
         current_user,
         "create",
-        "interview_candidate",
+        "recruitment_candidate",
         str(result.inserted_id),
         new_data=doc,
     )
@@ -853,7 +953,7 @@ async def update_candidate(
     await create_audit_log(
         current_user,
         "update",
-        "interview_candidate",
+        "recruitment_candidate",
         candidate_id,
         old_data=existing,
         new_data=update_data,
@@ -870,7 +970,7 @@ async def delete_candidate(candidate_id: str, current_user=Depends(get_current_u
         raise HTTPException(status_code=404, detail="Candidate not found")
     await db.interview_candidates.delete_one({"_id": oid})
     await create_audit_log(
-        current_user, "delete", "interview_candidate", candidate_id, old_data=existing
+        current_user, "delete", "recruitment_candidate", candidate_id, old_data=existing
     )
     return {"message": "Candidate deleted"}
 
@@ -1292,7 +1392,7 @@ async def convert_to_user(
     await create_audit_log(
         current_user,
         "convert_to_user",
-        "interview_candidate",
+        "recruitment_candidate",
         candidate_id,
         new_data={"user_id": user_id},
     )
