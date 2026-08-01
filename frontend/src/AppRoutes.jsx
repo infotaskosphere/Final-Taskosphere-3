@@ -65,7 +65,7 @@ const ImportInvoices = lazy(() => import('./pages/ImportInvoices.jsx'));
 const Reports = lazy(() => import('./pages/Reports.jsx'));
 const TaskAudit = lazy(() => import('./pages/TaskAudit.jsx'));
 const Users = lazy(() => import('./pages/Users.jsx'));
-const Interviews = lazy(() => import('./pages/Interviews.jsx'));
+
 const StaffActivity = lazy(() => import('./pages/StaffActivity.jsx'));
 const ClientPortalManagerPage = lazy(() => import('./pages/ClientPortalManagerPage.jsx'));
 const WhatsAppHub = lazy(() => import('./pages/WhatsAppHub.jsx'));
@@ -235,7 +235,6 @@ export default function AppRoutes() {
         <Route path="/reports" element={<Reports />} />
         <Route path="/task-audit" element={<TaskAudit />} />
         <Route path="/users" element={<ModuleGate module="peopleMatrix"><Users /></ModuleGate>} />
-        <Route path="/interviews" element={<ModuleGate module="peopleMatrix"><Interviews /></ModuleGate>} />
         <Route path="/staff-activity" element={<StaffActivity />} />
         <Route path="/client-portal-manager/*" element={<ClientPortalManagerPage />} />
         <Route path="/whatsapp-hub" element={<WhatsAppHub />} />
