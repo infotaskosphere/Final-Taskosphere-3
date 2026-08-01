@@ -1,5 +1,8 @@
-// EmployeeMaster.jsx — employee + salary structure master with UAN / ESIC IP
+// EmployeeMasterPayroll.jsx — employee + salary structure master with UAN / ESIC IP
 // details, bulk Excel import and a downloadable template.
+// Renamed from EmployeeMaster.jsx to avoid collision with the existing
+// frontend/src/pages/EmployeeMaster.jsx (People Matrix HRMS page, backed by
+// backend/hr_core.py) — different component, different data source, same name.
 import React, { useMemo, useRef, useState } from 'react';
 import { Plus, Pencil, Trash2, Upload, Download, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -18,7 +21,7 @@ import { rupee } from '@/lib/payroll/statutory';
 const grossOf = (e) =>
   Object.values(e.structure || {}).reduce((s, v) => s + (Number(v) || 0), 0);
 
-export default function EmployeeMaster({ employees, onChange, canEdit = true }) {
+export default function EmployeeMasterPayroll({ employees, onChange, canEdit = true }) {
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState(null);
   const fileRef = useRef(null);
