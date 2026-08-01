@@ -21,14 +21,20 @@ export default function Payroll() {
   const canEdit = hasActionAccess ? hasActionAccess(MODULE, PAGE, 'edit') : true;
 
   const [employees, setEmployees] = useState([]);
+  const [employeesLoading, setEmployeesLoading] = useState(true);
   const [runs, setRuns] = useState([]);
   const [settings, setSettings] = useState(getSettings());
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() === 0 ? 12 : now.getMonth());
   const [year, setYear] = useState(now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear());
 
-  const refresh = useCallback(() => {
-    setEmployees(listEmployees());
+  const refresh = useCallback(async () => {
+    setEmployeesLoading(true);
+    try {
+      setEmployees(await listEmployees());
+    } finally {
+      setEmployeesLoading(false);
+    }
     setRuns(listRuns());
     setSettings(getSettings());
   }, []);
@@ -55,12 +61,13 @@ export default function Payroll() {
         </TabsList>
 
         <TabsContent value="employees" className="mt-4">
-          <EmployeeMasterPayroll employees={employees} onChange={refresh} canEdit={canEdit} />
+          <EmployeeMasterPayroll employees={employees} loading={employeesLoading} onChange={refresh} canEdit={canEdit} />
         </TabsContent>
 
         <TabsContent value="run" className="mt-4">
           <PayrollRun
             employees={employees}
+            employeesLoading={employeesLoading}
             settings={settings}
             month={month}
             year={year}
