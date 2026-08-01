@@ -78,7 +78,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "view_other_todos": [],
           "view_other_activity": [],
                     "can_access_whatsapp_hub": False,     # ADMIN_GRANTED_ONLY
-          "can_view_interviews": True,          # Admin always has interview access
+          "can_view_recruitment": True,          # Admin always has recruitment access
+          "can_manage_recruitment": True,        # Admin always has recruitment access
           "assigned_clients": [],
           # ── Accounts module governance (Bank / Chart of Accounts / Journal) ──
           # Admin has full access by default. Manager/staff must be granted
@@ -161,7 +162,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "view_other_todos": [],
           "view_other_activity": [],
                     "can_access_whatsapp_hub": False,     # ADMIN_GRANTED_ONLY
-          "can_view_interviews": False,         # ADMIN_GRANTED_ONLY
+          "can_view_recruitment": False,         # ADMIN_GRANTED_ONLY
+          "can_manage_recruitment": False,       # ADMIN_GRANTED_ONLY
           "assigned_clients": [],
           # Accounts module governance — ADMIN_GRANTED_ONLY, request via Permission Governance
           "can_view_purchase": False,
@@ -240,7 +242,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "view_other_todos": [],
           "view_other_activity": [],
                     "can_access_whatsapp_hub": False,     # ADMIN_GRANTED_ONLY
-          "can_view_interviews": False,         # ADMIN_GRANTED_ONLY
+          "can_view_recruitment": False,         # ADMIN_GRANTED_ONLY
+          "can_manage_recruitment": False,       # ADMIN_GRANTED_ONLY
           "assigned_clients": [],
           # Accounts module governance — ADMIN_GRANTED_ONLY, request via Permission Governance
           "can_view_purchase": False,
@@ -345,17 +348,17 @@ MODULE_HIERARCHY: Dict[str, Dict[str, Any]] = {
     "people_matrix": {
         "flag": "can_access_people_matrix",
         "label": "People Matrix",
-        "description": "User directory, Attendance, Leave, Payroll, HR, Recruitment, Performance and Employee Interviews (HRMS).",
+        "description": "User directory, Attendance, Leave, Payroll, HR, Recruitment (candidate pipeline & interviews) and Performance (HRMS).",
         "pages": [
             {"flag": "can_view_user_page",  "label": "User Directory", "actions": ["view", "export"]},
-            {"flag": "can_view_interviews", "label": "Employee Interviews", "actions": ["view", "create", "edit", "delete", "export"]},
+
             {"flag": "can_view_leave",        "label": "Leave (view)", "actions": ["view"]},
             {"flag": "can_manage_leave",      "label": "Leave (manage)", "actions": ["create", "edit", "delete", "approve"]},
             {"flag": "can_view_payroll",      "label": "Payroll (view)", "actions": ["view", "export"]},
             {"flag": "can_manage_payroll",    "label": "Payroll (manage)", "actions": ["create", "edit", "approve"]},
             {"flag": "can_view_hr",           "label": "HR (view)", "actions": ["view"]},
             {"flag": "can_manage_hr",         "label": "HR (manage)", "actions": ["create", "edit", "delete"]},
-            {"flag": "can_view_recruitment",  "label": "Recruitment (view)", "actions": ["view"]},
+            {"flag": "can_view_recruitment",  "label": "Recruitment (view)", "actions": ["view", "export"]},
             {"flag": "can_manage_recruitment","label": "Recruitment (manage)", "actions": ["create", "edit", "delete"]},
             {"flag": "can_view_performance",  "label": "Performance (view)", "actions": ["view"]},
             {"flag": "can_manage_performance","label": "Performance (manage)", "actions": ["create", "edit"]},
@@ -466,10 +469,6 @@ class UserPermissions(BaseModel):
     assigned_clients: List[str] = Field(default_factory=list)
     can_access_whatsapp_hub: bool = False
     governed_users: List[str] = Field(default_factory=list)   # users this person can manage (when can_manage_users=True)
-    # ── Employee Interviews ──────────────────────────────────────────────────
-    # can_view_interviews → access the Employee Interviews page
-    #   Admin always has access. Grant explicitly to HR managers/staff.
-    can_view_interviews: bool = False
     # ── Accounts module governance ───────────────────────────────────────────
     # Purchase / Sale / Bank / Chart of Accounts / Journal Entries / Reports.
     # Admin has all of these True by default (see DEFAULT_ROLE_PERMISSIONS).
