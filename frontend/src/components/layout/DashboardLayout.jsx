@@ -716,7 +716,7 @@ const DashboardLayout = ({ children }) => {
               <Menu className="h-5 w-5" />
             </button>
 
-            <AnimatePresence mode="wait">
+            <AnimatePresence initial={false}>
               <motion.h1
                 key={location.pathname}
                 className={`text-xs sm:text-sm font-semibold truncate min-w-0 tracking-tight max-w-[80px] xs:max-w-[130px] sm:max-w-[260px] ${
