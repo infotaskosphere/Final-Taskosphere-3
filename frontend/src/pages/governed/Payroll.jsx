@@ -6,7 +6,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Users, Calculator, ShieldCheck, BarChart3, Settings2 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useGovernance } from '@/hooks/useGovernance';
-import EmployeeMaster from '@/components/payroll/EmployeeMaster';
+import EmployeeMasterPayroll from '@/components/payroll/EmployeeMasterPayroll';
 import PayrollRun from '@/components/payroll/PayrollRun';
 import ComplianceCenter from '@/components/payroll/ComplianceCenter';
 import PayrollReports from '@/components/payroll/PayrollReports';
@@ -55,7 +55,7 @@ export default function Payroll() {
         </TabsList>
 
         <TabsContent value="employees" className="mt-4">
-          <EmployeeMaster employees={employees} onChange={refresh} canEdit={canEdit} />
+          <EmployeeMasterPayroll employees={employees} onChange={refresh} canEdit={canEdit} />
         </TabsContent>
 
         <TabsContent value="run" className="mt-4">
