@@ -498,6 +498,13 @@ const DashboardLayout = ({ children }) => {
       >
         <Link
           to={item.path}
+          // Warm the Tasks page's lazy chunk on hover/focus so navigating
+          // there (including opening "New Task" from elsewhere) doesn't
+          // have to wait for the code to download first — that download
+          // delay was what made the Create Task dialog look like it
+          // "opened, closed, then reopened" on the first visit.
+          onMouseEnter={item.path === '/tasks' ? () => { import('@/pages/Tasks.jsx').catch(() => {}); } : undefined}
+          onFocus={item.path === '/tasks' ? () => { import('@/pages/Tasks.jsx').catch(() => {}); } : undefined}
           title={collapsed ? item.label : undefined}
           className={`relative flex items-center gap-3 min-w-0
             ${collapsed ? 'justify-center px-0 py-3' : 'px-3 py-2.5'}
