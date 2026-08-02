@@ -67,6 +67,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_trademark_sphere": True,    # Trademark Sphere — admin always has access
           "can_view_mis_report": True,        # MIS Report — admin always has access
           "can_manage_mis_report": True,      # MIS Report — upload / create / delete data
+          "can_view_salary_slips": True,        # Salary Slip Generator — admin always has access
+          "can_manage_salary_slips": True,
           "can_access_whatsapp_hub": True,    # WhatsApp Hub
           "can_view_all_visits": True,
           "can_edit_attendance": True,
@@ -318,7 +320,7 @@ MODULE_HIERARCHY: Dict[str, Dict[str, Any]] = {
     "compliance": {
         "flag": "can_access_compliance",
         "label": "Compliance",
-        "description": "Compliance Tracker, GST Reconciliation and Trademark Sphere.",
+        "description": "Compliance Tracker, GST Reconciliation, Trademark Sphere, MIS Report and the Salary Slip Generator.",
         "pages": [
             {"flag": "can_view_compliance",          "label": "Compliance Tracker (view)", "actions": ["view", "export", "print"]},
             {"flag": "can_manage_compliance",        "label": "Compliance Tracker (manage)", "actions": ["create", "edit", "delete", "approve"]},
@@ -326,6 +328,8 @@ MODULE_HIERARCHY: Dict[str, Dict[str, Any]] = {
             {"flag": "can_view_trademark_sphere",    "label": "Trademark Sphere", "actions": ["view", "create", "edit", "export", "print"]},
             {"flag": "can_view_mis_report",          "label": "MIS Report (view)", "actions": ["view", "export", "print"]},
             {"flag": "can_manage_mis_report",        "label": "MIS Report (manage)", "actions": ["create", "edit", "delete", "upload"]},
+            {"flag": "can_view_salary_slips",        "label": "Salary Slip Generator (view)", "actions": ["view", "export", "print"]},
+            {"flag": "can_manage_salary_slips",      "label": "Salary Slip Generator (manage)", "actions": ["create", "edit", "delete"]},
         ],
     },
     "records": {
@@ -472,6 +476,13 @@ class UserPermissions(BaseModel):
     #   clients from the MIS screen, and edit manual-entry figures.
     can_view_mis_report: bool = False
     can_manage_mis_report: bool = False
+    # ── Salary Slip Generator (Compliance) ───────────────────────────────────
+    # Generates payslips for CLIENT COMPANIES' employees (distinct from the
+    # People Matrix → Payroll module, which runs payroll for the firm's own
+    # staff). Payroll data is sensitive, so — like GST Reconciliation and
+    # Trademark Sphere — this is admin-granted only by default.
+    can_view_salary_slips: bool = False
+    can_manage_salary_slips: bool = False
     # ── Visit-specific permissions ───────────────────────────────────────────
     can_view_all_visits: bool = False
     can_edit_visits: bool = False
