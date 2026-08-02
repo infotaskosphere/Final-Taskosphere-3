@@ -32,6 +32,7 @@ const CompliancePage = lazy(() => import('./pages/CompliancePage.jsx'));
 const GSTReconciliation = lazy(() => import('./pages/GSTReconciliation.jsx'));
 const TrademarkSphere = lazy(() => import('./pages/TrademarkSphere.jsx'));
 const MISReport = lazy(() => import('./pages/MISReport.jsx'));
+const SalarySlips = lazy(() => import('./pages/SalarySlips.jsx'));
 
 /* ── Records ──────────────────────────────────────────────────────────── */
 const ClientApprovals = lazy(() => import('./pages/ClientApprovals.jsx'));
@@ -190,6 +191,7 @@ export default function AppRoutes() {
         <Route path="/gst-reconciliation" element={<ModuleGate module="compliance"><GSTReconciliation /></ModuleGate>} />
         <Route path="/trademark-sphere" element={<ModuleGate module="compliance"><TrademarkSphere /></ModuleGate>} />
         <Route path="/mis-report" element={<ModuleGate module="compliance"><PageGuard module="compliance" page="can_view_mis_report"><MISReport /></PageGuard></ModuleGate>} />
+        <Route path="/salary-slips" element={<ModuleGate module="compliance"><PageGuard module="compliance" page="can_view_salary_slips"><SalarySlips /></PageGuard></ModuleGate>} />
 
         {/* ── Records ── */}
         <Route path="/records-dashboard" element={<ModuleGate module="records"><RecordsDashboard /></ModuleGate>} />
