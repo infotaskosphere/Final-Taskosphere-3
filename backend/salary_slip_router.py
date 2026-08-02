@@ -310,10 +310,16 @@ class SlipGenerate(BaseModel):
     status: str = "final"                                 # draft | final
 
 
-class BulkGenerateBody(BaseModel):
-    company_key: str
+class SlipPeriod(BaseModel):
     month: int = Field(..., ge=1, le=12)
     year: int = Field(..., ge=2000, le=2100)
+
+
+class BulkGenerateBody(BaseModel):
+    company_key: str
+    month: Optional[int] = Field(None, ge=1, le=12)        # single-period shorthand (back-compat)
+    year: Optional[int] = Field(None, ge=2000, le=2100)
+    periods: Optional[List[SlipPeriod]] = None             # multiple months/years in one request; wins over month/year when given
     employee_ids: Optional[List[str]] = None              # None -> all active employees
     pay_date: Optional[str] = None
     total_days: float = 30
@@ -611,6 +617,14 @@ async def bulk_generate_slips(
     body: BulkGenerateBody,
     current_user: User = Depends(check_module_permission("salary_slips", "create")),
 ):
+    # Accept either a single month/year (back-compat) or an explicit list of
+    # periods — e.g. generating April, May and June payslips in one request.
+    periods: List[SlipPeriod] = body.periods or (
+        [SlipPeriod(month=body.month, year=body.year)] if body.month and body.year else []
+    )
+    if not periods:
+        raise HTTPException(400, "Provide either month & year, or a list of periods")
+
     company = await _resolve_company(body.company_key)
 
     query: Dict[str, Any] = {"company_key": body.company_key}
@@ -620,31 +634,51 @@ async def bulk_generate_slips(
         query["status"] = "active"
     employees = await db.salary_employees.find(query, {"_id": 0}).to_list(2000)
 
+    # Pre-fetch existing slips for these employees across the requested years
+    # so we can skip employee+period combos that already have a payslip,
+    # rather than silently creating duplicates when a range overlaps months
+    # that were already generated.
+    emp_ids = [e["id"] for e in employees]
+    years = sorted({p.year for p in periods})
+    existing = await db.salary_slips.find(
+        {"employee_id": {"$in": emp_ids}, "year": {"$in": years}},
+        {"_id": 0, "employee_id": 1, "month": 1, "year": 1},
+    ).to_list(20000) if emp_ids else []
+    existing_keys = {(e["employee_id"], e["month"], e["year"]) for e in existing}
+
     generated: List[Dict[str, Any]] = []
     skipped: List[Dict[str, str]] = []
 
-    for employee in employees:
-        earnings = _line_items([SalaryLineItem(**it) for it in employee.get("default_earnings", [])])
-        deductions = _line_items([SalaryLineItem(**it) for it in employee.get("default_deductions", [])])
-        if not earnings:
-            skipped.append({"employee_id": employee["id"], "name": employee.get("name", ""),
-                             "reason": "No default salary structure configured"})
-            continue
-        slip_no = await _next_slip_no(body.year)
-        doc = _compute_slip_doc(
-            employee=employee, company=company, month=body.month, year=body.year,
-            pay_date=body.pay_date, total_days=body.total_days, paid_days=body.paid_days,
-            lop_days=body.lop_days, earnings=earnings, deductions=deductions,
-            template=body.template, notes=None, status=body.status,
-            created_by=current_user.id, slip_no=slip_no,
-        )
-        await db.salary_slips.insert_one({**doc, "_id": doc["id"]})
-        doc.pop("_id", None)
-        generated.append(doc)
+    for period in periods:
+        for employee in employees:
+            key = (employee["id"], period.month, period.year)
+            if key in existing_keys:
+                skipped.append({"employee_id": employee["id"], "name": employee.get("name", ""),
+                                 "reason": f"Payslip already exists for {MONTH_NAMES[period.month]} {period.year}"})
+                continue
+            earnings = _line_items([SalaryLineItem(**it) for it in employee.get("default_earnings", [])])
+            deductions = _line_items([SalaryLineItem(**it) for it in employee.get("default_deductions", [])])
+            if not earnings:
+                skipped.append({"employee_id": employee["id"], "name": employee.get("name", ""),
+                                 "reason": "No default salary structure configured"})
+                continue
+            slip_no = await _next_slip_no(period.year)
+            doc = _compute_slip_doc(
+                employee=employee, company=company, month=period.month, year=period.year,
+                pay_date=body.pay_date, total_days=body.total_days, paid_days=body.paid_days,
+                lop_days=body.lop_days, earnings=earnings, deductions=deductions,
+                template=body.template, notes=None, status=body.status,
+                created_by=current_user.id, slip_no=slip_no,
+            )
+            await db.salary_slips.insert_one({**doc, "_id": doc["id"]})
+            doc.pop("_id", None)
+            generated.append(doc)
+            existing_keys.add(key)  # guard against duplicate periods within the same request
 
     return {
         "generated_count": len(generated),
         "skipped_count":   len(skipped),
+        "periods_count":   len(periods),
         "generated":       generated,
         "skipped":         skipped,
     }
