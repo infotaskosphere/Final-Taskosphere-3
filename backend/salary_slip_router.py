@@ -42,9 +42,11 @@ from datetime import datetime, timezone
 from io import BytesIO
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr, Field
+
+import pandas as pd
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -364,6 +366,176 @@ DEDUCTION_PRESETS = ["Provident Fund (EPF)", "Employee State Insurance (ESI)",
 
 
 # ═════════════════════════════════════════════════════════════════════════
+# EXCEL IMPORT — bulk-add a company's employees from a spreadsheet
+# ═════════════════════════════════════════════════════════════════════════
+# The template exposes a fixed set of "plain" fields plus a handful of the
+# most common earnings/deduction columns (mirrors the presets above). Any
+# amount column left blank/zero is simply omitted from that employee's
+# default_earnings/default_deductions — the accountant can still add more
+# exotic components later from the employee's edit modal.
+
+_IMPORT_PLAIN_FIELDS = [
+    # (template header,               employee doc field)
+    ("Name*",                         "name"),
+    ("Employee Code",                 "employee_code"),
+    ("Designation",                   "designation"),
+    ("Department",                    "department"),
+    ("Date of Joining (YYYY-MM-DD)",  "date_of_joining"),
+    ("PAN",                           "pan"),
+    ("UAN",                           "uan"),
+    ("PF Number",                     "pf_number"),
+    ("ESIC Number",                   "esic_number"),
+    ("Bank Name",                     "bank_name"),
+    ("Bank Account No.",              "bank_account"),
+    ("IFSC",                          "ifsc"),
+    ("Email",                         "email"),
+    ("Phone",                         "phone"),
+    ("Status (active/inactive)",      "status"),
+]
+
+_IMPORT_EARNING_COLS = [
+    ("Basic",                        "Basic"),
+    ("HRA",                          "House Rent Allowance (HRA)"),
+    ("Conveyance Allowance",         "Conveyance Allowance"),
+    ("Medical Allowance",            "Medical Allowance"),
+    ("Special Allowance",            "Special Allowance"),
+    ("Other Earnings",               "Other Earnings"),
+]
+_IMPORT_DEDUCTION_COLS = [
+    ("PF (EPF)",                     "Provident Fund (EPF)"),
+    ("ESI",                          "Employee State Insurance (ESI)"),
+    ("Professional Tax",             "Professional Tax"),
+    ("TDS",                          "TDS (Income Tax)"),
+    ("Other Deductions",             "Other Deductions"),
+]
+
+_IMPORT_TEMPLATE_HEADERS = (
+    [h for h, _ in _IMPORT_PLAIN_FIELDS]
+    + [h for h, _ in _IMPORT_EARNING_COLS]
+    + [h for h, _ in _IMPORT_DEDUCTION_COLS]
+)
+
+_IMPORT_EXAMPLE_ROW = [
+    "Rahul Sharma", "EMP-001", "Accountant", "Finance", "2023-06-01",
+    "ABCDE1234F", "100123456789", "PF/12345", "ESIC/98765",
+    "HDFC Bank", "50100123456789", "HDFC0000123",
+    "rahul@example.com", "9876543210", "active",
+    25000, 10000, 1600, 1250, 0, 0,
+    3000, 787, 200, 0, 0,
+]
+
+
+def _norm_header(h: str) -> str:
+    """Loose header match: lowercase, strip, drop anything in parens/asterisks/punctuation."""
+    import re
+    h = str(h or "").lower()
+    h = re.sub(r"\(.*?\)", "", h)          # drop "(YYYY-MM-DD)", "(EPF)" etc.
+    h = re.sub(r"[^a-z0-9]+", " ", h)      # punctuation -> space
+    return h.strip()
+
+
+def _read_employee_file(contents: bytes, filename: str) -> pd.DataFrame:
+    try:
+        if (filename or "").lower().endswith(".csv"):
+            return pd.read_csv(BytesIO(contents), dtype=str)
+        return pd.read_excel(BytesIO(contents), dtype=str)
+    except Exception as exc:
+        raise HTTPException(400, f"Could not parse file: {exc}")
+
+
+def _build_import_column_map(columns: List[str]) -> Dict[str, str]:
+    """Maps each template header -> the actual column name found in the
+    uploaded file (loose match), for every recognised header present."""
+    norm_to_actual = {_norm_header(c): c for c in columns}
+    mapping: Dict[str, str] = {}
+    for header, _field in _IMPORT_PLAIN_FIELDS + _IMPORT_EARNING_COLS + _IMPORT_DEDUCTION_COLS:
+        key = _norm_header(header)
+        if key in norm_to_actual:
+            mapping[header] = norm_to_actual[key]
+    return mapping
+
+
+def _num(val) -> float:
+    try:
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            return 0.0
+        s = str(val).replace(",", "").strip()
+        if not s or s.lower() == "nan":
+            return 0.0
+        return round(float(s), 2)
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _row_to_employee_fields(row: "pd.Series", col_map: Dict[str, str]):
+    """Turns one spreadsheet row into (plain_fields, earnings, deductions)."""
+    def get(header: str) -> str:
+        actual = col_map.get(header)
+        if not actual or actual not in row:
+            return ""
+        v = row[actual]
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return ""
+        return str(v).strip()
+
+    fields: Dict[str, Any] = {}
+    for header, field in _IMPORT_PLAIN_FIELDS:
+        fields[field] = get(header)
+    fields["status"] = fields.get("status", "").lower() if fields.get("status", "").lower() in ("active", "inactive") else "active"
+
+    earnings = [{"label": label, "amount": _num(row.get(col_map[header]))}
+                for header, label in _IMPORT_EARNING_COLS
+                if header in col_map and _num(row.get(col_map[header])) > 0]
+    deductions = [{"label": label, "amount": _num(row.get(col_map[header]))}
+                  for header, label in _IMPORT_DEDUCTION_COLS
+                  if header in col_map and _num(row.get(col_map[header])) > 0]
+
+    return fields, earnings, deductions
+
+
+def _build_import_template_bytes() -> bytes:
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Employees"
+
+    header_fill = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True, size=10)
+
+    for col_idx, header in enumerate(_IMPORT_TEMPLATE_HEADERS, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        ws.column_dimensions[get_column_letter(col_idx)].width = max(14, len(header) * 0.9)
+
+    for col_idx, value in enumerate(_IMPORT_EXAMPLE_ROW, start=1):
+        ws.cell(row=2, column=col_idx, value=value)
+
+    ws.freeze_panes = "A2"
+
+    notes = wb.create_sheet("Instructions")
+    notes["A1"] = "How to use this template"
+    notes["A1"].font = Font(bold=True, size=12)
+    for i, line in enumerate([
+        "Fill one row per employee on the Employees sheet. 'Name*' is the only required column.",
+        "Leave any column blank if it doesn't apply — blank earning/deduction amounts (or 0) are simply skipped.",
+        "'Status' accepts active or inactive (defaults to active if left blank).",
+        "Re-uploading with the same Employee Code (or Name, if no code) updates that employee instead of creating a duplicate.",
+        "Dates should be in YYYY-MM-DD format.",
+    ], start=3):
+        notes[f"A{i}"] = f"• {line}"
+    notes.column_dimensions["A"].width = 100
+
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+# ═════════════════════════════════════════════════════════════════════════
 # MANUAL (AD-HOC) COMPANIES — for companies not present in the Clients DB
 # ═════════════════════════════════════════════════════════════════════════
 
@@ -449,6 +621,20 @@ async def list_employees(
     return items
 
 
+@router.get("/employees/import-template")
+async def download_employee_import_template(
+    current_user: User = Depends(check_module_permission("salary_slips", "view")),
+):
+    # Registered ahead of GET /employees/{employee_id} — otherwise FastAPI
+    # would match "import-template" as an employee_id path param.
+    xlsx_bytes = _build_import_template_bytes()
+    return StreamingResponse(
+        BytesIO(xlsx_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=Employee_Import_Template.xlsx"},
+    )
+
+
 @router.get("/employees/{employee_id}")
 async def get_employee(
     employee_id: str,
@@ -518,6 +704,161 @@ async def delete_employee(
     # Note: previously generated slips are self-contained snapshots and are
     # intentionally left untouched so payslip history stays intact.
     return {"deleted": True}
+
+
+# ── Excel import: preview / commit (template route is above, near GET /employees) ──
+
+@router.post("/employees/import-preview")
+async def preview_employee_import(
+    company_key: str = Form(...),
+    file: UploadFile = File(...),
+    current_user: User = Depends(check_module_permission("salary_slips", "create")),
+):
+    """Parses the uploaded sheet and returns a row-by-row preview (name,
+    code, gross earnings, will-create-vs-update) so the frontend can show a
+    confirmation table before anything is written to the database."""
+    await _resolve_company(company_key)  # 404s early if the company_key is bad
+
+    contents = await file.read()
+    df = _read_employee_file(contents, file.filename or "upload.xlsx")
+    if df.empty:
+        raise HTTPException(400, "The file has no data rows")
+
+    df.columns = [str(c).strip() for c in df.columns]
+    col_map = _build_import_column_map(list(df.columns))
+    if "Name*" not in col_map:
+        raise HTTPException(
+            400,
+            "Couldn't find a 'Name' column. Please use the downloaded template, "
+            f"or make sure a column named 'Name' exists. Columns found: {list(df.columns)}",
+        )
+
+    existing = await db.salary_employees.find(
+        {"company_key": company_key}, {"_id": 0, "id": 1, "name": 1, "employee_code": 1},
+    ).to_list(2000)
+    by_code = {e["employee_code"].strip().lower(): e for e in existing if e.get("employee_code")}
+    by_name = {e["name"].strip().lower(): e for e in existing if e.get("name")}
+
+    rows_preview = []
+    for idx, row in df.iterrows():
+        fields, earnings, deductions = _row_to_employee_fields(row, col_map)
+        name = fields.get("name", "").strip()
+        if not name:
+            rows_preview.append({
+                "row": int(idx) + 2, "name": "", "employee_code": fields.get("employee_code", ""),
+                "status": "error", "reason": "Missing name — row will be skipped", "gross": 0,
+            })
+            continue
+
+        code_key = (fields.get("employee_code") or "").strip().lower()
+        match = by_code.get(code_key) if code_key else None
+        if not match:
+            match = by_name.get(name.lower())
+
+        rows_preview.append({
+            "row": int(idx) + 2,
+            "name": name,
+            "employee_code": fields.get("employee_code", ""),
+            "designation": fields.get("designation", ""),
+            "status": "update" if match else "new",
+            "existing_id": match["id"] if match else None,
+            "gross": _sum_items(earnings),
+            "deductions_total": _sum_items(deductions),
+        })
+
+    error_count = sum(1 for r in rows_preview if r["status"] == "error")
+    new_count = sum(1 for r in rows_preview if r["status"] == "new")
+    update_count = sum(1 for r in rows_preview if r["status"] == "update")
+
+    return {
+        "rows": rows_preview,
+        "total_rows": len(rows_preview),
+        "new_count": new_count,
+        "update_count": update_count,
+        "error_count": error_count,
+    }
+
+
+@router.post("/employees/import")
+async def import_employees(
+    company_key: str = Form(...),
+    file: UploadFile = File(...),
+    skip_updates: bool = Form(False),
+    current_user: User = Depends(check_module_permission("salary_slips", "create")),
+):
+    """Commits the bulk import: inserts new employees and — unless
+    skip_updates is set — updates ones matched by Employee Code (or Name)."""
+    company = await _resolve_company(company_key)
+
+    contents = await file.read()
+    df = _read_employee_file(contents, file.filename or "upload.xlsx")
+    if df.empty:
+        raise HTTPException(400, "The file has no data rows")
+
+    df.columns = [str(c).strip() for c in df.columns]
+    col_map = _build_import_column_map(list(df.columns))
+    if "Name*" not in col_map:
+        raise HTTPException(400, "Couldn't find a 'Name' column. Please use the downloaded template.")
+
+    existing = await db.salary_employees.find(
+        {"company_key": company_key}, {"_id": 0},
+    ).to_list(2000)
+    by_code = {e["employee_code"].strip().lower(): e for e in existing if e.get("employee_code")}
+    by_name = {e["name"].strip().lower(): e for e in existing if e.get("name")}
+
+    created, updated, skipped = [], [], []
+
+    for idx, row in df.iterrows():
+        fields, earnings, deductions = _row_to_employee_fields(row, col_map)
+        name = fields.get("name", "").strip()
+        if not name:
+            skipped.append({"row": int(idx) + 2, "reason": "Missing name"})
+            continue
+
+        code_key = (fields.get("employee_code") or "").strip().lower()
+        match = by_code.get(code_key) if code_key else None
+        if not match:
+            match = by_name.get(name.lower())
+
+        if match:
+            if skip_updates:
+                skipped.append({"row": int(idx) + 2, "name": name, "reason": "Already exists — updates skipped"})
+                continue
+            # Blank cells in the sheet shouldn't blank out fields already saved
+            # on the employee record — only overwrite with non-empty values.
+            updates = {k: v for k, v in fields.items() if v not in ("", None)}
+            updates["default_earnings"] = earnings
+            updates["default_deductions"] = deductions
+            updates["updated_at"] = _now()
+            await db.salary_employees.update_one({"id": match["id"]}, {"$set": updates})
+            updated.append({"row": int(idx) + 2, "id": match["id"], "name": name})
+        else:
+            doc = {
+                "id": _new_id(),
+                **fields,
+                "company_key": company_key,
+                "company_name": company["company_name"],
+                "default_earnings": earnings,
+                "default_deductions": deductions,
+                "created_by": current_user.id,
+                "created_at": _now(),
+                "updated_at": _now(),
+            }
+            await db.salary_employees.insert_one({**doc, "_id": doc["id"]})
+            created.append({"row": int(idx) + 2, "id": doc["id"], "name": name})
+            # Guard against duplicate rows within the same file matching each other
+            by_name[name.lower()] = doc
+            if code_key:
+                by_code[code_key] = doc
+
+    return {
+        "created_count": len(created),
+        "updated_count": len(updated),
+        "skipped_count": len(skipped),
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+    }
 
 
 # ═════════════════════════════════════════════════════════════════════════
