@@ -1065,10 +1065,19 @@ export default function Tasks() {
   // ── Auto-open new task dialog from URL param (?newTask=1) ─────────────
   useEffect(() => {
     if (searchParams.get('newTask') === '1') {
-      setEditingTask(null);
-      setFormData({ ...EMPTY_FORM });
-      setDialogOpen(true);
       setSearchParams({}, { replace: true });
+      // Idempotent: if the dialog is already open (e.g. a double-fired
+      // click on the Dashboard's "+ New Task" button re-delivered this
+      // same param a moment later), don't reset the form / re-open — that
+      // was making the dialog appear to open a second time right after
+      // the first.
+      setDialogOpen((wasOpen) => {
+        if (!wasOpen) {
+          setEditingTask(null);
+          setFormData({ ...EMPTY_FORM });
+        }
+        return true;
+      });
       return;
     }
     const filter = searchParams.get('filter');
