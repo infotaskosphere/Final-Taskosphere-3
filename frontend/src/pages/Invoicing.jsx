@@ -1,4 +1,5 @@
 import Papa from 'papaparse/papaparse.js';
+import { getJsPDF, getHtml2Canvas } from '@/lib/lazyLibs';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import { useDark } from '@/hooks/useDark';
@@ -348,7 +349,7 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
       //    - scale:3 (instead of 2) for sharper text closer to print quality
       //    - useCORS:true for external images (QR codes, logos)
       //    - Proper A4 page slicing
-      const { jsPDF } = window.jspdf;
+      const jsPDF = await getJsPDF();
       const pdf = new jsPDF('p', 'mm', 'a4');
 
       const blob    = new Blob([html], { type: 'text/html;charset=utf-8' });
@@ -402,7 +403,8 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
             );
 
             // Use scale:3 for higher fidelity (closer to print 300dpi)
-            const canvas = await window.html2canvas(iframeDoc.body, {
+            const html2canvas = await getHtml2Canvas();
+            const canvas = await html2canvas(iframeDoc.body, {
               scale:           3,
               useCORS:         true,
               allowTaint:      false,
