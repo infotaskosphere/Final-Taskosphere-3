@@ -1226,6 +1226,14 @@ MODULE_ACTION_MAP: Dict[str, str] = {
     "compliance.create":    "can_manage_compliance",
     "compliance.edit":      "can_manage_compliance",
     "compliance.delete":    "can_manage_compliance",
+    # salary_slips (Compliance → Salary Slip Generator) — payroll data for
+    # client companies' employees is sensitive, so this is a distinct,
+    # admin-granted-only-by-default permission pair, same pattern as
+    # gst_reconciliation / trademark_sphere above.
+    "salary_slips.view":    "can_view_salary_slips",
+    "salary_slips.create":  "can_manage_salary_slips",
+    "salary_slips.edit":    "can_manage_salary_slips",
+    "salary_slips.delete":  "can_manage_salary_slips",
 }
 
 
