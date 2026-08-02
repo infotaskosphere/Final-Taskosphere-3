@@ -15,7 +15,24 @@ import { UserPlus, User, Mail, Lock, Briefcase } from 'lucide-react';
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2', emerald: '#1FAF5A' };
 
+// Defined OUTSIDE Register so it isn't recreated on every keystroke/render.
+// (Previously this was declared inside Register(), which made React treat it as a
+// brand-new component type on every render, unmounting/remounting the <input> and
+// losing focus after each character typed.)
+const Field = ({ id, label, icon: Icon, type, placeholder, value, onChange, testId, labelClr, iconClr, inputSty }) => (
+  <div className="space-y-1.5">
+    <Label htmlFor={id} style={{ color: labelClr }} className="text-sm font-semibold">{label}</Label>
+    <div className="relative">
+      <Icon style={{ color: iconClr }} className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4" />
+      <Input id={id} type={type} placeholder={placeholder} value={value} onChange={onChange}
+        required className="pl-10 h-11 rounded-xl border" style={inputSty}
+        data-testid={testId} />
+    </div>
+  </div>
+);
+
 export default function Register() {
+
   const [email,    setEmail]    = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
@@ -60,18 +77,6 @@ export default function Register() {
     color:       isDark ? '#e2e8f0'             : '#1e293b',
     borderColor: isDark ? 'rgba(51,65,85,0.8)' : '#d1d5db',
   };
-
-  const Field = ({ id, label, icon: Icon, type, placeholder, value, onChange, testId }) => (
-    <div className="space-y-1.5">
-      <Label htmlFor={id} style={{ color: labelClr }} className="text-sm font-semibold">{label}</Label>
-      <div className="relative">
-        <Icon style={{ color: iconClr }} className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4" />
-        <Input id={id} type={type} placeholder={placeholder} value={value} onChange={onChange}
-          required className="pl-10 h-11 rounded-xl border" style={inputSty}
-          data-testid={testId} />
-      </div>
-    </div>
-  );
 
   return (
     <div className="min-h-screen flex relative overflow-hidden" style={{ background: pageBg }}>
@@ -123,9 +128,9 @@ export default function Register() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
-              <Field id="fullName" label="Full Name"    icon={User}     type="text"     placeholder="John Doe"             value={fullName} onChange={e => setFullName(e.target.value)} testId="register-name-input" />
-              <Field id="email"    label="Email"        icon={Mail}     type="email"    placeholder="name@example.com"     value={email}    onChange={e => setEmail(e.target.value)}    testId="register-email-input" />
-              <Field id="password" label="Password"     icon={Lock}     type="password" placeholder="Create a strong password" value={password} onChange={e => setPassword(e.target.value)} testId="register-password-input" />
+              <Field id="fullName" label="Full Name"    icon={User}     type="text"     placeholder="John Doe"             value={fullName} onChange={e => setFullName(e.target.value)} testId="register-name-input"     labelClr={labelClr} iconClr={iconClr} inputSty={inputSty} />
+              <Field id="email"    label="Email"        icon={Mail}     type="email"    placeholder="name@example.com"     value={email}    onChange={e => setEmail(e.target.value)}    testId="register-email-input"    labelClr={labelClr} iconClr={iconClr} inputSty={inputSty} />
+              <Field id="password" label="Password"     icon={Lock}     type="password" placeholder="Create a strong password" value={password} onChange={e => setPassword(e.target.value)} testId="register-password-input" labelClr={labelClr} iconClr={iconClr} inputSty={inputSty} />
 
               {/* Role */}
               <div className="space-y-1.5">
