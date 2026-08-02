@@ -21,6 +21,7 @@ from collections import Counter
 from backend.quickcompany_trademark_router import router as qc_trademark_router
 from backend.whatsapp_hub import router as whatsapp_hub_router
 from backend.compliance import router as compliance_router, create_compliance_indexes
+from backend.salary_slip_router import router as salary_slip_router, create_salary_slip_indexes
 from backend.ai_document_reader import router as ai_document_reader_router
 from backend.gst_reconciliation import router as gst_reconciliation_router
 from backend.mis_report import router as mis_report_router
@@ -531,6 +532,7 @@ async def startup_event():
     try:
         await db.tasks.create_index("assigned_to")
         await create_compliance_indexes()
+        await create_salary_slip_indexes()
         await create_gst_reconciliation_indexes()
         try:
             await db.mis_transactions.create_index([("client_id", 1), ("period", 1), ("doc_type", 1)])
@@ -14116,6 +14118,7 @@ for _governed_router in ALL_GOVERNED_ROUTERS:
 app.include_router(ai_document_reader_router)
 api_router.include_router(trademark_sphere_router)
 app.include_router(trademark_portals_router)  # already has /api/... prefix
+app.include_router(salary_slip_router)        # already has /api/compliance/salary-slips prefix
 api_router.include_router(compliance_router)
 api_router.include_router(gst_reconciliation_router)
 api_router.include_router(mis_report_router)
