@@ -65,6 +65,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_manage_compliance": True,     # Create / edit / delete compliance masters
           "can_view_gst_reconciliation": True,  # GST Reconciliation — admin always has access
           "can_view_trademark_sphere": True,    # Trademark Sphere — admin always has access
+          "can_view_mis_report": True,        # MIS Report — admin always has access
+          "can_manage_mis_report": True,      # MIS Report — upload / create / delete data
           "can_access_whatsapp_hub": True,    # WhatsApp Hub
           "can_view_all_visits": True,
           "can_edit_attendance": True,
@@ -150,6 +152,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "view_password_departments": [],   # defaults to own departments
           "can_view_compliance": True,       # Compliance Tracker → VIEW (Own + Team)
           "can_manage_compliance": True,     # Compliance Tracker → CREATE, EDIT, UPDATE (Own + Team)
+          "can_view_mis_report": False,      # MIS Report — ADMIN_GRANTED_ONLY
+          "can_manage_mis_report": False,    # MIS Report — ADMIN_GRANTED_ONLY
           "can_edit_attendance": True,       # Attendance → EDIT/UPDATE (Own + Team)
           "can_view_all_visits": False,      # SCOPE handled server-side by department query
           "can_edit_visits": True,           # Client Visits → EDIT/UPDATE (Own + Team)
@@ -230,6 +234,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "view_password_departments": [],
           "can_view_compliance": True,       # Compliance Tracker → VIEW (Own)
           "can_manage_compliance": True,     # Compliance Tracker → CREATE, EDIT, UPDATE (Own)
+          "can_view_mis_report": False,      # MIS Report — ADMIN_GRANTED_ONLY
+          "can_manage_mis_report": False,    # MIS Report — ADMIN_GRANTED_ONLY
           "can_edit_attendance": True,       # Attendance → EDIT/UPDATE (Own)
           "can_view_all_visits": False,      # SCOPE: own visits only (server-side scoped)
           "can_edit_visits": True,           # Client Visits → EDIT/UPDATE (Own)
@@ -318,6 +324,8 @@ MODULE_HIERARCHY: Dict[str, Dict[str, Any]] = {
             {"flag": "can_manage_compliance",        "label": "Compliance Tracker (manage)", "actions": ["create", "edit", "delete", "approve"]},
             {"flag": "can_view_gst_reconciliation",  "label": "GST Reconciliation", "actions": ["view", "export"]},
             {"flag": "can_view_trademark_sphere",    "label": "Trademark Sphere", "actions": ["view", "create", "edit", "export", "print"]},
+            {"flag": "can_view_mis_report",          "label": "MIS Report (view)", "actions": ["view", "export", "print"]},
+            {"flag": "can_manage_mis_report",        "label": "MIS Report (manage)", "actions": ["create", "edit", "delete", "upload"]},
         ],
     },
     "records": {
@@ -454,6 +462,16 @@ class UserPermissions(BaseModel):
     # can_view_trademark_sphere → access the Trademark Sphere page
     #   Admin always has access regardless of this flag.
     can_view_trademark_sphere: bool = False
+    # ── MIS Report ───────────────────────────────────────────────────────────
+    # can_view_mis_report → access the MIS Report page (Financial Dashboard,
+    #   Receivables/Payables/Revenue/Expense/Profitability MIS) for clients
+    #   they're allowed to see (scoped by can_view_all_clients/assigned_clients).
+    #   Admin always has access regardless of this flag.
+    # can_manage_mis_report → upload source documents (sales/purchase/bank/
+    #   balance sheet/GST reports), create MIS reports/periods, add new
+    #   clients from the MIS screen, and edit manual-entry figures.
+    can_view_mis_report: bool = False
+    can_manage_mis_report: bool = False
     # ── Visit-specific permissions ───────────────────────────────────────────
     can_view_all_visits: bool = False
     can_edit_visits: bool = False
