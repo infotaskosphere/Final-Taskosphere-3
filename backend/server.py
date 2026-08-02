@@ -23,6 +23,7 @@ from backend.whatsapp_hub import router as whatsapp_hub_router
 from backend.compliance import router as compliance_router, create_compliance_indexes
 from backend.ai_document_reader import router as ai_document_reader_router
 from backend.gst_reconciliation import router as gst_reconciliation_router
+from backend.mis_report import router as mis_report_router
 from backend.gst_reconciliation import create_gst_reconciliation_indexes
 from backend.zero_touch_entry import router as zero_touch_entry_router, create_zte_indexes
 from backend.learning.learning_router import router as learning_router
@@ -531,6 +532,12 @@ async def startup_event():
         await db.tasks.create_index("assigned_to")
         await create_compliance_indexes()
         await create_gst_reconciliation_indexes()
+        try:
+            await db.mis_transactions.create_index([("client_id", 1), ("period", 1), ("doc_type", 1)])
+            await db.mis_uploads.create_index([("client_id", 1), ("period", 1)])
+            await db.mis_manual.create_index([("client_id", 1), ("period", 1)], unique=True)
+        except Exception as _mis_idx_err:
+            logger.warning(f"MIS index creation skipped: {_mis_idx_err}")
         await create_zte_indexes()
         
         # --- PHASE 10 SELF-LEARNING INDEXES ---
@@ -14111,6 +14118,7 @@ api_router.include_router(trademark_sphere_router)
 app.include_router(trademark_portals_router)  # already has /api/... prefix
 api_router.include_router(compliance_router)
 api_router.include_router(gst_reconciliation_router)
+api_router.include_router(mis_report_router)
 api_router.include_router(identix_router, prefix="/identix")
 api_router.include_router(passwords_router)
 api_router.include_router(auth_password_reset_router)
