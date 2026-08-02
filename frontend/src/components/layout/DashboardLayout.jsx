@@ -11,7 +11,7 @@ import {
   Building2, Zap, Briefcase, ShoppingBag, Landmark, BookOpen, NotebookPen,
   ScanLine, Lock, Search, Loader2,
   Wallet, CalendarOff, UserPlus,
-  Database, FolderOpen, MessagesSquare,
+  Database, FolderOpen, MessagesSquare, FileBarChart2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -70,6 +70,7 @@ const NAV_GROUPS = [
       { path: '/compliance',         icon: ShieldCheck,    label: 'Compliance Tracker',  permission: 'can_view_compliance' },
       { path: '/gst-reconciliation', icon: ArrowLeftRight, label: 'GST Reconciliation', permission: 'can_view_gst_reconciliation' },
       { path: '/trademark-sphere', icon: Shield, label: 'Trademark Sphere', permission: 'can_view_trademark_sphere' },
+      { path: '/mis-report', icon: FileBarChart2, label: 'MIS Report', permission: 'can_view_mis_report' },
     ],
   },
   {
