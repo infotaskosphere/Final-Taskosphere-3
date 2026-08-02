@@ -26,6 +26,21 @@ const inr = (n) => `Rs. ${new Intl.NumberFormat('en-IN', { minimumFractionDigits
 
 const sumItems = (items) => (items || []).reduce((s, it) => s + (parseFloat(it.amount) || 0), 0);
 
+/** Expands a from-month/year → to-month/year range into an ordered list of
+ * { month, year } periods (inclusive). Returns [] if "to" is before "from". */
+function buildPeriodRange(fromMonth, fromYear, toMonth, toYear) {
+  const from = Number(fromYear) * 12 + (Number(fromMonth) - 1);
+  const to = Number(toYear) * 12 + (Number(toMonth) - 1);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return [];
+  const periods = [];
+  for (let idx = from; idx <= to; idx++) {
+    periods.push({ month: (idx % 12) + 1, year: Math.floor(idx / 12) });
+  }
+  return periods;
+}
+
+const MAX_BULK_PERIODS = 24;
+
 async function parseBlobError(err) {
   try {
     const blob = err?.response?.data;
@@ -593,9 +608,14 @@ export default function SalarySlips() {
 
   /* ── Generate tab state ───────────────────────────────────────────── */
   const [bulkMode, setBulkMode] = useState(false);
+  const [bulkEmployeeScope, setBulkEmployeeScope] = useState('all'); // 'all' | 'specific'
+  const [bulkEmployeeIds, setBulkEmployeeIds] = useState([]);
+  const [multiMonth, setMultiMonth] = useState(false);
   const [employeeId, setEmployeeId] = useState('');
   const [genMonth, setGenMonth] = useState(now.getMonth() + 1);
   const [genYear, setGenYear] = useState(now.getFullYear());
+  const [genMonthTo, setGenMonthTo] = useState(now.getMonth() + 1);
+  const [genYearTo, setGenYearTo] = useState(now.getFullYear());
   const [payDate, setPayDate] = useState('');
   const [totalDays, setTotalDays] = useState(30);
   const [paidDays, setPaidDays] = useState(30);
@@ -617,7 +637,11 @@ export default function SalarySlips() {
     }
   }, [employeeId, bulkMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { setEmployeeId(''); setLastGenerated(null); }, [companyKey]);
+  useEffect(() => { setEmployeeId(''); setLastGenerated(null); setBulkEmployeeIds([]); }, [companyKey]);
+
+  const toggleBulkEmployee = (id) => {
+    setBulkEmployeeIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
 
   const grossPreview = sumItems(earnings);
   const dedPreview = sumItems(deductions);
@@ -648,16 +672,36 @@ export default function SalarySlips() {
 
   const handleBulkGenerate = async () => {
     if (!companyKey) { toast.error('Select a company first'); return; }
+    if (bulkEmployeeScope === 'specific' && !bulkEmployeeIds.length) {
+      toast.error('Select at least one employee, or switch back to "All active employees"');
+      return;
+    }
+
+    const payload = {
+      company_key: companyKey,
+      pay_date: payDate || null, total_days: Number(totalDays), paid_days: Number(paidDays),
+      lop_days: Number(lopDays), template, status,
+    };
+
+    if (multiMonth) {
+      const periods = buildPeriodRange(genMonth, genYear, genMonthTo, genYearTo);
+      if (!periods.length) { toast.error('"To" period must be the same as or after "From"'); return; }
+      if (periods.length > MAX_BULK_PERIODS) { toast.error(`Choose a range of ${MAX_BULK_PERIODS} months or fewer at a time`); return; }
+      payload.periods = periods;
+    } else {
+      payload.month = Number(genMonth);
+      payload.year = Number(genYear);
+    }
+
+    if (bulkEmployeeScope === 'specific') payload.employee_ids = bulkEmployeeIds;
+
     setBulkGenerating(true);
     setBulkResult(null);
     try {
-      const { data } = await api.post('/compliance/salary-slips/bulk-generate', {
-        company_key: companyKey, month: Number(genMonth), year: Number(genYear),
-        pay_date: payDate || null, total_days: Number(totalDays), paid_days: Number(paidDays),
-        lop_days: Number(lopDays), template, status,
-      });
+      const { data } = await api.post('/compliance/salary-slips/bulk-generate', payload);
       setBulkResult(data);
-      toast.success(`${data.generated_count} payslip(s) generated${data.skipped_count ? `, ${data.skipped_count} skipped` : ''}`);
+      const periodNote = data.periods_count > 1 ? ` across ${data.periods_count} months` : '';
+      toast.success(`${data.generated_count} payslip(s) generated${periodNote}${data.skipped_count ? `, ${data.skipped_count} skipped` : ''}`);
       fetchSummary();
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Bulk generation failed');
@@ -815,7 +859,7 @@ export default function SalarySlips() {
                   className={`flex items-center gap-1.5 text-xs font-semibold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
                 >
                   {bulkMode ? <ToggleRight className="h-5 w-5" style={{ color: HUB_COLORS.mediumBlue }} /> : <ToggleLeft className="h-5 w-5" />}
-                  Bulk generate for whole company
+                  Bulk generate (multiple employees)
                 </button>
               </div>
 
@@ -837,25 +881,120 @@ export default function SalarySlips() {
                   )}
                 </div>
               ) : (
-                <p className={`text-xs rounded-xl p-3 ${isDark ? 'bg-slate-950 text-slate-400' : 'bg-slate-50 text-slate-500'}`}>
-                  Generates one payslip for every <b>active</b> employee under this company, using each employee's saved default earnings/deductions for the period below.
-                </p>
+                <div>
+                  <div className="flex gap-2 mb-3">
+                    <button
+                      onClick={() => setBulkEmployeeScope('all')}
+                      className={`flex-1 rounded-xl border px-3 py-2 text-xs font-semibold ${
+                        bulkEmployeeScope === 'all'
+                          ? isDark ? 'border-blue-500 bg-blue-950/30 text-white' : 'border-blue-400 bg-blue-50 text-slate-900'
+                          : isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-500'
+                      }`}
+                    >
+                      All active employees
+                    </button>
+                    <button
+                      onClick={() => setBulkEmployeeScope('specific')}
+                      className={`flex-1 rounded-xl border px-3 py-2 text-xs font-semibold ${
+                        bulkEmployeeScope === 'specific'
+                          ? isDark ? 'border-blue-500 bg-blue-950/30 text-white' : 'border-blue-400 bg-blue-50 text-slate-900'
+                          : isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-500'
+                      }`}
+                    >
+                      Choose specific employees
+                    </button>
+                  </div>
+
+                  {bulkEmployeeScope === 'all' ? (
+                    <p className={`text-xs rounded-xl p-3 ${isDark ? 'bg-slate-950 text-slate-400' : 'bg-slate-50 text-slate-500'}`}>
+                      Generates one payslip for every <b>active</b> employee under this company, using each employee's saved default earnings/deductions for the period below.
+                    </p>
+                  ) : (
+                    <div className={`rounded-xl border ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                      <div className={`flex items-center justify-between px-3 py-2 text-xs border-b ${isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-500'}`}>
+                        <span>{bulkEmployeeIds.length} of {employees.length} selected</span>
+                        <div className="flex gap-3">
+                          <button onClick={() => setBulkEmployeeIds(employees.map((e) => e.id))} className="font-semibold" style={{ color: HUB_COLORS.mediumBlue }}>Select all</button>
+                          <button onClick={() => setBulkEmployeeIds([])} className="font-semibold">Clear</button>
+                        </div>
+                      </div>
+                      <div className="max-h-56 overflow-y-auto p-2 space-y-1">
+                        {loadingEmployees ? (
+                          <div className="flex justify-center py-6"><Loader2 className="h-4 w-4 animate-spin text-slate-400" /></div>
+                        ) : !employees.length ? (
+                          <p className={`text-xs text-center py-4 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No employees for this company yet.</p>
+                        ) : employees.map((e) => (
+                          <label key={e.id} className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm cursor-pointer ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-50'}`}>
+                            <input type="checkbox" checked={bulkEmployeeIds.includes(e.id)} onChange={() => toggleBulkEmployee(e.id)} />
+                            <span className={isDark ? 'text-slate-200' : 'text-slate-700'}>{e.name}{e.employee_code ? ` (${e.employee_code})` : ''}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
             </Card>
 
             <Card isDark={isDark}>
-              <p className={`text-sm font-extrabold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>Pay period</p>
+              <div className="flex items-center justify-between mb-4">
+                <p className={`text-sm font-extrabold ${isDark ? 'text-white' : 'text-slate-900'}`}>Pay period</p>
+                {bulkMode && (
+                  <button
+                    onClick={() => setMultiMonth((m) => !m)}
+                    className={`flex items-center gap-1.5 text-xs font-semibold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
+                  >
+                    {multiMonth ? <ToggleRight className="h-5 w-5" style={{ color: HUB_COLORS.mediumBlue }} /> : <ToggleLeft className="h-5 w-5" />}
+                    Multiple months
+                  </button>
+                )}
+              </div>
+
+              {bulkMode && multiMonth ? (
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div className={`rounded-xl border p-3 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                    <p className={`text-xs font-bold uppercase tracking-wide mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>From</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <SelectInput isDark={isDark} value={genMonth} onChange={(e) => setGenMonth(e.target.value)}>
+                        {MONTHS.slice(1).map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                      </SelectInput>
+                      <TextInput isDark={isDark} type="number" value={genYear} onChange={(e) => setGenYear(e.target.value)} />
+                    </div>
+                  </div>
+                  <div className={`rounded-xl border p-3 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                    <p className={`text-xs font-bold uppercase tracking-wide mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>To</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <SelectInput isDark={isDark} value={genMonthTo} onChange={(e) => setGenMonthTo(e.target.value)}>
+                        {MONTHS.slice(1).map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                      </SelectInput>
+                      <TextInput isDark={isDark} type="number" value={genYearTo} onChange={(e) => setGenYearTo(e.target.value)} />
+                    </div>
+                  </div>
+                  <p className={`col-span-2 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                    {(() => {
+                      const n = buildPeriodRange(genMonth, genYear, genMonthTo, genYearTo).length;
+                      if (!n) return 'Pick a "To" period on or after "From".';
+                      if (n > MAX_BULK_PERIODS) return `That's ${n} months — please narrow it to ${MAX_BULK_PERIODS} or fewer.`;
+                      return `Will generate for ${n} month${n > 1 ? 's' : ''} per employee.`;
+                    })()}
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <FieldLabel isDark={isDark}>Month</FieldLabel>
+                    <SelectInput isDark={isDark} value={genMonth} onChange={(e) => setGenMonth(e.target.value)}>
+                      {MONTHS.slice(1).map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                    </SelectInput>
+                  </div>
+                  <div>
+                    <FieldLabel isDark={isDark}>Year</FieldLabel>
+                    <TextInput isDark={isDark} type="number" value={genYear} onChange={(e) => setGenYear(e.target.value)} />
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                <div>
-                  <FieldLabel isDark={isDark}>Month</FieldLabel>
-                  <SelectInput isDark={isDark} value={genMonth} onChange={(e) => setGenMonth(e.target.value)}>
-                    {MONTHS.slice(1).map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-                  </SelectInput>
-                </div>
-                <div>
-                  <FieldLabel isDark={isDark}>Year</FieldLabel>
-                  <TextInput isDark={isDark} type="number" value={genYear} onChange={(e) => setGenYear(e.target.value)} />
-                </div>
                 <div>
                   <FieldLabel isDark={isDark}>Pay Date</FieldLabel>
                   <TextInput isDark={isDark} type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
@@ -873,6 +1012,11 @@ export default function SalarySlips() {
                   <TextInput isDark={isDark} type="number" value={lopDays} onChange={(e) => setLopDays(e.target.value)} />
                 </div>
               </div>
+              {bulkMode && multiMonth && (
+                <p className={`text-xs mt-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                  Pay Date / Total / Paid / LOP days apply the same to every month in the range — edit individual slips afterward if any month needs different figures.
+                </p>
+              )}
             </Card>
 
             {!bulkMode && (
@@ -963,7 +1107,9 @@ export default function SalarySlips() {
                   className="w-full rounded-xl py-3 text-sm font-bold text-white flex items-center justify-center gap-2 disabled:opacity-50"
                   style={{ background: HUB_COLORS.mediumBlue }}
                 >
-                  {bulkGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <UsersIcon className="h-4 w-4" />} Generate for Whole Company
+                  {bulkGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <UsersIcon className="h-4 w-4" />}
+                  Generate{bulkEmployeeScope === 'specific' ? ` for ${bulkEmployeeIds.length || 0} Employee${bulkEmployeeIds.length === 1 ? '' : 's'}` : ' for Whole Company'}
+                  {multiMonth ? ' × Months' : ''}
                 </button>
               )}
               {!canManage && (
@@ -986,7 +1132,9 @@ export default function SalarySlips() {
 
               {bulkResult && (
                 <div className={`mt-4 rounded-xl border p-3 text-xs ${isDark ? 'border-slate-800 text-slate-300' : 'border-slate-200 text-slate-600'}`}>
-                  <p className="font-bold mb-1">{bulkResult.generated_count} generated, {bulkResult.skipped_count} skipped</p>
+                  <p className="font-bold mb-1">
+                    {bulkResult.generated_count} generated{bulkResult.periods_count > 1 ? ` across ${bulkResult.periods_count} months` : ''}, {bulkResult.skipped_count} skipped
+                  </p>
                   {bulkResult.skipped.map((s) => (
                     <p key={s.employee_id} className={isDark ? 'text-slate-500' : 'text-slate-400'}>• {s.name}: {s.reason}</p>
                   ))}
@@ -997,7 +1145,8 @@ export default function SalarySlips() {
                       onClickCapture={async () => {
                         try {
                           const res = await api.post('/compliance/salary-slips/bulk-pdf', { slip_ids: bulkResult.generated.map((g) => g.id) }, { responseType: 'blob' });
-                          triggerBlobDownload(res.data, `Payslips_${MONTHS[genMonth]}_${genYear}.pdf`);
+                          const label = bulkResult.periods_count > 1 ? `${MONTHS[genMonth]}_${genYear}_to_${MONTHS[genMonthTo]}_${genYearTo}` : `${MONTHS[genMonth]}_${genYear}`;
+                          triggerBlobDownload(res.data, `Payslips_${label}.pdf`);
                         } catch (e) { toast.error(await parseBlobError(e)); }
                       }}
                     >
