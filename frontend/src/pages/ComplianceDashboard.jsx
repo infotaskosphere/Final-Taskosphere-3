@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   ShieldCheck, ArrowLeftRight, Shield, AlertTriangle, CalendarClock,
-  CheckCircle2, Layers, ListChecks,
+  CheckCircle2, Layers, ListChecks, FileBarChart2,
 } from 'lucide-react';
 import api from '@/lib/api';
 import useDark from '@/hooks/useDark';
@@ -26,6 +26,11 @@ const MODULES = [
     path: '/trademark-sphere', icon: Shield, label: 'Trademark Sphere',
     description: 'Run trademark class searches, view verdicts and manage bulk searches.',
     color: '#7C3AED', permission: 'can_view_trademark_sphere',
+  },
+  {
+    path: '/mis-report', icon: FileBarChart2, label: 'MIS Report',
+    description: 'Financial Dashboard, Receivables, Payables, Revenue, Expense and Profitability MIS per client.',
+    color: '#0EA5E9', permission: 'can_view_mis_report',
   },
 ];
 
