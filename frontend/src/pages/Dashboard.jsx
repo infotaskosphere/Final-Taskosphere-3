@@ -1138,6 +1138,18 @@ export default function Dashboard() {
   const [dataLoading,      setDataLoading]      = useState(true);
   const [deptMembers,      setDeptMembers]      = useState({ count: 0, departments: [], members: [] });
 
+  // Tracks whether Dashboard is still mounted and any pending background-
+  // refresh timer, so we can cancel it on unmount (see fetchDashboardData).
+  const isMountedRef = useRef(true);
+  const bgRefreshTimeoutRef = useRef(null);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (bgRefreshTimeoutRef.current) clearTimeout(bgRefreshTimeoutRef.current);
+    };
+  }, []);
+
   // ── Fetch All Dashboard Data (with session cache for fast revisits) ──────────
   const applyWave1Data = React.useCallback((d) => {
     if (Array.isArray(d.tasks))      setTasks(d.tasks);
@@ -1166,8 +1178,13 @@ export default function Dashboard() {
         applyWave2Data(cached.wave2);
         setDataLoading(false);
         setUsersLoading(false);
-        // Silently refresh in background so data stays fresh
-        setTimeout(() => fetchDashboardData(true), 100);
+        // Silently refresh in background so data stays fresh.
+        // Tracked in a ref + cancelled on unmount below, so navigating away
+        // (e.g. Dashboard -> Tasks) doesn't leave an orphaned fetch that
+        // fires a full 12-endpoint refresh after we've already left the page.
+        bgRefreshTimeoutRef.current = setTimeout(() => {
+          if (isMountedRef.current) fetchDashboardData(true);
+        }, 100);
         return;
       }
     }
