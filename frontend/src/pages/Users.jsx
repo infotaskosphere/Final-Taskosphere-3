@@ -136,6 +136,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_edit_attendance: true, can_view_compliance: true, can_manage_compliance: true,
       can_view_gst_reconciliation: true,
       can_view_mis_report: true, can_manage_mis_report: true,
+      can_view_salary_slips: true, can_manage_salary_slips: true,
       can_view_all_visits: true, can_edit_visits: true, can_delete_visits: true, can_delete_own_visits: true,
       can_view_client_portal: true,
       can_manage_whatsapp: true,
@@ -290,6 +291,7 @@ const EMPTY_PERMISSIONS = {
   can_edit_attendance: false, can_view_compliance: false, can_manage_compliance: false, can_view_trademark_sphere: false,
   can_view_gst_reconciliation: false,
   can_view_mis_report: false, can_manage_mis_report: false,
+  can_view_salary_slips: false, can_manage_salary_slips: false,
   can_view_all_visits: false, can_edit_visits: false,
   can_delete_visits: false, can_delete_own_visits: true,
   can_view_client_portal: false,
@@ -513,6 +515,7 @@ const PermissionMatrixSummary = ({ permissions }) => {
     'can_view_accounting_reports', 'can_view_passwords', 'can_edit_passwords', 'can_view_gst_reconciliation',
     'can_view_trademark_sphere', 'can_view_client_portal', 'can_manage_whatsapp', 'can_create_quotations',
     'can_view_mis_report', 'can_manage_mis_report',
+    'can_view_salary_slips', 'can_manage_salary_slips',
     'can_view_recruitment', 'can_manage_recruitment',
     // Main permission module master switches (Modules tab)
     'can_access_taskosphere', 'can_access_finix', 'can_access_compliance',
@@ -674,7 +677,7 @@ const MODULE_TREE = [
   },
   {
     key: 'compliance', flag: 'can_access_compliance', label: 'Compliance', icon: ShieldCheck, accent: '#1F6FB2',
-    desc: 'Compliance Tracker, GST Reconciliation, Trademark Sphere and MIS Report.',
+    desc: 'Compliance Tracker, GST Reconciliation, Trademark Sphere, MIS Report and the Salary Slip Generator.',
     pages: [
       {
         permKey: 'can_view_compliance', label: 'Compliance Tracker', desc: 'View the Compliance Tracker page (own department categories for non-admins)', icon: ShieldCheck,
@@ -685,6 +688,10 @@ const MODULE_TREE = [
       {
         permKey: 'can_view_mis_report', label: 'MIS Report', desc: 'View the MIS Report — Financial Dashboard, Receivables/Payables/Revenue/Expense/Profitability per client', icon: BarChart3,
         writePerms: [{ permKey: 'can_manage_mis_report', label: 'Manage MIS Report', desc: 'Upload source documents, create periods/clients and edit manual entries', icon: Upload }],
+      },
+      {
+        permKey: 'can_view_salary_slips', label: 'Salary Slip Generator', desc: 'Generate and view payslips for client companies\u2019 employees — payroll data is sensitive, so this is admin-granted only by default', icon: Receipt,
+        writePerms: [{ permKey: 'can_manage_salary_slips', label: 'Manage Salary Slips', desc: 'Add/edit employees and companies, generate, edit and delete payslips', icon: Pencil }],
       },
     ],
   },
