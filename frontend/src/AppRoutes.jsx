@@ -31,6 +31,7 @@ const ComplianceDashboard = lazy(() => import('./pages/ComplianceDashboard.jsx')
 const CompliancePage = lazy(() => import('./pages/CompliancePage.jsx'));
 const GSTReconciliation = lazy(() => import('./pages/GSTReconciliation.jsx'));
 const TrademarkSphere = lazy(() => import('./pages/TrademarkSphere.jsx'));
+const MISReport = lazy(() => import('./pages/MISReport.jsx'));
 
 /* ── Records ──────────────────────────────────────────────────────────── */
 const ClientApprovals = lazy(() => import('./pages/ClientApprovals.jsx'));
@@ -188,6 +189,7 @@ export default function AppRoutes() {
         <Route path="/compliance" element={<ModuleGate module="compliance"><CompliancePage /></ModuleGate>} />
         <Route path="/gst-reconciliation" element={<ModuleGate module="compliance"><GSTReconciliation /></ModuleGate>} />
         <Route path="/trademark-sphere" element={<ModuleGate module="compliance"><TrademarkSphere /></ModuleGate>} />
+        <Route path="/mis-report" element={<ModuleGate module="compliance"><PageGuard module="compliance" page="can_view_mis_report"><MISReport /></PageGuard></ModuleGate>} />
 
         {/* ── Records ── */}
         <Route path="/records-dashboard" element={<ModuleGate module="records"><RecordsDashboard /></ModuleGate>} />
