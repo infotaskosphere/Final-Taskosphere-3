@@ -1150,6 +1150,10 @@ export default function Dashboard() {
     };
   }, []);
 
+  // Guards the '+ New Task' button against firing navigate() twice for a
+  // single tap/click (see onClick below).
+  const newTaskNavGuardRef = useRef(false);
+
   // ── Fetch All Dashboard Data (with session cache for fast revisits) ──────────
   const applyWave1Data = React.useCallback((d) => {
     if (Array.isArray(d.tasks))      setTasks(d.tasks);
@@ -2027,7 +2031,17 @@ export default function Dashboard() {
         <motion.div variants={itemVariants} className="flex justify-end gap-2">
           {hasPermission('can_edit_tasks') && (
             <button
-              onClick={() => navigate('/tasks?newTask=1')}
+              onClick={() => {
+                // Guard against double-firing (some touch devices emit both a
+                // touch-emulated click and a real click for a single tap),
+                // which was sending this navigation twice and made the
+                // Create Task dialog on /tasks appear to open a second time
+                // a moment after the first.
+                if (newTaskNavGuardRef.current) return;
+                newTaskNavGuardRef.current = true;
+                setTimeout(() => { newTaskNavGuardRef.current = false; }, 800);
+                navigate('/tasks?newTask=1');
+              }}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold border transition-all hover:shadow-md ${
                 isDark
                   ? 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500'
