@@ -916,7 +916,7 @@ async def startup_event():
         # Bootstrap templates asynchronously
         async def bootstrap_workflow_templates():
             try:
-                await WorkflowTemplates.bootstrap_default_templates()
+                await WorkflowTemplates.bootstrap_templates()
                 logger.info("Phase 11 default workflow templates bootstrapped successfully on boot.")
             except Exception as e_tmpl:
                 logger.error(f"Failed to bootstrap default workflow templates: {e_tmpl}")
