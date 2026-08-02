@@ -47,24 +47,12 @@ import {
 import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
 import { AreaChart, Area, ResponsiveContainer, Tooltip as ReTooltip } from 'recharts';
 import { useFormMinimizer } from '@/contexts/MinimizedFormsContext';
+import { getTasksCache, setTasksCache, prefetchTasksData } from '@/lib/tasksPrefetch';
 
 
-// ── Tasks session cache (2-minute TTL) ───────────────────────────────────────
-const TASKS_CACHE_TTL = 2 * 60 * 1000;
-const TASKS_CACHE_KEY = 'tasks_cache_v1';
-const getTasksCache = () => {
-  try {
-    const raw = sessionStorage.getItem(TASKS_CACHE_KEY);
-    if (!raw) return null;
-    const { data, ts } = JSON.parse(raw);
-    if (Date.now() - ts > TASKS_CACHE_TTL) { sessionStorage.removeItem(TASKS_CACHE_KEY); return null; }
-    return data;
-  } catch { return null; }
-};
-const setTasksCache = (data) => {
-  try { sessionStorage.setItem(TASKS_CACHE_KEY, JSON.stringify({ data, ts: Date.now() })); } catch {}
-};
-
+// ── Tasks session cache (shared with Dashboard's prefetcher) ────────────────
+// Dashboard warms this exact cache before you ever reach this page, so the
+// New Task form's dropdowns are populated on first paint.
 // ─── API Helpers ─────────────────────────────────────────────────────────────
 const API_BASE = api.defaults.baseURL;
 const getAuthHeader = () => {
@@ -1006,6 +994,7 @@ export default function Tasks() {
             users: usersResult.status === 'fulfilled' && Array.isArray(usersResult.value) ? usersResult.value : [],
             clients: clientsResult.status === 'fulfilled' && Array.isArray(clientsResult.value) ? clientsResult.value : [],
             ranking,
+            rankings: rankData,
           });
         }
       } else {
@@ -1020,7 +1009,15 @@ export default function Tasks() {
         if (Array.isArray(cached.tasks)) setTasks(cached.tasks);
         if (Array.isArray(cached.users)) { setUsers(cached.users); setUsersLoading(false); }
         if (Array.isArray(cached.clients)) setClients(cached.clients);
-        if (cached.ranking) { setMyRanking(cached.ranking); setRankingsLoaded(true); }
+        // Dashboard's prefetcher stores the raw `rankings` array; this page's
+        // own writes store the already-resolved `ranking` object. Accept both.
+        const cachedRanking = cached.ranking || (Array.isArray(cached.rankings) && cached.rankings.length
+          ? (() => {
+              const mine = cached.rankings.find(r => r.user_id === user?.id) || cached.rankings[0];
+              return { ...mine, totalUsers: cached.rankings.length, rankings: cached.rankings };
+            })()
+          : null);
+        if (cachedRanking) { setMyRanking(cachedRanking); setRankingsLoaded(true); }
         setDataLoading(false);
         // Silently background-refresh from the network exactly once so data
         // stays fresh (previously this called loadAll() again, which kept
@@ -2838,12 +2835,16 @@ export default function Tasks() {
         const apiScore   = rankingsLoaded && myRanking ? myRanking.overall_score : null;
         const apiAttendance  = rankingsLoaded && myRanking ? (myRanking.attendance_percent  ?? null) : null;
         const displayScore   = apiScore !== null ? apiScore : localScore;
-        const displayBadge   = apiBadge  || (localScore >= 85 ? 'Star Performer' : localScore >= 65 ? 'Good Performer' : 'Rising Star');
+        // Badge thresholds must mirror the backend exactly (>=95 Star, >=85 Top,
+        // else Good) — the old local fallback used 85/65 with different names,
+        // so an offline/local score showed a badge the server would never give.
+        const displayBadge   = apiBadge  || (localScore >= 95 ? 'Star Performer' : localScore >= 85 ? 'Top Performer' : 'Good Performer');
 
         // ── Improve-rank insight ──
         const dailyTarget   = workingDaysLeft > 0 ? Math.ceil(myPending / workingDaysLeft) : myPending;
-        const nextTierScore = localScore < 65 ? 65 : localScore < 85 ? 85 : 100;
-        const nextTierName  = localScore < 65 ? 'Top Performer' : localScore < 85 ? 'Star Performer' : 'Perfect Score';
+        // Tier targets must match the backend badge thresholds (85 / 95).
+        const nextTierScore = localScore < 85 ? 85 : localScore < 95 ? 95 : 100;
+        const nextTierName  = localScore < 85 ? 'Top Performer' : localScore < 95 ? 'Star Performer' : 'Perfect Score';
         const tasksForTier  = Math.max(1, Math.ceil((nextTierScore - localScore) / 4));
 
         const prevRankUser        = apiRank && apiRank > 1 && myRanking?.rankings ? myRanking.rankings[apiRank - 2] : null;
@@ -2851,21 +2852,28 @@ export default function Tasks() {
           ? Math.max(1, Math.ceil((prevRankUser.overall_score - (apiScore || localScore)) / 2.5))
           : null;
 
-        const scoreColor  = displayScore >= 85 ? '#1FAF5A' : displayScore >= 65 ? '#6366f1' : '#FF6B6B';
-        const badgeColor  = displayBadge === 'Star Performer' ? '#F59E0B' : displayBadge === 'Good Performer' ? '#6366f1' : '#1FAF5A';
+        const scoreColor  = displayScore >= 95 ? '#1FAF5A' : displayScore >= 85 ? '#4F46E5' : displayScore >= 60 ? '#F59E0B' : '#DC2626';
+        const badgeColor  = displayBadge === 'Star Performer' ? '#1FAF5A' : displayBadge === 'Top Performer' ? '#4F46E5' : '#F59E0B';
         const rankBgColor = apiRank === 1 ? 'linear-gradient(135deg,#7C3AED,#6366f1)' : apiRank !== null && apiRank <= 3 ? 'linear-gradient(135deg,#1F6FB2,#38bdf8)' : 'linear-gradient(135deg,#0D3B66,#1F6FB2)';
 
         const taskCompletionVal = apiScore !== null ? (myRanking.task_completion_percent ?? completionPct) : completionPct;
-        const taskHealthVal     = apiAttendance !== null ? apiAttendance : healthPct;
+        // BUGFIX: "Task Health" was being fed attendance_percent, so the card
+        // showed the attendance number under a task label (and the x/y counts
+        // beside it never matched). Task health is a purely local, task-based
+        // metric: non-overdue tasks / total tasks. Attendance is its own row.
+        const taskHealthVal     = healthPct;
         const onTimeVal         = apiScore !== null ? (myRanking.todo_ontime_percent ?? onTimeRate) : onTimeRate;
+        const attendanceVal     = apiAttendance !== null ? apiAttendance : null;
 
         const scoreBreakdown = [
-          { label: 'Task Completion', val: taskCompletionVal, color: '#6366f1', nums: `${myCompleted}/${myTotal}`,
-            icon: <CheckCircle2 className="h-5 w-5" style={{color:'#6366f1'}} /> },
-          { label: 'Task Health',     val: taskHealthVal,     color: '#1FAF5A', nums: `${myTotal - myOverdue}/${myTotal}`,
+          { label: 'Task Completion', val: taskCompletionVal, color: '#4F46E5', nums: `${myCompleted}/${myTotal}`,
+            icon: <CheckCircle2 className="h-5 w-5" style={{color:'#4F46E5'}} /> },
+          { label: 'Task Health',     val: taskHealthVal,     color: '#1FAF5A', nums: `${myTotal - myOverdue}/${myTotal} on track`,
             icon: <Activity className="h-5 w-5" style={{color:'#1FAF5A'}} /> },
           { label: 'On-Time Rate',    val: onTimeVal,         color: '#F59E0B', nums: `${onTimeCompleted}/${completedWithDue.length}`,
             icon: <Clock className="h-5 w-5" style={{color:'#F59E0B'}} /> },
+          ...(attendanceVal !== null ? [{ label: 'Attendance', val: attendanceVal, color: '#06b6d4', nums: 'this month',
+            icon: <CalendarIcon className="h-5 w-5" style={{color:'#06b6d4'}} /> }] : []),
         ];
 
         const motivationalQuotes = [
@@ -2876,7 +2884,11 @@ export default function Tasks() {
         ];
         const motivationalQuote = motivationalQuotes[Math.floor(displayScore / 25) % motivationalQuotes.length];
 
-        const scoreTrend = apiScore !== null && localScore !== null ? Math.round(apiScore - localScore) : 0;
+        // NOTE: there is deliberately no "trend" figure here any more. The old
+        // one was `apiScore - localScore` (server score minus a locally derived
+        // score) — two different formulas subtracted from each other, presented
+        // as "pts this month". The API exposes no historical score, so nothing
+        // truthful can be plotted; the card now shows real, current components.
 
         // ── Scoring formula (mirrors backend exactly) ──
         // overall_score = attendance*0.25 + hours_ratio*100*0.20 + task_completion*0.25 + todo_ontime*0.15 + timely_punchin*0.15
@@ -2900,6 +2912,9 @@ export default function Tasks() {
           { key: 'ontime',       label: 'To-Do On-Time Rate',  pct: onTimeVal,             weight: 15, contrib: contribOntime       },
           { key: 'punchin',      label: 'Timely Punch-in',     pct: apiTimely,             weight: 15, contrib: contribTimely       },
         ].sort((a, b) => (b.weight - b.contrib) - (a.weight - a.contrib)); // biggest gap first
+
+        // Component with the most unclaimed points — surfaced on the score card.
+        const topGapComponent = components.find(c => (c.weight - c.contrib) > 0.05) || null;
 
         const scoreTo85  = Math.max(0, 85  - displayScore);
         const scoreTo95  = Math.max(0, 95  - displayScore);
@@ -3108,14 +3123,22 @@ export default function Tasks() {
               <div className="flex flex-col lg:flex-row" style={{ minHeight: 0 }}>
 
                 {/* ══ PANEL 1: PERFORMANCE SCORE ══ */}
-                <div className={`flex-shrink-0 lg:w-60 px-4 py-3.5 flex flex-col gap-2.5 ${isDark ? 'border-b lg:border-b-0 lg:border-r border-slate-700' : 'border-b lg:border-b-0 lg:border-r border-slate-100'}`}>
+                {/* Redesigned as an analytics tile: gauge + weighted score
+                    composition + real KPI figures. Every number below comes
+                    from the performance-rankings API or from the user's own
+                    task rows — nothing is simulated. */}
+                <div className={`flex-shrink-0 lg:w-[19rem] px-4 py-3.5 flex flex-col gap-3 ${isDark ? 'border-b lg:border-b-0 lg:border-r border-slate-700' : 'border-b lg:border-b-0 lg:border-r border-slate-100'}`}>
 
-                  {/* Header row — label + rank pill */}
-                  <div className="flex items-center justify-between">
-                    <p className={`text-[9px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Your Score</p>
+                  {/* Header row — label + period + rank pill */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <Trophy className="h-3 w-3 flex-shrink-0" style={{ color: scoreColor }} />
+                      <p className={`text-[9px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Your Score</p>
+                      <span className={`text-[8px] font-semibold px-1.5 py-0.5 rounded ${isDark ? 'bg-slate-700/60 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>Monthly</span>
+                    </div>
                     {apiRank !== null && (
                       <motion.span
-                        className="inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full text-white leading-none"
+                        className="inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-md text-white leading-none flex-shrink-0"
                         style={{ background: apiRank === 1 ? '#B45309' : apiRank <= 3 ? '#4F46E5' : '#64748B' }}
                         initial={{ opacity: 0, y: -4 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -3126,107 +3149,151 @@ export default function Tasks() {
                           : apiRank <= 3
                           ? <Medal className="h-2.5 w-2.5" />
                           : <Trophy className="h-2.5 w-2.5" />}
-                        Rank #{apiRank}{totalUsers ? `/${totalUsers}` : ''}
+                        Rank {apiRank}{totalUsers ? ` of ${totalUsers}` : ''}
                       </motion.span>
                     )}
                   </div>
 
-                  {/* Ring + score + badge + trend */}
-                  <div className="flex items-center gap-3">
-                    <div className="relative flex-shrink-0" style={{ width: 66, height: 66 }}>
-                      <svg viewBox="0 0 100 100" width="66" height="66" style={{ transform: 'rotate(-90deg)' }}>
-                        <circle cx="50" cy="50" r="42" fill="none" stroke={isDark ? '#334155' : '#EDEFF5'} strokeWidth="9" />
-                        <motion.circle
-                          cx="50" cy="50" r="42" fill="none"
-                          stroke="#4F46E5" strokeWidth="9" strokeLinecap="round"
-                          style={{ strokeDasharray: 263.9 }}
-                          initial={{ strokeDashoffset: 263.9 }}
-                          animate={{ strokeDashoffset: 263.9 - (263.9 * Math.min(displayScore, 100)) / 100 }}
+                  {/* ── Gauge + headline figures ── */}
+                  <div className="flex items-center gap-3.5">
+                    {/* Half-dial gauge — reads like an instrument, not a toy */}
+                    <div className="relative flex-shrink-0" style={{ width: 104, height: 62 }}>
+                      <svg viewBox="0 0 120 68" width="104" height="62">
+                        {/* graduation ticks every 10 pts */}
+                        {Array.from({ length: 11 }).map((_, i) => {
+                          const a = Math.PI * (i / 10);
+                          const x1 = 60 - Math.cos(a) * 52, y1 = 60 - Math.sin(a) * 52;
+                          const x2 = 60 - Math.cos(a) * (i % 5 === 0 ? 45 : 48), y2 = 60 - Math.sin(a) * (i % 5 === 0 ? 45 : 48);
+                          return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={isDark ? '#334155' : '#DDE2EC'} strokeWidth={i % 5 === 0 ? 1.4 : 0.8} strokeLinecap="round" />;
+                        })}
+                        <path d="M 18 60 A 42 42 0 0 1 102 60" fill="none" stroke={isDark ? '#334155' : '#EDEFF5'} strokeWidth="9" strokeLinecap="round" />
+                        <motion.path
+                          d="M 18 60 A 42 42 0 0 1 102 60"
+                          fill="none" stroke={scoreColor} strokeWidth="9" strokeLinecap="round"
+                          style={{ strokeDasharray: 131.9 }}
+                          initial={{ strokeDashoffset: 131.9 }}
+                          animate={{ strokeDashoffset: 131.9 - (131.9 * Math.min(Math.max(displayScore, 0), 100)) / 100 }}
                           transition={{ duration: 0.9, ease: 'easeOut', delay: 0.15 }}
                         />
+                        {/* 85-pt "Top Performer" threshold marker */}
+                        {(() => {
+                          const a = Math.PI * 0.85;
+                          return <line x1={60 - Math.cos(a) * 56} y1={60 - Math.sin(a) * 56} x2={60 - Math.cos(a) * 38} y2={60 - Math.sin(a) * 38}
+                            stroke={isDark ? '#94a3b8' : '#94a3b8'} strokeWidth="1.2" strokeDasharray="2 2" />;
+                        })()}
                       </svg>
-                      <div className="absolute inset-0 flex flex-col items-center justify-center">
-                        <span className={`text-base font-black leading-none tabular-nums ${isDark ? 'text-white' : 'text-slate-800'}`}>{Math.round(displayScore)}</span>
-                        <span className={`text-[8px] font-semibold leading-none mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>/ 100</span>
+                      <div className="absolute inset-x-0 bottom-0 flex flex-col items-center">
+                        <span className={`text-[22px] font-black leading-none tabular-nums ${isDark ? 'text-white' : 'text-slate-800'}`}>
+                          {Number(displayScore).toFixed(1)}
+                        </span>
+                        <span className={`text-[8px] font-semibold leading-none mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>OUT OF 100</span>
                       </div>
                     </div>
 
                     <div className="flex flex-col gap-1.5 min-w-0 flex-1">
                       <span
-                        className="inline-flex items-center gap-1 self-start text-[9px] font-semibold px-2 py-0.5 rounded-full leading-none"
-                        style={{ color: badgeColor, background: `${badgeColor}14` }}
+                        className="inline-flex items-center gap-1 self-start text-[9px] font-bold px-2 py-1 rounded-md leading-none uppercase tracking-wide"
+                        style={{ color: badgeColor, background: `${badgeColor}16`, border: `1px solid ${badgeColor}33` }}
                       >
                         <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: badgeColor }} />
                         {displayBadge}
                       </span>
-                      <div className="flex items-center gap-1 flex-wrap">
-                        <TrendingUp className="h-2.5 w-2.5 flex-shrink-0" style={{ color: scoreTrend >= 0 ? '#1FAF5A' : '#DC2626' }} />
-                        <span className="text-[10px] font-bold tabular-nums" style={{ color: scoreTrend >= 0 ? '#1FAF5A' : '#DC2626' }}>
-                          {scoreTrend >= 0 ? `+${scoreTrend}` : scoreTrend} pts
-                        </span>
-                        <span className={`text-[9px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>this month</span>
-                      </div>
+
+                      {/* Distance to the next badge tier — real, from the score */}
+                      {nextBadge ? (
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-baseline justify-between gap-1">
+                            <span className={`text-[9px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>To {nextBadge.split(' (')[0]}</span>
+                            <span className="text-[10px] font-black tabular-nums" style={{ color: scoreColor }}>{Number(ptsToNext ?? 0).toFixed(1)} pts</span>
+                          </div>
+                          <div className={`h-1.5 w-full rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-150 bg-slate-100'}`}>
+                            <motion.div
+                              className="h-full rounded-full"
+                              style={{ background: scoreColor }}
+                              initial={{ width: 0 }}
+                              animate={{ width: `${Math.min(100, (displayScore / (displayScore >= 85 ? 95 : 85)) * 100)}%` }}
+                              transition={{ duration: 0.9, ease: 'easeOut', delay: 0.25 }}
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-[9px] font-semibold" style={{ color: '#1FAF5A' }}>Top tier reached — hold the streak.</p>
+                      )}
+
+                      {myRanking?.discipline_penalty > 0 && (
+                        <div className="flex items-center gap-1">
+                          <AlertCircle className="h-2.5 w-2.5 flex-shrink-0" style={{ color: '#DC2626' }} />
+                          <span className="text-[9px] font-semibold tabular-nums" style={{ color: '#DC2626' }}>
+                            −{Number(myRanking.discipline_penalty).toFixed(1)} pts absence penalty
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  {/* Score Trend Sparkline Chart — flatter, quieter container */}
-                  {(() => {
-                    const trendPoints = (() => {
-                      const base = Math.max(10, displayScore - 18);
-                      return [
-                        { day: 'W1', score: Math.round(base + Math.random() * 4) },
-                        { day: 'W2', score: Math.round(base + 4 + Math.random() * 5) },
-                        { day: 'W3', score: Math.round(base + 9 + Math.random() * 4) },
-                        { day: 'W4', score: Math.round(base + 13 + Math.random() * 3) },
-                        { day: 'Now', score: Math.round(displayScore) },
-                      ];
-                    })();
-                    const trendUp = scoreTrend >= 0;
-                    const trendColor = trendUp ? '#4F46E5' : '#DC2626';
-                    return (
-                      <motion.div
-                        className={`rounded-lg border flex-shrink-0 overflow-hidden ${isDark ? 'bg-slate-900/40 border-slate-700' : 'bg-slate-50/70 border-slate-200'}`}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        transition={{ delay: 0.3 }}
-                        style={{ height: 44 }}
-                      >
-                        <ResponsiveContainer width="100%" height="100%">
-                          <AreaChart data={trendPoints} margin={{ top: 6, right: 6, left: 6, bottom: 2 }}>
-                            <defs>
-                              <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="10%" stopColor={trendColor} stopOpacity={0.16} />
-                                <stop offset="100%" stopColor={trendColor} stopOpacity={0} />
-                              </linearGradient>
-                            </defs>
-                            <Area type="monotone" dataKey="score" stroke={trendColor} strokeWidth={1.5} fill="url(#trendGrad)" dot={false} />
-                            <ReTooltip
-                              contentStyle={{ fontSize: 9, padding: '2px 7px', borderRadius: 5, border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`, background: isDark ? '#1e293b' : '#fff', color: isDark ? '#e2e8f0' : '#334155', boxShadow: '0 2px 8px rgba(0,0,0,0.10)' }}
-                              itemStyle={{ fontSize: 9, color: trendColor }}
-                              labelStyle={{ fontSize: 9, fontWeight: 600, color: isDark ? '#94a3b8' : '#64748b' }}
-                            />
-                          </AreaChart>
-                        </ResponsiveContainer>
-                      </motion.div>
-                    );
-                  })()}
+                  {/* ── Score composition: earned vs. weight, per component ── */}
+                  <div className={`rounded-lg border px-2.5 py-2 ${isDark ? 'bg-slate-900/40 border-slate-700' : 'bg-slate-50/80 border-slate-200'}`}>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className={`text-[8px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Score Composition</p>
+                      <p className={`text-[8px] font-semibold tabular-nums ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>earned / weight</p>
+                    </div>
 
-                  {/* 4-stat mini grid — clean, neutral, tabular numerals */}
-                  <div className={`grid grid-cols-4 gap-1.5`}>
+                    {/* Single 100-pt rail: filled portion = points actually earned */}
+                    <div className="flex gap-[3px] h-2.5 mb-2">
+                      {[
+                        { key: 'att',  earned: contribAttendance,   max: 25, color: '#4F46E5' },
+                        { key: 'hrs',  earned: contribHours,        max: 20, color: '#8b5cf6' },
+                        { key: 'task', earned: contribTaskComplete, max: 25, color: '#1FAF5A' },
+                        { key: 'ont',  earned: contribOntime,       max: 15, color: '#F59E0B' },
+                        { key: 'pun',  earned: contribTimely,       max: 15, color: '#06b6d4' },
+                      ].map(({ key, earned, max, color }) => (
+                        <div key={key} className="rounded-sm overflow-hidden" style={{ flex: max, background: isDark ? '#334155' : '#E2E8F0' }}>
+                          <motion.div
+                            className="h-full"
+                            style={{ background: color }}
+                            initial={{ width: 0 }}
+                            animate={{ width: `${Math.min(100, (earned / max) * 100)}%` }}
+                            transition={{ duration: 0.8, ease: 'easeOut', delay: 0.3 }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-5 gap-1">
+                      {[
+                        { label: 'Attend', earned: contribAttendance,   max: 25, color: '#4F46E5' },
+                        { label: 'Hours',  earned: contribHours,        max: 20, color: '#8b5cf6' },
+                        { label: 'Tasks',  earned: contribTaskComplete, max: 25, color: '#1FAF5A' },
+                        { label: 'OnTime', earned: contribOntime,       max: 15, color: '#F59E0B' },
+                        { label: 'Punch',  earned: contribTimely,       max: 15, color: '#06b6d4' },
+                      ].map(({ label, earned, max, color }) => (
+                        <div key={label} className="flex flex-col items-center gap-0.5 min-w-0">
+                          <span className="text-[9px] font-black tabular-nums leading-none" style={{ color }}>
+                            {earned.toFixed(1)}
+                          </span>
+                          <span className={`text-[7px] font-semibold tabular-nums leading-none ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>/{max}</span>
+                          <span className={`text-[7px] font-semibold uppercase tracking-wide leading-none truncate w-full text-center ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* ── Live workload KPIs (from this user's own tasks) ── */}
+                  <div className="grid grid-cols-4 gap-1.5">
                     {[
-                      { val: workingDaysLeft, label: 'Days Left', color: null },
-                      { val: myPending, label: 'Pending', color: null },
-                      { val: `~${dailyTarget}/d`, label: 'To Finish', color: null },
-                      { val: scoreTrend >= 0 ? `+${scoreTrend}` : `${scoreTrend}`, label: 'Trend', color: scoreTrend >= 0 ? '#1FAF5A' : '#DC2626' },
+                      { val: myPending,        label: 'Pending',   color: null },
+                      { val: myOverdue,        label: 'Overdue',   color: myOverdue > 0 ? '#DC2626' : null },
+                      { val: workingDaysLeft,  label: 'Days Left', color: null },
+                      { val: `${dailyTarget}/d`, label: 'Pace Req', color: '#4F46E5' },
                     ].map(({ val, label, color }, i) => (
                       <motion.div
                         key={label}
-                        className={`flex flex-col items-center justify-center gap-0.5 rounded-lg border py-1.5 ${isDark ? 'bg-slate-900/40 border-slate-700' : 'bg-slate-50 border-slate-200'}`}
+                        className={`flex flex-col items-center justify-center gap-0.5 rounded-lg border py-1.5 ${isDark ? 'bg-slate-900/40 border-slate-700' : 'bg-white border-slate-200'}`}
                         initial={{ opacity: 0, y: 4 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.4 + i * 0.05 }}
                       >
-                        <span className="text-[11px] font-black leading-tight tabular-nums" style={{ color: color || (isDark ? '#e2e8f0' : '#1e293b') }}>
+                        <span className="text-[12px] font-black leading-tight tabular-nums" style={{ color: color || (isDark ? '#e2e8f0' : '#1e293b') }}>
                           {val}
                         </span>
                         <span className={`text-[7px] font-semibold uppercase tracking-wide text-center leading-tight ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{label}</span>
@@ -3234,7 +3301,7 @@ export default function Tasks() {
                     ))}
                   </div>
 
-                  {/* Footer CTA — quiet, single accent */}
+                  {/* Footer CTA */}
                   <motion.div
                     className={`rounded-lg border flex-1 flex items-center justify-between gap-2 px-2.5 py-2 ${isDark ? 'bg-indigo-500/10 border-indigo-500/20' : 'bg-indigo-50 border-indigo-100'}`}
                     initial={{ opacity: 0 }}
@@ -3243,10 +3310,12 @@ export default function Tasks() {
                   >
                     <div className="min-w-0">
                       <p className={`text-[9px] font-bold leading-tight truncate ${isDark ? 'text-indigo-300' : 'text-indigo-700'}`}>
-                        {displayScore >= 85 ? 'Outstanding work' : 'Keep pushing'}
+                        {topGapComponent ? `Biggest gap: ${topGapComponent.label}` : 'All components maxed'}
                       </p>
                       <p className={`text-[8px] leading-tight truncate ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-                        Each task lifts your rank.
+                        {topGapComponent
+                          ? `${(topGapComponent.weight - topGapComponent.contrib).toFixed(1)} pts still available here`
+                          : 'Maintain your current pace.'}
                       </p>
                     </div>
                     <button
@@ -3257,7 +3326,6 @@ export default function Tasks() {
                     </button>
                   </motion.div>
                 </div>
-
                 {/* ══ PANEL 2: SCORE BREAKDOWN ══ */}
                 <div className={`flex-1 min-w-0 px-4 py-3 flex flex-col gap-1.5 ${isDark ? 'border-b lg:border-b-0 lg:border-r border-slate-700' : 'border-b lg:border-b-0 lg:border-r border-slate-100'}`}>
                   <div className="flex items-center gap-1.5">
