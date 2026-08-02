@@ -957,20 +957,10 @@ export default function Tasks() {
       return all;
     };
 
-    const loadAll = async () => {
-      // Serve from cache first (instant revisit) then background-refresh
-      const cached = getTasksCache();
-      if (cached) {
-        if (Array.isArray(cached.tasks)) setTasks(cached.tasks);
-        if (Array.isArray(cached.users)) { setUsers(cached.users); setUsersLoading(false); }
-        if (Array.isArray(cached.clients)) setClients(cached.clients);
-        if (cached.ranking) { setMyRanking(cached.ranking); setRankingsLoaded(true); }
-        setDataLoading(false);
-        // Silently background-refresh so data stays fresh
-        setTimeout(() => loadAll(), 150);
-        return;
-      }
-      setDataLoading(true);
+    // Always hits the network, updates state + cache. Used both for the
+    // initial (no-cache) load and for the one-shot background refresh.
+    const fetchFresh = async (showLoadingState) => {
+      if (showLoadingState) setDataLoading(true);
       // ── All 4 API calls fire simultaneously — no sequential waterfalls ──
       const [tasksResult, usersResult, clientsResult, rankResult] = await Promise.allSettled([
         apiFetch('/tasks'),
@@ -1022,7 +1012,38 @@ export default function Tasks() {
         console.error('Tasks ranking fetch error:', rankResult.reason);
       }
     };
+
+    const loadAll = async () => {
+      // Serve from cache first (instant revisit) then background-refresh once
+      const cached = getTasksCache();
+      if (cached) {
+        if (Array.isArray(cached.tasks)) setTasks(cached.tasks);
+        if (Array.isArray(cached.users)) { setUsers(cached.users); setUsersLoading(false); }
+        if (Array.isArray(cached.clients)) setClients(cached.clients);
+        if (cached.ranking) { setMyRanking(cached.ranking); setRankingsLoaded(true); }
+        setDataLoading(false);
+        // Silently background-refresh from the network exactly once so data
+        // stays fresh (previously this called loadAll() again, which kept
+        // re-reading the still-valid cache and rescheduling itself every
+        // 150ms for the whole cache TTL — causing the page/dialog to appear
+        // to reload repeatedly). The timer is cancelled on unmount below so
+        // navigating away (e.g. back to Dashboard) doesn't leave an orphaned
+        // fetch that fires after we've already left the Tasks page.
+        bgRefreshTimeoutId = setTimeout(() => {
+          if (isMounted) fetchFresh(false);
+        }, 150);
+        return;
+      }
+      await fetchFresh(true);
+    };
+
+    let isMounted = true;
+    let bgRefreshTimeoutId = null;
     loadAll();
+    return () => {
+      isMounted = false;
+      if (bgRefreshTimeoutId) clearTimeout(bgRefreshTimeoutId);
+    };
   }, [apiFetch]);
 
   // ── Auto-open task detail / edit from URL param (?taskId=X&edit=1) ─────────────────
