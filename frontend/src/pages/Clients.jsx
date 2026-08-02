@@ -2,7 +2,7 @@ import Papa from 'papaparse/papaparse.js';
 import { motion } from 'framer-motion';
 import { useDark } from '@/hooks/useDark';
 import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';import { useAuth } from '@/contexts/AuthContext';
+import React, { useState, useEffect, useRef, useMemo, useCallback, Suspense } from 'react';import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -39,16 +39,18 @@ import ClientGroupsPanel from '@/components/ClientGroupsPanel';
 import { useBulkWASender } from '@/components/BulkWASenderContext';
 import ClientPortalManager from '@/components/ClientPortalManager';
 import ITRClientDialog from '@/components/ITRClientDialog';
-import ITRBulkImportDialog from '@/components/ITRBulkImportDialog';
+// Lazy-loaded: ITRBulkImportDialog statically imports the ~430KB `xlsx` library
+// for parsing bulk-upload spreadsheets. It's only needed when the user opens
+// the "Bulk Import" dialog, so loading it eagerly here would force every
+// visitor to the Clients page to download xlsx up front.
+const ITRBulkImportDialog = React.lazy(() => import('@/components/ITRBulkImportDialog'));
 import ClientWAAutoSend from '@/components/ClientWAAutoSend';
 import DSCLinkerSection from '@/components/DSCLinkerSection';
 import { useFormMinimizer } from '@/contexts/MinimizedFormsContext';
 import { format, startOfDay, differenceInDays } from 'date-fns';
 import WhatsAppSendDialog from '@/components/ui/WhatsAppSendDialog';
 import { buildClientMessage, getWASettings } from '@/hooks/useWhatsApp';
-import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import { getXLSX, getJsPDF, getAutoTable } from '@/lib/lazyLibs';
 import { saveAs } from 'file-saver';
 
 const CLIENT_TASK_DEPARTMENTS = [
@@ -2449,7 +2451,9 @@ const _fmt = n => new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, max
 const _sumVal = (arr, src) => arr.reduce((s, r) => s + (r[src]?.invoiceValue || 0), 0);
 const _sumTax = (arr, src) => arr.reduce((s, r) => { const i = r[src]; return s + (i ? i.igst + i.cgst + i.sgst : 0); }, 0);
 
-function gstExportPDF(results, company, period) {
+async function gstExportPDF(results, company, period) {
+  const jsPDF = await getJsPDF();
+  const autoTable = await getAutoTable();
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
   const BRAND  = [13, 59, 102];
@@ -2642,7 +2646,8 @@ function gstExportWord(results, company, period) {
   toast.success('Word document downloaded successfully!');
 }
 
-function gstExportExcel(results, company, period) {
+async function gstExportExcel(results, company, period) {
+  const XLSX = await getXLSX();
   const wb = XLSX.utils.book_new();
   const summaryRows = [
     ['GST Reconciliation Report','','',company.name||''],
@@ -2988,9 +2993,9 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
         gstin: full.client_gstin || session.client_gstin || '',
       };
       const period = full.period || session.period || '';
-      if (format === 'pdf')   gstExportPDF(results, company, period);
+      if (format === 'pdf')   await gstExportPDF(results, company, period);
       if (format === 'word')  gstExportWord(results, company, period);
-      if (format === 'excel') gstExportExcel(results, company, period);
+      if (format === 'excel') await gstExportExcel(results, company, period);
     } catch (err) {
       toast.error('Failed to fetch full report data. Please try again.');
     } finally {
@@ -3552,7 +3557,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
             const money = (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             const dateText = (d) => d ? format(new Date(String(d).slice(0, 10)), 'MMM d, yyyy') : '—';
             const statusLabel = (s) => (String(s || '').toLowerCase() === 'paid' ? 'Paid' : 'Unpaid');
-            const exportGovtFees = (kind) => {
+            const exportGovtFees = async (kind) => {
               if (!paymentRows.length) { toast.error('No government fee payments to export'); return; }
               const fileName = `govt_fees_${(selectedClient?.company_name || 'client').replace(/[^a-z0-9]+/gi, '_')}_${format(new Date(), 'dd-MMM-yyyy')}`;
               const rows = paymentRows.map((row, i) => [
@@ -3571,6 +3576,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
               ]);
               const headers = ['#', 'Client', 'Source', 'Title', 'Category', 'FY Year', 'Due Date', 'Status', 'Payment Date', 'Amount (₹)', 'SRN', 'Details'];
               if (kind === 'excel') {
+                const XLSX = await getXLSX();
                 const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
                 ws['!cols'] = [{wch:5},{wch:32},{wch:20},{wch:28},{wch:14},{wch:12},{wch:14},{wch:12},{wch:14},{wch:14},{wch:18},{wch:32}];
                 const wb = XLSX.utils.book_new();
@@ -3579,6 +3585,8 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 toast.success('Government fees Excel exported');
                 return;
               }
+              const jsPDF = await getJsPDF();
+              const autoTable = await getAutoTable();
               const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
               doc.setFontSize(15);
               doc.text('Government Fees Payment List', 14, 14);
@@ -5216,7 +5224,7 @@ export default function Clients() {
   useEffect(() => { fetchClientGroups(); }, [fetchClientGroups]);
 
   // ── Export filtered list ──────────────────────────────────────────────────
-  const handleExportList = useCallback(() => {
+  const handleExportList = useCallback(async () => {
     if (sortedClients.length === 0) { toast.error('No clients to export'); return; }
     const rows = [
       ['#', 'Company', 'Type', 'Email', 'Phone', 'City', 'State', 'Services', 'Status', 'Referred By', 'Added'],
@@ -5228,6 +5236,7 @@ export default function Clients() {
         c.created_at ? format(new Date(c.created_at), 'dd-MMM-yyyy') : '',
       ]),
     ];
+    const XLSX = await getXLSX();
     const ws = XLSX.utils.aoa_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Clients');
@@ -7742,12 +7751,14 @@ export default function Clients() {
       />
 
       {/* ── ITR Bulk Import Dialog ─────────────────────────────────────── */}
-      <ITRBulkImportDialog
-        open={itrBulkImportOpen}
-        onClose={() => setItrBulkImportOpen(false)}
-        onImported={() => { fetchClients(); }}
-        isDark={isDark}
-      />
+      <Suspense fallback={null}>
+        <ITRBulkImportDialog
+          open={itrBulkImportOpen}
+          onClose={() => setItrBulkImportOpen(false)}
+          onImported={() => { fetchClients(); }}
+          isDark={isDark}
+        />
+      </Suspense>
     </div>
   );
 }
