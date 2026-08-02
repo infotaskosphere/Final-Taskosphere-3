@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext.jsx';
 import DashboardLayout from '@/components/layout/DashboardLayout.jsx';
 import ModuleGate from '@/components/ModuleGate.jsx';
 import { PageGuard } from '@/components/governance/GovernanceGuards.jsx';
-import GifLoader from '@/components/ui/GifLoader.jsx';
+import GifLoader, { ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { AnimatePresence, motion } from 'framer-motion';
 
 /* ── Auth pages (no sidebar) ─────────────────────────────────────────── */
@@ -110,7 +110,22 @@ function ProtectedLayout() {
   if (!user) return <Navigate to="/login" replace />;
   return (
     <DashboardLayout>
-      <AnimatedOutlet />
+      {/* Nested Suspense boundary: a not-yet-downloaded lazy page (e.g.
+          Tasks.jsx, which is large) now only shows ContentLoader inside
+          the content area while its chunk loads — the sidebar/header
+          stay mounted and visible. Previously the ONLY Suspense boundary
+          was the app-wide one in App.jsx using the full-screen GifLoader,
+          so every first-visit navigation to a lazy page unmounted the
+          entire DashboardLayout (sidebar and all) and replaced the whole
+          screen with a loading overlay, then remounted everything from
+          scratch once the chunk arrived — which is what made pages like
+          Tasks (opened via "+ New Task", ?newTask=1) look like they
+          "opened, then closed, then reopened": the real sequence was
+          mount → suspend → full-screen overlay → remount, not a genuine
+          dialog open/close. */}
+      <Suspense fallback={<ContentLoader />}>
+        <AnimatedOutlet />
+      </Suspense>
     </DashboardLayout>
   );
 }
