@@ -2029,8 +2029,11 @@ export default function Tasks() {
               </Popover>
 
               {/* New Task */}
-              {canEditTasks && (
+              {/* Dialog stays mounted even while permissions/data are still loading —
+                  gating the whole <Dialog> made it unmount + remount (form flashed closed
+                  then re-opened) when auth permissions resolved after navigation. */}
                 <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
+                  {canEditTasks && (
                   <DialogTrigger asChild>
                     <Button size="sm" onClick={() => { setEditingTask(null); setFormData({ ...EMPTY_FORM }); }}
                       className="h-8 px-4 text-xs rounded-xl font-semibold gap-1.5"
@@ -2038,6 +2041,7 @@ export default function Tasks() {
                       <Plus className="h-3.5 w-3.5" /> New Task
                     </Button>
                   </DialogTrigger>
+                  )}
 
                   {/* Dialog form — premium redesign */}
                   <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden p-0 gap-0 flex flex-col rounded-2xl shadow-2xl">
@@ -2439,7 +2443,6 @@ export default function Tasks() {
                     </div>
                   </DialogContent>
                 </Dialog>
-              )}
             </div>
           </div>
         </div>
