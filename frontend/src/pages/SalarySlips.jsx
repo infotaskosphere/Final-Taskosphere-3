@@ -3,7 +3,7 @@ import {
   Receipt, Plus, X, Loader2, Trash2, Building2, Users as UsersIcon, Download,
   FileText, Copy, Pencil, Search, RefreshCw, Save, CalendarDays, Landmark,
   ToggleLeft, ToggleRight, CheckCircle2, ChevronLeft, ChevronRight, Info,
-  UserPlus, ClipboardList,
+  UserPlus, ClipboardList, Upload, FileSpreadsheet, AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '@/lib/api';
@@ -413,6 +413,215 @@ function EmployeeModal({ isDark, companyKey, presets, editing, onClose, onSaved 
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+ * Import Employees from Excel modal (Employees tab)
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+function ImportEmployeesModal({ isDark, companyKey, companyName, onClose, onImported }) {
+  const fileInputRef = useRef(null);
+  const [file, setFile] = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [preview, setPreview] = useState(null); // { rows, total_rows, new_count, update_count, error_count }
+  const [skipUpdates, setSkipUpdates] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState(null); // { created_count, updated_count, skipped_count, skipped }
+
+  const downloadTemplate = async () => {
+    try {
+      const res = await api.get('/compliance/salary-slips/employees/import-template', { responseType: 'blob' });
+      triggerBlobDownload(res.data, 'Employee_Import_Template.xlsx');
+    } catch (e) {
+      toast.error(await parseBlobError(e));
+    }
+  };
+
+  const pickFile = () => fileInputRef.current?.click();
+
+  const handleFile = async (f) => {
+    if (!f) return;
+    setFile(f);
+    setPreview(null);
+    setResult(null);
+    setLoadingPreview(true);
+    try {
+      const fd = new FormData();
+      fd.append('company_key', companyKey);
+      fd.append('file', f);
+      const { data } = await api.post('/compliance/salary-slips/employees/import-preview', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setPreview(data);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not read that file');
+      setFile(null);
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    const f = e.dataTransfer?.files?.[0];
+    if (f) handleFile(f);
+  };
+
+  const confirmImport = async () => {
+    if (!file) return;
+    setImporting(true);
+    try {
+      const fd = new FormData();
+      fd.append('company_key', companyKey);
+      fd.append('file', file);
+      fd.append('skip_updates', skipUpdates ? 'true' : 'false');
+      const { data } = await api.post('/compliance/salary-slips/employees/import', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setResult(data);
+      toast.success(`${data.created_count} added, ${data.updated_count} updated${data.skipped_count ? `, ${data.skipped_count} skipped` : ''}`);
+      onImported();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Import failed');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const reset = () => { setFile(null); setPreview(null); setResult(null); };
+
+  return (
+    <ModalShell isDark={isDark} onClose={onClose} title={`Import Employees${companyName ? ` — ${companyName}` : ''}`} icon={FileSpreadsheet} wide>
+      {result ? (
+        <div className="space-y-3">
+          <div className={`rounded-xl p-4 ${isDark ? 'bg-emerald-950/40 border border-emerald-900' : 'bg-emerald-50 border border-emerald-200'}`}>
+            <p className={`text-sm font-bold flex items-center gap-1.5 ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>
+              <CheckCircle2 className="h-4 w-4" /> Import complete
+            </p>
+            <p className={`text-xs mt-1 ${isDark ? 'text-emerald-400/80' : 'text-emerald-700/80'}`}>
+              {result.created_count} employee{result.created_count === 1 ? '' : 's'} added, {result.updated_count} updated
+              {result.skipped_count ? `, ${result.skipped_count} skipped` : ''}.
+            </p>
+          </div>
+          {result.skipped_count > 0 && (
+            <div className={`rounded-xl border p-3 text-xs max-h-40 overflow-y-auto ${isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-500'}`}>
+              {result.skipped.map((s, i) => (
+                <p key={i}>Row {s.row}{s.name ? ` (${s.name})` : ''}: {s.reason}</p>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <button onClick={reset} className={`flex-1 rounded-xl py-2.5 text-sm font-semibold border ${isDark ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-300 text-slate-600 hover:bg-slate-50'}`}>
+              Import another file
+            </button>
+            <button onClick={onClose} className="flex-1 rounded-xl py-2.5 text-sm font-bold text-white" style={{ background: HUB_COLORS.mediumBlue }}>
+              Done
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className={`rounded-xl border p-3 flex items-center justify-between gap-3 ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-50'}`}>
+            <div>
+              <p className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>1. Get the template</p>
+              <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Fill it with all the company's employees, then upload it below.</p>
+            </div>
+            <button onClick={downloadTemplate} className={`shrink-0 rounded-lg px-3 py-2 text-xs font-semibold flex items-center gap-1.5 border ${isDark ? 'border-slate-700 text-slate-200 hover:bg-slate-800' : 'border-slate-300 text-slate-700 hover:bg-white'}`}>
+              <Download className="h-3.5 w-3.5" /> Download template
+            </button>
+          </div>
+
+          <div>
+            <p className={`text-sm font-semibold mb-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>2. Upload the filled file</p>
+            <div
+              onClick={pickFile}
+              onDrop={onDrop}
+              onDragOver={(e) => e.preventDefault()}
+              className={`rounded-xl border-2 border-dashed p-6 text-center cursor-pointer transition-colors ${isDark ? 'border-slate-700 hover:border-slate-600 bg-slate-950' : 'border-slate-300 hover:border-slate-400 bg-slate-50'}`}
+            >
+              <input
+                ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
+                onChange={(e) => handleFile(e.target.files?.[0])}
+              />
+              <Upload className={`h-6 w-6 mx-auto mb-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} />
+              {file ? (
+                <p className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{file.name}</p>
+              ) : (
+                <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Click to browse or drag a .xlsx / .csv file here</p>
+              )}
+            </div>
+          </div>
+
+          {loadingPreview && (
+            <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-slate-400" /></div>
+          )}
+
+          {preview && (
+            <div>
+              <div className="flex items-center gap-3 mb-2 text-xs">
+                <span className={`font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{preview.new_count} new</span>
+                <span className={`font-bold ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>{preview.update_count} to update</span>
+                {preview.error_count > 0 && (
+                  <span className={`font-bold flex items-center gap-1 ${isDark ? 'text-red-400' : 'text-red-600'}`}>
+                    <AlertTriangle className="h-3.5 w-3.5" /> {preview.error_count} skipped
+                  </span>
+                )}
+              </div>
+              <div className={`rounded-xl border max-h-56 overflow-y-auto ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <table className="w-full text-xs">
+                  <thead className={`sticky top-0 ${isDark ? 'bg-slate-900' : 'bg-white'}`}>
+                    <tr className={`text-left border-b ${isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-500'}`}>
+                      <th className="py-1.5 px-2 font-semibold">Row</th>
+                      <th className="py-1.5 px-2 font-semibold">Name</th>
+                      <th className="py-1.5 px-2 font-semibold">Code</th>
+                      <th className="py-1.5 px-2 font-semibold text-right">Gross</th>
+                      <th className="py-1.5 px-2 font-semibold">Result</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.rows.map((r) => (
+                      <tr key={r.row} className={`border-b last:border-0 ${isDark ? 'border-slate-800/60 text-slate-300' : 'border-slate-100 text-slate-600'}`}>
+                        <td className="py-1.5 px-2">{r.row}</td>
+                        <td className="py-1.5 px-2">{r.name || '—'}</td>
+                        <td className="py-1.5 px-2">{r.employee_code || '—'}</td>
+                        <td className="py-1.5 px-2 text-right">{r.gross ? inr(r.gross) : '—'}</td>
+                        <td className="py-1.5 px-2">
+                          {r.status === 'error' ? (
+                            <span className={isDark ? 'text-red-400' : 'text-red-600'}>{r.reason}</span>
+                          ) : r.status === 'update' ? (
+                            <span className={isDark ? 'text-amber-400' : 'text-amber-600'}>Update existing</span>
+                          ) : (
+                            <span className={isDark ? 'text-emerald-400' : 'text-emerald-600'}>New employee</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {preview.update_count > 0 && (
+                <label className={`flex items-center gap-2 mt-3 text-xs cursor-pointer ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  <input type="checkbox" checked={skipUpdates} onChange={(e) => setSkipUpdates(e.target.checked)} />
+                  Skip employees that already exist — only add new ones
+                </label>
+              )}
+
+              <button
+                onClick={confirmImport}
+                disabled={importing || !preview.rows.length}
+                className="w-full mt-4 rounded-xl py-2.5 text-sm font-bold text-white flex items-center justify-center gap-2 disabled:opacity-50"
+                style={{ background: HUB_COLORS.mediumBlue }}
+              >
+                {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                Import {preview.new_count + (skipUpdates ? 0 : preview.update_count)} Employee{(preview.new_count + (skipUpdates ? 0 : preview.update_count)) === 1 ? '' : 's'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </ModalShell>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
  * Edit Slip modal (History tab)
  * ═══════════════════════════════════════════════════════════════════════ */
 
@@ -579,6 +788,7 @@ export default function SalarySlips() {
   const [loadingEmployees, setLoadingEmployees] = useState(false);
   const [showEmployeeModal, setShowEmployeeModal] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(null);
+  const [showImportModal, setShowImportModal] = useState(false);
 
   const fetchEmployees = useCallback(async (key) => {
     if (!key) { setEmployees([]); return; }
@@ -1168,13 +1378,22 @@ export default function SalarySlips() {
               Employees {companies.find((c) => c.key === companyKey)?.name ? `— ${companies.find((c) => c.key === companyKey)?.name}` : ''}
             </p>
             {canManage && (
-              <button
-                onClick={() => { setEditingEmployee(null); setShowEmployeeModal(true); }}
-                className="rounded-xl px-3 py-2 text-sm font-semibold text-white flex items-center gap-1.5"
-                style={{ background: HUB_COLORS.mediumBlue }}
-              >
-                <UserPlus className="h-4 w-4" /> Add Employee
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowImportModal(true)}
+                  disabled={!companyKey}
+                  className={`rounded-xl px-3 py-2 text-sm font-semibold flex items-center gap-1.5 border disabled:opacity-50 ${isDark ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-300 text-slate-600 hover:bg-slate-50'}`}
+                >
+                  <Upload className="h-4 w-4" /> Import from Excel
+                </button>
+                <button
+                  onClick={() => { setEditingEmployee(null); setShowEmployeeModal(true); }}
+                  className="rounded-xl px-3 py-2 text-sm font-semibold text-white flex items-center gap-1.5"
+                  style={{ background: HUB_COLORS.mediumBlue }}
+                >
+                  <UserPlus className="h-4 w-4" /> Add Employee
+                </button>
+              </div>
             )}
           </div>
 
@@ -1374,6 +1593,16 @@ export default function SalarySlips() {
           presets={presets}
           onClose={() => setEditingSlip(null)}
           onSaved={() => { setEditingSlip(null); fetchHistory(); }}
+        />
+      )}
+
+      {showImportModal && (
+        <ImportEmployeesModal
+          isDark={isDark}
+          companyKey={companyKey}
+          companyName={companies.find((c) => c.key === companyKey)?.name}
+          onClose={() => setShowImportModal(false)}
+          onImported={() => { fetchEmployees(companyKey); fetchSummary(); }}
         />
       )}
     </div>
