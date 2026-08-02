@@ -1154,6 +1154,27 @@ export default function Dashboard() {
   // single tap/click (see onClick below).
   const newTaskNavGuardRef = useRef(false);
 
+  // Warm the /tasks route's lazy chunk as soon as the Dashboard is idle, and
+  // again on hover/focus of the button below. Without this, the first click
+  // on "+ New Task" has to wait for Tasks.jsx (a very large page) to be
+  // downloaded and parsed before the Create Task dialog can even mount —
+  // which is what made the page look like it "opened, closed, and reopened"
+  // (empty shell → dialog pops in late → data finishes loading around it).
+  // import() is cached by the browser/bundler, so calling this more than
+  // once is a harmless no-op once the chunk is loaded.
+  const preloadTasksPage = useCallback(() => {
+    import('./Tasks.jsx').catch(() => {});
+  }, []);
+  useEffect(() => {
+    const idle = window.requestIdleCallback
+      ? window.requestIdleCallback(preloadTasksPage, { timeout: 2000 })
+      : setTimeout(preloadTasksPage, 300);
+    return () => {
+      if (window.cancelIdleCallback && typeof idle === 'number') window.cancelIdleCallback(idle);
+      else clearTimeout(idle);
+    };
+  }, [preloadTasksPage]);
+
   // ── Fetch All Dashboard Data (with session cache for fast revisits) ──────────
   const applyWave1Data = React.useCallback((d) => {
     if (Array.isArray(d.tasks))      setTasks(d.tasks);
@@ -2031,6 +2052,8 @@ export default function Dashboard() {
         <motion.div variants={itemVariants} className="flex justify-end gap-2">
           {hasPermission('can_edit_tasks') && (
             <button
+              onMouseEnter={preloadTasksPage}
+              onFocus={preloadTasksPage}
               onClick={() => {
                 // Guard against double-firing (some touch devices emit both a
                 // touch-emulated click and a real click for a single tap),
