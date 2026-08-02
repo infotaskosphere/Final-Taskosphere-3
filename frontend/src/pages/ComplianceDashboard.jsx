@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   ShieldCheck, ArrowLeftRight, Shield, AlertTriangle, CalendarClock,
-  CheckCircle2, Layers, ListChecks, FileBarChart2,
+  CheckCircle2, Layers, ListChecks, FileBarChart2, Receipt,
 } from 'lucide-react';
 import api from '@/lib/api';
 import useDark from '@/hooks/useDark';
@@ -31,6 +31,11 @@ const MODULES = [
     path: '/mis-report', icon: FileBarChart2, label: 'MIS Report',
     description: 'Financial Dashboard, Receivables, Payables, Revenue, Expense and Profitability MIS per client.',
     color: '#0EA5E9', permission: 'can_view_mis_report',
+  },
+  {
+    path: '/salary-slips', icon: Receipt, label: 'Salary Slip Generator',
+    description: 'Generate and manage payslips for client companies\u2019 employees, with a reusable employee master.',
+    color: '#F59E0B', permission: 'can_view_salary_slips',
   },
 ];
 
