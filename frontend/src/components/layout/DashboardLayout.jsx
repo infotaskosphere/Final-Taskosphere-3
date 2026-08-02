@@ -71,6 +71,7 @@ const NAV_GROUPS = [
       { path: '/gst-reconciliation', icon: ArrowLeftRight, label: 'GST Reconciliation', permission: 'can_view_gst_reconciliation' },
       { path: '/trademark-sphere', icon: Shield, label: 'Trademark Sphere', permission: 'can_view_trademark_sphere' },
       { path: '/mis-report', icon: FileBarChart2, label: 'MIS Report', permission: 'can_view_mis_report' },
+      { path: '/salary-slips', icon: Receipt, label: 'Salary Slip Generator', permission: 'can_view_salary_slips' },
     ],
   },
   {
