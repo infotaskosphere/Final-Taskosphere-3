@@ -26,7 +26,7 @@ import {
   Building2, MessageSquare, MessageCircle, Wallet, IndianRupee, ChevronDown, ChevronUp,
   Landmark, CreditCard, ShoppingBag, BookOpen, NotebookPen, BarChart3,
   TrendingDown, CalendarClock, CalendarX2, CalendarCheck2, CalendarOff,
-  Minimize2, Copy, ChevronsDownUp, ChevronsUpDown,
+  Minimize2, Copy, ChevronsDownUp, ChevronsUpDown, Upload,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -135,6 +135,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_manage_invoices: true, can_view_passwords: true, can_edit_passwords: true,
       can_edit_attendance: true, can_view_compliance: true, can_manage_compliance: true,
       can_view_gst_reconciliation: true,
+      can_view_mis_report: true, can_manage_mis_report: true,
       can_view_all_visits: true, can_edit_visits: true, can_delete_visits: true, can_delete_own_visits: true,
       can_view_client_portal: true,
       can_manage_whatsapp: true,
@@ -194,6 +195,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_manage_compliance: true,    // Compliance Tracker → CREATE, EDIT, UPDATE (Own + Team)
       can_edit_attendance: true,      // Attendance → EDIT/UPDATE (Own + Team)
       can_view_gst_reconciliation: false, // admin-granted only (GST dept users)
+      can_view_mis_report: false,     // admin-granted only
+      can_manage_mis_report: false,   // admin-granted only
       can_view_all_visits: false,     // own + team visits scoped server-side via department query
       can_edit_visits: true,          // Client Visits → EDIT/UPDATE (Own + Team)
       can_delete_visits: false,       // admin-granted only
@@ -254,6 +257,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_manage_compliance: true,    // Compliance Tracker → CREATE, EDIT, UPDATE (Own)
       can_edit_attendance: true,      // Attendance → EDIT/UPDATE (Own)
       can_view_gst_reconciliation: false, // admin-granted only (GST dept users)
+      can_view_mis_report: false,     // admin-granted only
+      can_manage_mis_report: false,   // admin-granted only
       can_view_all_visits: false,     // scope: own visits only (server-side scoped)
       can_edit_visits: true,          // Client Visits → EDIT/UPDATE (Own)
       can_delete_visits: false,       // admin-granted only
@@ -284,6 +289,7 @@ const EMPTY_PERMISSIONS = {
   can_manage_invoices: false, can_view_passwords: false, can_edit_passwords: false,
   can_edit_attendance: false, can_view_compliance: false, can_manage_compliance: false, can_view_trademark_sphere: false,
   can_view_gst_reconciliation: false,
+  can_view_mis_report: false, can_manage_mis_report: false,
   can_view_all_visits: false, can_edit_visits: false,
   can_delete_visits: false, can_delete_own_visits: true,
   can_view_client_portal: false,
@@ -506,6 +512,7 @@ const PermissionMatrixSummary = ({ permissions }) => {
     'can_manage_chart_of_accounts', 'can_view_journal_entries', 'can_post_journal_entries', 'can_match_bank',
     'can_view_accounting_reports', 'can_view_passwords', 'can_edit_passwords', 'can_view_gst_reconciliation',
     'can_view_trademark_sphere', 'can_view_client_portal', 'can_manage_whatsapp', 'can_create_quotations',
+    'can_view_mis_report', 'can_manage_mis_report',
     'can_view_recruitment', 'can_manage_recruitment',
     // Main permission module master switches (Modules tab)
     'can_access_taskosphere', 'can_access_finix', 'can_access_compliance',
@@ -667,7 +674,7 @@ const MODULE_TREE = [
   },
   {
     key: 'compliance', flag: 'can_access_compliance', label: 'Compliance', icon: ShieldCheck, accent: '#1F6FB2',
-    desc: 'Compliance Tracker, GST Reconciliation and Trademark Sphere.',
+    desc: 'Compliance Tracker, GST Reconciliation, Trademark Sphere and MIS Report.',
     pages: [
       {
         permKey: 'can_view_compliance', label: 'Compliance Tracker', desc: 'View the Compliance Tracker page (own department categories for non-admins)', icon: ShieldCheck,
@@ -675,6 +682,10 @@ const MODULE_TREE = [
       },
       { permKey: 'can_view_gst_reconciliation', label: 'GST Reconciliation', desc: 'Access the GST Reconciliation module — grant to GST department users only', icon: FileText },
       { permKey: 'can_view_trademark_sphere',   label: 'Trademark Sphere',   desc: 'Track, monitor and manage trademark applications from IP India', icon: ShieldCheck },
+      {
+        permKey: 'can_view_mis_report', label: 'MIS Report', desc: 'View the MIS Report — Financial Dashboard, Receivables/Payables/Revenue/Expense/Profitability per client', icon: BarChart3,
+        writePerms: [{ permKey: 'can_manage_mis_report', label: 'Manage MIS Report', desc: 'Upload source documents, create periods/clients and edit manual entries', icon: Upload }],
+      },
     ],
   },
   {
