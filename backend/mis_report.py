@@ -48,6 +48,10 @@ from pydantic import BaseModel, Field
 
 from backend.dependencies import db, get_current_user, check_permission, build_client_query
 from backend.models import User, ClientCreate
+from backend.mis_doc_readers import read_document, ParsedDocument
+from backend.mis_gst_parser import parse_gst_tables, gst_summary
+from backend.mis_exports import build_pdf_report, build_word_report, build_excel_workbook
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/mis", tags=["mis-report"])
@@ -76,16 +80,23 @@ def _num(val) -> float:
         return 0.0
     if isinstance(val, (int, float)):
         return 0.0 if (isinstance(val, float) and np.isnan(val)) else float(val)
-    s = str(val).strip().replace(",", "").replace("₹", "")
-    if s in ("", "-", "nan", "None"):
+    s = str(val).strip().replace(",", "").replace("₹", "").replace("Rs.", "").replace("INR", "")
+    if s in ("", "-", "–", "nan", "None", "NA", "N/A"):
         return 0.0
-    neg = s.startswith("(") and s.endswith(")")
-    s = s.strip("()")
+    neg = (s.startswith("(") and s.endswith(")")) or s.endswith("-")
+    s = s.strip("()").rstrip("-").strip()
+    # bank statements suffix the running balance with Dr / Cr
+    m = re.match(r"^(-?\d*\.?\d+)\s*(dr|cr)$", s, re.I)
+    if m:
+        s = m.group(1)
+        if m.group(2).lower() == "dr":
+            neg = True
     try:
         v = float(s)
         return -v if neg else v
     except (ValueError, TypeError):
         return 0.0
+
 
 
 def _str(val) -> str:
@@ -189,6 +200,58 @@ def _read_tabular(file_bytes: bytes, filename: str) -> pd.DataFrame:
         raise HTTPException(status_code=400, detail=f"Could not read file '{filename}': {e}")
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# HELPERS — universal document reading (Excel / CSV / PDF / Word)
+# ══════════════════════════════════════════════════════════════════════════
+
+def _read_any(file_bytes: bytes, filename: str) -> ParsedDocument:
+    """Read any supported document into tables + plain text."""
+    try:
+        return read_document(file_bytes, filename)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read file '{filename}': {e}")
+
+
+def _score_table(df: pd.DataFrame, spec: Dict[str, List[str]], weighted: List[str]) -> int:
+    """How well a table's headers match a column spec — used to pick the data table."""
+    if df is None or df.empty:
+        return 0
+    score = 0
+    for key, cands in spec.items():
+        if _find_col(df.columns, cands):
+            score += 3 if key in weighted else 1
+    return score
+
+
+def _pick_table(doc: ParsedDocument, spec: Dict[str, List[str]], weighted: List[str],
+                min_score: int = 3) -> Optional[pd.DataFrame]:
+    """
+    A PDF/Excel export usually holds several tables (cover page, summary,
+    then the real register). Concatenate every table that matches the
+    expected headers so nothing is dropped, instead of reading only one.
+    """
+    scored = [(_score_table(t, spec, weighted), t) for t in doc.tables]
+    scored = [(s, t) for s, t in scored if s >= min_score]
+    if not scored:
+        return None
+    best = max(s for s, _ in scored)
+    chosen = [t for s, t in scored if s == best]
+    frames = []
+    for t in chosen:
+        t = t.copy()
+        t.columns = [str(c).strip() for c in t.columns]
+        frames.append(t)
+    if len(frames) == 1:
+        return frames[0]
+    try:
+        return pd.concat(frames, ignore_index=True, sort=False)
+    except Exception:
+        return frames[0]
+
+
+
+
+
 EXPENSE_KEYWORDS = [
     ("rent", ["rent"]),
     ("employee_expenses", ["salary", "salaries", "payroll", "wages", "bonus", "incentive"]),
@@ -278,6 +341,11 @@ def _parse_bank(df: pd.DataFrame) -> List[Dict[str, Any]]:
             status_code=422,
             detail="Could not detect Debit/Credit columns in this bank statement. Expected headers like 'Debit', 'Credit', 'Date', 'Narration'.",
         )
+    # PDF statements often split the narration across a cheque-no / reference
+    # column; fold every unmapped text column back into the narration so
+    # expense categorisation sees the whole line.
+    mapped_cols = {c for c in colmap.values() if c is not None}
+    extra_cols = [c for c in df.columns if c not in mapped_cols]
     rows = []
     for _, r in df.iterrows():
         mapped = _map_row(r, colmap)
@@ -285,7 +353,12 @@ def _parse_bank(df: pd.DataFrame) -> List[Dict[str, Any]]:
         credit = _num(mapped["credit"])
         if not debit and not credit:
             continue
-        narration = _str(mapped["narration"])
+        parts = [_str(mapped["narration"])]
+        for c in extra_cols:
+            v = _str(r[c])
+            if v and _num(v) == 0 and not re.fullmatch(r"[\d.,\-]+", v):
+                parts.append(v)
+        narration = " ".join(p for p in parts if p).strip()
         rows.append({
             "date": _parse_date(mapped["date"]),
             "narration": narration,
@@ -295,6 +368,7 @@ def _parse_bank(df: pd.DataFrame) -> List[Dict[str, Any]]:
             "category": _categorize_expense(narration) if debit else None,
         })
     return rows
+
 
 
 BS_PATTERNS = {
@@ -343,6 +417,51 @@ def _parse_balance_sheet_pdf(file_bytes: bytes) -> Dict[str, float]:
                             pass
                     break
     return suggestions
+
+
+def _parse_balance_sheet_doc(doc: ParsedDocument) -> Dict[str, float]:
+    """
+    Read a provisional balance sheet from any format. Ruled tables (Excel,
+    Word, PDF) are matched head-by-head; whatever the tables miss is filled
+    from a plain-text scan of the same document.
+    """
+    suggestions: Dict[str, float] = {}
+
+    for table in doc.tables:
+        if table is None or table.empty or table.shape[1] < 2:
+            continue
+        for _, r in table.iterrows():
+            cells = [_str(v) for v in r.tolist()]
+            label = " ".join(c for c in cells[:1] if c).lower() or " ".join(cells).lower()
+            amounts = [_num(c) for c in cells[1:] if _num(c)]
+            if not amounts:
+                continue
+            for field, patterns in BS_PATTERNS.items():
+                if field in suggestions:
+                    continue
+                if any(re.search(p, label) for p in patterns):
+                    suggestions[field] = amounts[-1]
+                    break
+
+    if len(suggestions) < len(BS_PATTERNS):
+        amount_re = re.compile(r"([\d,]+(?:\.\d+)?)")
+        for line in (doc.text or "").splitlines():
+            low = line.lower()
+            for field, patterns in BS_PATTERNS.items():
+                if field in suggestions:
+                    continue
+                if any(re.search(p, low) for p in patterns):
+                    nums = [n.replace(",", "") for n in amount_re.findall(line)]
+                    if nums:
+                        try:
+                            suggestions[field] = float(nums[-1])
+                        except ValueError:
+                            pass
+                    break
+    return suggestions
+
+
+
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -420,39 +539,77 @@ async def upload_mis_document(
     status_msg = "parsed"
     error = None
 
+    gst_meta: Dict[str, Any] = {}
     try:
-        is_pdf = filename.lower().endswith(".pdf")
-        if doc_type in ("sales", "purchase", "gst_report") and not is_pdf:
-            df = _read_tabular(file_bytes, filename)
+        # Every document type now accepts Excel, CSV, PDF and Word — the
+        # reader normalises all four into tables + text before parsing.
+        doc = _read_any(file_bytes, filename)
+
+        if doc_type in ("sales", "purchase"):
+            df = _pick_table(doc, SALES_PURCHASE_COLS,
+                             weighted=["party_name", "total_amount", "taxable_value"])
+            if df is None or df.empty:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"No {doc_type} table could be read from '{filename}'. Expected columns similar to "
+                        "'Party Name', 'Invoice No', 'Date', 'Taxable Value', 'Total Amount'."
+                    ),
+                )
             parsed_rows = _parse_register(df, doc_type)
-        elif doc_type == "bank_statement" and not is_pdf:
-            df = _read_tabular(file_bytes, filename)
+
+        elif doc_type == "bank_statement":
+            df = _pick_table(doc, BANK_COLS, weighted=["debit", "credit"], min_score=4)
+            if df is None or df.empty:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"No transaction table could be read from '{filename}'. Expected columns like "
+                        "'Date', 'Narration', 'Withdrawal/Debit', 'Deposit/Credit', 'Balance'."
+                    ),
+                )
             parsed_rows = _parse_bank(df)
+
+        elif doc_type == "gst_report":
+            # First try an invoice-level export (GSTR-1 B2B Excel, purchase
+            # register from GSTR-2B). If that isn't what was uploaded, fall
+            # back to reading the filed return's own summary tables.
+            df = _pick_table(doc, SALES_PURCHASE_COLS,
+                             weighted=["party_name", "total_amount", "taxable_value"], min_score=6)
+            if df is not None and not df.empty:
+                try:
+                    parsed_rows = _parse_register(df, doc_type)
+                except HTTPException:
+                    parsed_rows = []
+            if not parsed_rows:
+                parsed_rows = parse_gst_tables(doc.tables, doc.text, filename)
+                if parsed_rows:
+                    gst_meta = {
+                        "gst_return_type": parsed_rows[0].get("gst_return_type"),
+                        "gst_period": parsed_rows[0].get("gst_period"),
+                    }
+            if not parsed_rows:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"No GST data could be read from '{filename}'. Upload a GSTR-1 / GSTR-3B / GSTR-2B "
+                        "download from the portal (PDF or Excel), or an invoice-level GST register."
+                    ),
+                )
+
         elif doc_type == "balance_sheet":
-            if is_pdf:
-                bs_suggestions = _parse_balance_sheet_pdf(file_bytes)
-            else:
-                df = _read_tabular(file_bytes, filename)
-                # a balance sheet exported as Excel: try to read a simple
-                # "Particulars" / "Amount" two-column layout
-                part_col = _find_col(df.columns, ["particulars", "head", "line item"])
-                amt_col = _find_col(df.columns, ["amount", "value", "balance"])
-                if part_col and amt_col:
-                    for _, r in df.iterrows():
-                        label = _str(r[part_col]).lower()
-                        amount = _num(r[amt_col])
-                        for field, patterns in BS_PATTERNS.items():
-                            if field in bs_suggestions:
-                                continue
-                            if any(re.search(p, label) for p in patterns):
-                                bs_suggestions[field] = amount
-        elif is_pdf:
-            raise HTTPException(
-                status_code=422,
-                detail="PDF is only supported for the Provisional Balance Sheet. Please upload Sales/Purchase/Bank/GST data as Excel or CSV.",
-            )
+            bs_suggestions = _parse_balance_sheet_doc(doc)
+            if not bs_suggestions:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"No balance-sheet line items were recognised in '{filename}'. Expected heads like "
+                        "'Sundry Debtors', 'Sundry Creditors', 'Cash & Bank Balance', 'Total Revenue'."
+                    ),
+                )
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported doc_type '{doc_type}'.")
+
     except HTTPException as he:
         status_msg = "error"
         error = he.detail
@@ -504,7 +661,10 @@ async def upload_mis_document(
         "status": status_msg,
         "row_count": len(parsed_rows),
         "balance_sheet_fields_found": list(bs_suggestions.keys()) if bs_suggestions else [],
+        "gst_return_type": gst_meta.get("gst_return_type"),
+        "gst_period": gst_meta.get("gst_period"),
         "error": error,
+
     }
     await db.mis_uploads.insert_one(upload_doc)
     upload_doc.pop("_id", None)
@@ -951,3 +1111,212 @@ async def profitability_mis(client_id: str = Query(...), period: str = Query(...
             "profit_pct": profit_pct,
         },
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 7. EXPORTS — generate PDF / Word reports and Excel data workbooks
+# ══════════════════════════════════════════════════════════════════════════
+
+def _humanize(key: str) -> str:
+    return key.replace("_pct", " %").replace("_", " ").strip().title()
+
+
+def _sections_from_report(title: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    """Turn any of the six MIS report payloads into a printable section."""
+    skip = {"client_id", "period"}
+    kpis, tables = [], []
+    for key, val in data.items():
+        if key in skip:
+            continue
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            kpis.append({"label": _humanize(key), "value": val,
+                         "money": not key.endswith("_pct"), "pct": key.endswith("_pct")})
+        elif isinstance(val, dict) and val and all(isinstance(v, (int, float)) for v in val.values()):
+            tables.append({"columns": [_humanize(key), "Amount"],
+                           "rows": [[k, round(float(v), 2)] for k, v in sorted(
+                               val.items(), key=lambda kv: -abs(float(kv[1])))]})
+        elif isinstance(val, list) and val and isinstance(val[0], dict):
+            cols = list(val[0].keys())
+            tables.append({"columns": [_humanize(c) for c in cols],
+                           "rows": [[r.get(c) for c in cols] for r in val]})
+    merged_rows, merged_cols = [], None
+    section = {"title": title, "kpis": kpis}
+    if tables:
+        section["table"] = tables[0]
+    extra = [{"title": f"{title} — detail {i + 2}", "kpis": [], "table": t}
+             for i, t in enumerate(tables[1:])]
+    return {"main": section, "extra": extra}
+
+
+async def _build_all_sections(client_id: str, period: str) -> List[Dict[str, Any]]:
+    reports = [
+        ("Financial Dashboard", await financial_dashboard(client_id, period)),
+        ("Receivables MIS", await receivables_mis(client_id, period)),
+        ("Payables MIS", await payables_mis(client_id, period)),
+        ("Revenue MIS", await revenue_mis(client_id, period)),
+        ("Expense MIS", await expense_mis(client_id, period)),
+        ("Profitability MIS", await profitability_mis(client_id, period)),
+    ]
+    sections: List[Dict[str, Any]] = []
+    for title, data in reports:
+        built = _sections_from_report(title, data)
+        sections.append(built["main"])
+        sections.extend(built["extra"])
+
+    _, _, _, gst, _ = await _load(client_id, period)
+    if gst:
+        summary = gst_summary(gst)
+        sections.append({
+            "title": "GST Summary",
+            "kpis": [
+                {"label": "Taxable Value (Outward)", "value": summary["outward"]["taxable_value"], "money": True},
+                {"label": "Output Tax", "value": summary["outward"]["tax_amount"], "money": True},
+                {"label": "Input Tax Credit", "value": summary["itc"]["tax_amount"], "money": True},
+                {"label": "Net Tax", "value": summary["net_tax"], "money": True},
+                {"label": "IGST", "value": summary["outward"]["igst"], "money": True},
+                {"label": "CGST / SGST", "value": summary["outward"]["cgst"] + summary["outward"]["sgst"], "money": True},
+            ],
+            "table": {
+                "columns": ["Return / Period", "Taxable Value", "IGST", "CGST", "SGST", "Cess", "Total Tax"],
+                "rows": [[k, v["taxable_value"], v["igst"], v["cgst"], v["sgst"], v["cess"], v["tax_amount"]]
+                         for k, v in summary["by_period"].items()],
+            },
+            "note": "Outward supplies are counted once — HSN, document-summary and tax-payment tables are reported separately.",
+        })
+    return sections
+
+
+async def _export_meta(client_id: str, period: str, user: User) -> Dict[str, Any]:
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "company_name": 1}) or {}
+    return {
+        "client_name": client.get("company_name") or "Client",
+        "period": period,
+        "generated_at": _now().strftime("%d-%b-%Y %H:%M IST"),
+        "prepared_by": getattr(user, "full_name", None) or getattr(user, "username", None) or "—",
+    }
+
+
+def _safe_name(text: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]+", "_", text or "").strip("_") or "MIS"
+
+
+def _file_response(content: bytes, filename: str, media_type: str):
+    from fastapi.responses import Response
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"',
+                 "Access-Control-Expose-Headers": "Content-Disposition"},
+    )
+
+
+@router.get("/export/report", dependencies=[Depends(VIEW)])
+async def export_mis_report(
+    client_id: str = Query(...),
+    period: str = Query(...),
+    format: str = Query("pdf", pattern="^(pdf|word|docx)$"),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate the full MIS report as a PDF or Word document."""
+    meta = await _export_meta(client_id, period, current_user)
+    sections = await _build_all_sections(client_id, period)
+    base = f"MIS_Report_{_safe_name(meta['client_name'])}_{_safe_name(period)}"
+    try:
+        if format == "pdf":
+            return _file_response(build_pdf_report(meta, sections), f"{base}.pdf", "application/pdf")
+        return _file_response(
+            build_word_report(meta, sections), f"{base}.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=f"Report generator not installed on the server: {e}")
+
+
+@router.get("/export/excel", dependencies=[Depends(VIEW)])
+async def export_mis_excel(
+    client_id: str = Query(...),
+    period: str = Query(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Every parsed row for the period — sales, purchase, bank, GST — as one workbook."""
+    meta = await _export_meta(client_id, period, current_user)
+    sales, purchase, bank, gst, _ = await _load(client_id, period)
+
+    reg_cols = ["date", "invoice_no", "party_name", "taxable_value", "tax_amount",
+                "total_amount", "status", "due_date", "paid_date", "category",
+                "service", "branch", "partner", "employee"]
+    bank_cols = ["date", "narration", "debit", "credit", "balance", "category"]
+    gst_cols = ["gst_return_type", "gst_period", "gst_section", "invoice_no", "party_name",
+                "taxable_value", "igst", "cgst", "sgst", "cess", "tax_amount", "gst_measure"]
+
+    def rows_of(items, cols):
+        return [[t.get(c) for c in cols] for t in items]
+
+    sheets = []
+    summary_rows = [
+        ["Sales rows", len(sales)], ["Purchase rows", len(purchase)],
+        ["Bank rows", len(bank)], ["GST rows", len(gst)],
+        ["Total revenue (taxable)", round(sum(_num(t["taxable_value"]) for t in sales), 2)],
+        ["Total purchases (taxable)", round(sum(_num(t["taxable_value"]) for t in purchase), 2)],
+        ["Bank credits", round(sum(_num(t["credit"]) for t in bank), 2)],
+        ["Bank debits", round(sum(_num(t["debit"]) for t in bank), 2)],
+    ]
+    sheets.append({"name": "Summary", "columns": ["Metric", "Value"], "rows": summary_rows, "money_columns": [1]})
+    if sales:
+        sheets.append({"name": "Sales Register", "columns": [_humanize(c) for c in reg_cols],
+                       "rows": rows_of(sales, reg_cols), "money_columns": [3, 4, 5]})
+    if purchase:
+        sheets.append({"name": "Purchase Register", "columns": [_humanize(c) for c in reg_cols],
+                       "rows": rows_of(purchase, reg_cols), "money_columns": [3, 4, 5]})
+    if bank:
+        sheets.append({"name": "Bank Statement", "columns": [_humanize(c) for c in bank_cols],
+                       "rows": rows_of(bank, bank_cols), "money_columns": [2, 3, 4]})
+    if gst:
+        sheets.append({"name": "GST Data", "columns": [_humanize(c) for c in gst_cols],
+                       "rows": rows_of(gst, gst_cols), "money_columns": [5, 6, 7, 8, 9, 10]})
+
+    content = build_excel_workbook(meta, sheets)
+    name = f"MIS_Data_{_safe_name(meta['client_name'])}_{_safe_name(period)}.xlsx"
+    return _file_response(content, name,
+                          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@router.get("/export/gst-excel", dependencies=[Depends(VIEW)])
+async def export_gst_excel(
+    client_id: str = Query(...),
+    period: str = Query(...),
+    current_user: User = Depends(get_current_user),
+):
+    """GST report workbook: return-wise, month-wise and full line-item detail."""
+    meta = await _export_meta(client_id, period, current_user)
+    _, _, _, gst, _ = await _load(client_id, period)
+    if not gst:
+        raise HTTPException(status_code=404, detail="No GST data uploaded for this client and period.")
+    summary = gst_summary(gst)
+
+    money = [1, 2, 3, 4, 5, 6]
+    def bucket_rows(mapping):
+        return [[k, v["taxable_value"], v["igst"], v["cgst"], v["sgst"], v["cess"], v["tax_amount"]]
+                for k, v in mapping.items()]
+    bucket_cols = ["Group", "Taxable Value", "IGST", "CGST", "SGST/UTGST", "Cess", "Total Tax"]
+
+    detail_cols = ["gst_return_type", "gst_period", "gst_section", "invoice_no", "party_name",
+                   "taxable_value", "igst", "cgst", "sgst", "cess", "tax_amount",
+                   "record_count", "gst_measure"]
+    sheets = [
+        {"name": "GST Summary", "columns": ["Metric", "Amount"], "money_columns": [1], "rows": [
+            ["Outward taxable value", summary["outward"]["taxable_value"]],
+            ["Output tax", summary["outward"]["tax_amount"]],
+            ["Input tax credit", summary["itc"]["tax_amount"]],
+            ["Net tax payable", summary["net_tax"]],
+            ["Line items read", summary["line_items"]],
+        ]},
+        {"name": "By Return", "columns": bucket_cols, "rows": bucket_rows(summary["by_return"]), "money_columns": money},
+        {"name": "By Period", "columns": bucket_cols, "rows": bucket_rows(summary["by_period"]), "money_columns": money},
+        {"name": "By Table Type", "columns": bucket_cols, "rows": bucket_rows(summary["by_measure"]), "money_columns": money},
+        {"name": "Line Items", "columns": [_humanize(c) for c in detail_cols],
+         "rows": [[t.get(c) for c in detail_cols] for t in gst], "money_columns": [5, 6, 7, 8, 9, 10]},
+    ]
+    content = build_excel_workbook(meta, sheets)
+    name = f"GST_Report_{_safe_name(meta['client_name'])}_{_safe_name(period)}.xlsx"
+    return _file_response(content, name,
+                          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
