@@ -10,6 +10,7 @@ import api from '@/lib/api';
 import useDark from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import { HubBanner, StatCard, HUB_COLORS } from '@/components/SectionHub.jsx';
+import SearchableSelect from '@/components/ui/SearchableSelect.jsx';
 
 /* ═══════════════════════════════════════════════════════════════════════
  * Helpers
@@ -753,9 +754,19 @@ export default function SalarySlips() {
 
   const fetchClients = useCallback(async () => {
     try {
-      const r = await api.get('/clients');
-      const list = Array.isArray(r.data) ? r.data : (r.data?.items || r.data?.data || []);
-      setClients(list);
+      const PAGE_SIZE = 500;
+      let page = 1;
+      let all = [];
+      // /clients paginates (default page_size=100) — loop until a short page tells us we're done
+      // so firms with 100+ clients aren't silently truncated in this dropdown.
+      while (true) {
+        const r = await api.get('/clients', { params: { page, page_size: PAGE_SIZE } });
+        const list = Array.isArray(r.data) ? r.data : (r.data?.items || r.data?.data || []);
+        all = all.concat(list);
+        if (list.length < PAGE_SIZE) break;
+        page += 1;
+      }
+      setClients(all);
     } catch { /* silent — Add Company still works */ }
   }, []);
 
@@ -1034,12 +1045,17 @@ export default function SalarySlips() {
           <div className="min-w-[260px] flex-1">
             <FieldLabel isDark={isDark}>Company</FieldLabel>
             <div className="flex gap-2">
-              <SelectInput isDark={isDark} value={companyKey} onChange={(e) => setCompanyKey(e.target.value)}>
-                {!companies.length && <option value="">No companies yet</option>}
-                {companies.map((c) => (
-                  <option key={c.key} value={c.key}>{c.name}{c.source === 'manual' ? ' (manual)' : ''}</option>
-                ))}
-              </SelectInput>
+              <SearchableSelect
+                isDark={isDark}
+                value={companyKey}
+                onChange={(key) => setCompanyKey(key)}
+                placeholder={companies.length ? 'Select a company…' : 'No companies yet'}
+                emptyText="No companies match"
+                options={companies.map((c) => ({
+                  value: c.key,
+                  label: c.name + (c.source === 'manual' ? ' (manual)' : ''),
+                }))}
+              />
               {canManage && (
                 <button
                   onClick={() => setShowAddCompany(true)}
