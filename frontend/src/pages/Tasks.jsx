@@ -45,7 +45,7 @@ import {
   Minimize2, ClipboardList,
 } from 'lucide-react';
 import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
-import { AreaChart, Area, ResponsiveContainer, Tooltip as ReTooltip } from 'recharts';
+import { AreaChart, Area, ResponsiveContainer, Tooltip as ReTooltip, BarChart, Bar, Cell, XAxis, YAxis, LabelList } from 'recharts';
 import { useFormMinimizer } from '@/contexts/MinimizedFormsContext';
 import { getTasksCache, setTasksCache, prefetchTasksData } from '@/lib/tasksPrefetch';
 
@@ -817,6 +817,7 @@ export default function Tasks() {
   const [scanProgress, setScanProgress] = useState(0);   // 0–100 progress while detecting duplicates
   const [scanStatus,   setScanStatus]   = useState('');  // human-readable status (e.g. 'Asking Gemini…')
   const scanAbortRef = useRef(null); // AbortController for in-flight duplicate-detection requests
+  const pendingNewTaskRef = useRef(false); // survives the searchParams re-render that clears ?newTask=1
   const [scanHistory, setScanHistory] = useState([]); // last few finished scans: { id, provider, label, groupCount, taskCount, scannedCount, durationMs, at }
   const [compareTaskIds,      setCompareTaskIds]       = useState([]);
   const [compareMode,         setCompareMode]          = useState(false);
@@ -1060,21 +1061,23 @@ export default function Tasks() {
   }, [searchParams, tasks]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-open new task dialog from URL param (?newTask=1) ─────────────
+  // Two-pass handoff via a ref so the cleanup of the first run cannot
+  // cancel the open:
+  //   Pass 1 – detects ?newTask=1, sets the ref, clears the URL param.
+  //             Clearing the param causes a re-render → effect fires again.
+  //   Pass 2 – ?newTask is gone but the ref is still true → open dialog,
+  //             clear the ref.  No timer involved, no race with cleanup.
   useEffect(() => {
     if (searchParams.get('newTask') === '1') {
+      pendingNewTaskRef.current = true;
       setSearchParams({}, { replace: true });
-      // Idempotent: if the dialog is already open (e.g. a double-fired
-      // click on the Dashboard's "+ New Task" button re-delivered this
-      // same param a moment later), don't reset the form / re-open — that
-      // was making the dialog appear to open a second time right after
-      // the first.
-      setDialogOpen((wasOpen) => {
-        if (!wasOpen) {
-          setEditingTask(null);
-          setFormData({ ...EMPTY_FORM });
-        }
-        return true;
-      });
+      return; // re-render will fire this effect again for pass 2
+    }
+    if (pendingNewTaskRef.current) {
+      pendingNewTaskRef.current = false;
+      setEditingTask(null);
+      setFormData({ ...EMPTY_FORM });
+      setDialogOpen(true);
       return;
     }
     const filter = searchParams.get('filter');
@@ -3107,408 +3110,331 @@ export default function Tasks() {
           </AnimatePresence>
 
           <motion.div variants={itemVariants}>
+            {/* ── Business-style Performance Score Card ── */}
+            {(() => {
+              const chartData = [
+                { name: 'Attendance', earned: parseFloat(contribAttendance.toFixed(1)), remaining: parseFloat((25 - contribAttendance).toFixed(1)), max: 25, color: '#4F46E5', pct: (apiAttendance ?? 0) },
+                { name: 'Work Hours', earned: parseFloat(contribHours.toFixed(1)),        remaining: parseFloat((20 - contribHours).toFixed(1)),        max: 20, color: '#7C3AED', pct: hoursRatioPct },
+                { name: 'Task Compl.', earned: parseFloat(contribTaskComplete.toFixed(1)), remaining: parseFloat((25 - contribTaskComplete).toFixed(1)), max: 25, color: '#10b981', pct: taskCompletionVal },
+                { name: 'On-Time',    earned: parseFloat(contribOntime.toFixed(1)),       remaining: parseFloat((15 - contribOntime).toFixed(1)),       max: 15, color: '#F59E0B', pct: onTimeVal },
+                { name: 'Punch-in',   earned: parseFloat(contribTimely.toFixed(1)),       remaining: parseFloat((15 - contribTimely).toFixed(1)),       max: 15, color: '#06b6d4', pct: apiTimely },
+              ];
+              const CustomBarTooltip = ({ active, payload, label }) => {
+                if (!active || !payload || !payload.length) return null;
+                const row = chartData.find(d => d.name === label);
+                return (
+                  <div className={`rounded-lg border px-3 py-2 text-xs shadow-lg ${isDark ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-700'}`}>
+                    <p className="font-bold mb-1">{label}</p>
+                    <p style={{ color: row?.color }}>Earned: <strong>{row?.earned.toFixed(1)}pts</strong> / {row?.max}pts</p>
+                    <p className={isDark ? 'text-slate-400' : 'text-slate-500'}>{row?.pct?.toFixed(1)}% rate</p>
+                  </div>
+                );
+              };
+              return (
             <div
               className={`rounded-2xl border overflow-hidden ${isDark ? 'bg-slate-800/90 border-slate-700' : 'bg-white border-slate-200'}`}
-              style={{ boxShadow: '0 4px 24px rgba(99,102,241,0.09), 0 1px 3px rgba(0,0,0,0.05)' }}
+              style={{ boxShadow: '0 4px 28px rgba(99,102,241,0.10), 0 1px 3px rgba(0,0,0,0.05)' }}
             >
-              {/* Animated top accent bar */}
-              <motion.div
-                className="h-1 w-full"
-                style={{ background: 'linear-gradient(90deg,#6366f1,#7C3AED,#1FAF5A,#F59E0B)' }}
-                initial={{ scaleX: 0, originX: 0 }}
-                animate={{ scaleX: 1 }}
-                transition={{ duration: 0.9, ease: 'easeOut' }}
-              />
+              {/* Top accent bar */}
+              <motion.div className="h-[3px] w-full" style={{ background: 'linear-gradient(90deg,#4F46E5,#7C3AED,#10b981,#F59E0B,#06b6d4)' }}
+                initial={{ scaleX: 0, originX: 0 }} animate={{ scaleX: 1 }} transition={{ duration: 0.9, ease: 'easeOut' }} />
+
+              {/* Card header */}
+              <div className={`flex items-center justify-between px-5 py-3 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                    style={{ background: 'linear-gradient(135deg,#4F46E5,#7C3AED)' }}>
+                    <Trophy className="h-3.5 w-3.5 text-white" />
+                  </div>
+                  <div>
+                    <h3 className={`text-sm font-bold leading-tight ${isDark ? 'text-white' : 'text-slate-800'}`}>Performance Score</h3>
+                    <p className={`text-[10px] leading-tight ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Monthly · Based on tasks, attendance & hours</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {apiRank !== null && (
+                    <motion.div
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-white text-[11px] font-bold"
+                      style={{ background: apiRank === 1 ? 'linear-gradient(135deg,#B45309,#D97706)' : apiRank <= 3 ? 'linear-gradient(135deg,#4F46E5,#7C3AED)' : 'linear-gradient(135deg,#475569,#64748B)' }}
+                      initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 }}
+                    >
+                      {apiRank === 1 ? <Crown className="h-3 w-3" /> : apiRank <= 3 ? <Medal className="h-3 w-3" /> : <Trophy className="h-3 w-3" />}
+                      Rank {apiRank}{totalUsers ? `/${totalUsers}` : ''}
+                    </motion.div>
+                  )}
+                  <span className="text-[10px] font-semibold px-2.5 py-1 rounded-lg" style={{ color: badgeColor, background: `${badgeColor}15`, border: `1px solid ${badgeColor}30` }}>
+                    {displayBadge}
+                  </span>
+                </div>
+              </div>
 
               <div className="flex flex-col lg:flex-row" style={{ minHeight: 0 }}>
 
-                {/* ══ PANEL 1: PERFORMANCE SCORE ══ */}
-                {/* Redesigned as an analytics tile: gauge + weighted score
-                    composition + real KPI figures. Every number below comes
-                    from the performance-rankings API or from the user's own
-                    task rows — nothing is simulated. */}
-                <div className={`flex-shrink-0 lg:w-[19rem] px-4 py-3.5 flex flex-col gap-3 ${isDark ? 'border-b lg:border-b-0 lg:border-r border-slate-700' : 'border-b lg:border-b-0 lg:border-r border-slate-100'}`}>
+                {/* ══ PANEL 1: SCORE OVERVIEW ══ */}
+                <div className={`flex-shrink-0 lg:w-[17rem] px-5 py-4 flex flex-col gap-3 ${isDark ? 'border-b lg:border-b-0 lg:border-r border-slate-700' : 'border-b lg:border-b-0 lg:border-r border-slate-100'}`}>
 
-                  {/* Header row — label + period + rank pill */}
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <Trophy className="h-3 w-3 flex-shrink-0" style={{ color: scoreColor }} />
-                      <p className={`text-[9px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Your Score</p>
-                      <span className={`text-[8px] font-semibold px-1.5 py-0.5 rounded ${isDark ? 'bg-slate-700/60 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>Monthly</span>
-                    </div>
-                    {apiRank !== null && (
-                      <motion.span
-                        className="inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-md text-white leading-none flex-shrink-0"
-                        style={{ background: apiRank === 1 ? '#B45309' : apiRank <= 3 ? '#4F46E5' : '#64748B' }}
-                        initial={{ opacity: 0, y: -4 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.3, delay: 0.1 }}
-                      >
-                        {apiRank === 1
-                          ? <Crown className="h-2.5 w-2.5" />
-                          : apiRank <= 3
-                          ? <Medal className="h-2.5 w-2.5" />
-                          : <Trophy className="h-2.5 w-2.5" />}
-                        Rank {apiRank}{totalUsers ? ` of ${totalUsers}` : ''}
-                      </motion.span>
-                    )}
-                  </div>
-
-                  {/* ── Gauge + headline figures ── */}
-                  <div className="flex items-center gap-3.5">
-                    {/* Half-dial gauge — reads like an instrument, not a toy */}
-                    <div className="relative flex-shrink-0" style={{ width: 104, height: 62 }}>
-                      <svg viewBox="0 0 120 68" width="104" height="62">
-                        {/* graduation ticks every 10 pts */}
-                        {Array.from({ length: 11 }).map((_, i) => {
-                          const a = Math.PI * (i / 10);
-                          const x1 = 60 - Math.cos(a) * 52, y1 = 60 - Math.sin(a) * 52;
-                          const x2 = 60 - Math.cos(a) * (i % 5 === 0 ? 45 : 48), y2 = 60 - Math.sin(a) * (i % 5 === 0 ? 45 : 48);
-                          return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={isDark ? '#334155' : '#DDE2EC'} strokeWidth={i % 5 === 0 ? 1.4 : 0.8} strokeLinecap="round" />;
+                  {/* ── Large half-dial gauge ── */}
+                  <div className="flex flex-col items-center pt-1">
+                    <div className="relative" style={{ width: 180, height: 106 }}>
+                      <svg viewBox="0 0 200 112" width="180" height="106">
+                        {/* Track */}
+                        <path d="M 22 96 A 78 78 0 0 1 178 96" fill="none" stroke={isDark ? '#1e293b' : '#f1f5f9'} strokeWidth="14" strokeLinecap="round" />
+                        {/* Zone bands */}
+                        {[
+                          { from: 0,  to: 60,  color: '#fca5a5' },
+                          { from: 60, to: 85,  color: '#fcd34d' },
+                          { from: 85, to: 95,  color: '#6ee7b7' },
+                          { from: 95, to: 100, color: '#34d399' },
+                        ].map(({ from, to, color }) => {
+                          const total = 245.1;
+                          const startOff = total - (total * from) / 100;
+                          const endOff   = total - (total * to)   / 100;
+                          return (
+                            <path key={from} d="M 22 96 A 78 78 0 0 1 178 96" fill="none"
+                              stroke={color} strokeWidth="14" strokeLinecap="butt" opacity="0.25"
+                              style={{ strokeDasharray: total, strokeDashoffset: endOff,
+                                strokeDasharray: `${(total * (to - from)) / 100} ${total}`,
+                                strokeDashoffset: startOff }} />
+                          );
                         })}
-                        <path d="M 18 60 A 42 42 0 0 1 102 60" fill="none" stroke={isDark ? '#334155' : '#EDEFF5'} strokeWidth="9" strokeLinecap="round" />
-                        <motion.path
-                          d="M 18 60 A 42 42 0 0 1 102 60"
-                          fill="none" stroke={scoreColor} strokeWidth="9" strokeLinecap="round"
-                          style={{ strokeDasharray: 131.9 }}
-                          initial={{ strokeDashoffset: 131.9 }}
-                          animate={{ strokeDashoffset: 131.9 - (131.9 * Math.min(Math.max(displayScore, 0), 100)) / 100 }}
-                          transition={{ duration: 0.9, ease: 'easeOut', delay: 0.15 }}
-                        />
-                        {/* 85-pt "Top Performer" threshold marker */}
-                        {(() => {
-                          const a = Math.PI * 0.85;
-                          return <line x1={60 - Math.cos(a) * 56} y1={60 - Math.sin(a) * 56} x2={60 - Math.cos(a) * 38} y2={60 - Math.sin(a) * 38}
-                            stroke={isDark ? '#94a3b8' : '#94a3b8'} strokeWidth="1.2" strokeDasharray="2 2" />;
-                        })()}
+                        {/* Score fill */}
+                        <motion.path d="M 22 96 A 78 78 0 0 1 178 96" fill="none"
+                          stroke={scoreColor} strokeWidth="14" strokeLinecap="round"
+                          style={{ strokeDasharray: 245.1 }}
+                          initial={{ strokeDashoffset: 245.1 }}
+                          animate={{ strokeDashoffset: 245.1 - (245.1 * Math.min(Math.max(displayScore, 0), 100)) / 100 }}
+                          transition={{ duration: 1, ease: 'easeOut', delay: 0.1 }} />
+                        {/* Tick marks */}
+                        {[0, 25, 50, 75, 85, 95, 100].map((v) => {
+                          const angle = Math.PI * (v / 100);
+                          const cx = 100, cy = 96, r = 78;
+                          const x1 = cx - Math.cos(angle) * (r - 9), y1 = cy - Math.sin(angle) * (r - 9);
+                          const x2 = cx - Math.cos(angle) * (r + 9), y2 = cy - Math.sin(angle) * (r + 9);
+                          return <line key={v} x1={x1} y1={y1} x2={x2} y2={y2} stroke={isDark ? '#475569' : '#cbd5e1'} strokeWidth="1.5" strokeLinecap="round" />;
+                        })}
+                        {/* Scale labels */}
+                        {[{ v: 0, lbl: '0' }, { v: 50, lbl: '50' }, { v: 100, lbl: '100' }].map(({ v, lbl }) => {
+                          const angle = Math.PI * (v / 100);
+                          const cx = 100, cy = 96, r = 60;
+                          const x = cx - Math.cos(angle) * r, y = cy - Math.sin(angle) * r;
+                          return <text key={v} x={x} y={y} textAnchor="middle" dominantBaseline="middle"
+                            fill={isDark ? '#64748b' : '#94a3b8'} fontSize="8" fontWeight="600">{lbl}</text>;
+                        })}
                       </svg>
-                      <div className="absolute inset-x-0 bottom-0 flex flex-col items-center">
-                        <span className={`text-[22px] font-black leading-none tabular-nums ${isDark ? 'text-white' : 'text-slate-800'}`}>
-                          {Number(displayScore).toFixed(1)}
-                        </span>
-                        <span className={`text-[8px] font-semibold leading-none mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>OUT OF 100</span>
+                      {/* Center score */}
+                      <div className="absolute inset-x-0 bottom-0 flex flex-col items-center pb-1">
+                        <motion.span className={`text-4xl font-black leading-none tabular-nums tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}
+                          style={{ color: scoreColor }}
+                          initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.4, duration: 0.4 }}>
+                          {Number(displayScore).toFixed(0)}
+                        </motion.span>
+                        <span className={`text-[10px] font-semibold tracking-widest uppercase mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>out of 100</span>
                       </div>
                     </div>
 
-                    <div className="flex flex-col gap-1.5 min-w-0 flex-1">
-                      <span
-                        className="inline-flex items-center gap-1 self-start text-[9px] font-bold px-2 py-1 rounded-md leading-none uppercase tracking-wide"
-                        style={{ color: badgeColor, background: `${badgeColor}16`, border: `1px solid ${badgeColor}33` }}
-                      >
-                        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: badgeColor }} />
-                        {displayBadge}
-                      </span>
-
-                      {/* Distance to the next badge tier — real, from the score */}
-                      {nextBadge ? (
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-baseline justify-between gap-1">
-                            <span className={`text-[9px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>To {nextBadge.split(' (')[0]}</span>
-                            <span className="text-[10px] font-black tabular-nums" style={{ color: scoreColor }}>{Number(ptsToNext ?? 0).toFixed(1)} pts</span>
+                    {/* Badge + next tier */}
+                    <div className="w-full mt-1 flex flex-col gap-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-lg"
+                          style={{ color: badgeColor, background: `${badgeColor}18`, border: `1.5px solid ${badgeColor}35` }}>
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ background: badgeColor }} />
+                          {displayBadge}
+                        </span>
+                        {myRanking?.discipline_penalty > 0 && (
+                          <span className="flex items-center gap-1 text-[10px] font-semibold" style={{ color: '#DC2626' }}>
+                            <AlertCircle className="h-3 w-3" />
+                            −{Number(myRanking.discipline_penalty).toFixed(1)}pts
+                          </span>
+                        )}
+                      </div>
+                      {nextBadge && (
+                        <div className={`rounded-lg px-3 py-2 ${isDark ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                              Next: {nextBadge.split(' (')[0]}
+                            </span>
+                            <span className="text-[11px] font-black tabular-nums" style={{ color: scoreColor }}>
+                              {Number(ptsToNext ?? 0).toFixed(1)} pts away
+                            </span>
                           </div>
-                          <div className={`h-1.5 w-full rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-150 bg-slate-100'}`}>
-                            <motion.div
-                              className="h-full rounded-full"
-                              style={{ background: scoreColor }}
+                          <div className={`h-2 w-full rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
+                            <motion.div className="h-full rounded-full"
+                              style={{ background: `linear-gradient(90deg, ${scoreColor}99, ${scoreColor})` }}
                               initial={{ width: 0 }}
                               animate={{ width: `${Math.min(100, (displayScore / (displayScore >= 85 ? 95 : 85)) * 100)}%` }}
-                              transition={{ duration: 0.9, ease: 'easeOut', delay: 0.25 }}
-                            />
+                              transition={{ duration: 1, ease: 'easeOut', delay: 0.3 }} />
                           </div>
-                        </div>
-                      ) : (
-                        <p className="text-[9px] font-semibold" style={{ color: '#1FAF5A' }}>Top tier reached — hold the streak.</p>
-                      )}
-
-                      {myRanking?.discipline_penalty > 0 && (
-                        <div className="flex items-center gap-1">
-                          <AlertCircle className="h-2.5 w-2.5 flex-shrink-0" style={{ color: '#DC2626' }} />
-                          <span className="text-[9px] font-semibold tabular-nums" style={{ color: '#DC2626' }}>
-                            −{Number(myRanking.discipline_penalty).toFixed(1)} pts absence penalty
-                          </span>
                         </div>
                       )}
                     </div>
                   </div>
+                </div>
 
-                  {/* ── Score composition: earned vs. weight, per component ── */}
-                  <div className={`rounded-lg border px-2.5 py-2 ${isDark ? 'bg-slate-900/40 border-slate-700' : 'bg-slate-50/80 border-slate-200'}`}>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <p className={`text-[8px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Score Composition</p>
-                      <p className={`text-[8px] font-semibold tabular-nums ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>earned / weight</p>
+                {/* ══ PANEL 2: SCORE COMPOSITION CHART ══ */}
+                <div className={`flex-1 min-w-0 px-5 py-4 flex flex-col gap-3 ${isDark ? 'border-b lg:border-b-0 lg:border-r border-slate-700' : 'border-b lg:border-b-0 lg:border-r border-slate-100'}`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Activity className={`h-3.5 w-3.5 ${isDark ? 'text-indigo-400' : 'text-indigo-500'}`} />
+                      <p className={`text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Score Composition</p>
                     </div>
+                    <span className={`text-[10px] font-medium ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>earned pts / max weight</span>
+                  </div>
 
-                    {/* Single 100-pt rail: filled portion = points actually earned */}
-                    <div className="flex gap-[3px] h-2.5 mb-2">
+                  {/* Recharts horizontal bar chart — each component shows earned vs. remaining */}
+                  <div style={{ height: 170 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={chartData} layout="vertical" margin={{ top: 0, right: 44, left: 4, bottom: 0 }} barCategoryGap="28%">
+                        <XAxis type="number" domain={[0, 25]} hide />
+                        <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 10, fontWeight: 600, fill: isDark ? '#94a3b8' : '#64748b' }} axisLine={false} tickLine={false} />
+                        <ReTooltip content={<CustomBarTooltip />} cursor={{ fill: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)' }} />
+                        {/* Earned bar */}
+                        <Bar dataKey="earned" stackId="a" radius={[0, 0, 0, 0]} isAnimationActive animationDuration={900} animationEasing="ease-out">
+                          {chartData.map((entry) => (
+                            <Cell key={entry.name} fill={entry.color} />
+                          ))}
+                          <LabelList dataKey="earned" position="right" formatter={(v) => `${v}pt`}
+                            style={{ fontSize: 10, fontWeight: 700, fill: isDark ? '#cbd5e1' : '#475569' }} />
+                        </Bar>
+                        {/* Remaining (gap) bar */}
+                        <Bar dataKey="remaining" stackId="a" radius={[0, 3, 3, 0]} isAnimationActive animationDuration={900} animationEasing="ease-out">
+                          {chartData.map((entry) => (
+                            <Cell key={entry.name} fill={isDark ? '#1e293b' : '#f1f5f9'} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  {/* Total score rail */}
+                  <div className={`rounded-lg px-3 py-2.5 ${isDark ? 'bg-slate-900/40 border border-slate-700' : 'bg-slate-50 border border-slate-100'}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Total Score Rail (100 pts)</span>
+                      <span className="text-[11px] font-black tabular-nums" style={{ color: scoreColor }}>{Number(displayScore).toFixed(1)} / 100</span>
+                    </div>
+                    <div className="flex gap-[2px] h-3 rounded-full overflow-hidden">
                       {[
-                        { key: 'att',  earned: contribAttendance,   max: 25, color: '#4F46E5' },
-                        { key: 'hrs',  earned: contribHours,        max: 20, color: '#8b5cf6' },
-                        { key: 'task', earned: contribTaskComplete, max: 25, color: '#1FAF5A' },
-                        { key: 'ont',  earned: contribOntime,       max: 15, color: '#F59E0B' },
-                        { key: 'pun',  earned: contribTimely,       max: 15, color: '#06b6d4' },
-                      ].map(({ key, earned, max, color }) => (
-                        <div key={key} className="rounded-sm overflow-hidden" style={{ flex: max, background: isDark ? '#334155' : '#E2E8F0' }}>
-                          <motion.div
-                            className="h-full"
-                            style={{ background: color }}
+                        { earned: contribAttendance,   max: 25, color: '#4F46E5' },
+                        { earned: contribHours,        max: 20, color: '#7C3AED' },
+                        { earned: contribTaskComplete, max: 25, color: '#10b981' },
+                        { earned: contribOntime,       max: 15, color: '#F59E0B' },
+                        { earned: contribTimely,       max: 15, color: '#06b6d4' },
+                      ].map(({ earned, max, color }, idx) => (
+                        <div key={idx} className="relative overflow-hidden" style={{ flex: max, background: isDark ? '#1e293b' : '#e2e8f0' }}>
+                          <motion.div className="absolute inset-y-0 left-0" style={{ background: color }}
                             initial={{ width: 0 }}
                             animate={{ width: `${Math.min(100, (earned / max) * 100)}%` }}
-                            transition={{ duration: 0.8, ease: 'easeOut', delay: 0.3 }}
-                          />
+                            transition={{ duration: 0.9, ease: 'easeOut', delay: 0.3 + idx * 0.06 }} />
                         </div>
                       ))}
                     </div>
-
-                    <div className="grid grid-cols-5 gap-1">
+                    <div className="flex gap-[2px] mt-1.5">
                       {[
                         { label: 'Attend', earned: contribAttendance,   max: 25, color: '#4F46E5' },
-                        { label: 'Hours',  earned: contribHours,        max: 20, color: '#8b5cf6' },
-                        { label: 'Tasks',  earned: contribTaskComplete, max: 25, color: '#1FAF5A' },
+                        { label: 'Hours',  earned: contribHours,        max: 20, color: '#7C3AED' },
+                        { label: 'Tasks',  earned: contribTaskComplete, max: 25, color: '#10b981' },
                         { label: 'OnTime', earned: contribOntime,       max: 15, color: '#F59E0B' },
                         { label: 'Punch',  earned: contribTimely,       max: 15, color: '#06b6d4' },
                       ].map(({ label, earned, max, color }) => (
-                        <div key={label} className="flex flex-col items-center gap-0.5 min-w-0">
-                          <span className="text-[9px] font-black tabular-nums leading-none" style={{ color }}>
-                            {earned.toFixed(1)}
-                          </span>
-                          <span className={`text-[7px] font-semibold tabular-nums leading-none ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>/{max}</span>
-                          <span className={`text-[7px] font-semibold uppercase tracking-wide leading-none truncate w-full text-center ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{label}</span>
+                        <div key={label} className="flex flex-col items-center min-w-0" style={{ flex: max }}>
+                          <span className="text-[9px] font-black tabular-nums" style={{ color }}>{earned.toFixed(1)}</span>
+                          <span className={`text-[7.5px] font-medium uppercase truncate ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>{label}</span>
                         </div>
                       ))}
                     </div>
                   </div>
 
-                  {/* ── Live workload KPIs (from this user's own tasks) ── */}
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {[
-                      { val: myPending,        label: 'Pending',   color: null },
-                      { val: myOverdue,        label: 'Overdue',   color: myOverdue > 0 ? '#DC2626' : null },
-                      { val: workingDaysLeft,  label: 'Days Left', color: null },
-                      { val: `${dailyTarget}/d`, label: 'Pace Req', color: '#4F46E5' },
-                    ].map(({ val, label, color }, i) => (
-                      <motion.div
-                        key={label}
-                        className={`flex flex-col items-center justify-center gap-0.5 rounded-lg border py-1.5 ${isDark ? 'bg-slate-900/40 border-slate-700' : 'bg-white border-slate-200'}`}
-                        initial={{ opacity: 0, y: 4 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.4 + i * 0.05 }}
-                      >
-                        <span className="text-[12px] font-black leading-tight tabular-nums" style={{ color: color || (isDark ? '#e2e8f0' : '#1e293b') }}>
-                          {val}
-                        </span>
-                        <span className={`text-[7px] font-semibold uppercase tracking-wide text-center leading-tight ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{label}</span>
-                      </motion.div>
-                    ))}
-                  </div>
-
-                  {/* Footer CTA */}
-                  <motion.div
-                    className={`rounded-lg border flex-1 flex items-center justify-between gap-2 px-2.5 py-2 ${isDark ? 'bg-indigo-500/10 border-indigo-500/20' : 'bg-indigo-50 border-indigo-100'}`}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ delay: 0.55 }}
-                  >
+                  {/* Bottom CTA */}
+                  <div className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 ${isDark ? 'bg-indigo-500/8 border-indigo-500/20' : 'bg-indigo-50 border-indigo-100'}`}>
                     <div className="min-w-0">
-                      <p className={`text-[9px] font-bold leading-tight truncate ${isDark ? 'text-indigo-300' : 'text-indigo-700'}`}>
-                        {topGapComponent ? `Biggest gap: ${topGapComponent.label}` : 'All components maxed'}
+                      <p className={`text-[10px] font-bold leading-tight ${isDark ? 'text-indigo-300' : 'text-indigo-700'}`}>
+                        {topGapComponent ? `Biggest gap: ${topGapComponent.label}` : 'All components maximised'}
                       </p>
-                      <p className={`text-[8px] leading-tight truncate ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-                        {topGapComponent
-                          ? `${(topGapComponent.weight - topGapComponent.contrib).toFixed(1)} pts still available here`
-                          : 'Maintain your current pace.'}
+                      <p className={`text-[9px] leading-tight ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                        {topGapComponent ? `${(topGapComponent.weight - topGapComponent.contrib).toFixed(1)} pts unclaimed` : 'Maintain your pace.'}
                       </p>
                     </div>
-                    <button
-                      className={`text-[9px] font-semibold px-2.5 py-1 rounded-md flex-shrink-0 whitespace-nowrap transition-colors ${isDark ? 'bg-indigo-500 text-white hover:bg-indigo-400' : 'bg-slate-900 text-white hover:bg-slate-700'}`}
-                      onClick={() => setShowTips(true)}
-                    >
+                    <button onClick={() => setShowTips(true)}
+                      className="text-[10px] font-semibold px-3 py-1.5 rounded-lg flex-shrink-0 whitespace-nowrap transition-colors"
+                      style={{ background: '#4F46E5', color: '#fff' }}>
                       View Tips
                     </button>
-                  </motion.div>
-                </div>
-                {/* ══ PANEL 2: SCORE BREAKDOWN ══ */}
-                <div className={`flex-1 min-w-0 px-4 py-3 flex flex-col gap-1.5 ${isDark ? 'border-b lg:border-b-0 lg:border-r border-slate-700' : 'border-b lg:border-b-0 lg:border-r border-slate-100'}`}>
-                  <div className="flex items-center gap-1.5">
-                    <Activity className={`h-3 w-3 ${isDark ? 'text-indigo-400' : 'text-indigo-500'}`} />
-                    <p className={`text-[9px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Score Breakdown</p>
                   </div>
+                </div>
 
-                  {scoreBreakdown.map(({ label, val, color, nums, icon }, i) => (
-                    <motion.div
-                      key={label}
-                      className={`rounded-lg border px-3 py-2 ${isDark ? 'bg-slate-700/20 border-slate-700/60' : 'bg-slate-50/80 border-slate-100'}`}
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: 0.26 + i * 0.09 }}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-1.5">
-                          <div
-                            className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0"
-                            style={{ background: `${color}15`, border: `1px solid ${color}30` }}
-                          >
-                            {React.cloneElement(icon, { className: 'h-3.5 w-3.5' })}
+                {/* ══ PANEL 3: KPIs + INSIGHTS ══ */}
+                <div className="lg:w-56 flex-shrink-0 px-5 py-4 flex flex-col gap-3">
+                  {/* 2×2 KPI grid */}
+                  <div>
+                    <p className={`text-[10px] font-bold uppercase tracking-widest mb-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Workload at a Glance</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { val: myTotal,    label: 'Total Tasks', color: '#4F46E5', icon: <ClipboardList className="h-3.5 w-3.5" /> },
+                        { val: myPending,  label: 'Pending',     color: '#F59E0B', icon: <Clock className="h-3.5 w-3.5" /> },
+                        { val: myOverdue,  label: 'Overdue',     color: myOverdue > 0 ? '#DC2626' : '#10b981', icon: <AlertCircle className="h-3.5 w-3.5" /> },
+                        { val: myCompleted,label: 'Done',         color: '#10b981', icon: <CheckCircle2 className="h-3.5 w-3.5" /> },
+                      ].map(({ val, label, color, icon }, i) => (
+                        <motion.div key={label}
+                          className={`rounded-xl border p-2.5 flex flex-col gap-1 ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-white border-slate-100'}`}
+                          style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}
+                          initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 + i * 0.07 }}>
+                          <div className="flex items-center justify-between">
+                            <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: `${color}18` }}>
+                              {React.cloneElement(icon, { style: { color } })}
+                            </div>
+                            <span className="text-xl font-black tabular-nums leading-none" style={{ color }}>
+                              {val}
+                            </span>
                           </div>
-                          <span className={`text-[10px] font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{label}</span>
-                        </div>
-                        <motion.span
-                          className="text-[11px] font-black"
-                          style={{ color }}
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          transition={{ delay: 0.42 + i * 0.09 }}
-                        >
-                          {Math.round(val ?? 0)}%
-                        </motion.span>
-                      </div>
-                      <div className={`h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
-                        <motion.div
-                          className="h-full rounded-full"
-                          style={{ background: `linear-gradient(90deg, ${color}80, ${color})` }}
-                          initial={{ width: 0 }}
-                          animate={{ width: `${Math.min(val ?? 0, 100)}%` }}
-                          transition={{ duration: 0.9, ease: 'easeOut', delay: 0.3 + i * 0.09 }}
-                        />
-                      </div>
-                      <p className={`text-[9px] mt-0.5 font-medium ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{nums}</p>
-                    </motion.div>
-                  ))}
-
-                </div>
-
-                {/* ══ PANEL 3: THIS MONTH ══ */}
-                <div className="lg:w-52 flex-shrink-0 px-4 py-3 flex flex-col gap-1.5">
-                  <div className="flex items-center gap-1.5">
-                    <Calendar className={`h-3 w-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`} />
-                    <p className={`text-[9px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>This Month</p>
+                          <span className={`text-[9px] font-semibold uppercase tracking-wide leading-tight ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{label}</span>
+                        </motion.div>
+                      ))}
+                    </div>
                   </div>
 
-                  {/* Working days card — flex-1 equal height */}
-                  <motion.div
-                    className={`rounded-lg border flex-1 flex flex-col justify-center overflow-hidden ${isDark ? 'bg-slate-700/20 border-slate-700' : 'bg-slate-50 border-slate-200'}`}
-                    initial={{ opacity: 0, x: 10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.38 }}
-                  >
-                    <div className={`flex items-center gap-1.5 px-2.5 py-1.5 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                      <Calendar className="h-3 w-3 text-indigo-500 flex-shrink-0" />
-                      <p className={`text-[9px] font-semibold uppercase tracking-wide leading-tight truncate ${isDark ? 'text-indigo-400' : 'text-indigo-600'}`}>
-                        {workingDaysLeft} Days Remaining
-                      </p>
+                  {/* Pace card */}
+                  <motion.div className={`rounded-xl border px-3 py-2.5 ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-white border-slate-100'}`}
+                    style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}
+                    initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.55 }}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-1.5">
+                        <Target className="h-3.5 w-3.5 text-indigo-500" />
+                        <span className={`text-[10px] font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Daily Pace</span>
+                      </div>
+                      <span className="text-sm font-black tabular-nums text-indigo-500">{dailyTarget}/day</span>
                     </div>
-                    <p className={`text-[9px] font-medium leading-snug px-2.5 py-1.5 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                      {myPending > 0 ? (
-                        <>You have <span className="font-semibold">{myPending}</span> pending tasks. ~<span className="font-semibold">{dailyTarget}</span>/day to finish.</>
-                      ) : (
-                        <>All tasks cleared. Great work! 🎉</>
-                      )}
+                    <p className={`text-[9px] leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      {myPending > 0
+                        ? <>{workingDaysLeft} working days left · complete <strong>{dailyTarget}</strong> tasks/day to clear all pending</>
+                        : <>All tasks cleared — great work! 🎉</>}
                     </p>
                   </motion.div>
 
-                  {/* Rank insight card — flex-1 equal height */}
-                  <motion.div
-                    className={`rounded-lg border flex-1 flex flex-col justify-center overflow-hidden ${isDark ? 'bg-slate-700/20 border-slate-700' : 'bg-slate-50 border-slate-200'}`}
-                    initial={{ opacity: 0, x: 10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.5 }}
-                  >
-                    {apiRank === 1 ? (
-                      <>
-                        <div className={`flex items-center gap-1.5 px-2.5 py-1.5 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                          <Trophy className="h-3 w-3 text-amber-500 flex-shrink-0" />
-                          <p className={`text-[9px] font-semibold uppercase tracking-wide leading-tight ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>You&apos;re #1!</p>
-                        </div>
-                        <p className={`text-[9px] font-medium leading-snug px-2.5 py-1.5 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                          Keep completing tasks on time to hold your crown.
-                        </p>
-                      </>
-                    ) : tasksForNextApiRank !== null && apiRank !== null && apiRank > 1 ? (
-                      <>
-                        <div className={`flex items-center gap-1.5 px-2.5 py-1.5 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                          <Zap className="h-3 w-3 text-amber-500 flex-shrink-0" />
-                          <p className={`text-[9px] font-semibold uppercase tracking-wide leading-tight truncate ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
-                            Climb to Rank #{apiRank - 1}
-                          </p>
-                        </div>
-                        <p className={`text-[9px] font-medium leading-snug px-2.5 py-1.5 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                          <span className="font-semibold">{tasksForNextApiRank}</span> tasks to overtake <span className="font-semibold">{prevRankUser?.user_name?.split(' ')[0] || 'next person'}</span>.
-                        </p>
-                      </>
-                    ) : myPending > 0 ? (
-                      <>
-                        <div className={`flex items-center gap-1.5 px-2.5 py-1.5 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                          <Star className="h-3 w-3 text-indigo-500 flex-shrink-0" />
-                          <p className={`text-[9px] font-semibold uppercase tracking-wide leading-tight ${isDark ? 'text-indigo-400' : 'text-indigo-600'}`}>Boost Your Score</p>
-                        </div>
-                        <p className={`text-[9px] font-medium leading-snug px-2.5 py-1.5 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                          <span className="font-semibold">{Math.min(tasksForTier, myPending)}</span> tasks to reach <span className="font-semibold">{nextTierName}</span>.
-                        </p>
-                      </>
-                    ) : (
-                      <>
-                        <div className={`flex items-center gap-1.5 px-2.5 py-1.5 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                          <Star className="h-3 w-3 text-indigo-500 flex-shrink-0" />
-                          <p className={`text-[9px] font-semibold uppercase tracking-wide leading-tight ${isDark ? 'text-indigo-400' : 'text-indigo-600'}`}>All Clear</p>
-                        </div>
-                        <p className={`text-[9px] font-medium leading-snug px-2.5 py-1.5 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                          All tasks complete. You&apos;re on fire this month!
-                        </p>
-                      </>
-                    )}
+                  {/* Rank / climb card */}
+                  <motion.div className={`rounded-xl border px-3 py-2.5 flex-1 ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-white border-slate-100'}`}
+                    style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}
+                    initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.65 }}>
+                    <div className="flex items-center gap-1.5 mb-1.5">
+                      {apiRank === 1 ? <Crown className="h-3.5 w-3.5 text-amber-500" /> : <TrendingUp className="h-3.5 w-3.5 text-indigo-500" />}
+                      <span className={`text-[10px] font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                        {apiRank === 1 ? "You're #1!" : apiRank !== null && apiRank > 1 ? `Rank #${apiRank} → #${apiRank - 1}` : 'Performance Insight'}
+                      </span>
+                    </div>
+                    <p className={`text-[9px] leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      {apiRank === 1
+                        ? 'Maintain your pace to defend the top position.'
+                        : tasksForNextApiRank !== null && apiRank !== null && apiRank > 1
+                          ? <><strong>{tasksForNextApiRank}</strong> more tasks to overtake <strong>{prevRankUser?.user_name?.split(' ')[0] || 'next person'}</strong></>
+                          : nextBadge
+                            ? <><strong>{Number(ptsToNext ?? 0).toFixed(1)} pts</strong> to reach {nextBadge.split(' (')[0]}</>
+                            : 'All badge tiers reached. Hold the streak!'}
+                    </p>
                   </motion.div>
-
-                  {/* Next Milestone card — flex-1 equal height */}
-                  {(() => {
-                    const milestones = [
-                      { score: 25,  label: 'Starter',        color: '#6366f1', icon: <Star className="h-3 w-3 text-indigo-500" /> },
-                      { score: 50,  label: 'Rising Star',    color: '#6366f1', icon: <Star className="h-3 w-3 text-indigo-500" /> },
-                      { score: 65,  label: 'Top Performer',  color: '#6366f1', icon: <Trophy className="h-3 w-3 text-indigo-500" /> },
-                      { score: 85,  label: 'Star Performer', color: '#F59E0B', icon: <Crown className="h-3 w-3 text-amber-500" /> },
-                      { score: 100, label: 'Perfect Score',  color: '#1FAF5A', icon: <Zap className="h-3 w-3 text-emerald-500" /> },
-                    ];
-                    const nextMilestone = milestones.find(m => m.score > Math.round(displayScore)) || milestones[milestones.length - 1];
-                    const ptsNeeded = Math.max(0, nextMilestone.score - Math.round(displayScore));
-                    const prevScore = milestones.filter(m => m.score <= Math.round(displayScore)).slice(-1)[0]?.score ?? 0;
-                    const range = nextMilestone.score - prevScore;
-                    const progress = range > 0 ? Math.min(100, ((Math.round(displayScore) - prevScore) / range) * 100) : 100;
-                    const achieved = ptsNeeded === 0;
-                    return (
-                      <motion.div
-                        className={`rounded-lg border flex-1 flex flex-col justify-center overflow-hidden ${isDark ? 'bg-slate-700/20 border-slate-700' : 'bg-slate-50 border-slate-200'}`}
-                        initial={{ opacity: 0, x: 10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.62 }}
-                      >
-                        <div className={`flex items-center justify-between px-2.5 py-1.5 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <div className="flex-shrink-0">{nextMilestone.icon}</div>
-                            <p className={`text-[9px] font-semibold uppercase tracking-wide leading-tight truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                              {achieved ? 'Max Achieved' : 'Next Milestone'}
-                            </p>
-                          </div>
-                          <span className="text-[9px] font-bold tabular-nums flex-shrink-0 ml-1" style={{ color: nextMilestone.color }}>{nextMilestone.score}</span>
-                        </div>
-                        <div className="px-2.5 py-1.5">
-                          <p className={`text-[9px] font-medium leading-tight mb-1.5 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                            {achieved ? 'All milestones reached!' : <><span className="font-semibold" style={{ color: nextMilestone.color }}>{nextMilestone.label}</span> — {ptsNeeded} pts away</>}
-                          </p>
-                          <div className={`h-1 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
-                            <motion.div
-                              className="h-full rounded-full"
-                              style={{ background: nextMilestone.color }}
-                              initial={{ width: 0 }}
-                              animate={{ width: `${progress}%` }}
-                              transition={{ duration: 0.9, ease: 'easeOut', delay: 0.7 }}
-                            />
-                          </div>
-                        </div>
-                      </motion.div>
-                    );
-                  })()}
                 </div>
 
               </div>
             </div>
+            );
+            })()}
           </motion.div>
           </>
         );
