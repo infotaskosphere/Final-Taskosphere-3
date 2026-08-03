@@ -42,7 +42,8 @@ import {
   TrendingUp, MoreHorizontal, Copy, SlidersHorizontal,
   Briefcase, Target, Activity, ChevronRight, Sun,
   Loader2, Mail, Send, Trophy, Medal, Star, Zap, Crown, ChevronsUpDown,
-  Minimize2, ClipboardList, Info,
+  Minimize2, ClipboardList, Info, Settings2, ArrowUp, ArrowDown, Eye, EyeOff,
+  BellRing, CheckSquare, Square,
 } from 'lucide-react';
 import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
 import { useFormMinimizer } from '@/contexts/MinimizedFormsContext';
@@ -619,6 +620,99 @@ const TaskRow = memo(function TaskRow({
         </AnimatePresence>
       </div>
     </motion.div>
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CUSTOMIZABLE METRIC-CARD LAYOUT
+// Users can hide/show and reorder the 6 summary cards; the choice is saved
+// per-browser so it survives reloads.
+// ═══════════════════════════════════════════════════════════════════════════════
+const CARD_DEFS = [
+  { key: 'myTask',     label: 'Assigned To Me' },
+  { key: 'todo',       label: 'To Do' },
+  { key: 'inProgress', label: 'In Progress' },
+  { key: 'completed',  label: 'Completed' },
+  { key: 'overdue',    label: 'Overdue' },
+  { key: 'team',       label: 'Team Task' },
+];
+const CARD_LAYOUT_STORAGE_KEY = 'ts_task_cards_layout_v1';
+
+const loadCardLayout = () => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CARD_LAYOUT_STORAGE_KEY) || 'null');
+    if (Array.isArray(saved) && saved.length) {
+      // Merge in any new card keys that were added after the user last saved.
+      const savedKeys = new Set(saved.map((c) => c.key));
+      const missing = CARD_DEFS.filter((c) => !savedKeys.has(c.key)).map((c) => ({ key: c.key, visible: true }));
+      return [...saved.filter((c) => CARD_DEFS.some((d) => d.key === c.key)), ...missing];
+    }
+  } catch { /* ignore corrupt data */ }
+  return CARD_DEFS.map((c) => ({ key: c.key, visible: true }));
+};
+
+const saveCardLayout = (layout) => {
+  try { localStorage.setItem(CARD_LAYOUT_STORAGE_KEY, JSON.stringify(layout)); } catch { /* quota */ }
+};
+
+// Small settings panel: reorder with ↑/↓, toggle visibility with the eye icon.
+const CardLayoutSettings = memo(function CardLayoutSettings({ layout, setLayout, isDark }) {
+  const move = (idx, dir) => {
+    setLayout((prev) => {
+      const next = [...prev];
+      const swapWith = idx + dir;
+      if (swapWith < 0 || swapWith >= next.length) return prev;
+      [next[idx], next[swapWith]] = [next[swapWith], next[idx]];
+      saveCardLayout(next);
+      return next;
+    });
+  };
+  const toggleVisible = (idx) => {
+    setLayout((prev) => {
+      const next = prev.map((c, i) => (i === idx ? { ...c, visible: !c.visible } : c));
+      saveCardLayout(next);
+      return next;
+    });
+  };
+  const reset = () => {
+    const fresh = CARD_DEFS.map((c) => ({ key: c.key, visible: true }));
+    setLayout(fresh);
+    saveCardLayout(fresh);
+  };
+  return (
+    <div className="space-y-1.5">
+      {layout.map((item, idx) => {
+        const def = CARD_DEFS.find((c) => c.key === item.key);
+        if (!def) return null;
+        return (
+          <div key={item.key}
+            className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border
+              ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+            <span className={`text-sm font-medium ${item.visible ? '' : 'opacity-40'} ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+              {def.label}
+            </span>
+            <div className="flex items-center gap-1">
+              <button type="button" onClick={() => move(idx, -1)} disabled={idx === 0}
+                className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-slate-500" title="Move up">
+                <ArrowUp className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" onClick={() => move(idx, 1)} disabled={idx === layout.length - 1}
+                className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-slate-500" title="Move down">
+                <ArrowDown className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" onClick={() => toggleVisible(idx)}
+                className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500" title={item.visible ? 'Hide card' : 'Show card'}>
+                {item.visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+          </div>
+        );
+      })}
+      <button type="button" onClick={reset}
+        className="text-xs font-medium text-blue-600 hover:text-blue-700 pt-1">
+        Reset to default
+      </button>
+    </div>
   );
 });
 
