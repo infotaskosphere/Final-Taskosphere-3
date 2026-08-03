@@ -1386,6 +1386,11 @@ class PerformanceMetric(BaseModel):
     discipline_penalty: float = 0.0
     auto_absent_count: int = 0
     final_score: float = 0.0
+    # Work-hours bonus: extra hours logged beyond the monthly target are
+    # converted into bonus points. They ONLY add to the score and can never
+    # reduce the base Work Hours points.
+    extra_hours: float = 0.0
+    bonus_points: float = 0.0
 
 
 # ======================
