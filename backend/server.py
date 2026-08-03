@@ -7090,6 +7090,15 @@ async def export_reports(
 
 
 # ====================== PERFORMANCE RANKINGS ======================
+# --- Scoring configuration (env-overridable) ---
+# Monthly work-hours target used for the Work Hours component of the score.
+MONTHLY_HOURS_TARGET = float(os.environ.get("MONTHLY_HOURS_TARGET", 180))
+# Extra hours beyond the target are converted into bonus points at this rate,
+# capped at HOURS_BONUS_POINTS_MAX. Bonus points are strictly additive.
+HOURS_BONUS_POINTS_PER_HOUR = float(os.environ.get("HOURS_BONUS_POINTS_PER_HOUR", 0.1))
+HOURS_BONUS_POINTS_MAX = float(os.environ.get("HOURS_BONUS_POINTS_MAX", 5))
+
+
 @api_router.get("/reports/performance-rankings", response_model=List[PerformanceMetric])
 async def get_performance_rankings(
     period: str = Query("monthly", enum=["weekly", "monthly", "all_time"]),
@@ -7305,7 +7314,16 @@ async def get_performance_rankings(
         )
 
         # ---------------- Composite score ----------------
-        safe_hours_ratio = min((effective_hours / 180), 1) if effective_hours else 0
+        # Work Hours scoring (configurable):
+        #   hours < target  -> proportional points
+        #   hours >= target -> ALWAYS full points (never reduced)
+        #   extra hours     -> converted into bonus points (capped)
+        hours_worked = float(effective_hours or 0)
+        safe_hours_ratio = min((hours_worked / MONTHLY_HOURS_TARGET), 1) if hours_worked else 0
+        extra_hours = max(0.0, hours_worked - MONTHLY_HOURS_TARGET)
+        bonus_points = round(
+            min(extra_hours * HOURS_BONUS_POINTS_PER_HOUR, HOURS_BONUS_POINTS_MAX), 2
+        )
         score = (
             float(attendance_percent or 0) * 0.25
             + safe_hours_ratio * 100 * 0.20
@@ -7318,7 +7336,9 @@ async def get_performance_rankings(
         # costs 2 pts, capped at a 10-pt maximum deduction, so it visibly affects
         # ranking without being able to wipe out an otherwise strong score.
         discipline_penalty = min(absent_days * 2, 10)
-        overall_score = round(min(max(score - discipline_penalty, 0), 100), 1)
+        # Bonus points are additive only — they never replace or reduce the
+        # base Work Hours contribution.
+        overall_score = round(min(max(score - discipline_penalty, 0) + bonus_points, 100), 1)
 
         if overall_score >= 95:
             badge = "Star Performer"
@@ -7342,6 +7362,8 @@ async def get_performance_rankings(
                 auto_absent_count=int(absent_days),
                 discipline_penalty=float(discipline_penalty),
                 final_score=float(overall_score or 0),
+                extra_hours=float(round(extra_hours, 2)),
+                bonus_points=float(bonus_points),
             )
         )
 
