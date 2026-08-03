@@ -42,7 +42,7 @@ import {
   TrendingUp, MoreHorizontal, Copy, SlidersHorizontal,
   Briefcase, Target, Activity, ChevronRight, Sun,
   Loader2, Mail, Send, Trophy, Medal, Star, Zap, Crown, ChevronsUpDown,
-  Minimize2, ClipboardList,
+  Minimize2, ClipboardList, Info,
 } from 'lucide-react';
 import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
 import { AreaChart, Area, ResponsiveContainer, Tooltip as ReTooltip, BarChart, Bar, Cell, XAxis, YAxis, LabelList } from 'recharts';
@@ -3110,7 +3110,7 @@ export default function Tasks() {
           </AnimatePresence>
 
           <motion.div variants={itemVariants}>
-            {/* ── Business-style Performance Score Card ── */}
+            {/* ── Compact Score Card (redesigned) ── */}
             {(() => {
               const chartData = [
                 { name: 'Attendance', earned: parseFloat(contribAttendance.toFixed(1)), remaining: parseFloat((25 - contribAttendance).toFixed(1)), max: 25, color: '#4F46E5', pct: (apiAttendance ?? 0) },
@@ -3119,17 +3119,44 @@ export default function Tasks() {
                 { name: 'On-Time',    earned: parseFloat(contribOntime.toFixed(1)),       remaining: parseFloat((15 - contribOntime).toFixed(1)),       max: 15, color: '#F59E0B', pct: onTimeVal },
                 { name: 'Punch-in',   earned: parseFloat(contribTimely.toFixed(1)),       remaining: parseFloat((15 - contribTimely).toFixed(1)),       max: 15, color: '#06b6d4', pct: apiTimely },
               ];
-              const CustomBarTooltip = ({ active, payload, label }) => {
-                if (!active || !payload || !payload.length) return null;
-                const row = chartData.find(d => d.name === label);
-                return (
-                  <div className={`rounded-lg border px-3 py-2 text-xs shadow-lg ${isDark ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-700'}`}>
-                    <p className="font-bold mb-1">{label}</p>
-                    <p style={{ color: row?.color }}>Earned: <strong>{row?.earned.toFixed(1)}pts</strong> / {row?.max}pts</p>
-                    <p className={isDark ? 'text-slate-400' : 'text-slate-500'}>{row?.pct?.toFixed(1)}% rate</p>
-                  </div>
-                );
-              };
+
+              const hoursWhole = Math.floor(apiHours);
+              const hoursMins  = Math.round((apiHours - hoursWhole) * 60);
+              const productivityVal = (taskCompletionVal + onTimeVal) / 2;
+
+              const kpiTiles = [
+                {
+                  key: 'score', label: 'Overall Score', icon: Star, color: '#F59E0B', bg: '#FEF3E2',
+                  big: `${Number(displayScore).toFixed(0)}`, unit: '/100',
+                  sub: <span className="text-[9px] font-bold px-1.5 py-[1px] rounded-full" style={{ color: badgeColor, background: `${badgeColor}18` }}>{displayBadge}</span>,
+                },
+                {
+                  key: 'tasks', label: 'Tasks', icon: ClipboardList, color: '#7C3AED', bg: '#F3E8FF',
+                  big: `${myTotal}`, unit: '', subText: 'Total Tasks',
+                  sub: <span className={`text-[9px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}><span className="font-bold" style={{ color: '#10b981' }}>{myCompleted} Done</span> · <span className="font-bold" style={{ color: '#F59E0B' }}>{myPending} Pending</span></span>,
+                },
+                {
+                  key: 'hours', label: 'Work Hours', icon: Clock, color: '#2563EB', bg: '#DBEAFE',
+                  big: `${hoursWhole}h ${hoursMins}m`, unit: '', subText: 'Logged',
+                  sub: <span className={`text-[9px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{hoursRatioPct.toFixed(0)}% of 180h target</span>,
+                },
+                {
+                  key: 'attendance', label: 'Attendance', icon: CheckCircle2, color: '#10b981', bg: '#D1FAE5',
+                  big: `${(apiAttendance ?? 0).toFixed(0)}%`, unit: '', subText: 'This Month',
+                  sub: <span className={`text-[9px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{(apiAttendance ?? 0) >= 90 ? 'On Track' : (apiAttendance ?? 0) >= 75 ? 'Fair' : 'Needs Attention'}</span>,
+                },
+                {
+                  key: 'ontime', label: 'On-Time %', icon: Target, color: '#F97316', bg: '#FFEDD5',
+                  big: `${apiTimely.toFixed(0)}%`, unit: '', subText: 'Punch-in',
+                  sub: <span className={`text-[9px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Timely check-ins</span>,
+                },
+                {
+                  key: 'productivity', label: 'Productivity', icon: TrendingUp, color: '#4F46E5', bg: '#E0E7FF',
+                  big: `${productivityVal.toFixed(0)}%`, unit: '', subText: 'This Period',
+                  sub: <span className={`text-[9px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Tasks + on-time avg</span>,
+                },
+              ];
+
               return (
             <div
               className={`rounded-2xl border overflow-hidden ${isDark ? 'bg-slate-800/90 border-slate-700' : 'bg-white border-slate-200'}`}
@@ -3139,19 +3166,26 @@ export default function Tasks() {
               <motion.div className="h-[3px] w-full" style={{ background: 'linear-gradient(90deg,#4F46E5,#7C3AED,#10b981,#F59E0B,#06b6d4)' }}
                 initial={{ scaleX: 0, originX: 0 }} animate={{ scaleX: 1 }} transition={{ duration: 0.9, ease: 'easeOut' }} />
 
-              {/* Card header */}
-              <div className={`flex items-center justify-between px-5 py-3 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-                <div className="flex items-center gap-2.5">
+              {/* Card header — compact, matches blue banner proportions */}
+              <div className={`flex items-center justify-between px-4 sm:px-5 py-2.5 border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
                     style={{ background: 'linear-gradient(135deg,#4F46E5,#7C3AED)' }}>
                     <Trophy className="h-3.5 w-3.5 text-white" />
                   </div>
-                  <div>
-                    <h3 className={`text-sm font-bold leading-tight ${isDark ? 'text-white' : 'text-slate-800'}`}>Performance Score</h3>
-                    <p className={`text-[10px] leading-tight ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Monthly · Based on tasks, attendance & hours</p>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <h3 className={`text-sm font-bold leading-tight truncate ${isDark ? 'text-white' : 'text-slate-800'}`}>Score Card</h3>
+                      <Info className={`h-3 w-3 flex-shrink-0 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} />
+                    </div>
+                    <p className={`text-[10px] leading-tight truncate ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Real-time overview of your performance</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className={`hidden sm:inline-flex items-center gap-1.5 text-[10px] font-semibold px-2.5 py-1 rounded-lg border ${isDark ? 'bg-slate-900/40 border-slate-700 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+                    <CalendarIcon className="h-3 w-3" />
+                    {format(new Date(), 'dd MMM yyyy')}
+                  </span>
                   {apiRank !== null && (
                     <motion.div
                       className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-white text-[11px] font-bold"
@@ -3159,159 +3193,79 @@ export default function Tasks() {
                       initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 }}
                     >
                       {apiRank === 1 ? <Crown className="h-3 w-3" /> : apiRank <= 3 ? <Medal className="h-3 w-3" /> : <Trophy className="h-3 w-3" />}
-                      Rank {apiRank}{totalUsers ? `/${totalUsers}` : ''}
+                      #{apiRank}{totalUsers ? `/${totalUsers}` : ''}
                     </motion.div>
                   )}
-                  <span className="text-[10px] font-semibold px-2.5 py-1 rounded-lg" style={{ color: badgeColor, background: `${badgeColor}15`, border: `1px solid ${badgeColor}30` }}>
-                    {displayBadge}
-                  </span>
                 </div>
               </div>
 
-              <div className="flex flex-col lg:flex-row" style={{ minHeight: 0 }}>
-
-                {/* ══ PANEL 1: SCORE OVERVIEW ══ */}
-                <div className={`flex-shrink-0 lg:w-[17rem] px-5 py-4 flex flex-col gap-3 ${isDark ? 'border-b lg:border-b-0 lg:border-r border-slate-700' : 'border-b lg:border-b-0 lg:border-r border-slate-100'}`}>
-
-                  {/* ── Large half-dial gauge ── */}
-                  <div className="flex flex-col items-center pt-1">
-                    <div className="relative" style={{ width: 180, height: 106 }}>
-                      <svg viewBox="0 0 200 112" width="180" height="106">
-                        {/* Track */}
-                        <path d="M 22 96 A 78 78 0 0 1 178 96" fill="none" stroke={isDark ? '#1e293b' : '#f1f5f9'} strokeWidth="14" strokeLinecap="round" />
-                        {/* Zone bands */}
-                        {[
-                          { from: 0,  to: 60,  color: '#fca5a5' },
-                          { from: 60, to: 85,  color: '#fcd34d' },
-                          { from: 85, to: 95,  color: '#6ee7b7' },
-                          { from: 95, to: 100, color: '#34d399' },
-                        ].map(({ from, to, color }) => {
-                          const total = 245.1;
-                          const startOff = total - (total * from) / 100;
-                          const endOff   = total - (total * to)   / 100;
-                          return (
-                            <path key={from} d="M 22 96 A 78 78 0 0 1 178 96" fill="none"
-                              stroke={color} strokeWidth="14" strokeLinecap="butt" opacity="0.25"
-                              style={{ strokeDasharray: total, strokeDashoffset: endOff,
-                                strokeDasharray: `${(total * (to - from)) / 100} ${total}`,
-                                strokeDashoffset: startOff }} />
-                          );
-                        })}
-                        {/* Score fill */}
-                        <motion.path d="M 22 96 A 78 78 0 0 1 178 96" fill="none"
-                          stroke={scoreColor} strokeWidth="14" strokeLinecap="round"
-                          style={{ strokeDasharray: 245.1 }}
-                          initial={{ strokeDashoffset: 245.1 }}
-                          animate={{ strokeDashoffset: 245.1 - (245.1 * Math.min(Math.max(displayScore, 0), 100)) / 100 }}
-                          transition={{ duration: 1, ease: 'easeOut', delay: 0.1 }} />
-                        {/* Tick marks */}
-                        {[0, 25, 50, 75, 85, 95, 100].map((v) => {
-                          const angle = Math.PI * (v / 100);
-                          const cx = 100, cy = 96, r = 78;
-                          const x1 = cx - Math.cos(angle) * (r - 9), y1 = cy - Math.sin(angle) * (r - 9);
-                          const x2 = cx - Math.cos(angle) * (r + 9), y2 = cy - Math.sin(angle) * (r + 9);
-                          return <line key={v} x1={x1} y1={y1} x2={x2} y2={y2} stroke={isDark ? '#475569' : '#cbd5e1'} strokeWidth="1.5" strokeLinecap="round" />;
-                        })}
-                        {/* Scale labels */}
-                        {[{ v: 0, lbl: '0' }, { v: 50, lbl: '50' }, { v: 100, lbl: '100' }].map(({ v, lbl }) => {
-                          const angle = Math.PI * (v / 100);
-                          const cx = 100, cy = 96, r = 60;
-                          const x = cx - Math.cos(angle) * r, y = cy - Math.sin(angle) * r;
-                          return <text key={v} x={x} y={y} textAnchor="middle" dominantBaseline="middle"
-                            fill={isDark ? '#64748b' : '#94a3b8'} fontSize="8" fontWeight="600">{lbl}</text>;
-                        })}
-                      </svg>
-                      {/* Center score */}
-                      <div className="absolute inset-x-0 bottom-0 flex flex-col items-center pb-1">
-                        <motion.span className={`text-4xl font-black leading-none tabular-nums tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}
-                          style={{ color: scoreColor }}
-                          initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.4, duration: 0.4 }}>
-                          {Number(displayScore).toFixed(0)}
-                        </motion.span>
-                        <span className={`text-[10px] font-semibold tracking-widest uppercase mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>out of 100</span>
-                      </div>
-                    </div>
-
-                    {/* Badge + next tier */}
-                    <div className="w-full mt-1 flex flex-col gap-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-lg"
-                          style={{ color: badgeColor, background: `${badgeColor}18`, border: `1.5px solid ${badgeColor}35` }}>
-                          <span className="w-1.5 h-1.5 rounded-full" style={{ background: badgeColor }} />
-                          {displayBadge}
-                        </span>
-                        {myRanking?.discipline_penalty > 0 && (
-                          <span className="flex items-center gap-1 text-[10px] font-semibold" style={{ color: '#DC2626' }}>
-                            <AlertCircle className="h-3 w-3" />
-                            −{Number(myRanking.discipline_penalty).toFixed(1)}pts
-                          </span>
-                        )}
-                      </div>
-                      {nextBadge && (
-                        <div className={`rounded-lg px-3 py-2 ${isDark ? 'bg-slate-900/50' : 'bg-slate-50'}`}>
-                          <div className="flex items-center justify-between mb-1.5">
-                            <span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                              Next: {nextBadge.split(' (')[0]}
-                            </span>
-                            <span className="text-[11px] font-black tabular-nums" style={{ color: scoreColor }}>
-                              {Number(ptsToNext ?? 0).toFixed(1)} pts away
-                            </span>
-                          </div>
-                          <div className={`h-2 w-full rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
-                            <motion.div className="h-full rounded-full"
-                              style={{ background: `linear-gradient(90deg, ${scoreColor}99, ${scoreColor})` }}
-                              initial={{ width: 0 }}
-                              animate={{ width: `${Math.min(100, (displayScore / (displayScore >= 85 ? 95 : 85)) * 100)}%` }}
-                              transition={{ duration: 1, ease: 'easeOut', delay: 0.3 }} />
-                          </div>
+              {/* ── KPI STRIP — 6 compact tiles ── */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 px-4 sm:px-5 pt-3">
+                {kpiTiles.map((tile, i) => {
+                  const Icon = tile.icon;
+                  return (
+                    <motion.div
+                      key={tile.key}
+                      className={`rounded-xl border p-2.5 flex flex-col gap-1 min-w-0 ${isDark ? 'bg-slate-900/40 border-slate-700' : 'bg-white border-slate-100'}`}
+                      style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}
+                      initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0" style={{ background: isDark ? `${tile.color}22` : tile.bg }}>
+                          <Icon className="h-3 w-3" style={{ color: tile.color }} />
                         </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                        <span className={`text-[9.5px] font-semibold uppercase tracking-wide truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{tile.label}</span>
+                      </div>
+                      <div className="flex items-baseline gap-0.5">
+                        <span className="text-lg font-black tabular-nums leading-none" style={{ color: tile.color }}>{tile.big}</span>
+                        {tile.unit && <span className={`text-[10px] font-semibold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{tile.unit}</span>}
+                      </div>
+                      <div className="truncate">{tile.sub}</div>
+                    </motion.div>
+                  );
+                })}
+              </div>
 
-                {/* ══ PANEL 2: SCORE COMPOSITION CHART ══ */}
-                <div className={`flex-1 min-w-0 px-5 py-4 flex flex-col gap-3 ${isDark ? 'border-b lg:border-b-0 lg:border-r border-slate-700' : 'border-b lg:border-b-0 lg:border-r border-slate-100'}`}>
+              {/* ── MAIN: breakdown (left) + gauge/composition (right) ── */}
+              <div className="grid grid-cols-1 lg:grid-cols-[1.35fr_1fr] gap-3 px-4 sm:px-5 py-3">
+
+                {/* LEFT — Score Breakdown */}
+                <div className={`rounded-xl border p-3 flex flex-col gap-2.5 ${isDark ? 'bg-slate-900/30 border-slate-700' : 'bg-slate-50/60 border-slate-100'}`}>
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Activity className={`h-3.5 w-3.5 ${isDark ? 'text-indigo-400' : 'text-indigo-500'}`} />
-                      <p className={`text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Score Composition</p>
-                    </div>
-                    <span className={`text-[10px] font-medium ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>earned pts / max weight</span>
+                    <span className={`text-[11px] font-bold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Score Breakdown</span>
+                    <button onClick={() => setShowTips(true)} className="text-[10px] font-semibold" style={{ color: '#4F46E5' }}>View Tips</button>
                   </div>
 
-                  {/* Recharts horizontal bar chart — each component shows earned vs. remaining */}
-                  <div style={{ height: 170 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={chartData} layout="vertical" margin={{ top: 0, right: 44, left: 4, bottom: 0 }} barCategoryGap="28%">
-                        <XAxis type="number" domain={[0, 25]} hide />
-                        <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 10, fontWeight: 600, fill: isDark ? '#94a3b8' : '#64748b' }} axisLine={false} tickLine={false} />
-                        <ReTooltip content={<CustomBarTooltip />} cursor={{ fill: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)' }} />
-                        {/* Earned bar */}
-                        <Bar dataKey="earned" stackId="a" radius={[0, 0, 0, 0]} isAnimationActive animationDuration={900} animationEasing="ease-out">
-                          {chartData.map((entry) => (
-                            <Cell key={entry.name} fill={entry.color} />
-                          ))}
-                          <LabelList dataKey="earned" position="right" formatter={(v) => `${v}pt`}
-                            style={{ fontSize: 10, fontWeight: 700, fill: isDark ? '#cbd5e1' : '#475569' }} />
-                        </Bar>
-                        {/* Remaining (gap) bar */}
-                        <Bar dataKey="remaining" stackId="a" radius={[0, 3, 3, 0]} isAnimationActive animationDuration={900} animationEasing="ease-out">
-                          {chartData.map((entry) => (
-                            <Cell key={entry.name} fill={isDark ? '#1e293b' : '#f1f5f9'} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
+                  <div className="flex flex-col gap-2">
+                    {components.map(({ key, label, contrib, weight }) => {
+                      const iconMap = { attendance: CheckCircle2, hours: Clock, tasks: ClipboardList, ontime: Clock, punchin: Target };
+                      const colorMap = { attendance: '#4F46E5', hours: '#7C3AED', tasks: '#10b981', ontime: '#F59E0B', punchin: '#06b6d4' };
+                      const Icon = iconMap[key] || CheckCircle2;
+                      const color = colorMap[key] || '#4F46E5';
+                      return (
+                        <div key={key} className="flex items-center gap-2.5">
+                          <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0" style={{ background: `${color}18` }}>
+                            <Icon className="h-3 w-3" style={{ color }} />
+                          </div>
+                          <span className={`text-[10.5px] font-medium w-[92px] flex-shrink-0 truncate ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{label}</span>
+                          <div className={`flex-1 h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
+                            <motion.div className="h-full rounded-full" style={{ background: color }}
+                              initial={{ width: 0 }} animate={{ width: `${Math.min(100, (contrib / weight) * 100)}%` }}
+                              transition={{ duration: 0.9, ease: 'easeOut' }} />
+                          </div>
+                          <span className="text-[10.5px] font-black tabular-nums w-[52px] text-right flex-shrink-0" style={{ color }}>{contrib.toFixed(1)}/{weight}</span>
+                        </div>
+                      );
+                    })}
                   </div>
 
                   {/* Total score rail */}
-                  <div className={`rounded-lg px-3 py-2.5 ${isDark ? 'bg-slate-900/40 border border-slate-700' : 'bg-slate-50 border border-slate-100'}`}>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Total Score Rail (100 pts)</span>
+                  <div className={`rounded-lg px-3 py-2 mt-0.5 ${isDark ? 'bg-slate-900/40 border border-slate-700' : 'bg-white border border-slate-100'}`}>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className={`text-[9px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Total Score (100 pts)</span>
                       <span className="text-[11px] font-black tabular-nums" style={{ color: scoreColor }}>{Number(displayScore).toFixed(1)} / 100</span>
                     </div>
-                    <div className="flex gap-[2px] h-3 rounded-full overflow-hidden">
+                    <div className="flex gap-[2px] h-2.5 rounded-full overflow-hidden">
                       {[
                         { earned: contribAttendance,   max: 25, color: '#4F46E5' },
                         { earned: contribHours,        max: 20, color: '#7C3AED' },
@@ -3321,13 +3275,12 @@ export default function Tasks() {
                       ].map(({ earned, max, color }, idx) => (
                         <div key={idx} className="relative overflow-hidden" style={{ flex: max, background: isDark ? '#1e293b' : '#e2e8f0' }}>
                           <motion.div className="absolute inset-y-0 left-0" style={{ background: color }}
-                            initial={{ width: 0 }}
-                            animate={{ width: `${Math.min(100, (earned / max) * 100)}%` }}
-                            transition={{ duration: 0.9, ease: 'easeOut', delay: 0.3 + idx * 0.06 }} />
+                            initial={{ width: 0 }} animate={{ width: `${Math.min(100, (earned / max) * 100)}%` }}
+                            transition={{ duration: 0.9, ease: 'easeOut', delay: 0.15 + idx * 0.05 }} />
                         </div>
                       ))}
                     </div>
-                    <div className="flex gap-[2px] mt-1.5">
+                    <div className="flex gap-[2px] mt-1">
                       {[
                         { label: 'Attend', earned: contribAttendance,   max: 25, color: '#4F46E5' },
                         { label: 'Hours',  earned: contribHours,        max: 20, color: '#7C3AED' },
@@ -3336,101 +3289,158 @@ export default function Tasks() {
                         { label: 'Punch',  earned: contribTimely,       max: 15, color: '#06b6d4' },
                       ].map(({ label, earned, max, color }) => (
                         <div key={label} className="flex flex-col items-center min-w-0" style={{ flex: max }}>
-                          <span className="text-[9px] font-black tabular-nums" style={{ color }}>{earned.toFixed(1)}</span>
-                          <span className={`text-[7.5px] font-medium uppercase truncate ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>{label}</span>
+                          <span className="text-[8.5px] font-black tabular-nums" style={{ color }}>{earned.toFixed(1)}</span>
+                          <span className={`text-[7px] font-medium uppercase truncate ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>{label}</span>
                         </div>
                       ))}
                     </div>
                   </div>
-
-                  {/* Bottom CTA */}
-                  <div className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 ${isDark ? 'bg-indigo-500/8 border-indigo-500/20' : 'bg-indigo-50 border-indigo-100'}`}>
-                    <div className="min-w-0">
-                      <p className={`text-[10px] font-bold leading-tight ${isDark ? 'text-indigo-300' : 'text-indigo-700'}`}>
-                        {topGapComponent ? `Biggest gap: ${topGapComponent.label}` : 'All components maximised'}
-                      </p>
-                      <p className={`text-[9px] leading-tight ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-                        {topGapComponent ? `${(topGapComponent.weight - topGapComponent.contrib).toFixed(1)} pts unclaimed` : 'Maintain your pace.'}
-                      </p>
-                    </div>
-                    <button onClick={() => setShowTips(true)}
-                      className="text-[10px] font-semibold px-3 py-1.5 rounded-lg flex-shrink-0 whitespace-nowrap transition-colors"
-                      style={{ background: '#4F46E5', color: '#fff' }}>
-                      View Tips
-                    </button>
-                  </div>
                 </div>
 
-                {/* ══ PANEL 3: KPIs + INSIGHTS ══ */}
-                <div className="lg:w-56 flex-shrink-0 px-5 py-4 flex flex-col gap-3">
-                  {/* 2×2 KPI grid */}
-                  <div>
-                    <p className={`text-[10px] font-bold uppercase tracking-widest mb-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Workload at a Glance</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {[
-                        { val: myTotal,    label: 'Total Tasks', color: '#4F46E5', icon: <ClipboardList className="h-3.5 w-3.5" /> },
-                        { val: myPending,  label: 'Pending',     color: '#F59E0B', icon: <Clock className="h-3.5 w-3.5" /> },
-                        { val: myOverdue,  label: 'Overdue',     color: myOverdue > 0 ? '#DC2626' : '#10b981', icon: <AlertCircle className="h-3.5 w-3.5" /> },
-                        { val: myCompleted,label: 'Done',         color: '#10b981', icon: <CheckCircle2 className="h-3.5 w-3.5" /> },
-                      ].map(({ val, label, color, icon }, i) => (
-                        <motion.div key={label}
-                          className={`rounded-xl border p-2.5 flex flex-col gap-1 ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-white border-slate-100'}`}
-                          style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}
-                          initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 + i * 0.07 }}>
-                          <div className="flex items-center justify-between">
-                            <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: `${color}18` }}>
-                              {React.cloneElement(icon, { style: { color } })}
-                            </div>
-                            <span className="text-xl font-black tabular-nums leading-none" style={{ color }}>
-                              {val}
-                            </span>
-                          </div>
-                          <span className={`text-[9px] font-semibold uppercase tracking-wide leading-tight ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{label}</span>
-                        </motion.div>
-                      ))}
-                    </div>
+                {/* RIGHT — Gauge + Composition (no fabricated trend; only real data) */}
+                <div className={`rounded-xl border p-3 flex flex-col gap-2.5 ${isDark ? 'bg-slate-900/30 border-slate-700' : 'bg-slate-50/60 border-slate-100'}`}>
+                  <div className="flex items-center justify-between">
+                    <span className={`text-[11px] font-bold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Score Composition</span>
+                    <span className={`text-[9px] font-medium ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>earned / max</span>
                   </div>
 
-                  {/* Pace card */}
-                  <motion.div className={`rounded-xl border px-3 py-2.5 ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-white border-slate-100'}`}
-                    style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}
-                    initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.55 }}>
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-1.5">
-                        <Target className="h-3.5 w-3.5 text-indigo-500" />
-                        <span className={`text-[10px] font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Daily Pace</span>
+                  {/* Half-dial gauge, compact */}
+                  <div className="flex flex-col items-center">
+                    <div className="relative" style={{ width: 150, height: 88 }}>
+                      <svg viewBox="0 0 200 112" width="150" height="88">
+                        <path d="M 22 96 A 78 78 0 0 1 178 96" fill="none" stroke={isDark ? '#1e293b' : '#f1f5f9'} strokeWidth="14" strokeLinecap="round" />
+                        {[
+                          { from: 0,  to: 60,  color: '#fca5a5' },
+                          { from: 60, to: 85,  color: '#fcd34d' },
+                          { from: 85, to: 95,  color: '#6ee7b7' },
+                          { from: 95, to: 100, color: '#34d399' },
+                        ].map(({ from, to, color }) => {
+                          const total = 245.1;
+                          const startOff = total - (total * from) / 100;
+                          return (
+                            <path key={from} d="M 22 96 A 78 78 0 0 1 178 96" fill="none"
+                              stroke={color} strokeWidth="14" strokeLinecap="butt" opacity="0.25"
+                              style={{ strokeDasharray: `${(total * (to - from)) / 100} ${total}`, strokeDashoffset: startOff }} />
+                          );
+                        })}
+                        <motion.path d="M 22 96 A 78 78 0 0 1 178 96" fill="none"
+                          stroke={scoreColor} strokeWidth="14" strokeLinecap="round"
+                          style={{ strokeDasharray: 245.1 }}
+                          initial={{ strokeDashoffset: 245.1 }}
+                          animate={{ strokeDashoffset: 245.1 - (245.1 * Math.min(Math.max(displayScore, 0), 100)) / 100 }}
+                          transition={{ duration: 1, ease: 'easeOut', delay: 0.1 }} />
+                      </svg>
+                      <div className="absolute inset-x-0 bottom-0 flex flex-col items-center pb-0.5">
+                        <motion.span className="text-3xl font-black leading-none tabular-nums tracking-tight"
+                          style={{ color: scoreColor }}
+                          initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.3, duration: 0.4 }}>
+                          {Number(displayScore).toFixed(0)}
+                        </motion.span>
+                        <span className={`text-[9px] font-semibold tracking-widest uppercase ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>out of 100</span>
                       </div>
-                      <span className="text-sm font-black tabular-nums text-indigo-500">{dailyTarget}/day</span>
                     </div>
-                    <p className={`text-[9px] leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                      {myPending > 0
-                        ? <>{workingDaysLeft} working days left · complete <strong>{dailyTarget}</strong> tasks/day to clear all pending</>
-                        : <>All tasks cleared — great work! 🎉</>}
-                    </p>
-                  </motion.div>
+                    {nextBadge && (
+                      <div className="w-full mt-1">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className={`text-[9px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Next: {nextBadge.split(' (')[0]}</span>
+                          <span className="text-[10px] font-black tabular-nums" style={{ color: scoreColor }}>{Number(ptsToNext ?? 0).toFixed(1)} pts away</span>
+                        </div>
+                        <div className={`h-1.5 w-full rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
+                          <motion.div className="h-full rounded-full" style={{ background: `linear-gradient(90deg, ${scoreColor}99, ${scoreColor})` }}
+                            initial={{ width: 0 }} animate={{ width: `${Math.min(100, (displayScore / (displayScore >= 85 ? 95 : 85)) * 100)}%` }}
+                            transition={{ duration: 1, ease: 'easeOut', delay: 0.2 }} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
-                  {/* Rank / climb card */}
-                  <motion.div className={`rounded-xl border px-3 py-2.5 flex-1 ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-white border-slate-100'}`}
-                    style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}
-                    initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.65 }}>
-                    <div className="flex items-center gap-1.5 mb-1.5">
-                      {apiRank === 1 ? <Crown className="h-3.5 w-3.5 text-amber-500" /> : <TrendingUp className="h-3.5 w-3.5 text-indigo-500" />}
-                      <span className={`text-[10px] font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                        {apiRank === 1 ? "You're #1!" : apiRank !== null && apiRank > 1 ? `Rank #${apiRank} → #${apiRank - 1}` : 'Performance Insight'}
-                      </span>
-                    </div>
-                    <p className={`text-[9px] leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                      {apiRank === 1
-                        ? 'Maintain your pace to defend the top position.'
-                        : tasksForNextApiRank !== null && apiRank !== null && apiRank > 1
-                          ? <><strong>{tasksForNextApiRank}</strong> more tasks to overtake <strong>{prevRankUser?.user_name?.split(' ')[0] || 'next person'}</strong></>
-                          : nextBadge
-                            ? <><strong>{Number(ptsToNext ?? 0).toFixed(1)} pts</strong> to reach {nextBadge.split(' (')[0]}</>
-                            : 'All badge tiers reached. Hold the streak!'}
+                  {/* Compact horizontal composition chart */}
+                  <div style={{ height: 116 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={chartData} layout="vertical" margin={{ top: 0, right: 30, left: 4, bottom: 0 }} barCategoryGap="24%">
+                        <XAxis type="number" domain={[0, 25]} hide />
+                        <YAxis type="category" dataKey="name" width={62} tick={{ fontSize: 8.5, fontWeight: 600, fill: isDark ? '#94a3b8' : '#64748b' }} axisLine={false} tickLine={false} />
+                        <ReTooltip
+                          content={({ active, payload, label }) => {
+                            if (!active || !payload || !payload.length) return null;
+                            const row = chartData.find(d => d.name === label);
+                            return (
+                              <div className={`rounded-lg border px-2.5 py-1.5 text-[10px] shadow-lg ${isDark ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-700'}`}>
+                                <p className="font-bold mb-0.5">{label}</p>
+                                <p style={{ color: row?.color }}>Earned: <strong>{row?.earned.toFixed(1)}pts</strong> / {row?.max}pts</p>
+                              </div>
+                            );
+                          }}
+                          cursor={{ fill: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)' }}
+                        />
+                        <Bar dataKey="earned" stackId="a" radius={[0, 0, 0, 0]} isAnimationActive animationDuration={900} animationEasing="ease-out">
+                          {chartData.map((entry) => (<Cell key={entry.name} fill={entry.color} />))}
+                          <LabelList dataKey="earned" position="right" formatter={(v) => `${v}pt`} style={{ fontSize: 8.5, fontWeight: 700, fill: isDark ? '#cbd5e1' : '#475569' }} />
+                        </Bar>
+                        <Bar dataKey="remaining" stackId="a" radius={[0, 3, 3, 0]} isAnimationActive animationDuration={900} animationEasing="ease-out">
+                          {chartData.map((entry) => (<Cell key={entry.name} fill={isDark ? '#1e293b' : '#f1f5f9'} />))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── BOTTOM STRIP — 4 compact info cards ── */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 px-4 sm:px-5 pb-4">
+                {/* Rank */}
+                <div className={`rounded-xl border p-2.5 flex items-center gap-2.5 ${isDark ? 'bg-slate-900/40 border-slate-700' : 'bg-white border-slate-100'}`} style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: isDark ? '#4F46E522' : '#EEF2FF' }}>
+                    {apiRank === 1 ? <Crown className="h-4 w-4" style={{ color: '#D97706' }} /> : <Trophy className="h-4 w-4" style={{ color: '#4F46E5' }} />}
+                  </div>
+                  <div className="min-w-0">
+                    <p className={`text-[9.5px] font-semibold uppercase tracking-wide ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Your Rank</p>
+                    <p className="text-sm font-black tabular-nums leading-tight" style={{ color: '#4F46E5' }}>
+                      {apiRank !== null ? `#${apiRank}` : '—'}{totalUsers ? <span className={`text-[10px] font-semibold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}> /{totalUsers}</span> : null}
                     </p>
-                  </motion.div>
+                  </div>
                 </div>
 
+                {/* Next Tier */}
+                <div className={`rounded-xl border p-2.5 flex items-center gap-2.5 ${isDark ? 'bg-slate-900/40 border-slate-700' : 'bg-white border-slate-100'}`} style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: isDark ? '#10b98122' : '#D1FAE5' }}>
+                    <Medal className="h-4 w-4" style={{ color: '#10b981' }} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className={`text-[9.5px] font-semibold uppercase tracking-wide truncate ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{nextBadge ? nextBadge.split(' (')[0] : 'Top Tier'}</p>
+                    <p className="text-sm font-black tabular-nums leading-tight" style={{ color: '#10b981' }}>
+                      {nextBadge ? `${Number(ptsToNext ?? 0).toFixed(1)} pts to go` : 'Reached! 🎉'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Daily Pace */}
+                <div className={`rounded-xl border p-2.5 flex items-center gap-2.5 ${isDark ? 'bg-slate-900/40 border-slate-700' : 'bg-white border-slate-100'}`} style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: isDark ? '#F59E0B22' : '#FEF3E2' }}>
+                    <Zap className="h-4 w-4" style={{ color: '#F59E0B' }} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className={`text-[9.5px] font-semibold uppercase tracking-wide ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Daily Pace</p>
+                    <p className="text-sm font-black tabular-nums leading-tight" style={{ color: '#F59E0B' }}>
+                      {myPending > 0 ? `${dailyTarget}/day` : 'All clear 🎉'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Biggest gap / Tips */}
+                <div className={`rounded-xl border p-2.5 flex items-center gap-2.5 ${isDark ? 'bg-indigo-500/8 border-indigo-500/20' : 'bg-indigo-50 border-indigo-100'}`} style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-[9.5px] font-semibold uppercase tracking-wide truncate ${isDark ? 'text-indigo-300' : 'text-indigo-600'}`}>Consistency</p>
+                    <p className={`text-[10px] leading-tight truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      {topGapComponent ? `Gap: ${topGapComponent.label}` : 'On track'}
+                    </p>
+                  </div>
+                  <button onClick={() => setShowTips(true)}
+                    className="text-[10px] font-semibold px-2.5 py-1.5 rounded-lg flex-shrink-0 whitespace-nowrap"
+                    style={{ background: '#4F46E5', color: '#fff' }}>
+                    View Tips
+                  </button>
+                </div>
               </div>
             </div>
             );
