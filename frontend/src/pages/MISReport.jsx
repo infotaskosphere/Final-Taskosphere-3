@@ -3,13 +3,17 @@ import {
   FileBarChart2, Plus, Upload, X, Loader2, TrendingUp, TrendingDown, Wallet,
   Landmark, ArrowLeftRight, ScrollText, ReceiptText, CheckCircle2, AlertTriangle,
   Clock, ChevronDown, Trash2, Save, Building2, Users, FileSpreadsheet, FileText,
-  RefreshCw, Info, Banknote, Target,
+  RefreshCw, Info, Banknote, Target, Download,
 } from 'lucide-react';
 import {
   BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend,
 } from 'recharts';
 import { toast } from 'sonner';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
+import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
 import api from '@/lib/api';
 import useDark from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext.jsx';
@@ -136,6 +140,248 @@ function DataTable({ columns, rows, isDark, emptyText = 'No records.' }) {
       </table>
     </div>
   );
+}
+
+/* ═══════════════════════════ EXPORT (PDF / WORD / EXCEL) ═══════════════════════════ */
+
+const EXPENSE_CATS = [
+  ['rent', 'Rent'], ['employee_expenses', 'Employee Expenses'], ['travel_expenses', 'Travel Expenses'],
+  ['office_expenses', 'Office Expenses'], ['software_subscription_cost', 'Software Subscription'],
+  ['utility_expenses', 'Utility Expenses'], ['marketing_expenses', 'Marketing Expenses'],
+  ['administrative_expenses', 'Administrative Expenses'],
+];
+
+/** Flattens whichever tab's report data is currently loaded into a
+ *  { title, tabLabel, metrics: [[label, value]], tables: [{ title, columns, rows }] }
+ *  shape that all three exporters (PDF / Word / Excel) consume. */
+function buildMISExportData(tab, data, clientName, period) {
+  if (!data) return null;
+  const tabMeta = TABS.find((t) => t.key === tab);
+  const tabLabel = tabMeta?.label || 'MIS Report';
+  const metrics = [];
+  const tables = [];
+
+  const chartTable = (obj, label) => {
+    const rows = toChartData(obj);
+    if (rows.length) tables.push({ title: label, columns: ['Name', 'Amount (₹)'], rows: rows.map((r) => [r.name, fmt(r.value)]) });
+  };
+
+  const dataTable = (label, rows, columns, emptyOk = false) => {
+    if (rows?.length || emptyOk) {
+      tables.push({
+        title: label,
+        columns: columns.map((c) => c.label),
+        rows: (rows || []).map((r) => columns.map((c) => String(c.render ? c.render(r) : (r[c.key] ?? '')))),
+      });
+    }
+  };
+
+  if (tab === 'dashboard') {
+    metrics.push(
+      ['Total Revenue', `₹${fmt(data.total_revenue)}`],
+      ['Total Expenses', `₹${fmt(data.total_expenses)}`],
+      ['Gross Profit', `₹${fmt(data.gross_profit)}`],
+      ['Net Profit', `₹${fmt(data.net_profit)}`],
+      ['EBITDA', `₹${fmt(data.ebitda)}`],
+      ['Cash & Bank Balance', `₹${fmt(data.cash_and_bank_balance)}`],
+      ['Accounts Receivable', `₹${fmt(data.accounts_receivable)}`],
+      ['Accounts Payable', `₹${fmt(data.accounts_payable)}`],
+      ['Working Capital', `₹${fmt(data.working_capital)}`],
+      ['Cash Flow Position', `₹${fmt(data.cash_flow_position)} (In ₹${fmt(data.cash_in)} · Out ₹${fmt(data.cash_out)})`],
+      ['Revenue Growth %', data.revenue_growth_pct == null ? 'N/A' : `${data.revenue_growth_pct}%`],
+    );
+    dataTable('Budget vs Actual', data.budget_vs_actual, [
+      { key: 'category', label: 'Category', render: (r) => String(r.category || '').replace(/_/g, ' ') },
+      { key: 'budget', label: 'Budget', render: (r) => `₹${fmt(r.budget)}` },
+      { key: 'actual', label: 'Actual', render: (r) => `₹${fmt(r.actual)}` },
+      { key: 'variance', label: 'Variance', render: (r) => `₹${fmt(r.variance)}` },
+    ]);
+  } else if (tab === 'receivables') {
+    const s = data.outstanding_summary || {};
+    metrics.push(
+      ['Total Outstanding', `₹${fmt(data.total_outstanding)}`],
+      ['Collection Efficiency', `${data.collection_reports?.collection_efficiency_pct ?? 0}%`],
+      ['Expected Collections', `₹${fmt(data.collection_reports?.expected_collections)}`],
+      ['Overdue Total', `₹${fmt(data.collection_reports?.overdue_total)}`],
+      ['Bad Debts Total', `₹${fmt(data.collection_reports?.bad_debts_total)}`],
+      ['Interest on Delayed Payments', `₹${fmt(data.collection_reports?.interest_on_delayed_payments)}`],
+    );
+    chartTable(data.ageing_analysis, 'Ageing Analysis');
+    chartTable(s.client_wise, 'Client-wise Outstanding');
+    chartTable(s.branch_wise, 'Branch-wise Outstanding');
+    chartTable(s.partner_wise, 'Partner-wise Outstanding');
+    dataTable('Invoice-wise Outstanding', s.invoice_wise, [
+      { key: 'invoice_no', label: 'Invoice #' }, { key: 'party_name', label: 'Party' },
+      { key: 'due_date', label: 'Due Date' }, { key: 'status', label: 'Status' },
+      { key: 'outstanding', label: 'Outstanding', render: (r) => `₹${fmt(r.outstanding)}` },
+    ]);
+    chartTable(data.collection_reports?.monthly_collections, 'Monthly Collections');
+    dataTable('Overdue Invoices', data.collection_reports?.overdue_invoices, [
+      { key: 'invoice_no', label: 'Invoice #' }, { key: 'party_name', label: 'Party' },
+      { key: 'due_date', label: 'Due Date' }, { key: 'outstanding', label: 'Outstanding', render: (r) => `₹${fmt(r.outstanding)}` },
+    ]);
+  } else if (tab === 'payables') {
+    metrics.push(
+      ['Total Payable', `₹${fmt(data.total_payable)}`],
+      ['Advances to Vendors', `₹${fmt((data.advances_to_vendors || []).reduce((s, a) => s + (a.amount || 0), 0))}`],
+      ['Security Deposits', `₹${fmt((data.security_deposits || []).reduce((s, a) => s + (a.amount || 0), 0))}`],
+    );
+    chartTable(data.ageing_analysis, 'Ageing Analysis');
+    chartTable(data.vendor_wise_payables, 'Vendor-wise Payables');
+    chartTable(data.expense_category_wise_payables, 'Expense Category-wise Payables');
+    chartTable(data.monthly_payment_summary, 'Monthly Payment Summary');
+    dataTable('Due Payments (Upcoming)', data.due_payments, [
+      { key: 'invoice_no', label: 'Bill #' }, { key: 'party_name', label: 'Vendor' },
+      { key: 'due_date', label: 'Due Date' }, { key: 'outstanding', label: 'Amount', render: (r) => `₹${fmt(r.outstanding)}` },
+    ]);
+  } else if (tab === 'revenue') {
+    metrics.push(
+      ['Total Revenue', `₹${fmt(data.total_revenue)}`],
+      ['Repeat Client Revenue', `₹${fmt(data.repeat_client_revenue)}`],
+      ['New Client Revenue', `₹${fmt(data.new_client_revenue)}`],
+    );
+    chartTable(data.monthly_revenue_trend, 'Monthly Revenue Trend');
+    chartTable(data.daily_revenue, 'Daily Revenue');
+    chartTable(data.service_wise_revenue, 'Service-wise Revenue');
+    chartTable(data.client_wise_revenue, 'Client-wise Revenue');
+    chartTable(data.branch_wise_revenue, 'Branch-wise Revenue');
+    chartTable(data.partner_wise_revenue, 'Partner-wise Revenue');
+    chartTable(data.employee_wise_billing, 'Employee-wise Billing');
+  } else if (tab === 'expense') {
+    metrics.push(['Total Expenses', `₹${fmt(data.total_expenses)}`], ['Purchase / COGS', `₹${fmt(data.purchase_cogs)}`]);
+    EXPENSE_CATS.forEach(([key, label]) => metrics.push([label, `₹${fmt(data[key])}`]));
+    chartTable(data.monthly_expenses, 'Monthly Expenses');
+    chartTable(data.department_wise_expenses, 'Department / Category-wise Expenses');
+  } else if (tab === 'profitability') {
+    const p = data.client_profitability || {};
+    metrics.push(
+      ['Revenue', `₹${fmt(p.revenue)}`],
+      ['Direct Cost', `₹${fmt(p.direct_cost)}`],
+      ['Indirect Cost', `₹${fmt(p.indirect_cost)}`],
+      ['Profit', `₹${fmt(p.profit)}`],
+      ['Profit Margin', `${p.profit_pct ?? 0}%`],
+    );
+  }
+
+  return { tabLabel, metrics, tables };
+}
+
+function exportFileBase(tabLabel, clientName, period) {
+  return `MIS_${tabLabel.replace(/\s+/g, '_')}_${(clientName || 'Client').replace(/\s+/g, '_')}_${(period || 'Period').replace(/\s+/g, '_')}`;
+}
+
+function exportMISPDF(tab, data, clientName, period) {
+  const exp = buildMISExportData(tab, data, clientName, period);
+  if (!exp) { toast.error('No data to export yet'); return; }
+
+  const doc = new jsPDF('p', 'mm', 'a4');
+  let y = 15;
+  doc.setFontSize(15);
+  doc.setFont(undefined, 'bold');
+  doc.text('MIS Report', 14, y); y += 7;
+  doc.setFontSize(10);
+  doc.setFont(undefined, 'normal');
+  doc.text(`${exp.tabLabel} — ${clientName || ''}`, 14, y); y += 5;
+  doc.text(`Period: ${period || ''}   |   Generated: ${new Date().toLocaleDateString('en-IN')}`, 14, y); y += 6;
+
+  if (exp.metrics.length) {
+    doc.autoTable({
+      startY: y,
+      head: [['Metric', 'Value']],
+      body: exp.metrics,
+      theme: 'grid',
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [31, 111, 178] },
+      margin: { left: 14, right: 14 },
+    });
+    y = doc.lastAutoTable.finalY + 8;
+  }
+
+  exp.tables.forEach((t) => {
+    if (y > 260) { doc.addPage(); y = 15; }
+    doc.setFontSize(11);
+    doc.setFont(undefined, 'bold');
+    doc.text(t.title, 14, y);
+    y += 4;
+    doc.autoTable({
+      startY: y,
+      head: [t.columns],
+      body: t.rows,
+      theme: 'striped',
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [31, 111, 178] },
+      margin: { left: 14, right: 14 },
+    });
+    y = doc.lastAutoTable.finalY + 8;
+  });
+
+  doc.save(`${exportFileBase(exp.tabLabel, clientName, period)}.pdf`);
+  toast.success('PDF downloaded');
+}
+
+function exportMISWord(tab, data, clientName, period) {
+  const exp = buildMISExportData(tab, data, clientName, period);
+  if (!exp) { toast.error('No data to export yet'); return; }
+
+  const cell = 'padding:6px 10px;border:1px solid #ddd;';
+  const head = `${cell}background:#f1f5f9;text-align:left;font-weight:bold;`;
+
+  const metricsHtml = exp.metrics.map(([k, v]) => `<tr><td style="${cell}">${k}</td><td style="${cell}font-weight:bold;">${v}</td></tr>`).join('');
+
+  const tablesHtml = exp.tables.map((t) => `
+    <h3 style="margin-top:22px;color:#1F6FB2;">${t.title}</h3>
+    <table style="border-collapse:collapse;width:100%;font-size:12px;">
+      <thead><tr>${t.columns.map((c) => `<th style="${head}">${c}</th>`).join('')}</tr></thead>
+      <tbody>${t.rows.map((r) => `<tr>${r.map((c) => `<td style="${cell}">${c}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table>
+  `).join('');
+
+  const html = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+    <head><meta charset="utf-8">
+      <!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->
+      <style>body{font-family:Calibri,Arial,sans-serif;} h1{color:#1F6FB2;margin-bottom:2px;} h2{color:#334155;margin-top:0;}</style>
+    </head>
+    <body>
+      <h1>MIS Report — ${exp.tabLabel}</h1>
+      <h2>${clientName || ''}</h2>
+      <p>Period: ${period || ''} &nbsp;|&nbsp; Generated: ${new Date().toLocaleDateString('en-IN')}</p>
+      <table style="border-collapse:collapse;width:100%;font-size:12px;margin-top:10px;">
+        <thead><tr><th style="${head}">Metric</th><th style="${head}">Value</th></tr></thead>
+        <tbody>${metricsHtml}</tbody>
+      </table>
+      ${tablesHtml}
+    </body>
+    </html>
+  `;
+
+  const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
+  saveAs(blob, `${exportFileBase(exp.tabLabel, clientName, period)}.doc`);
+  toast.success('Word document downloaded');
+}
+
+function exportMISExcel(tab, data, clientName, period) {
+  const exp = buildMISExportData(tab, data, clientName, period);
+  if (!exp) { toast.error('No data to export yet'); return; }
+
+  const wb = XLSX.utils.book_new();
+  const summaryRows = [
+    ['MIS Report'], [exp.tabLabel], [`Client: ${clientName || ''}`], [`Period: ${period || ''}`], [],
+    ['Metric', 'Value'], ...exp.metrics,
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), 'Summary');
+
+  const usedNames = new Set(['Summary']);
+  exp.tables.forEach((t, i) => {
+    const base = t.title.replace(/[\\/*?:[\]]/g, '').slice(0, 28) || `Table${i + 1}`;
+    let name = base, n = 1;
+    while (usedNames.has(name)) name = `${base}_${n++}`;
+    usedNames.add(name);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([t.columns, ...t.rows]), name);
+  });
+
+  XLSX.writeFile(wb, `${exportFileBase(exp.tabLabel, clientName, period)}.xlsx`);
+  toast.success('Excel downloaded');
 }
 
 /* ─────────────────────────────────────────────────────────────────────── */
@@ -468,21 +714,50 @@ export default function MISReport() {
       )}
 
       {/* Tabs */}
-      <div className="flex flex-wrap gap-2 mb-5">
-        {TABS.map((t) => (
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+        <div className="flex flex-wrap gap-2">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-semibold transition-colors ${
+                tab === t.key
+                  ? 'text-white'
+                  : isDark ? 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200' : 'bg-white text-slate-500 border border-slate-200 hover:text-slate-700'
+              }`}
+              style={tab === t.key ? { background: HUB_COLORS.mediumBlue } : {}}
+            >
+              <t.icon className="h-4 w-4" /> {t.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className={`text-xs font-semibold hidden sm:inline ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+            <Download className="h-3.5 w-3.5 inline -mt-0.5 mr-1" />Export:
+          </span>
           <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-semibold transition-colors ${
-              tab === t.key
-                ? 'text-white'
-                : isDark ? 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200' : 'bg-white text-slate-500 border border-slate-200 hover:text-slate-700'
-            }`}
-            style={tab === t.key ? { background: HUB_COLORS.mediumBlue } : {}}
+            disabled={!reportData[tab]}
+            onClick={() => exportMISPDF(tab, reportData[tab], selectedClient?.company_name, period)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg shadow-sm transition-colors"
           >
-            <t.icon className="h-4 w-4" /> {t.label}
+            <FileText className="h-3.5 w-3.5" /> PDF
           </button>
-        ))}
+          <button
+            disabled={!reportData[tab]}
+            onClick={() => exportMISWord(tab, reportData[tab], selectedClient?.company_name, period)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg shadow-sm transition-colors"
+          >
+            <FileText className="h-3.5 w-3.5" /> Word
+          </button>
+          <button
+            disabled={!reportData[tab]}
+            onClick={() => exportMISExcel(tab, reportData[tab], selectedClient?.company_name, period)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg shadow-sm transition-colors"
+          >
+            <FileSpreadsheet className="h-3.5 w-3.5" /> Excel
+          </button>
+        </div>
       </div>
 
       {loadingReport && !reportData[tab] ? (
