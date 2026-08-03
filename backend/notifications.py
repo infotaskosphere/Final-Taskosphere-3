@@ -42,6 +42,12 @@ class NotificationBase(BaseModel):
     title: str = Field(min_length=1)
     message: str = Field(min_length=1)
     type: str = "system"
+    # Task-level popup fields (used by the "raise a popup for this task"
+    # feature on the Tasks page). popup=True tells the frontend to fire an
+    # OS-level Notification() in addition to the normal in-app bell entry,
+    # so it is visible even if the browser window is minimized.
+    popup: bool = False
+    task_id: Optional[str] = None
 
 
 class Notification(NotificationBase):
@@ -58,7 +64,12 @@ class AdminNotificationRequest(BaseModel):
     message: str = Field(min_length=1)
     type: str = "system"
     user_id: Optional[str] = None
+    # Bulk targeting: send the same notification to several specific users
+    # at once (e.g. "raise popup" on multiple selected tasks/assignees).
+    user_ids: Optional[List[str]] = None
     broadcast: bool = False
+    popup: bool = False
+    task_id: Optional[str] = None
 
 
 # ====================== STABILITY HELPERS ======================
@@ -94,6 +105,8 @@ async def create_notification(
     title: str,
     message: str,
     type: str = "system",
+    popup: bool = False,
+    task_id: Optional[str] = None,
 ) -> Optional[Notification]:
     try:
         notification = Notification(
@@ -101,6 +114,8 @@ async def create_notification(
             title=title,
             message=message,
             type=type,
+            popup=popup,
+            task_id=task_id,
         )
         doc = notification.model_dump()
         doc["created_at"] = datetime.now(timezone.utc)
@@ -363,6 +378,35 @@ async def send_notification(
             "message": f"Broadcasted to {len(docs)} users",
         }
 
+    # ── BULK — several specific users at once (e.g. task popup fan-out) ────
+    if payload.user_ids:
+        target_ids = list({uid for uid in payload.user_ids if uid})
+        if not target_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="user_ids was provided but contained no valid ids",
+            )
+        docs = [
+            {
+                "id": str(uuid.uuid4()),
+                "user_id": uid,
+                "title": payload.title,
+                "message": payload.message,
+                "type": payload.type,
+                "popup": payload.popup,
+                "task_id": payload.task_id,
+                "is_read": False,
+                "created_at": now,
+            }
+            for uid in target_ids
+        ]
+        if docs:
+            await db.notifications.insert_many(docs, ordered=False)
+        return {
+            "status": "success",
+            "message": f"Notification sent to {len(docs)} users",
+        }
+
     # ── SINGLE USER ────────────────────────────────────────────────────────
     if payload.user_id:
         result = await create_notification(
@@ -370,6 +414,8 @@ async def send_notification(
             title=payload.title,
             message=payload.message,
             type=payload.type,
+            popup=payload.popup,
+            task_id=payload.task_id,
         )
         if result:
             return {"status": "success", "message": "Notification sent"}
@@ -385,6 +431,8 @@ async def send_notification(
         title=payload.title,
         message=payload.message,
         type=payload.type,
+        popup=payload.popup,
+        task_id=payload.task_id,
     )
     if result:
         return {"status": "success", "message": "Notification sent"}
