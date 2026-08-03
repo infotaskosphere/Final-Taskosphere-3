@@ -53,6 +53,10 @@ class ParsedDoc:
         return any(t is not None and not t.empty for t in self.tables)
 
 
+# Backward/forward-compatible alias — mis_report.py imports this name.
+ParsedDocument = ParsedDoc
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # GENERIC TABLE CLEANUP
 # ══════════════════════════════════════════════════════════════════════════
