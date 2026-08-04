@@ -206,6 +206,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_delete_own_visits: true,    // always allowed for own records
       can_manage_whatsapp: false,     // admin-granted only
       can_access_whatsapp_hub: false,  // ADMIN_GRANTED_ONLY
+      can_view_client_portal: false,   // admin-granted only
       can_access_taskosphere: true, can_access_finix: false, can_access_compliance: true,
       can_access_records: true, can_access_proposals: true, can_access_people_matrix: true,
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
@@ -269,6 +270,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_delete_own_visits: true,    // always allowed for own records
       can_manage_whatsapp: false,     // admin-granted only
       can_access_whatsapp_hub: false,  // ADMIN_GRANTED_ONLY
+      can_view_client_portal: false,   // admin-granted only
       can_access_taskosphere: true, can_access_finix: false, can_access_compliance: true,
       can_access_records: true, can_access_proposals: true, can_access_people_matrix: true,
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
@@ -327,7 +329,6 @@ const GLOBAL_PERMS = [
   { key: 'can_view_compliance',             label: 'Compliance Tracker',           desc: 'Access the Compliance Tracker page',                     icon: ShieldCheck },
   { key: 'can_view_gst_reconciliation',     label: 'GST Reconciliation',           desc: 'Access the GST Reconciliation module (GST dept users)',  icon: FileText    },
   { key: 'can_create_quotations',           label: 'Quotations Module',            desc: 'Create, edit, export and share quotations',              icon: Receipt     },
-  { key: 'can_view_client_portal',          label: 'Client Portal Manager',        desc: 'Access the Client Portal Manager (admin-level module)',   icon: Building2   },
   { key: 'can_manage_whatsapp',             label: 'WhatsApp Settings',            desc: 'Access and configure WhatsApp integration settings',     icon: MessageSquare },
   { key: 'can_access_whatsapp_hub', label: 'WhatsApp Hub', desc: 'Access the WhatsApp Hub multi-account inbox', icon: MessageCircle },
   { key: 'can_view_recruitment',    label: 'Recruitment (view)',   desc: 'Access the Recruitment page — candidate pipeline & interviews', icon: Briefcase },
@@ -671,9 +672,11 @@ const pagesWithWritePerms = (pagePerms, writePerms) => pagePerms.map(pg => ({
 const MODULE_TREE = [
   {
     key: 'taskosphere', flag: 'can_access_taskosphere', label: 'Taskosphere', icon: ClipboardList, accent: '#1F6FB2',
-    desc: 'The core workspace — Tasks, To-Do, Attendance, Reminders, Action Center, Client Visits and AI Document Reader.',
-    pages: [],
-    footnote: 'These core pages are open to every signed-in user today and don\u2019t yet have separate page-level toggles \u2014 this switch controls the whole module at once.',
+    desc: 'The core workspace — Tasks, To-Do, Attendance, Reminders, Action Center, Client Visits, AI Document Reader and Client Portal Manager.',
+    pages: [
+      { permKey: 'can_view_client_portal', label: 'Client Portal Manager', desc: 'Create and manage client portal accounts, Drive folder visibility, portal messages and settings', icon: Building2 },
+    ],
+    footnote: 'Tasks, To-Do, Attendance, Reminders, Action Center, Client Visits and AI Document Reader stay open to every signed-in user and don\u2019t have separate page-level toggles. Client Portal Manager above is the one page in this module that\u2019s individually admin-granted.',
   },
   {
     key: 'finix', flag: 'can_access_finix', label: 'Finix', icon: CreditCard, accent: '#15803D',
@@ -4178,17 +4181,9 @@ export default function Users() {
                     />
                   ))}
 
-                  {/* ── Client Portal ─────────────────────────────────── */}
-                  <ModuleAccessCard
-                    icon={Building2}
-                    title="Client Portal Manager"
-                    desc="Access the Client Portal Manager to create and manage client portal accounts, permissions and document visibility."
-                    permKey="can_view_client_portal"
-                    permissions={permissions}
-                    setPermissions={setPermissions}
-                    accentColor="#0D3B66"
-                    badge={permissions.can_view_client_portal ? 'Full Access' : undefined}
-                  />
+                  {/* Client Portal Manager now lives as a page inside the Taskosphere
+                      module card above (can_view_client_portal), not as a standalone
+                      card — it was moved out of Admin and is properly module-gated. */}
 
                   {/* ── WhatsApp Settings ──────────────────────────────── */}
                   <ModuleAccessCard
