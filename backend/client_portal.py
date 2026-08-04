@@ -32,6 +32,14 @@ from backend.models import User
 # Reuse the same Brevo-backed OTP emailer the main-app forgot-password flow
 # uses, so client portal password resets need no separate email infra.
 from backend.auth_password_reset import _send_otp_email
+# Client Portal Manager lives under the Taskosphere tab and is admin-granted
+# per user (see MODULE_HIERARCHY["taskosphere"] in backend/models.py). This
+# guard is applied to every STAFF-facing endpoint below (the ones that take
+# `current_user: User = Depends(get_current_user)`); it does not touch the
+# CLIENT-facing endpoints, which authenticate separately via
+# get_current_portal_client and must stay reachable by actual clients.
+from backend.governance_core import require_page
+_client_portal_guard = require_page("taskosphere", "can_view_client_portal")
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/client-portal", tags=["client-portal"])
@@ -203,7 +211,7 @@ class PortalResetPasswordRequest(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-@router.post("/users", status_code=201)
+@router.post("/users", status_code=201, dependencies=[Depends(_client_portal_guard)])
 async def create_portal_user(
     body: PortalUserCreate,
     current_user: User = Depends(get_current_user),
@@ -268,7 +276,7 @@ async def create_portal_user(
     return portal_doc
 
 
-@router.get("/users")
+@router.get("/users", dependencies=[Depends(_client_portal_guard)])
 async def list_portal_users(
     client_id: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user),
@@ -285,7 +293,7 @@ async def list_portal_users(
     return docs
 
 
-@router.put("/users/{portal_user_id}")
+@router.put("/users/{portal_user_id}", dependencies=[Depends(_client_portal_guard)])
 async def update_portal_user(
     portal_user_id: str,
     body: PortalUserUpdate,
@@ -334,7 +342,7 @@ async def update_portal_user(
     return {"success": True}
 
 
-@router.get("/users/{portal_user_id}/reveal-password")
+@router.get("/users/{portal_user_id}/reveal-password", dependencies=[Depends(_client_portal_guard)])
 async def reveal_portal_password(
     portal_user_id: str,
     current_user: User = Depends(get_current_user),
@@ -363,7 +371,7 @@ async def reveal_portal_password(
     }
 
 
-@router.delete("/users/{portal_user_id}")
+@router.delete("/users/{portal_user_id}", dependencies=[Depends(_client_portal_guard)])
 async def delete_portal_user(
     portal_user_id: str,
     current_user: User = Depends(get_current_user),
@@ -380,7 +388,7 @@ async def delete_portal_user(
 # Share-link endpoint  (admin generates a magic link or just returns the URL)
 # ═══════════════════════════════════════════════════════════════════════════
 
-@router.get("/users/{portal_user_id}/share-link")
+@router.get("/users/{portal_user_id}/share-link", dependencies=[Depends(_client_portal_guard)])
 async def get_share_link(
     portal_user_id: str,
     current_user: User = Depends(get_current_user),
@@ -725,7 +733,7 @@ def _get_folder_name(folder_id: str) -> str:
 # Google Drive  –  Visibility management (admin)
 # ═══════════════════════════════════════════════════════════════════════════
 
-@router.get("/drive/admin/files/{portal_user_id}")
+@router.get("/drive/admin/files/{portal_user_id}", dependencies=[Depends(_client_portal_guard)])
 async def admin_list_drive_files(
     portal_user_id: str,
     folder_id: Optional[str] = Query(None, description="Subfolder ID to browse (defaults to client's root folder)"),
@@ -776,7 +784,7 @@ class DriveVisibilityUpdate(BaseModel):
     hidden_ids: List[str] = Field(default_factory=list)
 
 
-@router.put("/drive/admin/visibility/{portal_user_id}")
+@router.put("/drive/admin/visibility/{portal_user_id}", dependencies=[Depends(_client_portal_guard)])
 async def admin_update_drive_visibility(
     portal_user_id: str,
     body: DriveVisibilityUpdate,
@@ -804,7 +812,7 @@ async def admin_update_drive_visibility(
     return {"success": True, "hidden_count": len(body.hidden_ids)}
 
 
-@router.patch("/drive/admin/visibility/{portal_user_id}/toggle")
+@router.patch("/drive/admin/visibility/{portal_user_id}/toggle", dependencies=[Depends(_client_portal_guard)])
 async def admin_toggle_single_file(
     portal_user_id: str,
     file_id: str = Query(..., description="Drive file ID to toggle"),
@@ -840,7 +848,7 @@ async def admin_toggle_single_file(
     return {"success": True, "file_id": file_id, "is_visible": visible}
 
 
-@router.get("/drive/admin/visibility/{portal_user_id}/summary")
+@router.get("/drive/admin/visibility/{portal_user_id}/summary", dependencies=[Depends(_client_portal_guard)])
 async def admin_visibility_summary(
     portal_user_id: str,
     current_user: User = Depends(get_current_user),
@@ -893,7 +901,7 @@ class PortalSettings(BaseModel):
     logo_url: Optional[str] = None
 
 
-@router.get("/settings")
+@router.get("/settings", dependencies=[Depends(_client_portal_guard)])
 async def get_portal_settings(
     current_user: User = Depends(get_current_user),
 ):
@@ -912,7 +920,7 @@ async def get_portal_settings(
     return doc
 
 
-@router.put("/settings")
+@router.put("/settings", dependencies=[Depends(_client_portal_guard)])
 async def save_portal_settings(
     body: PortalSettings,
     current_user: User = Depends(get_current_user),
@@ -973,7 +981,7 @@ MAX_LOGO_SIZE_BYTES = 1_500_000  # ~1.5 MB
 ALLOWED_LOGO_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/svg+xml"}
 
 
-@router.post("/settings/logo")
+@router.post("/settings/logo", dependencies=[Depends(_client_portal_guard)])
 async def upload_portal_logo(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
@@ -1006,7 +1014,7 @@ async def upload_portal_logo(
     return {"success": True, "logo_url": data_uri}
 
 
-@router.delete("/settings/logo")
+@router.delete("/settings/logo", dependencies=[Depends(_client_portal_guard)])
 async def delete_portal_logo(
     current_user: User = Depends(get_current_user),
 ):
@@ -1046,7 +1054,7 @@ async def _resolve_parent_folder_id(explicit: Optional[str] = None) -> Optional[
 # All Clients  –  returns every client with their portal connection status
 # ═══════════════════════════════════════════════════════════════════════════
 
-@router.get("/all-clients")
+@router.get("/all-clients", dependencies=[Depends(_client_portal_guard)])
 async def list_all_clients(
     current_user: User = Depends(get_current_user),
 ):
@@ -1085,7 +1093,7 @@ class FolderTemplate(BaseModel):
     parent_folder_id: Optional[str] = None
 
 
-@router.get("/folder-template")
+@router.get("/folder-template", dependencies=[Depends(_client_portal_guard)])
 async def get_folder_template(
     current_user: User = Depends(get_current_user),
 ):
@@ -1101,7 +1109,7 @@ async def get_folder_template(
     return doc
 
 
-@router.put("/folder-template")
+@router.put("/folder-template", dependencies=[Depends(_client_portal_guard)])
 async def save_folder_template(
     body: FolderTemplate,
     current_user: User = Depends(get_current_user),
@@ -1248,7 +1256,7 @@ class CreateFolderRequest(BaseModel):
     subfolders: Optional[List[str]] = None
 
 
-@router.post("/drive/create-folders")
+@router.post("/drive/create-folders", dependencies=[Depends(_client_portal_guard)])
 async def create_client_drive_folders(
     body: CreateFolderRequest,
     current_user: User = Depends(get_current_user),
@@ -1308,7 +1316,7 @@ class BulkCreateFolderRequest(BaseModel):
     subfolders: Optional[List[str]] = None
 
 
-@router.post("/drive/bulk-create-folders")
+@router.post("/drive/bulk-create-folders", dependencies=[Depends(_client_portal_guard)])
 async def bulk_create_client_drive_folders(
     body: BulkCreateFolderRequest,
     current_user: User = Depends(get_current_user),
@@ -1397,7 +1405,7 @@ class LinkExistingFolderRequest(BaseModel):
     folder_name: Optional[str] = None  # optional override; auto-fetched from Drive if blank
 
 
-@router.put("/clients/{client_id}/link-drive-folder")
+@router.put("/clients/{client_id}/link-drive-folder", dependencies=[Depends(_client_portal_guard)])
 async def link_existing_drive_folder(
     client_id: str,
     body: LinkExistingFolderRequest,
@@ -1476,7 +1484,7 @@ async def link_existing_drive_folder(
 # in Drive (created outside Taskosphere) instead of having to know/paste its
 # raw ID or share URL.
 
-@router.get("/drive/admin/search-folders")
+@router.get("/drive/admin/search-folders", dependencies=[Depends(_client_portal_guard)])
 async def admin_search_drive_folders(
     query: str = Query(..., min_length=1, description="Folder name (or partial name) to search for"),
     current_user: User = Depends(get_current_user),
@@ -1517,7 +1525,7 @@ async def admin_search_drive_folders(
 # ── Admin: browse any Drive folder (not tied to a portal user) ──────────────
 # Useful for previewing a folder before linking it to a client.
 
-@router.get("/drive/admin/browse")
+@router.get("/drive/admin/browse", dependencies=[Depends(_client_portal_guard)])
 async def admin_browse_drive_folder(
     folder_id: str = Query(..., description="Drive folder ID to list"),
     current_user: User = Depends(get_current_user),
@@ -1779,7 +1787,7 @@ async def portal_drive_download(
         raise HTTPException(500, "Failed to download file from Google Drive.")
 
 
-@router.get("/drive/admin/download")
+@router.get("/drive/admin/download", dependencies=[Depends(_client_portal_guard)])
 async def admin_drive_download(
     file_id: str = Query(..., description="Drive file ID to download"),
     current_user: User = Depends(get_current_user),
@@ -1847,7 +1855,7 @@ class PortalMessageCreate(BaseModel):
     body: str
     message_type: Optional[str] = "general"   # general | dsc_expiry | compliance_due | invoice_reminder | custom
 
-@router.get("/messages")
+@router.get("/messages", dependencies=[Depends(_client_portal_guard)])
 async def list_messages_admin(current_user: User = Depends(get_current_user)):
     """Admin: list all portal messages (scoped to this deployment)."""
     docs = await db.portal_messages.find(
@@ -1855,7 +1863,7 @@ async def list_messages_admin(current_user: User = Depends(get_current_user)):
     ).sort("created_at", -1).to_list(200)
     return docs
 
-@router.post("/messages", status_code=201)
+@router.post("/messages", status_code=201, dependencies=[Depends(_client_portal_guard)])
 async def send_portal_message(
     payload: PortalMessageCreate,
     current_user: User = Depends(get_current_user),
@@ -1957,7 +1965,7 @@ async def reply_to_message(
     return {"ok": True, "reply": reply}
 
 
-@router.delete("/messages/{msg_id}")
+@router.delete("/messages/{msg_id}", dependencies=[Depends(_client_portal_guard)])
 async def delete_portal_message(msg_id: str, current_user: User = Depends(get_current_user)):
     """Admin: delete a message."""
     await db.portal_messages.delete_one({"id": msg_id})
@@ -1972,7 +1980,7 @@ class IndividualFolderRequest(BaseModel):
     parent_folder_id: Optional[str] = None
     subfolders: Optional[List[str]] = None
 
-@router.post("/drive/create-individual-folder")
+@router.post("/drive/create-individual-folder", dependencies=[Depends(_client_portal_guard)])
 async def create_individual_folder(
     payload: IndividualFolderRequest,
     current_user: User = Depends(get_current_user),
@@ -2228,7 +2236,7 @@ class ClassifyRequest(BaseModel):
     available_subfolders: List[str] = Field(default_factory=list)
 
 
-@router.post("/drive/classify-document")
+@router.post("/drive/classify-document", dependencies=[Depends(_client_portal_guard)])
 async def classify_document_endpoint(
     filename: str = Form(...),
     available_subfolders: str = Form("[]"),   # JSON-encoded list
@@ -2252,7 +2260,7 @@ async def classify_document_endpoint(
     return {"filename": filename, **result}
 
 
-@router.post("/drive/smart-bulk-upload")
+@router.post("/drive/smart-bulk-upload", dependencies=[Depends(_client_portal_guard)])
 async def smart_bulk_upload(
     portal_user_id: str = Form(...),
     classifications: str = Form(...),   # JSON: [{filename, suggested_folder, override_folder?}, ...]
@@ -2438,7 +2446,7 @@ def _upload_file_path_to_drive_sync(service, folder_id: str, filename: str, file
     ).execute()
 
 
-@router.post("/drive/ensure-root-folder")
+@router.post("/drive/ensure-root-folder", dependencies=[Depends(_client_portal_guard)])
 async def ensure_root_folder(
     client_id: str = Form(...),
     client_name: str = Form(...),
@@ -2509,7 +2517,7 @@ async def ensure_root_folder(
     }
 
 
-@router.post("/drive/upload-file")
+@router.post("/drive/upload-file", dependencies=[Depends(_client_portal_guard)])
 async def simple_upload_file(
     portal_user_id: str = Form(...),
     folder_id: Optional[str] = Form(None),
@@ -2639,7 +2647,7 @@ class CreateSubfolderRequest(BaseModel):
     parent_folder_id: Optional[str] = None
 
 
-@router.post("/drive/simple-create-folder")
+@router.post("/drive/simple-create-folder", dependencies=[Depends(_client_portal_guard)])
 async def simple_create_folder(
     body: CreateSubfolderRequest,
     current_user: User = Depends(get_current_user),
@@ -2675,7 +2683,7 @@ class BulkDeleteRequest(BaseModel):
     file_ids: List[str] = Field(..., min_length=1)
 
 
-@router.delete("/drive/item")
+@router.delete("/drive/item", dependencies=[Depends(_client_portal_guard)])
 async def delete_drive_item(
     portal_user_id: str = Query(...),
     file_id: str = Query(...),
@@ -2704,7 +2712,7 @@ async def delete_drive_item(
     return {"success": True, "deleted_id": file_id}
 
 
-@router.post("/drive/bulk-delete")
+@router.post("/drive/bulk-delete", dependencies=[Depends(_client_portal_guard)])
 async def bulk_delete_drive_items(
     body: BulkDeleteRequest,
     current_user: User = Depends(get_current_user),
@@ -2742,7 +2750,7 @@ class BulkUserDeleteRequest(BaseModel):
     portal_user_ids: List[str] = Field(..., min_length=1)
 
 
-@router.post("/users/bulk-delete")
+@router.post("/users/bulk-delete", dependencies=[Depends(_client_portal_guard)])
 async def bulk_delete_portal_users(
     body: BulkUserDeleteRequest,
     current_user: User = Depends(get_current_user),
@@ -2755,7 +2763,7 @@ async def bulk_delete_portal_users(
     return {"success": True, "deleted_count": res.deleted_count}
 
 
-@router.get("/drive/subfolders/{portal_user_id}")
+@router.get("/drive/subfolders/{portal_user_id}", dependencies=[Depends(_client_portal_guard)])
 async def list_client_subfolders(
     portal_user_id: str,
     current_user=Depends(get_current_user),
@@ -2854,5 +2862,3 @@ async def client_portal_copilot_chat(
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
