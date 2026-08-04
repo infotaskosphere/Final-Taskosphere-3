@@ -3406,37 +3406,37 @@ export default function Tasks() {
                     <span className={`text-[9px] font-medium ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>earned / max</span>
                   </div>
 
-                  <div className="flex flex-col gap-1">
+                  <div className="grid grid-cols-2 grid-flow-col grid-rows-3 gap-x-3 gap-y-0.5">
                     {components.map(({ key, label, contrib, weight }) => {
                       const iconMap = { attendance: CheckCircle2, hours: Clock, tasks: ClipboardList, ontime: Clock, punchin: Target };
                       const Icon = iconMap[key] || CheckCircle2;
                       const pct = Math.min(100, (contrib / weight) * 100);
                       const color = qColor(pct);
-                      const ringR = 13, ringC = 2 * Math.PI * ringR;
+                      const ringR = 10, ringC = 2 * Math.PI * ringR;
                       return (
                         <button
                           key={key}
                           type="button"
                           onClick={() => { setFocusedMetric(key); setShowTips(true); }}
-                          className={`flex items-center gap-2.5 w-full text-left rounded-lg px-1.5 py-1 -mx-1.5 transition-colors ${isDark ? 'hover:bg-slate-800/70 active:bg-slate-800' : 'hover:bg-white active:bg-slate-100'}`}
+                          className={`flex items-center gap-2 w-full text-left rounded-lg px-1.5 py-0.5 -mx-1.5 transition-colors ${isDark ? 'hover:bg-slate-800/70 active:bg-slate-800' : 'hover:bg-white active:bg-slate-100'}`}
                           title={`View details for ${label}`}
                         >
                           {/* Graphical radial-progress ring with icon at center, replaces the old flat bar */}
-                          <div className="relative w-8 h-8 flex-shrink-0">
-                            <svg viewBox="0 0 32 32" width="32" height="32" className="-rotate-90">
-                              <circle cx="16" cy="16" r={ringR} fill="none" stroke={isDark ? '#334155' : '#e2e8f0'} strokeWidth="3" />
-                              <motion.circle cx="16" cy="16" r={ringR} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round"
+                          <div className="relative w-6 h-6 flex-shrink-0">
+                            <svg viewBox="0 0 24 24" width="24" height="24" className="-rotate-90">
+                              <circle cx="12" cy="12" r={ringR} fill="none" stroke={isDark ? '#334155' : '#e2e8f0'} strokeWidth="2.5" />
+                              <motion.circle cx="12" cy="12" r={ringR} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round"
                                 style={{ strokeDasharray: ringC }}
                                 initial={{ strokeDashoffset: ringC }}
                                 animate={{ strokeDashoffset: ringC - (ringC * pct) / 100 }}
                                 transition={{ duration: 0.9, ease: 'easeOut' }} />
                             </svg>
                             <div className="absolute inset-0 flex items-center justify-center">
-                              <Icon className="h-3 w-3" style={{ color }} />
+                              <Icon className="h-2.5 w-2.5" style={{ color }} />
                             </div>
                           </div>
-                          <span className={`text-[10.5px] font-medium flex-1 min-w-0 truncate ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{label}</span>
-                          <span className="text-[10.5px] font-black tabular-nums flex-shrink-0" style={{ color }}>{contrib.toFixed(1)}/{weight}</span>
+                          <span className={`text-[10px] font-medium flex-1 min-w-0 truncate ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{label}</span>
+                          <span className="text-[10px] font-black tabular-nums flex-shrink-0" style={{ color }}>{contrib.toFixed(1)}/{weight}</span>
                           <ChevronRight className={`h-3 w-3 flex-shrink-0 ${isDark ? 'text-slate-600' : 'text-slate-300'}`} />
                         </button>
                       );
@@ -3457,13 +3457,13 @@ export default function Tasks() {
                 </div>
 
                 {/* RIGHT — Single Overall Score gauge + Rank + Next Rank */}
-                <div className={`rounded-lg border p-2 flex flex-col gap-2 ${isDark ? 'bg-slate-900/30 border-slate-700' : 'bg-slate-50/60 border-slate-100'}`}>
+                <div className={`rounded-lg border p-2 flex flex-col gap-1.5 ${isDark ? 'bg-slate-900/30 border-slate-700' : 'bg-slate-50/60 border-slate-100'}`}>
                   <span className={`text-[11px] font-bold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Overall Score</span>
 
                   {/* Half-dial gauge — the ONLY overall-score gauge in the card */}
                   <div className="flex flex-col items-center">
-                    <div className="relative" style={{ width: 124, height: 72 }}>
-                      <svg viewBox="0 0 200 112" width="124" height="72">
+                    <div className="relative" style={{ width: 108, height: 62 }}>
+                      <svg viewBox="0 0 200 112" width="108" height="62">
                         <path d="M 22 96 A 78 78 0 0 1 178 96" fill="none" stroke={isDark ? '#1e293b' : '#eef1f5'} strokeWidth="12" strokeLinecap="round" />
                         <motion.path d="M 22 96 A 78 78 0 0 1 178 96" fill="none"
                           stroke={scoreColor} strokeWidth="12" strokeLinecap="round"
@@ -3480,19 +3480,19 @@ export default function Tasks() {
                         })}
                       </svg>
                       <div className="absolute inset-x-0 bottom-0 flex flex-col items-center">
-                        <motion.span className="text-2xl font-black leading-none tabular-nums tracking-tight"
+                        <motion.span className="text-xl font-black leading-none tabular-nums tracking-tight"
                           style={{ color: scoreColor }}
                           initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.3, duration: 0.4 }}>
                           {Number(displayScore).toFixed(0)}
                         </motion.span>
-                        <span className={`text-[8px] font-semibold tracking-widest uppercase ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>out of 100</span>
+                        <span className={`text-[7px] font-semibold tracking-widest uppercase ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>out of 100</span>
                       </div>
                     </div>
                   </div>
 
                   {/* Rank */}
-                  <div className={`rounded-md border px-2 py-1.5 flex items-center gap-2 ${isDark ? 'bg-slate-900/40 border-slate-700' : 'bg-white border-slate-100'}`}>
-                    <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: `${COLORS.mediumBlue}16` }}>
+                  <div className={`rounded-md border px-2 py-1 flex items-center gap-2 ${isDark ? 'bg-slate-900/40 border-slate-700' : 'bg-white border-slate-100'}`}>
+                    <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: `${COLORS.mediumBlue}16` }}>
                       {apiRank === 1 ? <Crown className="h-3 w-3" style={{ color: COLORS.amber }} /> : <Trophy className="h-3 w-3" style={{ color: COLORS.mediumBlue }} />}
                     </div>
                     <span className={`text-[9.5px] font-semibold uppercase tracking-wide flex-1 truncate ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Rank</span>
@@ -3502,7 +3502,7 @@ export default function Tasks() {
                   </div>
 
                   {/* Next Rank */}
-                  <div className={`rounded-md border px-2 py-1.5 ${isDark ? 'bg-slate-900/40 border-slate-700' : 'bg-white border-slate-100'}`}>
+                  <div className={`rounded-md border px-2 py-1 ${isDark ? 'bg-slate-900/40 border-slate-700' : 'bg-white border-slate-100'}`}>
                     <div className="flex items-center justify-between mb-1">
                       <span className={`text-[9.5px] font-semibold uppercase tracking-wide truncate ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                         Next: {nextBadge ? nextBadge.split(' (')[0] : 'Top Tier'}
