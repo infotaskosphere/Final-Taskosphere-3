@@ -1003,6 +1003,18 @@ export default function Tasks() {
   const [myRanking, setMyRanking] = useState(null);
   const [rankingsLoaded, setRankingsLoaded] = useState(false);
   const [showTips, setShowTips] = useState(false);
+  const [focusedMetric, setFocusedMetric] = useState(null); // which Score Breakdown row was clicked, for highlight/scroll in the Tips modal
+
+  // When a Score Breakdown row is clicked, the Tips modal opens already
+  // scrolled to (and highlighted on) that specific metric's detail card.
+  useEffect(() => {
+    if (!showTips || !focusedMetric) return;
+    const t = setTimeout(() => {
+      document.getElementById(`score-metric-${focusedMetric}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 120); // small delay so the modal's mount/entry animation has started
+    return () => clearTimeout(t);
+  }, [showTips, focusedMetric]);
+
 
   const hasCrossVisibility = React.useMemo(() => {
     if (isAdmin) return true;
@@ -3136,7 +3148,7 @@ export default function Tasks() {
               >
                 <motion.div
                   className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-                  onClick={() => setShowTips(false)}
+                  onClick={() => { setShowTips(false); setFocusedMetric(null); }}
                 />
                 <motion.div
                   className={`relative z-10 w-full max-w-2xl max-h-[88vh] flex flex-col rounded-2xl border shadow-2xl overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
@@ -3164,8 +3176,7 @@ export default function Tasks() {
                         </p>
                       </div>
                       <button
-                        onClick={() => setShowTips(false)}
-                        className={`p-2 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-500'}`}
+                        onClick={() => { setShowTips(false); setFocusedMetric(null); }}
                       >
                         <X className="h-5 w-5" />
                       </button>
@@ -3219,10 +3230,13 @@ export default function Tasks() {
                       const tips = tipsByComponent[key] || [];
                       const isWeak = gap > weight * 0.4;
                       const qColor = contrib >= weight * 0.8 ? COLORS.emeraldGreen : contrib >= weight * 0.5 ? COLORS.amber : COLORS.coral;
+                      const isFocused = focusedMetric === key;
                       return (
                         <motion.div
                           key={key}
-                          className={`rounded-xl border p-3.5 ${isDark ? 'bg-slate-900/30 border-slate-700' : 'bg-slate-50 border-slate-100'}`}
+                          id={`score-metric-${key}`}
+                          className={`rounded-xl border p-3.5 transition-shadow ${isDark ? 'bg-slate-900/30 border-slate-700' : 'bg-slate-50 border-slate-100'} ${isFocused ? 'ring-2' : ''}`}
+                          style={isFocused ? { boxShadow: `0 0 0 2px ${COLORS.mediumBlue}` } : undefined}
                           initial={{ opacity: 0, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: idx * 0.07 }}
@@ -3392,24 +3406,39 @@ export default function Tasks() {
                     <span className={`text-[9px] font-medium ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>earned / max</span>
                   </div>
 
-                  <div className="flex flex-col gap-1.5">
+                  <div className="flex flex-col gap-1">
                     {components.map(({ key, label, contrib, weight }) => {
                       const iconMap = { attendance: CheckCircle2, hours: Clock, tasks: ClipboardList, ontime: Clock, punchin: Target };
                       const Icon = iconMap[key] || CheckCircle2;
-                      const color = qColor((contrib / weight) * 100);
+                      const pct = Math.min(100, (contrib / weight) * 100);
+                      const color = qColor(pct);
+                      const ringR = 13, ringC = 2 * Math.PI * ringR;
                       return (
-                        <div key={key} className="flex items-center gap-2.5">
-                          <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0" style={{ background: `${color}18` }}>
-                            <Icon className="h-3 w-3" style={{ color }} />
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => { setFocusedMetric(key); setShowTips(true); }}
+                          className={`flex items-center gap-2.5 w-full text-left rounded-lg px-1.5 py-1 -mx-1.5 transition-colors ${isDark ? 'hover:bg-slate-800/70 active:bg-slate-800' : 'hover:bg-white active:bg-slate-100'}`}
+                          title={`View details for ${label}`}
+                        >
+                          {/* Graphical radial-progress ring with icon at center, replaces the old flat bar */}
+                          <div className="relative w-8 h-8 flex-shrink-0">
+                            <svg viewBox="0 0 32 32" width="32" height="32" className="-rotate-90">
+                              <circle cx="16" cy="16" r={ringR} fill="none" stroke={isDark ? '#334155' : '#e2e8f0'} strokeWidth="3" />
+                              <motion.circle cx="16" cy="16" r={ringR} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round"
+                                style={{ strokeDasharray: ringC }}
+                                initial={{ strokeDashoffset: ringC }}
+                                animate={{ strokeDashoffset: ringC - (ringC * pct) / 100 }}
+                                transition={{ duration: 0.9, ease: 'easeOut' }} />
+                            </svg>
+                            <div className="absolute inset-0 flex items-center justify-center">
+                              <Icon className="h-3 w-3" style={{ color }} />
+                            </div>
                           </div>
-                          <span className={`text-[10.5px] font-medium w-[92px] flex-shrink-0 truncate ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{label}</span>
-                          <div className={`flex-1 h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
-                            <motion.div className="h-full rounded-full" style={{ background: color }}
-                              initial={{ width: 0 }} animate={{ width: `${Math.min(100, (contrib / weight) * 100)}%` }}
-                              transition={{ duration: 0.9, ease: 'easeOut' }} />
-                          </div>
-                          <span className="text-[10.5px] font-black tabular-nums w-[52px] text-right flex-shrink-0" style={{ color }}>{contrib.toFixed(1)}/{weight}</span>
-                        </div>
+                          <span className={`text-[10.5px] font-medium flex-1 min-w-0 truncate ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{label}</span>
+                          <span className="text-[10.5px] font-black tabular-nums flex-shrink-0" style={{ color }}>{contrib.toFixed(1)}/{weight}</span>
+                          <ChevronRight className={`h-3 w-3 flex-shrink-0 ${isDark ? 'text-slate-600' : 'text-slate-300'}`} />
+                        </button>
                       );
                     })}
                   </div>
@@ -3527,7 +3556,7 @@ export default function Tasks() {
                       {topGapComponent ? `Gap: ${topGapComponent.label}` : 'On track'}
                     </p>
                   </div>
-                  <button onClick={() => setShowTips(true)}
+                  <button onClick={() => { setFocusedMetric(null); setShowTips(true); }}
                     className="text-[10px] font-semibold px-2 py-1 rounded-lg flex-shrink-0 whitespace-nowrap text-white"
                     style={{ background: COLORS.mediumBlue }}>
                     View Tips
