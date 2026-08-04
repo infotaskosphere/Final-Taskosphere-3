@@ -220,6 +220,11 @@ const getStripeColor = (task, overdue, dueToday) => {
   return 'bg-slate-300';
 };
 
+// Stable shared reference for "no comments yet" — using a fresh [] per
+// render here would give React.memo() a new prop identity every time and
+// force every row to re-render even when nothing about it changed.
+const EMPTY_ARR = [];
+
 // ─── Animation variants ───────────────────────────────────────────────────────
 const containerVariants = {
   hidden:  { opacity: 0 },
@@ -392,9 +397,10 @@ const TaskRow = memo(function TaskRow({
   canModifyTask, canDeleteTasks,
   handleEdit, handleDelete, handleDuplicateTask, handleQuickStatusChange,
   openTaskDetail, openCommentTaskId, setOpenCommentTaskId,
-  fetchComments, comments, newComment, setNewComment,
+  fetchComments, comments: taskComments, newComment, setNewComment,
   selectedTask, setSelectedTask, handleAddComment,
   user, isDark,
+  handleNudgeTask, sendingNudge, selectMode, selected, onToggleSelect,
 }) {
   const [expanded, setExpanded] = useState(false);
   const checklistItems = parseChecklist(task.description);
@@ -415,9 +421,15 @@ const TaskRow = memo(function TaskRow({
           className="pl-5 pr-3 py-2.5 grid items-center gap-0"
           style={{ gridTemplateColumns: '24px 24px minmax(0,1fr) 160px 88px 64px 72px 110px 110px 88px 100px' }}
         >
-          <span className="text-[11px] font-medium text-slate-400 select-none">
-            {String(index + 1).padStart(2, '0')}
-          </span>
+          {selectMode ? (
+            <button onClick={() => onToggleSelect(task.id)} className="flex items-center justify-center" title="Select task">
+              {selected ? <CheckSquare className="h-4 w-4 text-rose-500" /> : <Square className="h-4 w-4 text-slate-300" />}
+            </button>
+          ) : (
+            <span className="text-[11px] font-medium text-slate-400 select-none">
+              {String(index + 1).padStart(2, '0')}
+            </span>
+          )}
 
           <button
             onClick={() => {
@@ -552,6 +564,15 @@ const TaskRow = memo(function TaskRow({
                 <MessageSquare className="h-3.5 w-3.5" />
               </button>
             )}
+            {canModifyTask(task) && (
+              <button
+                onClick={() => handleNudgeTask(task)}
+                disabled={sendingNudge === task.id || !task.assigned_to}
+                className="p-1 rounded hover:bg-rose-50 text-slate-400 hover:text-rose-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                title={task.assigned_to ? `Send a popup reminder to ${getUserName(task.assigned_to)}` : 'No assignee to notify'}>
+                {sendingNudge === task.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BellRing className="h-3.5 w-3.5" />}
+              </button>
+            )}
             {canDeleteTasks && (
               <button onClick={() => handleDelete(task.id)}
                 className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors" title="Delete">
@@ -600,7 +621,7 @@ const TaskRow = memo(function TaskRow({
                 {openCommentTaskId === task.id && (
                   <div className="space-y-2">
                     <div className="max-h-28 overflow-y-auto space-y-1">
-                      {(comments[task.id] || []).map((comment, i) => (
+                      {(taskComments || []).map((comment, i) => (
                         <div key={i} className={`text-xs rounded-lg px-3 py-2 border ${isDark ? 'bg-slate-700 text-slate-300 border-slate-600' : 'bg-slate-50 text-slate-600 border-slate-100'}`}>
                           {comment.text}
                         </div>
@@ -726,7 +747,7 @@ const BoardCard = memo(function BoardCard({
   canModifyTask, canDeleteTasks,
   handleEdit, handleDelete, handleDuplicateTask, handleQuickStatusChange,
   openTaskDetail, openCommentTaskId, setOpenCommentTaskId,
-  fetchComments, comments, newComment, setNewComment,
+  fetchComments, comments: taskComments, newComment, setNewComment,
   selectedTask, setSelectedTask, handleAddComment,
   isDark,
 }) {
@@ -837,7 +858,7 @@ const BoardCard = memo(function BoardCard({
           {openCommentTaskId === task.id && (
             <div className="space-y-2">
               <div className="max-h-24 overflow-y-auto space-y-1">
-                {(comments[task.id] || []).map((c, i) => (
+                {(taskComments || []).map((c, i) => (
                   <div key={i} className={`text-[10px] rounded-lg px-2 py-1.5 border ${isDark ? 'bg-slate-700 text-slate-300 border-slate-600' : 'bg-slate-50 text-slate-600 border-slate-100'}`}>
                     {c.text}
                   </div>
@@ -880,10 +901,10 @@ export default function Tasks() {
   const isAdmin = user?.role === 'admin';
   const isDark  = useDark();
 
-  const canModifyTask = (task) => {
+  const canModifyTask = React.useCallback((task) => {
     if (isAdmin) return true;
     return task.assigned_to === user?.id || task.sub_assignees?.includes(user?.id) || task.created_by === user?.id;
-  };
+  }, [isAdmin, user]);
   const canAssignTasks = hasPermission('can_assign_tasks');
   const canEditTasks   = hasPermission('can_edit_tasks');
   const canDeleteTasks = isAdmin || hasPermission('can_delete_tasks');
@@ -954,6 +975,12 @@ export default function Tasks() {
   const [openCommentTaskId,  setOpenCommentTaskId]  = useState(null);
   const [notifications,      setNotifications]      = useState([]);
   const [showNotifications,  setShowNotifications]  = useState(false);
+
+  // ── Bulk "raise a popup" selection (Actions column + bulk bar) ──────────
+  const [selectMode,     setSelectMode]     = useState(false);
+  const [selectedTaskIds, setSelectedTaskIds] = useState(() => new Set());
+  const [sendingNudge,   setSendingNudge]   = useState(false);
+  const [bulkNudging,    setBulkNudging]    = useState(false);
 
   const [searchQuery,             setSearchQuery]             = useState('');
   const [filterStatus,            setFilterStatus]            = useState('all');
@@ -1317,11 +1344,11 @@ export default function Tasks() {
     setDialogOpen(false); resetForm(); setLoading(false);
   };
 
-  const handleEdit = (task) => {
+  const handleEdit = React.useCallback((task) => {
     setEditingTask(task);
     setFormData({ title: task.title, description: task.description || '', assigned_to: task.assigned_to || 'unassigned', sub_assignees: task.sub_assignees || [], due_date: task.due_date ? format(new Date(task.due_date), 'yyyy-MM-dd') : '', priority: task.priority, status: task.status, category: task.category || 'other', categories: task.categories && task.categories.length > 0 ? task.categories : (task.category && task.category !== 'other' ? [task.category] : []), client_id: task.client_id || '', is_recurring: task.is_recurring || false, recurrence_pattern: task.recurrence_pattern || 'monthly', recurrence_interval: task.recurrence_interval || 1, popup_interval_minutes: task.popup_interval_minutes != null ? String(task.popup_interval_minutes) : '' });
     setDialogOpen(true);
-  };
+  }, []);
 
   const handleAddToReminder = async (task) => {
     try {
@@ -1334,7 +1361,7 @@ export default function Tasks() {
     } catch { toast.error('Failed to add reminder'); }
   };
 
-  const handleDelete = (taskOrId) => {
+  const handleDelete = React.useCallback((taskOrId) => {
     let taskObj = null;
     if (typeof taskOrId === 'object' && taskOrId !== null) {
       taskObj = taskOrId;
@@ -1343,7 +1370,7 @@ export default function Tasks() {
     }
     setTaskToDelete(taskObj);
     setDeleteDialogOpen(true);
-  };
+  }, [tasks]);
 
   const handleConfirmDelete = async () => {
     if (!taskToDelete?.id) return;
@@ -1372,34 +1399,94 @@ export default function Tasks() {
     }
   };
 
-  const handleQuickStatusChange = async (task, newStatus) => {
+  const handleQuickStatusChange = React.useCallback(async (task, newStatus) => {
     setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
     try {
       await fetch(`${API_BASE}/tasks/${task.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...getAuthHeader() }, body: JSON.stringify({ status: newStatus }) });
       toast.success(`Marked as ${STATUS_STYLES[newStatus]?.label || newStatus}`);
     } catch { toast.error('Network error'); }
-  };
+  }, []);
 
-  const handleAddComment = async () => {
+  const handleAddComment = React.useCallback(async () => {
     if (!newComment.trim()) return;
     const taskId = selectedTask?.id; if (!taskId) return;
     try {
       const res = await fetch(`${API_BASE}/tasks/${taskId}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...getAuthHeader() }, body: JSON.stringify({ text: newComment }) });
       if (res.ok) { const comment = await res.json(); setComments(prev => ({ ...prev, [taskId]: [...(prev[taskId] || []), comment] })); setNewComment(''); toast.success('Comment added!'); }
     } catch { toast.error('Network error'); }
-  };
+  }, [newComment, selectedTask]);
 
-  const fetchComments = async (taskId) => {
+  const fetchComments = React.useCallback(async (taskId) => {
     const data = await apiFetch(`/tasks/${taskId}/comments`);
     setComments(prev => ({ ...prev, [taskId]: Array.isArray(data) ? data : (prev[taskId] || []) }));
-  };
+  }, [apiFetch]);
 
-  const handleDuplicateTask = async (task) => {
+  const handleDuplicateTask = React.useCallback(async (task) => {
     const { id, created_at, updated_at, ...rest } = task;
     try {
       const res = await fetch(`${API_BASE}/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...getAuthHeader() }, body: JSON.stringify({ ...rest, title: `${task.title} (Copy)`, status: 'pending' }) });
       if (res.ok) { const created = await res.json(); setTasks(prev => [created, ...prev]); toast.success('Task duplicated!'); }
     } catch { toast.error('Network error'); }
+  }, []);
+
+  // ── Raise a popup: fires an immediate on-screen popup (and, on the
+  // recipient's side, a desktop Notification() — see ReminderPopupManager)
+  // for a task's assignee. Backed by POST /notifications/send with
+  // popup:true, which /reminders/due-popups then folds into its poll. ──
+  const buildNudgePayload = React.useCallback((task) => ({
+    user_id: task.assigned_to,
+    title: `Reminder: ${task.title}`,
+    message: `${user?.full_name || user?.name || 'A colleague'} sent you a popup reminder for "${task.title}"${task.due_date ? ` (due ${format(new Date(task.due_date), 'MMM dd')})` : ''}.`,
+    type: 'task_popup',
+    popup: true,
+    task_id: task.id,
+  }), [user]);
+
+  const handleNudgeTask = React.useCallback(async (task) => {
+    if (!task.assigned_to) { toast.error('This task has no assignee to notify'); return; }
+    setSendingNudge(task.id);
+    try {
+      await api.post('/notifications/send', buildNudgePayload(task));
+      toast.success(`Popup sent to ${getUserName(task.assigned_to)}`);
+    } catch {
+      toast.error('Failed to send popup');
+    } finally {
+      setSendingNudge(false);
+    }
+  }, [buildNudgePayload, getUserName]);
+
+  const toggleSelectMode = React.useCallback(() => {
+    setSelectMode((v) => !v);
+    setSelectedTaskIds(new Set());
+  }, []);
+
+  const toggleTaskSelected = React.useCallback((taskId) => {
+    setSelectedTaskIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId); else next.add(taskId);
+      return next;
+    });
+  }, []);
+
+  const handleBulkNudge = async () => {
+    const targets = displayTasks.filter((t) => selectedTaskIds.has(t.id) && t.assigned_to);
+    const skipped = selectedTaskIds.size - targets.length;
+    if (!targets.length) { toast.error('None of the selected tasks have an assignee'); return; }
+    setBulkNudging(true);
+    try {
+      const results = await Promise.allSettled(
+        targets.map((t) => api.post('/notifications/send', buildNudgePayload(t)))
+      );
+      const ok = results.filter((r) => r.status === 'fulfilled').length;
+      const failed = targets.length - ok;
+      toast.success(`Popup sent for ${ok}/${targets.length} task(s)${skipped ? ` (${skipped} had no assignee)` : ''}${failed ? ` — ${failed} failed` : ''}`);
+      setSelectedTaskIds(new Set());
+      setSelectMode(false);
+    } catch {
+      toast.error('Failed to send bulk popups');
+    } finally {
+      setBulkNudging(false);
+    }
   };
 
   // ── Enhanced local duplicate detection — deep field-level comparison ──
@@ -2080,6 +2167,16 @@ export default function Tasks() {
               <Button variant="ghost" size="sm" onClick={handleExportPdf}
                 className="h-8 text-xs rounded-xl text-white/80 hover:text-white hover:bg-white/15 border border-white/20">
                 Export PDF
+              </Button>
+              {/* Bulk "raise a popup" — select tasks, then nudge all their assignees at once */}
+              <Button
+                variant="ghost" size="sm" onClick={toggleSelectMode}
+                className="h-8 text-xs rounded-xl gap-1.5 border font-semibold"
+                style={selectMode
+                  ? { backgroundColor: 'rgba(244,63,94,0.25)', borderColor: 'rgba(244,63,94,0.55)', color: '#fecdd3' }
+                  : { backgroundColor: 'transparent', borderColor: 'rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.8)' }}>
+                {selectMode ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
+                {selectMode ? `Selecting (${selectedTaskIds.size})` : 'Select'}
               </Button>
               {canEditTasks && (
                 <Button variant="ghost" size="sm" onClick={() => setShowWorkflowLibrary(true)}
@@ -3892,6 +3989,29 @@ export default function Tasks() {
         )}
       </AnimatePresence>
 
+      {/* ── Bulk popup action bar ────────────────────────────────────────── */}
+      <AnimatePresence>
+        {selectMode && selectedTaskIds.size > 0 && (
+          <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
+            className={`flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl border mb-2
+              ${isDark ? 'bg-rose-950/40 border-rose-800' : 'bg-rose-50 border-rose-200'}`}>
+            <span className={`text-sm font-semibold flex items-center gap-1.5 ${isDark ? 'text-rose-200' : 'text-rose-700'}`}>
+              <BellRing className="h-4 w-4" /> {selectedTaskIds.size} task{selectedTaskIds.size !== 1 ? 's' : ''} selected
+            </span>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => setSelectedTaskIds(new Set())}
+                className="h-7 text-xs rounded-lg">
+                Clear
+              </Button>
+              <Button size="sm" onClick={handleBulkNudge} disabled={bulkNudging}
+                className="h-7 text-xs rounded-lg gap-1.5 bg-rose-600 hover:bg-rose-700 text-white">
+                {bulkNudging ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Sending…</> : <><BellRing className="h-3.5 w-3.5" />Send Popup to Selected</>}
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ── List / Board ─────────────────────────────────────────────────── */}
       <div className="overflow-y-auto max-h-[calc(100vh-360px)]">
         {viewMode === 'list' ? (
@@ -3901,7 +4021,20 @@ export default function Tasks() {
                 ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-100'}`}
               style={{ gridTemplateColumns: '24px 24px minmax(0,1fr) 160px 88px 64px 72px 110px 110px 88px 100px' }}
             >
-              <span /><span />
+              {selectMode ? (
+                <button
+                  onClick={() => {
+                    const allIds = displayTasks.map((t) => t.id);
+                    const allSelected = allIds.length > 0 && allIds.every((id) => selectedTaskIds.has(id));
+                    setSelectedTaskIds(allSelected ? new Set() : new Set(allIds));
+                  }}
+                  className="flex items-center justify-center" title="Select all">
+                  {displayTasks.length > 0 && displayTasks.every((t) => selectedTaskIds.has(t.id))
+                    ? <CheckSquare className="h-3.5 w-3.5 text-rose-500" />
+                    : <Square className="h-3.5 w-3.5 text-slate-400" />}
+                </button>
+              ) : <span />}
+              <span />
               <span className="pl-1">Task</span>
               <span className="text-center">Status</span>
               <span className="text-center">Dept</span>
@@ -3929,9 +4062,11 @@ export default function Tasks() {
                   handleEdit={handleEdit} handleDelete={handleDelete} handleDuplicateTask={handleDuplicateTask}
                   handleQuickStatusChange={handleQuickStatusChange} openTaskDetail={openTaskDetail}
                   openCommentTaskId={openCommentTaskId} setOpenCommentTaskId={setOpenCommentTaskId}
-                  fetchComments={fetchComments} comments={comments} newComment={newComment}
+                  fetchComments={fetchComments} comments={comments[task.id] || EMPTY_ARR} newComment={newComment}
                   setNewComment={setNewComment} selectedTask={selectedTask} setSelectedTask={setSelectedTask}
                   handleAddComment={handleAddComment} user={user}
+                  handleNudgeTask={handleNudgeTask} sendingNudge={sendingNudge}
+                  selectMode={selectMode} selected={selectedTaskIds.has(task.id)} onToggleSelect={toggleTaskSelected}
                 />
               );
             })}
@@ -3978,7 +4113,7 @@ export default function Tasks() {
                           handleEdit={handleEdit} handleDelete={handleDelete} handleDuplicateTask={handleDuplicateTask}
                           handleQuickStatusChange={handleQuickStatusChange} openTaskDetail={openTaskDetail}
                           openCommentTaskId={openCommentTaskId} setOpenCommentTaskId={setOpenCommentTaskId}
-                          fetchComments={fetchComments} comments={comments} newComment={newComment}
+                          fetchComments={fetchComments} comments={comments[task.id] || EMPTY_ARR} newComment={newComment}
                           setNewComment={setNewComment} selectedTask={selectedTask} setSelectedTask={setSelectedTask}
                           handleAddComment={handleAddComment}
                           isDark={isDark}
