@@ -897,12 +897,6 @@ const DashboardLayout = ({ children }) => {
                             {user?.full_name}
                           </p>
                           <p className="text-xs truncate mt-0.5 text-slate-400">{user?.email}</p>
-                          <span
-                            className="inline-block mt-1 px-2 py-0.5 text-[10px] font-bold rounded-md capitalize"
-                            style={{ background: `${COLORS.deepBlue}12`, color: COLORS.deepBlue }}
-                          >
-                            {user?.role}
-                          </span>
                         </div>
                       </div>
                     </div>
