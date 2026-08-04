@@ -317,6 +317,7 @@ BOOLEAN_PERM_KEYS = [
     "can_manage_compliance",
     "can_view_all_visits",
     "can_edit_visits",
+    "can_receive_popup_reminders",
 ]
 
 # Flags that only an admin can grant — a manager cannot escalate these even if
