@@ -504,13 +504,13 @@ const TaskRow = memo(function TaskRow({
 
           <div className="flex items-center justify-start gap-1 overflow-hidden px-1">
             <User className="h-3 w-3 flex-shrink-0 text-slate-400" />
-            <span className="text-[10px] text-slate-600 truncate">{getUserName(task.assigned_to)}</span>
+            <span className="text-[10px] text-slate-600 truncate">{getUserName(task.assigned_to, task.assigned_to_name)}</span>
           </div>
 
           <div className="flex items-center justify-start gap-1 overflow-hidden px-1">
             <User className="h-3 w-3 flex-shrink-0 text-slate-300" />
             <span className="text-[10px] text-slate-400 truncate">
-              {task.created_by ? getUserName(task.created_by) : '—'}
+              {task.created_by ? getUserName(task.created_by, task.created_by_name) : '—'}
             </span>
           </div>
 
@@ -569,7 +569,7 @@ const TaskRow = memo(function TaskRow({
                 onClick={() => handleNudgeTask(task)}
                 disabled={sendingNudge === task.id || !task.assigned_to}
                 className="p-1 rounded hover:bg-rose-50 text-slate-400 hover:text-rose-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                title={task.assigned_to ? `Send a popup reminder to ${getUserName(task.assigned_to)}` : 'No assignee to notify'}>
+                title={task.assigned_to ? `Send a popup reminder to ${getUserName(task.assigned_to, task.assigned_to_name)}` : 'No assignee to notify'}>
                 {sendingNudge === task.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BellRing className="h-3.5 w-3.5" />}
               </button>
             )}
@@ -816,7 +816,7 @@ const BoardCard = memo(function BoardCard({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 text-xs text-slate-500">
                 <User className="h-3.5 w-3.5 flex-shrink-0" />
-                <span className="truncate max-w-[120px]">{getUserName(task.assigned_to)}</span>
+                <span className="truncate max-w-[120px]">{getUserName(task.assigned_to, task.assigned_to_name)}</span>
               </div>
               {task.due_date && (
                 <span className={`text-xs font-bold flex items-center gap-1 px-1.5 py-0.5 rounded ${
@@ -1247,7 +1247,7 @@ export default function Tasks() {
     if (!items.length) return 0;
     return Math.round(((taskChecklists[task.id] || []).length / items.length) * 100);
   }, [taskChecklists]);
-  const getUserName      = useCallback((id) => userMap.get(id)?.full_name || 'Unassigned', [userMap]);
+  const getUserName      = useCallback((id, fallbackName) => userMap.get(id)?.full_name || fallbackName || 'Unassigned', [userMap]);
   const getClientName    = useCallback((id) => clientMap.get(id)?.company_name || 'No Client', [clientMap]);
   const getCategoryLabel = useCallback((v)  => TASK_CATEGORIES.find(c => c.value === v)?.label || v || 'Other', []);
   const isOverdue = useCallback((task) => {
@@ -1447,7 +1447,7 @@ export default function Tasks() {
     setSendingNudge(task.id);
     try {
       await api.post('/notifications/send', buildNudgePayload(task));
-      toast.success(`Popup sent to ${getUserName(task.assigned_to)}`);
+      toast.success(`Popup sent to ${getUserName(task.assigned_to, task.assigned_to_name)}`);
     } catch {
       toast.error('Failed to send popup');
     } finally {
@@ -4167,8 +4167,8 @@ export default function Tasks() {
                 )}
                 <div className="grid grid-cols-2 gap-3">
                   {[
-                    { label: 'Assigned To', value: getUserName(selectedDetailTask.assigned_to) },
-                    { label: 'Created By',  value: selectedDetailTask.created_by ? getUserName(selectedDetailTask.created_by) : '—' },
+                    { label: 'Assigned To', value: getUserName(selectedDetailTask.assigned_to, selectedDetailTask.assigned_to_name) },
+                    { label: 'Created By',  value: selectedDetailTask.created_by ? getUserName(selectedDetailTask.created_by, selectedDetailTask.created_by_name) : '—' },
                     { label: 'Department',  value: getCategoryLabel(selectedDetailTask.category) },
                     { label: 'Client',      value: selectedDetailTask.client_id ? getClientName(selectedDetailTask.client_id) : '—' },
                     { label: 'Created On',  value: selectedDetailTask.created_at ? format(new Date(selectedDetailTask.created_at), 'MMM dd, yyyy · hh:mm a') : '—' },
@@ -4464,7 +4464,7 @@ export default function Tasks() {
                             <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${ss.bg} ${ss.text}`}>{ss.label}</span>
                             <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${ps.bg} ${ps.text}`}>{ps.label}</span>
                             {task.category && <span className="text-[10px] text-slate-400 uppercase">{task.category}</span>}
-                            <span className="text-[10px] text-slate-400">{getUserName(task.assigned_to)}</span>
+                            <span className="text-[10px] text-slate-400">{getUserName(task.assigned_to, task.assigned_to_name)}</span>
                             {task.created_at && (
                               <span className="text-[10px] text-slate-400 hidden sm:inline">{format(new Date(task.created_at), 'MMM dd, yy')}</span>
                             )}
