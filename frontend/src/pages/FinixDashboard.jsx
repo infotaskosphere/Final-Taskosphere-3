@@ -18,6 +18,7 @@ import RequestAccessGate from '@/components/RequestAccessGate.jsx';
 import { runVerifyAndFix, describeValidationResult } from '@/lib/verifyAndFixLedger';
 
 const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 // Friendly display copy for each backend validation rule, keyed by the
 // `rule` string reconciliation_validator.py returns. Used to render the
@@ -87,6 +88,37 @@ function FinixDashboardInner() {
     }
   };
 
+  // Fetches a real Revenue/Expenses total for every elapsed month of the
+  // current financial year (Apr–Mar) by calling the existing profit-loss
+  // endpoint once per month, instead of inventing a fake seasonal curve.
+  const buildMonthlyTrend = async (cid) => {
+    const now = new Date();
+    const fyStartYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1; // FY starts April
+    const months = [];
+    let cursor = new Date(fyStartYear, 3, 1);
+    while (cursor <= now) {
+      months.push(new Date(cursor));
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+    }
+    const results = await Promise.allSettled(months.map((m) => {
+      const start = new Date(m.getFullYear(), m.getMonth(), 1);
+      const lastDay = new Date(m.getFullYear(), m.getMonth() + 1, 0);
+      const end = lastDay > now ? now : lastDay;
+      const df = start.toISOString().split('T')[0];
+      const dt = end.toISOString().split('T')[0];
+      return api.get('/reports/profit-loss', { params: { company_id: cid, date_from: df, date_to: dt } })
+        .then((r) => ({ label: m.toLocaleString('en-US', { month: 'short' }), data: r.data }));
+    }));
+    return results
+      .filter((r) => r.status === 'fulfilled')
+      .map((r) => {
+        const { label, data } = r.value;
+        const rev = round2(data?.total_income || 0);
+        const exp = round2(data?.total_expense || 0);
+        return { name: label, Revenue: rev, Expenses: exp, Profit: round2(rev - exp) };
+      });
+  };
+
   const fetchMetrics = async (cid) => {
     setLoading(true);
     try {
@@ -139,58 +171,70 @@ function FinixDashboardInner() {
       }
       setCashAndBank(liquidCash);
 
-      // Extract Payables (Account 2100 / 2000)
+      // Extract Payables (Account 2000 "Accounts Payable" only — 2100 is GST
+      // Output Payable, a tax liability, not a vendor payable, and mixing it
+      // in here previously caused the card to show tax dues as vendor debt).
       let apTotal = 0;
       if (tbData?.rows) {
-        const apAcct = tbData.rows.find(r => r.code === '2100' || r.code === '2000');
+        const apAcct = tbData.rows.find(r => r.code === '2000');
         apTotal = apAcct ? Math.abs((apAcct.credit || 0) - (apAcct.debit || 0)) : 0;
       }
       if (!apTotal && bsData?.liabilities) {
-        const apRow = bsData.liabilities.find(l => l.code === '2100' || l.code === '2000' || l.name?.toLowerCase().includes('payable'));
+        const apRow = bsData.liabilities.find(l => l.code === '2000' || l.name?.toLowerCase().includes('accounts payable'));
         apTotal = apRow ? apRow.amount : 0;
       }
       setPayables(apTotal);
 
-      // Profit and Expenses
-      const expTotal = pnlData?.expenses_total || pnlData?.total_expenses || 0;
+      // Profit and Expenses — the backend's /reports/profit-loss returns the
+      // field as `total_expense` (singular). The previous `expenses_total` /
+      // `total_expenses` keys never existed on the response, so this always
+      // silently evaluated to 0 — flattening the Expenses trend line, faking
+      // an empty Operating Cost Distribution, and inflating the net margin
+      // insight to an impossible 100%.
+      const expTotal = pnlData?.total_expense ?? 0;
       setExpenses(expTotal);
-      setNetProfit(pnlData?.net_profit || (revTotal - expTotal));
+      setNetProfit(pnlData?.net_profit ?? (revTotal - expTotal));
 
       // Build charts
-      // 1. Revenue vs Expenses over the last few months
-      if (pnlData?.monthly_breakdown || pnlData?.trend) {
-        const trend = pnlData.monthly_breakdown || pnlData.trend || [];
-        setChartData(trend.map(t => ({
-          name: t.month || t.label || 'Month',
-          Revenue: t.revenue || 0,
-          Expenses: t.expenses || 0,
-          Profit: (t.revenue || 0) - (t.expenses || 0)
-        })));
-      } else {
-        // Mock a standard seasonal trend based on current revenue to keep visual polish impeccable
-        setChartData([
-          { name: 'Apr', Revenue: revTotal * 0.15, Expenses: expTotal * 0.16, Profit: revTotal * 0.15 - expTotal * 0.16 },
-          { name: 'May', Revenue: revTotal * 0.14, Expenses: expTotal * 0.13, Profit: revTotal * 0.14 - expTotal * 0.13 },
-          { name: 'Jun', Revenue: revTotal * 0.18, Expenses: expTotal * 0.15, Profit: revTotal * 0.18 - expTotal * 0.15 },
-          { name: 'Jul', Revenue: revTotal * 0.16, Expenses: expTotal * 0.14, Profit: revTotal * 0.16 - expTotal * 0.14 },
-          { name: 'Aug', Revenue: revTotal * 0.17, Expenses: expTotal * 0.17, Profit: revTotal * 0.17 - expTotal * 0.17 },
-          { name: 'Sep', Revenue: revTotal * 0.20, Expenses: expTotal * 0.25, Profit: revTotal * 0.20 - expTotal * 0.25 }
-        ]);
-      }
+      // 1. Revenue vs Expenses by month. The backend's /reports/profit-loss
+      // has no monthly_breakdown/trend field — it only returns FY-range
+      // totals — so this previously always fell into a "mock" branch that
+      // fabricated a fake seasonal split of the real totals (with visible
+      // floating-point noise like "82355.84000000001" in the tooltip).
+      // Instead, call the same endpoint once per elapsed month of the
+      // current FY so every point on the chart is a real, independently
+      // computed total rather than an invented percentage of the whole.
+      const trend = await buildMonthlyTrend(cid);
+      setChartData(trend.length ? trend : [
+        { name: 'This FY', Revenue: round2(revTotal), Expenses: round2(expTotal), Profit: round2(revTotal - expTotal) }
+      ]);
 
-      // Expense Breakdown pie chart
-      if (pnlData?.expenses_breakdown) {
-        setExpenseBreakdown(pnlData.expenses_breakdown.map(e => ({
-          name: e.category || e.name || 'Other',
-          value: e.amount || 0
-        })));
-      } else {
-        setExpenseBreakdown([
-          { name: 'Office Rent & Overhead', value: expTotal * 0.40 || 40000 },
-          { name: 'Professional Services', value: expTotal * 0.25 || 25000 },
-          { name: 'Taxes & GST Payments', value: expTotal * 0.20 || 20000 },
-          { name: 'Software Licences', value: expTotal * 0.15 || 15000 }
-        ]);
+      // Expense Breakdown pie chart — use the real per-account expense rows
+      // the backend already computed (`expenses`, not the non-existent
+      // `expenses_breakdown`). Previously this key never matched, so the
+      // chart silently displayed hardcoded fake categories/amounts
+      // (Office Rent 40k, Professional Services 25k, etc.) regardless of
+      // the company's actual books.
+      const realBreakdown = (pnlData?.expenses || [])
+        .filter(e => Math.abs(e.amount || 0) > 0.01)
+        .map(e => ({ name: e.name || e.code || 'Other', value: Math.abs(e.amount) }));
+      setExpenseBreakdown(realBreakdown);
+
+      // Run the real reconciliation/consistency engine now (before building
+      // insights below) so the GST-sync insight and the Integrity Shield can
+      // both reflect actual pass/fail results instead of static copy that
+      // claims "0.02% variance" regardless of what the books actually say.
+      let validationResult = null;
+      try {
+        setVerifying(true);
+        validationResult = await runVerifyAndFix(cid);
+        setValidation(validationResult);
+        setLastVerifiedAt(new Date());
+      } catch (err) {
+        console.error(err);
+        setValidation(null);
+      } finally {
+        setVerifying(false);
       }
 
       // AI Insights - dynamic heuristic alerts based on actual figures
@@ -253,13 +297,27 @@ function FinixDashboardInner() {
         });
       }
 
-      // Insight 4: GST Portal Sync Match
-      generatedInsights.push({
-        type: 'info',
-        category: 'Compliance',
-        title: 'Auto-Matched GST Return Readiness',
-        text: 'Sales ledgers are matched with outstanding GST output. Final tax reconciliation is completed with GSTR-1 & GSTR-3B filings, showing 0.02% variance.'
-      });
+      // Insight 4: GST Portal Sync Match — reflects the real
+      // "GST + Non-GST + Export + Exempt Sales = Revenue" check result
+      // instead of a hardcoded "0.02% variance" claim.
+      const gstMismatch = validationResult?.mismatches?.find(
+        (m) => m.rule === 'GST + Non-GST + Export + Exempt Sales = Revenue'
+      );
+      if (validationResult && !gstMismatch) {
+        generatedInsights.push({
+          type: 'success',
+          category: 'Compliance',
+          title: 'Auto-Matched GST Return Readiness',
+          text: 'Sales ledgers are matched with outstanding GST output. GST/non-GST/export/exempt sale buckets reconcile exactly with total revenue.'
+        });
+      } else if (gstMismatch) {
+        generatedInsights.push({
+          type: 'warning',
+          category: 'Compliance',
+          title: 'GST Return Readiness Mismatch',
+          text: `Sales tax buckets differ from total revenue by ${fmtC(Math.abs(gstMismatch.diff))}. Review GST classification on recent invoices before filing.`
+        });
+      }
 
       setInsights(generatedInsights);
 
@@ -268,6 +326,21 @@ function FinixDashboardInner() {
       toast.error('Failed to parse financial metrics');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleReverify = async () => {
+    if (!companyId || verifying) return;
+    setVerifying(true);
+    try {
+      const v = await runVerifyAndFix(companyId, { force: true });
+      setValidation(v);
+      setLastVerifiedAt(new Date());
+    } catch (err) {
+      console.error(err);
+      toast.error('Verification failed. Please try again.');
+    } finally {
+      setVerifying(false);
     }
   };
 
@@ -503,222 +576,248 @@ function FinixDashboardInner() {
 
           </div>
 
-          {/* ── Main Layout: Charts, Chatbot & Insights ── */}
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-            
-            {/* Left Column (2/3 Width on xl): Charts & Analytics */}
-            <div className="xl:col-span-2 space-y-8">
-              
-              {/* Chart 1: Revenue vs Expenses Trend */}
-              <div className={`p-6 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800/60 border-slate-700/80' : 'bg-white border-slate-100'}`}>
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h3 className="font-extrabold text-lg flex items-center gap-2">
-                      <LineIcon className="w-5 h-5 text-emerald-500" />
-                      Revenue vs Expenses Trend
-                    </h3>
-                    <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                      Monthly visual telemetry of cash inflow vs structural operations cost
-                    </p>
-                  </div>
-                </div>
-                <div className="h-80 w-full font-mono text-xs">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#1FAF5A" stopOpacity={0.2}/>
-                          <stop offset="95%" stopColor="#1FAF5A" stopOpacity={0}/>
-                        </linearGradient>
-                        <linearGradient id="colorExp" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#FF6B6B" stopOpacity={0.2}/>
-                          <stop offset="95%" stopColor="#FF6B6B" stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#E2E8F0'} />
-                      <XAxis dataKey="name" stroke={isDark ? '#94A3B8' : '#64748B'} />
-                      <YAxis stroke={isDark ? '#94A3B8' : '#64748B'} />
-                      <Tooltip contentStyle={{ backgroundColor: isDark ? '#1E293B' : '#FFFFFF', border: 'none', borderRadius: '12px' }} />
-                      <Legend />
-                      <Area type="monotone" dataKey="Revenue" stroke="#1FAF5A" fillOpacity={1} fill="url(#colorRev)" strokeWidth={2.5} />
-                      <Area type="monotone" dataKey="Expenses" stroke="#FF6B6B" fillOpacity={1} fill="url(#colorExp)" strokeWidth={2.5} />
-                    </AreaChart>
-                  </ResponsiveContainer>
+          {/* ── Main Layout: Charts, Chatbot & Insights ──
+               Both rows below use `items-stretch` on a single shared grid,
+               so every card in a row is forced to the same height as its
+               tallest sibling — Revenue Trend now matches Ask Finix AI
+               Accountant, and Operating Cost Distribution / Autonomous
+               Integrity Shield / Real-time Auditing Insights all match
+               each other, instead of drifting apart because they used to
+               live in two independently-stacked columns. ── */}
+
+          {/* Row 1: Revenue vs Expenses Trend + Ask Finix AI Accountant */}
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 items-stretch">
+
+            {/* Chart 1: Revenue vs Expenses Trend */}
+            <div className={`xl:col-span-2 h-full flex flex-col p-6 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800/60 border-slate-700/80' : 'bg-white border-slate-100'}`}>
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="font-extrabold text-lg flex items-center gap-2">
+                    <LineIcon className="w-5 h-5 text-emerald-500" />
+                    Revenue vs Expenses Trend
+                  </h3>
+                  <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    Real monthly totals for the current financial year (Apr–{new Date().toLocaleString('en-US', { month: 'short' })})
+                  </p>
                 </div>
               </div>
-
-              {/* Grid: Expense Pie Chart & Quick Action Widgets */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-stretch">
-                
-                {/* Expense Breakdown */}
-                <div className={`h-full flex flex-col p-6 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800/60 border-slate-700/80' : 'bg-white border-slate-100'}`}>
-                  <h3 className="font-extrabold text-lg flex items-center gap-2 mb-4">
-                    <PieIcon className="w-5 h-5 text-emerald-500" />
-                    Operating Cost Distribution
-                  </h3>
-                  <div className="flex-1 min-h-[16rem] w-full text-xs">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={expenseBreakdown}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={60}
-                          outerRadius={80}
-                          paddingAngle={4}
-                          dataKey="value"
-                        >
-                          {expenseBreakdown.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS_CHART[index % COLORS_CHART.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip formatter={(value) => fmtC(value)} />
-                        <Legend verticalAlign="bottom" height={36} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
-                {/* AI Auditing Summary */}
-                <div className={`h-full flex flex-col p-6 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800/60 border-slate-700/80' : 'bg-white border-slate-100'}`}>
-                  <h3 className="font-extrabold text-lg flex items-center gap-2 mb-4">
-                    <Brain className="w-5 h-5 text-emerald-500" />
-                    Autonomous Integrity Shield
-                  </h3>
-                  <div className="flex-1 flex flex-col justify-between gap-4">
-                    <div className="flex items-start gap-3">
-                      <div className="p-2 bg-emerald-500/10 rounded-xl shrink-0">
-                        <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-bold">Ledger Balance Reconciliation</h4>
-                        <p className="text-xs text-slate-400 mt-0.5">Calculated accounts receivable matches sales outstandings perfectly. Zero leakages verified.</p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start gap-3">
-                      <div className="p-2 bg-blue-500/10 rounded-xl shrink-0">
-                        <ShieldCheck className="w-5 h-5 text-blue-500" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-bold">GST Portal Return Sync Integrity</h4>
-                        <p className="text-xs text-slate-400 mt-0.5">Matched dynamic sales items against HSN/SAC parameters. Audit trails locked.</p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start gap-3">
-                      <div className="p-2 bg-emerald-500/10 rounded-xl shrink-0">
-                        <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-bold">Bank Ledger Compliance</h4>
-                        <p className="text-xs text-slate-400 mt-0.5">Imported banking ledger reconciled with double-entry general records.</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
+              <div className="flex-1 min-h-[280px] w-full font-mono text-xs">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#1FAF5A" stopOpacity={0.2}/>
+                        <stop offset="95%" stopColor="#1FAF5A" stopOpacity={0}/>
+                      </linearGradient>
+                      <linearGradient id="colorExp" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#FF6B6B" stopOpacity={0.2}/>
+                        <stop offset="95%" stopColor="#FF6B6B" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#E2E8F0'} />
+                    <XAxis dataKey="name" stroke={isDark ? '#94A3B8' : '#64748B'} />
+                    <YAxis stroke={isDark ? '#94A3B8' : '#64748B'} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: isDark ? '#1E293B' : '#FFFFFF', border: 'none', borderRadius: '12px' }}
+                      formatter={(value) => fmtC(value)}
+                    />
+                    <Legend />
+                    <Area type="monotone" dataKey="Revenue" stroke="#1FAF5A" fillOpacity={1} fill="url(#colorRev)" strokeWidth={2.5} />
+                    <Area type="monotone" dataKey="Expenses" stroke="#FF6B6B" fillOpacity={1} fill="url(#colorExp)" strokeWidth={2.5} />
+                  </AreaChart>
+                </ResponsiveContainer>
               </div>
-
             </div>
 
-            {/* Right Column (1/3 Width on xl): AI Assistant Chat & Insights */}
-            <div className="space-y-8">
-              
-              {/* Finix AI Chatbot Co-Pilot */}
-              <div className={`p-6 rounded-3xl shadow-sm border flex flex-col h-[480px] ${isDark ? 'bg-slate-800/60 border-slate-700/80' : 'bg-white border-slate-100'}`}>
-                <div className="flex items-center gap-2.5 pb-4 border-b border-slate-100 dark:border-slate-700">
-                  <div className="p-2 bg-emerald-500/10 rounded-2xl">
-                    <Brain className="w-5 h-5 text-emerald-500" />
-                  </div>
-                  <div>
-                    <h3 className="font-extrabold text-sm">Ask Finix AI Accountant</h3>
-                    <p className="text-[10px] text-emerald-500 font-semibold animate-pulse">Core intelligence connected</p>
-                  </div>
+            {/* Finix AI Chatbot Co-Pilot */}
+            <div className={`h-[480px] flex flex-col p-6 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800/60 border-slate-700/80' : 'bg-white border-slate-100'}`}>
+              <div className="flex items-center gap-2.5 pb-4 border-b border-slate-100 dark:border-slate-700">
+                <div className="p-2 bg-emerald-500/10 rounded-2xl">
+                  <Brain className="w-5 h-5 text-emerald-500" />
                 </div>
-
-                {/* Messages Panel */}
-                <div className="flex-1 overflow-y-auto py-4 space-y-3 pr-1 text-xs">
-                  {chatMessages.map((msg, i) => (
-                    <div key={i} className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
-                      <div className={`max-w-[85%] rounded-2xl px-3.5 py-2 ${msg.sender === 'user' ? 'bg-emerald-600 text-white' : isDark ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-800'}`}>
-                        <p className="leading-relaxed whitespace-pre-wrap">{msg.text}</p>
-                      </div>
-                      <span className="text-[9px] text-slate-400 mt-1 px-1">{msg.time}</span>
-                    </div>
-                  ))}
-                  {chatLoading && (
-                    <div className="flex items-center gap-1 text-slate-400 italic">
-                      <span className="animate-bounce">●</span>
-                      <span className="animate-bounce delay-75">●</span>
-                      <span className="animate-bounce delay-150">●</span>
-                      <span className="text-[10px] ml-1">Finix is auditing ledger records...</span>
-                    </div>
-                  )}
-                  <div ref={chatEndRef} />
+                <div>
+                  <h3 className="font-extrabold text-sm">Ask Finix AI Accountant</h3>
+                  <p className="text-[10px] text-emerald-500 font-semibold animate-pulse">Core intelligence connected</p>
                 </div>
-
-                {/* Chat Pre-fills */}
-                <div className="flex flex-wrap gap-1.5 mb-3">
-                  {[
-                    "Check Receivables aging",
-                    "Audit GST output liabilities"
-                  ].map((txt) => (
-                    <button
-                      key={txt}
-                      type="button"
-                      onClick={() => setChatInput(txt)}
-                      className={`text-[10px] px-2 py-1 rounded-full border border-dashed transition-all ${isDark ? 'border-slate-700 hover:bg-slate-700' : 'border-slate-200 hover:bg-slate-50'}`}
-                    >
-                      {txt}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Input Panel */}
-                <form onSubmit={handleSendMessage} className="flex gap-2 shrink-0">
-                  <input
-                    type="text"
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    placeholder="Ask about receivables, taxes, margins..."
-                    className={`flex-1 px-4 py-2 text-xs rounded-xl border focus:outline-none focus:ring-1 focus:ring-emerald-500 ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
-                  />
-                  <Button type="submit" size="icon" disabled={chatLoading} className="rounded-xl h-9 w-9 bg-emerald-600 hover:bg-emerald-700">
-                    <Send className="w-4 h-4 text-white" />
-                  </Button>
-                </form>
               </div>
 
-              {/* Dynamic AI Insights & Alerts List */}
-              <div className={`p-6 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800/60 border-slate-700/80' : 'bg-white border-slate-100'}`}>
-                <h3 className="font-extrabold text-sm flex items-center gap-2 mb-4">
-                  <Sparkles className="w-4 h-4 text-emerald-500" />
-                  Real-time Auditing Insights
+              {/* Messages Panel */}
+              <div className="flex-1 overflow-y-auto py-4 space-y-3 pr-1 text-xs">
+                {chatMessages.map((msg, i) => (
+                  <div key={i} className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
+                    <div className={`max-w-[85%] rounded-2xl px-3.5 py-2 ${msg.sender === 'user' ? 'bg-emerald-600 text-white' : isDark ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-800'}`}>
+                      <p className="leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                    </div>
+                    <span className="text-[9px] text-slate-400 mt-1 px-1">{msg.time}</span>
+                  </div>
+                ))}
+                {chatLoading && (
+                  <div className="flex items-center gap-1 text-slate-400 italic">
+                    <span className="animate-bounce">●</span>
+                    <span className="animate-bounce delay-75">●</span>
+                    <span className="animate-bounce delay-150">●</span>
+                    <span className="text-[10px] ml-1">Finix is auditing ledger records...</span>
+                  </div>
+                )}
+                <div ref={chatEndRef} />
+              </div>
+
+              {/* Chat Pre-fills */}
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {[
+                  "Check Receivables aging",
+                  "Audit GST output liabilities"
+                ].map((txt) => (
+                  <button
+                    key={txt}
+                    type="button"
+                    onClick={() => setChatInput(txt)}
+                    className={`text-[10px] px-2 py-1 rounded-full border border-dashed transition-all ${isDark ? 'border-slate-700 hover:bg-slate-700' : 'border-slate-200 hover:bg-slate-50'}`}
+                  >
+                    {txt}
+                  </button>
+                ))}
+              </div>
+
+              {/* Input Panel */}
+              <form onSubmit={handleSendMessage} className="flex gap-2 shrink-0">
+                <input
+                  type="text"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="Ask about receivables, taxes, margins..."
+                  className={`flex-1 px-4 py-2 text-xs rounded-xl border focus:outline-none focus:ring-1 focus:ring-emerald-500 ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
+                />
+                <Button type="submit" size="icon" disabled={chatLoading} className="rounded-xl h-9 w-9 bg-emerald-600 hover:bg-emerald-700">
+                  <Send className="w-4 h-4 text-white" />
+                </Button>
+              </form>
+            </div>
+
+          </div>
+
+          {/* Row 2: Operating Cost Distribution + Autonomous Integrity Shield + Real-time Auditing Insights */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-stretch">
+
+            {/* Expense Breakdown */}
+            <div className={`h-full flex flex-col p-6 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800/60 border-slate-700/80' : 'bg-white border-slate-100'}`}>
+              <h3 className="font-extrabold text-lg flex items-center gap-2 mb-4">
+                <PieIcon className="w-5 h-5 text-emerald-500" />
+                Operating Cost Distribution
+              </h3>
+              {expenseBreakdown.length > 0 ? (
+                <div className="flex-1 min-h-[16rem] w-full text-xs">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={expenseBreakdown}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={80}
+                        paddingAngle={4}
+                        dataKey="value"
+                      >
+                        {expenseBreakdown.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={COLORS_CHART[index % COLORS_CHART.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value) => fmtC(value)} />
+                      <Legend verticalAlign="bottom" height={36} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className="flex-1 min-h-[16rem] flex flex-col items-center justify-center text-center gap-2 text-slate-400">
+                  <PieIcon className="w-8 h-8 opacity-40" />
+                  <p className="text-xs">No expense entries recorded yet for this period.</p>
+                </div>
+              )}
+            </div>
+
+            {/* AI Auditing Summary — driven by the real reconciliation
+                engine (runVerifyAndFix) instead of static always-green
+                claims, so a genuine mismatch actually shows up here. */}
+            <div className={`h-full flex flex-col p-6 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800/60 border-slate-700/80' : 'bg-white border-slate-100'}`}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-extrabold text-lg flex items-center gap-2">
+                  <Brain className="w-5 h-5 text-emerald-500" />
+                  Autonomous Integrity Shield
                 </h3>
-                <div className="space-y-4 max-h-[350px] overflow-y-auto pr-1">
-                  {insights.map((ins, i) => (
-                    <div key={i} className={`p-4 rounded-2xl border ${ins.type === 'warning' ? 'bg-amber-500/5 border-amber-500/20' : ins.type === 'success' ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-blue-500/5 border-blue-500/20'}`}>
-                      <div className="flex items-center gap-2 mb-1.5">
-                        {ins.type === 'warning' ? (
-                          <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
-                        ) : (
-                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                        )}
-                        <span className={`text-[10px] font-extrabold uppercase tracking-wider ${ins.type === 'warning' ? 'text-amber-500' : ins.type === 'success' ? 'text-emerald-500' : 'text-blue-500'}`}>
-                          {ins.category}
-                        </span>
-                      </div>
-                      <h4 className="text-xs font-bold leading-tight">{ins.title}</h4>
-                      <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">{ins.text}</p>
-                    </div>
-                  ))}
-                  {insights.length === 0 && (
-                    <p className="text-xs text-slate-400 text-center py-4">Reconciled with 0 warnings.</p>
-                  )}
-                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleReverify}
+                  disabled={verifying || !companyId}
+                  className="h-8 w-8 rounded-lg shrink-0"
+                  title="Re-run integrity checks"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${verifying ? 'animate-spin' : ''}`} />
+                </Button>
               </div>
+              <div className="flex-1 overflow-y-auto pr-1 flex flex-col justify-between gap-4">
+                {INTEGRITY_CHECKS.map((chk) => {
+                  const mismatch = validation?.mismatches?.find((m) => m.rule === chk.rule);
+                  const passed = !!validation && !mismatch;
+                  return (
+                    <div key={chk.rule} className="flex items-start gap-3">
+                      <div className={`p-2 rounded-xl shrink-0 ${passed ? 'bg-emerald-500/10' : mismatch ? 'bg-amber-500/10' : 'bg-slate-500/10'}`}>
+                        {passed ? (
+                          <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                        ) : mismatch ? (
+                          <AlertTriangle className="w-5 h-5 text-amber-500" />
+                        ) : (
+                          <ShieldAlert className="w-5 h-5 text-slate-400" />
+                        )}
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold">{chk.title}</h4>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          {passed
+                            ? chk.okText
+                            : mismatch
+                            ? `Mismatch of ${fmtC(Math.abs(mismatch.diff))} detected${mismatch.note ? ` — ${mismatch.note}` : '. Re-sync recommended.'}`
+                            : verifying ? 'Verifying…' : 'Not yet verified — click refresh to run this check.'}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {lastVerifiedAt && (
+                <p className="text-[10px] text-slate-400 mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 shrink-0">
+                  Last verified {lastVerifiedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </p>
+              )}
+            </div>
 
+            {/* Dynamic AI Insights & Alerts List */}
+            <div className={`h-full flex flex-col p-6 rounded-3xl shadow-sm border ${isDark ? 'bg-slate-800/60 border-slate-700/80' : 'bg-white border-slate-100'}`}>
+              <h3 className="font-extrabold text-sm flex items-center gap-2 mb-4">
+                <Sparkles className="w-4 h-4 text-emerald-500" />
+                Real-time Auditing Insights
+              </h3>
+              <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+                {insights.map((ins, i) => (
+                  <div key={i} className={`p-4 rounded-2xl border ${ins.type === 'warning' ? 'bg-amber-500/5 border-amber-500/20' : ins.type === 'success' ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-blue-500/5 border-blue-500/20'}`}>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      {ins.type === 'warning' ? (
+                        <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                      ) : (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                      )}
+                      <span className={`text-[10px] font-extrabold uppercase tracking-wider ${ins.type === 'warning' ? 'text-amber-500' : ins.type === 'success' ? 'text-emerald-500' : 'text-blue-500'}`}>
+                        {ins.category}
+                      </span>
+                    </div>
+                    <h4 className="text-xs font-bold leading-tight">{ins.title}</h4>
+                    <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">{ins.text}</p>
+                  </div>
+                ))}
+                {insights.length === 0 && (
+                  <p className="text-xs text-slate-400 text-center py-4">Reconciled with 0 warnings.</p>
+                )}
+              </div>
             </div>
 
           </div>
