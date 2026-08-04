@@ -106,6 +106,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_access_records": True,
           "can_access_proposals": True,
           "can_access_people_matrix": True,
+          "can_view_client_portal": True,
       },
       "manager": {
           # Manager: SCOPE = OWN + SAME_DEPARTMENT (Own + Team)
@@ -191,6 +192,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_access_records": False,
           "can_access_proposals": False,
           "can_access_people_matrix": False,
+          "can_view_client_portal": False,   # ADMIN_GRANTED_ONLY
       },
       "staff": {
           # Staff: SCOPE = OWN only
@@ -274,6 +276,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_access_records": False,
           "can_access_proposals": False,
           "can_access_people_matrix": False,
+          "can_view_client_portal": False,   # ADMIN_GRANTED_ONLY
       },
   }
 
@@ -291,18 +294,21 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
 # toggle is greyed out until its module is switched on.
 #
 # NOTE: Taskosphere (Tasks, To-Do, Attendance, Reminders, Action Center,
-# Client Visits, AI Document Reader) has no individual page-level flags of
-# its own today — those pages have always been open to every authenticated
-# user. Its entry below therefore only carries the module master flag; the
-# Dashboard route itself is intentionally left out of this hierarchy so that
-# turning Taskosphere off can never create a redirect loop (denied-access
-# redirects always land on /dashboard).
+# Client Visits, AI Document Reader) has always been open to every
+# authenticated user and carries no page-level flag of its own. Client
+# Portal Manager is the one exception — it lives inside the Taskosphere tab
+# but is admin-granted per user via its own page flag (can_view_client_portal)
+# below. The Dashboard route itself is intentionally left out of this
+# hierarchy so that turning Taskosphere off can never create a redirect loop
+# (denied-access redirects always land on /dashboard).
 MODULE_HIERARCHY: Dict[str, Dict[str, Any]] = {
     "taskosphere": {
         "flag": "can_access_taskosphere",
         "label": "Taskosphere",
-        "description": "Core workspace — Tasks, To-Do, Attendance, Reminders, Action Center, Client Visits and AI Document Reader.",
-        "pages": [],
+        "description": "Core workspace — Tasks, To-Do, Attendance, Reminders, Action Center, Client Visits, AI Document Reader and Client Portal Manager.",
+        "pages": [
+            {"flag": "can_view_client_portal", "label": "Client Portal Manager", "actions": ["view", "create", "edit", "delete", "export", "print", "share"]},
+        ],
     },
     "finix": {
         "flag": "can_access_finix",
@@ -560,6 +566,11 @@ class UserPermissions(BaseModel):
     can_view_roles: bool = False
     can_manage_roles: bool = False
     can_manage_permissions: bool = False   # Admin → Permission Matrix (grant/revoke others' access)
+    # ── Client Portal Manager ────────────────────────────────────────────────
+    # Lives under the Taskosphere module (see MODULE_HIERARCHY["taskosphere"]
+    # above) — grant/revoke per user from Users → Permission Governance /
+    # Permission Matrix. Admin always has access regardless of this flag.
+    can_view_client_portal: bool = False
 
     # ── Centralized action-level + visibility governance (additive layer) ───
     # `governance_matrix`: { "<module>.<page_flag>": ["view","create","edit",
