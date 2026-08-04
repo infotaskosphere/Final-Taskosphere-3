@@ -199,6 +199,10 @@ export default function AppRoutes() {
         <Route path="/action-center" element={<ModuleGate module="taskosphere"><ActionCenter /></ModuleGate>} />
         <Route path="/visits" element={<ModuleGate module="taskosphere"><VisitsPage /></ModuleGate>} />
         <Route path="/ai-reader" element={<ModuleGate module="taskosphere"><AIDocumentReader /></ModuleGate>} />
+        {/* Client Portal Manager — moved here from Admin; still individually
+            admin-granted per user via can_view_client_portal (see
+            MODULE_HIERARCHY["taskosphere"] in backend/models.py). */}
+        <Route path="/client-portal-manager/*" element={<ModuleGate module="taskosphere"><PageGuard module="taskosphere" page="can_view_client_portal"><ClientPortalManagerPage /></PageGuard></ModuleGate>} />
 
         {/* ── Compliance ── */}
         <Route path="/compliance-dashboard" element={<ModuleGate module="compliance"><ComplianceDashboard /></ModuleGate>} />
@@ -251,11 +255,13 @@ export default function AppRoutes() {
         {/* ── Admin ── */}
         <Route path="/people-matrix" element={<ModuleGate module="peopleMatrix"><PeopleMatrixDashboard /></ModuleGate>} />
         <Route path="/reports" element={<Reports />} />
-        <Route path="/task-audit" element={<TaskAudit />} />
+        {/* Audit Logs & Unified Inbox are now admin-only in the nav (see
+            DashboardLayout.jsx) — gate the routes themselves too, so a
+            non-admin can't reach them just by typing the URL. */}
+        <Route path="/task-audit" element={<AdminOnly><TaskAudit /></AdminOnly>} />
         <Route path="/users" element={<ModuleGate module="peopleMatrix"><Users /></ModuleGate>} />
         <Route path="/staff-activity" element={<StaffActivity />} />
-        <Route path="/client-portal-manager/*" element={<ClientPortalManagerPage />} />
-        <Route path="/whatsapp-hub" element={<WhatsAppHub />} />
+        <Route path="/whatsapp-hub" element={<AdminOnly><WhatsAppHub /></AdminOnly>} />
 
         {/* ── People Matrix: Leave / Payroll / HR / Recruitment ── */}
         {/* Performance was removed — it duplicated /reports (see the Reports
