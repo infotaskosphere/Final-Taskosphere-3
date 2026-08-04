@@ -12438,6 +12438,12 @@ async def get_due_reminder_popups(current_user: User = Depends(get_current_user)
     Returns reminders for the current user that are due (remind_at <= now),
     not yet dismissed, and not yet fired — then marks them as fired so they
     don't pop up again on the next poll.
+
+    Also folds in any `db.notifications` docs created with popup=True (e.g.
+    the per-task / bulk "raise a popup" button on the Tasks page Actions
+    column, sent via POST /notifications/send) that haven't been shown yet,
+    so both systems feed the same on-screen popup + desktop Notification()
+    pipeline on the frontend.
     """
     now_iso = datetime.now(timezone.utc).isoformat()
     cursor = db.reminders.find({
@@ -12448,24 +12454,49 @@ async def get_due_reminder_popups(current_user: User = Depends(get_current_user)
     }).sort("remind_at", 1).limit(20)
 
     due_docs = await cursor.to_list(length=20)
-    if not due_docs:
-        return []
+    if due_docs:
+        ids = [doc["_id"] for doc in due_docs]
+        await db.reminders.update_many(
+            {"_id": {"$in": ids}},
+            {"$set": {"is_fired": True, "updated_at": now_iso}},
+        )
 
-    ids = [doc["_id"] for doc in due_docs]
-    await db.reminders.update_many(
-        {"_id": {"$in": ids}},
-        {"$set": {"is_fired": True, "updated_at": now_iso}},
-    )
-
-    return [
+    results = [
         {
             "id": str(doc.get("_id")),
             "type": doc.get("reminder_type", "reminder"),
             "title": doc.get("title", "Reminder"),
             "message": doc.get("description", ""),
+            "task_id": doc.get("related_task_id"),
         }
         for doc in due_docs
     ]
+
+    popup_cursor = db.notifications.find({
+        "user_id": str(current_user.id),
+        "popup": True,
+        "is_read": False,
+    }).sort("created_at", 1).limit(20)
+    popup_docs = await popup_cursor.to_list(length=20)
+    if popup_docs:
+        popup_ids = [doc["id"] for doc in popup_docs if doc.get("id")]
+        if popup_ids:
+            await db.notifications.update_many(
+                {"id": {"$in": popup_ids}},
+                {"$set": {"is_read": True}},
+            )
+        results.extend([
+            {
+                "id": doc.get("id"),
+                "type": doc.get("type") or "task_popup",
+                "title": doc.get("title", "Reminder"),
+                "message": doc.get("message", ""),
+                "task_id": doc.get("task_id"),
+            }
+            for doc in popup_docs
+        ])
+
+    return results
 
 
 @api_router.post("/send-pending-task-reminders")
