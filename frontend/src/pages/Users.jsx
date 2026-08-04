@@ -125,6 +125,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_view_documents: true, can_view_all_duedates: true, can_view_reports: true,
       can_manage_users: true, can_assign_tasks: true, can_view_staff_activity: true,
       can_view_attendance: true, can_send_reminders: true, can_view_user_page: true,
+      can_receive_popup_reminders: true,
       can_view_audit_logs: true, can_edit_tasks: true, can_edit_dsc: true,
       can_edit_documents: true, can_edit_due_dates: true, can_edit_users: true,
       can_download_reports: true, can_view_selected_users_reports: true,
@@ -176,6 +177,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_assign_clients: false,      // admin-granted only
       can_view_staff_activity: false, // Staff Activity module removed
       can_send_reminders: false,      // admin-granted only
+      can_receive_popup_reminders: false, // admin-granted only, also requires cross visibility on
       can_view_user_page: false,      // admin-granted only
       can_view_audit_logs: false,     // admin-granted only
       can_view_recruitment: false,    // admin-granted only
@@ -238,6 +240,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_assign_clients: false,      // admin-granted only
       can_view_staff_activity: false, // Staff Activity module removed
       can_send_reminders: false,      // admin-granted only
+      can_receive_popup_reminders: false, // admin-granted only, also requires cross visibility on
       can_view_user_page: false,      // admin-granted only
       can_view_audit_logs: false,     // admin-granted only
       can_view_recruitment: false,    // admin-granted only
@@ -280,6 +283,7 @@ const EMPTY_PERMISSIONS = {
   can_view_documents: false, can_view_all_duedates: false, can_view_reports: false,
   can_manage_users: false, can_assign_tasks: false, can_view_staff_activity: false,
   can_view_attendance: false, can_send_reminders: false, can_view_user_page: false,
+  can_receive_popup_reminders: false,
   can_view_audit_logs: false, can_edit_tasks: false, can_edit_dsc: false,
   can_edit_documents: false, can_edit_due_dates: false, can_edit_users: false,
   can_download_reports: false, can_view_selected_users_reports: false,
@@ -337,6 +341,7 @@ const OPS_PERMS = [
   { key: 'can_view_attendance',     label: 'Attendance Management',  desc: 'Review punch timings and late reports',            icon: Clock        },
   { key: 'can_edit_attendance',    label: 'Edit Attendance',        desc: 'Edit past attendance records (mark absent, half day, leave)',  icon: Edit         },
   { key: 'can_send_reminders',      label: 'Automated Reminders',    desc: 'Trigger email/notification reminders',             icon: Bell         },
+  { key: 'can_receive_popup_reminders', label: 'Popup Reminders',    desc: 'Receive on-screen popup reminders (also requires Cross Visibility to be on for this user)', icon: Bell },
   { key: 'can_download_reports',    label: 'Export Data',            desc: 'Download CSV/PDF versions of reports',             icon: Download     },
   { key: 'can_manage_settings',     label: 'System Settings',        desc: 'Modify global system configuration',               icon: Settings     },
   { key: 'can_delete_data',         label: 'Delete Records',         desc: 'Permanently delete data entries',                  icon: Trash2       },
