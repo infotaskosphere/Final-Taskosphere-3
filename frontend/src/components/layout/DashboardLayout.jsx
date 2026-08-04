@@ -59,6 +59,12 @@ const NAV_GROUPS = [
       { path: '/action-center', icon: Zap, label: 'Action Center' },
       { path: '/visits',     icon: MapPin,          label: 'Client Visits' },
       { path: '/ai-reader',      icon: BrainCircuit,  label: 'AI Document Reader' },
+      // Client Portal Manager — moved here from Admin. Still individually
+      // admin-granted per user (see MODULE_HIERARCHY["taskosphere"] in
+      // backend/models.py), but it now lives inside the Taskosphere tab
+      // rather than Admin, since it's day-to-day client-facing work rather
+      // than a system-administration page.
+      { path: '/client-portal-manager', icon: Building2, label: 'Client Portal', permission: 'can_view_client_portal' },
     ],
   },
   {
@@ -195,8 +201,14 @@ const NAV_GROUPS = [
       { path: '/task-audit',     icon: Activity,   label: 'Audit Logs',   permission: 'can_view_audit_logs'  },
       { path: '/master-data',    icon: Database,   label: 'Master Data', adminOnly: true },
       { path: '/roles',          icon: Fingerprint, label: 'Roles', adminOnly: true },
-      { path: '/client-portal-manager', icon: Building2, label: 'Client Portal', permission: 'can_view_client_portal' },
-      { path: '/whatsapp-hub', icon: MessageCircle, label: 'Unified Inbox', permission: 'can_access_whatsapp_hub' },
+      // Admin is a system-administration area, not an individually-grantable
+      // permission module (see MODULE_HIERARCHY["admin"] in backend/models.py:
+      // "Admin should NEVER require any permission" — role === 'admin' is
+      // itself the gate). Every item here is therefore adminOnly so the
+      // "Admin" tab never appears in the section bar for a non-admin user,
+      // regardless of which individual page flags they've been granted.
+      { path: '/task-audit',     icon: Activity,   label: 'Audit Logs',   adminOnly: true },
+      { path: '/whatsapp-hub', icon: MessageCircle, label: 'Unified Inbox', adminOnly: true },
     ],
   },
   {
@@ -233,9 +245,12 @@ const SECTION_ORDER = ['core', 'accounts', 'compliance', 'records', 'proposals',
 // (see backend/models.py::MODULE_HIERARCHY). A user who lacks the module's
 // master flag never sees ANY item in that group, regardless of individual
 // page-level permission flags — those are always an additional, narrower
-// check on top of this one. Admin (Task Audit / Client Portal / Inbox) and
-// Settings are intentionally left out: they are not part of the 6 main
-// permission modules and keep working exactly as before.
+// check on top of this one. Admin (Audit Logs / Unified Inbox, both now
+// adminOnly) and Settings are intentionally left out: they are not part of
+// the 6 main permission modules and keep working exactly as before. Client
+// Portal Manager moved out of Admin into the Taskosphere group above, so it
+// IS covered by this module-level gate (can_access_taskosphere) in addition
+// to its own can_view_client_portal page flag.
 const GROUP_MODULE_FLAG = {
   core:            'can_access_taskosphere',
   accounts:        'can_access_finix',
