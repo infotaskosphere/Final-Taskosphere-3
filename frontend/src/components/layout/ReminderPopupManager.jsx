@@ -34,6 +34,7 @@ const readPollIntervalMs = () => {
 
 const TYPE_META = {
   task_assigned: { icon: ClipboardCheck, color: "text-indigo-600", bg: "bg-indigo-50" },
+  task_popup: { icon: Bell, color: "text-rose-600", bg: "bg-rose-50" },
   daily_summary: { icon: Bell, color: "text-amber-600", bg: "bg-amber-50" },
   visit: { icon: MapPin, color: "text-emerald-600", bg: "bg-emerald-50" },
   meeting: { icon: CalendarClock, color: "text-purple-600", bg: "bg-purple-50" },
@@ -41,6 +42,33 @@ const TYPE_META = {
 };
 
 const getMeta = (type) => TYPE_META[type] || TYPE_META.reminder;
+
+// Fires a native OS-level desktop notification (via the browser Notification
+// API) so the reminder is visible even when the Chrome window is minimized
+// or another app is focused — the in-app <Dialog> below only ever paints
+// while this tab is the visible, foregrounded one.
+const fireDesktopNotification = (item) => {
+  try {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+    if (Notification.permission !== "granted") return;
+    const n = new Notification(item.title || "Task-o-sphere Reminder", {
+      body: item.message || "",
+      tag: `tos-popup-${item.id}`,
+      icon: "/favicon.ico",
+      silent: false,
+    });
+    n.onclick = () => {
+      window.focus();
+      if (item.task_id) {
+        window.location.assign(`/tasks?taskId=${item.task_id}`);
+      }
+      n.close();
+    };
+  } catch {
+    // Desktop notifications are a best-effort enhancement — never let a
+    // failure here disrupt the in-app popup queue below.
+  }
+};
 
 /**
  * Mounted once near the root of the app (inside AuthProvider, outside the
@@ -51,6 +79,14 @@ export default function ReminderPopupManager() {
   const [queue, setQueue] = useState([]);
   const pollRef = useRef(null);
 
+  // Ask for desktop-notification permission once per session (a no-op if
+  // already granted/denied, and browsers ignore repeated prompts anyway).
+  useEffect(() => {
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission().catch(() => {});
+    }
+  }, []);
+
   const fetchDuePopups = useCallback(async () => {
     if (!user) return;
     try {
@@ -59,6 +95,7 @@ export default function ReminderPopupManager() {
         setQueue((prev) => {
           const existingIds = new Set(prev.map((p) => p.id));
           const fresh = data.filter((p) => !existingIds.has(p.id));
+          fresh.forEach(fireDesktopNotification);
           return [...prev, ...fresh];
         });
       }
