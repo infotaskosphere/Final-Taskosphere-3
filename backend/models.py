@@ -46,6 +46,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_assign_clients": True,
           "can_view_staff_activity": True,
           "can_send_reminders": True,
+          "can_receive_popup_reminders": True,   # Admin always gets popup reminders
           "can_view_user_page": True,
           "can_view_audit_logs": True,
           "can_view_selected_users_reports": True,
@@ -137,6 +138,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_assign_clients": False,       # ADMIN_GRANTED_ONLY
           "can_view_staff_activity": False,  # Admin-only — not grantable to manager/staff
           "can_send_reminders": False,       # ADMIN_GRANTED_ONLY
+          "can_receive_popup_reminders": False,  # ADMIN_GRANTED_ONLY — also requires cross visibility to be on
           "can_view_user_page": False,       # ADMIN_GRANTED_ONLY
           "can_view_audit_logs": False,      # ADMIN_GRANTED_ONLY
           "can_view_selected_users_reports": True,  # Reports → VIEW (Team scope)
@@ -219,6 +221,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_assign_clients": False,       # ADMIN_GRANTED_ONLY
           "can_view_staff_activity": False,  # Admin-only — not grantable to manager/staff
           "can_send_reminders": False,       # ADMIN_GRANTED_ONLY
+          "can_receive_popup_reminders": False,  # ADMIN_GRANTED_ONLY — also requires cross visibility to be on
           "can_view_user_page": False,       # ADMIN_GRANTED_ONLY
           "can_view_audit_logs": False,      # ADMIN_GRANTED_ONLY
           "can_view_selected_users_reports": False, # ADMIN_GRANTED_ONLY (staff sees own reports only)
@@ -430,6 +433,7 @@ class UserPermissions(BaseModel):
     can_assign_clients: bool = False
     can_view_staff_activity: bool = False
     can_send_reminders: bool = False
+    can_receive_popup_reminders: bool = False
     can_view_user_page: bool = False
     can_view_audit_logs: bool = False
     can_view_selected_users_reports: bool = False
