@@ -12444,7 +12444,27 @@ async def get_due_reminder_popups(current_user: User = Depends(get_current_user)
     column, sent via POST /notifications/send) that haven't been shown yet,
     so both systems feed the same on-screen popup + desktop Notification()
     pipeline on the frontend.
+
+    ACCESS RULE (popup gating):
+      - Admin: always allowed (default on, not revocable via governance).
+      - Manager / staff: allowed ONLY IF both are true —
+          1. `can_receive_popup_reminders` is granted on their permissions
+             (ADMIN_GRANTED_ONLY by default; toggled via Permission
+             Governance, same as can_send_reminders).
+          2. Cross visibility is switched on for them, i.e. at least one
+             view_other_* array is non-empty (get_cross_visibility_union
+             returns at least one id).
+      If either condition fails, no popups are fetched or marked fired —
+      the underlying reminders stay pending so they can fire once the
+      user is granted access.
     """
+    if current_user.role != "admin":
+        perms = get_user_permissions(current_user)
+        has_popup_permission = perms.get("can_receive_popup_reminders", False)
+        cross_visibility_on = bool(await get_cross_visibility_union(current_user.id))
+        if not (has_popup_permission and cross_visibility_on):
+            return []
+
     now_iso = datetime.now(timezone.utc).isoformat()
     cursor = db.reminders.find({
         "user_id": str(current_user.id),
