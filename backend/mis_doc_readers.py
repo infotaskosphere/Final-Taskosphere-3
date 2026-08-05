@@ -27,6 +27,7 @@ from __future__ import annotations
 import io
 import re
 import csv
+import zipfile
 import logging
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
@@ -39,6 +40,7 @@ EXCEL_EXT = (".xlsx", ".xlsm", ".xltx", ".xls")
 CSV_EXT = (".csv", ".tsv", ".txt")
 PDF_EXT = (".pdf",)
 WORD_EXT = (".docx", ".doc")
+ZIP_EXT = (".zip",)
 
 
 @dataclass
@@ -383,6 +385,36 @@ def _read_pdf(file_bytes: bytes) -> ParsedDoc:
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# ZIP
+# ══════════════════════════════════════════════════════════════════════════
+
+def _read_zip(file_bytes: bytes, filename: str) -> ParsedDoc:
+    """Extract a ZIP archive and merge the parsed contents of every member."""
+    doc = ParsedDoc(kind="zip")
+    texts: List[str] = []
+    members_parsed: List[str] = []
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+            for member in zf.namelist():
+                if member.endswith("/") or member.startswith("__MACOSX"):
+                    continue
+                try:
+                    member_bytes = zf.read(member)
+                    member_doc = read_document(member_bytes, member)
+                    doc.tables.extend(member_doc.tables)
+                    if member_doc.text:
+                        texts.append(f"--- {member} ---\n{member_doc.text}")
+                    members_parsed.append(member)
+                except Exception as e:
+                    logger.warning("MIS: could not read zip member '%s': %s", member, e)
+    except zipfile.BadZipFile as e:
+        raise RuntimeError(f"Could not open ZIP archive '{filename}': {e}")
+    doc.text = "\n".join(texts)
+    doc.meta["zip_members"] = members_parsed
+    return doc
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # PUBLIC ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -397,13 +429,31 @@ def read_document(file_bytes: bytes, filename: str) -> ParsedDoc:
     if name.endswith(".docx"):
         return _read_word(file_bytes)
     if name.endswith(".doc"):
-        raise RuntimeError("Legacy .doc files are not supported — please save as .docx or PDF.")
+        # Try Word first; fall back to treating as binary/CSV
+        try:
+            return _read_word(file_bytes)
+        except Exception:
+            pass
+        return _read_csv(file_bytes, name)
+    if name.endswith(ZIP_EXT):
+        return _read_zip(file_bytes, name)
     # unknown extension: sniff the magic bytes
     if file_bytes[:4] == b"%PDF":
         return _read_pdf(file_bytes)
     if file_bytes[:2] == b"PK":
-        try:
-            return _read_excel(file_bytes, name + ".xlsx")
-        except Exception:
-            return _read_word(file_bytes)
+        # Could be xlsx, docx, or a plain zip — try each
+        if not zipfile.is_zipfile(io.BytesIO(file_bytes)):
+            return _read_csv(file_bytes, name)
+        for attempt_ext, attempt_fn in [
+            (".xlsx", lambda: _read_excel(file_bytes, name + ".xlsx")),
+            (".docx", lambda: _read_word(file_bytes)),
+            (".zip", lambda: _read_zip(file_bytes, name + ".zip")),
+        ]:
+            try:
+                result = attempt_fn()
+                if result.tables or result.text:
+                    return result
+            except Exception:
+                pass
+        return _read_csv(file_bytes, name)
     return _read_csv(file_bytes, name)
