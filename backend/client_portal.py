@@ -42,6 +42,24 @@ from backend.governance_core import require_page
 _client_portal_guard = require_page("taskosphere", "can_view_client_portal")
 
 logger = logging.getLogger(__name__)
+
+
+def _can_manage_portal(user: "User") -> bool:
+    """
+    Return True when the staff user may access portal-management endpoints.
+
+    Allowed when:
+      • role is "admin" or "manager" (always), OR
+      • the user has been explicitly granted can_view_client_portal via the
+        Permission Governance module (stored in user.permissions dict or as a
+        direct attribute, depending on how the auth layer serialises it).
+    """
+    if getattr(user, "role", None) in ("admin", "manager"):
+        return True
+    perms = getattr(user, "permissions", None) or {}
+    if isinstance(perms, dict):
+        return bool(perms.get("can_view_client_portal", False))
+    return bool(getattr(user, "can_view_client_portal", False))
 router = APIRouter(prefix="/client-portal", tags=["client-portal"])
 
 # Google Drive calls are synchronous under the hood. Keep them capped so a
@@ -217,7 +235,7 @@ async def create_portal_user(
     current_user: User = Depends(get_current_user),
 ):
     """Create portal credentials for a client. Only admin/manager."""
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
 
     # Verify client exists
@@ -282,7 +300,7 @@ async def list_portal_users(
     current_user: User = Depends(get_current_user),
 ):
     """List all portal users (optionally filtered by client_id)."""
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
     query = {}
     if client_id:
@@ -299,7 +317,7 @@ async def update_portal_user(
     body: PortalUserUpdate,
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
 
     update: dict = {}
@@ -353,7 +371,7 @@ async def reveal_portal_password(
     Password Vault — the bcrypt hash used for actual login is never
     returned/decryptable).
     """
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
     pu = await db.client_portal_users.find_one({"id": portal_user_id}, {"_id": 0})
     if not pu:
@@ -376,7 +394,7 @@ async def delete_portal_user(
     portal_user_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
     res = await db.client_portal_users.delete_one({"id": portal_user_id})
     if res.deleted_count == 0:
@@ -397,7 +415,7 @@ async def get_share_link(
     Returns the portal login URL for this portal user.
     Also returns a pre-filled username hint so admins can share it easily.
     """
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
 
     portal_user = await db.client_portal_users.find_one(
@@ -743,7 +761,7 @@ async def admin_list_drive_files(
     Admin endpoint – list ALL files in the portal user's linked Drive folder
     (or a subfolder), annotated with their current visibility setting.
     """
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
 
     portal_user = await db.client_portal_users.find_one({"id": portal_user_id}, {"_id": 0})
@@ -791,7 +809,7 @@ async def admin_update_drive_visibility(
     current_user: User = Depends(get_current_user),
 ):
     """Admin endpoint – save/update which Drive files are hidden for a portal user."""
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
 
     portal_user = await db.client_portal_users.find_one({"id": portal_user_id}, {"_id": 0})
@@ -820,7 +838,7 @@ async def admin_toggle_single_file(
     current_user: User = Depends(get_current_user),
 ):
     """Quick toggle for a single file – adds or removes from hidden_ids."""
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
 
     portal_user = await db.client_portal_users.find_one({"id": portal_user_id}, {"_id": 0})
@@ -854,7 +872,7 @@ async def admin_visibility_summary(
     current_user: User = Depends(get_current_user),
 ):
     """Returns the raw visibility config for a portal user."""
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
     doc = await db.client_drive_visibility.find_one({"portal_user_id": portal_user_id}, {"_id": 0})
     return doc or {"portal_user_id": portal_user_id, "hidden_ids": []}
@@ -906,7 +924,7 @@ async def get_portal_settings(
     current_user: User = Depends(get_current_user),
 ):
     """Returns the saved portal settings (creates sane defaults if none saved yet)."""
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
     doc = await db.portal_settings.find_one({}, {"_id": 0})
     if not doc:
@@ -926,7 +944,7 @@ async def save_portal_settings(
     current_user: User = Depends(get_current_user),
 ):
     """Saves (upserts) portal settings, including the root Drive folder."""
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
 
     normalised_root = _extract_folder_id(body.root_drive_folder)
@@ -987,7 +1005,7 @@ async def upload_portal_logo(
     current_user: User = Depends(get_current_user),
 ):
     """Uploads/replaces the portal logo shown on the client login page and dashboard."""
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
 
     content_type = (file.content_type or "").lower()
@@ -1019,7 +1037,7 @@ async def delete_portal_logo(
     current_user: User = Depends(get_current_user),
 ):
     """Removes the portal logo — the login/dashboard fall back to the default Taskosphere mark."""
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
     await db.portal_settings.update_one({}, {"$set": {"logo_url": None}}, upsert=True)
     return {"success": True}
@@ -1059,7 +1077,7 @@ async def list_all_clients(
     current_user: User = Depends(get_current_user),
 ):
     """Returns all clients enriched with their portal connection status."""
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
 
     clients = await db.clients.find({}, {"_id": 0}).to_list(2000)
@@ -1098,7 +1116,7 @@ async def get_folder_template(
     current_user: User = Depends(get_current_user),
 ):
     """Returns the saved folder architecture template."""
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
     doc = await db.portal_folder_template.find_one({}, {"_id": 0})
     settings_root = await _resolve_settings_root_folder()
@@ -1115,7 +1133,7 @@ async def save_folder_template(
     current_user: User = Depends(get_current_user),
 ):
     """Saves (upserts) the folder architecture template."""
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
 
     normalised_parent = _extract_folder_id(body.parent_folder_id)
@@ -1262,7 +1280,7 @@ async def create_client_drive_folders(
     current_user: User = Depends(get_current_user),
 ):
     """Creates root + sub-folders in Drive using custom or template subfolders, auto-links to portal user."""
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
 
     from backend.invoicing import _get_drive_service, _drive_configured
@@ -1325,7 +1343,7 @@ async def bulk_create_client_drive_folders(
     Bulk-creates Drive folders for multiple clients (or all clients if client_ids is empty).
     Uses the saved folder template unless subfolders are explicitly provided.
     """
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
 
     from backend.invoicing import _get_drive_service, _drive_configured
@@ -1423,7 +1441,7 @@ async def link_existing_drive_folder(
     After linking, the client's portal user(s) immediately gain access to that
     folder via the /drive/files and /drive/download endpoints.
     """
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
 
     client_doc = await db.clients.find_one({"id": client_id}, {"_id": 0})
@@ -1493,7 +1511,7 @@ async def admin_search_drive_folders(
     Search all of Drive for folders whose name contains `query`.
     Read-only preview — nothing is linked until the admin explicitly confirms.
     """
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
 
     from backend.invoicing import _get_drive_service, _drive_configured
@@ -1534,7 +1552,7 @@ async def admin_browse_drive_folder(
     Browse any Drive folder by ID so the admin can preview its contents
     before linking it to a client.  No portal user required.
     """
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
 
     # Accept a bare folder ID OR a full Google Drive share URL — normalise to
@@ -1798,7 +1816,7 @@ async def admin_drive_download(
     (used by the "Download all" quick action so staff don't have to open
     every file one-by-one in a new Drive tab).
     """
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
 
     from backend.invoicing import _get_drive_service, _drive_configured
@@ -2244,7 +2262,7 @@ async def classify_document_endpoint(
     current_user=Depends(get_current_user),
 ):
     """Classify a single document and suggest which Drive subfolder it belongs in."""
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
     import json as _json
     try:
@@ -2275,7 +2293,7 @@ async def smart_bulk_upload(
     2. Uploads each file to its assigned subfolder
     3. Returns per-file results with Drive links
     """
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
 
     from backend.invoicing import _get_drive_service, _drive_configured
@@ -2460,7 +2478,7 @@ async def ensure_root_folder(
     Folder Architect to create Drive folders manually with the desired
     subfolder structure.
     """
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
 
     portal_user = await db.client_portal_users.find_one({"client_id": client_id}, {"_id": 0})
@@ -2541,7 +2559,7 @@ async def simple_upload_file(
       - conflict_action == "keep_both" → upload as a new file, auto-suffixed
         " (1)", " (2)", … if needed so it doesn't share the exact same name.
     """
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
 
     from backend.invoicing import _get_drive_service, _drive_configured
@@ -2653,7 +2671,7 @@ async def simple_create_folder(
     current_user: User = Depends(get_current_user),
 ):
     """Create a single new folder (used by the Upload Center's '+ New Folder' button)."""
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
 
     from backend.invoicing import _get_drive_service, _drive_configured
@@ -2690,7 +2708,7 @@ async def delete_drive_item(
     current_user: User = Depends(get_current_user),
 ):
     """Move a single Drive file/folder to Trash and drop it from any visibility list."""
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
 
     from backend.invoicing import _get_drive_service, _drive_configured
@@ -2718,7 +2736,7 @@ async def bulk_delete_drive_items(
     current_user: User = Depends(get_current_user),
 ):
     """Trash multiple Drive files/folders at once (used by the Upload Center's bulk-delete action)."""
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
 
     from backend.invoicing import _get_drive_service, _drive_configured
@@ -2769,7 +2787,7 @@ async def list_client_subfolders(
     current_user=Depends(get_current_user),
 ):
     """List top-level subfolders inside a client's Drive root folder."""
-    if current_user.role not in ("admin", "manager"):
+    if not _can_manage_portal(current_user):
         raise HTTPException(403, "Insufficient permissions")
     portal_user = await db.client_portal_users.find_one({"id": portal_user_id}, {"_id": 0})
     if not portal_user:
