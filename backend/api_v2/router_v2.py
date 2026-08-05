@@ -83,12 +83,33 @@ async def api_copilot_action(body: CopilotActionRequest, user=Depends(get_curren
 async def api_enterprise_search(
     query: str = Query(..., min_length=1),
     category: Optional[str] = Query("all"),
+    company_id: Optional[str] = Query(None),
     user=Depends(get_current_user)
 ):
-    """Deep parallel semantic searching across files, invoices, and general journals."""
-    company_id = getattr(user, "company_id", "default_comp")
-    results = await EnterpriseSearch.global_enterprise_search(company_id, query, category)
+    """Universal search across clients (companies), directors/individuals,
+    tasks, compliance assignments, uploaded documents and ledger entries.
+
+    NOTE: this used to force a `company_id` of "default_comp" (an attribute
+    real users don't have) and only searched OCR text + the legacy `journals`
+    collection, so searching a company or a person's name always returned
+    "No records found". Entity groups are not tenant-scoped in this codebase;
+    only the document/ledger groups accept an optional company_id.
+    """
+    resolved_company = company_id or getattr(user, "company_id", None)
+    results = await EnterpriseSearch.global_enterprise_search(
+        resolved_company, query, category or "all"
+    )
     return results
+
+
+@router.get("/search/client/{client_id}")
+async def api_search_client_profile(client_id: str, user=Depends(get_current_user)):
+    """360-degree profile behind a clicked search result: the company, who it
+    is assigned to, its directors, its compliances and its tasks."""
+    profile = await EnterpriseSearch.client_360(client_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return profile
 
 
 # --- DYNAMIC EXPORTS ---
