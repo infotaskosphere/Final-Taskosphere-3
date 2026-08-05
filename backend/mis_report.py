@@ -252,6 +252,82 @@ def _pick_table(doc: ParsedDocument, spec: Dict[str, List[str]], weighted: List[
 
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# BEST-EFFORT TEXT FALLBACK — extracts rough transaction rows from plain text
+# when no structured table matched the expected schema (e.g. audit PDFs).
+# ══════════════════════════════════════════════════════════════════════════
+
+_AMOUNT_RE = re.compile(r"[-+]?(?:Rs\.?|₹|INR)?\s*([\d,]+(?:\.\d{1,2})?)\s*(?:cr|dr)?", re.I)
+_DATE_VARIANTS = [
+    r"\d{1,2}[-/]\d{1,2}[-/]\d{2,4}",        # 01/04/2024
+    r"\d{1,2}[-/][A-Za-z]{3}[-/]\d{2,4}",    # 01-Apr-2024
+    r"\d{4}[-/]\d{2}[-/]\d{2}",               # 2024-04-01
+]
+_DATE_RE = re.compile("|".join(_DATE_VARIANTS))
+
+
+def _text_rows_fallback(text: str, doc_type: str) -> List[Dict[str, Any]]:
+    """
+    Walk through the plain text of a document line-by-line.
+    Any line that contains both a date-like token and at least one rupee
+    amount is treated as a transaction row — this handles audit reports,
+    non-standard bank PDFs, and multi-column financial statements that
+    the table parsers missed.
+    """
+    rows: List[Dict[str, Any]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if len(line) < 10:
+            continue
+        date_m = _DATE_RE.search(line)
+        amounts = _AMOUNT_RE.findall(line)
+        amounts_f = []
+        for a in amounts:
+            try:
+                amounts_f.append(float(a.replace(",", "")))
+            except ValueError:
+                pass
+        amounts_f = [a for a in amounts_f if a > 0]
+        if not date_m or not amounts_f:
+            continue
+        date_str = _parse_date(date_m.group())
+        # Remove date and amounts from line to get the narration/party text
+        narration = _DATE_RE.sub("", line)
+        narration = _AMOUNT_RE.sub("", narration).strip(" -|:")
+
+        total = max(amounts_f)
+        if doc_type == "bank_statement":
+            # Heuristic: first amount = debit if line contains debit keywords
+            low = line.lower()
+            is_debit = any(k in low for k in ("dr", "debit", "withdrawal", "paid", "payment"))
+            rows.append({
+                "date": date_str,
+                "narration": narration or "—",
+                "debit": round(total, 2) if is_debit else 0.0,
+                "credit": 0.0 if is_debit else round(total, 2),
+                "balance": 0.0,
+                "category": _categorize_expense(narration) if is_debit else None,
+            })
+        else:
+            rows.append({
+                "date": date_str,
+                "invoice_no": "",
+                "party_name": narration[:100] if narration else "Extracted",
+                "taxable_value": round(total, 2),
+                "tax_amount": 0.0,
+                "total_amount": round(total, 2),
+                "status": "unpaid",
+                "due_date": date_str,
+                "paid_date": None,
+                "category": None,
+                "service": None,
+                "branch": None,
+                "partner": None,
+                "employee": None,
+            })
+    return rows
+
+
 EXPENSE_KEYWORDS = [
     ("rent", ["rent"]),
     ("employee_expenses", ["salary", "salaries", "payroll", "wages", "bonus", "incentive"]),
@@ -276,18 +352,53 @@ def _categorize_expense(narration: str, given_category: str = "") -> str:
 # PARSERS — one per doc_type, all return List[dict] transaction rows
 # ══════════════════════════════════════════════════════════════════════════
 
+def _best_effort_colmap(df: pd.DataFrame, spec: Dict[str, List[str]]) -> Dict[str, Optional[str]]:
+    """
+    First pass: strict fuzzy matching via _find_col.
+    Second pass: if the required amount/name columns are still missing, scan
+    every column for numeric content (amount) or non-numeric text (party name)
+    so that real-world PDFs with non-standard headers are not rejected outright.
+    """
+    colmap = {k: _find_col(df.columns, v) for k, v in spec.items()}
+    amount_keys = {"total_amount", "taxable_value"}
+    if not any(colmap.get(k) for k in amount_keys):
+        # find numeric-heavy columns
+        num_cols = []
+        for c in df.columns:
+            try:
+                cleaned = df[c].astype(str).str.replace(r"[,₹\s]", "", regex=True)
+                numeric = pd.to_numeric(cleaned, errors="coerce").notna()
+                if numeric.sum() > max(2, len(df) * 0.25):
+                    num_cols.append(c)
+            except Exception:
+                pass
+        if num_cols:
+            if not colmap.get("total_amount"):
+                colmap["total_amount"] = num_cols[-1]
+            if not colmap.get("taxable_value") and len(num_cols) > 1:
+                colmap["taxable_value"] = num_cols[-2]
+    if not colmap.get("party_name"):
+        # find the most text-like column that isn't already mapped
+        mapped = set(v for v in colmap.values() if v)
+        for c in df.columns:
+            if c in mapped:
+                continue
+            vals = df[c].astype(str).str.strip()
+            non_numeric = vals.apply(lambda x: not re.fullmatch(r"[-+()₹,.\d\s%]+", x) and len(x) > 1)
+            if non_numeric.sum() > max(2, len(df) * 0.25):
+                colmap["party_name"] = c
+                break
+    return colmap
+
+
 def _parse_register(df: pd.DataFrame, doc_type: str) -> List[Dict[str, Any]]:
     if df is None or df.empty:
         return []
-    colmap = {k: _find_col(df.columns, v) for k, v in SALES_PURCHASE_COLS.items()}
+    colmap = _best_effort_colmap(df, SALES_PURCHASE_COLS)
     if not colmap["party_name"] and not colmap["total_amount"] and not colmap["taxable_value"]:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Could not detect Party Name / Amount columns in this {doc_type} register. "
-                "Expected headers similar to 'Party Name', 'Taxable Value', 'Total Amount', 'Invoice No', 'Date'."
-            ),
-        )
+        # Nothing usable found — return empty instead of hard-erroring
+        logger.warning("MIS: no usable columns found in %s table for %s", doc_type, list(df.columns)[:10])
+        return []
     rows = []
     for _, r in df.iterrows():
         mapped = _map_row(r, colmap)
@@ -337,10 +448,26 @@ def _parse_bank(df: pd.DataFrame) -> List[Dict[str, Any]]:
         return []
     colmap = {k: _find_col(df.columns, v) for k, v in BANK_COLS.items()}
     if not colmap["debit"] and not colmap["credit"]:
-        raise HTTPException(
-            status_code=422,
-            detail="Could not detect Debit/Credit columns in this bank statement. Expected headers like 'Debit', 'Credit', 'Date', 'Narration'.",
-        )
+        # Best-effort: look for numeric columns that could be debit/credit
+        mapped = set(v for v in colmap.values() if v)
+        num_cols = []
+        for c in df.columns:
+            if c in mapped:
+                continue
+            try:
+                cleaned = df[c].astype(str).str.replace(r"[,₹\s]", "", regex=True)
+                numeric = pd.to_numeric(cleaned, errors="coerce").notna()
+                if numeric.sum() > max(2, len(df) * 0.2):
+                    num_cols.append(c)
+            except Exception:
+                pass
+        if num_cols:
+            colmap["debit"] = num_cols[0]
+            if len(num_cols) > 1:
+                colmap["credit"] = num_cols[1]
+        else:
+            logger.warning("MIS: no debit/credit columns found in bank statement, columns: %s", list(df.columns)[:10])
+            return []
     # PDF statements often split the narration across a cheque-no / reference
     # column; fold every unmapped text column back into the narration so
     # expense categorisation sees the whole line.
@@ -546,41 +673,53 @@ async def upload_mis_document(
         doc = _read_any(file_bytes, filename)
 
         if doc_type in ("sales", "purchase"):
+            # Try the highest-scoring table first; if that yields nothing useful,
+            # fall back to trying EVERY table in the document so that multi-page
+            # PDFs and audit-style reports are never silently dropped.
             df = _pick_table(doc, SALES_PURCHASE_COLS,
                              weighted=["party_name", "total_amount", "taxable_value"])
-            if df is None or df.empty:
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        f"No {doc_type} table could be read from '{filename}'. Expected columns similar to "
-                        "'Party Name', 'Invoice No', 'Date', 'Taxable Value', 'Total Amount'."
-                    ),
+            if df is not None and not df.empty:
+                parsed_rows = _parse_register(df, doc_type)
+            if not parsed_rows:
+                for tbl in doc.tables:
+                    rows = _parse_register(tbl, doc_type)
+                    if rows:
+                        parsed_rows.extend(rows)
+            if not parsed_rows and doc.text:
+                # Plain-text fallback: extract any line that looks like a
+                # transaction (has a date and at least one number).
+                parsed_rows = _text_rows_fallback(doc.text, doc_type)
+            if not parsed_rows:
+                status_msg = "partial"
+                error = (
+                    f"File '{filename}' was read successfully but no {doc_type} rows could be "
+                    "extracted — the column headers may use non-standard names. "
+                    "The raw content has been stored; check the extracted text below."
                 )
-            parsed_rows = _parse_register(df, doc_type)
 
         elif doc_type == "bank_statement":
-            df = _pick_table(doc, BANK_COLS, weighted=["debit", "credit"], min_score=4)
-            if df is None or df.empty:
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        f"No transaction table could be read from '{filename}'. Expected columns like "
-                        "'Date', 'Narration', 'Withdrawal/Debit', 'Deposit/Credit', 'Balance'."
-                    ),
+            df = _pick_table(doc, BANK_COLS, weighted=["debit", "credit"], min_score=2)
+            if df is not None and not df.empty:
+                parsed_rows = _parse_bank(df)
+            if not parsed_rows:
+                for tbl in doc.tables:
+                    rows = _parse_bank(tbl)
+                    if rows:
+                        parsed_rows.extend(rows)
+            if not parsed_rows and doc.text:
+                parsed_rows = _text_rows_fallback(doc.text, "bank_statement")
+            if not parsed_rows:
+                status_msg = "partial"
+                error = (
+                    f"File '{filename}' was read but no bank transactions were extracted — "
+                    "expected columns like 'Date', 'Narration', 'Debit', 'Credit', 'Balance'."
                 )
-            parsed_rows = _parse_bank(df)
 
         elif doc_type == "gst_report":
-            # First try an invoice-level export (GSTR-1 B2B Excel, purchase
-            # register from GSTR-2B). If that isn't what was uploaded, fall
-            # back to reading the filed return's own summary tables.
             df = _pick_table(doc, SALES_PURCHASE_COLS,
                              weighted=["party_name", "total_amount", "taxable_value"], min_score=6)
             if df is not None and not df.empty:
-                try:
-                    parsed_rows = _parse_register(df, doc_type)
-                except HTTPException:
-                    parsed_rows = []
+                parsed_rows = _parse_register(df, doc_type)
             if not parsed_rows:
                 parsed_rows = parse_gst_tables(doc.tables, doc.text, filename)
                 if parsed_rows:
@@ -589,23 +728,22 @@ async def upload_mis_document(
                         "gst_period": parsed_rows[0].get("gst_period"),
                     }
             if not parsed_rows:
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        f"No GST data could be read from '{filename}'. Upload a GSTR-1 / GSTR-3B / GSTR-2B "
-                        "download from the portal (PDF or Excel), or an invoice-level GST register."
-                    ),
+                status_msg = "partial"
+                error = (
+                    f"File '{filename}' was read but no GST rows were extracted. "
+                    "Upload a GSTR-1 / GSTR-3B / GSTR-2B portal export (PDF or Excel), "
+                    "or an invoice-level GST register."
                 )
 
         elif doc_type == "balance_sheet":
             bs_suggestions = _parse_balance_sheet_doc(doc)
+            # Balance sheets are always accepted — even when nothing is
+            # auto-detected the user can fill in the Manual Entry form.
             if not bs_suggestions:
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        f"No balance-sheet line items were recognised in '{filename}'. Expected heads like "
-                        "'Sundry Debtors', 'Sundry Creditors', 'Cash & Bank Balance', 'Total Revenue'."
-                    ),
+                status_msg = "partial"
+                error = (
+                    f"File '{filename}' was stored but no balance-sheet line items were "
+                    "auto-detected. You can fill in the figures manually under Manual Entry."
                 )
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported doc_type '{doc_type}'.")
