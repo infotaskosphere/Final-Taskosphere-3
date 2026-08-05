@@ -2521,11 +2521,10 @@ async def security_events(
 
 @api_router.post("/users/{user_id}/approve")
 async def approve_user(user_id: str, current_user: User = Depends(get_current_user)):
-    # PERMISSION MATRIX (updated): Admin or users with can_manage_users can approve
-    perms = get_user_permissions(current_user)
-    if current_user.role != "admin" and not perms.get("can_manage_users", False):
+    # Client / user approval is admin-only — permission governance cannot delegate this.
+    if current_user.role != "admin":
         raise HTTPException(
-            status_code=403, detail="You do not have permission to approve users"
+            status_code=403, detail="Only administrators can approve users"
         )
 
     existing = await db.users.find_one({"id": user_id}, {"_id": 0})
@@ -2557,11 +2556,10 @@ async def approve_user(user_id: str, current_user: User = Depends(get_current_us
 
 @api_router.post("/users/{user_id}/reject")
 async def reject_user(user_id: str, current_user: User = Depends(get_current_user)):
-    # PERMISSION MATRIX (updated): Admin or users with can_manage_users can reject
-    perms = get_user_permissions(current_user)
-    if current_user.role != "admin" and not perms.get("can_manage_users", False):
+    # User rejection is admin-only — matches approval which is also admin-only.
+    if current_user.role != "admin":
         raise HTTPException(
-            status_code=403, detail="You do not have permission to reject users"
+            status_code=403, detail="Only administrators can reject users"
         )
 
     existing = await db.users.find_one({"id": user_id}, {"_id": 0})
