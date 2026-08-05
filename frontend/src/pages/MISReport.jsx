@@ -23,11 +23,11 @@ const fmt = (n) => new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).
 const PALETTE = ['#1F6FB2', '#1FAF5A', '#F59E0B', '#7C3AED', '#EF4444', '#0EA5E9', '#EC4899', '#14B8A6'];
 
 const DOC_TYPES = [
-  { key: 'sales', label: 'Sales Register', icon: ReceiptText, hint: 'Invoice-wise sales with party name, amount, due date, status' },
-  { key: 'purchase', label: 'Purchase Register', icon: FileSpreadsheet, hint: 'Vendor bills with amount, due date, status' },
-  { key: 'bank_statement', label: 'Bank Statement', icon: Landmark, hint: 'Date, Narration, Debit, Credit, Balance' },
-  { key: 'balance_sheet', label: 'Provisional Balance Sheet', icon: FileText, hint: 'PDF or Excel — cash, debtors, creditors, revenue' },
-  { key: 'gst_report', label: 'GST Reports (GSTR-2B/3B)', icon: ScrollText, hint: 'GST portal export — Excel/CSV' },
+  { key: 'sales', label: 'Sales Register', icon: ReceiptText, hint: 'PDF, Excel, CSV, ZIP — invoice-wise sales with party name, amount, due date, status' },
+  { key: 'purchase', label: 'Purchase Register', icon: FileSpreadsheet, hint: 'PDF, Excel, CSV, ZIP — vendor bills with amount, due date, status' },
+  { key: 'bank_statement', label: 'Bank Statement', icon: Landmark, hint: 'PDF, Excel, CSV — Date, Narration, Debit, Credit, Balance' },
+  { key: 'balance_sheet', label: 'Provisional Balance Sheet', icon: FileText, hint: 'PDF, Excel, Word — cash, debtors, creditors, revenue (auto-filled into Manual Entry)' },
+  { key: 'gst_report', label: 'GST Reports (GSTR-2B/3B)', icon: ScrollText, hint: 'PDF, Excel, CSV, ZIP — GST portal export or invoice-level register' },
 ];
 
 const TABS = [
@@ -489,10 +489,16 @@ export default function MISReport() {
     form.append('file', file);
     try {
       const { data } = await api.post('/mis/upload', form, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 });
-      toast.success(`${DOC_TYPES.find((d) => d.key === docType)?.label}: ${data.row_count} rows parsed`);
+      const label = DOC_TYPES.find((d) => d.key === docType)?.label;
+      if (data.status === 'partial') {
+        toast.warning(`${label}: file stored but rows could not be auto-extracted. ${data.error || 'You can fill in figures manually.'}`, { duration: 8000 });
+      } else {
+        toast.success(`${label}: ${data.row_count} rows parsed successfully`);
+      }
       refreshAll();
     } catch (e) {
-      toast.error(e?.response?.data?.detail || 'Upload failed — check the file columns match the expected format');
+      const detail = e?.response?.data?.detail;
+      toast.error(detail || 'Upload failed — the file could not be read. Try saving it as PDF or Excel and re-uploading.', { duration: 8000 });
     } finally {
       setUploading((p) => ({ ...p, [docType]: false }));
     }
@@ -622,9 +628,11 @@ export default function MISReport() {
 
                     {existing ? (
                       <div className="flex items-center justify-between gap-2 mt-2">
-                        <span className={`text-xs flex items-center gap-1 min-w-0 truncate ${existing.status === 'error' ? 'text-red-500' : 'text-emerald-500'}`}>
-                          {existing.status === 'error' ? <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> : <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />}
-                          <span className="truncate">{existing.filename} · {existing.row_count} rows</span>
+                        <span className={`text-xs flex items-center gap-1 min-w-0 truncate ${existing.status === 'error' ? 'text-red-500' : existing.status === 'partial' ? 'text-amber-500' : 'text-emerald-500'}`}>
+                          {existing.status === 'error' ? <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> : existing.status === 'partial' ? <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> : <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />}
+                          <span className="truncate" title={existing.status === 'partial' ? (existing.error || 'Stored — fill manually') : existing.filename}>
+                            {existing.filename} · {existing.status === 'partial' ? 'stored (manual fill needed)' : `${existing.row_count} rows`}
+                          </span>
                         </span>
                         {canManage && (
                           <button onClick={() => deleteUpload(existing.id)} className="text-red-400 hover:text-red-500 shrink-0">
@@ -641,7 +649,7 @@ export default function MISReport() {
                         <input
                           ref={(el) => (fileInputs.current[d.key] = el)}
                           type="file"
-                          accept=".xlsx,.xls,.csv,.tsv,.pdf"
+                          accept=".xlsx,.xls,.csv,.tsv,.pdf,.zip,.docx,.doc,.xlsm"
                           className="hidden"
                           onChange={(e) => { handleUpload(d.key, e.target.files[0]); e.target.value = ''; }}
                         />
