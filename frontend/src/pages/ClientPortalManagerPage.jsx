@@ -2436,7 +2436,7 @@ function AdvancedSettingsTab({ isDark, isAdmin }) {
 
 /* ── Main Page ──────────────────────────────────────────────────────────────── */
 export default function ClientPortalManagerPage() {
-  const { user }   = useAuth();
+  const { user, hasPermission }   = useAuth();
   const { isDark } = useDark();
   const navigate   = useNavigate();
   const location   = useLocation();
@@ -2446,6 +2446,9 @@ export default function ClientPortalManagerPage() {
   const [manageTarget, setManageTarget] = useState(null);
 
   const isAdmin = user?.role === 'admin';
+  // Users with can_view_client_portal permission granted via Permission Governance
+  // get the same manage rights as admins, except approval-only actions.
+  const canManagePortal = isAdmin || user?.role === 'manager' || hasPermission?.('can_view_client_portal');
 
   // Determine active tab from path
   const path = location.pathname;
@@ -2499,13 +2502,13 @@ export default function ClientPortalManagerPage() {
       </motion.div>
 
       {/* ── Info banners ── */}
-      {!isAdmin && (
+      {!canManagePortal && (
         <div className={`mb-5 flex items-start gap-3 p-4 rounded-xl border ${isDark ? 'bg-blue-900/20 border-blue-800 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-700'}`}>
           <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
           <p className="text-xs leading-relaxed">You have read-only access to the Client Portal. Contact an administrator to add or modify portal users.</p>
         </div>
       )}
-      {isAdmin && (
+      {canManagePortal && (
         <div className={`mb-5 flex items-start gap-3 p-4 rounded-xl border ${isDark ? 'bg-slate-700/50 border-slate-600 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
           <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5 text-slate-400" />
           <p className="text-xs leading-relaxed">
@@ -2519,15 +2522,19 @@ export default function ClientPortalManagerPage() {
       )}
 
       {/* ── Active Tab Content ── */}
-      {activeTab === 'overview'         && <OverviewTab        portalUsers={portalUsers} loading={loading} navigate={navigate} isAdmin={isAdmin} isDark={isDark} onManage={handleManage} />}
-      {activeTab === 'all-clients'      && <AllClientsTab      isDark={isDark} isAdmin={isAdmin} />}
-      {activeTab === 'clients'          && <ClientsTab         portalUsers={portalUsers} loading={loading} onManage={handleManage} isAdmin={isAdmin} isDark={isDark} />}
-      {activeTab === 'folder-architect' && <FolderArchitectTab isDark={isDark} isAdmin={isAdmin} />}
-      {activeTab === 'documents'        && <DocumentsTab       isDark={isDark} isAdmin={isAdmin} />}
-      {activeTab === 'smart-connect'    && <SmartConnectTab    portalUsers={portalUsers} loading={loading} isDark={isDark} isAdmin={isAdmin} />}
+      {/* isAdmin prop below is intentionally canManagePortal so that users with    */}
+      {/* can_view_client_portal permission get the same manage controls as admins. */}
+      {/* The real isAdmin flag is kept for approval-only actions (not rendered     */}
+      {/* inside any of these tabs).                                                */}
+      {activeTab === 'overview'         && <OverviewTab        portalUsers={portalUsers} loading={loading} navigate={navigate} isAdmin={canManagePortal} isDark={isDark} onManage={handleManage} />}
+      {activeTab === 'all-clients'      && <AllClientsTab      isDark={isDark} isAdmin={canManagePortal} />}
+      {activeTab === 'clients'          && <ClientsTab         portalUsers={portalUsers} loading={loading} onManage={handleManage} isAdmin={canManagePortal} isDark={isDark} />}
+      {activeTab === 'folder-architect' && <FolderArchitectTab isDark={isDark} isAdmin={canManagePortal} />}
+      {activeTab === 'documents'        && <DocumentsTab       isDark={isDark} isAdmin={canManagePortal} />}
+      {activeTab === 'smart-connect'    && <SmartConnectTab    portalUsers={portalUsers} loading={loading} isDark={isDark} isAdmin={canManagePortal} />}
       {activeTab === 'messages'         && <MessagesTab        portalUsers={portalUsers} isDark={isDark} />}
       {activeTab === 'settings'         && <ClientPortalSettingTab isDark={isDark} />}
-      {activeTab === 'advanced-settings' && <AdvancedSettingsTab isDark={isDark} isAdmin={isAdmin} />}
+      {activeTab === 'advanced-settings' && <AdvancedSettingsTab isDark={isDark} isAdmin={canManagePortal} />}
 
       {/* ── Manage modal ── */}
       {manageTarget && (
