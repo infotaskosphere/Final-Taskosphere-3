@@ -51,14 +51,14 @@ const NAV_GROUPS = [
     id: 'core',
     items: [
       // Default modules — <Protected> routes, visible to all roles
-      { path: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard' },
-      { path: '/tasks',      icon: CheckSquare,     label: 'Tasks' },
-      { path: '/todos',      icon: CheckSquare,     label: 'To Do' },
-      { path: '/attendance', icon: Clock,           label: 'Attendance' },
-      { path: '/reminders',  icon: Bell,            label: 'Reminders' },
-      { path: '/action-center', icon: Zap, label: 'Action Center' },
-      { path: '/visits',     icon: MapPin,          label: 'Client Visits' },
-      { path: '/ai-reader',      icon: BrainCircuit,  label: 'AI Document Reader' },
+      { path: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard', permission: 'can_view_dashboard' },
+      { path: '/tasks',      icon: CheckSquare,     label: 'Tasks', permission: 'can_view_tasks' },
+      { path: '/todos',      icon: CheckSquare,     label: 'To Do', permission: 'can_view_todo_dashboard' },
+      { path: '/attendance', icon: Clock,           label: 'Attendance', permission: 'can_view_attendance' },
+      { path: '/reminders',  icon: Bell,            label: 'Reminders', permission: 'can_view_reminders' },
+      { path: '/action-center', icon: Zap, label: 'Action Center', permission: 'can_view_action_center' },
+      { path: '/visits',     icon: MapPin,          label: 'Client Visits', permission: 'can_view_client_visits' },
+      { path: '/ai-reader',      icon: BrainCircuit,  label: 'AI Document Reader', permission: 'can_view_ai_document_reader' },
       // Client Portal Manager — moved here from Admin. Still individually
       // admin-granted per user (see MODULE_HIERARCHY["taskosphere"] in
       // backend/models.py), but it now lives inside the Taskosphere tab
