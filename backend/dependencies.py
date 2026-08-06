@@ -1196,6 +1196,11 @@ MODULE_ACTION_MAP: Dict[str, str] = {
     "password_vault.create":"can_edit_passwords",
     "password_vault.edit":  "can_edit_passwords",
     "password_vault.delete":"can_edit_passwords",
+    # password_reset (Client Portal Manager → bulk password reset)
+    "password_reset.view":   "can_reset_client_passwords",
+    "password_reset.create": "can_reset_client_passwords",
+    "password_reset.edit":   "can_reset_client_passwords",
+    "password_reset.export": "can_reset_client_passwords",
     # dsc_register
     "dsc_register.view":    "can_view_all_dsc",
     "dsc_register.create":  "can_edit_dsc",
