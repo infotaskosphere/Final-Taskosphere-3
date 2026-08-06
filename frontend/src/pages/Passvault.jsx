@@ -158,7 +158,7 @@ function ModalHead({ icon, title, sub, grad, onClose }) {
   );
 }
 
-function RevealPw({ entryId, isDark }) {
+function RevealPw({ entryId, isDark, canReveal = false }) {
   const [shown, setShown] = useState(false);
   const [pw, setPw] = useState('');
   const [loading, setLoading] = useState(false);
@@ -171,12 +171,22 @@ function RevealPw({ entryId, isDark }) {
     try {
       const r = await api.get(`/passwords/${entryId}/reveal`);
       if (!mounted.current) return;
-      setPw(r.data.password || '');
+      const pw = r.data.password || '';
+      if (pw === '[decryption failed]') {
+        toast.error('Password decryption failed — the encryption key may have changed. Re-save the entry to fix it.');
+        return;
+      }
+      setPw(pw);
       setShown(true);
     } catch (e) {
       if (mounted.current) toast.error(errorMessage(e));
     } finally { if (mounted.current) setLoading(false); }
   };
+
+  // Non-admin: just show dots, no reveal button
+  if (!canReveal) {
+    return <span className="font-mono tracking-widest text-slate-400 text-sm select-none">••••••••••</span>;
+  }
 
   return (
     <div className="flex items-center gap-1.5">
@@ -200,7 +210,7 @@ function RevealPw({ entryId, isDark }) {
   );
 }
 
-function DetailModal({ open, onClose, entry, isDark }) {
+function DetailModal({ open, onClose, entry, isDark, isAdmin }) {
   if (!entry) return null;
   const m = PM[entry.portal_type] || PM.OTHER;
   const row = (label, val, mono = false) => val ? (
@@ -247,7 +257,7 @@ function DetailModal({ open, onClose, entry, isDark }) {
             {entry.has_password && (
               <div>
                 <p className={`text-xs font-semibold uppercase ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Password</p>
-                <div className="mt-1"><RevealPw entryId={entry.id} isDark={isDark} /></div>
+                <div className="mt-1"><RevealPw entryId={entry.id} isDark={isDark} canReveal={isAdmin} /></div>
               </div>
             )}
           </div>
@@ -642,8 +652,20 @@ function WAModal({ open, onClose, entry, isDark }) {
     setPhone(entry.mobile || '');
     setLoadPw(true);
     api.get(`/passwords/${entry.id}/reveal`)
-      .then(r => setPw(r.data.password || ''))
-      .catch(() => setPw(''))
+      .then(r => {
+        const pw = r.data.password || '';
+        if (pw === '[decryption failed]') {
+          toast.error('Password decryption failed — re-save the entry to fix it.');
+          setPw('');
+        } else {
+          setPw(pw);
+        }
+      })
+      .catch(err => {
+        const detail = err?.response?.data?.detail;
+        if (detail) toast.error(detail);
+        setPw('');
+      })
       .finally(() => setLoadPw(false));
   }, [open, entry?.id]);
 
@@ -981,7 +1003,9 @@ function ShareClientModal({ open, onClose, isDark, entries }) {
       if (e.username) L.push(`   👤 ID: ${e.username}`);
       if (e.has_password) {
         const pw = revealedMap[e.id];
-        L.push(`   🔑 Password: ${pw || '(loading…)'}`);
+        if (pw && pw !== '[decryption failed]') {
+          L.push(`   🔑 Password: ${pw}`);
+        }
       }
       if (e.holder_name) L.push(`   👔 Holder: ${e.holder_name}${e.holder_din ? ` (DIN: ${e.holder_din})` : ''}`);
       if (e.mobile) L.push(`   📱 Mobile: ${e.mobile}`);
@@ -1206,7 +1230,7 @@ function Card({ entry, no, canEdit, isAdmin, onEdit, onDel, onShare, onDetail, i
         <div className="mb-2.5" onClick={e => e.stopPropagation()}>
           <p className={`text-[10px] font-bold uppercase tracking-wider mb-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Password</p>
           {entry.has_password
-            ? <RevealPw entryId={entry.id} isDark={isDark} />
+            ? <RevealPw entryId={entry.id} isDark={isDark} canReveal={isAdmin} />
             : <span className={`text-xs italic ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No password stored</span>}
         </div>
         {entry.mobile && (
@@ -1312,7 +1336,7 @@ function Row({ entry, no, canEdit, isAdmin, onEdit, onDel, onShare, onDetail, is
                 </button>
               </div>
             )}
-            <RevealPw entryId={entry.id} isDark={isDark} />
+            <RevealPw entryId={entry.id} isDark={isDark} canReveal={isAdmin} />
           </div>
 
           {/* Type & Dept badges */}
@@ -1816,7 +1840,7 @@ export default function PasswordRepository() {
         onSize={s => { setSize(s); setPage(1); }}
         isDark={isDark} />
 
-      <DetailModal open={detailOpen} onClose={() => setDetailOpen(false)} entry={detailEntry} isDark={isDark} />
+      <DetailModal open={detailOpen} onClose={() => setDetailOpen(false)} entry={detailEntry} isDark={isDark} isAdmin={isAdmin} />
       <EditModal open={editOpen} onClose={() => setEditOpen(false)} entry={editEntry} isDark={isDark}
         onSuccess={() => qc.invalidateQueries({ queryKey: ['passwords'] })} />
       <DeleteModal open={delOpen} onClose={() => setDelOpen(false)} entry={delEntry} isDark={isDark} />
