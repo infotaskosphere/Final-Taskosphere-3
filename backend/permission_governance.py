@@ -70,16 +70,13 @@ _MODULE_TO_PAGE_FLAGS = {
 
 # Modules that are always open to every authenticated user and therefore
 # exempt from the "parent module off -> zero out its pages" rule below.
-# Taskosphere carries a can_access_taskosphere flag in MODULE_HIERARCHY for
-# UI/bookkeeping reasons, but per the note in backend/models.py it "has
-# always been open to every authenticated user and carries no page-level
-# flag of its own". A stale/missing/False value for that flag on an older
-# account must never be able to silently wipe out a page-level grant like
-# can_view_client_portal underneath it — which is exactly what happened
-# before this fix: an admin would toggle "Client Portal Manager" on, save,
-# and see it wiped straight back to False because the parent flag looked
-# off in that save's payload.
-_ALWAYS_ON_MODULES = {"can_access_taskosphere"}
+# Taskosphere used to be listed here — it no longer is. Every one of its
+# pages (Dashboard, Tasks, To-Do, Attendance, Reminders, Action Center,
+# Client Visits, AI Document Reader, Client Portal Manager) now has its own
+# individually-governed flag, and can_access_taskosphere is a real, editable
+# master switch like every other module: switching it off correctly cascades
+# and clears every page flag beneath it, same as Finix/Compliance/etc.
+_ALWAYS_ON_MODULES = set()
 
 
 def _enforce_module_hierarchy(permissions: dict) -> dict:
