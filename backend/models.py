@@ -51,6 +51,11 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_audit_logs": True,
           "can_view_selected_users_reports": True,
           "can_view_todo_dashboard": True,
+          "can_view_dashboard": True,
+          "can_view_reminders": True,
+          "can_view_action_center": True,
+          "can_view_client_visits": True,
+          "can_view_ai_document_reader": True,
           "can_use_chat": True,
           "can_view_staff_rankings": True,
           "can_delete_data": True,
@@ -144,6 +149,11 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_audit_logs": False,      # ADMIN_GRANTED_ONLY
           "can_view_selected_users_reports": True,  # Reports → VIEW (Team scope)
           "can_view_todo_dashboard": True,   # To Do → VIEW (Own + Team)
+          "can_view_dashboard": True,        # Dashboard → VIEW
+          "can_view_reminders": True,        # Reminders → VIEW (Own + Team)
+          "can_view_action_center": True,    # Action Center → VIEW (Own + Team)
+          "can_view_client_visits": True,    # Client Visits → VIEW (Own + Team)
+          "can_view_ai_document_reader": True,  # AI Document Reader → VIEW (Own + Team)
           "can_use_chat": False,             # ADMIN_GRANTED_ONLY
           "can_view_staff_rankings": False,  # ADMIN_GRANTED_ONLY
           "can_delete_data": False,          # ADMIN_GRANTED_ONLY
@@ -228,6 +238,11 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_audit_logs": False,      # ADMIN_GRANTED_ONLY
           "can_view_selected_users_reports": False, # ADMIN_GRANTED_ONLY (staff sees own reports only)
           "can_view_todo_dashboard": True,   # To Do → VIEW (Own)
+          "can_view_dashboard": True,        # Dashboard → VIEW
+          "can_view_reminders": True,        # Reminders → VIEW (Own)
+          "can_view_action_center": True,    # Action Center → VIEW (Own)
+          "can_view_client_visits": True,    # Client Visits → VIEW (Own)
+          "can_view_ai_document_reader": True,  # AI Document Reader → VIEW (Own)
           "can_use_chat": False,             # ADMIN_GRANTED_ONLY
           "can_view_staff_rankings": False,  # ADMIN_GRANTED_ONLY
           "can_delete_data": False,          # ADMIN_GRANTED_ONLY
@@ -293,21 +308,32 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
 # every time permissions are saved, and mirrored in the frontend so a page
 # toggle is greyed out until its module is switched on.
 #
-# NOTE: Taskosphere (Tasks, To-Do, Attendance, Reminders, Action Center,
-# Client Visits, AI Document Reader) has always been open to every
-# authenticated user and carries no page-level flag of its own. Client
-# Portal Manager is the one exception — it lives inside the Taskosphere tab
-# but is admin-granted per user via its own page flag (can_view_client_portal)
-# below. The Dashboard route itself is intentionally left out of this
-# hierarchy so that turning Taskosphere off can never create a redirect loop
-# (denied-access redirects always land on /dashboard).
+# NOTE: every page inside Taskosphere — Dashboard, Tasks, To-Do, Attendance,
+# Reminders, Action Center, Client Visits, AI Document Reader and Client
+# Portal Manager — now carries its own individually-governed page flag, same
+# as every other module. All default True for every role (see
+# DEFAULT_ROLE_PERMISSIONS above) so nobody loses access on upgrade; an admin
+# can revoke any one of them per user from Users → Permission Governance.
+# Dashboard is still never enforced with a hard redirect in the frontend
+# route guard (see frontend/src/AppRoutes.jsx) — its flag only controls
+# whether the Dashboard link shows in the sidebar, so turning it off can
+# never create a redirect loop (denied-access redirects always land on
+# /dashboard).
 MODULE_HIERARCHY: Dict[str, Dict[str, Any]] = {
     "taskosphere": {
         "flag": "can_access_taskosphere",
         "label": "Taskosphere",
         "description": "Core workspace — Tasks, To-Do, Attendance, Reminders, Action Center, Client Visits, AI Document Reader and Client Portal Manager.",
         "pages": [
-            {"flag": "can_view_client_portal", "label": "Client Portal Manager", "actions": ["view", "create", "edit", "delete", "export", "print", "share"]},
+            {"flag": "can_view_dashboard",          "label": "Dashboard",           "actions": ["view"]},
+            {"flag": "can_view_tasks",               "label": "Tasks",                "actions": ["view", "create", "edit", "delete"]},
+            {"flag": "can_view_todo_dashboard",      "label": "To-Do",                "actions": ["view", "create", "edit", "delete"]},
+            {"flag": "can_view_attendance",          "label": "Attendance",           "actions": ["view", "edit"]},
+            {"flag": "can_view_reminders",           "label": "Reminders",            "actions": ["view", "create", "edit", "delete"]},
+            {"flag": "can_view_action_center",       "label": "Action Center",        "actions": ["view"]},
+            {"flag": "can_view_client_visits",       "label": "Client Visits",        "actions": ["view", "create", "edit", "delete"]},
+            {"flag": "can_view_ai_document_reader",  "label": "AI Document Reader",   "actions": ["view", "create"]},
+            {"flag": "can_view_client_portal",       "label": "Client Portal Manager", "actions": ["view", "create", "edit", "delete", "export", "print", "share"]},
         ],
     },
     "finix": {
@@ -444,6 +470,16 @@ class UserPermissions(BaseModel):
     can_view_audit_logs: bool = False
     can_view_selected_users_reports: bool = False
     can_view_todo_dashboard: bool = False
+    # ── Individually-governed Taskosphere pages (see MODULE_HIERARCHY["taskosphere"]
+    # in this file). These used to be wide open to every signed-in user with no
+    # flag of their own; they now default True for every role so nobody loses
+    # access on upgrade, but an admin can revoke any one of them per user from
+    # Users → Permission Governance, same as Client Portal Manager already worked.
+    can_view_dashboard: bool = True
+    can_view_reminders: bool = True
+    can_view_action_center: bool = True
+    can_view_client_visits: bool = True
+    can_view_ai_document_reader: bool = True
     can_use_chat: bool = False
     can_view_staff_rankings: bool = False
     can_delete_data: bool = False
@@ -531,8 +567,12 @@ class UserPermissions(BaseModel):
     # Master "module access" flags for the six main areas of the app, shown on
     # Users → Permissions → Modules. A page-level flag above can only ever be
     # effectively True while its parent module flag here is also True.
-    # Taskosphere has always been open to every authenticated user, so it
-    # defaults True for every role; the other five default to admin-only.
+    # Taskosphere defaults True for every role (matching its historically-open
+    # pages), but — unlike before — is now a real, editable master switch: an
+    # admin can turn it off for a user, which cascades and clears every page
+    # flag nested beneath it (Dashboard, Tasks, To-Do, Attendance, Reminders,
+    # Action Center, Client Visits, AI Document Reader, Client Portal Manager),
+    # exactly like Finix/Compliance/Records/Proposals/People Matrix already do.
     can_access_taskosphere: bool = True
     can_access_finix: bool = False
     can_access_compliance: bool = False
