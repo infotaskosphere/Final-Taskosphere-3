@@ -143,6 +143,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_view_salary_slips: true, can_manage_salary_slips: true,
       can_view_all_visits: true, can_edit_visits: true, can_delete_visits: true, can_delete_own_visits: true,
       can_view_client_portal: true,
+      can_reset_client_passwords: true,
       can_manage_whatsapp: true,
       can_access_whatsapp_hub: true,
       // ── Main permission modules ──
@@ -215,6 +216,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_manage_whatsapp: false,     // admin-granted only
       can_access_whatsapp_hub: false,  // ADMIN_GRANTED_ONLY
       can_view_client_portal: false,   // admin-granted only
+      can_reset_client_passwords: false,   // admin-granted only
       can_access_taskosphere: true, can_access_finix: false, can_access_compliance: true,
       can_access_records: true, can_access_proposals: true, can_access_people_matrix: true,
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
@@ -284,6 +286,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_manage_whatsapp: false,     // admin-granted only
       can_access_whatsapp_hub: false,  // ADMIN_GRANTED_ONLY
       can_view_client_portal: false,   // admin-granted only
+      can_reset_client_passwords: false,   // admin-granted only
       can_access_taskosphere: true, can_access_finix: false, can_access_compliance: true,
       can_access_records: true, can_access_proposals: true, can_access_people_matrix: true,
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
@@ -316,6 +319,7 @@ const EMPTY_PERMISSIONS = {
   can_view_all_visits: false, can_edit_visits: false,
   can_delete_visits: false, can_delete_own_visits: true,
   can_view_client_portal: false,
+  can_reset_client_passwords: false,
   can_manage_whatsapp: false,
   can_access_whatsapp_hub: false,  // ADMIN_GRANTED_ONLY
   // ── Main permission modules ── all start off for a brand-new/blank form;
@@ -538,7 +542,7 @@ const PermissionMatrixSummary = ({ permissions }) => {
     'can_manage_invoices', 'can_view_sale', 'can_view_purchase', 'can_view_bank', 'can_view_chart_of_accounts',
     'can_manage_chart_of_accounts', 'can_view_journal_entries', 'can_post_journal_entries', 'can_match_bank',
     'can_view_accounting_reports', 'can_view_passwords', 'can_edit_passwords', 'can_view_gst_reconciliation',
-    'can_view_trademark_sphere', 'can_view_client_portal', 'can_manage_whatsapp', 'can_create_quotations',
+    'can_view_trademark_sphere', 'can_view_client_portal', 'can_reset_client_passwords', 'can_manage_whatsapp', 'can_create_quotations',
     'can_view_mis_report', 'can_manage_mis_report',
     'can_view_salary_slips', 'can_manage_salary_slips',
     'can_view_recruitment', 'can_manage_recruitment',
@@ -702,6 +706,7 @@ const MODULE_TREE = [
       { permKey: 'can_view_client_visits',      label: 'Client Visits',    desc: 'Log and view client visit records', icon: MapPin },
       { permKey: 'can_view_ai_document_reader', label: 'AI Document Reader', desc: 'Upload and analyze documents using the AI reader', icon: BrainCircuit },
       { permKey: 'can_view_client_portal',      label: 'Client Portal Manager', desc: 'Create and manage client portal accounts, Drive folder visibility, portal messages and settings', icon: Building2 },
+      { permKey: 'can_reset_client_passwords',  label: 'Password Reset', desc: 'Reset client portal passwords in bulk and download the credentials sheet. Off = the user cannot reset any portal password.', icon: KeyRound },
     ],
   },
   {
