@@ -27,7 +27,21 @@ router = APIRouter(prefix="/passwords", tags=["password-repository"])
 # a reversible, non-encrypted format (base64) if the crypto library is
 # missing. Any of those would let anyone with DB or repo access decrypt every
 # stored client password.
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet, MultiFernet, InvalidToken
+
+
+def _coerce_fernet_key(raw: str) -> bytes:
+    """Accept either a real Fernet key or any human-chosen passphrase."""
+    raw = (raw or "").strip()
+    try:
+        key = raw.encode()
+        Fernet(key)  # validate it's a proper Fernet key
+        return key
+    except Exception:
+        # Derive a proper key deterministically from the passphrase itself
+        # (never from another secret).
+        return base64.urlsafe_b64encode(hashlib.sha256(raw.encode()).digest())
+
 
 _env_key = os.getenv("PASSWORD_REPO_KEY", "").strip()
 
@@ -47,36 +61,93 @@ if not _env_key:
         "before deploying."
     )
 
-try:
-    _fernet_key = _env_key.encode()
-    Fernet(_fernet_key)  # validate it's a proper Fernet key
-except Exception:
-    # Allow a human-chosen passphrase too, but derive a proper key from it
-    # deterministically via its own value only (never another secret).
-    _fernet_key = base64.urlsafe_b64encode(hashlib.sha256(_env_key.encode()).digest())
+_fernet_key = _coerce_fernet_key(_env_key)
 
-_fernet = Fernet(_fernet_key)
+# ── Key rotation support ──────────────────────────────────────────────────────
+# The 422 "Password decryption failed — the encryption key may have changed"
+# error happens when an entry was written with a *previous* key (e.g. the
+# vault used PASSWORDS_SECRET_KEY earlier, or PASSWORD_REPO_KEY was rotated).
+# Instead of failing, we now try every known historical key on read. Set
+# PASSWORD_REPO_KEY_OLD (or a comma-separated PASSWORD_REPO_KEYS_OLD list) to
+# the old value(s); PASSWORDS_SECRET_KEY is also tried automatically because
+# earlier builds of this app used it. Whatever decrypts a record is
+# transparently re-encrypted with the CURRENT key on the next save, so the old
+# keys can be dropped once everything is migrated.
+_legacy_raw: List[str] = []
+for _name in ("PASSWORD_REPO_KEY_OLD", "PASSWORDS_SECRET_KEY", "PASSWORD_SECRET_KEY"):
+    _v = os.getenv(_name, "").strip()
+    if _v:
+        _legacy_raw.append(_v)
+for _v in (os.getenv("PASSWORD_REPO_KEYS_OLD", "") or "").split(","):
+    _v = _v.strip()
+    if _v:
+        _legacy_raw.append(_v)
+
+_all_keys: List[bytes] = [_fernet_key]
+for _v in _legacy_raw:
+    _k = _coerce_fernet_key(_v)
+    if _k not in _all_keys:
+        _all_keys.append(_k)
+
+# MultiFernet encrypts with the FIRST key and decrypts with any of them.
+_fernet = MultiFernet([Fernet(k) for k in _all_keys])
 ENCRYPTION_AVAILABLE = True
+
+DECRYPT_FAILED = "[decryption failed]"
+
 
 def _encrypt(plain: str) -> str:
     if not plain:
         return ""
     return _fernet.encrypt(plain.encode()).decode()
 
+
 def _decrypt(cipher: str) -> str:
     if not cipher:
         return ""
     try:
+        # Tries the current key first, then every configured legacy key.
         return _fernet.decrypt(cipher.encode()).decode()
     except Exception:
-        # Backward-compat: records written before this fix (when the old
-        # code could silently fall back to base64-only "encryption") won't
-        # be valid Fernet tokens. Try to recover them once so they aren't
-        # lost; they should be re-saved through _encrypt() to be re-secured.
+        # Backward-compat: records written before Fernet existed here could be
+        # plain base64. Recover them so they aren't lost; they get re-secured
+        # by _reencrypt_if_stale()/the next save.
         try:
-            return base64.b64decode(cipher).decode()
+            decoded = base64.b64decode(cipher, validate=True).decode()
+            if decoded and decoded.isprintable():
+                return decoded
         except Exception:
-            return "[decryption failed]"
+            pass
+        return DECRYPT_FAILED
+
+
+def _is_current_key(cipher: str) -> bool:
+    """True when `cipher` decrypts with the CURRENT (primary) key."""
+    if not cipher:
+        return False
+    try:
+        Fernet(_fernet_key).decrypt(cipher.encode())
+        return True
+    except Exception:
+        return False
+
+
+async def _reencrypt_if_stale(collection, query: dict, cipher: str, field: str = "password_encrypted") -> None:
+    """
+    Self-healing: if a record decrypted via a legacy key (or legacy base64),
+    silently rewrite it with the current key so the error never comes back and
+    the old keys can eventually be removed. Never raises.
+    """
+    try:
+        if not cipher or _is_current_key(cipher):
+            return
+        plain = _decrypt(cipher)
+        if not plain or plain == DECRYPT_FAILED:
+            return
+        await collection.update_one(query, {"$set": {field: _encrypt(plain)}})
+    except Exception:  # pragma: no cover - best effort only
+        logger.warning("Could not re-encrypt legacy password record", exc_info=True)
+
 
 # ── Pydantic schemas ──────────────────────────────────────────────────────────
 PORTAL_TYPES = [
@@ -990,14 +1061,18 @@ async def reveal_password(
         raise HTTPException(404, "Entry not found")
     if not _can_reveal(current_user, doc):
         raise HTTPException(403, "You are not authorised to reveal this password")
-    plain = _decrypt(doc.get("password_encrypted", ""))
-    if plain == "[decryption failed]":
+    cipher = doc.get("password_encrypted", "")
+    plain = _decrypt(cipher)
+    if plain == DECRYPT_FAILED:
         raise HTTPException(
             422,
-            "Password decryption failed — the encryption key may have changed. "
-            "Re-save the entry to re-encrypt it with the current key, or ensure "
-            "PASSWORD_REPO_KEY is set to the original value.",
+            "Password decryption failed — this entry was encrypted with a key "
+            "this server does not have. Re-save the entry with the correct "
+            "password, or set PASSWORD_REPO_KEY_OLD to the previous key so it "
+            "can be migrated automatically.",
         )
+    # Self-heal: entry decrypted with a legacy key → rewrite with current key.
+    await _reencrypt_if_stale(db.passwords, {"id": entry_id}, cipher)
     now = datetime.now(timezone.utc).isoformat()
     await db.passwords.update_one(
         {"id": entry_id},
