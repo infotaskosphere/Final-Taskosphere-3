@@ -387,9 +387,17 @@ async def reveal_portal_password(
             "No recoverable password on file for this account yet — set/reset the "
             "password once to enable this.",
         )
+    plain = _vault_decrypt(encrypted)
+    if plain == "[decryption failed]":
+        raise HTTPException(
+            422,
+            "Password decryption failed — the encryption key may have changed. "
+            "Reset the portal password to re-encrypt it with the current key, or "
+            "ensure PASSWORD_REPO_KEY is set to the original value.",
+        )
     return {
         "portal_username": pu.get("portal_username"),
-        "password": _vault_decrypt(encrypted),
+        "password": plain,
     }
 
 
