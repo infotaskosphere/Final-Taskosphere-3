@@ -304,8 +304,11 @@ const EMPTY_PERMISSIONS = {
   can_manage_whatsapp: false,
   can_access_whatsapp_hub: false,  // ADMIN_GRANTED_ONLY
   // ── Main permission modules ── all start off for a brand-new/blank form;
-  // Quick Reset templates above set sensible role defaults.
-  can_access_taskosphere: false, can_access_finix: false, can_access_compliance: false,
+  // Quick Reset templates above set sensible role defaults. Exception:
+  // can_access_taskosphere is always true — it's a locked always-on module
+  // (see ModuleGovernanceCard), matching the backend which now ignores any
+  // stored/missing value for this flag and always treats it as granted.
+  can_access_taskosphere: true, can_access_finix: false, can_access_compliance: false,
   can_access_records: false, can_access_proposals: false, can_access_people_matrix: false,
   view_password_departments: [], assigned_clients: [], view_other_tasks: [],
   view_other_attendance: [], view_other_reports: [], view_other_todos: [],
@@ -788,18 +791,31 @@ const MODULE_TREE = [
 
 const ModuleGovernanceCard = ({ module, permissions, setPermissions, expanded = true, onToggleExpanded, searchTerm = '' }) => {
   const { flag, label, desc, icon: Icon, accent, pages, footnote } = module;
-  const masterOn  = !!permissions[flag];
+
+  // Taskosphere is always open to every authenticated user — the backend
+  // (governance_core.has_module_access + permission_governance's
+  // _enforce_module_hierarchy + dependencies._normalize_permissions) now
+  // treats can_access_taskosphere as permanently True no matter what's
+  // stored, specifically so a stale/False value here can never wipe out a
+  // page-level grant like Client Portal Manager underneath it. The toggle
+  // is locked on to match — turning it "off" in this UI would no longer do
+  // anything on save, so presenting it as editable would just be misleading.
+  const alwaysOn = flag === 'can_access_taskosphere';
+  const masterOn  = alwaysOn ? true : !!permissions[flag];
   const pageKeys  = pages.flatMap(p => [p.permKey, ...(p.writePerms || []).map(w => w.permKey)]);
   const enabledCount = pageKeys.filter(k => permissions[k]).length;
 
-  const toggleMaster = (val) => setPermissions(prev => {
-    const next = { ...prev, [flag]: val };
-    // Turning the module off cascades: every page (and nested write) flag
-    // beneath it is cleared in the same update, matching what the backend
-    // guarantees on save (_enforce_module_hierarchy).
-    if (!val) pageKeys.forEach(k => { next[k] = false; });
-    return next;
-  });
+  const toggleMaster = (val) => {
+    if (alwaysOn) return; // locked always-on — no-op
+    setPermissions(prev => {
+      const next = { ...prev, [flag]: val };
+      // Turning the module off cascades: every page (and nested write) flag
+      // beneath it is cleared in the same update, matching what the backend
+      // guarantees on save (_enforce_module_hierarchy).
+      if (!val) pageKeys.forEach(k => { next[k] = false; });
+      return next;
+    });
+  };
 
   // "Select Entire Module" — turn the module on AND grant every page (and
   // nested write-permission) flag beneath it in one click.
@@ -813,6 +829,7 @@ const ModuleGovernanceCard = ({ module, permissions, setPermissions, expanded = 
   };
 
   // "Remove Entire Module" — same cascade as switching the module off.
+  // Not available for always-on modules (see alwaysOn above).
   const removeEntireModule = (e) => {
     e.stopPropagation();
     toggleMaster(false);
@@ -834,8 +851,8 @@ const ModuleGovernanceCard = ({ module, permissions, setPermissions, expanded = 
   return (
     <div className="space-y-3">
       <div
-        onClick={() => toggleMaster(!masterOn)}
-        className="flex gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all hover:shadow-md"
+        onClick={() => !alwaysOn && toggleMaster(!masterOn)}
+        className={`flex gap-4 p-4 rounded-xl border-2 transition-all hover:shadow-md ${alwaysOn ? 'cursor-default' : 'cursor-pointer'}`}
         style={masterOn ? { borderColor: `${accent}40`, background: `${accent}06` } : {}}
       >
         <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition-all ${
@@ -848,20 +865,26 @@ const ModuleGovernanceCard = ({ module, permissions, setPermissions, expanded = 
             <p className={`font-bold text-sm ${masterOn ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300'}`}>{label}</p>
             {pages.length > 0 && (
               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md" style={{ background: `${accent}15`, color: accent }}>
-                {masterOn ? `${enabledCount}/${pageKeys.length} pages` : 'Access off'}
+                {alwaysOn ? `Always on · ${enabledCount}/${pageKeys.length} pages` : (masterOn ? `${enabledCount}/${pageKeys.length} pages` : 'Access off')}
               </span>
             )}
           </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">{desc}</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
+            {alwaysOn ? `${desc} Open to every signed-in user — this module can't be turned off, only the pages beneath it are individually granted.` : desc}
+          </p>
           {pages.length > 0 && (
             <div className="flex items-center gap-3 mt-1.5" onClick={e => e.stopPropagation()}>
               <button type="button" onClick={selectEntireModule} className="text-[11px] font-bold hover:underline" style={{ color: accent }}>
                 Select entire module
               </button>
-              <span className="text-slate-300 dark:text-slate-600">·</span>
-              <button type="button" onClick={removeEntireModule} className="text-[11px] font-bold text-slate-400 hover:text-red-500 hover:underline">
-                Remove entire module
-              </button>
+              {!alwaysOn && (
+                <>
+                  <span className="text-slate-300 dark:text-slate-600">·</span>
+                  <button type="button" onClick={removeEntireModule} className="text-[11px] font-bold text-slate-400 hover:text-red-500 hover:underline">
+                    Remove entire module
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -873,7 +896,7 @@ const ModuleGovernanceCard = ({ module, permissions, setPermissions, expanded = 
               {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             </button>
           )}
-          <Switch checked={masterOn} onCheckedChange={toggleMaster} />
+          <Switch checked={masterOn} onCheckedChange={toggleMaster} disabled={alwaysOn} />
         </div>
       </div>
 
