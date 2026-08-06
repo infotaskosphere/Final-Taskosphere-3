@@ -62,17 +62,11 @@ def has_module_access(user: User, module_key: str) -> bool:
         # flag a non-admin can be granted here (see MODULE_HIERARCHY note).
         return False
 
-    if module_key == "taskosphere":
-        # Taskosphere (Tasks, To-Do, Attendance, Reminders, Action Center,
-        # Client Visits, AI Document Reader) has always been open to every
-        # authenticated user — see the MODULE_HIERARCHY note in models.py.
-        # It still carries a can_access_taskosphere flag for UI/hierarchy
-        # bookkeeping, but that flag must never be able to gate access: a
-        # stale/missing/False value on an old account would otherwise cause
-        # _enforce_module_hierarchy() to silently wipe out page-level grants
-        # underneath it (e.g. Client Portal Manager) on every future save.
-        return True
-
+    # Taskosphere used to be hard-coded True here regardless of the stored
+    # flag. It's now a real, editable master switch like every other module
+    # — defaults True for every role (see DEFAULT_ROLE_PERMISSIONS), but an
+    # admin can turn it off per user, which cascades to every page beneath
+    # it via _enforce_module_hierarchy on save.
     module_def = MODULE_HIERARCHY.get(module_key)
     if not module_def:
         return False
