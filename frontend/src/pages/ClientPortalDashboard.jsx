@@ -1142,22 +1142,22 @@ export default function ClientPortalDashboard() {
                   <Empty message="No documents found." />
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="w-full text-sm min-w-[480px]">
                       <thead>
                         <tr className="text-left text-xs text-gray-500 border-b border-gray-100">
-                          <th className="pb-2 font-medium">Name</th>
-                          <th className="pb-2 font-medium">Type</th>
-                          <th className="pb-2 font-medium">Status</th>
-                          <th className="pb-2 font-medium">Expiry</th>
+                          <th className="pb-2 pr-4 font-semibold w-2/5">Name</th>
+                          <th className="pb-2 px-3 font-semibold w-1/5">Type</th>
+                          <th className="pb-2 px-3 font-semibold w-1/5">Status</th>
+                          <th className="pb-2 pl-3 font-semibold w-1/5 whitespace-nowrap">Expiry</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-50">
+                      <tbody className="divide-y divide-gray-100">
                         {(data.documents || []).map((d, i) => (
-                          <tr key={i} className="hover:bg-gray-50">
-                            <td className="py-3 font-medium text-gray-800">{d.name}</td>
-                            <td className="py-3 text-gray-500">{d.doc_type || "—"}</td>
-                            <td className="py-3"><Badge status={d.status} /></td>
-                            <td className="py-3 text-gray-500">{fmtDate(d.expiry_date)}</td>
+                          <tr key={i} className="hover:bg-gray-50 align-middle">
+                            <td className="py-3 pr-4 font-medium text-gray-800 truncate max-w-[200px]">{d.name}</td>
+                            <td className="py-3 px-3 text-gray-500 whitespace-nowrap">{d.doc_type || "—"}</td>
+                            <td className="py-3 px-3"><Badge status={d.status} /></td>
+                            <td className="py-3 pl-3 text-gray-500 whitespace-nowrap">{fmtDate(d.expiry_date)}</td>
                           </tr>
                         ))}
                       </tbody>
