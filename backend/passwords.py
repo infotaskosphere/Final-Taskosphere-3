@@ -991,6 +991,13 @@ async def reveal_password(
     if not _can_reveal(current_user, doc):
         raise HTTPException(403, "You are not authorised to reveal this password")
     plain = _decrypt(doc.get("password_encrypted", ""))
+    if plain == "[decryption failed]":
+        raise HTTPException(
+            422,
+            "Password decryption failed — the encryption key may have changed. "
+            "Re-save the entry to re-encrypt it with the current key, or ensure "
+            "PASSWORD_REPO_KEY is set to the original value.",
+        )
     now = datetime.now(timezone.utc).isoformat()
     await db.passwords.update_one(
         {"id": entry_id},
