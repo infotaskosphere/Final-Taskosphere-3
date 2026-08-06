@@ -82,7 +82,12 @@ function PortalUserCard({ pu, onManage, isAdmin }) {
     setRevealing(true);
     try {
       const res = await api.get(`/client-portal/users/${pu.id}/reveal-password`);
-      setRevealed(res.data?.password || '');
+      const pw = res.data?.password || '';
+      if (pw === '[decryption failed]') {
+        toast.error('Password decryption failed — reset the portal password to fix it.');
+        return;
+      }
+      setRevealed(pw);
       setShowPassword(true);
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Could not retrieve password');
@@ -97,6 +102,10 @@ function PortalUserCard({ pu, onManage, isAdmin }) {
       try {
         const res = await api.get(`/client-portal/users/${pu.id}/reveal-password`);
         pwd = res.data?.password || '';
+        if (pwd === '[decryption failed]') {
+          toast.error('Password decryption failed — reset the portal password to fix it.');
+          return;
+        }
         setRevealed(pwd);
       } catch (err) {
         toast.error(err?.response?.data?.detail || 'Could not retrieve password');
@@ -367,11 +376,19 @@ function OverviewTab({ portalUsers, loading, navigate, isAdmin, isDark, onManage
         ) : viewMode === 'list' ? (
           /* List View (Table Mode) */
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm min-w-[700px]">
+              <colgroup>
+                <col className="w-[28%]" />
+                <col className="w-[17%]" />
+                <col className="w-[17%]" />
+                <col className="w-[10%]" />
+                <col className="w-[18%]" />
+                <col className="w-[10%]" />
+              </colgroup>
               <thead>
                 <tr className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
                   {['Client / Company', 'Portal Username', 'Email Address', 'Status', 'Permissions Enabled', 'Actions'].map((h) => (
-                    <th key={h} className="text-left py-3 px-4 text-xs font-semibold text-slate-500 tracking-wider">{h}</th>
+                    <th key={h} className="text-left py-3 px-4 text-xs font-semibold text-slate-500 tracking-wider whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -384,26 +401,26 @@ function OverviewTab({ portalUsers, loading, navigate, isAdmin, isDark, onManage
                       isDark ? 'border-slate-700/60' : 'border-slate-100'
                     }`}
                   >
-                    <td className="py-4 px-4">
+                    <td className="py-4 px-4 align-top">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-sm" style={{ background: GRADIENT }}>
                           {(pu.display_name || pu.portal_username || '?')[0].toUpperCase()}
                         </div>
-                        <div>
-                          <span className="font-semibold text-slate-800 dark:text-slate-100 text-sm block">
+                        <div className="min-w-0">
+                          <span className="font-semibold text-slate-800 dark:text-slate-100 text-sm block truncate">
                             {pu.display_name || pu.portal_username}
                           </span>
                           {pu.client_name && (
-                            <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1 mt-0.5">
-                              <Building2 className="h-3 w-3" /> {pu.client_name}
+                            <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1 mt-0.5 truncate">
+                              <Building2 className="h-3 w-3 flex-shrink-0" /> {pu.client_name}
                             </span>
                           )}
                         </div>
                       </div>
                     </td>
-                    <td className="py-4 px-4 text-xs text-slate-600 dark:text-slate-400 font-mono">@{pu.portal_username}</td>
-                    <td className="py-4 px-4 text-xs text-slate-500 dark:text-slate-400">{pu.email || '—'}</td>
-                    <td className="py-4 px-4">
+                    <td className="py-4 px-4 align-top text-xs text-slate-600 dark:text-slate-400 font-mono whitespace-nowrap">@{pu.portal_username}</td>
+                    <td className="py-4 px-4 align-top text-xs text-slate-500 dark:text-slate-400 truncate max-w-[160px]">{pu.email || '—'}</td>
+                    <td className="py-4 px-4 align-top whitespace-nowrap">
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
                         pu.is_active
                           ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400'
@@ -413,7 +430,7 @@ function OverviewTab({ portalUsers, loading, navigate, isAdmin, isDark, onManage
                         {pu.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </td>
-                    <td className="py-4 px-4">
+                    <td className="py-4 px-4 align-top">
                       <div className="flex flex-wrap gap-1.5">
                         {[
                           { key: 'can_view_tasks',      label: 'Tasks',      icon: ClipboardList, color: '#3B82F6' },
@@ -439,13 +456,13 @@ function OverviewTab({ portalUsers, loading, navigate, isAdmin, isDark, onManage
                         })}
                       </div>
                     </td>
-                    <td className="py-4 px-4">
-                      <div className="flex items-center gap-2">
+                    <td className="py-4 px-4 align-top">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={() => navigate(`/client-portal-manager/documents?clientId=${pu.client_id}`)}
-                          className="text-xs h-7 px-2.5"
+                          className="text-xs h-7 px-2.5 whitespace-nowrap"
                         >
                           <FileText className="h-3.5 w-3.5 mr-1" /> Document Portal
                         </Button>
