@@ -51,6 +51,7 @@ GOVERNED_MODULES = {
     "journal_entries":     {"flag": "can_view_journal_entries",     "label": "Journal Entries"},
     "post_journal_entries": {"flag": "can_post_journal_entries",    "label": "Journal Entries (post)"},
     "accounting_reports":  {"flag": "can_view_accounting_reports",  "label": "Accounting Reports"},
+    "password_reset":      {"flag": "can_reset_client_passwords",    "label": "Password Reset"},
 }
 
 
