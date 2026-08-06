@@ -410,14 +410,11 @@ def _normalize_permissions(user_dict: dict) -> dict:
     # Only fill keys that are completely absent (never override DB values)
     merged = {**template, **perms}
 
-    # Taskosphere is always open to every authenticated user (see the
-    # MODULE_HIERARCHY note in models.py) — unlike every other flag above,
-    # this one is force-corrected even when a value is already stored,
-    # because older accounts can have it explicitly persisted as False from
-    # before this module-hierarchy bug was fixed. Leaving it there would
-    # keep silently wiping out can_view_client_portal (and any future page
-    # nested under Taskosphere) on every save via _enforce_module_hierarchy.
-    merged["can_access_taskosphere"] = True
+    # can_access_taskosphere is now a real, editable master switch like every
+    # other module flag — it defaults True from the template above (filling
+    # in only for accounts missing it entirely) but is no longer force-
+    # corrected over an explicit stored value, so an admin's choice to turn
+    # it off for a user actually sticks.
 
     user_dict["permissions"] = merged
     return user_dict
