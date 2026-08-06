@@ -27,6 +27,7 @@ import {
   Landmark, CreditCard, ShoppingBag, BookOpen, NotebookPen, BarChart3,
   TrendingDown, CalendarClock, CalendarX2, CalendarCheck2, CalendarOff,
   Minimize2, Copy, ChevronsDownUp, ChevronsUpDown, Upload,
+  CheckSquare, BrainCircuit,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -130,6 +131,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_edit_documents: true, can_edit_due_dates: true, can_edit_users: true,
       can_download_reports: true, can_view_selected_users_reports: true,
       can_view_todo_dashboard: true, can_edit_clients: true, can_use_chat: true,
+      can_view_dashboard: true, can_view_reminders: true, can_view_action_center: true,
+      can_view_client_visits: true, can_view_ai_document_reader: true,
       can_view_all_leads: true, can_manage_settings: true, can_assign_clients: true,
       can_view_staff_rankings: true, can_delete_data: true, can_delete_tasks: true,
       can_connect_email: true, can_view_own_data: true, can_create_quotations: true,
@@ -184,6 +187,11 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_manage_recruitment: false,  // admin-granted only
       can_view_selected_users_reports: true,  // Reports → VIEW (Team scope)
       can_view_todo_dashboard: true,  // To Do → VIEW (Own + Team)
+      can_view_dashboard: true,       // Dashboard → VIEW
+      can_view_reminders: true,       // Reminders → VIEW (Own + Team)
+      can_view_action_center: true,   // Action Center → VIEW (Own + Team)
+      can_view_client_visits: true,   // Client Visits → VIEW (Own + Team)
+      can_view_ai_document_reader: true, // AI Document Reader → VIEW (Own + Team)
       can_use_chat: false,            // admin-granted only
       can_view_staff_rankings: false, // admin-granted only
       can_delete_data: false,         // admin-granted only
@@ -248,6 +256,11 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_manage_recruitment: false,  // admin-granted only
       can_view_selected_users_reports: false, // admin-granted only (staff sees own reports only)
       can_view_todo_dashboard: true,  // To Do → VIEW (Own)
+      can_view_dashboard: true,       // Dashboard → VIEW (Own)
+      can_view_reminders: true,       // Reminders → VIEW (Own)
+      can_view_action_center: true,   // Action Center → VIEW (Own)
+      can_view_client_visits: true,   // Client Visits → VIEW (Own)
+      can_view_ai_document_reader: true, // AI Document Reader → VIEW (Own)
       can_use_chat: false,            // admin-granted only
       can_view_staff_rankings: false, // admin-granted only
       can_delete_data: false,         // admin-granted only
@@ -290,6 +303,8 @@ const EMPTY_PERMISSIONS = {
   can_edit_documents: false, can_edit_due_dates: false, can_edit_users: false,
   can_download_reports: false, can_view_selected_users_reports: false,
   can_view_todo_dashboard: false, can_edit_clients: false, can_use_chat: false,
+  can_view_dashboard: false, can_view_reminders: false, can_view_action_center: false,
+  can_view_client_visits: false, can_view_ai_document_reader: false,
   can_view_all_leads: false, can_manage_settings: false, can_assign_clients: false,
   can_view_staff_rankings: false, can_delete_data: false, can_delete_tasks: false,
   can_connect_email: false, can_view_own_data: false, can_create_quotations: false,
@@ -304,11 +319,12 @@ const EMPTY_PERMISSIONS = {
   can_manage_whatsapp: false,
   can_access_whatsapp_hub: false,  // ADMIN_GRANTED_ONLY
   // ── Main permission modules ── all start off for a brand-new/blank form;
-  // Quick Reset templates above set sensible role defaults. Exception:
-  // can_access_taskosphere is always true — it's a locked always-on module
-  // (see ModuleGovernanceCard), matching the backend which now ignores any
-  // stored/missing value for this flag and always treats it as granted.
-  can_access_taskosphere: true, can_access_finix: false, can_access_compliance: false,
+  // Quick Reset templates above set sensible role defaults. Taskosphere is
+  // no longer a locked always-on module — it starts off like every other
+  // module here too, and its 9 pages above (Dashboard through Client Portal
+  // Manager) start off with it, exactly matching ModuleGovernanceCard's
+  // cascade-on-off behavior.
+  can_access_taskosphere: false, can_access_finix: false, can_access_compliance: false,
   can_access_records: false, can_access_proposals: false, can_access_people_matrix: false,
   view_password_departments: [], assigned_clients: [], view_other_tasks: [],
   view_other_attendance: [], view_other_reports: [], view_other_todos: [],
@@ -677,9 +693,16 @@ const MODULE_TREE = [
     key: 'taskosphere', flag: 'can_access_taskosphere', label: 'Taskosphere', icon: ClipboardList, accent: '#1F6FB2',
     desc: 'The core workspace — Tasks, To-Do, Attendance, Reminders, Action Center, Client Visits, AI Document Reader and Client Portal Manager.',
     pages: [
-      { permKey: 'can_view_client_portal', label: 'Client Portal Manager', desc: 'Create and manage client portal accounts, Drive folder visibility, portal messages and settings', icon: Building2 },
+      { permKey: 'can_view_dashboard',         label: 'Dashboard',         desc: 'View the personal dashboard — summary widgets, quick stats and recent activity', icon: LayoutDashboard },
+      { permKey: 'can_view_tasks',              label: 'Tasks',             desc: 'View and manage assigned tasks', icon: CheckSquare },
+      { permKey: 'can_view_todo_dashboard',     label: 'To-Do',             desc: 'View and manage the personal to-do list', icon: CheckSquare },
+      { permKey: 'can_view_attendance',         label: 'Attendance',        desc: 'Mark and view attendance records', icon: Clock },
+      { permKey: 'can_view_reminders',          label: 'Reminders',        desc: 'View and manage reminders', icon: Bell },
+      { permKey: 'can_view_action_center',      label: 'Action Center',    desc: 'View pending actions and approvals awaiting the user', icon: Zap },
+      { permKey: 'can_view_client_visits',      label: 'Client Visits',    desc: 'Log and view client visit records', icon: MapPin },
+      { permKey: 'can_view_ai_document_reader', label: 'AI Document Reader', desc: 'Upload and analyze documents using the AI reader', icon: BrainCircuit },
+      { permKey: 'can_view_client_portal',      label: 'Client Portal Manager', desc: 'Create and manage client portal accounts, Drive folder visibility, portal messages and settings', icon: Building2 },
     ],
-    footnote: 'Tasks, To-Do, Attendance, Reminders, Action Center, Client Visits and AI Document Reader stay open to every signed-in user and don\u2019t have separate page-level toggles. Client Portal Manager above is the one page in this module that\u2019s individually admin-granted.',
   },
   {
     key: 'finix', flag: 'can_access_finix', label: 'Finix', icon: CreditCard, accent: '#15803D',
@@ -792,16 +815,14 @@ const MODULE_TREE = [
 const ModuleGovernanceCard = ({ module, permissions, setPermissions, expanded = true, onToggleExpanded, searchTerm = '' }) => {
   const { flag, label, desc, icon: Icon, accent, pages, footnote } = module;
 
-  // Taskosphere is always open to every authenticated user — the backend
-  // (governance_core.has_module_access + permission_governance's
-  // _enforce_module_hierarchy + dependencies._normalize_permissions) now
-  // treats can_access_taskosphere as permanently True no matter what's
-  // stored, specifically so a stale/False value here can never wipe out a
-  // page-level grant like Client Portal Manager underneath it. The toggle
-  // is locked on to match — turning it "off" in this UI would no longer do
-  // anything on save, so presenting it as editable would just be misleading.
-  const alwaysOn = flag === 'can_access_taskosphere';
-  const masterOn  = alwaysOn ? true : !!permissions[flag];
+  // Every module — including Taskosphere — now has a real, editable master
+  // switch: turning it off cascades and clears every page flag nested
+  // beneath it (Dashboard, Tasks, To-Do, Attendance, Reminders, Action
+  // Center, Client Visits, AI Document Reader, Client Portal Manager),
+  // matching what the backend guarantees on save
+  // (permission_governance._enforce_module_hierarchy).
+  const alwaysOn = false;
+  const masterOn  = !!permissions[flag];
   const pageKeys  = pages.flatMap(p => [p.permKey, ...(p.writePerms || []).map(w => w.permKey)]);
   const enabledCount = pageKeys.filter(k => permissions[k]).length;
 
