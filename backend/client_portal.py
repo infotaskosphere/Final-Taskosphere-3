@@ -27,7 +27,13 @@ from passlib.context import CryptContext
 from jose import jwt, JWTError
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from backend.dependencies import db, JWT_SECRET as SECRET_KEY, ALGORITHM, get_current_user
+from backend.dependencies import (
+    db,
+    JWT_SECRET as SECRET_KEY,
+    ALGORITHM,
+    get_current_user,
+    get_user_permissions,
+)
 from backend.models import User
 # Reuse the same Brevo-backed OTP emailer the main-app forgot-password flow
 # uses, so client portal password resets need no separate email infra.
@@ -51,15 +57,13 @@ def _can_manage_portal(user: "User") -> bool:
     Allowed when:
       • role is "admin" or "manager" (always), OR
       • the user has been explicitly granted can_view_client_portal via the
-        Permission Governance module (stored in user.permissions dict or as a
-        direct attribute, depending on how the auth layer serialises it).
+        Permission Governance module.
     """
     if getattr(user, "role", None) in ("admin", "manager"):
         return True
-    perms = getattr(user, "permissions", None) or {}
-    if isinstance(perms, dict):
-        return bool(perms.get("can_view_client_portal", False))
-    return bool(getattr(user, "can_view_client_portal", False))
+    return bool(get_user_permissions(user).get("can_view_client_portal", False))
+
+
 router = APIRouter(prefix="/client-portal", tags=["client-portal"])
 
 # Google Drive calls are synchronous under the hood. Keep them capped so a
