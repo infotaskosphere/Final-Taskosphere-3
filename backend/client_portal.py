@@ -111,7 +111,11 @@ async def get_current_portal_client(
 # hashed) copy using the same Fernet-based encryption the Password Vault
 # already uses, and mirror it into the Password Vault as a "Client Portal"
 # entry so it shows up there automatically too.
-from backend.passwords import _encrypt as _vault_encrypt, _decrypt as _vault_decrypt
+from backend.passwords import (
+    _encrypt as _vault_encrypt,
+    _decrypt as _vault_decrypt,
+    _reencrypt_if_stale as _vault_reencrypt_if_stale,
+)
 
 
 async def _sync_portal_password(
@@ -364,6 +368,167 @@ async def update_portal_user(
     return {"success": True}
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# BULK PASSWORD RESET  (Client Portal Manager → Password Reset shortcut)
+# Gated by the dedicated `can_reset_client_passwords` permission ("Password
+# Reset" in Access Governance). Admin always allowed.
+# ═══════════════════════════════════════════════════════════════════════════
+
+import csv
+import secrets as _secrets
+import string as _string
+
+_PWD_ALPHABET = _string.ascii_uppercase + _string.ascii_lowercase + _string.digits
+
+
+def _can_reset_passwords(user: "User") -> bool:
+    if getattr(user, "role", None) == "admin":
+        return True
+    return bool(get_user_permissions(user).get("can_reset_client_passwords", False))
+
+
+def _generate_portal_password(length: int = 12) -> str:
+    length = max(8, min(length, 32))
+    # Guarantee at least one upper, one lower and one digit.
+    while True:
+        pwd = "".join(_secrets.choice(_PWD_ALPHABET) for _ in range(length))
+        if (any(c.islower() for c in pwd) and any(c.isupper() for c in pwd)
+                and any(c.isdigit() for c in pwd)):
+            return pwd
+
+
+class BulkPasswordResetRequest(BaseModel):
+    # Portal user ids to reset. Empty + all_users=True resets every account.
+    portal_user_ids: List[str] = Field(default_factory=list)
+    all_users: bool = False
+    only_active: bool = True
+    # Leave blank to auto-generate a strong unique password per client.
+    new_password: Optional[str] = None
+    password_length: int = 12
+
+
+async def _reset_one_portal_user(pu: dict, new_password: str, current_user: User) -> dict:
+    await db.client_portal_users.update_one(
+        {"id": pu["id"]},
+        {"$set": {
+            "hashed_password": pwd_context.hash(new_password),
+            "password_reset_at": datetime.now(timezone.utc).isoformat(),
+            "password_reset_by": current_user.id,
+        }},
+    )
+    await _sync_portal_password(
+        client_id=pu.get("client_id"),
+        client_name=pu.get("display_name") or pu.get("client_name") or "",
+        portal_username=pu.get("portal_username"),
+        plain_password=new_password,
+        current_user=current_user,
+    )
+    return {
+        "portal_user_id": pu["id"],
+        "client_id": pu.get("client_id"),
+        "client_name": pu.get("display_name") or pu.get("client_name") or "",
+        "portal_username": pu.get("portal_username"),
+        "email": pu.get("email"),
+        "new_password": new_password,
+    }
+
+
+async def _select_portal_users(body: BulkPasswordResetRequest) -> List[dict]:
+    query: dict = {}
+    if not body.all_users:
+        if not body.portal_user_ids:
+            raise HTTPException(400, "Select at least one portal user, or set all_users=true")
+        query["id"] = {"$in": body.portal_user_ids}
+    if body.only_active:
+        query["is_active"] = {"$ne": False}
+    docs = await db.client_portal_users.find(query, {"_id": 0}).to_list(2000)
+    if not docs:
+        raise HTTPException(404, "No matching portal users found")
+    return docs
+
+
+@router.post("/users/bulk-reset-password", dependencies=[Depends(_client_portal_guard)])
+async def bulk_reset_portal_passwords(
+    body: BulkPasswordResetRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Reset the client-portal login password for many clients at once.
+
+    Each account gets a freshly generated strong password (or the single
+    `new_password` supplied). The bcrypt hash is stored for login and an
+    encrypted recoverable copy is mirrored into the Password Vault, exactly
+    like a single reset does — so this also repairs entries whose old
+    encryption key is no longer available.
+    """
+    if not _can_reset_passwords(current_user):
+        raise HTTPException(403, "You do not have the 'Password Reset' permission")
+
+    docs = await _select_portal_users(body)
+    results: List[dict] = []
+    failures: List[dict] = []
+    for pu in docs:
+        try:
+            new_password = body.new_password or _generate_portal_password(body.password_length)
+            results.append(await _reset_one_portal_user(pu, new_password, current_user))
+        except Exception as exc:  # keep going; report per-row
+            logger.exception("Bulk portal password reset failed for %s", pu.get("id"))
+            failures.append({
+                "portal_user_id": pu.get("id"),
+                "portal_username": pu.get("portal_username"),
+                "error": str(exc),
+            })
+
+    await db.password_access_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "action": "BULK_PORTAL_RESET",
+        "count": len(results),
+        "failed": len(failures),
+        "user_id": current_user.id,
+        "user_name": current_user.full_name,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+    return {
+        "success": True,
+        "reset_count": len(results),
+        "failed_count": len(failures),
+        "results": results,
+        "failures": failures,
+    }
+
+
+@router.post("/users/bulk-reset-password/export", dependencies=[Depends(_client_portal_guard)])
+async def export_bulk_reset_credentials(
+    body: BulkPasswordResetRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Same as bulk reset, but streams the new credentials back as a CSV file."""
+    if not _can_reset_passwords(current_user):
+        raise HTTPException(403, "You do not have the 'Password Reset' permission")
+
+    data = await bulk_reset_portal_passwords(body, current_user)  # type: ignore[arg-type]
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Client Name", "Portal Username", "Email", "New Password"])
+    for r in data["results"]:
+        writer.writerow([r["client_name"], r["portal_username"], r.get("email") or "", r["new_password"]])
+    buf.seek(0)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="client-portal-passwords-{stamp}.csv"'},
+    )
+
+
+@router.get("/users/password-reset-access", dependencies=[Depends(_client_portal_guard)])
+async def portal_password_reset_access(current_user: User = Depends(get_current_user)):
+    """Lets the UI show/hide the bulk reset shortcut."""
+    return {"can_reset_passwords": _can_reset_passwords(current_user)}
+
+
 @router.get("/users/{portal_user_id}/reveal-password", dependencies=[Depends(_client_portal_guard)])
 async def reveal_portal_password(
     portal_user_id: str,
@@ -391,10 +556,15 @@ async def reveal_portal_password(
     if plain == "[decryption failed]":
         raise HTTPException(
             422,
-            "Password decryption failed — the encryption key may have changed. "
-            "Reset the portal password to re-encrypt it with the current key, or "
-            "ensure PASSWORD_REPO_KEY is set to the original value.",
+            "Password decryption failed — this account was encrypted with a key "
+            "this server does not have. Use Password Reset (bulk or single) to "
+            "issue a fresh password, or set PASSWORD_REPO_KEY_OLD to the previous "
+            "key so it can be migrated automatically.",
         )
+    # Self-heal: re-encrypt with the current key when it came from a legacy key.
+    await _vault_reencrypt_if_stale(
+        db.client_portal_users, {"id": portal_user_id}, encrypted
+    )
     return {
         "portal_username": pu.get("portal_username"),
         "password": plain,
