@@ -2774,8 +2774,14 @@ async def bulk_delete_portal_users(
     current_user: User = Depends(get_current_user),
 ):
     """Remove multiple clients from the Client Portal at once (revokes their login; Drive files are untouched)."""
-    if current_user.role != "admin":
-        raise HTTPException(403, "Only admins can remove clients from the portal")
+    # Was hardcoded to role == "admin" only, which ignored the
+    # can_view_client_portal permission everyone else in this file already
+    # respects via _can_manage_portal(). That meant a user (or manager) who
+    # had been granted Client Portal access via Permission Governance could
+    # view, add, edit and even single-delete portal users, but hit a 403
+    # specifically on bulk delete. Aligned with every other endpoint below.
+    if not _can_manage_portal(current_user):
+        raise HTTPException(403, "Insufficient permissions")
 
     res = await db.client_portal_users.delete_many({"id": {"$in": body.portal_user_ids}})
     return {"success": True, "deleted_count": res.deleted_count}
