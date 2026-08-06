@@ -68,16 +68,36 @@ _MODULE_TO_PAGE_FLAGS = {
     m["flag"]: [p["flag"] for p in m["pages"]] for m in MODULE_HIERARCHY.values()
 }
 
+# Modules that are always open to every authenticated user and therefore
+# exempt from the "parent module off -> zero out its pages" rule below.
+# Taskosphere carries a can_access_taskosphere flag in MODULE_HIERARCHY for
+# UI/bookkeeping reasons, but per the note in backend/models.py it "has
+# always been open to every authenticated user and carries no page-level
+# flag of its own". A stale/missing/False value for that flag on an older
+# account must never be able to silently wipe out a page-level grant like
+# can_view_client_portal underneath it — which is exactly what happened
+# before this fix: an admin would toggle "Client Portal Manager" on, save,
+# and see it wiped straight back to False because the parent flag looked
+# off in that save's payload.
+_ALWAYS_ON_MODULES = {"can_access_taskosphere"}
+
 
 def _enforce_module_hierarchy(permissions: dict) -> dict:
     """
     Returns a copy of `permissions` with every page-level flag forced to
-    False wherever its parent module's master flag is False (or missing).
-    Only touches flags that belong to a module and are present in the
-    payload — everything else passes through untouched.
+    False wherever its parent module's master flag is False (or missing) —
+    except for _ALWAYS_ON_MODULES, whose page flags are never touched here,
+    and whose own master flag is normalized back to True so an old stale
+    record self-heals the next time it's saved. Only touches flags that
+    belong to a module and are present in the payload — everything else
+    passes through untouched.
     """
     result = dict(permissions)
     for module_flag, page_flags in _MODULE_TO_PAGE_FLAGS.items():
+        if module_flag in _ALWAYS_ON_MODULES:
+            if module_flag in result:
+                result[module_flag] = True
+            continue
         module_on = bool(result.get(module_flag, False))
         if not module_on:
             for page_flag in page_flags:
