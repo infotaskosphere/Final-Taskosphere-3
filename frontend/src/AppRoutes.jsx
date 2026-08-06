@@ -189,16 +189,24 @@ export default function AppRoutes() {
             its own — this is the fix for sluggish page-to-page navigation. ── */}
         <Route element={<ProtectedLayout />}>
 
-        {/* ── Core ── */}
+        {/* ── Core ──
+            Every Taskosphere page is now individually admin-granted via its
+            own can_view_X flag (see MODULE_HIERARCHY["taskosphere"] in
+            backend/models.py) — same PageGuard pattern Client Portal Manager
+            already used. Dashboard is the one exception: it's intentionally
+            left un-gated here (no PageGuard) so that turning any page off
+            can never create a redirect loop, since every denied PageGuard
+            redirects to /dashboard. Its can_view_dashboard flag still
+            controls whether the Dashboard link shows in the sidebar. */}
         <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/tasks" element={<ModuleGate module="taskosphere"><Tasks /></ModuleGate>} />
-        <Route path="/todos" element={<ModuleGate module="taskosphere"><TodoDashboard /></ModuleGate>} />
+        <Route path="/tasks" element={<ModuleGate module="taskosphere"><PageGuard module="taskosphere" page="can_view_tasks"><Tasks /></PageGuard></ModuleGate>} />
+        <Route path="/todos" element={<ModuleGate module="taskosphere"><PageGuard module="taskosphere" page="can_view_todo_dashboard"><TodoDashboard /></PageGuard></ModuleGate>} />
         <Route path="/todo" element={<Navigate to="/todos" replace />} />
-        <Route path="/attendance" element={<ModuleGate module="taskosphere"><Attendance /></ModuleGate>} />
-        <Route path="/reminders" element={<ModuleGate module="taskosphere"><Reminders /></ModuleGate>} />
-        <Route path="/action-center" element={<ModuleGate module="taskosphere"><ActionCenter /></ModuleGate>} />
-        <Route path="/visits" element={<ModuleGate module="taskosphere"><VisitsPage /></ModuleGate>} />
-        <Route path="/ai-reader" element={<ModuleGate module="taskosphere"><AIDocumentReader /></ModuleGate>} />
+        <Route path="/attendance" element={<ModuleGate module="taskosphere"><PageGuard module="taskosphere" page="can_view_attendance"><Attendance /></PageGuard></ModuleGate>} />
+        <Route path="/reminders" element={<ModuleGate module="taskosphere"><PageGuard module="taskosphere" page="can_view_reminders"><Reminders /></PageGuard></ModuleGate>} />
+        <Route path="/action-center" element={<ModuleGate module="taskosphere"><PageGuard module="taskosphere" page="can_view_action_center"><ActionCenter /></PageGuard></ModuleGate>} />
+        <Route path="/visits" element={<ModuleGate module="taskosphere"><PageGuard module="taskosphere" page="can_view_client_visits"><VisitsPage /></PageGuard></ModuleGate>} />
+        <Route path="/ai-reader" element={<ModuleGate module="taskosphere"><PageGuard module="taskosphere" page="can_view_ai_document_reader"><AIDocumentReader /></PageGuard></ModuleGate>} />
         {/* Client Portal Manager — moved here from Admin; still individually
             admin-granted per user via can_view_client_portal (see
             MODULE_HIERARCHY["taskosphere"] in backend/models.py). */}
