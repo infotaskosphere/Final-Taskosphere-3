@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Building2, Users, FileText, MessageSquare, Settings, ExternalLink, ChevronRight, Link2, ArrowLeft, SlidersHorizontal, Loader2 } from 'lucide-react';
+import { Building2, Users, FileText, MessageSquare, Settings, ExternalLink, ChevronRight, Link2, ArrowLeft, SlidersHorizontal, Loader2, KeyRound } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useDark } from '@/hooks/useDark.jsx';
 import { useDocumentUploads } from '@/contexts/DocumentUploadContext.jsx';
@@ -20,6 +20,7 @@ const NAV_ITEMS = [
   { path: '/client-portal-manager/documents',      icon: FileText,           label: 'Documents'           },
   { path: '/client-portal-manager/smart-connect',  icon: Link2,              label: 'Smart Connect'       },
   { path: '/client-portal-manager/messages',       icon: MessageSquare,      label: 'Messages'            },
+  { path: '/client-portal-manager/password-reset', icon: KeyRound,          label: 'Password Reset'      },
   { path: '/client-portal-manager/settings',       icon: Settings,           label: 'Client Portal Setting' },
   { path: '/client-portal-manager/advanced-settings', icon: SlidersHorizontal, label: 'Advanced Settings' },
 ];
