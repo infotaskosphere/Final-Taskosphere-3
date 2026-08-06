@@ -112,6 +112,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_access_proposals": True,
           "can_access_people_matrix": True,
           "can_view_client_portal": True,
+          "can_reset_client_passwords": True,
       },
       "manager": {
           # Manager: SCOPE = OWN + SAME_DEPARTMENT (Own + Team)
@@ -203,6 +204,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_access_proposals": False,
           "can_access_people_matrix": False,
           "can_view_client_portal": False,   # ADMIN_GRANTED_ONLY
+          "can_reset_client_passwords": False,   # ADMIN_GRANTED_ONLY
       },
       "staff": {
           # Staff: SCOPE = OWN only
@@ -292,6 +294,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_access_proposals": False,
           "can_access_people_matrix": False,
           "can_view_client_portal": False,   # ADMIN_GRANTED_ONLY
+          "can_reset_client_passwords": False,   # ADMIN_GRANTED_ONLY
       },
   }
 
@@ -334,6 +337,7 @@ MODULE_HIERARCHY: Dict[str, Dict[str, Any]] = {
             {"flag": "can_view_client_visits",       "label": "Client Visits",        "actions": ["view", "create", "edit", "delete"]},
             {"flag": "can_view_ai_document_reader",  "label": "AI Document Reader",   "actions": ["view", "create"]},
             {"flag": "can_view_client_portal",       "label": "Client Portal Manager", "actions": ["view", "create", "edit", "delete", "export", "print", "share"]},
+            {"flag": "can_reset_client_passwords",   "label": "Password Reset", "actions": ["view", "edit", "export"]},
         ],
     },
     "finix": {
@@ -611,6 +615,12 @@ class UserPermissions(BaseModel):
     # above) — grant/revoke per user from Users → Permission Governance /
     # Permission Matrix. Admin always has access regardless of this flag.
     can_view_client_portal: bool = False
+    # ── Password Reset (Client Portal Manager → Password Reset) ──────────────
+    # Allows resetting client-portal login passwords, including the bulk
+    # reset shortcut, and downloading the resulting credentials sheet.
+    # Admin always has this; manager/staff must be granted it via Access
+    # Governance / Permission Matrix.
+    can_reset_client_passwords: bool = False
 
     # ── Centralized action-level + visibility governance (additive layer) ───
     # `governance_matrix`: { "<module>.<page_flag>": ["view","create","edit",
