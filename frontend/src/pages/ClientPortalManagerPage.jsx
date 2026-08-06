@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import ClientPortalHeader from '@/components/layout/ClientPortalHeader.jsx';
 import ClientPortalManager from '@/components/ClientPortalManager.jsx';
 import DocumentUploadCenter from '@/components/DocumentUploadCenter.jsx';
+import BulkPasswordResetTab from '@/components/clientportal/BulkPasswordResetTab.jsx';
 import {
   Building2, Users, Shield, FileText, ExternalLink,
   Search, Globe, Lock, CreditCard, ClipboardList,
@@ -2478,6 +2479,7 @@ export default function ClientPortalManagerPage() {
   if (path.endsWith('/settings'))         activeTab = 'settings';
   if (path.endsWith('/advanced-settings')) activeTab = 'advanced-settings';
   if (path.endsWith('/smart-connect'))    activeTab = 'smart-connect';
+  if (path.endsWith('/password-reset'))   activeTab = 'password-reset';
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -2504,9 +2506,22 @@ export default function ClientPortalManagerPage() {
         title="Client Portal Manager"
         subtitle="Manage client portal access, permissions and visibility"
         actions={
-          <Button size="sm" variant="ghost" onClick={loadUsers} className="text-white/70 hover:text-white hover:bg-white/15 border border-white/20">
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-          </Button>
+          <>
+            {(canManagePortal || hasPermission?.('can_reset_client_passwords')) && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => navigate('/client-portal-manager/password-reset')}
+                className="text-white/80 hover:text-white hover:bg-white/15 border border-white/20 text-xs"
+                title="Bulk reset client portal passwords"
+              >
+                <KeyRound className="h-3.5 w-3.5 mr-1.5" /> Password Reset
+              </Button>
+            )}
+            <Button size="sm" variant="ghost" onClick={loadUsers} className="text-white/70 hover:text-white hover:bg-white/15 border border-white/20">
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+            </Button>
+          </>
         }
       />
 
@@ -2552,6 +2567,7 @@ export default function ClientPortalManagerPage() {
       {activeTab === 'messages'         && <MessagesTab        portalUsers={portalUsers} isDark={isDark} />}
       {activeTab === 'settings'         && <ClientPortalSettingTab isDark={isDark} />}
       {activeTab === 'advanced-settings' && <AdvancedSettingsTab isDark={isDark} isAdmin={canManagePortal} />}
+      {activeTab === 'password-reset'    && <BulkPasswordResetTab isDark={isDark} portalUsers={portalUsers} loading={loading} onRefresh={loadUsers} />}
 
       {/* ── Manage modal ── */}
       {manageTarget && (
