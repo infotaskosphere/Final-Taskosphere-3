@@ -35,6 +35,7 @@ from backend.dependencies import (
 )
 from backend.models import User, DEFAULT_ROLE_PERMISSIONS, MODULE_HIERARCHY
 from backend.governance_core import ALL_ACTIONS
+from backend.dependencies import _normalize_permissions
 
 router = APIRouter(tags=["Permission Governance"])
 
@@ -339,20 +340,30 @@ async def get_permissions(
     - Admin    : can fetch any user's permissions.
     - Manager (with can_manage_users): can fetch their team staff permissions.
     - Staff    : can only fetch their own permissions (read-only display).
+
+    The returned dict is normalized the same way backend.dependencies.get_current_user
+    normalizes it on every request (missing keys back-filled from
+    DEFAULT_ROLE_PERMISSIONS[role]; explicit stored values, including explicit
+    False, are never touched). Without this, a user whose DB record predates a
+    flag such as can_access_taskosphere or can_view_client_portal would show
+    that flag as OFF here (raw dict lookup defaults to a bare {}), even though
+    it is actually True by role default — the Permission Matrix UI would then
+    render the "Taskosphere" module as off, silently blocking the "Client
+    Portal Manager" page toggle beneath it and any save made from that state.
     """
     # Admin always allowed
     if current_user.role == "admin":
         user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-        return user.get("permissions", {})
+        return _normalize_permissions(user)["permissions"]
 
     # Any user can always fetch their OWN permissions
     if user_id == current_user.id:
         user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-        return user.get("permissions", {})
+        return _normalize_permissions(user)["permissions"]
 
     # Manager with can_manage_users can fetch their direct-report staff permissions
     perms = get_user_permissions(current_user)
@@ -368,7 +379,7 @@ async def get_permissions(
                 status_code=403,
                 detail="Managers can only view permissions of staff members",
             )
-        return target_user.get("permissions", {})
+        return _normalize_permissions(target_user)["permissions"]
 
     raise HTTPException(status_code=403, detail="Not allowed")
 
