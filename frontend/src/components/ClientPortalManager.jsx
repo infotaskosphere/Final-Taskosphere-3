@@ -74,7 +74,12 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
     setRevealing(true);
     try {
       const res = await api.get(`/client-portal/users/${pu.id}/reveal-password`);
-      setRevealed(res.data?.password || '');
+      const pw = res.data?.password || '';
+      if (pw === '[decryption failed]') {
+        toast.error('Password decryption failed — reset the portal password to fix it.');
+        return;
+      }
+      setRevealed(pw);
       setShowPassword(true);
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Could not retrieve password');
@@ -90,6 +95,10 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
       try {
         const res = await api.get(`/client-portal/users/${pu.id}/reveal-password`);
         pwd = res.data?.password || '';
+        if (pwd === '[decryption failed]') {
+          toast.error('Password decryption failed — reset the portal password to fix it.');
+          return;
+        }
         setRevealed(pwd);
       } catch (err) {
         toast.error(err?.response?.data?.detail || 'Could not retrieve password');
