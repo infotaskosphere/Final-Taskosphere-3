@@ -5939,7 +5939,14 @@ function Invoicing() {
       } else if (listViewFilter === 'received') {
         if (!(inv.status === 'paid' || (calcDue(inv) <= 0 && inv.status !== 'draft' && inv.status !== 'cancelled'))) return false;
       }
-      if (typeFilter !== 'all' && inv.invoice_type !== typeFilter) return false;
+      if (typeFilter !== 'all') {
+        if (inv.invoice_type !== typeFilter) return false;
+      } else if (inv.invoice_type === 'proforma') {
+        // Proforma Invoices are quotations, not real sales — keep them out of
+        // the default "All Invoices" list. Select "Proforma Invoice" from the
+        // type filter to view them separately.
+        return false;
+      }
       if (referrerFilter !== 'all' && getInvoiceReferrer(inv) !== referrerFilter) return false;
       if (fromDate && inv.invoice_date < fromDate) return false;
       if (toDate && inv.invoice_date > toDate) return false;
@@ -6170,6 +6177,25 @@ const fetchAll = useCallback(async () => {
     if (!window.confirm(`Delete invoice ${inv.invoice_no}?`)) return;
     try { await api.delete(`/invoices/${inv.id}`); toast.success('Invoice deleted'); fetchAll(); setDetailOpen(false); }
     catch { toast.error('Failed to delete'); }
+  }, [fetchAll]);
+
+  // Convert a Proforma Invoice into a real Tax Invoice (new invoice record,
+  // proforma stays as-is with a backlink so it shows "Converted").
+  const handleConvertToInvoice = useCallback(async (inv) => {
+    if (inv.converted_invoice_id) {
+      toast.info(`Already converted to ${inv.converted_invoice_no || 'an invoice'}`);
+      return;
+    }
+    if (!window.confirm(`Convert Proforma ${inv.invoice_no} into a Tax Invoice?`)) return;
+    try {
+      toast.info('Converting to invoice…', { duration: 1500 });
+      const { data } = await api.post(`/invoices/${inv.id}/convert-to-invoice`);
+      toast.success(`Converted to Tax Invoice ${data.invoice_no || ''}`);
+      fetchAll();
+      setDetailOpen(false);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to convert to invoice');
+    }
   }, [fetchAll]);
 
   const handleDownloadPdf = useCallback(async (inv) => {
@@ -6764,6 +6790,18 @@ const fetchAll = useCallback(async () => {
                       <div className="flex items-center gap-1">
                         <button onClick={() => { setEditingInv(inv); setFormOpen(true); }} title="Edit" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-blue-400 hover:bg-blue-900/30' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}><Edit className="h-3.5 w-3.5" /></button>
                         <button onClick={() => handleDuplicateInv(inv)} title="Duplicate" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-purple-400 hover:bg-purple-900/30' : 'text-slate-400 hover:text-purple-600 hover:bg-purple-50'}`}><Copy className="h-3.5 w-3.5" /></button>
+                        {inv.invoice_type === 'proforma' && (
+                          <button
+                            onClick={() => handleConvertToInvoice(inv)}
+                            title={inv.converted_invoice_id ? `Converted to ${inv.converted_invoice_no}` : 'Convert to Tax Invoice'}
+                            className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+                              inv.converted_invoice_id
+                                ? (isDark ? 'text-emerald-400' : 'text-emerald-600')
+                                : (isDark ? 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/30' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50')
+                            }`}>
+                            {inv.converted_invoice_id ? <Check className="h-3.5 w-3.5" /> : <ArrowRightLeft className="h-3.5 w-3.5" />}
+                          </button>
+                        )}
                         <button onClick={() => handleDownloadPdf(inv)} title="Download PDF" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/30' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}><Download className="h-3.5 w-3.5" /></button>
                         <button onClick={() => handlePrintInvoice(inv)} title="Print Invoice" className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${isDark ? 'text-slate-400 hover:text-indigo-400 hover:bg-indigo-900/30' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}><Printer className="h-3.5 w-3.5" /></button>
                         <button
