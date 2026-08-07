@@ -98,6 +98,11 @@ DRIVE_SCOPES = [
     "https://www.googleapis.com/auth/drive.metadata.readonly",
 ]
 
+# In-process cache of refreshed Credentials, keyed by refresh_token.
+# Reused across Drive calls so we only hit Google's token endpoint when the
+# cached access token has actually expired, instead of on every request.
+_DRIVE_CREDS_CACHE: dict = {}
+
 
 def _get_drive_refresh_token() -> str | None:
     """
@@ -158,8 +163,24 @@ def _drive_configured() -> bool:
 def _get_drive_service():
     """
     Build and return an authenticated Google Drive v3 service.
-    Handles stale/cached env tokens by falling back to DB and
-    auto-clears invalid tokens so the UI shows the correct status.
+
+    IMPORTANT — connection persistence:
+    Once connected, Drive should stay connected until an admin explicitly
+    disconnects it. This function therefore:
+      1. Caches the built Credentials in-process and only calls .refresh()
+         when the cached access token has actually expired, instead of
+         hitting Google's token endpoint on every single Drive call. Fewer
+         refresh calls means fewer chances to hit a transient network/Google
+         hiccup that looks like an auth failure but isn't.
+      2. Retries a transient refresh failure a couple of times (brief
+         backoff) before giving up, since a one-off network blip or a
+         momentary Google-side error is far more common than an actually
+         revoked token.
+      3. NEVER auto-clears the saved refresh token from the database when a
+         refresh fails. A failed refresh raises an error for that one
+         request only — the stored connection is left intact so the next
+         call (or the next retry) can succeed. Disconnecting Drive is only
+         ever done via the explicit /auth/google/disconnect endpoint.
     """
     import google.auth.exceptions
 
@@ -169,7 +190,30 @@ def _get_drive_service():
     if not client_id or not client_secret:
         raise HTTPException(500, "Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET")
 
+    def _refresh_with_retries(creds: Credentials, attempts: int = 3):
+        last_err = None
+        for i in range(attempts):
+            try:
+                creds.refresh(Request())
+                return
+            except google.auth.exceptions.RefreshError:
+                # Don't retry a genuinely invalid/revoked token — retrying
+                # won't help and just delays the error.
+                raise
+            except Exception as e:
+                # Transient network/transport error — back off and retry.
+                last_err = e
+                if i < attempts - 1:
+                    time.sleep(0.75 * (i + 1))
+        raise last_err
+
     def _build_from_token(token: str):
+        # Reuse the cached, still-valid Credentials for this token if we
+        # have one, instead of refreshing on every call.
+        cached = _DRIVE_CREDS_CACHE.get(token)
+        if cached is not None and cached.valid:
+            return build("drive", "v3", credentials=cached, cache_discovery=False)
+
         creds = Credentials(
             None,
             refresh_token=token,
@@ -178,7 +222,8 @@ def _get_drive_service():
             client_secret=client_secret,
             scopes=DRIVE_SCOPES,
         )
-        creds.refresh(Request())
+        _refresh_with_retries(creds)
+        _DRIVE_CREDS_CACHE[token] = creds
         return build("drive", "v3", credentials=creds, cache_discovery=False)
 
     def _fetch_db_token_sync():
@@ -195,23 +240,6 @@ def _get_drive_service():
                 return pool.submit(lambda: asyncio.run(_fetch())).result(timeout=5)
         except Exception:
             return None
-
-    def _mark_drive_disconnected_sync():
-        import asyncio
-        from backend.dependencies import db as _db
-
-        async def _update():
-            await _db["app_settings"].update_one(
-                {"_id": "google_drive"},
-                {"$set": {"connected": False, "refresh_token": None, "access_token": None}},
-            )
-
-        try:
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                pool.submit(lambda: asyncio.run(_update())).result(timeout=5)
-        except Exception:
-            pass
 
     # Step 1: Try token from env-var cache or DB
     refresh_token = _get_drive_refresh_token()
@@ -234,45 +262,47 @@ def _get_drive_service():
         # unauthorized_client = token was issued for a *different* OAuth
         # client than the one currently configured, e.g. after rotating
         # credentials in Google Cloud Console or Render's env vars).
-        # Either way the fix is the same: reconnect Drive.
         is_stale_credential = "invalid_grant" in err_msg or "unauthorized_client" in err_msg
 
         if not is_stale_credential:
             logger.error(f"DRIVE REFRESH ERROR: {e}", exc_info=True)
             raise HTTPException(500, f"Google Drive auth failed: {str(e)}")
 
-        # --- stale/mismatched credentials: cached token is unusable ---
+        # Clear only the in-process env-var cache — the DB record (the
+        # actual "connected" source of truth) is left untouched. If this
+        # env-cached token was simply stale (e.g. after a redeploy) but a
+        # newer one exists in the DB, fetching it below recovers instantly
+        # without the admin ever seeing a "disconnected" state.
         logger.warning(
             f"Google Drive refresh token rejected ({err_msg}). "
             "Clearing env cache and checking DB for a newer token."
         )
-
-        # Clear the stale env-var cache
         os.environ.pop("GOOGLE_REFRESH_TOKEN", None)
+        _DRIVE_CREDS_CACHE.pop(refresh_token, None)
 
-        # Try fetching a fresh token directly from DB
-        # (user may have reconnected via UI after the env var was cached)
         db_token = _fetch_db_token_sync()
 
         if db_token and db_token != refresh_token:
             try:
                 svc = _build_from_token(db_token)
-                # Cache the working token
                 os.environ["GOOGLE_REFRESH_TOKEN"] = db_token
                 return svc
             except Exception as db_err:
                 logger.warning(f"DB token also failed: {db_err}")
 
-        # Both tokens are invalid: mark Drive as disconnected in DB
-        # so Settings page shows the correct disconnected state
-        _mark_drive_disconnected_sync()
-
+        # The token really is unusable right now. We deliberately do NOT
+        # wipe it from the DB or flip `connected` to False here — per
+        # product requirement, Drive must only ever be disconnected by an
+        # explicit admin action (Settings -> Disconnect), never
+        # automatically. The saved token stays in place so a future retry
+        # (or a manual "Reconnect", which re-authorizes without first
+        # requiring a "Not Connected" state) can pick it back up.
         raise HTTPException(
             500,
-            "Google Drive's connection has stopped working (the saved token no "
-            "longer matches this app's Google credentials). Please go to "
-            "Settings -> General Settings -> Google Drive and click Reconnect "
-            "to re-authorize.",
+            "Google Drive request failed — the connection may be temporarily "
+            "unavailable. It has NOT been disconnected; this will retry "
+            "automatically on the next action. If it keeps failing, use "
+            "Settings -> General Settings -> Google Drive -> Reconnect.",
         )
 
     except HTTPException:
