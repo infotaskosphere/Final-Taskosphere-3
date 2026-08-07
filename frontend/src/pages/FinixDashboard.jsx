@@ -30,6 +30,20 @@ const INTEGRITY_CHECKS = [
   { rule: 'Trial Balance Debits = Credits', title: 'Trial Balance Integrity', okText: 'Every posted journal entry balances — total debits equal total credits.' },
 ];
 
+// ─── Short-lived in-memory caches (module scope, survives remounts) ───────
+// Every full load of this dashboard previously fired: 4 report calls, then
+// (only after those finished) N monthly-trend calls, then (only after THAT
+// finished) the full validation engine — three sequential network+backend
+// round trips stacked on top of each other. Re-opening the page or flipping
+// back to a company you were just viewing re-ran the entire waterfall from
+// scratch every time. These caches make a revisit within the TTL instant,
+// the same pattern already used for the validation engine in
+// verifyAndFixLedger.js. Pass { force: true } to bypass (manual refresh).
+const _companiesCache_finix = { data: null, ts: 0 };
+const _metricsCache_finix = new Map(); // companyId -> { data, ts }
+const COMPANIES_CACHE_TTL_MS = 5 * 60_000;
+const METRICS_CACHE_TTL_MS = 60_000;
+
 export default function FinixDashboard() {
   return (
     <RequestAccessGate module="accounting_reports" moduleLabel="Finix Dashboard" permissionFlag="can_view_accounting_reports">
@@ -78,11 +92,25 @@ function FinixDashboardInner() {
   const [chatLoading, setChatLoading] = useState(false);
   const chatEndRef = useRef(null);
 
+  // Bumped on every fetchMetrics call; lets an in-flight request recognize
+  // it's been superseded by a newer one (fast company switching) so its
+  // slower, now-stale response can't clobber the newer selection's data.
+  const fetchIdRef = useRef(0);
+
   const fetchCompanies = async () => {
+    // Companies rarely change within a session; skip the round trip on a
+    // revisit within the TTL and go straight to loading dashboard data.
+    if (_companiesCache_finix.data && Date.now() - _companiesCache_finix.ts < COMPANIES_CACHE_TTL_MS) {
+      setCompanies(_companiesCache_finix.data);
+      return _companiesCache_finix.data;
+    }
     try {
       const { data } = await api.get('/companies/list');
-      setCompanies(data || []);
-      return data || [];
+      const list = data || [];
+      _companiesCache_finix.data = list;
+      _companiesCache_finix.ts = Date.now();
+      setCompanies(list);
+      return list;
     } catch {
       return [];
     }
@@ -119,24 +147,89 @@ function FinixDashboardInner() {
       });
   };
 
-  const fetchMetrics = async (cid) => {
+  const fetchMetrics = async (cid, { force = false } = {}) => {
+    // Serve straight from the short-lived cache when we already computed
+    // this company's numbers recently — makes switching back to a company
+    // you were just viewing (or simply re-opening this page) feel instant
+    // instead of re-running the entire fetch waterfall below. The manual
+    // refresh button passes { force: true } to bypass this.
+    const cachedMetrics = _metricsCache_finix.get(cid);
+    if (!force && cachedMetrics && Date.now() - cachedMetrics.ts < METRICS_CACHE_TTL_MS) {
+      const m = cachedMetrics.data;
+      setRevenue(m.revenue);
+      setReceivables(m.receivables);
+      setCashAndBank(m.cashAndBank);
+      setPayables(m.payables);
+      setNetProfit(m.netProfit);
+      setExpenses(m.expenses);
+      setChartData(m.chartData);
+      setExpenseBreakdown(m.expenseBreakdown);
+      setValidation(m.validation);
+      setLastVerifiedAt(m.lastVerifiedAt);
+      setInsights(m.insights);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
+    // Bumped for this call; if a newer fetchMetrics call starts (fast
+    // company switching, or a refresh click) before this one finishes, the
+    // stale one recognizes it's been superseded and skips writing state.
+    const requestId = ++fetchIdRef.current;
     try {
-      // Get Trial Balance, Profit/Loss, and MIS reports to aggregate Finix AI state
+      // Get Trial Balance, Profit/Loss, and Balance Sheet reports to
+      // aggregate Finix AI state. (This used to also fetch
+      // /reports/mis-compliance here as a 4th parallel call, but its result
+      // was never read anywhere below — it was fetched and thrown away.
+      // Every one of these report endpoints re-syncs the company's ledger
+      // on the backend before computing anything, so that was a full,
+      // wasted reconciliation pass on every single load. Dropping it changes
+      // nothing the user sees and removes ~1/4 of the backend work.)
       const df = `${new Date().getFullYear()}-04-01`; // Current FY start
       const dt = `${new Date().getFullYear() + 1}-03-31`; // Current FY end
-      
-      const [tbRes, pnlRes, bsRes, misRes] = await Promise.allSettled([
-        api.get('/reports/trial-balance', { params: { company_id: cid, date_from: df, date_to: dt } }),
-        api.get('/reports/profit-loss', { params: { company_id: cid, date_from: df, date_to: dt } }),
-        api.get('/reports/balance-sheet', { params: { company_id: cid, as_of: new Date().toISOString().split('T')[0] } }),
-        api.get('/reports/mis-compliance', { params: { company_id: cid, date_from: df, date_to: dt } })
+
+      // These three request groups are independent of each other — each
+      // only needs `cid` — but previously ran one after another (batch of
+      // 3 reports, THEN the monthly-trend calls, THEN the validation
+      // engine), stacking three separate wait times on top of each other.
+      // Firing them together lets the backend work on all three at once,
+      // so total wait time is roughly the slowest of the three instead of
+      // the sum of all three.
+      const [batchSettled, trend, validationResult] = await Promise.all([
+        Promise.allSettled([
+          api.get('/reports/trial-balance', { params: { company_id: cid, date_from: df, date_to: dt } }),
+          api.get('/reports/profit-loss', { params: { company_id: cid, date_from: df, date_to: dt } }),
+          api.get('/reports/balance-sheet', { params: { company_id: cid, as_of: new Date().toISOString().split('T')[0] } }),
+        ]),
+        buildMonthlyTrend(cid),
+        (async () => {
+          setVerifying(true);
+          try {
+            const v = await runVerifyAndFix(cid, { force });
+            if (requestId === fetchIdRef.current) {
+              setValidation(v);
+              setLastVerifiedAt(new Date());
+            }
+            return v;
+          } catch (err) {
+            console.error(err);
+            if (requestId === fetchIdRef.current) setValidation(null);
+            return null;
+          } finally {
+            if (requestId === fetchIdRef.current) setVerifying(false);
+          }
+        })(),
       ]);
+
+      // A newer company switch or refresh click superseded this request —
+      // don't let its slower, now-stale response overwrite the newer data.
+      if (requestId !== fetchIdRef.current) return;
+
+      const [tbRes, pnlRes, bsRes] = batchSettled;
 
       let tbData = tbRes.status === 'fulfilled' ? tbRes.value.data : null;
       let pnlData = pnlRes.status === 'fulfilled' ? pnlRes.value.data : null;
       let bsData = bsRes.status === 'fulfilled' ? bsRes.value.data : null;
-      let misData = misRes.status === 'fulfilled' ? misRes.value.data : null;
 
       // Extract Revenue from P&L or Trial Balance
       let revTotal = pnlData?.total_income || pnlData?.revenue || 0;
@@ -204,10 +297,13 @@ function FinixDashboardInner() {
       // Instead, call the same endpoint once per elapsed month of the
       // current FY so every point on the chart is a real, independently
       // computed total rather than an invented percentage of the whole.
-      const trend = await buildMonthlyTrend(cid);
-      setChartData(trend.length ? trend : [
+      // (`trend` was already fetched above, concurrently with the batch of
+      // reports and the validation engine, instead of only starting after
+      // they both finished.)
+      const chartDataResolved = trend.length ? trend : [
         { name: 'This FY', Revenue: round2(revTotal), Expenses: round2(expTotal), Profit: round2(revTotal - expTotal) }
-      ]);
+      ];
+      setChartData(chartDataResolved);
 
       // Expense Breakdown pie chart — use the real per-account expense rows
       // the backend already computed (`expenses`, not the non-existent
@@ -220,22 +316,11 @@ function FinixDashboardInner() {
         .map(e => ({ name: e.name || e.code || 'Other', value: Math.abs(e.amount) }));
       setExpenseBreakdown(realBreakdown);
 
-      // Run the real reconciliation/consistency engine now (before building
-      // insights below) so the GST-sync insight and the Integrity Shield can
-      // both reflect actual pass/fail results instead of static copy that
-      // claims "0.02% variance" regardless of what the books actually say.
-      let validationResult = null;
-      try {
-        setVerifying(true);
-        validationResult = await runVerifyAndFix(cid);
-        setValidation(validationResult);
-        setLastVerifiedAt(new Date());
-      } catch (err) {
-        console.error(err);
-        setValidation(null);
-      } finally {
-        setVerifying(false);
-      }
+      // The reconciliation/consistency engine (validationResult) was already
+      // run concurrently above, in parallel with the report batch and the
+      // monthly trend, instead of only starting after both of those
+      // finished — its state (setValidation/setLastVerifiedAt) was already
+      // applied as soon as it resolved.
 
       // AI Insights - dynamic heuristic alerts based on actual figures
       const generatedInsights = [];
@@ -321,11 +406,31 @@ function FinixDashboardInner() {
 
       setInsights(generatedInsights);
 
+      // Cache the fully-assembled snapshot so the next visit to this
+      // company within the TTL (switching back, or remounting this page)
+      // can skip straight to applying it instead of re-fetching everything.
+      _metricsCache_finix.set(cid, {
+        ts: Date.now(),
+        data: {
+          revenue: revTotal,
+          receivables: arTotal,
+          cashAndBank: liquidCash,
+          payables: apTotal,
+          netProfit: pnlData?.net_profit ?? (revTotal - expTotal),
+          expenses: expTotal,
+          chartData: chartDataResolved,
+          expenseBreakdown: realBreakdown,
+          insights: generatedInsights,
+          validation: validationResult,
+          lastVerifiedAt: validationResult ? new Date() : null,
+        },
+      });
+
     } catch (err) {
       console.error(err);
       toast.error('Failed to parse financial metrics');
     } finally {
-      setLoading(false);
+      if (requestId === fetchIdRef.current) setLoading(false);
     }
   };
 
@@ -335,7 +440,14 @@ function FinixDashboardInner() {
     try {
       const v = await runVerifyAndFix(companyId, { force: true });
       setValidation(v);
-      setLastVerifiedAt(new Date());
+      const verifiedAt = new Date();
+      setLastVerifiedAt(verifiedAt);
+      // Keep the cached snapshot in sync so switching away and back within
+      // the cache TTL doesn't show the stale pre-reverify result.
+      const cachedMetrics = _metricsCache_finix.get(companyId);
+      if (cachedMetrics) {
+        cachedMetrics.data = { ...cachedMetrics.data, validation: v, lastVerifiedAt: verifiedAt };
+      }
     } catch (err) {
       console.error(err);
       toast.error('Verification failed. Please try again.');
@@ -479,7 +591,7 @@ function FinixDashboardInner() {
             <Button
               variant="outline"
               size="icon"
-              onClick={() => fetchMetrics(companyId)}
+              onClick={() => fetchMetrics(companyId, { force: true })}
               disabled={loading || !companyId}
               className="h-11 w-11 rounded-2xl border-white/20 bg-white/10 backdrop-blur-sm text-white hover:bg-white/20 hover:text-white"
             >
