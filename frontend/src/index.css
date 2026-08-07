@@ -76,9 +76,10 @@ html {
 *::before,
 *::after {
   box-sizing: border-box;
-  /* Prevent text from breaking layout */
-  word-break: break-word;
-  overflow-wrap: anywhere;
+  /* Only break a word if it truly can't fit on its own line
+     (e.g. a long URL/ID with no spaces). Normal words are never
+     split just because a flex/grid child has shrunk. */
+  overflow-wrap: break-word;
 }
 
 /* Flex & grid children: prevent shrink below content width */
@@ -111,10 +112,9 @@ code {
     'Courier New', monospace;
 }
 
-/* Headings: prevent overflow */
+/* Headings: prevent overflow without hyphenating words */
 h1, h2, h3, h4, h5, h6 {
   overflow-wrap: break-word;
-  hyphens: auto;
   max-width: 100%;
 }
 
