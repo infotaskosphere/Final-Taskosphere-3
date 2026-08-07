@@ -4552,6 +4552,78 @@ async def convert_quotation(qtn_id: str, current_user: User = Depends(check_modu
 
 
 # ═══════════════════════════════════════════════════════════
+# CONVERT PROFORMA INVOICE → TAX INVOICE
+# ═══════════════════════════════════════════════════════════
+
+@router.post("/invoices/{inv_id}/convert-to-invoice")
+async def convert_proforma_to_invoice(inv_id: str, current_user: User = Depends(check_module_permission("invoicing", "create"))):
+    """Create a real Tax Invoice from an existing Proforma Invoice.
+
+    The proforma record itself is left untouched (it's a quotation, not a
+    real sale) except for a backlink so the UI can show it's been converted
+    and avoid creating duplicate invoices on a second click.
+    """
+    if not _perm(current_user): raise HTTPException(403, "Access denied")
+    pro = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
+    if not pro: raise HTTPException(404, "Proforma invoice not found")
+    if pro.get("invoice_type") != "proforma":
+        raise HTTPException(400, "Only Proforma Invoices can be converted to a Tax Invoice")
+
+    # Prevent duplicate conversion — return the already-converted invoice if present.
+    if pro.get("converted_invoice_id"):
+        existing = await db.invoices.find_one({"id": pro["converted_invoice_id"]}, {"_id": 0})
+        if existing:
+            existing.pop("_id", None)
+            return existing
+
+    inv_items = [InvoiceItem(
+        description=it.get("description", ""), hsn_sac=it.get("hsn_sac", ""),
+        quantity=float(it.get("quantity", 1)), unit=it.get("unit", "service"),
+        unit_price=float(it.get("unit_price", 0)), discount_pct=float(it.get("discount_pct", 0)),
+        gst_rate=float(it.get("gst_rate", pro.get("gst_rate", 18))))
+        for it in pro.get("items", [])]
+
+    create_data = InvoiceCreate(
+        invoice_type="tax_invoice", company_id=pro.get("company_id", ""),
+        client_id=pro.get("client_id"), lead_id=pro.get("lead_id"),
+        client_name=pro.get("client_name", ""), client_address=pro.get("client_address", ""),
+        client_email=pro.get("client_email", ""), client_phone=pro.get("client_phone", ""),
+        client_gstin=pro.get("client_gstin", "") or "", client_state=pro.get("client_state", "") or "",
+        supply_state=pro.get("supply_state", "") or "", is_interstate=pro.get("is_interstate", False),
+        items=inv_items, gst_rate=pro.get("gst_rate", 18),
+        discount_amount=pro.get("discount_amount", 0), shipping_charges=pro.get("shipping_charges", 0),
+        other_charges=pro.get("other_charges", 0), advance_received=pro.get("advance_received", 0),
+        payment_terms=pro.get("payment_terms", "Due on receipt"), notes=pro.get("notes", ""),
+        terms_conditions=pro.get("terms_conditions", ""),
+        reference_no=pro.get("invoice_no", "") or pro.get("reference_no", ""),
+        invoice_template=pro.get("invoice_template", "prestige"), invoice_theme=pro.get("invoice_theme", "classic_blue"),
+        invoice_custom_color=pro.get("invoice_custom_color", "#0D3B66"), status="draft")
+
+    invoice = await create_invoice(create_data, current_user)
+    inv_dict = invoice if isinstance(invoice, dict) else (invoice.model_dump() if hasattr(invoice, "model_dump") else dict(invoice))
+    new_id = inv_dict.get("id")
+    new_no = inv_dict.get("invoice_no")
+
+    if new_id:
+        try:
+            await db.invoices.update_one(
+                {"id": inv_id},
+                {"$set": {
+                    "converted_invoice_id": new_id,
+                    "converted_invoice_no": new_no,
+                    "converted_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }},
+            )
+        except Exception as backlink_err:
+            logger.error(
+                f"convert_proforma_to_invoice: failed to write backlink on proforma {inv_id} "
+                f"(invoice {new_id}): {backlink_err}", exc_info=True,
+            )
+    return inv_dict
+
+
+# ═══════════════════════════════════════════════════════════
 # SEND EMAIL
 # ═══════════════════════════════════════════════════════════
 
