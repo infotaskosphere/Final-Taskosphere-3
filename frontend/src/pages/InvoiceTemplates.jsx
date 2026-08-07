@@ -460,6 +460,20 @@ function wordsBox(inv, p, light, accent) {
   return html;
 }
 
+// Returns the correct document-type heading for a given invoice, so
+// Proforma Invoices / Estimates / Credit Notes / Debit Notes never get
+// mislabelled as "Tax Invoice" on the printed/PDF document.
+function docTypeLabel(inv, company) {
+  var map = {
+    proforma:    'Proforma Invoice',
+    estimate:    'Estimate',
+    credit_note: 'Credit Note',
+    debit_note:  'Debit Note',
+  };
+  var type = (inv && inv.invoice_type) || 'tax_invoice';
+  return map[type] || ((company && company.invoice_title) || 'Tax Invoice');
+}
+
 // ═══════════════════════════════════════════════════════════════
 // 8. TEMPLATE FUNCTIONS
 // ═══════════════════════════════════════════════════════════════
@@ -493,7 +507,7 @@ function tplClassic(inv, company, theme) {
     + (company && company.phone ? '<span class="co-tag" style="margin-left:4px">\uD83D\uDCDE&nbsp;' + company.phone + '</span>' : '')
     + '</div>'
     + '<div class="inv-r">'
-    + '<div class="inv-type">' + ((company && company.invoice_title)||'Tax Invoice') + '</div>'
+    + '<div class="inv-type">' + docTypeLabel(inv, company) + '</div>'
     + '<div class="inv-no">' + (inv.invoice_no||'\u2014') + '</div>'
     + '<div class="inv-meta">Date: ' + (inv.invoice_date||'\u2014') + (inv.due_date ? '<br>Due: ' + inv.due_date : '') + '</div>'
     + '</div>'
@@ -531,7 +545,7 @@ function tplTheme2(inv, company, theme) {
     + '.br{padding:10px 12px}'
     + itemTableCSS(p,l)
     + '</style></head><body><div class="page">'
-    + '<div class="strip1"><div class="co-name">' + ((company && company.name)||'Your Company') + '</div><div class="tax-lbl">Tax Invoice</div></div>'
+    + '<div class="strip1"><div class="co-name">' + ((company && company.name)||'Your Company') + '</div><div class="tax-lbl">' + docTypeLabel(inv, company) + '</div></div>'
     + '<div class="strip2">'
     + logo
     + '<div class="s2-addr">'
@@ -579,7 +593,7 @@ function tplTheme3(inv, company, theme) {
     + '</style></head><body><div class="page">'
     + '<div class="hdr">'
     + '<div class="hl">' + logo + '<div><div class="co-name">' + ((company && company.name)||'Your Company') + '</div><div class="co-sub">' + ((company && company.address)||'') + '</div>' + (company && company.gstin ? '<span class="co-gstin">GSTIN&nbsp;' + company.gstin + '</span>' : '') + '</div></div>'
-    + '<div class="hr"><div class="inv-type">Tax Invoice</div><div class="inv-no">' + (inv.invoice_no||'\u2014') + '</div><div class="inv-dt">Date: ' + (inv.invoice_date||'\u2014') + (inv.due_date ? '<br>Due: ' + inv.due_date : '') + '</div></div>'
+    + '<div class="hr"><div class="inv-type">' + docTypeLabel(inv, company) + '</div><div class="inv-no">' + (inv.invoice_no||'\u2014') + '</div><div class="inv-dt">Date: ' + (inv.invoice_date||'\u2014') + (inv.due_date ? '<br>Due: ' + inv.due_date : '') + '</div></div>'
     + '</div>'
     + '<div class="body">'
     + partyBoxes(inv, p)
@@ -625,7 +639,7 @@ function tplTheme4(inv, company, theme) {
     + '</div>'
     + '</div>'
     + '<div class="inv-banner">'
-    + '<div class="inv-banner-type">Tax Invoice</div>'
+    + '<div class="inv-banner-type">' + docTypeLabel(inv, company) + '</div>'
     + '<div class="inv-banner-no">' + (inv.invoice_no||'\u2014') + '</div>'
     + '<div class="inv-banner-dt">Date: ' + (inv.invoice_date||'\u2014') + (inv.due_date ? ' &nbsp;\u00B7&nbsp; Due: ' + inv.due_date : '') + '</div>'
     + '</div>'
@@ -685,7 +699,7 @@ function tplTheme5(inv, company, theme) {
     + '</div>'
     + '</div>'
     + '<div>'
-    + '<div style="font-size:8.5px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,0.65)">Tax Invoice</div>'
+    + '<div style="font-size:8.5px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,0.65)">' + docTypeLabel(inv, company) + '</div>'
     + '<div class="inv-no">' + (inv.invoice_no||'\u2014') + '</div>'
     + '<div class="inv-dt">Date: ' + (inv.invoice_date||'\u2014') + (inv.due_date ? ' \u00B7 Due: ' + inv.due_date : '') + '</div>'
     + '</div>'
@@ -745,7 +759,7 @@ function tplTheme6(inv, company, theme) {
     + (company && company.gstin ? '<span style="display:inline-block;margin-top:4px;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);color:white;font-size:8.5px;font-weight:700;padding:2px 8px;border-radius:10px">GSTIN&nbsp;' + company.gstin + '</span>' : '')
     + '</div></div>'
     + '<div class="inv-r">'
-    + '<div style="font-size:9px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,0.65);margin-bottom:6px">Tax Invoice</div>'
+    + '<div style="font-size:9px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,0.65);margin-bottom:6px">' + docTypeLabel(inv, company) + '</div>'
     + '<div class="inv-no">' + (inv.invoice_no||'\u2014') + '</div>'
     + '<div class="inv-dt">Issued: ' + (inv.invoice_date||'\u2014') + (inv.due_date ? '<br>Due: ' + inv.due_date : '') + '</div>'
     + '</div>'
@@ -825,7 +839,7 @@ function tplTheme7(inv, company, theme) {
     + '</div>'
     + '<div class="main">'
     + '<div class="main-top">'
-    + '<div><div class="inv-type">' + ((company && company.invoice_title)||'Tax Invoice') + '</div><div class="inv-no">' + (inv.invoice_no||'\u2014') + '</div></div>'
+    + '<div><div class="inv-type">' + docTypeLabel(inv, company) + '</div><div class="inv-no">' + (inv.invoice_no||'\u2014') + '</div></div>'
     + '<div><div class="mc"><div class="mk">Invoice Date</div><div class="mv">' + (inv.invoice_date||'\u2014') + '</div></div>' + (inv.due_date ? '<div class="mc"><div class="mk">Due Date</div><div class="mv">' + inv.due_date + '</div></div>' : '') + '</div>'
     + '</div>'
     + itemsTableHTML(inv, p, l)
@@ -934,7 +948,7 @@ function tplFrenchElite(inv, company, theme) {
     + '</style></head><body><div class="page">'
     + '<div class="hdr">'
     + '<div class="hl">' + logo + '<div><div class="co-name">' + ((company && company.name)||'Your Company') + '</div><div class="co-sub">' + ((company && company.address)||'') + '</div>' + (company && company.gstin ? '<span class="co-gstin">GSTIN&nbsp;' + company.gstin + '</span>' : '') + '</div></div>'
-    + '<div class="hr"><div class="inv-type">Tax Invoice</div><div class="inv-no">' + (inv.invoice_no||'\u2014') + '</div><div class="inv-dt">Date: ' + (inv.invoice_date||'\u2014') + (inv.due_date ? '<br>Due: ' + inv.due_date : '') + '</div></div>'
+    + '<div class="hr"><div class="inv-type">' + docTypeLabel(inv, company) + '</div><div class="inv-no">' + (inv.invoice_no||'\u2014') + '</div><div class="inv-dt">Date: ' + (inv.invoice_date||'\u2014') + (inv.due_date ? '<br>Due: ' + inv.due_date : '') + '</div></div>'
     + '</div>'
     + '<div class="ornament">\u2014 \u2726 \u2014</div>'
     + '<div class="body">'
@@ -973,7 +987,7 @@ function tplDoubleDivine(inv, company, theme) {
     + '</style></head><body><div class="page">'
     + '<div class="hdr">'
     + '<div class="hl">' + logo + '<div><div class="co-name">' + ((company && company.name)||'Your Company') + '</div><div class="co-sub">' + ((company && company.address)||'') + '</div>' + (company && company.gstin ? '<span class="co-tag">GSTIN&nbsp;' + company.gstin + '</span>' : '') + '</div></div>'
-    + '<div class="hr"><div class="divine-lbl">Tax Invoice</div><div class="inv-no">' + (inv.invoice_no||'\u2014') + '</div><div class="inv-dt">Date: ' + (inv.invoice_date||'\u2014') + (inv.due_date ? '<br>Due: ' + inv.due_date : '') + '</div></div>'
+    + '<div class="hr"><div class="divine-lbl">' + docTypeLabel(inv, company) + '</div><div class="inv-no">' + (inv.invoice_no||'\u2014') + '</div><div class="inv-dt">Date: ' + (inv.invoice_date||'\u2014') + (inv.due_date ? '<br>Due: ' + inv.due_date : '') + '</div></div>'
     + '</div>'
     + '<div class="divine-stripe"></div>'
     + '<div class="body">'
@@ -1051,7 +1065,7 @@ function tplGstTheme1(inv, company, theme) {
     + '<div class="co-sub">' + ((company && company.address)||'') + (company && company.phone ? ' \u00B7 \uD83D\uDCDE ' + company.phone : '') + '</div>'
     + (company && company.gstin ? '<div style="font-size:9px;color:rgba(255,255,255,0.7);margin-top:2px">GSTIN: <strong style="color:white">' + company.gstin + '</strong></div>' : '')
     + '</div>'
-    + '<div><div class="tax-inv-badge">Tax Invoice</div></div>'
+    + '<div><div class="tax-inv-badge">' + docTypeLabel(inv, company) + '</div></div>'
     + '</div>'
     + '<div class="body">'
     + '<div class="meta2">'
@@ -1142,7 +1156,7 @@ function tplTallyTheme(inv, company, theme) {
     + (company && company.phone ? '<div class="center" style="font-size:10px">Ph: ' + company.phone + '</div>' : '')
     + (company && company.gstin ? '<div class="center" style="font-size:10px">GSTIN: ' + company.gstin + '</div>' : '')
     + '<hr class="solid"/>'
-    + '<div class="center bold">TAX INVOICE</div>'
+    + '<div class="center bold">' + docTypeLabel(inv, company).toUpperCase() + '</div>'
     + '<hr class="dash"/>'
     + '<div class="grid"><span>Invoice No: <strong>' + (inv.invoice_no||'\u2014') + '</strong></span><span>Date: <strong>' + (inv.invoice_date||'\u2014') + '</strong></span></div>'
     + (inv.due_date ? '<div class="grid"><span></span><span>Due: <strong>' + inv.due_date + '</strong></span></div>' : '')
@@ -1219,7 +1233,7 @@ function tplThermal1(inv, company, theme) {
     + '<div class="c" style="font-size:10px">' + ((company && company.address)||'') + '</div>'
     + (company && company.phone ? '<div class="c" style="font-size:10px">\uD83D\uDCDE ' + company.phone + '</div>' : '')
     + (company && company.gstin ? '<div class="c" style="font-size:10px">GSTIN: ' + company.gstin + '</div>' : '')
-    + '<hr class="s2"/><div class="c b">TAX INVOICE</div><hr class="s"/>'
+    + '<hr class="s2"/><div class="c b">' + docTypeLabel(inv, company).toUpperCase() + '</div><hr class="s"/>'
     + '<table>'
     + '<tr><td>Invoice No:</td><td class="r b">' + (inv.invoice_no||'\u2014') + '</td></tr>'
     + '<tr><td>Date:</td><td class="r">' + (inv.invoice_date||'\u2014') + '</td></tr>'
