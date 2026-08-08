@@ -10,9 +10,7 @@ import {
   ResponsiveContainer, Legend,
 } from 'recharts';
 import { toast } from 'sonner';
-import jsPDF from 'jspdf';
-import 'jspdf-autotable';
-import * as XLSX from 'xlsx';
+import { getJsPDF, getAutoTable, getXLSX } from '@/lib/lazyLibs';
 import { saveAs } from 'file-saver';
 import api from '@/lib/api';
 import useDark from '@/hooks/useDark';
@@ -270,10 +268,12 @@ function exportFileBase(tabLabel, clientName, period) {
   return `MIS_${tabLabel.replace(/\s+/g, '_')}_${(clientName || 'Client').replace(/\s+/g, '_')}_${(period || 'Period').replace(/\s+/g, '_')}`;
 }
 
-function exportMISPDF(tab, data, clientName, period) {
+async function exportMISPDF(tab, data, clientName, period) {
   const exp = buildMISExportData(tab, data, clientName, period);
   if (!exp) { toast.error('No data to export yet'); return; }
 
+  const jsPDF = await getJsPDF();
+  await getAutoTable(); // side-effect: patches doc.autoTable(...)
   const doc = new jsPDF('p', 'mm', 'a4');
   let y = 15;
   doc.setFontSize(15);
@@ -360,10 +360,11 @@ function exportMISWord(tab, data, clientName, period) {
   toast.success('Word document downloaded');
 }
 
-function exportMISExcel(tab, data, clientName, period) {
+async function exportMISExcel(tab, data, clientName, period) {
   const exp = buildMISExportData(tab, data, clientName, period);
   if (!exp) { toast.error('No data to export yet'); return; }
 
+  const XLSX = await getXLSX();
   const wb = XLSX.utils.book_new();
   const summaryRows = [
     ['MIS Report'], [exp.tabLabel], [`Client: ${clientName || ''}`], [`Period: ${period || ''}`], [],
