@@ -23,17 +23,16 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useDark } from '@/hooks/useDark';
 import api from '@/lib/api';
 import { toast } from 'sonner';
+import ApplyLeaveModal from '@/components/attendance/ApplyLeaveModal';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Calendar } from '@/components/ui/calendar';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '@/components/ui/select';
 import {
-  CalendarOff, CalendarPlus, CalendarClock, CalendarDays,
+  CalendarOff, CalendarClock, CalendarDays,
   UserX, Send, X, ChevronDown, ChevronLeft, ChevronRight, Loader2,
   Users, AlertTriangle, History,
 } from 'lucide-react';
@@ -285,13 +284,11 @@ export default function Leave() {
 
   const [activeLeaveTab, setActiveLeaveTab] = useState('upcoming');
 
+  // Apply Leave now uses the shared <ApplyLeaveModal /> (see
+  // components/attendance/ApplyLeaveModal.jsx) — the same component the
+  // Attendance page uses — so applying leave from either page produces
+  // exactly the same result.
   const [showApplyModal, setShowApplyModal] = useState(false);
-  const [leaveType, setLeaveType] = useState('full_day');
-  const [leaveFrom, setLeaveFrom] = useState(null);
-  const [leaveTo, setLeaveTo] = useState(null);
-  const [leaveReason, setLeaveReason] = useState('');
-  const [earlyLeaveTime, setEarlyLeaveTime] = useState('');
-  const [submitting, setSubmitting] = useState(false);
 
   const effectiveUserId = viewUserId === 'me' ? user?.id : viewUserId;
 
@@ -371,42 +368,6 @@ export default function Leave() {
       totalAbsent: absentRecords.length,
     };
   }, [leaveRecords, bucketed, absentRecords]);
-
-  // ── Apply leave ────────────────────────────────────────────────────────
-  const resetApplyForm = () => {
-    setLeaveType('full_day'); setLeaveFrom(null); setLeaveTo(null);
-    setLeaveReason(''); setEarlyLeaveTime('');
-  };
-
-  const handleApplyLeave = useCallback(async () => {
-    if (!leaveFrom) { toast.error('Select a leave start date'); return; }
-    if (leaveType === 'early_leave' && !earlyLeaveTime) { toast.error('Select the early-leave time'); return; }
-    const isPartialDay = leaveType !== 'full_day';
-    const effectiveTo = isPartialDay ? leaveFrom : (leaveTo || leaveFrom);
-    setSubmitting(true);
-    try {
-      await api.post('/attendance/apply-leave', {
-        from_date: format(leaveFrom, 'yyyy-MM-dd'),
-        to_date: format(effectiveTo, 'yyyy-MM-dd'),
-        reason: leaveReason || 'Leave Applied',
-        leave_type: leaveType,
-        early_leave_time: leaveType === 'early_leave' ? earlyLeaveTime : undefined,
-      });
-      toast.success('Leave request submitted');
-      setShowApplyModal(false);
-      resetApplyForm();
-      fetchHistory();
-      if (canViewTeam) fetchTeamSummary();
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || 'Failed to submit leave request');
-    } finally {
-      setSubmitting(false);
-    }
-  }, [leaveFrom, leaveTo, leaveReason, leaveType, earlyLeaveTime, fetchHistory, fetchTeamSummary, canViewTeam]);
-
-  const dayCount = leaveFrom
-    ? Math.max(1, leaveTo ? Math.ceil((leaveTo.getTime() - leaveFrom.getTime()) / 86400000) + 1 : 1)
-    : 0;
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6" style={{ color: isDark ? D.text : undefined }}>
@@ -617,121 +578,17 @@ export default function Leave() {
         {teamDetail && <TeamDetailModal detail={teamDetail} onClose={() => setTeamDetail(null)} isDark={isDark} />}
       </AnimatePresence>
 
-      {/* ── Apply Leave modal ── */}
-      <AnimatePresence>
-        {showApplyModal && (
-          <motion.div
-            className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            onClick={(e) => { if (e.target === e.currentTarget) setShowApplyModal(false); }}
-          >
-            <motion.div
-              className="w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
-              style={{ backgroundColor: isDark ? D.card : '#ffffff' }}
-              initial={{ scale: 0.92, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 24 }}
-              transition={{ type: 'spring', stiffness: 220, damping: 22 }}
-            >
-              <div className="px-6 py-5 flex items-center justify-between flex-shrink-0"
-                style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
-                <h2 className="text-xl font-black text-white flex items-center gap-2">
-                  <CalendarPlus className="w-5 h-5" /> Apply Leave
-                </h2>
-                <button onClick={() => setShowApplyModal(false)} className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center">
-                  <X className="w-4 h-4 text-white" />
-                </button>
-              </div>
-
-              <div className="p-6 space-y-5 overflow-y-auto flex-1">
-                {/* Leave type */}
-                <div>
-                  <p className="text-sm font-semibold mb-2.5" style={{ color: isDark ? D.muted : '#374151' }}>Leave Type</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {LEAVE_TYPES.map((lt) => (
-                      <button key={lt.value} type="button" onClick={() => setLeaveType(lt.value)}
-                        className="p-3 rounded-xl border text-left transition-all"
-                        style={{
-                          borderColor: leaveType === lt.value ? COLORS.deepBlue : (isDark ? D.border : '#e2e8f0'),
-                          backgroundColor: leaveType === lt.value ? (isDark ? `${COLORS.deepBlue}22` : `${COLORS.deepBlue}0A`) : (isDark ? D.raised : '#f8fafc'),
-                        }}>
-                        <p className="text-sm font-bold" style={{ color: leaveType === lt.value ? (isDark ? '#60a5fa' : COLORS.deepBlue) : (isDark ? D.text : '#1e293b') }}>
-                          {lt.icon} {lt.label}
-                        </p>
-                        <p className="text-[11px] mt-0.5" style={{ color: isDark ? D.muted : '#64748b' }}>{lt.desc}</p>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Early leave time */}
-                {leaveType === 'early_leave' && (
-                  <div>
-                    <p className="text-sm font-semibold mb-2" style={{ color: isDark ? D.muted : '#374151' }}>Leaving At</p>
-                    <input type="time" value={earlyLeaveTime} onChange={(e) => setEarlyLeaveTime(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg border text-sm"
-                      style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : '#fff', color: isDark ? D.text : '#0f172a' }} />
-                  </div>
-                )}
-
-                {/* Date selection */}
-                {leaveType === 'full_day' ? (
-                  <>
-                    <div className="flex flex-wrap gap-2">
-                      {[1, 3, 7, 15, 30].map((days) => (
-                        <Button key={days} variant="outline" size="sm" onClick={() => {
-                          const from = new Date(); const to = new Date();
-                          to.setDate(from.getDate() + days - 1);
-                          setLeaveFrom(from); setLeaveTo(to);
-                        }}>{days === 1 ? '1 Day' : `${days} Days`}</Button>
-                      ))}
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <p className="text-sm font-semibold mb-2" style={{ color: isDark ? D.muted : '#374151' }}>From Date</p>
-                        <Calendar mode="single" selected={leaveFrom} onSelect={setLeaveFrom}
-                          disabled={(date) => isBefore(date, startOfDay(new Date()))}
-                          className="rounded-xl border w-full" style={{ borderColor: isDark ? D.border : '#e2e8f0' }} />
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold mb-2" style={{ color: isDark ? D.muted : '#374151' }}>To Date</p>
-                        <Calendar mode="single" selected={leaveTo} onSelect={setLeaveTo}
-                          disabled={(date) => (leaveFrom ? isBefore(date, leaveFrom) : true)}
-                          className="rounded-xl border w-full" style={{ borderColor: isDark ? D.border : '#e2e8f0' }} />
-                      </div>
-                    </div>
-                    {leaveFrom && (
-                      <div className="px-4 py-3 rounded-xl" style={{ backgroundColor: isDark ? `${COLORS.deepBlue}18` : `${COLORS.deepBlue}08` }}>
-                        <p className="text-xs text-slate-400 mb-0.5">Total Duration</p>
-                        <p className="text-xl font-black" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>{dayCount} day{dayCount !== 1 ? 's' : ''}</p>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div>
-                    <p className="text-sm font-semibold mb-2" style={{ color: isDark ? D.muted : '#374151' }}>Select Date</p>
-                    <Calendar mode="single" selected={leaveFrom} onSelect={setLeaveFrom}
-                      disabled={(date) => isBefore(date, startOfDay(new Date()))}
-                      className="rounded-xl border w-full" style={{ borderColor: isDark ? D.border : '#e2e8f0' }} />
-                  </div>
-                )}
-
-                {/* Reason */}
-                <div>
-                  <p className="text-sm font-semibold mb-2" style={{ color: isDark ? D.muted : '#374151' }}>Reason</p>
-                  <Textarea value={leaveReason} onChange={(e) => setLeaveReason(e.target.value)} placeholder="Optional — why are you applying for leave?" />
-                </div>
-              </div>
-
-              <div className="p-4 border-t flex-shrink-0" style={{ borderColor: isDark ? D.border : '#e2e8f0' }}>
-                <Button className="w-full gap-2" disabled={submitting || !leaveFrom} onClick={handleApplyLeave}
-                  style={{ backgroundColor: COLORS.deepBlue }}>
-                  {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                  Submit Leave Request
-                </Button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Apply Leave — shared modal, see components/attendance/ApplyLeaveModal.jsx.
+          Using the same component the Attendance page uses guarantees
+          applying leave here produces exactly the same result either way. */}
+      <ApplyLeaveModal
+        open={showApplyModal}
+        onClose={() => setShowApplyModal(false)}
+        onSubmitted={async () => { await fetchHistory(); if (canViewTeam) await fetchTeamSummary(); }}
+        isDark={isDark}
+        colors={COLORS}
+        tokens={D}
+      />
     </div>
   );
 }
