@@ -12,7 +12,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import jsPDF from 'jspdf';
+import { getJsPDF } from '@/lib/lazyLibs';
 import {
   format,
   startOfMonth,
@@ -2304,7 +2304,7 @@ export default function Attendance() {
         api.get(historyUrl).catch(() => ({ data: [] })),
         (isOtherReq || isEveryoneReq) ? Promise.resolve(null) : api.get('/attendance/my-summary').catch(() => ({ data: null })),
         api.get('/attendance/today').catch(() => ({ data: null })),
-        api.get('/tasks').catch(() => ({ data: [] })),
+        api.get('/tasks', { params: { page: 1, page_size: 500 } }).then(r => ({ data: r.data?.tasks || [] })).catch(() => ({ data: [] })),
         api.get('/holidays').catch(() => ({ data: [] })),
         api.get('/reports/performance-rankings?period=monthly').catch((e) => {
           if (e?.response?.status === 403) toast.error("You don't have permission to view performance rankings.");
@@ -2852,6 +2852,7 @@ export default function Attendance() {
       else if (canSwitchUser && selectedUserId) employeeName = (Array.isArray(allUsers) ? allUsers : []).find(u => u.id === selectedUserId)?.full_name || 'Employee';
       else employeeName = user?.full_name || 'User';
 
+      const jsPDF = await getJsPDF();
       const doc = new jsPDF();
       doc.setFillColor(13, 59, 102); doc.rect(0, 0, 210, 24, 'F');
       doc.setTextColor(255, 255, 255); doc.setFontSize(15); doc.setFont(undefined, 'bold');
