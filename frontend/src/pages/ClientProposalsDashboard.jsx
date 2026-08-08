@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Target, Receipt, Trophy, Send, Clock3 } from 'lucide-react';
+import { Target, Receipt, Trophy, Send, Clock3, MessageSquare, Percent } from 'lucide-react';
 import api from '@/lib/api';
 import useDark from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext.jsx';
@@ -18,6 +18,11 @@ const MODULES = [
     description: 'Create, send and track quotations issued to leads and clients.',
     color: HUB_COLORS.emeraldGreen, permission: 'can_create_quotations',
   },
+  {
+    path: '/client-discussion', icon: MessageSquare, label: 'Client Discussion',
+    description: 'Keep every back-and-forth with a lead or client in one running thread.',
+    color: '#F59E0B', permission: 'can_view_client_discussion',
+  },
 ];
 
 export default function ClientProposalsDashboard() {
@@ -26,6 +31,7 @@ export default function ClientProposalsDashboard() {
   const [loading, setLoading] = useState(true);
   const [leads, setLeads] = useState([]);
   const [quotations, setQuotations] = useState([]);
+  const [discussions, setDiscussions] = useState([]);
 
   const canSee = (m) => {
     if (!m.permission) return true;
@@ -38,13 +44,20 @@ export default function ClientProposalsDashboard() {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const [leadsRes, quotesRes] = await Promise.allSettled([
+      // Fired together (not one-after-another) so total wait time is the
+      // slowest of the three calls instead of the sum of all three.
+      const [leadsRes, quotesRes, discussionsRes] = await Promise.allSettled([
         api.get('/leads', { _silent: true }),
         api.get('/quotations', { _silent: true }),
+        api.get('/client-discussion', { _silent: true }),
       ]);
       if (cancelled) return;
       if (leadsRes.status === 'fulfilled') setLeads(Array.isArray(leadsRes.value.data) ? leadsRes.value.data : []);
       if (quotesRes.status === 'fulfilled') setQuotations(Array.isArray(quotesRes.value.data) ? quotesRes.value.data : []);
+      if (discussionsRes.status === 'fulfilled') {
+        const d = discussionsRes.value.data;
+        setDiscussions(Array.isArray(d) ? d : (Array.isArray(d?.data) ? d.data : []));
+      }
       setLoading(false);
     })();
     return () => { cancelled = true; };
@@ -60,10 +73,15 @@ export default function ClientProposalsDashboard() {
   const acceptedValue = quotations
     .filter((q) => q.status === 'accepted')
     .reduce((s, q) => s + (Number(q.total) || 0), 0);
+  const lostLeads = leads.filter((l) => l.status === 'lost').length;
+  const closedLeads = wonLeads + lostLeads;
+  const winRate = closedLeads > 0 ? Math.round((wonLeads / closedLeads) * 100) : null;
+  const openDiscussions = discussions.filter((d) => d.status ? d.status !== 'closed' : true).length;
 
   const badgeFor = (path) => {
     if (path === '/leads') return loading ? '—' : leads.length;
     if (path === '/quotations') return loading ? '—' : quotations.length;
+    if (path === '/client-discussion') return loading ? '—' : discussions.length;
     return null;
   };
 
@@ -71,6 +89,7 @@ export default function ClientProposalsDashboard() {
     { label: 'Active Leads', value: loading ? '—' : activeLeads, loading },
     { label: 'Won Value', value: loading ? '—' : fmtC(wonValue), loading },
     { label: 'Pending Quotes', value: loading ? '—' : pendingQuotes, loading },
+    { label: 'Win Rate', value: loading ? '—' : (winRate === null ? '—' : `${winRate}%`), loading },
   ];
 
   return (
@@ -84,11 +103,13 @@ export default function ClientProposalsDashboard() {
         stats={stats}
       />
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
         <StatCard icon={Clock3} label="Active Leads" value={loading ? '—' : activeLeads} loading={loading} color={HUB_COLORS.mediumBlue} isDark={isDark} />
         <StatCard icon={Trophy} label="Won Leads" value={loading ? '—' : wonLeads} loading={loading} color={HUB_COLORS.emeraldGreen} isDark={isDark} />
         <StatCard icon={Send} label="Pending Quotations" value={loading ? '—' : pendingQuotes} loading={loading} color="#F59E0B" isDark={isDark} />
         <StatCard icon={Receipt} label="Accepted Quotations" value={loading ? '—' : acceptedQuotes} loading={loading} color="#7C3AED" isDark={isDark} />
+        <StatCard icon={Percent} label="Win Rate" value={loading ? '—' : (winRate === null ? 'N/A' : `${winRate}%`)} loading={loading} color="#0EA5E9" isDark={isDark} />
+        <StatCard icon={MessageSquare} label="Open Discussions" value={loading ? '—' : openDiscussions} loading={loading} color="#EC4899" isDark={isDark} />
       </div>
 
       <h2 className={`text-sm font-extrabold uppercase tracking-widest mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
@@ -99,7 +120,7 @@ export default function ClientProposalsDashboard() {
           You don't have access to any proposal modules yet. Contact your admin to request access.
         </p>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {visibleModules.map((m) => (
             <LinkCard key={m.path} {...m} badge={badgeFor(m.path)} isDark={isDark} />
           ))}
