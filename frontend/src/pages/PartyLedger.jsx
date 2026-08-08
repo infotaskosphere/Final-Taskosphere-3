@@ -25,7 +25,7 @@ import { Input } from '@/components/ui/input';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 import { format, parseISO, differenceInDays, startOfDay } from 'date-fns';
-import * as XLSX from 'xlsx';
+import { getXLSX } from '@/lib/lazyLibs';
 import {
   X,
   Search,
@@ -638,7 +638,7 @@ function printLedger(rows, client, company, dateFrom, dateTo, openingBal) {
 // ════════════════════════════════════════════════════════════════════════════════
 // EXCEL EXPORT
 // ════════════════════════════════════════════════════════════════════════════════
-function exportLedgerReconciliationExcel(rows, client, company, dateFrom, dateTo, openingBalance) {
+async function exportLedgerReconciliationExcel(rows, client, company, dateFrom, dateTo, openingBalance) {
   const periodLabel = dateFrom && dateTo
     ? `${format(new Date(dateFrom), 'dd-MMM-yyyy')} – ${format(new Date(dateTo), 'dd-MMM-yyyy')}`
     : 'All time';
@@ -679,6 +679,7 @@ function exportLedgerReconciliationExcel(rows, client, company, dateFrom, dateTo
   sheetData.push(['', 'Closing Balance', '', '', '', '', '', '', '', closingBal, '', closingSide]);
   sheetData.push(['', 'Total',           '', '', '', totalDr,      '', totalCr,   '', '',          '', '']);
 
+  const XLSX = await getXLSX();
   const ws = XLSX.utils.aoa_to_sheet(sheetData);
 
   ws['!merges'] = [
