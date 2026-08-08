@@ -16,8 +16,7 @@ import {
   ResponsiveContainer, AreaChart, Area, Legend,
   RadarChart, Radar, PolarGrid, PolarAngleAxis,
 } from 'recharts';
-import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import { getJsPDF, getAutoTable } from '@/lib/lazyLibs';
 import LayoutCustomizer from '@/components/layout/LayoutCustomizer';
 import { usePageLayout } from '@/hooks/usePageLayout';
 
@@ -252,13 +251,17 @@ export default function Reports() {
 
   const fetchAll = async (ref=false) => {
     ref ? setRefreshing(true) : setLoading(true);
+    // NOTE: /tasks capped to the 500 most-recently-created tasks (stop-gap for load
+    // time). For firms with very high task volume this can undercount efficiency
+    // stats for long-tenured staff — a true paginated/aggregated backend endpoint
+    // would be the correct long-term fix.
     const [r1,r2,r3,r4] = await Promise.allSettled([
-      api.get('/tasks'),
+      api.get('/tasks', { params: { page: 1, page_size: 500 } }),
       api.get('/dashboard/stats'),
       api.get('/attendance/history'),
       (isAdmin || hasCrossVisReports) ? api.get('/users') : Promise.resolve({data:[]}),
     ]);
-    if (r1.status==='fulfilled') setTasks(r1.value?.data||[]);
+    if (r1.status==='fulfilled') setTasks(r1.value?.data?.tasks || (Array.isArray(r1.value?.data) ? r1.value.data : []));
     if (r2.status==='fulfilled') setDashStats(r2.value?.data||null);
     if (r3.status==='fulfilled') setAttendance(r3.value?.data||[]);
     if (r4.status==='fulfilled') {
@@ -425,6 +428,8 @@ export default function Reports() {
   // ── PDF export ────────────────────────────────────────────────────────────
   const handlePdf = async () => {
     try {
+      const jsPDF = await getJsPDF();
+      await getAutoTable(); // side-effect: patches doc.autoTable(...)
       const doc=new jsPDF('p','mm','a4'); let y=15;
       doc.setFontSize(20);doc.setTextColor(13,59,102);
       doc.text('Efficiency Reports & Analytics',15,y);y+=9;
