@@ -23,8 +23,7 @@ import {
 import { useDark } from '@/hooks/useDark';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import { getJsPDF, getAutoTable } from '@/lib/lazyLibs';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
@@ -374,8 +373,10 @@ export default function ActivityReportPanel() {
   }, [staffList, selDate]);
 
   // ── PDF export ────────────────────────────────────────────────────────────
-  const handlePdf = () => {
+  const handlePdf = async () => {
     try {
+      const jsPDF = await getJsPDF();
+      await getAutoTable(); // side-effect: patches doc.autoTable(...)
       const doc = new jsPDF('p', 'mm', 'a4');
       let y = 15;
       doc.setFontSize(18); doc.setTextColor(13, 59, 102);
