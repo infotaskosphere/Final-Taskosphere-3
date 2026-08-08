@@ -1083,8 +1083,13 @@ export default function Tasks() {
     const fetchFresh = async (showLoadingState) => {
       if (showLoadingState) setDataLoading(true);
       // ── All 4 API calls fire simultaneously — no sequential waterfalls ──
+      // NOTE: /tasks is capped to the 500 most-recently-created tasks (server sorts
+      // by created_at desc) instead of fetching the entire unbounded collection.
+      // This is a stop-gap for load time — a full server-side-paginated Tasks UI
+      // (search/filter hitting the server instead of the in-memory array) is a
+      // larger follow-up change, not done here.
       const [tasksResult, usersResult, clientsResult, rankResult] = await Promise.allSettled([
-        apiFetch('/tasks'),
+        apiFetch('/tasks?page=1&page_size=500'),
         apiFetch('/users'),
         fetchAllClients(),
         apiFetch('/reports/performance-rankings?period=monthly'),
@@ -1093,8 +1098,13 @@ export default function Tasks() {
       // tasks
       if (tasksResult.status === 'fulfilled') {
         const tasksData = tasksResult.value;
-        if (Array.isArray(tasksData)) setTasks(tasksData);
-        else if (tasksData === null) toast.error("You don't have permission to view tasks.");
+        const tasksArray = Array.isArray(tasksData) ? tasksData : (tasksData?.tasks || null);
+        if (Array.isArray(tasksArray)) {
+          setTasks(tasksArray);
+          if (tasksData?.total > tasksArray.length) {
+            toast.info(`Showing the ${tasksArray.length} most recent tasks (of ${tasksData.total} total). Use filters/search to narrow results.`, { duration: 5000 });
+          }
+        } else if (tasksData === null) toast.error("You don't have permission to view tasks.");
       } else {
         if (tasksResult.reason?.response?.status === 403)
           toast.error("You don't have permission to view tasks.");
@@ -1122,8 +1132,11 @@ export default function Tasks() {
           setMyRanking(ranking);
           setRankingsLoaded(true);
           // Cache everything for fast revisit
+          const tasksArrayForCache = tasksResult.status === 'fulfilled'
+            ? (Array.isArray(tasksResult.value) ? tasksResult.value : (tasksResult.value?.tasks || []))
+            : [];
           setTasksCache({
-            tasks: tasksResult.status === 'fulfilled' && Array.isArray(tasksResult.value) ? tasksResult.value : [],
+            tasks: tasksArrayForCache,
             users: usersResult.status === 'fulfilled' && Array.isArray(usersResult.value) ? usersResult.value : [],
             clients: clientsResult.status === 'fulfilled' && Array.isArray(clientsResult.value) ? clientsResult.value : [],
             ranking,
