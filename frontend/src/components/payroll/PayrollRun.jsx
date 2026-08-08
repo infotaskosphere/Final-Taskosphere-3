@@ -19,7 +19,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { toast } from 'sonner';
 import { computePayrollLine, summarise, MONTHS, rupee, periodLabel, dueDates } from '@/lib/payroll/statutory';
 import { getRun, saveRun } from '@/lib/payroll/store';
-import { attendanceSummaryForEmployees } from '@/lib/payroll/linkAttendance';
+import { attendanceSummaryForEmployees, salaryReportForEmployees } from '@/lib/payroll/linkAttendance';
 import { downloadSalaryRegister, downloadBankAdvice, downloadAllPayslips, downloadPayslip } from '@/lib/payroll/exports';
 
 export default function PayrollRun({ employees, employeesLoading = false, settings, month, year, setMonth, setYear, onSaved, canEdit = true }) {
@@ -43,20 +43,35 @@ export default function PayrollRun({ employees, employeesLoading = false, settin
   // period or roster changes, then prefill it — but only for employees who
   // don't already have a lopDays value for this run (a loaded draft or a
   // manual edit is never overwritten by this effect).
+  //
+  // Two sources are combined:
+  //  1. salaryReportForEmployees() — GET /users/salary-report-all, the exact
+  //     same attendance-based calculation People Matrix → Users → "Salary
+  //     Due" shows (absent/half-day/late/early-out policy, holidays, weekend
+  //     handling, all identical). Used whenever it's available so the LOP
+  //     days — and therefore Gross/Net here — match that page exactly.
+  //  2. attendanceSummaryForEmployees() — the simpler local calculation, kept
+  //     as a fallback for a non-admin payroll editor (the salary-report
+  //     endpoint is admin-only) so payroll never breaks if that call fails.
   useEffect(() => {
     if (!autoLop || locked() || active.length === 0) return;
     let cancelled = false;
     setAttendanceLoading(true);
-    attendanceSummaryForEmployees(active.map((e) => e.id), month, year, settings)
-      .then((summaries) => {
+    Promise.all([
+      salaryReportForEmployees(month, year),
+      attendanceSummaryForEmployees(active.map((e) => e.id), month, year, settings),
+    ])
+      .then(([exact, fallback]) => {
         if (cancelled) return;
-        setAttendance(summaries);
+        const merged = { ...fallback };
+        Object.entries(exact).forEach(([id, s]) => { merged[id] = { ...merged[id], ...s, exact: true }; });
+        setAttendance(merged);
         setInputs((prev) => {
           const next = { ...prev };
           active.forEach((e) => {
             if (next[e.id]?.lopDays != null) return; // already set — don't clobber
-            const s = summaries[e.id];
-            if (s?.ok) next[e.id] = { ...(next[e.id] || {}), lopDays: s.lopDays };
+            const s = merged[e.id];
+            if (s?.ok) next[e.id] = { ...(next[e.id] || {}), lopDays: s.totalDeductionDays ?? s.lopDays };
           });
           return next;
         });
@@ -71,13 +86,18 @@ export default function PayrollRun({ employees, employeesLoading = false, settin
   const recalculateFromAttendance = async () => {
     setAttendanceLoading(true);
     try {
-      const summaries = await attendanceSummaryForEmployees(active.map((e) => e.id), month, year, settings);
-      setAttendance(summaries);
+      const [exact, fallback] = await Promise.all([
+        salaryReportForEmployees(month, year),
+        attendanceSummaryForEmployees(active.map((e) => e.id), month, year, settings),
+      ]);
+      const merged = { ...fallback };
+      Object.entries(exact).forEach(([id, s]) => { merged[id] = { ...merged[id], ...s, exact: true }; });
+      setAttendance(merged);
       setInputs((prev) => {
         const next = { ...prev };
         active.forEach((e) => {
-          const s = summaries[e.id];
-          if (s?.ok) next[e.id] = { ...(next[e.id] || {}), lopDays: s.lopDays };
+          const s = merged[e.id];
+          if (s?.ok) next[e.id] = { ...(next[e.id] || {}), lopDays: s.totalDeductionDays ?? s.lopDays };
         });
         return next;
       });
@@ -190,6 +210,11 @@ export default function PayrollRun({ employees, employeesLoading = false, settin
                         {l.pf.applicable && <span className="ml-2">PF</span>}
                         {l.esi.applicable && <span className="ml-1">ESI</span>}
                       </div>
+                      {employeesById[l.employeeId]?.usingSalaryFallback && (
+                        <div className="text-[10px] mt-0.5 text-amber-600">
+                          Using salary on file (₹{employeesById[l.employeeId]?.monthlySalaryOnFile?.toLocaleString('en-IN')}) — no CTC structure set up yet
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Input className="h-8" type="number" disabled={isLocked || !canEdit}
@@ -197,7 +222,12 @@ export default function PayrollRun({ employees, employeesLoading = false, settin
                         onChange={(e) => setInput(l.employeeId, 'lopDays', Number(e.target.value) || 0)} />
                       {att?.ok && (
                         <div className="text-[10px] text-muted-foreground mt-0.5">
-                          {att.absentDays} absent{att.halfDays ? `, ${att.halfDays} half-day` : ''}{att.leaveDays ? `, ${att.leaveDays} leave` : ''}
+                          {att.absentDays} absent
+                          {att.halfDays ? `, ${att.halfDays} half-day` : ''}
+                          {att.leaveDays ? `, ${att.leaveDays} leave` : ''}
+                          {att.lateDays ? `, ${att.lateDays} late` : ''}
+                          {att.earlyOutDays ? `, ${att.earlyOutDays} early-out` : ''}
+                          {att.exact && <span title="Matches People Matrix → Users → Salary Due exactly"> ✓</span>}
                         </div>
                       )}
                     </TableCell>
