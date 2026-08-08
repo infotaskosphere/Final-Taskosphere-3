@@ -1,5 +1,5 @@
 import Papa from 'papaparse/papaparse.js';
-import { getJsPDF, getHtml2Canvas } from '@/lib/lazyLibs';
+import { getJsPDF, getHtml2Canvas, getXLSX } from '@/lib/lazyLibs';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import { useDark } from '@/hooks/useDark';
@@ -15,7 +15,10 @@ import api from '@/lib/api';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { format, parseISO, differenceInDays, startOfMonth, endOfMonth, subMonths } from 'date-fns';
-import * as XLSX from 'xlsx';
+// XLSX is loaded on demand at each import/export entry point (not statically
+// imported) so opening the Invoicing page doesn't force-download ~420KB
+// of spreadsheet library that most visits never use.
+let XLSX;
 import {
   Plus, Edit, Trash2, FileText, Search, Download, X, ChevronRight,
   Check, Eye, Printer, Layout, Palette, LayoutGrid,
@@ -506,7 +509,8 @@ const DriveUploadBtn = ({ invoiceId, invoiceNo, invoice, companies }) => {
 };
 
 function parseExcelInvoices(file) {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
+    XLSX = await getXLSX();
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
@@ -1027,9 +1031,10 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], clients
   };
 
   // ── Export helpers ──────────────────────────────────────────────────────
-  const handleExport = (exportFormat = 'excel') => {
+  const handleExport = async (exportFormat = 'excel') => {
     setExporting(exportFormat);
     try {
+      if (exportFormat !== 'json') XLSX = await getXLSX();
       const co = companies.find(c => c.id === companyFilter);
       const companyName = companyFilter === 'all' ? 'All' : (co?.name || companyFilter);
       const supplierGSTIN = (co?.gstin || co?.gst_number || '24AALCP5501B1ZW').toUpperCase();
@@ -1838,7 +1843,8 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], clients
 // EXCEL IMPORT — parse Excel/CSV invoice template
 // ════════════════════════════════════════════════════════════════════════════════
 function parseSaleReportExcel(file) {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
+    XLSX = await getXLSX();
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
@@ -2076,6 +2082,7 @@ const ImportModal = ({ open, onClose, isDark, companies, onImportComplete }) => 
     setLoading(true); setError('');
     try {
       if (importMode === 'excel') {
+        XLSX = await getXLSX();
         // Auto-detect SaleReport vs template
         const firstCell = await new Promise(res => {
           const sniffReader = new FileReader();
@@ -5187,9 +5194,10 @@ const ProductModal = ({ open, onClose, isDark, onSaved, invoices = [] }) => {
     Promise.all(toAdd.map(s => api.post('/products', s))).then(() => { toast.success(`Imported ${toAdd.length} service${toAdd.length > 1 ? 's' : ''}`); fetchProducts(); onSaved?.(); }).catch(() => toast.error('Some imports failed'));
   };
 
-  const handleExportCSV = () => {
+  const handleExportCSV = async () => {
     const rows = [['Name', 'Description', 'Type', 'Category', 'Unit', 'Unit Price', 'GST %', 'Discount %', 'HSN/SAC', 'Notes']];
     products.forEach(p => rows.push([p.name, p.description || '', p.is_service ? 'Service' : 'Product', p.category || '', p.unit || '', p.unit_price || 0, p.gst_rate || 18, p.discount || 0, p.hsn_sac || '', p.notes || '']));
+    XLSX = await getXLSX();
     const ws = XLSX.utils.aoa_to_sheet(rows); const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Catalog'); XLSX.writeFile(wb, 'service_catalog.xlsx');
     toast.success('Exported!');
@@ -6366,10 +6374,11 @@ const fetchAll = useCallback(async () => {
     setWaDialogOpen(true);
   }, []);
 
-  const handleExport = useCallback(() => {
+  const handleExport = useCallback(async () => {
     if (!(enrichedFiltered?.length)) { toast.error('No invoices to export'); return; }
     const rows = [['Invoice No','Type','Client','Date','Due Date','Taxable','GST','Total','Paid','Balance','Status'],
       ...enrichedFiltered.map(inv => [inv.invoice_no, INV_TYPES.find(t => t.value === inv.invoice_type)?.label || inv.invoice_type, inv.client_name, inv.invoice_date, inv.due_date, inv.total_taxable, inv.total_gst, inv.grand_total, inv.amount_paid, inv.amount_due, inv.status])];
+    XLSX = await getXLSX();
     const ws = XLSX.utils.aoa_to_sheet(rows); const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Invoices');
     XLSX.writeFile(wb, `invoices_${format(new Date(), 'dd-MMM-yyyy')}.xlsx`);
