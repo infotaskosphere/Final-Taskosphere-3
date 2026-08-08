@@ -16,7 +16,7 @@ import {
   XCircle, Loader2, AlertCircle, ChevronDown, ChevronUp,
   X, FileText, Eye, Pencil, Trash2, Search, Save
 } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import { getXLSX } from '@/lib/lazyLibs';
 import api from '@/lib/api';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -333,7 +333,7 @@ function isFilterOrEmptyRow(r) {
   return allFilter;
 }
 
-function parseITRExcel(workbook) {
+function parseITRExcel(workbook, XLSX) {
   const results = [];
   let detectedAY = null;
 
@@ -638,11 +638,12 @@ export default function ITRBulkImportDialog({ open, onClose, onImported, isDark 
     setFileName(file.name);
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
+        const XLSX = await getXLSX();
         const data = new Uint8Array(e.target.result);
         const wb = XLSX.read(data, { type: 'array', cellDates: false, raw: true });
-        const { rows, detectedAY: ay } = parseITRExcel(wb);
+        const { rows, detectedAY: ay } = parseITRExcel(wb, XLSX);
 
         if (rows.length === 0) {
           toast.error('No valid client rows found. Make sure the file has Name and PAN columns.');
