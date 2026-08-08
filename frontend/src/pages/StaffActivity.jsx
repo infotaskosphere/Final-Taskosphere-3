@@ -18,8 +18,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend, AreaChart, Area,
 } from 'recharts';
-import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import { getJsPDF, getAutoTable } from '@/lib/lazyLibs';
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 const tok = (dark) => ({
@@ -470,6 +469,8 @@ export default function StaffActivity() {
 
   const exportPDF = async () => {
     try {
+      const jsPDF = await getJsPDF();
+      await getAutoTable(); // side-effect: patches doc.autoTable(...)
       const doc = new jsPDF('p', 'mm', 'a4'); let y = 15;
       doc.setFontSize(18); doc.setTextColor(13, 59, 102);
       doc.text('Team Activity Report', 15, y); y += 8;
