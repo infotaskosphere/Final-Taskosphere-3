@@ -1219,9 +1219,13 @@ export default function Dashboard() {
     // ── Wave 1: critical path ──
     let wave1 = {};
     try {
-      const [tasks, stats, dueDates, attendance, todos, visits, holidays, deptMembers, reminders] =
+      // /tasks is capped to the 500 most-recently-created tasks — the dashboard only
+      // ever displays small "recent" slices of this array (top 5-6, newest-first);
+      // aggregate counts/overdue stats come from /dashboard/stats and
+      // /duedates/upcoming, which are unaffected by this cap.
+      const [tasksResp, stats, dueDates, attendance, todos, visits, holidays, deptMembers, reminders] =
         await Promise.all([
-          apiFetch('/tasks'),
+          apiFetch('/tasks?page=1&page_size=500'),
           apiFetch('/dashboard/stats'),
           apiFetch('/duedates/upcoming?days=30'),
           apiFetch('/attendance/today'),
@@ -1231,6 +1235,7 @@ export default function Dashboard() {
           apiFetch('/dashboard/dept-members'),
           apiFetch('/email/reminders'),
         ]);
+      const tasks = Array.isArray(tasksResp) ? tasksResp : (tasksResp?.tasks || []);
       wave1 = { tasks, stats, dueDates, attendance, todos, visits, holidays, deptMembers, reminders };
       applyWave1Data(wave1);
     } catch (e) {
@@ -1493,8 +1498,9 @@ export default function Dashboard() {
       });
       if (!res.ok) {
         toast.error('Failed to update status');
-        const data = await apiFetch('/tasks');
-        if (Array.isArray(data)) setTasks(data);
+        const data = await apiFetch('/tasks?page=1&page_size=500');
+        const arr = Array.isArray(data) ? data : (data?.tasks || null);
+        if (Array.isArray(arr)) setTasks(arr);
       } else {
         toast.success(`Marked as ${newStatus.replace('_', ' ')}`);
       }
