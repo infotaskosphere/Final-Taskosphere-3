@@ -109,6 +109,21 @@ function ageFromDob(dob) {
 function mergeUserWithOverlay(user, overlay) {
   const ov = deepMerge(overlayDefaults(), overlay || {});
   const uid_ = user.id || user._id;
+  const monthlySalaryOnFile = user.monthly_salary ?? null;
+
+  // If nobody has broken this person's pay down into a Basic/DA/HRA/…
+  // structure yet (Payroll → Employees), don't show ₹0 gross wages just
+  // because the CTC split hasn't been configured. Fall back to the salary
+  // that was already entered for them in Users (People Matrix → Users →
+  // Monthly Salary), treated as the Basic component, so "Process payroll"
+  // reflects the real, already-known salary immediately. The moment
+  // someone does fill in a real structure (`configured: true`), that
+  // takes over and this fallback is no longer used.
+  const structureIsBlank = !ov.configured && Object.values(ov.structure || {}).every((v) => !Number(v));
+  const structure = structureIsBlank && monthlySalaryOnFile
+    ? { ...ov.structure, basic: Number(monthlySalaryOnFile) || 0 }
+    : ov.structure;
+
   return {
     id: uid_,
     userId: uid_,
@@ -128,12 +143,13 @@ function mergeUserWithOverlay(user, overlay) {
     age: ageFromDob(user.birthday),
     monthlyTds: ov.monthlyTds,
     status: user.is_active === false ? 'inactive' : 'active',
-    structure: ov.structure,
+    structure,
     pf: ov.pf,
     esi: ov.esi,
     bank: { ...ov.bank, accountHolder: ov.bank.accountHolder || user.full_name || '' },
     configured: ov.configured,
-    monthlySalaryOnFile: user.monthly_salary ?? null, // shown as a hint when structure isn't filled in yet
+    monthlySalaryOnFile, // shown as a hint when structure isn't filled in yet
+    usingSalaryFallback: structureIsBlank && !!monthlySalaryOnFile,
   };
 }
 
