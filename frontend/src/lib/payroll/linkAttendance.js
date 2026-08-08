@@ -72,3 +72,44 @@ export async function attendanceSummaryForEmployees(userIds, month, year, settin
   );
   return Object.fromEntries(entries);
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Exact salary-due numbers, straight from the same source of truth as
+// People Matrix → Users ("Salary Due" table): GET /users/salary-report-all.
+// That endpoint already applies the firm's real attendance policy —
+// absent = 1 day, half-day = 0.5, late-in OR early-out = 0.5 (capped at 1),
+// Sundays/holidays excluded, weekend-spanning leave handled, etc. Payroll
+// pulls the resulting `total_deduction_days` as its LOP figure instead of
+// re-deriving a simplified version, so the two pages always agree exactly.
+//
+// Admin-only on the backend — for a non-admin payroll editor (if that ever
+// exists) this quietly returns `{}` and PayrollRun falls back to the
+// simpler attendanceSummaryForMonth() above.
+export async function salaryReportForEmployees(month, year) {
+  try {
+    const monthParam = `${year}-${String(month).padStart(2, '0')}`;
+    const { data } = await api.get('/users/salary-report-all', { params: { month: monthParam } });
+    const reports = Array.isArray(data?.reports) ? data.reports : [];
+    return Object.fromEntries(
+      reports.map((r) => [
+        r.user_id,
+        {
+          ok: true,
+          monthlySalary: r.monthly_salary || 0,
+          perDaySalary: r.per_day_salary || 0,
+          presentDays: r.present_days || 0,
+          absentDays: r.absent_days || 0,
+          halfDays: r.half_days || 0,
+          lateDays: r.late_days || 0,
+          earlyOutDays: r.early_out_days || 0,
+          holidayDays: r.holiday_days || 0,
+          totalDeductionDays: r.total_deduction_days || 0,
+          deductionAmount: r.deduction_amount || 0,
+          payableSalary: r.payable_salary ?? r.monthly_salary ?? 0,
+        },
+      ])
+    );
+  } catch {
+    return {};
+  }
+}
