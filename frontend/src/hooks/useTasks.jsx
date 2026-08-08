@@ -8,8 +8,10 @@ export function useTasks() {
   return useQuery({
     queryKey: ["tasks"],
     queryFn: async () => {
-      const { data } = await api.get("/tasks");
-      return data || [];
+      // Capped to the 500 most-recently-created tasks — see server.py /tasks
+      // docstring. Unwraps the paginated {tasks, total, ...} response shape.
+      const { data } = await api.get("/tasks", { params: { page: 1, page_size: 500 } });
+      return Array.isArray(data) ? data : (data?.tasks || []);
     },
   });
 }
