@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import {
   BarChart3, RefreshCw, CheckCircle2, AlertTriangle, Building2,
   TrendingUp, TrendingDown, Landmark, Receipt, Sparkles, Send, Brain, HelpCircle,
-  ArrowRight, ShieldCheck, ShieldAlert, PieChart as PieIcon, LineChart as LineIcon, Clock,
+  ArrowRight, ShieldCheck, ShieldAlert, PieChart as PieIcon, LineChart as LineIcon, Clock, Layers,
 } from 'lucide-react';
 import { ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
@@ -43,6 +43,33 @@ const _companiesCache_finix = { data: null, ts: 0 };
 const _metricsCache_finix = new Map(); // companyId -> { data, ts }
 const COMPANIES_CACHE_TTL_MS = 5 * 60_000;
 const METRICS_CACHE_TTL_MS = 60_000;
+
+// Sentinel companyId for the "All Companies" combined view.
+const ALL_COMPANIES_ID = '__all__';
+
+// ─── sessionStorage mirror of the in-memory caches ─────────────────────
+// The in-memory caches above only help while this tab stays on the same
+// SPA session (they're lost on a hard refresh). Mirroring the same data
+// into sessionStorage means a hard refresh of this page — or coming back
+// to it after visiting somewhere else and reloading — can paint instantly
+// from the last-known numbers instead of showing a blank loading screen
+// while the whole waterfall re-runs, then quietly re-validates in the
+// background. Session (not local) storage on purpose: financial figures
+// shouldn't linger across browser restarts/devices.
+const SS_METRICS_PREFIX = 'finix:metrics:';
+const SS_COMPANIES_KEY = 'finix:companies';
+
+function ssRead(key) {
+  try {
+    const raw = sessionStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+function ssWrite(key, value) {
+  try { sessionStorage.setItem(key, JSON.stringify(value)); } catch { /* quota / privacy mode — non-fatal */ }
+}
 
 export default function FinixDashboard() {
   return (
@@ -104,15 +131,25 @@ function FinixDashboardInner() {
       setCompanies(_companiesCache_finix.data);
       return _companiesCache_finix.data;
     }
+    // Nothing in memory (e.g. fresh hard reload) — fall back to the
+    // sessionStorage mirror so the dropdown paints immediately instead of
+    // sitting empty, while the network call below still runs to refresh it.
+    const cached = ssRead(SS_COMPANIES_KEY);
+    if (cached?.data && Date.now() - cached.ts < COMPANIES_CACHE_TTL_MS) {
+      _companiesCache_finix.data = cached.data;
+      _companiesCache_finix.ts = cached.ts;
+      setCompanies(cached.data);
+    }
     try {
       const { data } = await api.get('/companies/list');
       const list = data || [];
       _companiesCache_finix.data = list;
       _companiesCache_finix.ts = Date.now();
+      ssWrite(SS_COMPANIES_KEY, { data: list, ts: _companiesCache_finix.ts });
       setCompanies(list);
       return list;
     } catch {
-      return [];
+      return cached?.data || [];
     }
   };
 
@@ -147,295 +184,408 @@ function FinixDashboardInner() {
       });
   };
 
-  const fetchMetrics = async (cid, { force = false } = {}) => {
-    // Serve straight from the short-lived cache when we already computed
-    // this company's numbers recently — makes switching back to a company
-    // you were just viewing (or simply re-opening this page) feel instant
-    // instead of re-running the entire fetch waterfall below. The manual
-    // refresh button passes { force: true } to bypass this.
-    const cachedMetrics = _metricsCache_finix.get(cid);
-    if (!force && cachedMetrics && Date.now() - cachedMetrics.ts < METRICS_CACHE_TTL_MS) {
-      const m = cachedMetrics.data;
-      setRevenue(m.revenue);
-      setReceivables(m.receivables);
-      setCashAndBank(m.cashAndBank);
-      setPayables(m.payables);
-      setNetProfit(m.netProfit);
-      setExpenses(m.expenses);
-      setChartData(m.chartData);
-      setExpenseBreakdown(m.expenseBreakdown);
-      setValidation(m.validation);
-      setLastVerifiedAt(m.lastVerifiedAt);
-      setInsights(m.insights);
-      setLoading(false);
-      return;
+  // ─── Pure metrics computation for one company ────────────────────────
+  // Fetches + computes everything for a single company and returns the
+  // finished snapshot; does NOT touch component state directly (besides
+  // the optional onValidationSettled callback, used by the single-company
+  // path below for an early UI update). Kept state-free so it can be
+  // reused for both the normal single-company view and the "All
+  // Companies" aggregate view, running once per company in parallel
+  // instead of the aggregate view re-implementing this logic.
+  const computeMetricsForCompany = async (cid, { force = false, onValidationSettled } = {}) => {
+    // In-memory cache (fastest — survives SPA navigation within this tab).
+    const cached = _metricsCache_finix.get(cid);
+    if (!force && cached && Date.now() - cached.ts < METRICS_CACHE_TTL_MS) {
+      return cached.data;
+    }
+    // sessionStorage mirror (survives a hard page refresh too).
+    if (!force) {
+      const ss = ssRead(SS_METRICS_PREFIX + cid);
+      if (ss && Date.now() - ss.ts < METRICS_CACHE_TTL_MS) {
+        const restored = { ...ss.data, lastVerifiedAt: ss.data.lastVerifiedAt ? new Date(ss.data.lastVerifiedAt) : null };
+        _metricsCache_finix.set(cid, { ts: ss.ts, data: restored });
+        return restored;
+      }
     }
 
+    // Get Trial Balance, Profit/Loss, and Balance Sheet reports to
+    // aggregate Finix AI state. (This used to also fetch
+    // /reports/mis-compliance here as a 4th parallel call, but its result
+    // was never read anywhere below — it was fetched and thrown away.
+    // Every one of these report endpoints re-syncs the company's ledger
+    // on the backend before computing anything, so that was a full,
+    // wasted reconciliation pass on every single load. Dropping it changes
+    // nothing the user sees and removes ~1/4 of the backend work.)
+    const df = `${new Date().getFullYear()}-04-01`; // Current FY start
+    const dt = `${new Date().getFullYear() + 1}-03-31`; // Current FY end
+
+    // These three request groups are independent of each other — each
+    // only needs `cid` — but previously ran one after another (batch of
+    // 3 reports, THEN the monthly-trend calls, THEN the validation
+    // engine), stacking three separate wait times on top of each other.
+    // Firing them together lets the backend work on all three at once,
+    // so total wait time is roughly the slowest of the three instead of
+    // the sum of all three.
+    const [batchSettled, trend, validationResult] = await Promise.all([
+      Promise.allSettled([
+        api.get('/reports/trial-balance', { params: { company_id: cid, date_from: df, date_to: dt } }),
+        api.get('/reports/profit-loss', { params: { company_id: cid, date_from: df, date_to: dt } }),
+        api.get('/reports/balance-sheet', { params: { company_id: cid, as_of: new Date().toISOString().split('T')[0] } }),
+      ]),
+      buildMonthlyTrend(cid),
+      (async () => {
+        try {
+          const v = await runVerifyAndFix(cid, { force });
+          onValidationSettled?.(v, null);
+          return v;
+        } catch (err) {
+          console.error(err);
+          onValidationSettled?.(null, err);
+          return null;
+        }
+      })(),
+    ]);
+
+    const [tbRes, pnlRes, bsRes] = batchSettled;
+
+    let tbData = tbRes.status === 'fulfilled' ? tbRes.value.data : null;
+    let pnlData = pnlRes.status === 'fulfilled' ? pnlRes.value.data : null;
+    let bsData = bsRes.status === 'fulfilled' ? bsRes.value.data : null;
+
+    // Extract Revenue from P&L or Trial Balance
+    let revTotal = pnlData?.total_income || pnlData?.revenue || 0;
+    if (!revTotal && tbData?.rows) {
+      // Fallback to accounts code 4000
+      const salesAcct = tbData.rows.find(r => r.code === '4000');
+      revTotal = salesAcct ? Math.abs((salesAcct.credit || 0) - (salesAcct.debit || 0)) : 0;
+    }
+
+    // Extract Receivables (Account 1200 / 1100)
+    let arTotal = 0;
+    if (tbData?.rows) {
+      const arAcct = tbData.rows.find(r => r.code === '1200' || r.code === '1100');
+      arTotal = arAcct ? ((arAcct.debit || 0) - (arAcct.credit || 0)) : 0;
+    }
+    if (!arTotal && bsData?.assets) {
+      const arRow = bsData.assets.find(a => a.code === '1200' || a.code === '1100' || a.name?.toLowerCase().includes('receivable'));
+      arTotal = arRow ? arRow.amount : 0;
+    }
+
+    // Extract Bank and Cash Balances (1001, 1002, 1003, 1000, 1010)
+    let liquidCash = 0;
+    if (tbData?.rows) {
+      const cashAccts = tbData.rows.filter(r => ['1001', '1002', '1003', '1000', '1010'].includes(r.code));
+      liquidCash = cashAccts.reduce((sum, r) => sum + ((r.debit || 0) - (r.credit || 0)), 0);
+    }
+    if (!liquidCash && bsData?.assets) {
+      const cashRows = bsData.assets.filter(a => ['1001', '1002', '1003', '1000', '1010'].includes(a.code) || a.name?.toLowerCase().includes('cash') || a.name?.toLowerCase().includes('bank'));
+      liquidCash = cashRows.reduce((sum, item) => sum + (item.amount || 0), 0);
+    }
+
+    // Extract Payables (Account 2000 "Accounts Payable" only — 2100 is GST
+    // Output Payable, a tax liability, not a vendor payable, and mixing it
+    // in here previously caused the card to show tax dues as vendor debt).
+    let apTotal = 0;
+    if (tbData?.rows) {
+      const apAcct = tbData.rows.find(r => r.code === '2000');
+      apTotal = apAcct ? Math.abs((apAcct.credit || 0) - (apAcct.debit || 0)) : 0;
+    }
+    if (!apTotal && bsData?.liabilities) {
+      const apRow = bsData.liabilities.find(l => l.code === '2000' || l.name?.toLowerCase().includes('accounts payable'));
+      apTotal = apRow ? apRow.amount : 0;
+    }
+
+    // Profit and Expenses — the backend's /reports/profit-loss returns the
+    // field as `total_expense` (singular).
+    const expTotal = pnlData?.total_expense ?? 0;
+    const netProfitTotal = pnlData?.net_profit ?? (revTotal - expTotal);
+
+    // Build charts
+    // 1. Revenue vs Expenses by month — call the same endpoint once per
+    // elapsed month of the current FY so every point on the chart is a
+    // real, independently computed total. (`trend` was already fetched
+    // above, concurrently with the batch of reports and the validation
+    // engine, instead of only starting after they both finished.)
+    const chartDataResolved = trend.length ? trend : [
+      { name: 'This FY', Revenue: round2(revTotal), Expenses: round2(expTotal), Profit: round2(revTotal - expTotal) }
+    ];
+
+    // Expense Breakdown pie chart — use the real per-account expense rows
+    // the backend already computed.
+    const realBreakdown = (pnlData?.expenses || [])
+      .filter(e => Math.abs(e.amount || 0) > 0.01)
+      .map(e => ({ name: e.name || e.code || 'Other', value: Math.abs(e.amount) }));
+
+    // AI Insights - dynamic heuristic alerts based on actual figures
+    const generatedInsights = [];
+
+    // Insight 1: Receivable Drift & Aging Prediction
+    if (arTotal > 0) {
+      const arRatio = (arTotal / (revTotal || 1)) * 100;
+      if (arRatio > 35) {
+        generatedInsights.push({
+          type: 'warning',
+          category: 'Receivables & Collections',
+          title: 'High Receivable Exposure Detected',
+          text: `Outstanding receivables of ${fmtC(arTotal)} represent ${arRatio.toFixed(1)}% of total sales. AI-predicted collection lag: 45 days. Recommended: automate payment reminders.`
+        });
+      } else {
+        generatedInsights.push({
+          type: 'success',
+          category: 'Receivables & Collections',
+          title: 'Outstanding Under Control',
+          text: `Receivables of ${fmtC(arTotal)} are healthy at only ${arRatio.toFixed(1)}% of annualized revenue. Outstanding collection efficiency remains high.`
+        });
+      }
+    }
+
+    // Insight 2: Working Capital / Cash Flow Alert
+    if (liquidCash > 0) {
+      if (liquidCash < apTotal) {
+        generatedInsights.push({
+          type: 'warning',
+          category: 'Working Capital',
+          title: 'Short-Term Cash Squeeze Risk',
+          text: `Liquid reserves (${fmtC(liquidCash)}) are lower than current accounts payable (${fmtC(apTotal)}). Liquid ratio is ${((liquidCash / (apTotal || 1))).toFixed(2)}. Suggest pausing non-essential cash outflow.`
+        });
+      } else {
+        generatedInsights.push({
+          type: 'success',
+          category: 'Working Capital',
+          title: 'Excellent Working Capital Health',
+          text: `Cash/Bank holdings of ${fmtC(liquidCash)} easily cover all pending vendor payables (${fmtC(apTotal)}), yielding a robust current ratio.`
+        });
+      }
+    }
+
+    // Insight 3: Profit Margin Analysis
+    const margin = (revTotal > 0) ? ((revTotal - expTotal) / revTotal) * 100 : 0;
+    if (margin > 20) {
+      generatedInsights.push({
+        type: 'success',
+        category: 'Profitability',
+        title: 'Premium Net Margin Generated',
+        text: `Your current net profit margin is ${margin.toFixed(1)}%. This outperforms the general sector average of 14.5% due to optimized operating overheads.`
+      });
+    } else if (margin > 0) {
+      generatedInsights.push({
+        type: 'info',
+        category: 'Profitability',
+        title: 'Stable Net Operating Margin',
+        text: `Net profit margin is currently stable at ${margin.toFixed(1)}%. Expense audits reveal slight optimization space in Software and Professional fees.`
+      });
+    }
+
+    // Insight 4: GST Portal Sync Match
+    const gstMismatch = validationResult?.mismatches?.find(
+      (m) => m.rule === 'GST + Non-GST + Export + Exempt Sales = Revenue'
+    );
+    if (validationResult && !gstMismatch) {
+      generatedInsights.push({
+        type: 'success',
+        category: 'Compliance',
+        title: 'Auto-Matched GST Return Readiness',
+        text: 'Sales ledgers are matched with outstanding GST output. GST/non-GST/export/exempt sale buckets reconcile exactly with total revenue.'
+      });
+    } else if (gstMismatch) {
+      generatedInsights.push({
+        type: 'warning',
+        category: 'Compliance',
+        title: 'GST Return Readiness Mismatch',
+        text: `Sales tax buckets differ from total revenue by ${fmtC(Math.abs(gstMismatch.diff))}. Review GST classification on recent invoices before filing.`
+      });
+    }
+
+    const lastVerifiedAt = validationResult ? new Date() : null;
+    const data = {
+      revenue: revTotal,
+      receivables: arTotal,
+      cashAndBank: liquidCash,
+      payables: apTotal,
+      netProfit: netProfitTotal,
+      expenses: expTotal,
+      chartData: chartDataResolved,
+      expenseBreakdown: realBreakdown,
+      insights: generatedInsights,
+      validation: validationResult,
+      lastVerifiedAt,
+    };
+
+    // Cache the fully-assembled snapshot — in memory (instant SPA revisit)
+    // and mirrored to sessionStorage (instant paint after a hard refresh)
+    // — so the next visit to this company within the TTL can skip straight
+    // to applying it instead of re-fetching everything.
+    const ts = Date.now();
+    _metricsCache_finix.set(cid, { ts, data });
+    ssWrite(SS_METRICS_PREFIX + cid, { ts, data: { ...data, lastVerifiedAt: lastVerifiedAt ? lastVerifiedAt.toISOString() : null } });
+
+    return data;
+  };
+
+  // ─── Single-company view ──────────────────────────────────────────────
+  const fetchMetrics = async (cid, { force = false } = {}) => {
     setLoading(true);
+    setVerifying(true);
     // Bumped for this call; if a newer fetchMetrics call starts (fast
     // company switching, or a refresh click) before this one finishes, the
     // stale one recognizes it's been superseded and skips writing state.
     const requestId = ++fetchIdRef.current;
     try {
-      // Get Trial Balance, Profit/Loss, and Balance Sheet reports to
-      // aggregate Finix AI state. (This used to also fetch
-      // /reports/mis-compliance here as a 4th parallel call, but its result
-      // was never read anywhere below — it was fetched and thrown away.
-      // Every one of these report endpoints re-syncs the company's ledger
-      // on the backend before computing anything, so that was a full,
-      // wasted reconciliation pass on every single load. Dropping it changes
-      // nothing the user sees and removes ~1/4 of the backend work.)
-      const df = `${new Date().getFullYear()}-04-01`; // Current FY start
-      const dt = `${new Date().getFullYear() + 1}-03-31`; // Current FY end
-
-      // These three request groups are independent of each other — each
-      // only needs `cid` — but previously ran one after another (batch of
-      // 3 reports, THEN the monthly-trend calls, THEN the validation
-      // engine), stacking three separate wait times on top of each other.
-      // Firing them together lets the backend work on all three at once,
-      // so total wait time is roughly the slowest of the three instead of
-      // the sum of all three.
-      const [batchSettled, trend, validationResult] = await Promise.all([
-        Promise.allSettled([
-          api.get('/reports/trial-balance', { params: { company_id: cid, date_from: df, date_to: dt } }),
-          api.get('/reports/profit-loss', { params: { company_id: cid, date_from: df, date_to: dt } }),
-          api.get('/reports/balance-sheet', { params: { company_id: cid, as_of: new Date().toISOString().split('T')[0] } }),
-        ]),
-        buildMonthlyTrend(cid),
-        (async () => {
-          setVerifying(true);
-          try {
-            const v = await runVerifyAndFix(cid, { force });
-            if (requestId === fetchIdRef.current) {
-              setValidation(v);
-              setLastVerifiedAt(new Date());
-            }
-            return v;
-          } catch (err) {
-            console.error(err);
-            if (requestId === fetchIdRef.current) setValidation(null);
-            return null;
-          } finally {
-            if (requestId === fetchIdRef.current) setVerifying(false);
-          }
-        })(),
-      ]);
+      const data = await computeMetricsForCompany(cid, {
+        force,
+        // Applies the integrity-check result the moment it resolves,
+        // rather than waiting for the whole batch — matches the previous
+        // single-company behaviour where the Shield could light up before
+        // the KPI cards finished.
+        onValidationSettled: (v) => {
+          if (requestId !== fetchIdRef.current) return;
+          setValidation(v);
+          setLastVerifiedAt(v ? new Date() : null);
+          setVerifying(false);
+        },
+      });
 
       // A newer company switch or refresh click superseded this request —
       // don't let its slower, now-stale response overwrite the newer data.
       if (requestId !== fetchIdRef.current) return;
 
-      const [tbRes, pnlRes, bsRes] = batchSettled;
-
-      let tbData = tbRes.status === 'fulfilled' ? tbRes.value.data : null;
-      let pnlData = pnlRes.status === 'fulfilled' ? pnlRes.value.data : null;
-      let bsData = bsRes.status === 'fulfilled' ? bsRes.value.data : null;
-
-      // Extract Revenue from P&L or Trial Balance
-      let revTotal = pnlData?.total_income || pnlData?.revenue || 0;
-      if (!revTotal && tbData?.rows) {
-        // Fallback to accounts code 4000
-        const salesAcct = tbData.rows.find(r => r.code === '4000');
-        revTotal = salesAcct ? Math.abs((salesAcct.credit || 0) - (salesAcct.debit || 0)) : 0;
-      }
-      setRevenue(revTotal);
-
-      // Extract Receivables (Account 1200 / 1100)
-      let arTotal = 0;
-      if (tbData?.rows) {
-        const arAcct = tbData.rows.find(r => r.code === '1200' || r.code === '1100');
-        arTotal = arAcct ? ((arAcct.debit || 0) - (arAcct.credit || 0)) : 0;
-      }
-      if (!arTotal && bsData?.assets) {
-        const arRow = bsData.assets.find(a => a.code === '1200' || a.code === '1100' || a.name?.toLowerCase().includes('receivable'));
-        arTotal = arRow ? arRow.amount : 0;
-      }
-      setReceivables(arTotal);
-
-      // Extract Bank and Cash Balances (1001, 1002, 1003, 1000, 1010)
-      let liquidCash = 0;
-      if (tbData?.rows) {
-        const cashAccts = tbData.rows.filter(r => ['1001', '1002', '1003', '1000', '1010'].includes(r.code));
-        liquidCash = cashAccts.reduce((sum, r) => sum + ((r.debit || 0) - (r.credit || 0)), 0);
-      }
-      if (!liquidCash && bsData?.assets) {
-        const cashRows = bsData.assets.filter(a => ['1001', '1002', '1003', '1000', '1010'].includes(a.code) || a.name?.toLowerCase().includes('cash') || a.name?.toLowerCase().includes('bank'));
-        liquidCash = cashRows.reduce((sum, item) => sum + (item.amount || 0), 0);
-      }
-      setCashAndBank(liquidCash);
-
-      // Extract Payables (Account 2000 "Accounts Payable" only — 2100 is GST
-      // Output Payable, a tax liability, not a vendor payable, and mixing it
-      // in here previously caused the card to show tax dues as vendor debt).
-      let apTotal = 0;
-      if (tbData?.rows) {
-        const apAcct = tbData.rows.find(r => r.code === '2000');
-        apTotal = apAcct ? Math.abs((apAcct.credit || 0) - (apAcct.debit || 0)) : 0;
-      }
-      if (!apTotal && bsData?.liabilities) {
-        const apRow = bsData.liabilities.find(l => l.code === '2000' || l.name?.toLowerCase().includes('accounts payable'));
-        apTotal = apRow ? apRow.amount : 0;
-      }
-      setPayables(apTotal);
-
-      // Profit and Expenses — the backend's /reports/profit-loss returns the
-      // field as `total_expense` (singular). The previous `expenses_total` /
-      // `total_expenses` keys never existed on the response, so this always
-      // silently evaluated to 0 — flattening the Expenses trend line, faking
-      // an empty Operating Cost Distribution, and inflating the net margin
-      // insight to an impossible 100%.
-      const expTotal = pnlData?.total_expense ?? 0;
-      setExpenses(expTotal);
-      setNetProfit(pnlData?.net_profit ?? (revTotal - expTotal));
-
-      // Build charts
-      // 1. Revenue vs Expenses by month. The backend's /reports/profit-loss
-      // has no monthly_breakdown/trend field — it only returns FY-range
-      // totals — so this previously always fell into a "mock" branch that
-      // fabricated a fake seasonal split of the real totals (with visible
-      // floating-point noise like "82355.84000000001" in the tooltip).
-      // Instead, call the same endpoint once per elapsed month of the
-      // current FY so every point on the chart is a real, independently
-      // computed total rather than an invented percentage of the whole.
-      // (`trend` was already fetched above, concurrently with the batch of
-      // reports and the validation engine, instead of only starting after
-      // they both finished.)
-      const chartDataResolved = trend.length ? trend : [
-        { name: 'This FY', Revenue: round2(revTotal), Expenses: round2(expTotal), Profit: round2(revTotal - expTotal) }
-      ];
-      setChartData(chartDataResolved);
-
-      // Expense Breakdown pie chart — use the real per-account expense rows
-      // the backend already computed (`expenses`, not the non-existent
-      // `expenses_breakdown`). Previously this key never matched, so the
-      // chart silently displayed hardcoded fake categories/amounts
-      // (Office Rent 40k, Professional Services 25k, etc.) regardless of
-      // the company's actual books.
-      const realBreakdown = (pnlData?.expenses || [])
-        .filter(e => Math.abs(e.amount || 0) > 0.01)
-        .map(e => ({ name: e.name || e.code || 'Other', value: Math.abs(e.amount) }));
-      setExpenseBreakdown(realBreakdown);
-
-      // The reconciliation/consistency engine (validationResult) was already
-      // run concurrently above, in parallel with the report batch and the
-      // monthly trend, instead of only starting after both of those
-      // finished — its state (setValidation/setLastVerifiedAt) was already
-      // applied as soon as it resolved.
-
-      // AI Insights - dynamic heuristic alerts based on actual figures
-      const generatedInsights = [];
-      
-      // Insight 1: Receivable Drift & Aging Prediction
-      if (arTotal > 0) {
-        const arRatio = (arTotal / (revTotal || 1)) * 100;
-        if (arRatio > 35) {
-          generatedInsights.push({
-            type: 'warning',
-            category: 'Receivables & Collections',
-            title: 'High Receivable Exposure Detected',
-            text: `Outstanding receivables of ${fmtC(arTotal)} represent ${arRatio.toFixed(1)}% of total sales. AI-predicted collection lag: 45 days. Recommended: automate payment reminders.`
-          });
-        } else {
-          generatedInsights.push({
-            type: 'success',
-            category: 'Receivables & Collections',
-            title: 'Outstanding Under Control',
-            text: `Receivables of ${fmtC(arTotal)} are healthy at only ${arRatio.toFixed(1)}% of annualized revenue. Outstanding collection efficiency remains high.`
-          });
-        }
-      }
-
-      // Insight 2: Working Capital / Cash Flow Alert
-      if (liquidCash > 0) {
-        if (liquidCash < apTotal) {
-          generatedInsights.push({
-            type: 'warning',
-            category: 'Working Capital',
-            title: 'Short-Term Cash Squeeze Risk',
-            text: `Liquid reserves (${fmtC(liquidCash)}) are lower than current accounts payable (${fmtC(apTotal)}). Liquid ratio is ${((liquidCash / (apTotal || 1))).toFixed(2)}. Suggest pausing non-essential cash outflow.`
-          });
-        } else {
-          generatedInsights.push({
-            type: 'success',
-            category: 'Working Capital',
-            title: 'Excellent Working Capital Health',
-            text: `Cash/Bank holdings of ${fmtC(liquidCash)} easily cover all pending vendor payables (${fmtC(apTotal)}), yielding a robust current ratio.`
-          });
-        }
-      }
-
-      // Insight 3: Profit Margin Analysis
-      const margin = (revTotal > 0) ? ((revTotal - expTotal) / revTotal) * 100 : 0;
-      if (margin > 20) {
-        generatedInsights.push({
-          type: 'success',
-          category: 'Profitability',
-          title: 'Premium Net Margin Generated',
-          text: `Your current net profit margin is ${margin.toFixed(1)}%. This outperforms the general sector average of 14.5% due to optimized operating overheads.`
-        });
-      } else if (margin > 0) {
-        generatedInsights.push({
-          type: 'info',
-          category: 'Profitability',
-          title: 'Stable Net Operating Margin',
-          text: `Net profit margin is currently stable at ${margin.toFixed(1)}%. Expense audits reveal slight optimization space in Software and Professional fees.`
-        });
-      }
-
-      // Insight 4: GST Portal Sync Match — reflects the real
-      // "GST + Non-GST + Export + Exempt Sales = Revenue" check result
-      // instead of a hardcoded "0.02% variance" claim.
-      const gstMismatch = validationResult?.mismatches?.find(
-        (m) => m.rule === 'GST + Non-GST + Export + Exempt Sales = Revenue'
-      );
-      if (validationResult && !gstMismatch) {
-        generatedInsights.push({
-          type: 'success',
-          category: 'Compliance',
-          title: 'Auto-Matched GST Return Readiness',
-          text: 'Sales ledgers are matched with outstanding GST output. GST/non-GST/export/exempt sale buckets reconcile exactly with total revenue.'
-        });
-      } else if (gstMismatch) {
-        generatedInsights.push({
-          type: 'warning',
-          category: 'Compliance',
-          title: 'GST Return Readiness Mismatch',
-          text: `Sales tax buckets differ from total revenue by ${fmtC(Math.abs(gstMismatch.diff))}. Review GST classification on recent invoices before filing.`
-        });
-      }
-
-      setInsights(generatedInsights);
-
-      // Cache the fully-assembled snapshot so the next visit to this
-      // company within the TTL (switching back, or remounting this page)
-      // can skip straight to applying it instead of re-fetching everything.
-      _metricsCache_finix.set(cid, {
-        ts: Date.now(),
-        data: {
-          revenue: revTotal,
-          receivables: arTotal,
-          cashAndBank: liquidCash,
-          payables: apTotal,
-          netProfit: pnlData?.net_profit ?? (revTotal - expTotal),
-          expenses: expTotal,
-          chartData: chartDataResolved,
-          expenseBreakdown: realBreakdown,
-          insights: generatedInsights,
-          validation: validationResult,
-          lastVerifiedAt: validationResult ? new Date() : null,
-        },
-      });
-
+      setRevenue(data.revenue);
+      setReceivables(data.receivables);
+      setCashAndBank(data.cashAndBank);
+      setPayables(data.payables);
+      setNetProfit(data.netProfit);
+      setExpenses(data.expenses);
+      setChartData(data.chartData);
+      setExpenseBreakdown(data.expenseBreakdown);
+      setValidation(data.validation);
+      setLastVerifiedAt(data.lastVerifiedAt);
+      setInsights(data.insights);
     } catch (err) {
       console.error(err);
       toast.error('Failed to parse financial metrics');
     } finally {
-      if (requestId === fetchIdRef.current) setLoading(false);
+      if (requestId === fetchIdRef.current) {
+        setLoading(false);
+        setVerifying(false);
+      }
+    }
+  };
+
+  // ─── "All Companies" combined view ────────────────────────────────────
+  // Runs computeMetricsForCompany for every company in parallel (each one
+  // still benefits from its own cache above), then sums the money figures,
+  // merges the monthly trend and expense-breakdown charts across
+  // companies, and rolls the integrity checks up into a combined picture
+  // that still names which company/companies failed which rule.
+  const fetchAggregateMetrics = async (companyList, { force = false } = {}) => {
+    if (!companyList.length) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const requestId = ++fetchIdRef.current;
+    try {
+      const settled = await Promise.allSettled(
+        companyList.map((c) => computeMetricsForCompany(c.id, { force }))
+      );
+      if (requestId !== fetchIdRef.current) return;
+
+      const ok = settled
+        .map((r, i) => ({ r, company: companyList[i] }))
+        .filter(({ r }) => r.status === 'fulfilled')
+        .map(({ r, company }) => ({ data: r.value, company }));
+
+      if (!ok.length) {
+        toast.error('Could not load figures for any company.');
+        setRevenue(0); setReceivables(0); setCashAndBank(0); setPayables(0);
+        setNetProfit(0); setExpenses(0); setChartData([]); setExpenseBreakdown([]);
+        setValidation(null); setLastVerifiedAt(null); setInsights([]);
+        return;
+      }
+
+      const sum = (key) => ok.reduce((s, { data }) => s + (Number(data[key]) || 0), 0);
+      setRevenue(sum('revenue'));
+      setReceivables(sum('receivables'));
+      setCashAndBank(sum('cashAndBank'));
+      setPayables(sum('payables'));
+      setExpenses(sum('expenses'));
+      setNetProfit(sum('netProfit'));
+
+      // Merge monthly trend charts by month label, summing every
+      // company's Revenue/Expenses/Profit for that month.
+      const monthMap = new Map();
+      ok.forEach(({ data }) => {
+        (data.chartData || []).forEach((row) => {
+          const cur = monthMap.get(row.name) || { name: row.name, Revenue: 0, Expenses: 0, Profit: 0 };
+          cur.Revenue += Number(row.Revenue) || 0;
+          cur.Expenses += Number(row.Expenses) || 0;
+          cur.Profit += Number(row.Profit) || 0;
+          monthMap.set(row.name, cur);
+        });
+      });
+      setChartData(Array.from(monthMap.values()).map((r) => ({
+        ...r, Revenue: round2(r.Revenue), Expenses: round2(r.Expenses), Profit: round2(r.Profit),
+      })));
+
+      // Merge expense breakdown by category name across every company.
+      const catMap = new Map();
+      ok.forEach(({ data }) => {
+        (data.expenseBreakdown || []).forEach((row) => {
+          catMap.set(row.name, (catMap.get(row.name) || 0) + (Number(row.value) || 0));
+        });
+      });
+      setExpenseBreakdown(Array.from(catMap.entries()).map(([name, value]) => ({ name, value })));
+
+      // Combined integrity picture — a rule only shows as passing if every
+      // company's own check passed; a failing rule names which and how
+      // many companies are affected instead of just a single generic flag.
+      const combinedMismatches = [];
+      INTEGRITY_CHECKS.forEach(({ rule }) => {
+        const failing = ok.filter(({ data }) => data.validation?.mismatches?.some((m) => m.rule === rule));
+        if (failing.length) {
+          const totalDiff = failing.reduce((s, { data }) => {
+            const m = data.validation.mismatches.find((m2) => m2.rule === rule);
+            return s + Math.abs(m?.diff || 0);
+          }, 0);
+          combinedMismatches.push({
+            rule,
+            diff: totalDiff,
+            note: `${failing.length} of ${ok.length} compan${failing.length === 1 ? 'y' : 'ies'} affected: ${failing.map(({ company }) => company.name).join(', ')}`,
+          });
+        }
+      });
+      const anyVerified = ok.some(({ data }) => !!data.validation);
+      setValidation(anyVerified ? { mismatches: combinedMismatches } : null);
+      setLastVerifiedAt(anyVerified ? new Date() : null);
+
+      // Combined insights: a headline summary plus each company's own top
+      // warning (if any), so nothing important gets buried by aggregation.
+      const combinedInsights = [{
+        type: combinedMismatches.length ? 'warning' : 'success',
+        category: 'Combined View',
+        title: `Combined figures across ${ok.length} of ${companyList.length} companies`,
+        text: combinedMismatches.length
+          ? `${combinedMismatches.length} integrity check${combinedMismatches.length === 1 ? '' : 's'} failed in at least one company — see the Autonomous Integrity Shield below for details.`
+          : 'All companies passed every integrity check for the current financial year.',
+      }];
+      ok.forEach(({ data, company }) => {
+        const warn = (data.insights || []).find((i) => i.type === 'warning');
+        if (warn) combinedInsights.push({ ...warn, title: `${company.name}: ${warn.title}` });
+      });
+      setInsights(combinedInsights);
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to aggregate financial metrics across companies.');
+    } finally {
+      if (requestId === fetchIdRef.current) {
+        setLoading(false);
+        setVerifying(false);
+      }
     }
   };
 
   const handleReverify = async () => {
-    if (!companyId || verifying) return;
+    if (!companyId || companyId === ALL_COMPANIES_ID || verifying) return;
     setVerifying(true);
     try {
       const v = await runVerifyAndFix(companyId, { force: true });
@@ -447,6 +597,10 @@ function FinixDashboardInner() {
       const cachedMetrics = _metricsCache_finix.get(companyId);
       if (cachedMetrics) {
         cachedMetrics.data = { ...cachedMetrics.data, validation: v, lastVerifiedAt: verifiedAt };
+        ssWrite(SS_METRICS_PREFIX + companyId, {
+          ts: cachedMetrics.ts,
+          data: { ...cachedMetrics.data, lastVerifiedAt: verifiedAt.toISOString() },
+        });
       }
     } catch (err) {
       console.error(err);
@@ -462,11 +616,13 @@ function FinixDashboardInner() {
       let initialCid = '';
       if (list.length) {
         const stored = localStorage.getItem('accountingReports:lastCompanyId') || '';
-        if (stored && list.some((c) => c.id === stored)) initialCid = stored;
+        if (stored === ALL_COMPANIES_ID || (stored && list.some((c) => c.id === stored))) initialCid = stored;
         else initialCid = list[0].id;
       }
       setCompanyId(initialCid);
-      if (initialCid) {
+      if (initialCid === ALL_COMPANIES_ID) {
+        fetchAggregateMetrics(list);
+      } else if (initialCid) {
         fetchMetrics(initialCid);
       }
     })();
@@ -475,13 +631,37 @@ function FinixDashboardInner() {
   const handleCompanyChange = (val) => {
     setCompanyId(val);
     localStorage.setItem('accountingReports:lastCompanyId', val);
-    fetchMetrics(val);
+    if (val === ALL_COMPANIES_ID) {
+      fetchAggregateMetrics(companies);
+    } else {
+      fetchMetrics(val);
+    }
   };
 
   // Chat message send handler
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!chatInput.trim() || chatLoading) return;
+
+    // The AI accountant reasons over one company's ledger — "All
+    // Companies" has no single company_id to ground it in, so ask the
+    // person to pick a company instead of sending a request that can't
+    // be answered meaningfully.
+    if (companyId === ALL_COMPANIES_ID) {
+      const userMsg = {
+        sender: 'user',
+        text: chatInput,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      const aiMsg = {
+        sender: 'ai',
+        text: 'I can only audit one company\'s ledger at a time — please switch the dropdown above from "All Companies" to a specific company and ask me again.',
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      setChatMessages(prev => [...prev, userMsg, aiMsg]);
+      setChatInput('');
+      return;
+    }
 
     const userMsg = {
       sender: 'user',
@@ -583,6 +763,13 @@ function FinixDashboardInner() {
                 <SelectValue placeholder="Select Company" />
               </SelectTrigger>
               <SelectContent>
+                {companies.length > 1 && (
+                  <SelectItem value={ALL_COMPANIES_ID}>
+                    <span className="flex items-center gap-1.5 font-bold">
+                      <Layers className="w-3.5 h-3.5" /> All Companies
+                    </span>
+                  </SelectItem>
+                )}
                 {companies.map((c) => (
                   <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                 ))}
@@ -591,15 +778,25 @@ function FinixDashboardInner() {
             <Button
               variant="outline"
               size="icon"
-              onClick={() => fetchMetrics(companyId, { force: true })}
+              onClick={() => companyId === ALL_COMPANIES_ID
+                ? fetchAggregateMetrics(companies, { force: true })
+                : fetchMetrics(companyId, { force: true })}
               disabled={loading || !companyId}
               className="h-11 w-11 rounded-2xl border-white/20 bg-white/10 backdrop-blur-sm text-white hover:bg-white/20 hover:text-white"
+              title={companyId === ALL_COMPANIES_ID ? 'Refresh all companies' : 'Refresh'}
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </Button>
           </div>
         </div>
       </div>
+
+      {companyId === ALL_COMPANIES_ID && !loading && (
+        <div className={`mb-6 -mt-4 flex items-center gap-2 text-xs font-semibold px-4 py-2 rounded-2xl border ${isDark ? 'bg-blue-500/10 border-blue-500/20 text-blue-300' : 'bg-blue-50 border-blue-100 text-blue-700'}`}>
+          <Layers className="w-3.5 h-3.5 shrink-0" />
+          Showing combined figures across all {companies.length} companies. Switch to a single company to chat with Finix AI or re-run its integrity checks.
+        </div>
+      )}
 
       {loading ? (
         <div className="flex flex-col items-center justify-center py-24">
@@ -797,7 +994,7 @@ function FinixDashboardInner() {
                   type="text"
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Ask about receivables, taxes, margins..."
+                  placeholder={companyId === ALL_COMPANIES_ID ? 'Pick a single company to chat...' : 'Ask about receivables, taxes, margins...'}
                   className={`flex-1 px-4 py-2 text-xs rounded-xl border focus:outline-none focus:ring-1 focus:ring-emerald-500 ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100' : 'bg-slate-50 border-slate-200 text-slate-800'}`}
                 />
                 <Button type="submit" size="icon" disabled={chatLoading} className="rounded-xl h-9 w-9 bg-emerald-600 hover:bg-emerald-700">
@@ -860,9 +1057,9 @@ function FinixDashboardInner() {
                   variant="ghost"
                   size="icon"
                   onClick={handleReverify}
-                  disabled={verifying || !companyId}
+                  disabled={verifying || !companyId || companyId === ALL_COMPANIES_ID}
                   className="h-8 w-8 rounded-lg shrink-0"
-                  title="Re-run integrity checks"
+                  title={companyId === ALL_COMPANIES_ID ? 'Switch to a single company to re-verify' : 'Re-run integrity checks'}
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${verifying ? 'animate-spin' : ''}`} />
                 </Button>
