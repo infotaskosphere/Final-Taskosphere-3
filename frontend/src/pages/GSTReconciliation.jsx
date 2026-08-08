@@ -1,8 +1,10 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import { getXLSX, getJsPDF, getAutoTable } from '@/lib/lazyLibs';
 import { saveAs } from 'file-saver';
+// XLSX / jsPDF / autoTable are loaded on demand (see readWorkbook, exportPDF, exportExcel)
+// instead of statically imported, so opening this page doesn't force-download ~1MB of
+// export/parsing libraries that most visits never use.
+let XLSX, jsPDF, autoTable;
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '@/lib/api';
 import {
@@ -1705,7 +1707,9 @@ const sumTax = (arr, src) => arr.reduce((s, r) => { const i = r[src]; return s +
    • Consistent header + footer on every page via didDrawPage callback
    • Cover redesigned: gradient band, 6 stat cards, clean summary table
 ═══════════════════════════════════════════════════════════════════════════ */
-function exportPDF(results, company, period, manualTradeNames = {}, invoiceComments = {}) {
+async function exportPDF(results, company, period, manualTradeNames = {}, invoiceComments = {}) {
+  jsPDF = await getJsPDF();
+  autoTable = await getAutoTable();
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
 
   // ── Page geometry ──────────────────────────────────────────────────────
@@ -2838,7 +2842,8 @@ ${matchedHtml}
    • Summary sheet has professional formatting with wscols
    • All sheets include freeze pane on header row
 ═══════════════════════════════════════════════════════════════════════════ */
-function exportExcel(results, company, period, manualTradeNames = {}, invoiceComments = {}) {
+async function exportExcel(results, company, period, manualTradeNames = {}, invoiceComments = {}) {
+  XLSX = await getXLSX();
   const wb = XLSX.utils.book_new();
 
   // ── Helper: append a sheet with column widths + freeze header ─────────
@@ -6534,12 +6539,15 @@ export default function GSTReconciliation() {
     } catch (_) { /* If metadata extraction fails, silently continue */ }
   };
 
-  const readWorkbook = file => new Promise((res, rej) => {
-    const reader = new FileReader();
-    reader.onload = e => { try { res(XLSX.read(e.target.result, { type:'array', raw:false })); } catch(err) { rej(err); } };
-    reader.onerror = rej;
-    reader.readAsArrayBuffer(file);
-  });
+  const readWorkbook = async file => {
+    XLSX = await getXLSX();
+    return new Promise((res, rej) => {
+      const reader = new FileReader();
+      reader.onload = e => { try { res(XLSX.read(e.target.result, { type:'array', raw:false })); } catch(err) { rej(err); } };
+      reader.onerror = rej;
+      reader.readAsArrayBuffer(file);
+    });
+  };
 
   const handleReconcile = async () => {
     if (!portalFile || !booksFile) { toast.error('Please upload both files.'); return; }
