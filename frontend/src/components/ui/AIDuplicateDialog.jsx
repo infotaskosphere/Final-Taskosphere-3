@@ -29,7 +29,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Sparkles, CheckCircle2, AlertTriangle, X, ArrowLeftRight, Trash2, Edit2, Eye } from 'lucide-react';
+import { Sparkles, CheckCircle2, AlertTriangle, X, ArrowLeftRight, Trash2, Edit2, Eye, Merge } from 'lucide-react';
 
 const CONF_STYLE = {
   high:   { bg: 'bg-red-50 border-red-200 text-red-700',    dot: 'bg-red-500',    label: 'HIGH MATCH' },
@@ -40,9 +40,9 @@ const CONF_STYLE = {
 export default function AIDuplicateDialog({
   open, onClose, groups = [], items = [],
   getTitle, getSubtitle, getMeta, compareFields,
-  onEdit, onDelete, onView,
+  onEdit, onDelete, onView, onMerge,
   entityLabel = 'Record', accentColor = '#6d28d9',
-  canDelete = false, canEdit = false, isDark = false,
+  canDelete = false, canEdit = false, canMerge = false, isDark = false,
 }) {
   const [compareIds, setCompareIds] = useState([]);
   const [compareMode, setCompareMode] = useState(false);
@@ -222,6 +222,15 @@ export default function AIDuplicateDialog({
                       ⇄ Compare
                     </button>
                   )}
+                  {canMerge && onMerge && groupItems.length >= 2 && (
+                    <button
+                      onClick={() => onMerge({ ...group, item_ids: groupItems.map((i) => i.id) })}
+                      className="text-[10px] font-bold px-2 py-0.5 rounded-full border flex-shrink-0 transition-all flex items-center gap-1 bg-white border-violet-300 text-violet-600 hover:bg-violet-50 hover:border-violet-400"
+                      title={`Merge these ${groupItems.length} ${entityLabel.toLowerCase()}s into one`}
+                    >
+                      <Merge className="h-2.5 w-2.5" /> Merge
+                    </button>
+                  )}
                 </div>
 
                 {/* Items */}
@@ -307,7 +316,7 @@ export default function AIDuplicateDialog({
           <p className="text-[10px] text-slate-400">
             {compareMode
               ? 'Click titles to select items · Compare side-by-side · Delete duplicates directly'
-              : `Click titles to view · Enable Compare Mode for side-by-side diff`}
+              : `Click titles to view · Enable Compare Mode for side-by-side diff${canMerge && onMerge ? ' · Merge to combine a group into one record' : ''}`}
           </p>
           <Button variant="outline" onClick={onClose} className="h-9 text-sm rounded-xl">Close</Button>
         </div>
