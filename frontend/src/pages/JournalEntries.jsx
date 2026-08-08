@@ -2,9 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { toast } from 'sonner';
 import { NotebookPen, Plus, RefreshCw, Trash2, X, CheckSquare, Square, XCircle, Building2, ChevronLeft, ChevronRight, Pencil, AlertTriangle, ShieldCheck, FileDown, FileSpreadsheet, FileText } from 'lucide-react';
-import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import { getXLSX, getJsPDF, getAutoTable } from '@/lib/lazyLibs';
 import ExistingRecordsPanel from '@/components/ExistingRecordsPanel.jsx';
 import GifLoader, { MiniLoader, ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
@@ -452,6 +450,7 @@ function JournalEntriesInner() {
       const fileBase = `Journal_Entries_Report_${(activeCompany?.name || 'AllCompanies').replace(/[^a-z0-9]+/gi, '_')}`;
 
       if (format === 'excel') {
+        const XLSX = await getXLSX();
         const header = ['Date', 'Voucher No', 'Invoice/Bill No', 'Narration', 'Source', 'Party', 'Ledger Account', 'Debit (₹)', 'Credit (₹)'];
         const aoa = [header, ...rows.map(r => [r.date, r.voucher, r.invoice, r.narration, r.source, r.party, r.account, r.debit || '', r.credit || ''])];
         const totalDebit = rows.reduce((s, r) => s + (r.debit || 0), 0);
@@ -465,6 +464,8 @@ function JournalEntriesInner() {
         XLSX.writeFile(wb, `${fileBase}_${dateStr}.xlsx`);
         toast.success('Journal entries exported to Excel');
       } else {
+        const jsPDF = await getJsPDF();
+        const autoTable = await getAutoTable();
         const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
         const W = doc.internal.pageSize.getWidth();
         const H = doc.internal.pageSize.getHeight();
