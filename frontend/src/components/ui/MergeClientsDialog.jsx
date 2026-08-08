@@ -2,8 +2,11 @@
  * MergeClientsDialog
  * ──────────────────
  * Merge two or more duplicate clients into one "primary" client.
- * Shows a side-by-side field comparison and lets the user pick which
- * value to keep for each conflicting field.
+ * Shows an editable form for the merged record — every field starts
+ * pre-filled from whichever client is picked as primary, but can be
+ * freely retyped (name, type, email, address, everything) before the
+ * merge is confirmed. Quick-fill chips let you grab a value from one
+ * of the duplicates with one click, then keep editing by hand.
  *
  * Props:
  *   open       — boolean
@@ -15,29 +18,44 @@
  */
 
 import React, { useState, useMemo, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import {
-  Merge, CheckCircle2, AlertTriangle, X, ArrowLeftRight,
-  ChevronDown, ChevronUp, Crown, Loader2, Users, Check,
+  Merge, AlertTriangle, Crown, Loader2, Pencil,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
+// Editable fields shown in the merge form, in display order.
+// `required` fields block the merge if left blank.
 const MERGE_FIELDS = [
-  { key: 'email',              label: 'Email' },
-  { key: 'phone',              label: 'Phone' },
-  { key: 'address',            label: 'Address' },
-  { key: 'city',               label: 'City' },
-  { key: 'state',              label: 'State' },
-  { key: 'gstin',              label: 'GSTIN' },
-  { key: 'pan',                label: 'PAN' },
-  { key: 'referred_by',        label: 'Referred By' },
-  { key: 'website',            label: 'Website' },
-  { key: 'cin',                label: 'CIN' },
-  { key: 'notes',              label: 'Notes' },
+  { key: 'company_name', label: 'Company / Client Name', required: true },
+  {
+    key: 'client_type', label: 'Client Type', type: 'select',
+    options: [
+      { value: 'proprietor',  label: 'Proprietor' },
+      { value: 'pvt_ltd',     label: 'Pvt Ltd' },
+      { value: 'llp',         label: 'LLP' },
+      { value: 'public_ltd',  label: 'Public Ltd' },
+      { value: 'partnership', label: 'Partnership' },
+      { value: 'huf',         label: 'HUF' },
+      { value: 'trust',       label: 'Trust' },
+      { value: 'section_8',   label: 'Section 8' },
+      { value: 'other',       label: 'Other' },
+    ],
+  },
+  { key: 'email',       label: 'Email' },
+  { key: 'phone',       label: 'Phone' },
+  { key: 'address',     label: 'Address' },
+  { key: 'city',        label: 'City' },
+  { key: 'state',       label: 'State' },
+  { key: 'gstin',       label: 'GSTIN' },
+  { key: 'pan',         label: 'PAN' },
+  { key: 'referred_by', label: 'Referred By' },
+  { key: 'website',     label: 'Website' },
+  { key: 'cin',         label: 'CIN' },
+  { key: 'notes',       label: 'Notes', type: 'textarea' },
 ];
 
 const CONF_STYLE = {
@@ -56,7 +74,7 @@ function ClientChip({ client, isPrimary, onClick, isDark }) {
           ? 'border-blue-500 bg-blue-50'
           : isDark ? 'border-slate-600 bg-slate-700 hover:border-slate-500' : 'border-slate-200 bg-white hover:border-slate-300'
       }`}
-      title="Click to set as primary"
+      title="Click to load this client's details into the merge form"
     >
       <span
         className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
@@ -70,7 +88,7 @@ function ClientChip({ client, isPrimary, onClick, isDark }) {
       </div>
       {isPrimary && (
         <span className="flex items-center gap-0.5 text-[9px] font-bold bg-blue-500 text-white px-1.5 py-0.5 rounded-full flex-shrink-0">
-          <Crown className="w-2.5 h-2.5" /> PRIMARY
+          <Crown className="w-2.5 h-2.5" /> KEEPING
         </span>
       )}
     </button>
@@ -82,9 +100,8 @@ export default function MergeClientsDialog({
 }) {
   const [selectedGroupIdx, setSelectedGroupIdx] = useState(0);
   const [primaryId, setPrimaryId] = useState(null);
-  const [fieldOverrides, setFieldOverrides] = useState({});
+  const [editedFields, setEditedFields] = useState({});
   const [merging, setMerging] = useState(false);
-  const [expandedGroups, setExpandedGroups] = useState({});
 
   // Build group data
   const groupsWithClients = useMemo(() =>
@@ -95,12 +112,35 @@ export default function MergeClientsDialog({
 
   const activeGroup = groupsWithClients[selectedGroupIdx];
 
-  // Auto-set primary to first client when group changes
+  // Load a client's values into the editable form
+  const loadIntoForm = useCallback((client) => {
+    if (!client) return;
+    const initial = {};
+    MERGE_FIELDS.forEach(f => { initial[f.key] = client[f.key] || ''; });
+    setEditedFields(initial);
+  }, []);
+
+  // Reset group index and form whenever the dialog is (re)opened or the
+  // set of groups passed in changes (e.g. opened for a single scanned group).
+  React.useEffect(() => {
+    if (!open) return;
+    setSelectedGroupIdx(0);
+    const first = groupsWithClients[0]?.clients?.[0];
+    if (first) {
+      setPrimaryId(first.id);
+      loadIntoForm(first);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, groups]);
+
+  // Re-seed the form when the user switches which group they're merging
   React.useEffect(() => {
     if (activeGroup?.clients?.length) {
-      setPrimaryId(activeGroup.clients[0].id);
-      setFieldOverrides({});
+      const first = activeGroup.clients[0];
+      setPrimaryId(first.id);
+      loadIntoForm(first);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedGroupIdx]);
 
   const primaryClient = useMemo(() =>
@@ -111,35 +151,49 @@ export default function MergeClientsDialog({
     (activeGroup?.clients || []).filter(c => c.id !== primaryId),
     [activeGroup, primaryId]);
 
-  // Fields with conflicts
-  const conflictFields = useMemo(() => {
-    if (!primaryClient || !secondaryClients.length) return [];
-    return MERGE_FIELDS.filter(f => {
-      const pVal = (primaryClient[f.key] || '').toString().trim();
-      const anyDiff = secondaryClients.some(sc => {
-        const sVal = (sc[f.key] || '').toString().trim();
-        return sVal && sVal !== pVal;
-      });
-      return anyDiff;
+  // For a given field, other values present among this group's clients —
+  // shown as quick-fill chips under the input.
+  const fieldSuggestions = useCallback((key) => {
+    if (!activeGroup) return [];
+    const current = (editedFields[key] || '').toString().trim();
+    const vals = [];
+    activeGroup.clients.forEach(c => {
+      const v = (c[key] || '').toString().trim();
+      if (v && v !== current && !vals.includes(v)) vals.push(v);
     });
-  }, [primaryClient, secondaryClients]);
+    return vals;
+  }, [activeGroup, editedFields]);
+
+  const setField = (key, value) => setEditedFields(prev => ({ ...prev, [key]: value }));
 
   const handleMerge = useCallback(async () => {
     if (!primaryClient) return;
+    if (!(editedFields.company_name || '').trim()) {
+      toast.error('Client name is required');
+      return;
+    }
     setMerging(true);
     try {
       const secondaryIds = secondaryClients.map(c => c.id);
-      await onMerge(primaryClient.id, secondaryIds, fieldOverrides);
-      toast.success(`Merged ${secondaryIds.length + 1} clients into "${primaryClient.company_name}"`);
+      // Send every edited field as an override so the merged record reflects
+      // exactly what was typed in the form — not just picked from a duplicate.
+      const overrides = {};
+      MERGE_FIELDS.forEach(f => { overrides[f.key] = (editedFields[f.key] ?? '').toString(); });
+      await onMerge(primaryClient.id, secondaryIds, overrides);
+      toast.success(`Merged ${secondaryIds.length + 1} clients into "${overrides.company_name}"`);
       onClose();
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Merge failed. Please try again.');
     } finally {
       setMerging(false);
     }
-  }, [primaryClient, secondaryClients, fieldOverrides, onMerge, onClose]);
+  }, [primaryClient, secondaryClients, editedFields, onMerge, onClose]);
 
   if (!groups.length) return null;
+
+  const fieldCls = (extra = '') => `w-full px-3 py-2 rounded-lg border text-sm outline-none transition-colors focus:border-blue-400 focus:ring-1 focus:ring-blue-100 ${
+    isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200 text-slate-800'
+  } ${extra}`;
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
@@ -156,7 +210,7 @@ export default function MergeClientsDialog({
             <div>
               <DialogTitle className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>Merge Duplicate Clients</DialogTitle>
               <DialogDescription className="text-xs text-slate-400 mt-0.5">
-                {groups.length} duplicate group{groups.length !== 1 ? 's' : ''} found · Select a group and choose which client to keep as primary
+                {groups.length} duplicate group{groups.length !== 1 ? 's' : ''} · Pick a starting record, then edit any field before merging
               </DialogDescription>
             </div>
           </div>
@@ -212,10 +266,10 @@ export default function MergeClientsDialog({
                   );
                 })()}
 
-                {/* Client chips — click to set primary */}
+                {/* Client chips — click to load that client's data into the form */}
                 <div>
                   <p className={`text-xs font-bold mb-2 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                    Click a client to set it as primary (the one that survives the merge)
+                    Click a client to load its details as the starting point below
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {activeGroup.clients.map(c => (
@@ -223,88 +277,90 @@ export default function MergeClientsDialog({
                         key={c.id}
                         client={c}
                         isPrimary={c.id === primaryId}
-                        onClick={() => { setPrimaryId(c.id); setFieldOverrides({}); }}
+                        onClick={() => { setPrimaryId(c.id); loadIntoForm(c); }}
                         isDark={isDark}
                       />
                     ))}
                   </div>
                 </div>
 
-                {/* Conflicting fields */}
-                {conflictFields.length > 0 && (
-                  <div>
-                    <p className={`text-xs font-bold mb-2 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                      Conflicting fields — click a value to prefer it in the merged record
-                    </p>
-                    <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                      {conflictFields.map((f, fi) => {
-                        const primaryVal = (primaryClient[f.key] || '').toString().trim() || '—';
-                        const chosenVal = fieldOverrides[f.key];
-                        return (
-                          <div key={f.key} className={`${fi !== 0 ? `border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}` : ''}`}>
-                            <div className={`px-3 py-1 ${isDark ? 'bg-slate-700/50' : 'bg-slate-50'}`}>
-                              <p className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{f.label}</p>
+                {/* Editable merged record */}
+                <div>
+                  <p className={`text-xs font-bold mb-2 flex items-center gap-1.5 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                    <Pencil className="w-3 h-3" /> Merged Client Details — edit anything before saving
+                  </p>
+                  <div className={`rounded-xl border p-3 space-y-3 ${isDark ? 'border-slate-700 bg-slate-800/40' : 'border-slate-200 bg-slate-50/60'}`}>
+                    {MERGE_FIELDS.map(f => {
+                      const suggestions = fieldSuggestions(f.key);
+                      return (
+                        <div key={f.key}>
+                          <label className={`text-[11px] font-semibold mb-1 block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                            {f.label}{f.required && <span style={{ color: '#ef4444' }}> *</span>}
+                          </label>
+                          {f.type === 'select' ? (
+                            <select
+                              value={editedFields[f.key] || ''}
+                              onChange={e => setField(f.key, e.target.value)}
+                              className={fieldCls()}
+                            >
+                              <option value="">— Select —</option>
+                              {f.options.map(o => (
+                                <option key={o.value} value={o.value}>{o.label}</option>
+                              ))}
+                            </select>
+                          ) : f.type === 'textarea' ? (
+                            <textarea
+                              value={editedFields[f.key] || ''}
+                              onChange={e => setField(f.key, e.target.value)}
+                              rows={3}
+                              className={fieldCls('resize-none')}
+                            />
+                          ) : (
+                            <input
+                              type="text"
+                              value={editedFields[f.key] || ''}
+                              onChange={e => setField(f.key, e.target.value)}
+                              className={fieldCls()}
+                            />
+                          )}
+                          {suggestions.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mt-1.5">
+                              <span className="text-[9px] text-slate-400 mt-1">from duplicates:</span>
+                              {suggestions.map(v => (
+                                <button
+                                  key={v}
+                                  type="button"
+                                  onClick={() => setField(f.key, v)}
+                                  className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${
+                                    isDark
+                                      ? 'border-slate-600 text-slate-300 hover:border-violet-400 hover:text-violet-300'
+                                      : 'border-slate-200 text-slate-600 hover:border-violet-300 hover:text-violet-700'
+                                  }`}
+                                  title="Use this value"
+                                >
+                                  {v.length > 40 ? `${v.slice(0, 40)}…` : v}
+                                </button>
+                              ))}
                             </div>
-                            <div className="flex flex-wrap gap-2 p-2">
-                              {/* Primary value */}
-                              <button
-                                onClick={() => {
-                                  const overrides = { ...fieldOverrides };
-                                  delete overrides[f.key];
-                                  setFieldOverrides(overrides);
-                                }}
-                                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-all ${
-                                  !chosenVal
-                                    ? 'border-blue-400 bg-blue-50 text-blue-700 font-semibold'
-                                    : isDark ? 'border-slate-600 text-slate-300 hover:border-blue-400' : 'border-slate-200 text-slate-600 hover:border-blue-300'
-                                }`}
-                              >
-                                {!chosenVal && <Check className="w-3 h-3" />}
-                                <Crown className="w-3 h-3 opacity-60" />
-                                <span className="max-w-[200px] truncate">{primaryVal}</span>
-                                <span className="text-[9px] opacity-60">(primary)</span>
-                              </button>
-                              {/* Secondary values */}
-                              {secondaryClients.map(sc => {
-                                const scVal = (sc[f.key] || '').toString().trim();
-                                if (!scVal || scVal === (primaryClient[f.key] || '').toString().trim()) return null;
-                                const isChosen = chosenVal === scVal;
-                                return (
-                                  <button
-                                    key={sc.id}
-                                    onClick={() => setFieldOverrides(prev => ({ ...prev, [f.key]: scVal }))}
-                                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-all ${
-                                      isChosen
-                                        ? 'border-violet-400 bg-violet-50 text-violet-700 font-semibold'
-                                        : isDark ? 'border-slate-600 text-slate-300 hover:border-violet-400' : 'border-slate-200 text-slate-600 hover:border-violet-300'
-                                    }`}
-                                  >
-                                    {isChosen && <Check className="w-3 h-3" />}
-                                    <span className="max-w-[200px] truncate">{scVal}</span>
-                                    <span className="text-[9px] opacity-60">(from duplicate)</span>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                )}
+                </div>
 
                 {/* What happens summary */}
                 <div className={`p-3 rounded-xl border text-xs ${isDark ? 'bg-slate-700/40 border-slate-600 text-slate-300' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
                   <p className="font-bold mb-1">What will happen:</p>
                   <ul className="space-y-0.5 list-disc list-inside opacity-90">
                     <li>
-                      <strong>{primaryClient?.company_name}</strong> will be kept as the merged record
+                      One client record will be kept, saved with the details entered above
                     </li>
                     <li>
                       {secondaryClients.map(c => c.company_name).join(', ')} will be deleted
                     </li>
                     <li>Services, DSC details, contacts & assignments from all clients will be combined</li>
-                    <li>Tasks and other records linked to deleted clients will be re-linked to the primary</li>
+                    <li>Tasks and other records linked to deleted clients will be re-linked to the kept client</li>
                   </ul>
                 </div>
               </>
@@ -325,7 +381,7 @@ export default function MergeClientsDialog({
             <Button
               size="sm"
               onClick={handleMerge}
-              disabled={!primaryClient || secondaryClients.length === 0 || merging}
+              disabled={!primaryClient || secondaryClients.length === 0 || merging || !(editedFields.company_name || '').trim()}
               className="bg-gradient-to-r from-blue-600 to-violet-600 text-white border-0 min-w-[110px]"
             >
               {merging ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />Merging…</> : <><Merge className="w-3.5 h-3.5 mr-1" />Merge Now</>}
