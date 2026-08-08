@@ -24,9 +24,7 @@ import { usePageLayout } from '@/hooks/usePageLayout';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
 import { detectComplianceDuplicates } from '@/lib/aiDuplicateEngine';
 import StandaloneGovtFeeDialog from '@/components/StandaloneGovtFeeDialog';
-import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import { getXLSX, getJsPDF, getAutoTable } from '@/lib/lazyLibs';
 
 const D = {
   bg:'#0f172a',card:'#1e293b',raised:'#263348',border:'#334155',
@@ -3644,7 +3642,7 @@ export default function CompliancePage(){
   // Active list based on sub-tab
   const activeGovtFeesList = govtFeesSubTab === 'direct' ? filteredAdhoc : filteredAllFees;
 
-  const exportGovtFees = useCallback((kind) => {
+  const exportGovtFees = useCallback(async (kind) => {
     if (!activeGovtFeesList.length) { toast.error('No government fee payments to export'); return; }
     const dateText = (d) => d ? format(parseISO(String(d).slice(0, 10)), 'MMM d, yyyy') : '—';
     const statusText = (s) => String(s || '').toLowerCase() === 'paid' ? 'Paid' : 'Unpaid';
@@ -3665,6 +3663,7 @@ export default function CompliancePage(){
     ]);
     const fileName = `govt_fees_full_list_${format(new Date(), 'dd-MMM-yyyy')}`;
     if (kind === 'excel') {
+      const XLSX = await getXLSX();
       const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
       ws['!cols'] = [{wch:5},{wch:30},{wch:28},{wch:16},{wch:12},{wch:14},{wch:12},{wch:14},{wch:14},{wch:18},{wch:32}];
       const wb = XLSX.utils.book_new();
@@ -3673,6 +3672,8 @@ export default function CompliancePage(){
       toast.success('Government fees Excel exported');
       return;
     }
+    const jsPDF = await getJsPDF();
+    const autoTable = await getAutoTable();
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
     doc.setFontSize(15);
     doc.text('Government Fees Full Payment List', 14, 14);
