@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import * as XLSX from 'xlsx';
+import { getXLSX } from '@/lib/lazyLibs';
 import {
   BarChart3, RefreshCw, CheckCircle2, AlertTriangle, Download, Building2,
   ChevronLeft, ChevronRight, Scale, X, Loader2, ShieldCheck,
@@ -285,7 +285,7 @@ function printLedger(rows, client, company, dateFrom, dateTo, openingBal) {
   win.onload = () => { win.focus(); win.print(); };
 }
 
-function exportLedgerReconciliationExcel(rows, client, company, dateFrom, dateTo, openingBalance) {
+async function exportLedgerReconciliationExcel(rows, client, company, dateFrom, dateTo, openingBalance) {
   const periodLabel = dateFrom && dateTo
     ? `${format(new Date(dateFrom), 'dd-MMM-yyyy')} – ${format(new Date(dateTo), 'dd-MMM-yyyy')}`
     : 'All time';
@@ -326,6 +326,7 @@ function exportLedgerReconciliationExcel(rows, client, company, dateFrom, dateTo
   sheetData.push(['', 'Closing Balance', '', '', '', '', '', '', '', closingBal, '', closingSide]);
   sheetData.push(['', 'Total',           '', '', '', totalDr,      '', totalCr,   '', '',          '', '']);
 
+  const XLSX = await getXLSX();
   const ws = XLSX.utils.aoa_to_sheet(sheetData);
 
   ws['!merges'] = [
