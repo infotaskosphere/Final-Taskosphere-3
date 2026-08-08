@@ -7724,6 +7724,12 @@ export default function Clients() {
           } catch { toast.error('Failed to delete client'); }
         }}
         onView={(c) => { setSelectedClient(c); setClientDetailOpen(true); setShowDupDialog(false); }}
+        canMerge={canEditClients}
+        onMerge={(group) => {
+          setMergeDupGroups([group]);
+          setShowDupDialog(false);
+          setShowMergeDialog(true);
+        }}
       />
 
       {/* ── Merge Clients Dialog ───────────────────────────────────────── */}
