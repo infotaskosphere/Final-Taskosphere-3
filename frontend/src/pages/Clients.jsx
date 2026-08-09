@@ -28,10 +28,12 @@ import {
   Copy, ExternalLink, CheckSquare, Square, MinusSquare,
   Shield, Download, UserCheck, AlertCircle, Sparkles, Loader2,
   ArrowLeftRight, RefreshCw, FileSpreadsheet, ExternalLink as ExternalLinkIcon,
-  IndianRupee, Save as SaveIcon, Globe, Settings, Clock, Send, Repeat, Link,
+  IndianRupee, Save as SaveIcon, Globe, Settings, Clock, CalendarClock, Send, Repeat, Link,
   Merge, Layers, Paperclip, Minimize2,
 } from 'lucide-react';
 import { detectClientDuplicates } from '@/lib/aiDuplicateEngine';
+import ClientActivityTimeline from '@/components/ClientActivityTimeline';
+import ClientRenewalsTab from '@/components/ClientRenewalsTab';
 import StandaloneGovtFeeDialog from '@/components/StandaloneGovtFeeDialog';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
 import MergeClientsDialog from '@/components/ui/MergeClientsDialog';
@@ -3049,12 +3051,14 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
         <div className={`flex items-center gap-1 px-8 py-2.5 border-b flex-shrink-0 overflow-x-auto scrollbar-none ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
           {[
             { key: 'details',        label: 'Details',     icon: <User className="h-3.5 w-3.5" /> },
+            { key: 'timeline',       label: 'Timeline',    icon: <Clock className="h-3.5 w-3.5" /> },
             { key: 'invoices',       label: 'Invoices',    icon: <FileText className="h-3.5 w-3.5" /> },
             { key: 'purchases',      label: 'Purchases',   icon: <IndianRupee className="h-3.5 w-3.5" /> },
             { key: 'reconciliation', label: 'GST Recon',   icon: <ArrowLeftRight className="h-3.5 w-3.5" /> },
             { key: 'govtfees',       label: 'Govt Fees',   icon: <IndianRupee className="h-3.5 w-3.5" /> },
             { key: 'portal',         label: 'Portal',      icon: <Globe className="h-3.5 w-3.5" /> },
             { key: 'tasks',          label: 'Assign Task', icon: <CheckSquare className="h-3.5 w-3.5" /> },
+            ...(isAdmin ? [{ key: 'renewals', label: 'Renewals', icon: <CalendarClock className="h-3.5 w-3.5" /> }] : []),
             ...(canEditClients ? [{ key: 'merge', label: 'Merge', icon: <Merge className="h-3.5 w-3.5" />, accent: '#7C3AED' }] : []),
           ].map(tab => (
             <button
@@ -3909,6 +3913,28 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
             );
           })()}
 
+
+          {/* ════════════════ TIMELINE TAB ════════════════ */}
+          {activeTab === 'timeline' && (
+            <div className="px-8 py-4" style={{ height: 520 }}>
+              <ClientActivityTimeline
+                clientId={selectedClient.id}
+                isDark={isDark}
+                currentUserId={user?.id}
+              />
+            </div>
+          )}
+
+          {/* ════════════════ RENEWALS TAB (admin only) ════════════════ */}
+          {activeTab === 'renewals' && isAdmin && (
+            <div className="px-8 py-4">
+              <ClientRenewalsTab
+                clientId={selectedClient.id}
+                isDark={isDark}
+                currentUserRole={user?.role}
+              />
+            </div>
+          )}
 
           {/* ════════════════ DETAILS TAB ════════════════ */}
           {activeTab === 'details' && (
