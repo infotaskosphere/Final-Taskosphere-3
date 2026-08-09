@@ -658,7 +658,6 @@ function AutoSendTab({ isDark }) {
   if (!auto) return <div className={`text-sm ${muted}`}>Loading…</div>;
 
   const rows = [
-    { k: "birthday_enabled", label: "Birthday wishes", desc: "Daily at 9:00 AM IST", icon: Cake, color: "#ec4899" },
     { k: "dsc_enabled", label: "DSC expiry alerts", desc: "7-day & 1-day warnings", icon: Shield, color: "#f59e0b" },
     { k: "compliance_enabled", label: "Compliance reminders", desc: "7-day & 1-day due-date alerts", icon: FileText, color: "#3b82f6" },
   ];
@@ -691,10 +690,18 @@ function AutoSendTab({ isDark }) {
               );
             })}
           </div>
-          <div className="mt-4">
-            <label className={labelCls}>Default birthday message <span className="normal-case font-normal opacity-70">(use {"{name}"})</span></label>
-            <textarea rows={4} className={`${inputCls} resize-none font-mono text-xs`} value={auto.birthday_template || ""} onChange={e => set("birthday_template", e.target.value)} placeholder="🎂 Happy Birthday, {name}!" />
-            <p className={`text-[10px] mt-1 ${muted}`}>Used for clients without a custom message. Per-client overrides live on each client's page.</p>
+          <div className="mt-4 rounded-xl border border-pink-200 bg-pink-50 dark:bg-pink-950/20 dark:border-pink-900 px-3 py-2.5 flex items-start gap-2">
+            <Cake className="h-4 w-4 text-pink-500 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className={`text-xs font-semibold ${txt}`}>Birthday wishes moved to Automation Settings</p>
+              <p className={`text-[11px] mt-0.5 ${muted}`}>
+                Birthday (and festival) wishes across WhatsApp and Email — templates, images, and the admin
+                approval gate — are now managed in one place.
+              </p>
+              <a href="/settings/automation" className="text-[11px] font-semibold mt-1 inline-block hover:underline" style={{ color: "#ec4899" }}>
+                Open Automation Settings →
+              </a>
+            </div>
           </div>
           <button onClick={saveAuto} disabled={saving} className="w-full mt-4 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold text-white transition hover:opacity-90" style={{ background: GRAD_BTN }}>
             <Save className="h-4 w-4" /> {saving ? "Saving…" : "Save Settings"}
