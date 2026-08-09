@@ -1321,6 +1321,51 @@ async def send_birthday_email(recipient_email: str, client_name: str):
         return False
 
 
+async def send_automation_wish_email(
+    recipient_email: str,
+    subject: str,
+    body_plain: str,
+    attachment_url: Optional[str] = None,
+) -> bool:
+    """
+    Generic sender for automation-engine emails (birthday + festival wishes),
+    using the admin's own subject/template from Automation Settings rather
+    than a hardcoded one — send_birthday_email above is kept only as the
+    legacy/manual "Send Birthday Wish" button's sender.
+
+    attachment_url, if given, is fetched and attached to the email (e.g. a
+    birthday banner, a festival greeting card) via Brevo's attachment API.
+    A failed fetch never blocks the email — it just sends without the
+    attachment, same fallback philosophy as the WhatsApp image sender.
+    """
+    html_content = (
+        "<html><body style=\"font-family: Arial, sans-serif; padding: 20px; background-color: #f5f5f5;\">"
+        "<div style=\"max-width: 600px; margin: 0 auto; background-color: white; padding: 30px; "
+        "border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);\">"
+        f"<p style=\"font-size: 16px; line-height: 1.6; color: #333; white-space: pre-wrap;\">{body_plain}</p>"
+        "</div></body></html>"
+    )
+
+    attachments = None
+    if attachment_url:
+        try:
+            async with httpx.AsyncClient(timeout=20) as c:
+                resp = await c.get(attachment_url)
+                resp.raise_for_status()
+            filename = attachment_url.rsplit("/", 1)[-1].split("?")[0] or "attachment.jpg"
+            b64_content = base64.b64encode(resp.content).decode("ascii")
+            attachments = [{"name": filename, "content": b64_content}]
+        except Exception as exc:
+            logger.warning(f"Automation email attachment fetch failed ({attachment_url}): {exc} — sending without it.")
+
+    try:
+        await _brevo_send(recipient_email, subject, body_plain, html_content, attachments=attachments)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send automation wish email: {str(e)}")
+        return False
+
+
 # ─── ACTIVE SENDER HELPER ─────────────────────────────────────────────────────
 async def _get_active_sender():
     """
