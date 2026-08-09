@@ -49,6 +49,8 @@ from backend.security.session_manager import SessionManager
 from backend.security.security_monitor import SecurityMonitor
 from backend.visits import router as visits_router
 from backend.leads import router as leads_router
+from backend.client_activity import router as client_activity_router
+from backend.automation_engine import router as automation_router, expiry_router as service_expiry_router
 from backend.recruitment import router as recruitment_router
 from backend.telegram import router as telegram_router
 from backend.notifications import router as notification_router, create_notification, notify_admins_leave
@@ -102,11 +104,16 @@ from backend.activity_monitor import router as activity_monitor_router
 from backend.desktop_agent import router as desktop_agent_router, create_desktop_indexes
 from backend.whatsapp_integration import router as whatsapp_router
 from backend.whatsapp_scheduler import (
-    wa_birthday_job,
     wa_dsc_expiry_job,
     wa_compliance_job,
 )
 from backend.whatsapp_integration import wa_scheduled_bulk_job, wa_bridge_keepalive_job
+from backend.automation_engine import (
+    birthday_automation_job,
+    festival_greeting_job,
+    service_expiry_alert_job,
+    follow_up_reminder_job,
+)
 
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -531,6 +538,11 @@ async def startup_event():
     _self.app_event_loop = asyncio.get_event_loop()
     try:
         await db.tasks.create_index("assigned_to")
+        # ── Activity Timeline & Automation Engine indexes ──────────────────
+        await db.client_activities.create_index([("client_id", 1), ("created_at", -1)])
+        await db.pending_client_messages.create_index([("status", 1), ("created_at", -1)])
+        await db.service_expiries.create_index("client_id")
+        await db.service_expiries.create_index("expiry_date")
         await create_compliance_indexes()
         await create_salary_slip_indexes()
         await create_gst_reconciliation_indexes()
@@ -762,16 +774,47 @@ async def startup_event():
             replace_existing=True,
         )
 
-        # ── WhatsApp notification jobs ────────────────────────────────────
+        # ── Automation Engine jobs ────────────────────────────────────────
+        # Supersedes the old WA-only wa_birthday_job: handles WhatsApp +
+        # Email birthdays, the admin approval gate, and timeline logging.
         scheduler.add_job(
-            wa_birthday_job,
+            birthday_automation_job,
             "cron",
             hour=9,
             minute=0,
             timezone=pytz.timezone("Asia/Kolkata"),
-            id="wa_birthday_wishes",
+            id="birthday_automation",
             replace_existing=True,
         )
+        scheduler.add_job(
+            festival_greeting_job,
+            "cron",
+            hour=9,
+            minute=5,
+            timezone=pytz.timezone("Asia/Kolkata"),
+            id="festival_greetings",
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            service_expiry_alert_job,
+            "cron",
+            hour=9,
+            minute=45,
+            timezone=pytz.timezone("Asia/Kolkata"),
+            id="service_expiry_alerts",
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            follow_up_reminder_job,
+            "cron",
+            hour=10,
+            minute=15,
+            timezone=pytz.timezone("Asia/Kolkata"),
+            id="follow_up_reminders",
+            replace_existing=True,
+        )
+
+        # ── WhatsApp notification jobs ────────────────────────────────────
         scheduler.add_job(
             wa_dsc_expiry_job,
             "cron",
@@ -14201,6 +14244,9 @@ api_router.include_router(website_tracking_router)
 api_router.include_router(quotation_router)
 api_router.include_router(telegram_router)
 api_router.include_router(leads_router)
+api_router.include_router(client_activity_router)
+api_router.include_router(automation_router)
+api_router.include_router(service_expiry_router)
 api_router.include_router(recruitment_router)
 api_router.include_router(notification_router)
 api_router.include_router(email_router)
