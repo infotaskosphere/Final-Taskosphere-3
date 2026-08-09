@@ -95,6 +95,9 @@ export default function PendingApprovalsPanel(props) {
                 <div className="text-sm font-semibold mt-1">{item.recipient_name}</div>
                 <div className="text-xs text-slate-400">{item.client_name} · {item.recipient_contact}</div>
                 {item.subject && <div className="text-xs font-semibold mt-1.5">{item.subject}</div>}
+                {item.media_url && (
+                  <img src={item.media_url} alt="" className="mt-1.5 h-16 rounded-lg border object-cover" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }} />
+                )}
                 <p className={`text-sm mt-1 whitespace-pre-wrap ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
                   {item.message}
                 </p>
