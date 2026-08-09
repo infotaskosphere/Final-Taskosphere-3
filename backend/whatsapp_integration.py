@@ -641,6 +641,48 @@ async def send_whatsapp_notification(to, message, message_type="general", contex
         pass
 
 
+async def send_whatsapp_media_notification(
+    to, image_url, caption="", message_type="general", context_id=None,
+    sent_by="system", session_id=None,
+):
+    """
+    Non-route counterpart to /send-media, for internal callers (automation
+    jobs, schedulers) that only have an image URL, not an uploaded file.
+    Fetches the image, base64-encodes it, and posts to the bridge exactly
+    like the /send-media route does. Falls back to a plain text send
+    (caption only) if the image can't be fetched, so a bad/expired image
+    URL never blocks the message itself from going out.
+    """
+    import base64 as _b64
+    filename = image_url.rsplit("/", 1)[-1].split("?")[0] or "image.jpg"
+    try:
+        async with httpx.AsyncClient(timeout=20) as c:
+            img_resp = await c.get(image_url)
+            img_resp.raise_for_status()
+        mime_type = img_resp.headers.get("content-type", "image/jpeg").split(";")[0]
+        b64_data = _b64.b64encode(img_resp.content).decode("ascii")
+
+        result = await _bridge_post_large("/send-media-base64", {
+            "to": to, "sessionId": session_id, "caption": caption,
+            "base64": b64_data, "mimeType": mime_type, "filename": filename,
+        })
+        status_val, error = "sent", None
+        log_text = f"[{filename}] {caption}"
+    except Exception as exc:
+        logger.error("WA media notification failed to %s (%s), falling back to text-only: %s", to, image_url, exc)
+        # Fallback: send the caption as a plain message so the wish still goes out.
+        await send_whatsapp_notification(to, caption, message_type, context_id, sent_by, session_id)
+        return
+    try:
+        await _db()["whatsapp_messages"].insert_one({
+            "sent_by": sent_by, "to": to, "message": log_text, "message_type": message_type,
+            "context_id": context_id, "session_id": session_id, "status": status_val,
+            "error": error, "sent_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception:
+        pass
+
+
 # ── Auto-Send Settings (global) ───────────────────────────────────────────────
 # Stored in the `whatsapp_settings` collection as a single doc (_id="global").
 # Controls whether each automatic WhatsApp job runs, plus the default birthday
@@ -672,6 +714,11 @@ async def get_auto_settings() -> Dict[str, Any]:
 
 
 class WAAutoSettings(BaseModel):
+    # birthday_enabled / birthday_template are DEPRECATED — birthday
+    # automation (WhatsApp + Email, approval gate, images) now lives
+    # entirely in backend/automation_engine.py's AutomationSettings.
+    # Left here only so old stored docs don't fail validation; the daily
+    # scheduler no longer reads these two fields.
     birthday_enabled: Optional[bool] = None
     dsc_enabled: Optional[bool] = None
     compliance_enabled: Optional[bool] = None
@@ -719,8 +766,13 @@ async def update_client_autosend(client_id: str, body: WAClientAutoSend, current
 
 @router.post("/jobs/run/{job_name}")
 async def trigger_job_manually(job_name: str, current_user: User = Depends(require_admin())):
-    from backend.whatsapp_scheduler import _send_birthday_wishes, _send_dsc_expiry_alerts, _send_compliance_reminders
-    JOBS = {"birthday": _send_birthday_wishes, "dsc_expiry": _send_dsc_expiry_alerts, "compliance": _send_compliance_reminders}
+    from backend.whatsapp_scheduler import _send_dsc_expiry_alerts, _send_compliance_reminders
+    from backend.automation_engine import run_birthday_automation
+    # "birthday" is intentionally NOT _send_birthday_wishes (deprecated, see
+    # whatsapp_scheduler.py) — it now runs the same automation-engine job the
+    # daily cron uses, so a manual trigger still respects the approval gate,
+    # email channel, and activity-timeline logging instead of bypassing them.
+    JOBS = {"birthday": run_birthday_automation, "dsc_expiry": _send_dsc_expiry_alerts, "compliance": _send_compliance_reminders}
     fn = JOBS.get(job_name)
     if not fn:
         raise HTTPException(400, f"Unknown job '{job_name}'")
