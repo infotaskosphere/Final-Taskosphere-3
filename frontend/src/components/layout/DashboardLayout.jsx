@@ -10,7 +10,7 @@ import {
   CreditCard, Fingerprint, Bell, Shield, ShieldCheck, ArrowLeftRight, MessageCircle,
   Building2, Zap, Briefcase, ShoppingBag, Landmark, BookOpen, NotebookPen,
   ScanLine, Lock, Search, Loader2,
-  Wallet, CalendarOff, UserPlus, Cake, Sparkles,
+  Wallet, CalendarOff, UserPlus, Cake,
   Database, FolderOpen, MessagesSquare, FileBarChart2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -219,8 +219,7 @@ const NAV_GROUPS = [
       // Settings — <Protected> routes, visible to all roles
       { path: '/settings/email',   icon: Mail,     label: 'Email Accounts'   },
       { path: '/settings/general', icon: Settings, label: 'General Settings' },
-      { path: '/settings/whatsapp', icon: MessageCircle, label: 'WhatsApp Settings' },
-      { path: '/settings/automation', icon: Sparkles, label: 'Automation Settings', adminOnly: true },
+      { path: '/settings/whatsapp', icon: MessageCircle, label: 'Message Automation' },
     ],
   },
 ];
