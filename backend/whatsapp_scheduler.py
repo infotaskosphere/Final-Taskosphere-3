@@ -290,6 +290,13 @@ def _run_on_main_loop(coro, timeout=55):
 
 
 def wa_birthday_job():
+    """
+    DEPRECATED — no longer registered in server.py's scheduler. Superseded by
+    backend/automation_engine.py::birthday_automation_job, which covers
+    WhatsApp + Email, the admin approval gate, image attachments, and
+    activity-timeline logging. Kept only so _send_birthday_wishes below
+    still has a caller for reference; do not re-register this job.
+    """
     try:
         _run_on_main_loop(_send_birthday_wishes())
     except Exception as exc:
