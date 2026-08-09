@@ -30,7 +30,7 @@ import {
   Shield, Key, Eye, Building2, Plus, Trash2, Smartphone, QrCode,
   Wifi, WifiOff, RefreshCw, Link, Unlink, ChevronRight, AlertCircle,
   Pencil, Check, X, Phone, Hash, Copy, ShieldCheck,
-  Clock, Calendar, Send, Cake, Power,
+  Clock, Calendar, Send, Cake, Power, Sparkles, Loader2,
 } from "lucide-react";
 import { getWASettings, saveWASettings } from "@/hooks/useWhatsApp";
 import api from "@/lib/api";
@@ -590,7 +590,7 @@ function ConnectedNumbersTab({ isDark }) {
 }
 
 // ─── Auto-Send & Scheduling Tab ───────────────────────────────────────────────
-function AutoSendTab({ isDark }) {
+function AutoSendTab({ isDark, onOpenAutomation }) {
   const [auto, setAuto] = useState(null);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState({ connected: false, loading: true });
@@ -693,14 +693,14 @@ function AutoSendTab({ isDark }) {
           <div className="mt-4 rounded-xl border border-pink-200 bg-pink-50 dark:bg-pink-950/20 dark:border-pink-900 px-3 py-2.5 flex items-start gap-2">
             <Cake className="h-4 w-4 text-pink-500 flex-shrink-0 mt-0.5" />
             <div>
-              <p className={`text-xs font-semibold ${txt}`}>Birthday wishes moved to Automation Settings</p>
+              <p className={`text-xs font-semibold ${txt}`}>Birthday & festival wishes live right here now</p>
               <p className={`text-[11px] mt-0.5 ${muted}`}>
                 Birthday (and festival) wishes across WhatsApp and Email — templates, images, and the admin
-                approval gate — are now managed in one place.
+                approval gate — are managed in the same Message Automation page.
               </p>
-              <a href="/settings/automation" className="text-[11px] font-semibold mt-1 inline-block hover:underline" style={{ color: "#ec4899" }}>
-                Open Automation Settings →
-              </a>
+              <button type="button" onClick={onOpenAutomation} className="text-[11px] font-semibold mt-1 inline-block hover:underline" style={{ color: "#ec4899" }}>
+                Open Birthday & Approval Gate →
+              </button>
             </div>
           </div>
           <button onClick={saveAuto} disabled={saving} className="w-full mt-4 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold text-white transition hover:opacity-90" style={{ background: GRAD_BTN }}>
@@ -749,6 +749,192 @@ function AutoSendTab({ isDark }) {
   );
 }
 
+// ─── Automation Tab (Birthday Wishes, Festivals, Approval Gate, Follow-ups) ───
+// Folded in from the old standalone Automation Settings page so it all lives
+// under Message Automation now.
+
+function AutomationTab({ isDark }) {
+  const [settings, setSettings] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [newFestival, setNewFestival] = useState({ name: "", month_day: "", wa_template: "", wa_image_url: "", email_template: "" });
+  const [addingFestival, setAddingFestival] = useState(false);
+
+  const card  = isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200";
+  const txt   = isDark ? "text-slate-100" : "text-slate-800";
+  const muted = isDark ? "text-slate-400" : "text-slate-500";
+  const inputCls = ["w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-400 transition",
+    isDark ? "bg-slate-900 border-slate-700 text-slate-100" : "bg-white border-slate-300 text-slate-800"].join(" ");
+  const labelCls = `block text-[11px] font-semibold uppercase tracking-wider mb-1 ${muted}`;
+  const rowCls = `flex items-center justify-between rounded-xl border p-3 ${isDark ? "border-slate-700" : "border-slate-200"}`;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.get("/automation/settings");
+      setSettings(res.data);
+    } catch (err) {
+      toast.error("Failed to load automation settings");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const save = async (patch) => {
+    setSaving(true);
+    try {
+      const res = await api.put("/automation/settings", patch);
+      setSettings(res.data);
+      toast.success("Saved");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addFestival = async () => {
+    if (!newFestival.name || !newFestival.month_day) {
+      toast.error("Name and date (MM-DD) are required");
+      return;
+    }
+    setAddingFestival(true);
+    try {
+      const res = await api.post("/automation/settings/festivals", {
+        name: newFestival.name,
+        month_day: newFestival.month_day,
+        wa_template: newFestival.wa_template || `🪔 Happy ${newFestival.name}! Wishing you and your family joy and prosperity.`,
+        wa_image_url: newFestival.wa_image_url || null,
+        email_template: newFestival.email_template || `Dear {name},\n\nWishing you a very Happy ${newFestival.name}!\n\nBest wishes,\nTaskosphere Team`,
+        enabled: true,
+      });
+      setSettings(res.data);
+      setNewFestival({ name: "", month_day: "", wa_template: "", wa_image_url: "", email_template: "" });
+      toast.success("Festival added");
+    } catch (err) {
+      toast.error("Failed to add festival");
+    } finally {
+      setAddingFestival(false);
+    }
+  };
+
+  const removeFestival = async (id) => {
+    try {
+      const res = await api.delete(`/automation/settings/festivals/${id}`);
+      setSettings(res.data);
+    } catch (err) {
+      toast.error("Failed to remove");
+    }
+  };
+
+  if (loading || !settings) {
+    return <div className="flex items-center justify-center py-16"><Loader2 className="h-5 w-5 animate-spin text-slate-400" /></div>;
+  }
+
+  return (
+    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      {/* Approval gate */}
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+        <div className={`rounded-2xl border shadow-sm p-5 ${card}`}>
+          <div className="flex items-center gap-2 mb-4"><ShieldCheck className="h-4 w-4 text-violet-500" /><span className={`text-sm font-bold ${txt}`}>Approval Gate</span></div>
+          <div className="space-y-3">
+            <div className={rowCls}>
+              <div className="pr-4">
+                <p className={`text-sm font-semibold ${txt}`}>Require admin approval before sending birthday wishes</p>
+                <p className={`text-[11px] mt-0.5 ${muted}`}>When on, wishes are queued in Pending Approvals instead of sent automatically.</p>
+              </div>
+              <Toggle on={!!settings.birthday_requires_approval} onChange={v => save({ birthday_requires_approval: v })} isDark={isDark} />
+            </div>
+            <div className={rowCls}>
+              <p className={`text-sm font-semibold ${txt}`}>Require admin approval before sending festival greetings</p>
+              <Toggle on={!!settings.festival_requires_approval} onChange={v => save({ festival_requires_approval: v })} isDark={isDark} />
+            </div>
+          </div>
+        </div>
+      </motion.div>
+
+      {/* Birthday wishes */}
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
+        <div className={`rounded-2xl border shadow-sm p-5 ${card}`}>
+          <div className="flex items-center gap-2 mb-4"><Cake className="h-4 w-4 text-pink-500" /><span className={`text-sm font-bold ${txt}`}>Birthday Wishes</span></div>
+          <div className="flex flex-wrap gap-5 mb-3">
+            <label className={`flex items-center gap-2.5 cursor-pointer text-sm ${muted}`}><Toggle on={!!settings.birthday_wa_enabled} onChange={v => save({ birthday_wa_enabled: v })} isDark={isDark} />Send via WhatsApp</label>
+            <label className={`flex items-center gap-2.5 cursor-pointer text-sm ${muted}`}><Toggle on={!!settings.birthday_email_enabled} onChange={v => save({ birthday_email_enabled: v })} isDark={isDark} />Send via Email</label>
+          </div>
+          <div className="mb-3">
+            <label className={labelCls}>WhatsApp template <span className="normal-case font-normal opacity-70">(use {"{name}"})</span></label>
+            <textarea rows={2} className={`${inputCls} resize-none`} defaultValue={settings.birthday_wa_template} onBlur={e => save({ birthday_wa_template: e.target.value })} />
+          </div>
+          <div className="mb-3">
+            <label className={labelCls}>WhatsApp image URL <span className="normal-case font-normal opacity-70">(optional — sent as an image with the message as caption)</span></label>
+            <input className={inputCls} placeholder="https://…/birthday-banner.jpg" defaultValue={settings.birthday_wa_image_url || ""} onBlur={e => save({ birthday_wa_image_url: e.target.value })} />
+            {settings.birthday_wa_image_url && (
+              <img src={settings.birthday_wa_image_url} alt="Birthday WhatsApp preview" className="mt-2 h-16 rounded-lg border object-cover" style={{ borderColor: isDark ? "#334155" : "#e2e8f0" }} />
+            )}
+          </div>
+          <div>
+            <label className={labelCls}>Email template <span className="normal-case font-normal opacity-70">(use {"{name}"})</span></label>
+            <textarea rows={4} className={`${inputCls} resize-none`} defaultValue={settings.birthday_email_template} onBlur={e => save({ birthday_email_template: e.target.value })} />
+          </div>
+        </div>
+      </motion.div>
+
+      {/* Festivals */}
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+        <div className={`rounded-2xl border shadow-sm p-5 ${card}`}>
+          <div className="flex items-center gap-2 mb-3"><Sparkles className="h-4 w-4 text-orange-500" /><span className={`text-sm font-bold ${txt}`}>Festival Greetings</span></div>
+          <div className="space-y-2 mb-4">
+            {(settings.festivals || []).length === 0 && <p className={`text-xs ${muted}`}>No festivals added yet.</p>}
+            {(settings.festivals || []).map(f => (
+              <div key={f.id} className={`flex items-center justify-between rounded-lg border px-3 py-2 ${isDark ? "border-slate-700" : "border-slate-200"}`}>
+                <div className="flex items-center gap-2">
+                  {f.wa_image_url && <img src={f.wa_image_url} alt="" className="h-7 w-7 rounded object-cover flex-shrink-0" />}
+                  <div><span className={`text-sm font-semibold ${txt}`}>{f.name}</span><span className={`text-xs ml-2 ${muted}`}>{f.month_day}</span></div>
+                </div>
+                <button onClick={() => removeFestival(f.id)} className="p-1 text-slate-400 hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <input className={inputCls} placeholder="Festival name (e.g. Diwali)" value={newFestival.name} onChange={e => setNewFestival({ ...newFestival, name: e.target.value })} />
+            <input className={inputCls} placeholder="MM-DD (e.g. 11-01)" value={newFestival.month_day} onChange={e => setNewFestival({ ...newFestival, month_day: e.target.value })} />
+            <input className={`${inputCls} col-span-2`} placeholder="WhatsApp image URL (optional)" value={newFestival.wa_image_url} onChange={e => setNewFestival({ ...newFestival, wa_image_url: e.target.value })} />
+          </div>
+          <button onClick={addFestival} disabled={addingFestival} className="mt-3 h-9 px-4 rounded-lg text-sm font-semibold text-white flex items-center gap-1.5" style={{ background: "#EA580C" }}>
+            {addingFestival ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />} Add Festival
+          </button>
+        </div>
+      </motion.div>
+
+      {/* Follow-ups & renewals */}
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+        <div className={`rounded-2xl border shadow-sm p-5 ${card}`}>
+          <div className="flex items-center gap-2 mb-4"><Clock className="h-4 w-4 text-cyan-500" /><span className={`text-sm font-bold ${txt}`}>Follow-ups & Renewals</span></div>
+          <div className={`${rowCls} mb-3`}>
+            <p className={`text-sm font-semibold pr-4 ${txt}`}>Nudge assigned user if a client hasn't been contacted</p>
+            <Toggle on={!!settings.follow_up_enabled} onChange={v => save({ follow_up_enabled: v })} isDark={isDark} />
+          </div>
+          <div className="mb-3">
+            <label className={labelCls}>Days without contact before nudging</label>
+            <input type="number" min={1} className={`${inputCls} w-32`} defaultValue={settings.follow_up_days_threshold} onBlur={e => save({ follow_up_days_threshold: parseInt(e.target.value, 10) || 30 })} />
+          </div>
+          <div className={rowCls}>
+            <div className="pr-4">
+              <p className={`text-sm font-semibold ${txt}`}>Alert on service/license renewal due dates</p>
+              <p className={`text-[11px] mt-0.5 ${muted}`}>Set per-client renewal dates from the client's Renewals tab.</p>
+            </div>
+            <Toggle on={!!settings.expiry_alert_enabled} onChange={v => save({ expiry_alert_enabled: v })} isDark={isDark} />
+          </div>
+        </div>
+      </motion.div>
+
+      {saving && <div className={`text-xs flex items-center gap-1 xl:col-span-2 ${muted}`}><Save className="h-3 w-3" /> Saving…</div>}
+    </div>
+  );
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 export default function WhatsAppSettings() {
@@ -793,6 +979,7 @@ export default function WhatsAppSettings() {
     ...(isAdmin ? [{ id: "numbers",   label: "Connected Numbers", icon: Smartphone  }] : []),
     ...(isAdmin ? [{ id: "templates", label: "Message Templates", icon: MessageCircle }] : []),
     ...(isAdmin ? [{ id: "autosend", label: "Auto-Send & Scheduling", icon: Clock }] : []),
+    ...(isAdmin ? [{ id: "automation", label: "Birthday & Approval Gate", icon: Sparkles }] : []),
     { id: "info", label: "How It Works", icon: Eye },
   ];
 
@@ -811,9 +998,9 @@ export default function WhatsAppSettings() {
               <MessageCircle className="h-5 w-5 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-white tracking-tight leading-tight">WhatsApp Settings</h1>
+              <h1 className="text-2xl font-bold text-white tracking-tight leading-tight">Message Automation</h1>
               <p className="text-white/60 text-[10px] font-semibold uppercase tracking-widest mt-0.5">
-                {isAdmin ? "Multi-number connection · Message templates" : "Message templates · Shared across all pages"}
+                {isAdmin ? "WhatsApp connection · Templates · Birthday & festival automation" : "Message templates · Shared across all pages"}
               </p>
             </div>
           </div>
@@ -841,10 +1028,15 @@ export default function WhatsAppSettings() {
 
       {/* Auto-Send & Scheduling Tab */}
       {activeTab === "autosend" && isAdmin && (
-        <AutoSendTab isDark={isDark} />
+        <AutoSendTab isDark={isDark} onOpenAutomation={() => setActiveTab("automation")} />
       )}
 
-
+      {/* Birthday Wishes / Festivals / Approval Gate Tab */}
+      {activeTab === "automation" && isAdmin && (
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+          <AutomationTab isDark={isDark} />
+        </motion.div>
+      )}
 
       {/* Templates Tab */}
       {activeTab === "templates" && isAdmin && (
