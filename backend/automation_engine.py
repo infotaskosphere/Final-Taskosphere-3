@@ -98,6 +98,7 @@ class Festival(BaseModel):
     name: str
     month_day: str  # "MM-DD"
     wa_template: str = "🪔 Happy {festival}! Wishing you and your family joy and prosperity."
+    wa_image_url: Optional[str] = None
     email_template: str = "Dear {name},\n\nWishing you a very Happy {festival}!\n\nBest wishes,\nTaskosphere Team"
     enabled: bool = True
 
@@ -110,6 +111,7 @@ class AutomationSettings(BaseModel):
     birthday_requires_approval: bool = True
     birthday_email_template: str = DEFAULT_BIRTHDAY_EMAIL_TEMPLATE
     birthday_wa_template: str = DEFAULT_BIRTHDAY_WA_TEMPLATE
+    birthday_wa_image_url: Optional[str] = None
     festival_requires_approval: bool = True
     festivals: List[Festival] = Field(default_factory=list)
     follow_up_days_threshold: int = 30
@@ -126,6 +128,7 @@ class AutomationSettingsUpdate(BaseModel):
     birthday_requires_approval: Optional[bool] = None
     birthday_email_template: Optional[str] = None
     birthday_wa_template: Optional[str] = None
+    birthday_wa_image_url: Optional[str] = None
     festival_requires_approval: Optional[bool] = None
     follow_up_days_threshold: Optional[int] = None
     follow_up_enabled: Optional[bool] = None
@@ -143,6 +146,7 @@ class PendingClientMessage(BaseModel):
     recipient_contact: str  # phone or email
     message: str
     subject: Optional[str] = None
+    media_url: Optional[str] = None
     status: Literal["pending", "approved", "rejected", "sent", "failed"] = "pending"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     reviewed_by: Optional[str] = None
@@ -233,18 +237,28 @@ async def list_pending_approvals(
 
 async def _dispatch_pending_message(msg: dict) -> bool:
     """Actually sends an approved message. Returns True on success."""
-    from backend.whatsapp_integration import send_whatsapp_notification
+    from backend.whatsapp_integration import send_whatsapp_notification, send_whatsapp_media_notification
 
     ok = True
     if msg["channel"] == "whatsapp":
-        result = await send_whatsapp_notification(
-            to=msg["recipient_contact"],
-            message=msg["message"],
-            message_type=msg["kind"],
-            context_id=msg["client_id"],
-            sent_by="automation:approved",
-        )
-        ok = result is not False
+        if msg.get("media_url"):
+            await send_whatsapp_media_notification(
+                to=msg["recipient_contact"],
+                image_url=msg["media_url"],
+                caption=msg["message"],
+                message_type=msg["kind"],
+                context_id=msg["client_id"],
+                sent_by="automation:approved",
+            )
+        else:
+            result = await send_whatsapp_notification(
+                to=msg["recipient_contact"],
+                message=msg["message"],
+                message_type=msg["kind"],
+                context_id=msg["client_id"],
+                sent_by="automation:approved",
+            )
+            ok = result is not False
     elif msg["channel"] == "email":
         from backend.server import send_birthday_email  # reuse existing Brevo sender
         ok = await send_birthday_email(msg["recipient_contact"], msg["recipient_name"])
@@ -308,12 +322,13 @@ async def reject_pending_message(message_id: str, current_user=Depends(require_a
     return {"status": "rejected"}
 
 
-async def _queue_or_send(kind, channel, client, recipient_name, recipient_contact, message, subject, requires_approval):
+async def _queue_or_send(kind, channel, client, recipient_name, recipient_contact, message, subject, requires_approval, media_url=None):
     if requires_approval:
         entry = PendingClientMessage(
             kind=kind, channel=channel, client_id=client["id"],
             client_name=client.get("company_name", ""), recipient_name=recipient_name,
             recipient_contact=recipient_contact, message=message, subject=subject,
+            media_url=media_url,
         )
         await db.pending_client_messages.insert_one(entry.model_dump())
         admins = await db.users.find({"role": "admin"}, {"_id": 0, "id": 1}).to_list(50)
@@ -329,7 +344,7 @@ async def _queue_or_send(kind, channel, client, recipient_name, recipient_contac
         ok = await _dispatch_pending_message({
             "kind": kind, "channel": channel, "client_id": client["id"],
             "recipient_name": recipient_name, "recipient_contact": recipient_contact,
-            "message": message,
+            "message": message, "media_url": media_url,
         })
         return ok
 
@@ -401,7 +416,8 @@ async def run_birthday_automation():
                     phone = "91" + phone
                 msg = (client.get("wa_birthday_message") or settings["birthday_wa_template"]).format(name=name)
                 await _queue_or_send("birthday", "whatsapp", client, name, phone, msg, None,
-                                      settings.get("birthday_requires_approval", True))
+                                      settings.get("birthday_requires_approval", True),
+                                      media_url=settings.get("birthday_wa_image_url"))
                 await asyncio.sleep(0.5)
 
             if settings.get("birthday_email_enabled") and person.get("email"):
@@ -430,7 +446,8 @@ async def run_festival_greetings():
                     phone = "91" + phone
                 msg = festival["wa_template"].format(name=name, festival=festival["name"])
                 await _queue_or_send("festival", "whatsapp", client, name, phone, msg, None,
-                                      settings.get("festival_requires_approval", True))
+                                      settings.get("festival_requires_approval", True),
+                                      media_url=festival.get("wa_image_url"))
                 await asyncio.sleep(0.5)
             if client.get("email"):
                 msg = festival["email_template"].format(name=name, festival=festival["name"])
