@@ -36,7 +36,7 @@ export default function AutomationSettingsPage(props) {
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [newFestival, setNewFestival] = useState({ name: '', month_day: '', wa_template: '', email_template: '' });
+  const [newFestival, setNewFestival] = useState({ name: '', month_day: '', wa_template: '', wa_image_url: '', email_template: '' });
   const [addingFestival, setAddingFestival] = useState(false);
 
   const load = async () => {
@@ -77,11 +77,12 @@ export default function AutomationSettingsPage(props) {
         name: newFestival.name,
         month_day: newFestival.month_day,
         wa_template: newFestival.wa_template || `🪔 Happy ${newFestival.name}! Wishing you and your family joy and prosperity.`,
+        wa_image_url: newFestival.wa_image_url || null,
         email_template: newFestival.email_template || `Dear {name},\n\nWishing you a very Happy ${newFestival.name}!\n\nBest wishes,\nTaskosphere Team`,
         enabled: true,
       });
       setSettings(res.data);
-      setNewFestival({ name: '', month_day: '', wa_template: '', email_template: '' });
+      setNewFestival({ name: '', month_day: '', wa_template: '', wa_image_url: '', email_template: '' });
       toast.success('Festival added');
     } catch (err) {
       toast.error('Failed to add festival');
@@ -164,6 +165,19 @@ export default function AutomationSettingsPage(props) {
           />
         </div>
         <div className="mt-3">
+          <label className={label}>WhatsApp image URL (optional — sent as an image with the message as caption)</label>
+          <input
+            className={input}
+            placeholder="https://…/birthday-banner.jpg"
+            defaultValue={settings.birthday_wa_image_url || ''}
+            onBlur={(e) => save({ birthday_wa_image_url: e.target.value })}
+          />
+          {settings.birthday_wa_image_url && (
+            <img src={settings.birthday_wa_image_url} alt="Birthday WhatsApp preview"
+              className="mt-2 h-20 rounded-lg border object-cover" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }} />
+          )}
+        </div>
+        <div className="mt-3">
           <label className={label}>Email template (use {'{name}'})</label>
           <textarea
             className={input}
@@ -185,9 +199,14 @@ export default function AutomationSettingsPage(props) {
           )}
           {(settings.festivals || []).map(f => (
             <div key={f.id} className={`flex items-center justify-between rounded-lg border px-3 py-2 ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-              <div>
-                <span className="text-sm font-semibold">{f.name}</span>
-                <span className="text-xs text-slate-400 ml-2">{f.month_day}</span>
+              <div className="flex items-center gap-2">
+                {f.wa_image_url && (
+                  <img src={f.wa_image_url} alt="" className="h-7 w-7 rounded object-cover flex-shrink-0" />
+                )}
+                <div>
+                  <span className="text-sm font-semibold">{f.name}</span>
+                  <span className="text-xs text-slate-400 ml-2">{f.month_day}</span>
+                </div>
               </div>
               <button onClick={() => removeFestival(f.id)} className="p-1 text-slate-400 hover:text-red-500">
                 <Trash2 className="h-3.5 w-3.5" />
@@ -200,6 +219,8 @@ export default function AutomationSettingsPage(props) {
             onChange={e => setNewFestival({ ...newFestival, name: e.target.value })} />
           <input className={input} placeholder="MM-DD (e.g. 11-01)" value={newFestival.month_day}
             onChange={e => setNewFestival({ ...newFestival, month_day: e.target.value })} />
+          <input className={`${input} col-span-2`} placeholder="WhatsApp image URL (optional)" value={newFestival.wa_image_url}
+            onChange={e => setNewFestival({ ...newFestival, wa_image_url: e.target.value })} />
         </div>
         <button
           onClick={addFestival}
