@@ -383,6 +383,8 @@ MODULE_HIERARCHY: Dict[str, Dict[str, Any]] = {
             {"flag": "can_view_all_clients", "label": "Clients — visibility of other users' clients", "actions": ["view"]},
             {"flag": "can_edit_clients",     "label": "Clients — edit / update any client", "actions": ["edit", "update"]},
             {"flag": "can_approve_clients",  "label": "Clients — approve newly added clients", "actions": ["approve"]},
+            {"flag": "can_approve_whatsapp_wishes", "label": "Automation — approve WhatsApp birthday/festival wishes", "actions": ["approve"]},
+            {"flag": "can_approve_email_wishes",    "label": "Automation — approve Email birthday/festival wishes", "actions": ["approve"]},
         ],
     },
     "proposals": {
@@ -458,6 +460,11 @@ class UserPermissions(BaseModel):
     can_edit_clients: bool = False
     # Approve / reject client records created by other users (admin workflow)
     can_approve_clients: bool = False
+    # Delegated rights to approve queued automated client messages —
+    # separate from can_manage_automation_settings, which controls
+    # templates/toggles/festivals (structural config, admin by default).
+    can_approve_whatsapp_wishes: bool = False
+    can_approve_email_wishes: bool = False
     can_edit_dsc: bool = False
     can_edit_documents: bool = False
     can_edit_due_dates: bool = False
