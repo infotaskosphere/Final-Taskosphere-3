@@ -10,7 +10,7 @@ import {
   CreditCard, Fingerprint, Bell, Shield, ShieldCheck, ArrowLeftRight, MessageCircle,
   Building2, Zap, Briefcase, ShoppingBag, Landmark, BookOpen, NotebookPen,
   ScanLine, Lock, Search, Loader2,
-  Wallet, CalendarOff, UserPlus,
+  Wallet, CalendarOff, UserPlus, Cake, Sparkles,
   Database, FolderOpen, MessagesSquare, FileBarChart2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -92,6 +92,7 @@ const NAV_GROUPS = [
       { path: '/clients',   icon: Users,     label: 'Clients' },
       { path: '/passwords', icon: KeyRound,  label: 'Password Vault',    permission: 'can_view_passwords'   },
       { path: '/client-approvals', icon: UserPlus, label: 'Client Approvals' },
+      { path: '/automation/approvals', icon: Cake, label: 'Automation Approvals', permission: ['can_approve_whatsapp_wishes', 'can_approve_email_wishes'] },
     ],
   },
   {
@@ -219,6 +220,7 @@ const NAV_GROUPS = [
       { path: '/settings/email',   icon: Mail,     label: 'Email Accounts'   },
       { path: '/settings/general', icon: Settings, label: 'General Settings' },
       { path: '/settings/whatsapp', icon: MessageCircle, label: 'WhatsApp Settings' },
+      { path: '/settings/automation', icon: Sparkles, label: 'Automation Settings', adminOnly: true },
     ],
   },
 ];
