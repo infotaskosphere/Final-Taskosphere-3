@@ -123,6 +123,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
     admin: {
       can_view_tasks: true, can_view_clients: true,
       can_view_all_tasks: true, can_view_all_clients: true, can_approve_clients: true, can_view_all_dsc: true,
+      can_approve_whatsapp_wishes: true, can_approve_email_wishes: true,
       can_view_documents: true, can_view_all_duedates: true, can_view_reports: true,
       can_manage_users: true, can_assign_tasks: true, can_view_staff_activity: true,
       can_view_attendance: true, can_send_reminders: true, can_view_user_page: true,
@@ -162,6 +163,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_view_all_tasks: false,      // scope handled server-side by department query
       can_view_all_clients: false,    // admin-granted only
       can_approve_clients: false,     // admin-granted only
+      can_approve_whatsapp_wishes: false, // admin-granted only
+      can_approve_email_wishes: false,    // admin-granted only
       can_view_all_dsc: false,        // admin-granted only
       can_view_documents: false,      // admin-granted only
       can_view_all_duedates: true,    // Compliance Tracker (Calendar panel) → VIEW (Own + Team)
@@ -232,6 +235,8 @@ const DEFAULT_ROLE_PERMISSIONS = {
       can_view_all_tasks: false,      // scope: own only
       can_view_all_clients: false,    // admin-granted only
       can_approve_clients: false,     // admin-granted only
+      can_approve_whatsapp_wishes: false, // admin-granted only
+      can_approve_email_wishes: false,    // admin-granted only
       can_view_all_dsc: false,        // admin-granted only
       can_view_documents: false,      // admin-granted only
       can_view_all_duedates: true,    // Compliance Tracker (Calendar panel) → VIEW (Own)
@@ -298,6 +303,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
 const EMPTY_PERMISSIONS = {
   can_view_tasks: false, can_view_clients: false,
   can_view_all_tasks: false, can_view_all_clients: false, can_approve_clients: false, can_view_all_dsc: false,
+  can_approve_whatsapp_wishes: false, can_approve_email_wishes: false,
   can_view_documents: false, can_view_all_duedates: false, can_view_reports: false,
   can_manage_users: false, can_assign_tasks: false, can_view_staff_activity: false,
   can_view_attendance: false, can_send_reminders: false, can_view_user_page: false,
@@ -748,6 +754,8 @@ const MODULE_TREE = [
         writePerms: [
           { permKey: 'can_edit_clients',    label: 'Client Edit & Update Access', desc: 'Edit and update any client record, not just their own assigned ones', icon: Pencil },
           { permKey: 'can_approve_clients', label: 'Approve New Clients',         desc: 'Approve or reject clients added by other users (admins always can)',  icon: ShieldCheck },
+          { permKey: 'can_approve_whatsapp_wishes', label: 'Approve WhatsApp Automation', desc: 'Review and approve/reject queued birthday & festival WhatsApp wishes before they send (admins always can)', icon: MessageSquare },
+          { permKey: 'can_approve_email_wishes',    label: 'Approve Email Automation',    desc: 'Review and approve/reject queued birthday & festival email wishes before they send (admins always can)', icon: Mail },
         ],
         extra: () => (
           <div className="p-4 rounded-xl border bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700">
