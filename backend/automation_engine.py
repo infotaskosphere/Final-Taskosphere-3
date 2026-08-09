@@ -100,6 +100,7 @@ class Festival(BaseModel):
     wa_template: str = "🪔 Happy {festival}! Wishing you and your family joy and prosperity."
     wa_image_url: Optional[str] = None
     email_template: str = "Dear {name},\n\nWishing you a very Happy {festival}!\n\nBest wishes,\nTaskosphere Team"
+    email_attachment_url: Optional[str] = None
     enabled: bool = True
 
 
