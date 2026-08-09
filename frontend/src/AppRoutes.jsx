@@ -87,6 +87,8 @@ const PermissionMatrix = lazy(() => import('./pages/PermissionMatrix.jsx'));
 const GeneralSettings = lazy(() => import('./pages/GeneralSettings.jsx'));
 const WhatsAppSettings = lazy(() => import('./pages/WhatsAppSettings.jsx'));
 const EmailSettings = lazy(() => import('@/components/EmailSettings.jsx'));
+const AutomationSettings = lazy(() => import('./pages/AutomationSettingsPage.jsx'));
+const PendingApprovals = lazy(() => import('@/components/PendingApprovalsPanel.jsx'));
 
 /* ── Route guards ─────────────────────────────────────────────────────── */
 
@@ -296,6 +298,11 @@ export default function AppRoutes() {
         <Route path="/settings/general" element={<GeneralSettings />} />
         <Route path="/settings/email" element={<EmailSettings />} />
         <Route path="/settings/whatsapp" element={<WhatsAppSettings />} />
+        <Route path="/settings/automation" element={<AdminOnly><AutomationSettings /></AdminOnly>} />
+        {/* Not AdminOnly — reachable by any logged-in user; the panel itself
+            (and the backend) only shows/allows channels the user is granted
+            via can_approve_whatsapp_wishes / can_approve_email_wishes. */}
+        <Route path="/automation/approvals" element={<PendingApprovals />} />
 
         </Route>
 
