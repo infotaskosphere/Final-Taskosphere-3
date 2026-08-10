@@ -341,6 +341,11 @@ def build_report_pdf(doc_record: dict) -> bytes:
     all_results      = report.get("all_results", []) or []
     phonetic_results = report.get("phonetic_matches", []) or []
     class_filter     = report.get("class_filter") or "All"
+    # Full requested class list (multi-class aware). Falls back to a
+    # single-element list from class_filter for older stored reports that
+    # predate the class_filters field.
+    class_filters    = report.get("class_filters") or ([class_filter] if class_filter not in ("All", None, "") else [])
+    class_filters_set = {int(c) for c in class_filters} if class_filters else set()
     created_at       = doc_record.get("created_at") or datetime.utcnow().isoformat()
 
     # Branding
@@ -419,7 +424,10 @@ def build_report_pdf(doc_record: dict) -> bytes:
 
     # ── CLIENT DETAILS ──────────────────────────────────────────────────────
     story += _section_header("CLIENT DETAILS", st)
-    class_label = f"Class {class_filter}" if class_filter not in ("All", None, "") else "All Classes"
+    class_label = (
+        ("Class " + ", ".join(str(c) for c in sorted(class_filters_set)))
+        if class_filters_set else "All Classes"
+    )
     client_details_rows = [
         ("Client Name",         client_name or "\u2014"),
         ("Proposed Mark",       query),
@@ -528,6 +536,49 @@ def build_report_pdf(doc_record: dict) -> bytes:
         story.append(conflict_tbl)
         story.append(Spacer(1, 14))
 
+    # ── CLASS-WISE BREAKDOWN ────────────────────────────────────────────────
+    # Especially important for multi-class searches (e.g. CL16 + CL21 + CL28):
+    # shows how filings/conflicts are distributed across each requested class,
+    # so the report doesn't just collapse everything into one number.
+    if class_breakdown:
+        story += _section_header("CLASS-WISE BREAKDOWN", st)
+        hdr_style_cb = ParagraphStyle("tbl_hdr_cb", parent=st["cell_bold"], textColor=WHITE)
+        cb_rows = [[
+            Paragraph("Class",          hdr_style_cb),
+            Paragraph("Sector",         hdr_style_cb),
+            Paragraph("Total Filings",  hdr_style_cb),
+            Paragraph("Blocking",       hdr_style_cb),
+            Paragraph("Dead/Expired",   hdr_style_cb),
+        ]]
+        for cb in class_breakdown:
+            blocking_n = cb.get("blocking", 0)
+            blocking_style = ParagraphStyle(
+                "cb_blk", parent=st["cell_bold"],
+                textColor=(RED if blocking_n else EMERALD), alignment=TA_CENTER,
+            )
+            cb_rows.append([
+                Paragraph(f"CL{cb.get('class', '\u2014')}", st["cell_center"]),
+                Paragraph(str(cb.get("hint") or cb.get("sector") or "\u2014"), st["cell"]),
+                Paragraph(str(cb.get("total", 0)), st["cell_center"]),
+                Paragraph(str(blocking_n), blocking_style),
+                Paragraph(str(cb.get("dead", 0)), st["cell_center"]),
+            ])
+        cb_tbl = Table(cb_rows, colWidths=[18*mm, CONTENT_W - 18*mm - 26*mm - 22*mm - 26*mm, 26*mm, 22*mm, 26*mm])
+        cb_tbl.setStyle(TableStyle([
+            ("BOX",           (0, 0), (-1, -1), 0.75, DARK_BLUE),
+            ("LINEBELOW",     (0, 0), (-1, 0),  0.75, DARK_BLUE),
+            ("INNERGRID",     (0, 1), (-1, -1), 0.25, BORDER_CLR),
+            ("BACKGROUND",    (0, 0), (-1, 0),  DARK_BLUE),
+            ("ROWBACKGROUNDS",(0, 1), (-1, -1), [WHITE, LIGHT_GREY]),
+            ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING",    (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 6),
+        ]))
+        story.append(cb_tbl)
+        story.append(Spacer(1, 14))
+
     # ── DETAILED ANALYSIS ───────────────────────────────────────────────────
     top_results = all_results[:10]
     if top_results:
@@ -573,7 +624,7 @@ def build_report_pdf(doc_record: dict) -> bytes:
             visual_s    = sim_pct if match_type in ("exact", "similar", "contains") else max(0, sim_pct - 20)
             phonetic_s  = sim_pct if match_type in ("exact", "phonetic")            else max(0, sim_pct - 30)
             concept_s   = sim_pct // 2 if match_type in ("exact", "contains")       else 0
-            gs_s        = 50 if str(r.get("class", "")) == str(class_filter) else 30
+            gs_s        = 50 if (class_filters_set and r.get("class") in class_filters_set) else 30
 
             hdr_style2 = ParagraphStyle("tbl_hdr2", parent=st["cell_bold"], textColor=WHITE)
             sim_rows = [
