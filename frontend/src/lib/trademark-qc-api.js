@@ -209,6 +209,55 @@ export function pdfDownloadUrl(reportId) {
 }
 
 /**
+ * Parse a filename out of a Content-Disposition header, preferring the
+ * RFC 5987 filename*=UTF-8''... form when present.
+ */
+function _filenameFromContentDisposition(headerValue) {
+  if (!headerValue) return null;
+  const star = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(headerValue);
+  if (star) {
+    try { return decodeURIComponent(star[1].trim()); } catch { /* fall through */ }
+  }
+  const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(headerValue);
+  return plain ? plain[1].trim() : null;
+}
+
+function _fallbackFilename(brandName, classFilters) {
+  const base = (brandName || "trademark").trim().replace(/[^\w-]+/g, "_").replace(/^_+|_+$/g, "") || "trademark";
+  const suffix = Array.isArray(classFilters) && classFilters.length
+    ? "_" + [...new Set(classFilters)].sort((a, b) => a - b).map(c => `CL${c}`).join("_")
+    : "";
+  return `Trademark_${base}${suffix}.pdf`;
+}
+
+/**
+ * Download a stored report as a PDF, saved locally under the brand name that
+ * was searched (e.g. "Trademark_Krimira_CL16_CL21_CL28.pdf") — never the
+ * internal report ID. Uses the authenticated axios instance (so it works
+ * the same way regardless of how the browser's built-in PDF viewer would
+ * otherwise decide a filename), and reads the real name from the server's
+ * Content-Disposition header when available, falling back to a name built
+ * from the brand/classes the caller already knows client-side.
+ */
+export async function downloadReportPdf(reportId, { brandName, classFilters } = {}) {
+  const response = await api.get(`/trademark-qc/searches/${reportId}/pdf`, {
+    responseType: "blob",
+  });
+  const headerName = _filenameFromContentDisposition(response.headers?.["content-disposition"]);
+  const filename = headerName || _fallbackFilename(brandName, classFilters);
+
+  const blobUrl = window.URL.createObjectURL(response.data);
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(blobUrl);
+  return filename;
+}
+
+/**
  * Build a PDF URL that instructs the backend to overlay the given branding
  * onto the stored report — without re-running the trademark scrape.
  */
