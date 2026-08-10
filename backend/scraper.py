@@ -24,6 +24,7 @@ import re
 import asyncio
 import base64
 import logging
+import random
 from typing import List, Dict, Optional, Set, Tuple
 from urllib.parse import quote_plus
 
@@ -47,6 +48,10 @@ IMAGE_FETCH_CAP = 60
 PAGE_DELAY = 0.45
 # Delay between class-specific fetches
 CLASS_DELAY = 0.6
+# Retry policy for transient failures (timeouts, connection errors, 5xx, 429)
+MAX_RETRIES = 3
+RETRY_BASE_DELAY = 1.2   # seconds; doubles each retry (exponential backoff)
+RETRY_JITTER = 0.35      # +/- random jitter fraction, avoids thundering-herd/bot-pattern retries
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -301,10 +306,19 @@ async def _fetch_page(
     class_filter: Optional[int] = None,
 ) -> Tuple[List[Dict], Optional[int]]:
     """
-    Fetch a single search-result page.
-    
+    Fetch a single search-result page, with retries on transient failures.
+
     If class_filter is provided, appends class[]=N to the URL for class-specific scraping.
     Returns (results, total_on_page_1).
+
+    Robustness:
+      - Retries timeouts/connection errors/5xx up to MAX_RETRIES times with
+        exponential backoff + jitter, instead of giving up on the first blip.
+      - HTTP 429 (rate limited) is retried respecting the Retry-After header
+        when present, so a burst of class-specific fetches doesn't silently
+        return zero results just because QC throttled one request.
+      - 4xx errors other than 429 are NOT retried (they won't succeed on
+        retry) — we log and return empty so the caller can move on.
     """
     params: dict = {"q": query.strip(), "page": page}
     if class_filter is not None:
@@ -318,29 +332,95 @@ async def _fetch_page(
         url = f"{SEARCH_URL}?q={q_enc}&class[]={class_filter}&page={page}"
     else:
         url = SEARCH_URL
-    
-    try:
-        if class_filter is not None:
-            resp = await client.get(url, headers=HEADERS, timeout=timeout)
-        else:
-            resp = await client.get(url, params=params, headers=HEADERS, timeout=timeout)
-        resp.raise_for_status()
-    except httpx.HTTPStatusError as e:
-        logger.warning("QC HTTP error page=%d class=%s query=%r: %s", page, class_filter, query, e)
-        return [], None
-    except Exception as e:
-        logger.warning("QC fetch error page=%d class=%s query=%r: %s", page, class_filter, query, e)
-        return [], None
 
-    soup  = BeautifulSoup(resp.text, "lxml")
-    cards = _parse_cards_from_soup(soup)
-    total = _parse_total(soup) if page == 1 else None
-    
-    logger.debug(
-        "QC fetch: query=%r class=%s page=%d → %d cards",
-        query, class_filter, page, len(cards)
-    )
-    return cards, total
+    last_exc: Optional[Exception] = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            if class_filter is not None:
+                resp = await client.get(url, headers=HEADERS, timeout=timeout)
+            else:
+                resp = await client.get(url, params=params, headers=HEADERS, timeout=timeout)
+
+            if resp.status_code == 429:
+                retry_after = resp.headers.get("Retry-After")
+                try:
+                    wait = float(retry_after) if retry_after else RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                except ValueError:
+                    wait = RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                logger.warning(
+                    "QC rate-limited (429) page=%d class=%s query=%r — waiting %.1fs (attempt %d/%d)",
+                    page, class_filter, query, wait, attempt, MAX_RETRIES,
+                )
+                if attempt < MAX_RETRIES:
+                    await asyncio.sleep(wait)
+                    continue
+                return [], None
+
+            if resp.status_code >= 500:
+                # Server-side error — worth a retry, QC's backend can be flaky.
+                logger.warning(
+                    "QC server error %d page=%d class=%s query=%r (attempt %d/%d)",
+                    resp.status_code, page, class_filter, query, attempt, MAX_RETRIES,
+                )
+                if attempt < MAX_RETRIES:
+                    await _backoff_sleep(attempt)
+                    continue
+                return [], None
+
+            resp.raise_for_status()
+
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError) as e:
+            last_exc = e
+            logger.warning(
+                "QC transient network error page=%d class=%s query=%r: %s (attempt %d/%d)",
+                page, class_filter, query, e, attempt, MAX_RETRIES,
+            )
+            if attempt < MAX_RETRIES:
+                await _backoff_sleep(attempt)
+                continue
+            return [], None
+        except httpx.HTTPStatusError as e:
+            # Non-retryable 4xx (bad request, not found, etc.)
+            logger.warning("QC HTTP error page=%d class=%s query=%r: %s", page, class_filter, query, e)
+            return [], None
+        except Exception as e:
+            logger.warning("QC fetch error page=%d class=%s query=%r: %s", page, class_filter, query, e)
+            return [], None
+
+        # Success
+        try:
+            soup  = BeautifulSoup(resp.text, "lxml")
+            cards = _parse_cards_from_soup(soup)
+            total = _parse_total(soup) if page == 1 else None
+        except Exception as e:
+            # Parsing failure shouldn't crash the whole multi-page/multi-class
+            # scrape — log it and treat this page as empty so pagination stops
+            # cleanly instead of raising up through the caller.
+            logger.error(
+                "QC parse error page=%d class=%s query=%r: %s", page, class_filter, query, e
+            )
+            return [], None
+
+        logger.debug(
+            "QC fetch: query=%r class=%s page=%d \u2192 %d cards",
+            query, class_filter, page, len(cards)
+        )
+        return cards, total
+
+    # Exhausted retries without a distinguishable branch above (defensive)
+    if last_exc:
+        logger.error(
+            "QC fetch failed after %d attempts page=%d class=%s query=%r: %s",
+            MAX_RETRIES, page, class_filter, query, last_exc,
+        )
+    return [], None
+
+
+async def _backoff_sleep(attempt: int) -> None:
+    """Exponential backoff with jitter, capped so retries don't stall for too long."""
+    base  = RETRY_BASE_DELAY * (2 ** (attempt - 1))
+    jitter = base * RETRY_JITTER * random.uniform(-1, 1)
+    await asyncio.sleep(max(0.2, min(base + jitter, 12.0)))
 
 
 async def _scrape_all_pages(
@@ -398,8 +478,9 @@ async def _scrape_all_pages(
             # Sparse/empty page = end of results
             break
 
-        # Polite crawl delay
-        await asyncio.sleep(PAGE_DELAY)
+        # Polite crawl delay with jitter (avoids a robotic, perfectly-even
+        # request cadence that's easy to rate-limit/fingerprint).
+        await asyncio.sleep(PAGE_DELAY + random.uniform(0, PAGE_DELAY * 0.4))
 
     return all_results, total_estimated
 
@@ -442,7 +523,7 @@ async def search_trademarks(
         return {
             "query": query, "total_estimated": 0,
             "results": [], "source": "quickcompany.in",
-            "classes_fetched": [],
+            "classes_fetched": [], "classes_failed": [],
         }
 
     all_results:   List[Dict] = []
@@ -476,19 +557,36 @@ async def search_trademarks(
         # ── Round 2: Class-specific fetches (if requested) ────────────────────
         # This captures results that were buried in generic pagination or missed
         # because too many other-class results dominated early pages.
+        #
+        # Each class is isolated in its own try/except: if one class's fetch
+        # fails outright (e.g. a bug, an unexpected exception type not already
+        # handled inside _fetch_page's own retry logic), the other requested
+        # classes still get scraped and returned — a multi-class run for
+        # CL16+CL21+CL28 should never come back completely empty just because
+        # CL21 hiccupped. classes_failed surfaces what failed.
+        classes_failed: List[int] = []
         if class_filters:
             logger.info(
                 "QC scrape [2/2]: class-specific pages for classes=%s query=%r",
                 class_filters, query
             )
             for cls in class_filters:
-                await asyncio.sleep(CLASS_DELAY)
-                class_results, _ = await _scrape_all_pages(
-                    client, query, timeout,
-                    class_filter=cls,
-                    max_pages=MAX_PAGES_CLASS,
-                    seen_ids=seen_ids,  # shared — deduplicates against generic results
-                )
+                await asyncio.sleep(CLASS_DELAY + random.uniform(0, CLASS_DELAY * 0.3))
+                try:
+                    class_results, _ = await _scrape_all_pages(
+                        client, query, timeout,
+                        class_filter=cls,
+                        max_pages=MAX_PAGES_CLASS,
+                        seen_ids=seen_ids,  # shared — deduplicates against generic results
+                    )
+                except Exception as e:
+                    logger.error(
+                        "QC class-specific fetch CL%d FAILED for query=%r: %s — "
+                        "continuing with remaining classes", cls, query, e
+                    )
+                    classes_failed.append(cls)
+                    continue
+
                 new_count = len(class_results)
                 if new_count > 0:
                     logger.info(
@@ -499,6 +597,7 @@ async def search_trademarks(
                     classes_fetched.append(cls)
                 else:
                     logger.info("QC class-specific fetch CL%d: all already captured", cls)
+                    classes_fetched.append(cls)
 
         if len(all_results) > limit:
             all_results = all_results[:limit]
@@ -521,8 +620,8 @@ async def search_trademarks(
         all_results = list(enriched_capped) + rest
 
     logger.info(
-        "QC search %r: %d total results collected (estimated: %s, classes fetched: %s)",
-        query, len(all_results), total_estimated, classes_fetched
+        "QC search %r: %d total results collected (estimated: %s, classes fetched: %s, classes failed: %s)",
+        query, len(all_results), total_estimated, classes_fetched, classes_failed
     )
 
     return {
@@ -531,4 +630,9 @@ async def search_trademarks(
         "results":         all_results,
         "source":          "quickcompany.in",
         "classes_fetched": classes_fetched,
+        # Classes that were requested but whose scrape failed outright after
+        # retries — surfaced so the caller/UI can warn the user that a
+        # particular class's results may be incomplete, instead of silently
+        # returning a partial report that looks complete.
+        "classes_failed":  classes_failed,
     }
