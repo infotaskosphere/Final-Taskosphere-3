@@ -9,6 +9,7 @@ import os
 import re
 from io import BytesIO
 from datetime import datetime
+from typing import Any, Dict, List
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib import colors
@@ -293,6 +294,44 @@ def _generate_remarks(r: dict, query: str, risk_cat: str, match_type: str) -> st
         )
 
 
+def _plain_language_remark(r: dict, risk_cat: str, match_type: str) -> str:
+    """A short, jargon-free version of _generate_remarks() for readers who
+    aren't trademark professionals."""
+    name = r.get("name") or "this mark"
+    status = (r.get("status") or "on record").lower()
+    cls = r.get("class") or "\u2014"
+
+    if match_type == "exact":
+        return (
+            f"Someone else already has a trademark that reads exactly the same as yours "
+            f"(\"{name}\", {status}, Class {cls}). This is the strongest kind of conflict — "
+            f"you should not file without changing your name or sorting this out first."
+        )
+    elif match_type == "phonetic":
+        return (
+            f"There's a mark that sounds like yours when spoken out loud (\"{name}\", "
+            f"{status}, Class {cls}). Even though it's spelled differently, the registry "
+            f"often objects to marks that sound alike, so this is worth reviewing carefully."
+        )
+    elif match_type == "contains":
+        return (
+            f"Part of your proposed name overlaps with an existing mark (\"{name}\", "
+            f"{status}, Class {cls}). This alone won't stop your application, but it's "
+            f"worth keeping an eye on, especially if you sell similar products or services."
+        )
+    elif risk_cat == "high":
+        return (
+            f"This existing mark (\"{name}\", {status}, Class {cls}) is close enough to "
+            f"yours that it could cause problems during examination. We'd recommend "
+            f"getting a professional opinion before you file."
+        )
+    else:
+        return (
+            f"This mark (\"{name}\", {status}, Class {cls}) only loosely resembles yours. "
+            f"It's a low concern, but worth keeping on your radar."
+        )
+
+
 # ── Page template ─────────────────────────────────────────────────────────────
 
 class _PageTemplate:
@@ -549,6 +588,7 @@ def build_report_pdf(doc_record: dict) -> bytes:
             Paragraph("Total Filings",  hdr_style_cb),
             Paragraph("Blocking",       hdr_style_cb),
             Paragraph("Dead/Expired",   hdr_style_cb),
+            Paragraph("Result",         hdr_style_cb),
         ]]
         for cb in class_breakdown:
             blocking_n = cb.get("blocking", 0)
@@ -556,14 +596,21 @@ def build_report_pdf(doc_record: dict) -> bytes:
                 "cb_blk", parent=st["cell_bold"],
                 textColor=(RED if blocking_n else EMERALD), alignment=TA_CENTER,
             )
+            result_text  = "No Conflicting Mark" if blocking_n == 0 else "Possible Conflict"
+            result_style = ParagraphStyle(
+                "cb_res", parent=st["cell_bold"],
+                textColor=(EMERALD if blocking_n == 0 else RED), alignment=TA_CENTER,
+            )
             cb_rows.append([
                 Paragraph(f"CL{cb.get('class', '\u2014')}", st["cell_center"]),
                 Paragraph(str(cb.get("hint") or cb.get("sector") or "\u2014"), st["cell"]),
                 Paragraph(str(cb.get("total", 0)), st["cell_center"]),
                 Paragraph(str(blocking_n), blocking_style),
                 Paragraph(str(cb.get("dead", 0)), st["cell_center"]),
+                Paragraph(result_text, result_style),
             ])
-        cb_tbl = Table(cb_rows, colWidths=[18*mm, CONTENT_W - 18*mm - 26*mm - 22*mm - 26*mm, 26*mm, 22*mm, 26*mm])
+        cb_col_fixed = 16*mm + 22*mm + 18*mm + 24*mm + 34*mm
+        cb_tbl = Table(cb_rows, colWidths=[16*mm, CONTENT_W - cb_col_fixed, 22*mm, 18*mm, 24*mm, 34*mm])
         cb_tbl.setStyle(TableStyle([
             ("BOX",           (0, 0), (-1, -1), 0.75, DARK_BLUE),
             ("LINEBELOW",     (0, 0), (-1, 0),  0.75, DARK_BLUE),
@@ -577,99 +624,183 @@ def build_report_pdf(doc_record: dict) -> bytes:
             ("RIGHTPADDING",  (0, 0), (-1, -1), 6),
         ]))
         story.append(cb_tbl)
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(
+            "In simple terms: a class marked <b>\"No Conflicting Mark\"</b> means our search did not "
+            "find any existing trademark that stands in the way of your application in that class. A "
+            "class marked <b>\"Possible Conflict\"</b> has at least one similar mark already on record "
+            "and is examined in detail on the pages that follow.",
+            st["small"],
+        ))
         story.append(Spacer(1, 14))
 
-    # ── DETAILED ANALYSIS ───────────────────────────────────────────────────
-    top_results = all_results[:10]
-    if top_results:
+    # ── DETAILED ANALYSIS (one page per class) ──────────────────────────────
+    # Every class that was actually searched gets its own page — including
+    # classes with zero conflicts, which are explicitly labelled "No
+    # Conflicting Mark" rather than being silently omitted from the report.
+    results_by_class: Dict[Any, List[Dict]] = {}
+    for r in all_results:
+        results_by_class.setdefault(r.get("class"), []).append(r)
+
+    if class_filters_set:
+        classes_to_report = sorted(class_filters_set)
+    else:
+        classes_to_report = sorted(
+            [c for c in results_by_class.keys() if c is not None],
+            key=lambda c: (-len(results_by_class.get(c, [])),)
+        )
+
+    if classes_to_report:
         story.append(PageBreak())
         story += _section_header("DETAILED ANALYSIS", st)
-        story.append(Spacer(1, 4))
+        story.append(Paragraph(
+            "Each Nice Classification class you searched is reviewed on its own page below — "
+            "whether or not any conflicting marks were found in it.",
+            st["small"],
+        ))
+        story.append(Spacer(1, 6))
 
-        for exhibit_no, r in enumerate(top_results, 1):
-            risk_cat   = _categorize_risk(r.get("individual_risk_score", 0), r.get("status", ""), r.get("match_type", ""))
-            risk_clr   = RISK_COLOR.get(risk_cat, AMBER)
-            sim_pct    = r.get("similarity_pct", 0)
-            match_type = (r.get("match_type") or "weak").lower()
+        for class_idx, cls in enumerate(classes_to_report):
+            if class_idx > 0:
+                story.append(PageBreak())
 
-            block = []
+            sector = None
+            for cb in class_breakdown:
+                if cb.get("class") == cls:
+                    sector = cb.get("hint") or cb.get("sector")
+                    break
+            sector = sector or "\u2014"
 
-            # Exhibit heading
-            block.append(Paragraph(f"EXHIBIT {exhibit_no}", st["h2"]))
+            cls_results = sorted(
+                results_by_class.get(cls, []),
+                key=lambda r: r.get("individual_risk_score", 0),
+                reverse=True,
+            )[:10]
 
-            # Trademark details table
-            block.append(Paragraph("Trademark Details", st["h3"]))
-            block.append(_kv_table([
-                ("Mark",               r.get("name") or "\u2014"),
-                ("Application Number", str(r.get("application_id") or "\u2014")),
-                ("Class",              str(r.get("class") or "\u2014")),
-                ("Status",             r.get("status") or "\u2014"),
-                ("Proprietor",         r.get("applicant") or "\u2014"),
-                ("Filing Date",        r.get("filing_date") or "\u2014"),
-                ("User Date",          r.get("user_date") or "\u2014"),
-                ("Journal Number",     r.get("journal_number") or "\u2014"),
-                ("Office",             r.get("office") or "\u2014"),
-                ("Agent / Attorney",   r.get("attorney") or "\u2014"),
-            ], st=st))
-            block.append(Spacer(1, 6))
+            story.append(Paragraph(f"Class {cls} \u2014 {sector}", st["h2"]))
+            story.append(Spacer(1, 4))
 
-            # Goods & Services
-            gs = r.get("goods_and_services") or r.get("description") or "\u2014"
-            block.append(Paragraph("Goods &amp; Services", st["h3"]))
-            block.append(Paragraph(str(gs)[:600], st["body_j"]))
-            block.append(Spacer(1, 6))
+            if not cls_results:
+                # ── Plain-language "all clear" notice ───────────────────────
+                clear_box = Table(
+                    [[Paragraph(
+                        f"<b>\u2714 No Conflicting Mark Found in Class {cls}</b><br/><br/>"
+                        f"Our search did not find any existing trademark in Class {cls} "
+                        f"({sector}) that conflicts with the proposed mark <b>\"{query}\"</b>. "
+                        f"In plain terms: based on the records we checked, there is nothing "
+                        f"currently blocking you from filing in this class.",
+                        st["body_j"],
+                    )]],
+                    colWidths=[CONTENT_W],
+                )
+                clear_box.setStyle(TableStyle([
+                    ("BOX",           (0, 0), (-1, -1), 0.75, EMERALD),
+                    ("BACKGROUND",    (0, 0), (-1, -1), colors.HexColor("#ECFDF5")),
+                    ("TOPPADDING",    (0, 0), (-1, -1), 12),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+                    ("LEFTPADDING",   (0, 0), (-1, -1), 12),
+                    ("RIGHTPADDING",  (0, 0), (-1, -1), 12),
+                ]))
+                story.append(clear_box)
+                story.append(Spacer(1, 8))
+                continue
 
-            # Similarity Assessment
-            block.append(Paragraph("Similarity Assessment", st["h3"]))
-            visual_s    = sim_pct if match_type in ("exact", "similar", "contains") else max(0, sim_pct - 20)
-            phonetic_s  = sim_pct if match_type in ("exact", "phonetic")            else max(0, sim_pct - 30)
-            concept_s   = sim_pct // 2 if match_type in ("exact", "contains")       else 0
-            gs_s        = 50 if (class_filters_set and r.get("class") in class_filters_set) else 30
+            story.append(Paragraph(
+                f"{len(cls_results)} similar mark(s) found in this class. Details below, "
+                f"most similar first.",
+                st["small"],
+            ))
+            story.append(Spacer(1, 6))
 
-            hdr_style2 = ParagraphStyle("tbl_hdr2", parent=st["cell_bold"], textColor=WHITE)
-            sim_rows = [
-                [Paragraph("Parameter",              hdr_style2), Paragraph("Score", hdr_style2)],
-                [Paragraph("Visual Similarity",      st["cell"]), Paragraph(f"{visual_s}%",    st["cell_center"])],
-                [Paragraph("Phonetic Similarity",    st["cell"]), Paragraph(f"{phonetic_s}%",  st["cell_center"])],
-                [Paragraph("Conceptual Similarity",  st["cell"]), Paragraph(f"{concept_s}%",   st["cell_center"])],
-                [Paragraph("Goods / Services Similarity", st["cell"]), Paragraph(f"{gs_s}%",  st["cell_center"])],
-                [
-                    Paragraph("Overall Similarity", st["cell_bold"]),
-                    Paragraph(
-                        f"{sim_pct}%",
-                        ParagraphStyle("simov", parent=st["cell_bold"],
-                                       textColor=risk_clr, alignment=TA_CENTER),
-                    ),
-                ],
-            ]
-            sim_tbl = Table(sim_rows, colWidths=[CONTENT_W - 58*mm, 58*mm])
-            sim_tbl.setStyle(TableStyle([
-                ("BOX",           (0, 0), (-1, -1), 0.5, BORDER_CLR),
-                ("INNERGRID",     (0, 0), (-1, -1), 0.25, BORDER_CLR),
-                ("BACKGROUND",    (0, 0), (-1, 0),  DARK_BLUE),
-                ("BACKGROUND",    (0, -1), (-1, -1), LIGHT_GREY),
-                ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
-                ("TOPPADDING",    (0, 0), (-1, -1), 5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-                ("LEFTPADDING",   (0, 0), (-1, -1), 8),
-                ("RIGHTPADDING",  (0, 0), (-1, -1), 8),
-            ]))
-            block.append(sim_tbl)
-            block.append(Spacer(1, 6))
+            for exhibit_no, r in enumerate(cls_results, 1):
+                risk_cat   = _categorize_risk(r.get("individual_risk_score", 0), r.get("status", ""), r.get("match_type", ""))
+                risk_clr   = RISK_COLOR.get(risk_cat, AMBER)
+                sim_pct    = r.get("similarity_pct", 0)
+                match_type = (r.get("match_type") or "weak").lower()
 
-            # Professional Remarks
-            block.append(Paragraph("Professional Remarks", st["h3"]))
-            block.append(Paragraph(_generate_remarks(r, query, risk_cat, match_type), st["body_j"]))
+                block = []
 
-            if exhibit_no < len(top_results):
-                block.append(HRFlowable(width="100%", thickness=0.5, color=BORDER_CLR,
-                                        spaceAfter=8, spaceBefore=8))
+                # Exhibit heading
+                block.append(Paragraph(f"EXHIBIT {class_idx + 1}.{exhibit_no}", st["h2"]))
 
-            story.append(KeepTogether(block[:4]))
-            for item in block[4:]:
-                story.append(item)
+                # Trademark details table
+                block.append(Paragraph("Trademark Details", st["h3"]))
+                block.append(_kv_table([
+                    ("Mark",               r.get("name") or "\u2014"),
+                    ("Application Number", str(r.get("application_id") or "\u2014")),
+                    ("Class",              str(r.get("class") or "\u2014")),
+                    ("Status",             r.get("status") or "\u2014"),
+                    ("Proprietor",         r.get("applicant") or "\u2014"),
+                    ("Filing Date",        r.get("filing_date") or "\u2014"),
+                    ("User Date",          r.get("user_date") or "\u2014"),
+                    ("Journal Number",     r.get("journal_number") or "\u2014"),
+                    ("Office",             r.get("office") or "\u2014"),
+                    ("Agent / Attorney",   r.get("attorney") or "\u2014"),
+                ], st=st))
+                block.append(Spacer(1, 6))
 
-        story.append(Spacer(1, 14))
+                # Goods & Services
+                gs = r.get("goods_and_services") or r.get("description") or "\u2014"
+                block.append(Paragraph("Goods &amp; Services", st["h3"]))
+                block.append(Paragraph(str(gs)[:600], st["body_j"]))
+                block.append(Spacer(1, 6))
+
+                # Similarity Assessment
+                block.append(Paragraph("Similarity Assessment", st["h3"]))
+                visual_s    = sim_pct if match_type in ("exact", "similar", "contains") else max(0, sim_pct - 20)
+                phonetic_s  = sim_pct if match_type in ("exact", "phonetic")            else max(0, sim_pct - 30)
+                concept_s   = sim_pct // 2 if match_type in ("exact", "contains")       else 0
+                gs_s        = 50 if (class_filters_set and r.get("class") in class_filters_set) else 30
+
+                hdr_style2 = ParagraphStyle("tbl_hdr2", parent=st["cell_bold"], textColor=WHITE)
+                sim_rows = [
+                    [Paragraph("Parameter",              hdr_style2), Paragraph("Score", hdr_style2)],
+                    [Paragraph("Visual Similarity",      st["cell"]), Paragraph(f"{visual_s}%",    st["cell_center"])],
+                    [Paragraph("Phonetic Similarity",    st["cell"]), Paragraph(f"{phonetic_s}%",  st["cell_center"])],
+                    [Paragraph("Conceptual Similarity",  st["cell"]), Paragraph(f"{concept_s}%",   st["cell_center"])],
+                    [Paragraph("Goods / Services Similarity", st["cell"]), Paragraph(f"{gs_s}%",  st["cell_center"])],
+                    [
+                        Paragraph("Overall Similarity", st["cell_bold"]),
+                        Paragraph(
+                            f"{sim_pct}%",
+                            ParagraphStyle("simov", parent=st["cell_bold"],
+                                           textColor=risk_clr, alignment=TA_CENTER),
+                        ),
+                    ],
+                ]
+                sim_tbl = Table(sim_rows, colWidths=[CONTENT_W - 58*mm, 58*mm])
+                sim_tbl.setStyle(TableStyle([
+                    ("BOX",           (0, 0), (-1, -1), 0.5, BORDER_CLR),
+                    ("INNERGRID",     (0, 0), (-1, -1), 0.25, BORDER_CLR),
+                    ("BACKGROUND",    (0, 0), (-1, 0),  DARK_BLUE),
+                    ("BACKGROUND",    (0, -1), (-1, -1), LIGHT_GREY),
+                    ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+                    ("TOPPADDING",    (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                    ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+                    ("RIGHTPADDING",  (0, 0), (-1, -1), 8),
+                ]))
+                block.append(sim_tbl)
+                block.append(Spacer(1, 6))
+
+                # Professional Remarks
+                block.append(Paragraph("Professional Remarks", st["h3"]))
+                block.append(Paragraph(_generate_remarks(r, query, risk_cat, match_type), st["body_j"]))
+                block.append(Spacer(1, 3))
+                block.append(Paragraph(
+                    f"<i>In plain terms:</i> {_plain_language_remark(r, risk_cat, match_type)}",
+                    st["small"],
+                ))
+
+                if exhibit_no < len(cls_results):
+                    block.append(HRFlowable(width="100%", thickness=0.5, color=BORDER_CLR,
+                                            spaceAfter=8, spaceBefore=8))
+
+                story.append(KeepTogether(block[:4]))
+                for item in block[4:]:
+                    story.append(item)
+
+            story.append(Spacer(1, 8))
 
     # ── PHONETICALLY SIMILAR MARKS ──────────────────────────────────────────
     if phonetic_results:
