@@ -1,3 +1,4 @@
+"""
 backend/trademark_sphere.py
 ---------------------------
 Dual-source trademark scraper:
