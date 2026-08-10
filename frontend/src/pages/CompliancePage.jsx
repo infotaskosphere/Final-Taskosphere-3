@@ -3713,7 +3713,23 @@ export default function CompliancePage(){
         setAllowedCategories(null);
       }
       setAllUsers(Array.isArray(usersRes.data)?usersRes.data:[]);
-    }catch{toast.error('Failed to load compliance data');}
+    }catch(err){
+      const status=err?.response?.status;
+      const noResponse=!err?.response;
+      let msg='Failed to load compliance data';
+      if(noResponse){
+        msg='Failed to load compliance data: cannot reach the server (network/CORS error or the API URL is misconfigured)';
+      } else if(status===404){
+        msg='Failed to load compliance data: API endpoint not found (404) — the backend URL this app is pointing to may be wrong or down';
+      } else if(status===401||status===403){
+        msg='Failed to load compliance data: not authorized — please log in again';
+      } else if(status){
+        msg=`Failed to load compliance data (HTTP ${status})`;
+      }
+      // eslint-disable-next-line no-console
+      console.error('[CompliancePage] fetchAll failed:',err);
+      toast.error(msg);
+    }
     finally{setLoading(false);}
   },[catFilter,fyFilter,refreshKey]);
 
