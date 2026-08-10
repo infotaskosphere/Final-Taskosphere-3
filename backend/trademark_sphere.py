@@ -1,8 +1,3 @@
-# REMOVED broken import (backend.services not found): from backend.services.watchlist_service import watchlist_service
-# REMOVED broken import (backend.services not found): from backend.services.search_service import search_service
-
-
-# REMOVED broken import (backend.services not found): from backend.services.ipindia_scraper import scraper
 """
 backend/trademark_sphere.py
 ---------------------------
@@ -33,15 +28,50 @@ from zoneinfo import ZoneInfo
 
 import requests as _requests
 from bs4 import BeautifulSoup
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query, Response, Body
 from pydantic import BaseModel, Field
 
 from backend.dependencies import db, get_current_user
 from backend.models import User
 from backend.pdf_renderer import build_combined_report_pdf
 
+# ── QC availability report modules ────────────────────────────────────────────
+from backend.scraper import search_trademarks as _qc_availability_search
+from backend.report_engine import build_report
+from backend.class_finder import find_classes
+from backend.qc_pdf_renderer import build_report_pdf
+
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/trademark-sphere", tags=["trademark-sphere"])
+router = APIRouter(prefix="", tags=["trademark-sphere"])
+
+
+def _pdf_filename(brand_name: str, class_filters: Optional[List[int]] = None) -> str:
+    """
+    Build a safe, brand-name-based PDF filename, e.g. 'Trademark_Krimira_CL16_CL21_CL28.pdf'.
+
+    - Always named after the searched brand (never the internal report/UUID),
+      so the file the user gets after "Download PDF" / Ctrl+S matches what
+      they searched for.
+    - Appends the searched class(es) when known, so multi-class runs and
+      per-class reports for the same brand don't overwrite each other.
+    - Strips characters that are unsafe in filenames / HTTP headers.
+    """
+    base = (brand_name or "trademark").strip()
+    base = re.sub(r"[^\w\-]+", "_", base, flags=re.UNICODE).strip("_") or "trademark"
+    suffix = ""
+    if class_filters:
+        classes = sorted({int(c) for c in class_filters})
+        suffix = "_" + "_".join(f"CL{c}" for c in classes)
+    return f"Trademark_{base}{suffix}.pdf"
+
+
+def _content_disposition(filename: str) -> str:
+    """
+    RFC 5987-safe Content-Disposition header value: ASCII fallback for
+    old clients + UTF-8 filename* for everything else (non-Latin brand names).
+    """
+    ascii_fallback = filename.encode("ascii", "ignore").decode("ascii") or "trademark.pdf"
+    return f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{quote(filename)}'
 IST   = ZoneInfo("Asia/Kolkata")
 _pool = ThreadPoolExecutor(max_workers=6)
 
@@ -76,13 +106,20 @@ def _qc_sess() -> _requests.Session:
         s = _requests.Session()
         s.headers.update({
             **_COMMON_HEADERS,
-            "Accept":  "text/html,application/xhtml+xml,*/*;q=0.8",
-            "Referer": QC_SEARCH,
+            "Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Referer":                   QC_BASE + "/",
+            "sec-ch-ua":                 '"Chromium";v="124", "Google Chrome";v="124"',
+            "sec-ch-ua-mobile":          "?0",
+            "sec-ch-ua-platform":        '"Windows"',
+            "sec-fetch-dest":            "document",
+            "sec-fetch-mode":            "navigate",
+            "sec-fetch-site":            "same-origin",
+            "Upgrade-Insecure-Requests": "1",
+            "Cache-Control":             "max-age=0",
         })
-        # Warm-up: fetch homepage to get cookies
         try:
-            s.get(QC_SEARCH, timeout=15)
-            time.sleep(0.5)
+            s.get(QC_BASE + "/", timeout=15)
+            time.sleep(0.8)
         except Exception:
             pass
         _qc_session = s
@@ -103,9 +140,9 @@ def _ip_sess() -> _requests.Session:
 
 
 # ── In-memory caches ──────────────────────────────────────────────────────────
-_tm_cache:      Dict[str, Any] = {}   # key → normalised record
-_ip_vs_cache:   Dict[str, str] = {}   # IP India viewstate cache
-_sessions:      Dict[str, Any] = {}   # OTP-compat noop
+_tm_cache:      Dict[str, Any] = {}
+_ip_vs_cache:   Dict[str, str] = {}
+_sessions:      Dict[str, Any] = {}
 _sync_progress: Dict[str, Any] = {}
 
 
@@ -114,12 +151,10 @@ _sync_progress: Dict[str, Any] = {}
 # ════════════════════════════════════════════════════════════════════════════
 
 def _clean(v: Any) -> Optional[str]:
-    """Strip and normalise whitespace; return None for empty strings."""
     return " ".join(str(v).split()).strip() or None
 
 
 def _parse_date(s: Any) -> Optional[date]:
-    """Parse multiple date formats → date object."""
     if not s:
         return None
     for fmt in (
@@ -135,7 +170,6 @@ def _parse_date(s: Any) -> Optional[date]:
 
 
 def _status_map(raw: str) -> str:
-    """Normalise IP India / QC status strings to canonical values."""
     if not raw:
         return "Unknown"
     r = raw.strip().lower()
@@ -163,16 +197,10 @@ def _status_map(raw: str) -> str:
     for k, v in MAP.items():
         if k in r:
             return v
-    # Title-case the raw value as fallback
     return raw.strip().title()
 
 
 def _compute_deadlines(tm: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Compute all renewal/deadline fields expected by the frontend.
-    Keys set: renewal_due, renewal_date, days_until_renewal,
-              days_to_renewal (alias), renewal_status.
-    """
     today = date.today()
     dl: Dict[str, Any] = {}
 
@@ -180,9 +208,9 @@ def _compute_deadlines(tm: Dict[str, Any]) -> Dict[str, Any]:
     if rd:
         days_left = (rd - today).days
         dl["renewal_due"]         = rd.isoformat()
-        dl["renewal_date"]        = rd.isoformat()        # frontend alias
-        dl["days_until_renewal"]  = days_left             # frontend field
-        dl["days_to_renewal"]     = days_left             # legacy alias
+        dl["renewal_date"]        = rd.isoformat()
+        dl["days_until_renewal"]  = days_left
+        dl["days_to_renewal"]     = days_left
 
         if days_left < 0:
             dl["renewal_status"] = "overdue"
@@ -198,7 +226,6 @@ def _compute_deadlines(tm: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def _gen_reminders(tm_id: str, tm: Dict[str, Any]) -> None:
-    """Generate 90/60/30/7-day renewal reminders."""
     if not tm.get("reminders_enabled", True):
         return
     rd = _parse_date(tm.get("valid_upto"))
@@ -234,27 +261,17 @@ async def _gen_reminders(tm_id: str, tm: Dict[str, Any]) -> None:
 # ════════════════════════════════════════════════════════════════════════════
 
 def _qc_detail_url(app_number: str) -> str:
-    """
-    QC trademark URLs are /trademarks/{app_no}-{word_slug}.
-    We do a search first to find the correct slug, then fetch the detail page.
-    """
     return f"{QC_DETAIL}/{app_number.strip()}"
 
 
 def _qc_parse_detail_page(html: str, app_number: str) -> Dict[str, Any]:
-    """
-    Parse a QuickCompany trademark detail page (e.g. /trademarks/2859256-hotstar).
-    Returns a normalised trademark dict.
-    """
     soup = BeautifulSoup(html, "lxml")
 
-    # ── Word mark ────────────────────────────────────────────────────────────
     word_mark = ""
     h1 = soup.find("h1")
     if h1:
         word_mark = _clean(h1.get_text()) or ""
 
-    # ── Build a flat label→value map from every table row ────────────────────
     kv: Dict[str, str] = {}
     for tr in soup.find_all("tr"):
         cells = tr.find_all(["td", "th"])
@@ -264,11 +281,8 @@ def _qc_parse_detail_page(html: str, app_number: str) -> Dict[str, Any]:
             if key and val:
                 kv[key.lower()] = val
 
-    # Also grab definition-list style "label: value" from divs
-    # QC uses: <h4>Label</h4><p>Value</p> patterns inside a section div
     section = soup.find("div", string=re.compile(r"Trademark Information", re.I))
     if not section:
-        # fallback: find by nearby heading
         for h in soup.find_all(["h3", "h4"]):
             if "trademark information" in h.get_text().lower():
                 section = h.find_parent("div")
@@ -278,20 +292,17 @@ def _qc_parse_detail_page(html: str, app_number: str) -> Dict[str, Any]:
         labels = section.find_all(["h4", "strong", "dt"])
         for lbl in labels:
             key = _clean(lbl.get_text())
-            # next sibling that has text
             nxt = lbl.find_next_sibling()
             if nxt:
                 val = _clean(nxt.get_text())
                 if key and val:
                     kv[key.lower()] = val
 
-    # ── Also try meta description for fallback data ───────────────────────────
     meta_desc = ""
     meta = soup.find("meta", {"name": "description"})
     if meta:
         meta_desc = meta.get("content", "")
 
-    # ── Extract specific fields ───────────────────────────────────────────────
     def g(*keys) -> str:
         for k in keys:
             v = kv.get(k, "")
@@ -314,24 +325,20 @@ def _qc_parse_detail_page(html: str, app_number: str) -> Dict[str, Any]:
     used_since  = g("used since")
     mark_type   = g("type", "mark type")
 
-    # Proprietor sometimes is in an <h4> tag next to the h1
     if not proprietor:
         h4 = soup.find("h4")
         if h4:
             proprietor = _clean(h4.get_text()) or ""
 
-    # Class: strip non-numeric clutter like "Class 9" or "[9]"
     if class_no:
         m = re.search(r"\d+", class_no)
         class_no = m.group(0) if m else class_no
 
-    # Image
     img_url = ""
     img_tag = soup.find("img", src=re.compile(r"quickcompany\.blob|trademarks.*image", re.I))
     if img_tag:
         img_url = img_tag.get("src", "")
 
-    # Documents table
     documents: List[Dict] = []
     for tr in soup.find_all("tr"):
         cells = tr.find_all("td")
@@ -349,7 +356,6 @@ def _qc_parse_detail_page(html: str, app_number: str) -> Dict[str, Any]:
                     "pdf_link": doc_link,
                 })
 
-    # Hearing / correspondence section
     hearings = None
     for tr in soup.find_all("tr"):
         cells = tr.find_all("td")
@@ -359,9 +365,8 @@ def _qc_parse_detail_page(html: str, app_number: str) -> Dict[str, Any]:
             hearings = {"date": date_cell, "officer": ""}
             break
 
-    # ── PR Details / applicant_name ───────────────────────────────────────────
     pr_details = g("pr details", "applicant details")
-    applicant_name = proprietor  # default same
+    applicant_name = proprietor
 
     return {
         "application_number":  str(app_number).strip(),
@@ -389,10 +394,6 @@ def _qc_parse_detail_page(html: str, app_number: str) -> Dict[str, Any]:
 
 
 def _qc_search_app_number(app_number: str) -> Optional[str]:
-    """
-    Search QC to find the full slug URL for an application number.
-    Returns the full path like /trademarks/2859256-hotstar
-    """
     sess = _qc_sess()
     try:
         r = sess.get(
@@ -403,7 +404,6 @@ def _qc_search_app_number(app_number: str) -> Optional[str]:
         if r.status_code != 200:
             return None
         soup = BeautifulSoup(r.text, "lxml")
-        # Find first trademark link containing the app number
         for a in soup.find_all("a", href=True):
             href = a["href"]
             if f"/trademarks/{app_number}" in href or f"/trademarks/{app_number}-" in href:
@@ -415,14 +415,6 @@ def _qc_search_app_number(app_number: str) -> Optional[str]:
 
 
 def _qc_fetch_by_app_number(app_number: str) -> Dict[str, Any]:
-    """
-    Main entry point: fetch full trademark data from QuickCompany
-    by application number.
-    Strategy:
-      1. Try direct URL /trademarks/{app_number} (redirects to slug URL)
-      2. If 404, search QC for the slug URL
-      3. Parse the resulting detail page HTML
-    """
     app_number = (app_number or "").strip()
     if not app_number:
         raise HTTPException(400, "Application number is required.")
@@ -433,7 +425,6 @@ def _qc_fetch_by_app_number(app_number: str) -> Dict[str, Any]:
 
     sess = _qc_sess()
 
-    # Strategy 1: direct URL (QC redirects /trademarks/{id} → /trademarks/{id}-{slug})
     url = f"{QC_DETAIL}/{app_number}"
     detail_html = ""
     final_url = url
@@ -444,7 +435,6 @@ def _qc_fetch_by_app_number(app_number: str) -> Dict[str, Any]:
             detail_html = r.text
             final_url = r.url
         elif r.status_code == 404:
-            # Strategy 2: search for slug
             slug_path = _qc_search_app_number(app_number)
             if slug_path:
                 time.sleep(0.8)
@@ -468,10 +458,6 @@ def _qc_fetch_by_app_number(app_number: str) -> Dict[str, Any]:
 
 
 def _qc_attorney_app_numbers(agent_code: str) -> List[str]:
-    """
-    Scrape all application numbers listed on a QC attorney page.
-    URL pattern: /trademarks/attorney/{agent_code}?page=N
-    """
     agent_code = (agent_code or "").strip()
     if not agent_code:
         return []
@@ -480,7 +466,7 @@ def _qc_attorney_app_numbers(agent_code: str) -> List[str]:
     seen: set = set()
     nums: List[str] = []
 
-    for page in range(1, 51):  # max 50 pages
+    for page in range(1, 51):
         url = f"{QC_ATTY}/{quote(agent_code)}"
         try:
             r = sess.get(url, params={"page": page}, timeout=20)
@@ -494,7 +480,6 @@ def _qc_attorney_app_numbers(agent_code: str) -> List[str]:
         added = 0
         for a in soup.find_all("a", href=True):
             href = a["href"]
-            # Match /trademarks/1234567 or /trademarks/1234567-slug
             m = re.search(r"/trademarks/(\d{5,})(?:[-/]|$)", href)
             if m:
                 n = m.group(1)
@@ -504,8 +489,8 @@ def _qc_attorney_app_numbers(agent_code: str) -> List[str]:
                     added += 1
 
         if added == 0:
-            break  # no more results
-        time.sleep(1.0)  # polite crawling
+            break
+        time.sleep(1.0)
 
     logger.info(f"QC attorney '{agent_code}': found {len(nums)} application numbers.")
     return nums
@@ -516,10 +501,6 @@ def _qc_attorney_app_numbers(agent_code: str) -> List[str]:
 # ════════════════════════════════════════════════════════════════════════════
 
 def _ip_get_viewstate() -> Dict[str, str]:
-    """
-    Fetch the IP India TMR Public Search main page and extract
-    ASP.NET hidden form fields (__VIEWSTATE, __EVENTVALIDATION, etc.)
-    """
     sess = _ip_sess()
     try:
         r = sess.get(IP_MAIN, timeout=20)
@@ -539,28 +520,17 @@ def _ip_get_viewstate() -> Dict[str, str]:
 
 
 def _ip_search_by_application_number(app_number: str) -> Dict[str, Any]:
-    """
-    Search IP India TMR Public Search for a specific application number.
-    Uses the ASPX POST form with __VIEWSTATE session state.
-    Returns a normalised trademark dict.
-    """
     app_number = (app_number or "").strip()
     sess       = _ip_sess()
 
-    # Step 1: get viewstate
     vs = _ip_get_viewstate()
 
-    # Step 2: POST the search form
-    # IP India search form field names (from browser DevTools inspection):
-    #   ctl00$ContentPlaceHolder1$txtApplicationNo → application number field
-    #   ctl00$ContentPlaceHolder1$btnSearch        → submit button
     post_data = {
         "__VIEWSTATE":          vs.get("__VIEWSTATE", ""),
         "__VIEWSTATEGENERATOR": vs.get("__VIEWSTATEGENERATOR", ""),
         "__EVENTVALIDATION":    vs.get("__EVENTVALIDATION", ""),
         "__EVENTTARGET":        "",
         "__EVENTARGUMENT":      "",
-        # Search type: "A" = Application No, "W" = Word Mark
         "ctl00$ContentPlaceHolder1$RadioButton1":     "rdApplicationNumber",
         "ctl00$ContentPlaceHolder1$txtApplicationNo": app_number,
         "ctl00$ContentPlaceHolder1$btnSearch":        "Search",
@@ -585,13 +555,8 @@ def _ip_search_by_application_number(app_number: str) -> Dict[str, Any]:
 
 
 def _ip_parse_search_results(html: str, app_number: str) -> Dict[str, Any]:
-    """
-    Parse IP India search result page HTML into a normalised trademark dict.
-    IP India shows results in a table with fixed column order.
-    """
     soup = BeautifulSoup(html, "lxml")
 
-    # Find the results table — IP India uses a GridView with id containing 'GridView'
     table = (
         soup.find("table", id=re.compile(r"GridView", re.I))
         or soup.find("table", class_=re.compile(r"result|grid|search", re.I))
@@ -605,10 +570,8 @@ def _ip_parse_search_results(html: str, app_number: str) -> Dict[str, Any]:
     if len(rows) < 2:
         raise HTTPException(404, f"No trademark data rows on IP India for '{app_number}'.")
 
-    # First row = header
     headers = [_clean(th.get_text()) for th in rows[0].find_all(["th", "td"])]
 
-    # Find the data row matching our app number
     target_row = None
     for row in rows[1:]:
         cells = row.find_all("td")
@@ -618,13 +581,11 @@ def _ip_parse_search_results(html: str, app_number: str) -> Dict[str, Any]:
             break
 
     if not target_row:
-        # Just take the first data row if only one result
         if len(rows) >= 2:
             target_row = rows[1].find_all("td")
         else:
             raise HTTPException(404, f"Trademark {app_number} not found in IP India results.")
 
-    # Map header → cell value
     kv: Dict[str, str] = {}
     for i, h in enumerate(headers):
         if h and i < len(target_row):
@@ -637,9 +598,6 @@ def _ip_parse_search_results(html: str, app_number: str) -> Dict[str, Any]:
                 return v
         return ""
 
-    # Standard IP India column names:
-    #   Application No, Word Mark, Class, Status, Proprietor Name,
-    #   Applicant Address, Filing Date, Valid Upto, Attorney/Agent
     word_mark   = g("word mark", "trademark", "mark", "trade mark")
     app_no      = g("application no", "application number", "app no") or app_number
     status      = g("status", "tm status", "current status")
@@ -676,10 +634,6 @@ def _ip_parse_search_results(html: str, app_number: str) -> Dict[str, Any]:
 
 
 def _ip_search_by_wordmark(word_mark: str, class_no: str = "") -> List[Dict[str, Any]]:
-    """
-    Search IP India by word mark (and optional class).
-    Returns list of normalised trademark dicts.
-    """
     sess = _ip_sess()
     vs   = _ip_get_viewstate()
 
@@ -767,16 +721,11 @@ def _ip_search_by_wordmark(word_mark: str, class_no: str = "") -> List[Dict[str,
 # ════════════════════════════════════════════════════════════════════════════
 
 def _scrape_trademark_sync(app_number: str) -> Dict[str, Any]:
-    """
-    Try QuickCompany (richer data: image, documents, hearings).
-    Fall back to IP India on failure.
-    """
     app_number = (app_number or "").strip()
     cache_key  = f"unified::{app_number}"
     if cache_key in _tm_cache:
         return _tm_cache[cache_key]
 
-    # ── Try QuickCompany ──────────────────────────────────────────────────────
     try:
         data = _qc_fetch_by_app_number(app_number)
         _tm_cache[cache_key] = data
@@ -789,7 +738,6 @@ def _scrape_trademark_sync(app_number: str) -> Dict[str, Any]:
     except Exception as e:
         logger.warning(f"QC exception for {app_number}: {e}, trying IP India…")
 
-    # ── Fall back to IP India ─────────────────────────────────────────────────
     try:
         data = _ip_search_by_application_number(app_number)
         _tm_cache[cache_key] = data
@@ -810,7 +758,6 @@ async def scrape_trademark(
     session_id:   Optional[str] = None,
     otp:          Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Async wrapper for the unified scraper (runs in thread pool)."""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(_pool, _scrape_trademark_sync, app_number)
 
@@ -818,7 +765,6 @@ async def scrape_trademark(
 async def scrape_documents(
     app_number: str, class_number: Optional[str] = None
 ) -> Tuple[List[Dict], Optional[Dict]]:
-    """Documents are scraped inline by _qc_fetch_by_app_number. Return empty here."""
     return [], None
 
 
@@ -827,13 +773,11 @@ async def scrape_by_attorney_code(
     session_id: Optional[str] = None,
     otp:        Optional[str] = None,
 ) -> List[str]:
-    """Scrape attorney portfolio from QuickCompany."""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(_pool, _qc_attorney_app_numbers, agent_code)
 
 
 async def send_otp(email: str) -> str:
-    """No-op — QC and IP India public search need no OTP."""
     sid = str(uuid.uuid4())
     _sessions[sid] = {"email": email, "noop": True, "created_at": datetime.now(IST).isoformat()}
     return sid
@@ -913,13 +857,55 @@ class PortalSyncRequest(BaseModel):
 class SearchRequest(BaseModel):
     query: str
     limit: int = 25
-    search_type: str = "wordmark"  # "wordmark" | "application_no"
+    search_type: str = "wordmark"
     class_number: str = ""
 
 class IpIndiaSearchRequest(BaseModel):
     query:        str
-    search_type:  str = "wordmark"   # "wordmark" | "application_no"
+    search_type:  str = "wordmark"
     class_number: str = ""
+
+# ── QC Availability Report models ─────────────────────────────────────────────
+
+class ReportRequest(BaseModel):
+    name: str
+    class_filter: Optional[int] = None
+    class_filters: Optional[List[int]] = None   # multi-class: scrape all these classes
+    device_only: bool = False
+    logo_data_url: Optional[str] = None
+    footer: str = ""
+    tagline: str = ""
+    watermark: str = ""
+    custom_watermark: str = ""
+    client_name: str = ""
+    client_mobile: str = ""
+    report_date: str = ""
+    prepared_by: str = ""
+
+class BulkReportRequest(BaseModel):
+    names: List[str]
+    class_filter: Optional[int] = None
+    class_filters: Optional[List[int]] = None   # multi-class: scrape all these classes
+    device_only: bool = False
+    logo_data_url: Optional[str] = None
+    footer: str = ""
+    tagline: str = ""
+    watermark: str = ""
+    custom_watermark: str = ""
+    prepared_by: str = ""
+    disclaimer: str = ""
+    company_name: str = ""
+    client_name: str = ""
+    client_mobile: str = ""
+    report_date: str = ""
+    enable_monitoring: bool = False
+
+class BrandingPrefRequest(BaseModel):
+    default_company_id: Optional[str] = None
+    default_company_name: Optional[str] = None
+    footer: str = ""
+    tagline: str = ""
+    watermark: str = ""
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1069,12 +1055,398 @@ async def _portal_sync_bg(
 # ── FastAPI Routes ────────────────────────────────────────────────────────────
 # ════════════════════════════════════════════════════════════════════════════
 
+# ── QC Availability Report Routes ─────────────────────────────────────────────
+# These power the "Run Report" button on the TrademarkSphere page.
+# Endpoints: /report, /bulk, /searches, /check, /class-finder, /branding-preference
+
+@router.post("/report")
+async def qc_generate_report(body: ReportRequest, user: User = Depends(get_current_user)):
+    """Run a QuickCompany trademark availability report for a brand name."""
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name is required")
+    try:
+        # Use body.class_filters (multi-class array) if provided; otherwise derive from class_filter
+        class_filters = body.class_filters or ([body.class_filter] if body.class_filter is not None else None)
+        scraped = await _qc_availability_search(name, class_filters=class_filters)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"SCRAPER ERROR - {exc}")
+    # Pass the FULL class list through so a multi-class run (e.g. CL16+CL21+CL28)
+    # analyses and reports on all requested classes combined, not just the first.
+    report = build_report(name, scraped, class_filter=body.class_filter, class_filters=class_filters)
+    report["logo_data_url"]   = body.logo_data_url
+    report["footer"]          = body.footer
+    report["tagline"]         = body.tagline
+    report["watermark"]       = body.watermark
+    report["custom_watermark"]= body.custom_watermark
+    report["device_only"]     = body.device_only
+    report["client_name"]     = body.client_name
+    report["client_mobile"]   = body.client_mobile
+    report["report_date"]     = body.report_date
+    report["prepared_by"]     = body.prepared_by
+    report["class_filter"]    = body.class_filter
+    user_id = str(getattr(user, "id", None) or user.get("_id", ""))
+    doc = {
+        "_id":        str(uuid.uuid4()),
+        "user_id":    user_id,
+        "created_at": datetime.utcnow().isoformat(),
+        "report":     report,
+    }
+    await db.trademark_qc_reports.insert_one(doc)
+    return {**doc, "id": doc["_id"]}
+
+
+@router.post("/bulk")
+async def qc_bulk_reports(body: BulkReportRequest, user: User = Depends(get_current_user)):
+    """Run availability reports for multiple brand names (max 20)."""
+    names = [n.strip() for n in (body.names or []) if n.strip()]
+    if not names:
+        raise HTTPException(status_code=422, detail="names list is required")
+    user_id = str(getattr(user, "id", None) or user.get("_id", ""))
+    items = []
+    class_filters_bulk = body.class_filters or ([body.class_filter] if body.class_filter is not None else None)
+    for name in names[:20]:
+        try:
+            scraped = await _qc_availability_search(name, class_filters=class_filters_bulk)
+            report  = build_report(name, scraped, class_filter=body.class_filter, class_filters=class_filters_bulk)
+            report["logo_data_url"]    = body.logo_data_url
+            report["footer"]           = body.footer
+            report["tagline"]          = body.tagline
+            report["watermark"]        = body.watermark
+            report["custom_watermark"] = body.custom_watermark
+            report["device_only"]      = body.device_only
+            report["client_name"]      = body.client_name
+            report["client_mobile"]    = body.client_mobile
+            report["report_date"]      = body.report_date
+            report["prepared_by"]      = body.prepared_by
+            report["class_filter"]     = body.class_filter
+            doc = {
+                "_id":        str(uuid.uuid4()),
+                "user_id":    user_id,
+                "created_at": datetime.utcnow().isoformat(),
+                "report":     report,
+            }
+            await db.trademark_qc_reports.insert_one(doc)
+            items.append({
+                **doc,
+                "id":             doc["_id"],
+                "name":           name,            # FIX: always surface the searched name
+                "overall_status": report.get("overall_status"),
+                "risk_score":     report.get("risk_score"),
+                "headline":       report.get("headline"),
+            })
+        except Exception as exc:
+            items.append({"name": name, "error": str(exc)})
+
+    # Compute portfolio analytics so the frontend can show the summary grid
+    from backend.trademark_bulk import enrich_report_with_analytics, compute_portfolio_analytics
+    for it in items:
+        if not it.get("error") and it.get("report"):
+            enrich_report_with_analytics(it["report"], enable_monitoring=body.enable_monitoring)
+    analytics = compute_portfolio_analytics(items)
+
+    return {"items": items, "count": len(items), "analytics": analytics}
+
+
+@router.post("/bulk/export")
+async def qc_bulk_export(
+    body: BulkReportRequest,
+    format: str = "pdf",
+    user: User = Depends(get_current_user),
+):
+    """
+    Run availability searches for multiple marks and return a combined
+    downloadable report in the requested format (pdf / docx / xlsx).
+    This is the endpoint called by the frontend bulkExport() helper.
+    """
+    from backend.trademark_bulk import (
+        build_bulk_dossier_pdf,
+        build_bulk_docx,
+        build_bulk_xlsx,
+        enrich_report_with_analytics,
+        compute_portfolio_analytics,
+    )
+
+    names = [n.strip() for n in (body.names or []) if n.strip()]
+    if not names:
+        raise HTTPException(status_code=422, detail="names list is required")
+
+    branding = {
+        "logo_data_url":    body.logo_data_url,
+        "footer":           body.footer or "",
+        "tagline":          body.tagline or "Bulk Trademark Availability Report",
+        "watermark":        body.watermark or "",
+        "custom_watermark": body.custom_watermark or "",
+        "prepared_by":      body.prepared_by or "",
+        "disclaimer":       body.disclaimer or "",
+        "company_name":     body.company_name or "",
+        "client_name":      body.client_name or "",
+        "client_mobile":    body.client_mobile or "",
+        "report_date":      body.report_date or "",
+    }
+
+    items = []
+    class_filters_export = body.class_filters or ([body.class_filter] if body.class_filter is not None else None)
+    for name in names[:20]:
+        try:
+            scraped = await _qc_availability_search(name, class_filters=class_filters_export)
+            report  = build_report(name, scraped, class_filter=body.class_filter, class_filters=class_filters_export)
+            enrich_report_with_analytics(report, enable_monitoring=body.enable_monitoring)
+            items.append({
+                "name":           name,
+                "report":         report,
+                "error":          None,
+                "overall_status": report.get("overall_status"),
+                "risk_score":     report.get("risk_score"),
+                "headline":       report.get("headline"),
+            })
+        except Exception as exc:
+            logger.warning("bulk/export scrape failed for %s: %s", name, exc)
+            items.append({"name": name, "error": str(exc)})
+
+    analytics = compute_portfolio_analytics(items)
+    fmt   = (format or "pdf").lower()
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    slug  = "-".join(n.replace(" ", "_")[:12] for n in names[:3])
+
+    try:
+        if fmt == "docx":
+            content  = build_bulk_docx(items, branding, analytics)
+            media    = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            filename = f"{slug}_trademark_report_{today}.docx"
+        elif fmt == "xlsx":
+            content  = build_bulk_xlsx(items, branding, analytics)
+            media    = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            filename = f"{slug}_trademark_report_{today}.xlsx"
+        else:
+            content  = build_bulk_dossier_pdf(items, branding, analytics)
+            media    = "application/pdf"
+            filename = f"{slug}_trademark_report_{today}.pdf"
+    except ImportError as exc:
+        logger.error("bulk/export missing library: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Server is missing a required library for {fmt.upper()} export: {exc}. "
+                   "Please contact support or try a different format."
+        )
+    except Exception as exc:
+        logger.exception("bulk/export file generation failed (fmt=%s)", fmt)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate {fmt.upper()} report: {exc}"
+        )
+
+    return Response(
+        content=content,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/searches")
+async def qc_list_searches(limit: int = 25, user: User = Depends(get_current_user)):
+    """List the user's past trademark availability searches."""
+    user_id = str(getattr(user, "id", None) or user.get("_id", ""))
+    cursor = db.trademark_qc_reports.find(
+        {"user_id": user_id},
+        sort=[("created_at", -1)],
+        limit=limit,
+    )
+    items = []
+    async for doc in cursor:
+        doc["id"] = str(doc.get("_id", doc.get("id", "")))
+        doc.pop("_id", None)
+        items.append(doc)
+    return {"items": items, "count": len(items)}
+
+
+@router.get("/searches/{report_id}/pdf")
+async def qc_download_pdf_get(
+    report_id: str,
+    footer:    str = Query(""),
+    tagline:   str = Query(""),
+    watermark: str = Query(""),
+    user: User = Depends(get_current_user),
+):
+    """Download a PDF for a stored availability report (GET — no logo)."""
+    user_id = str(getattr(user, "id", None) or user.get("_id", ""))
+    doc = await db.trademark_qc_reports.find_one({"_id": report_id, "user_id": user_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Report not found")
+    if footer or tagline or watermark:
+        rep = dict(doc.get("report", {}))
+        if footer:    rep["footer"]    = footer
+        if tagline:   rep["tagline"]   = tagline
+        if watermark: rep["watermark"] = watermark
+        doc = {**doc, "report": rep}
+    pdf_bytes = build_report_pdf(doc)
+    rep_data  = doc.get("report") or {}
+    name      = rep_data.get("query", "report")
+    filename  = _pdf_filename(name, rep_data.get("class_filters"))
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": _content_disposition(filename)},
+    )
+
+
+@router.post("/searches/{report_id}/pdf")
+async def qc_download_pdf_post(
+    report_id: str,
+    body: dict = Body(default={}),
+    user: User = Depends(get_current_user),
+):
+    """Download a PDF with branding (POST — supports logo in request body)."""
+    user_id = str(getattr(user, "id", None) or user.get("_id", ""))
+    doc = await db.trademark_qc_reports.find_one({"_id": report_id, "user_id": user_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Report not found")
+    rep = dict(doc.get("report", {}))
+    for field in (
+        "logo_data_url", "footer", "tagline", "watermark", "custom_watermark",
+        "client_name", "client_mobile", "report_date", "prepared_by",
+    ):
+        if body.get(field) is not None:
+            rep[field] = body[field]
+    doc = {**doc, "report": rep}
+    pdf_bytes = build_report_pdf(doc)
+    name     = rep.get("query", "report")
+    filename = _pdf_filename(name, rep.get("class_filters"))
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": _content_disposition(filename)},
+    )
+
+
+@router.get("/searches/{report_id}")
+async def qc_get_search(report_id: str, user: User = Depends(get_current_user)):
+    """Fetch a single stored availability report."""
+    user_id = str(getattr(user, "id", None) or user.get("_id", ""))
+    doc = await db.trademark_qc_reports.find_one({"_id": report_id, "user_id": user_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Report not found")
+    doc["id"] = str(doc.get("_id", ""))
+    doc.pop("_id", None)
+    return doc
+
+
+@router.delete("/searches/{report_id}")
+async def qc_delete_search(report_id: str, user: User = Depends(get_current_user)):
+    """Delete a stored report."""
+    user_id = str(getattr(user, "id", None) or user.get("_id", ""))
+    result = await db.trademark_qc_reports.delete_one({"_id": report_id, "user_id": user_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return {"ok": True}
+
+
+@router.get("/trademark-users")
+async def get_trademark_users(
+    user: User = Depends(get_current_user),
+):
+    """Return users who have access to Trademark Sphere (for 'Prepared By' dropdown)."""
+    all_users = await db.users.find(
+        {"is_active": True},
+        {"_id": 0, "id": 1, "full_name": 1, "role": 1, "departments": 1, "permissions": 1}
+    ).to_list(1000)
+
+    trademark_users = []
+    for u in all_users:
+        role = u.get("role", "")
+        perms = u.get("permissions", {}) or {}
+
+        # Include admins (always have trademark access) OR users with explicit permission
+        if role == "admin":
+            trademark_users.append({"id": u["id"], "full_name": u.get("full_name", "Unknown")})
+        elif perms.get("can_view_trademark_sphere", False):
+            trademark_users.append({"id": u["id"], "full_name": u.get("full_name", "Unknown")})
+        else:
+            # Also include users in trademark-named departments as fallback
+            depts = [d.lower() for d in u.get("departments", [])]
+            if any(d in ("trademark", "trademarks", "trademark sphere", "ip") for d in depts):
+                trademark_users.append({"id": u["id"], "full_name": u.get("full_name", "Unknown")})
+
+    return trademark_users
+
+
+@router.get("/check")
+async def qc_quick_check(
+    name: str = Query(...),
+    cls:  Optional[int] = Query(None, alias="class"),
+    user: User = Depends(get_current_user),
+):
+    """Quick availability check — returns verdict without saving."""
+    name = (name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name is required")
+    try:
+        class_filters_check = [cls] if cls is not None else None
+        scraped = await _qc_availability_search(name, class_filters=class_filters_check)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"SCRAPER ERROR - {exc}")
+    report = build_report(name, scraped, class_filter=cls)
+    return {
+        "query":          report["query"],
+        "overall_status": report["overall_status"],
+        "risk_score":     report["risk_score"],
+        "headline":       report["headline"],
+        "summary_counts": report["summary_counts"],
+    }
+
+
+@router.post("/class-finder")
+async def qc_class_finder(
+    body: dict = Body(default={}),
+    user: User = Depends(get_current_user),
+):
+    """Suggest Nice classification classes from a goods/services description."""
+    description = (body.get("description") or "").strip()
+    top = int(body.get("top", 5))
+    if not description:
+        raise HTTPException(status_code=422, detail="description is required")
+    results = find_classes(description, top=top)
+    return {"classes": results, "query": description}
+
+
+@router.get("/branding-preference")
+async def qc_get_branding(user: User = Depends(get_current_user)):
+    """Fetch user's saved default branding preference."""
+    user_id = str(getattr(user, "id", None) or user.get("_id", ""))
+    pref = await db.trademark_qc_branding.find_one({"user_id": user_id}) or {}
+    return {
+        "default_company_id":   pref.get("default_company_id"),
+        "default_company_name": pref.get("default_company_name"),
+        "footer":    pref.get("footer", ""),
+        "tagline":   pref.get("tagline", ""),
+        "watermark": pref.get("watermark", ""),
+    }
+
+
+@router.post("/branding-preference")
+async def qc_save_branding(body: BrandingPrefRequest, user: User = Depends(get_current_user)):
+    """Save user's default branding preference."""
+    user_id = str(getattr(user, "id", None) or user.get("_id", ""))
+    await db.trademark_qc_branding.update_one(
+        {"user_id": user_id},
+        {"$set": {
+            "user_id":              user_id,
+            "default_company_id":   body.default_company_id,
+            "default_company_name": body.default_company_name,
+            "footer":    body.footer,
+            "tagline":   body.tagline,
+            "watermark": body.watermark,
+            "updated_at": datetime.utcnow().isoformat(),
+        }},
+        upsert=True,
+    )
+    return {"ok": True}
+
+
+# ── Trademark Tracking Routes ──────────────────────────────────────────────────
+
 @router.get("/stats")
 async def get_stats(user: User = Depends(get_current_user)):
-    """
-    Returns all 6 metric fields the frontend dashboard needs.
-    Fixes the original stub that only returned { total }.
-    """
     today     = date.today().isoformat()
     soon_90   = (date.today() + timedelta(days=90)).isoformat()
     soon_30   = (date.today() + timedelta(days=30)).isoformat()
@@ -1115,10 +1487,6 @@ async def list_trademarks(
     renewal_alert: Optional[str] = Query(None),
     user: User = Depends(get_current_user),
 ):
-    """
-    List trademarks with full filter support.
-    Fixes: returns 'total' (not 'count') + all frontend filter params.
-    """
     flt: Dict[str, Any] = {}
 
     if search:
@@ -1132,7 +1500,6 @@ async def list_trademarks(
     if class_number:
         flt["class_number"] = class_number
     if renewal_alert:
-        # renewal_alert maps to renewal_status field stored on documents
         flt["renewal_status"] = renewal_alert
 
     total = await db.trademark_sphere.count_documents(flt)
@@ -1149,10 +1516,6 @@ async def get_deadlines(
     days: int = Query(180, ge=1, le=730),
     user: User = Depends(get_current_user),
 ):
-    """
-    Returns { upcoming: [...], overdue: [...] } as the frontend expects.
-    Fixes the original that returned a flat list.
-    """
     today      = date.today()
     today_str  = today.isoformat()
     cutoff_str = (today + timedelta(days=days)).isoformat()
@@ -1385,7 +1748,6 @@ async def update_tm(
 ):
     upd = {k: v for k, v in body.dict().items() if v is not None}
     upd["updated_at"] = datetime.now(IST).isoformat()
-    # Recompute deadlines if valid_upto changed
     if "valid_upto" in upd:
         upd.update(_compute_deadlines(upd))
 
@@ -1406,7 +1768,6 @@ async def refresh_tm(
     if not d:
         raise HTTPException(404, "Not found")
 
-    # Clear cache so we get fresh data
     for prefix in ("qc::", "unified::"):
         _tm_cache.pop(f"{prefix}{d['application_number']}", None)
 
@@ -1443,43 +1804,37 @@ async def delete_tm(tm_id: str, user: User = Depends(get_current_user)):
 
 @router.post("/sync/{application_number}")
 async def sync_trademark(application_number: str):
+    data = await scrape_trademark(application_number)
+    return data
 
-    return await scraper.search_application(
-        application_number
-    )
 
 @router.get("/health")
 async def trademark_health():
-
     return {
         "status": "running",
         "module": "Trademark Sphere"
     }
 
 
-
 @router.post("/watchlist")
 async def create_watchlist(payload: dict):
-
-    # watchlist_service not available — stub response
     return {"status": "ok", "message": "Watchlist feature coming soon"}
+
 
 @router.get("/watchlist")
 async def get_watchlists():
-
-    # watchlist_service not available — stub response
     return []
 
-@router.get("/search")
-async def search_trademark(query: str):
 
-    # search_service not available — use direct QuickCompany search
+@router.get("/search")
+async def search_trademark_get(query: str):
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(_pool, _qc_fetch_by_app_number, query)
     return result
 
 
 # ── Combined / Bulk PDF ────────────────────────────────────────────────────────
+
 class CombinedPdfItem(BaseModel):
     name: str
     overall_status: str = "UNKNOWN"
