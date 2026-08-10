@@ -109,7 +109,7 @@ function brandedPdfUrl(reportId, branding) {
 }
 
 // POST-based PDF download — required when a logo needs to be sent (too large for query params)
-async function downloadBrandedPdfWithLogo(reportId, branding, clientInfo = {}, brandName = "") {
+async function downloadBrandedPdfWithLogo(reportId, branding, clientInfo = {}, brandName = "", classFilters = null) {
   const wm = branding?.watermark === "CUSTOM" ? branding.customWatermark : branding?.watermark;
   const body = {
     logo_data_url:    branding?.logo || null,
@@ -128,14 +128,33 @@ async function downloadBrandedPdfWithLogo(reportId, branding, clientInfo = {}, b
     body,
     { responseType: "blob", timeout: 60000 }
   );
+  // Prefer the filename the server computed (brand name + classes, RFC5987-safe);
+  // this keeps single/bulk/history/shared-link downloads all named consistently.
+  const cd = res.headers?.["content-disposition"] || "";
+  const starMatch  = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(cd);
+  const plainMatch = /filename\s*=\s*"?([^";]+)"?/i.exec(cd);
+  let filename = starMatch ? decodeURIComponent(starMatch[1].trim()) : (plainMatch ? plainMatch[1].trim() : null);
+
+  if (!filename) {
+    // Client-side fallback — always brand-name based, never the report ID,
+    // so a report loaded from history or a shared link (where the local
+    // `searchQuery` input state was never populated) still downloads under
+    // a meaningful name instead of "trademark_report_<uuid-prefix>.pdf".
+    const base = (brandName || "trademark").replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").toLowerCase() || "trademark";
+    const clsSuffix = Array.isArray(classFilters) && classFilters.length
+      ? "_" + [...new Set(classFilters)].sort((a, b) => a - b).map(c => `CL${c}`).join("_")
+      : "";
+    filename = `Trademark_${base}${clsSuffix}.pdf`;
+  }
+
   const blob = res.data;
   const url  = URL.createObjectURL(new Blob([blob], { type: "application/pdf" }));
   const a    = document.createElement("a");
   a.href = url;
-  a.download = brandName
-    ? `${brandName.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase()}_trademark_report.pdf`
-    : `trademark_report_${reportId.slice(0, 8)}.pdf`;
+  a.download = filename;
+  document.body.appendChild(a);
   a.click();
+  a.remove();
   URL.revokeObjectURL(url);
 }
 
@@ -934,7 +953,7 @@ function StatGrid({ report, T }) {
 }
 
 // ─── Report actions — with Re-brand PDF ──────────────────────────────────────
-function ReportActions({ reportId, branding, clientInfo = {}, brandName = "", T }) {
+function ReportActions({ reportId, branding, clientInfo = {}, brandName = "", classFilters = null, T }) {
   const [copied, setCopied] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   if (!reportId) return null;
@@ -946,7 +965,7 @@ function ReportActions({ reportId, branding, clientInfo = {}, brandName = "", T 
   const handlePdfDownload = async () => {
     setPdfLoading(true);
     try {
-      await downloadBrandedPdfWithLogo(reportId, branding, clientInfo, brandName);
+      await downloadBrandedPdfWithLogo(reportId, branding, clientInfo, brandName, classFilters);
     } catch (e) {
       toast.error("PDF generation failed. Please try again.");
     } finally {
@@ -1932,7 +1951,13 @@ export default function TrademarkSphere() {
     const sid = p.get("report");
     if (sid) {
       (async () => {
-        try { setLoading(true); const d = await getReport(sid); setReport(d.report); setActiveId(d.id); }
+        try {
+          setLoading(true);
+          const d = await getReport(sid);
+          setReport(d.report); setActiveId(d.id);
+          setSearchQuery(d.report?.query || "");
+          setLastClassFilter(d.report?.class_filter ?? null);
+        }
         catch { toast.error("Could not load shared report"); }
         finally { setLoading(false); }
       })();
@@ -2000,6 +2025,7 @@ export default function TrademarkSphere() {
     try {
       const d = await getReport(item.id);
       setReport(d.report); setActiveId(d.id);
+      setSearchQuery(d.report?.query || item.name || "");
       window.scrollTo({ top: 320, behavior: "smooth" });
     } catch { toast.error("Could not load report"); }
     finally { setLoading(false); }
@@ -2163,7 +2189,10 @@ export default function TrademarkSphere() {
                       </Card>
                     )}
 
-                    <ReportActions T={T} reportId={activeId} branding={branding} brandName={searchQuery} clientInfo={{
+                    <ReportActions T={T} reportId={activeId} branding={branding}
+                      brandName={report?.query || searchQuery}
+                      classFilters={report?.class_filters ?? (lastClassFilter != null ? [lastClassFilter] : null)}
+                      clientInfo={{
                         client_name:   selectedClient?.company_name || "",
                         client_mobile: selectedClient?.phone || "",
                         report_date:   reportDate || "",
