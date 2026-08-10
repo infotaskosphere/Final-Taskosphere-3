@@ -2,11 +2,47 @@ import axios from "axios";
 import { useState, useEffect, useRef } from "react";
 
 // ✅ Normalise: always ensure the base ends with /api
+//
+// Resolution order (highest priority first):
+//   1. window.__TASKOSPHERE_API_URL__ — a runtime override you can set in
+//      index.html or via your hosting provider's environment-variable
+//      injection, WITHOUT needing a rebuild. This is the recommended way
+//      to point a custom domain (e.g. taskosphere.com) at its backend.
+//   2. VITE_API_URL — a build-time env var (baked into the bundle).
+//   3. "" (same-origin) for known dev/preview hosts.
+//   4. A hardcoded last-resort guess. If we ever get here on a real
+//      deployment, something isn't configured — we log a loud warning so
+//      it's easy to diagnose instead of silently 404-ing on every request.
+const _isDevOrPreviewHost =
+  typeof window !== "undefined" &&
+  (window.location.hostname === "localhost" ||
+    window.location.hostname.includes(".run.app") ||
+    window.location.hostname.includes("emergentagent.com"));
+
+const _runtimeOverride =
+  typeof window !== "undefined" ? window.__TASKOSPHERE_API_URL__ : undefined;
+
 let _raw =
+  _runtimeOverride ||
   import.meta.env.VITE_API_URL ||
-  ((typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname.includes(".run.app") || window.location.hostname.includes("emergentagent.com")))
-    ? ""
-    : "https://final-taskosphere-backend.onrender.com");
+  (_isDevOrPreviewHost ? "" : "https://final-taskosphere-backend.onrender.com");
+
+if (
+  typeof window !== "undefined" &&
+  !_runtimeOverride &&
+  !import.meta.env.VITE_API_URL &&
+  !_isDevOrPreviewHost
+) {
+  // eslint-disable-next-line no-console
+  console.warn(
+    "[api] No VITE_API_URL or window.__TASKOSPHERE_API_URL__ configured for host " +
+      `"${window.location.hostname}". Falling back to a hardcoded guess (` +
+      `${_raw}). If API calls are failing (404s across the board), this ` +
+      "guessed backend URL is likely wrong or the service is down — set " +
+      "window.__TASKOSPHERE_API_URL__ in index.html or VITE_API_URL at " +
+      "build time to the real backend URL."
+  );
+}
 
 // Strip trailing slash(es), then append /api if missing
 _raw = _raw.replace(/\/+$/, "");
