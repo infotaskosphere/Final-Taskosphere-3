@@ -1,9 +1,3 @@
-# REMOVED broken import (backend.services not found): from backend.services.watchlist_service import watchlist_service
-# REMOVED broken import (backend.services not found): from backend.services.search_service import search_service
-
-
-# REMOVED broken import (backend.services not found): from backend.services.ipindia_scraper import scraper
-"""
 backend/trademark_sphere.py
 ---------------------------
 Dual-source trademark scraper:
@@ -48,6 +42,35 @@ from backend.qc_pdf_renderer import build_report_pdf
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="", tags=["trademark-sphere"])
+
+
+def _pdf_filename(brand_name: str, class_filters: Optional[List[int]] = None) -> str:
+    """
+    Build a safe, brand-name-based PDF filename, e.g. 'Trademark_Krimira_CL16_CL21_CL28.pdf'.
+
+    - Always named after the searched brand (never the internal report/UUID),
+      so the file the user gets after "Download PDF" / Ctrl+S matches what
+      they searched for.
+    - Appends the searched class(es) when known, so multi-class runs and
+      per-class reports for the same brand don't overwrite each other.
+    - Strips characters that are unsafe in filenames / HTTP headers.
+    """
+    base = (brand_name or "trademark").strip()
+    base = re.sub(r"[^\w\-]+", "_", base, flags=re.UNICODE).strip("_") or "trademark"
+    suffix = ""
+    if class_filters:
+        classes = sorted({int(c) for c in class_filters})
+        suffix = "_" + "_".join(f"CL{c}" for c in classes)
+    return f"Trademark_{base}{suffix}.pdf"
+
+
+def _content_disposition(filename: str) -> str:
+    """
+    RFC 5987-safe Content-Disposition header value: ASCII fallback for
+    old clients + UTF-8 filename* for everything else (non-Latin brand names).
+    """
+    ascii_fallback = filename.encode("ascii", "ignore").decode("ascii") or "trademark.pdf"
+    return f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{quote(filename)}'
 IST   = ZoneInfo("Asia/Kolkata")
 _pool = ThreadPoolExecutor(max_workers=6)
 
@@ -1047,7 +1070,9 @@ async def qc_generate_report(body: ReportRequest, user: User = Depends(get_curre
         scraped = await _qc_availability_search(name, class_filters=class_filters)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"SCRAPER ERROR - {exc}")
-    report = build_report(name, scraped, class_filter=body.class_filter)
+    # Pass the FULL class list through so a multi-class run (e.g. CL16+CL21+CL28)
+    # analyses and reports on all requested classes combined, not just the first.
+    report = build_report(name, scraped, class_filter=body.class_filter, class_filters=class_filters)
     report["logo_data_url"]   = body.logo_data_url
     report["footer"]          = body.footer
     report["tagline"]         = body.tagline
@@ -1082,7 +1107,7 @@ async def qc_bulk_reports(body: BulkReportRequest, user: User = Depends(get_curr
     for name in names[:20]:
         try:
             scraped = await _qc_availability_search(name, class_filters=class_filters_bulk)
-            report  = build_report(name, scraped, class_filter=body.class_filter)
+            report  = build_report(name, scraped, class_filter=body.class_filter, class_filters=class_filters_bulk)
             report["logo_data_url"]    = body.logo_data_url
             report["footer"]           = body.footer
             report["tagline"]          = body.tagline
@@ -1164,7 +1189,7 @@ async def qc_bulk_export(
     for name in names[:20]:
         try:
             scraped = await _qc_availability_search(name, class_filters=class_filters_export)
-            report  = build_report(name, scraped, class_filter=body.class_filter)
+            report  = build_report(name, scraped, class_filter=body.class_filter, class_filters=class_filters_export)
             enrich_report_with_analytics(report, enable_monitoring=body.enable_monitoring)
             items.append({
                 "name":           name,
@@ -1254,11 +1279,13 @@ async def qc_download_pdf_get(
         if watermark: rep["watermark"] = watermark
         doc = {**doc, "report": rep}
     pdf_bytes = build_report_pdf(doc)
-    name = (doc.get("report") or {}).get("query", "report")
+    rep_data  = doc.get("report") or {}
+    name      = rep_data.get("query", "report")
+    filename  = _pdf_filename(name, rep_data.get("class_filters"))
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="trademark_{name}.pdf"'},
+        headers={"Content-Disposition": _content_disposition(filename)},
     )
 
 
@@ -1282,11 +1309,12 @@ async def qc_download_pdf_post(
             rep[field] = body[field]
     doc = {**doc, "report": rep}
     pdf_bytes = build_report_pdf(doc)
-    name = rep.get("query", "report")
+    name     = rep.get("query", "report")
+    filename = _pdf_filename(name, rep.get("class_filters"))
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="trademark_{name}.pdf"'},
+        headers={"Content-Disposition": _content_disposition(filename)},
     )
 
 
