@@ -159,21 +159,46 @@ def _risk_from_match(match_type: str, status: str) -> int:
     return max(0, min(100, base))
 
 
-def build_report(query: str, scraped: Dict, class_filter: Optional[int] = None) -> Dict:
+def build_report(
+    query: str,
+    scraped: Dict,
+    class_filter: Optional[int] = None,
+    class_filters: Optional[List[int]] = None,
+) -> Dict:
     """
     Build a trademark availability report from scraped QC data.
 
     Args:
-        query:        The brand name searched
-        scraped:      Output of scraper.search_trademarks()
-        class_filter: Optional Nice class to focus the analysis on.
-                      When provided, the verdict/risk is computed from that class only,
-                      but all_results and class_breakdown always include ALL classes.
+        query:         The brand name searched
+        scraped:       Output of scraper.search_trademarks()
+        class_filter:  Optional single Nice class (legacy/back-compat param).
+        class_filters: Optional list of Nice classes to focus the analysis on
+                       (multi-class search, e.g. [16, 21, 28]). When provided,
+                       this takes precedence over class_filter and the verdict/
+                       risk/tables are computed across ALL of these classes
+                       combined — not just the first one.
+                       If neither is provided, the report covers every class
+                       found in the scrape.
 
     Returns:
-        Full report dict. class_breakdown covers all classes found in the scrape.
+        Full report dict. class_breakdown_all always covers every class found
+        in the scrape; class_breakdown/all_results are restricted to the
+        requested class(es) when class_filter/class_filters is set.
     """
     raw_results: List[Dict] = scraped.get("results", []) or []
+
+    # ── Normalise the requested class set ───────────────────────────────────
+    # class_filters (list) wins over the legacy single class_filter. Both are
+    # folded into one "effective_classes" set used everywhere below, so a
+    # 3-class search filters/analyses across all 3 classes together instead
+    # of silently collapsing to just the first one.
+    if class_filters:
+        effective_classes: Optional[List[int]] = sorted({int(c) for c in class_filters})
+    elif class_filter is not None:
+        effective_classes = [int(class_filter)]
+    else:
+        effective_classes = None
+    effective_classes_set = set(effective_classes) if effective_classes else None
 
     # ── Enrich ALL results (needed for class_breakdown) ────────────────────────
     all_enriched: List[Dict] = []
@@ -212,20 +237,25 @@ def build_report(query: str, scraped: Dict, class_filter: Optional[int] = None) 
         cb["hint"] = cb.get("sector", CLASS_HINTS.get(cb["class"], "—"))
         cb["blocking_pct"] = round(cb["blocking"] / cb["total"] * 100) if cb["total"] else 0
 
-    # ── Focus analysis on class_filter if provided ────────────────────────────
-    # IMPORTANT: when a class is selected, the report must ONLY reflect that
-    # class. This used to silently fall back to ALL classes whenever the
-    # selected class had zero matches, which made class filtering look broken
-    # (a Class 5 search would show Class 25/35/44/... results in the table
-    # and PDF). Zero conflicting marks in a class is a valid, common, and
-    # GOOD outcome — it must never be masked by unrelated classes.
-    if class_filter is not None:
-        focused_results = [r for r in all_enriched if r.get("class") == class_filter]
+    # ── Focus analysis on the requested class(es) if provided ─────────────────
+    # IMPORTANT: when class(es) are selected, the report must ONLY reflect
+    # those classes. This used to silently fall back to ALL classes whenever
+    # the selected class had zero matches, which made class filtering look
+    # broken (a Class 5 search would show Class 25/35/44/... results in the
+    # table and PDF). Zero conflicting marks in a class is a valid, common,
+    # and GOOD outcome — it must never be masked by unrelated classes.
+    #
+    # For MULTI-class searches (e.g. CL16 + CL21 + CL28), all requested
+    # classes are combined into ONE focused set — this used to only keep the
+    # first class (class_filter), which is why a 3-class "Run 3 Classes"
+    # search rendered a report containing just Class 16.
+    if effective_classes_set is not None:
+        focused_results = [r for r in all_enriched if r.get("class") in effective_classes_set]
         if not focused_results:
             logger.info(
-                "build_report: class_filter=%d produced 0 results from %d total "
-                "results across all classes — class appears clear.",
-                class_filter, len(all_enriched)
+                "build_report: classes=%s produced 0 results from %d total "
+                "results across all classes — class(es) appear clear.",
+                sorted(effective_classes_set), len(all_enriched)
             )
     else:
         focused_results = all_enriched
@@ -261,11 +291,11 @@ def build_report(query: str, scraped: Dict, class_filter: Optional[int] = None) 
         )
     else:
         overall  = "AVAILABLE"
-        headline = (
-            f"No conflicting trademarks were found in Class {class_filter} on the QuickCompany index."
-            if class_filter is not None
-            else "No conflicting trademarks were found in the QuickCompany index."
-        )
+        if effective_classes:
+            classes_str = ", ".join(f"Class {c}" for c in effective_classes)
+            headline = f"No conflicting trademarks were found in {classes_str} on the QuickCompany index."
+        else:
+            headline = "No conflicting trademarks were found in the QuickCompany index."
 
     # ── Risk score ────────────────────────────────────────────────────────────
     if focused_results:
@@ -281,8 +311,8 @@ def build_report(query: str, scraped: Dict, class_filter: Optional[int] = None) 
         recommendations.append("Consider modifying the name or selecting a different trademark class.")
     elif overall == "CAUTION":
         recommendations.append("Conduct a deeper phonetic + device-mark search before filing.")
-        if class_filter is not None:
-            clear_classes = [cb for cb in class_breakdown if cb["blocking"] == 0 and cb["class"] != class_filter]
+        if effective_classes_set is not None:
+            clear_classes = [cb for cb in class_breakdown if cb["blocking"] == 0 and cb["class"] not in effective_classes_set]
             if clear_classes:
                 suggestions = ", ".join(f"Class {cb['class']} ({cb['hint']})" for cb in clear_classes[:3])
                 recommendations.append(f"Consider filing in: {suggestions} — these classes have no blocking marks.")
@@ -298,6 +328,9 @@ def build_report(query: str, scraped: Dict, class_filter: Optional[int] = None) 
     return {
         "query":            query,
         "class_filter":     class_filter,
+        # Full list of requested classes (multi-class aware). For a single-class
+        # search this is just [class_filter]; for "All classes" it's None.
+        "class_filters":    effective_classes,
         "overall_status":   overall,
         "risk_score":       risk_score,
         "headline":         headline,
@@ -312,16 +345,17 @@ def build_report(query: str, scraped: Dict, class_filter: Optional[int] = None) 
         "exact_matches":    exact,
         "phonetic_matches": phonetic,
         "contains_matches": contains,
-        # ── When a class filter is active, reports show ONLY that class ────────
+        # ── When class(es) are selected, reports show ONLY those classes ───────
         # This ensures Exhibit A, class-wise breakdown, and match tables in both
-        # the PDF and frontend only show filings relevant to the selected class.
-        "all_results":     focused_results,   # filtered to class if class_filter set
+        # the PDF and frontend only show filings relevant to the selected
+        # class(es) — combined across ALL requested classes for multi-class runs.
+        "all_results":     focused_results,   # filtered to class(es) if set
         "focused_results": focused_results,
-        # Class breakdown: only the filtered class row when class_filter is set,
+        # Class breakdown: only the requested class rows when class(es) are set,
         # so the PDF table and frontend don't show irrelevant classes.
         "class_breakdown": (
-            [cb for cb in class_breakdown if cb["class"] == class_filter]
-            if class_filter is not None
+            [cb for cb in class_breakdown if cb["class"] in effective_classes_set]
+            if effective_classes_set is not None
             else class_breakdown
         ),
         # Always keep the full cross-class breakdown under a separate key so
@@ -484,7 +518,3 @@ class EnterpriseExportOrchestrator:
             from backend.exports.json_export import JSONExport
             data = JSONExport.export_to_json(journals)
             return {"status": "SUCCESS", "format": "JSON", "content": data}
-
-
-
-
