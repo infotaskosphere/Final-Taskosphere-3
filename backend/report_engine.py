@@ -226,6 +226,18 @@ def build_report(
         elif r.get("status") in DEAD_STATUSES:
             b["dead"] += 1
 
+    # Every class the user actually searched must show up in the breakdown —
+    # even (especially) when zero matches were found for it. Without this, a
+    # clear class (e.g. Class 16 with no filings at all) simply vanishes from
+    # the table instead of being reported as "no conflicting mark", which
+    # reads as if that class was never searched.
+    if effective_classes:
+        for c in effective_classes:
+            class_counts.setdefault(c, {
+                "class": c, "total": 0, "blocking": 0, "dead": 0,
+                "sector": CLASS_HINTS.get(c, "—"),
+            })
+
     # Sort by blocking count desc, then total desc
     class_breakdown = sorted(
         class_counts.values(),
