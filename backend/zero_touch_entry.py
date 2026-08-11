@@ -232,8 +232,11 @@ async def resolve_company(current_user: User, extracted: dict) -> Tuple[Optional
     figure out which of the firm's companies this document belongs to.
     Priority: GSTIN match > billing-email match > fuzzy name match.
     Returns (company_id or None, human-readable reason, all_candidate_companies)."""
+    # Companies are org-wide master data (Admin -> Master Data), so never scope
+    # them by created_by -- otherwise documents uploaded by a non-admin could
+    # not be matched to companies the admin created.
     companies = await db.companies.find(
-        {} if current_user.role == "admin" else {"created_by": current_user.id},
+        {},
         {"_id": 0, "id": 1, "name": 1, "gstin": 1, "email": 1},
     ).to_list(500)
 
@@ -790,9 +793,9 @@ async def list_processed_documents(
 
 @router.get("/companies")
 async def list_companies_for_zte(current_user: User = Depends(get_current_user)):
-    """Company picker for the manual-override dropdown in the upload UI."""
-    query = {} if current_user.role == "admin" else {"created_by": current_user.id}
-    return await db.companies.find(query, {"_id": 0, "id": 1, "name": 1, "gstin": 1}).to_list(500)
+    """Company picker for the manual-override dropdown in the upload UI.
+    Org-wide master data: visible to any authenticated user."""
+    return await db.companies.find({}, {"_id": 0, "id": 1, "name": 1, "gstin": 1}).sort("name", 1).to_list(500)
 
 
 class AssignCompanyBody(BaseModel):
