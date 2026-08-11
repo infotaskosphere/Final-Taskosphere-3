@@ -1612,7 +1612,7 @@ async def list_companies(current_user: User = Depends(get_current_user)):
     Returns only the fields needed to render a picker.
     """
     query = {} if current_user.role == "admin" else {"created_by": current_user.id}
-    projection = {"_id": 0, "id": 1, "name": 1, "gstin": 1, "has_gst": 1, "tm_logo_base64": 1, "logo_base64": 1, "trade_name": 1}
+    projection = {"_id": 0, "id": 1, "name": 1, "gstin": 1, "has_gst": 1}
     companies = await db.companies.find(query, projection).to_list(500)
     return companies
 
