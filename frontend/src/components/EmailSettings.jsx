@@ -20,6 +20,7 @@ import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import api from "@/lib/api";
+import { normalizeCompanies } from "@/lib/companies";
 import { useDark } from "@/hooks/useDark";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -2348,7 +2349,7 @@ function EmailComposePanel({ isDark }) {
   }, []);
 
   React.useEffect(() => {
-    api.get('/companies').then(r => { const d = r.data; setCompanies(Array.isArray(d) ? d : (d?.companies || d?.data || [])); }).catch(() => {});
+    api.get('/companies').then(r => setCompanies(normalizeCompanies(r))).catch(() => {});
     fetchAllClients();
     api.get('/email/client-templates').then(r => setTemplates(r.data || [])).catch(() => {});
   }, [fetchAllClients]);
