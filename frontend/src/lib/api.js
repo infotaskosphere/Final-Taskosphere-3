@@ -22,15 +22,37 @@ const _isDevOrPreviewHost =
 const _runtimeOverride =
   typeof window !== "undefined" ? window.__TASKOSPHERE_API_URL__ : undefined;
 
+const _configuredApiUrl = _runtimeOverride || import.meta.env.VITE_API_URL || "";
+const _defaultBackendUrl = "https://final-taskosphere-backend.onrender.com";
+
+// Some older Render builds accidentally injected the frontend URL into
+// VITE_API_URL. That makes every authenticated page request
+// `frontend.onrender.com/api/...`, which is a frontend 404 rather than an API
+// response. Correct that known deployment pairing while still honoring an
+// explicit runtime override.
+const _configuredUrlIsFrontendHost = (() => {
+  if (!_configuredApiUrl || _runtimeOverride || typeof window === "undefined") {
+    return false;
+  }
+  try {
+    const configuredHost = new URL(_configuredApiUrl, window.location.origin).hostname;
+    return configuredHost.endsWith("-frontend.onrender.com");
+  } catch {
+    return false;
+  }
+})();
+
 let _raw =
   _runtimeOverride ||
-  import.meta.env.VITE_API_URL ||
-  (_isDevOrPreviewHost ? "" : "https://final-taskosphere-backend.onrender.com");
+  (_configuredUrlIsFrontendHost
+    ? _configuredApiUrl.replace("-frontend.onrender.com", "-backend.onrender.com")
+    : _configuredApiUrl) ||
+  (_isDevOrPreviewHost ? "" : _defaultBackendUrl);
 
 if (
   typeof window !== "undefined" &&
   !_runtimeOverride &&
-  !import.meta.env.VITE_API_URL &&
+  !_configuredApiUrl &&
   !_isDevOrPreviewHost
 ) {
   // eslint-disable-next-line no-console
