@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import api from '@/lib/api';
+import { normalizeCompanies } from "@/lib/companies";
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
 import { GuidanceNote } from '@/components/ui/GuidanceNote.jsx';
@@ -556,9 +557,10 @@ function AccountingReportsInner() {
 
   const fetchCompanies = async () => {
     try {
-      const { data } = await api.get('/companies/list');
-      setCompanies(data || []);
-      return data || [];
+      const res = await api.get('/companies/list');
+      const list = normalizeCompanies(res);
+      setCompanies(list);
+      return list;
     } catch {
       return [];
     }
