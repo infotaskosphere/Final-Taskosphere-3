@@ -567,6 +567,7 @@ async def create_visit(
 
 # ── 2. LIST ────────────────────────────────────────────────────────────────────
 @router.get("")
+@router.get("/", include_in_schema=False)
 async def list_visits(
     user_id:   Optional[str] = Query(None),
     client_id: Optional[str] = Query(None),
