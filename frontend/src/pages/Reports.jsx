@@ -3,6 +3,7 @@ import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
+import { normalizeCompanies } from "@/lib/companies";
 import { toast } from 'sonner';
 import {
   BarChart3, TrendingUp, Clock, Award, Users, CheckCircle2,
@@ -245,7 +246,7 @@ export default function Reports() {
   const fetchCompanies = async () => {
     try {
       const r = await api.get('/companies/list');
-      setCompanies(Array.isArray(r.data) ? r.data : []);
+      setCompanies(normalizeCompanies(r));
     } catch { setCompanies([]); }
   };
 
