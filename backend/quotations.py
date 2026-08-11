@@ -22,6 +22,7 @@ from backend.dependencies import (
     get_current_user,
     require_admin,
     check_module_permission,
+    _get_perm,
 )
 from backend.models import User
 
@@ -1528,10 +1529,75 @@ def _send_email_with_pdf(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+# ───────────────────────────────────────────────────────────────────────────────
+# Company records are ORGANIZATION-WIDE MASTER DATA (Admin → Master Data).
+#
+# They are created/edited in one place and consumed everywhere (Quotations,
+# Invoicing, Trademark Sphere, Bank Accounts, Reports, WhatsApp/Email settings,
+# Attendance, Salary Slips ...). Therefore:
+#   * READING a company must only require authentication — NOT the
+#     `quotations.view` permission, and NOT ownership (`created_by`).
+#     Previously a company added by an admin in Master Data was invisible to
+#     every other user (empty dropdowns / "Company not found" on some pages
+#     while quotation pages worked), because the query was scoped to
+#     {"created_by": current_user.id}.
+#   * WRITING requires Master Data manage rights OR the legacy quotations
+#     permission, so both the new Admin → Master Data screen and the older
+#     Quotation/Invoice settings screens keep working.
+# ───────────────────────────────────────────────────────────────────────────────
+
+# Fields that must never be exposed to users who cannot manage master data.
+_COMPANY_SENSITIVE_FIELDS = ("smtp_password",)
+
+
+def _can_manage_companies(user: User) -> bool:
+    return (
+        getattr(user, "role", "") == "admin"
+        or bool(_get_perm(user, "can_manage_master_data", False))
+        or bool(_get_perm(user, "can_create_quotations", False))
+    )
+
+
+async def require_company_manage(current_user: User = Depends(get_current_user)) -> User:
+    """Write access to company master data."""
+    if _can_manage_companies(current_user):
+        return current_user
+    raise HTTPException(
+        403,
+        "Permission required: Master Data (manage) or Quotations",
+    )
+
+
+def _scrub_company(company: dict, user: User) -> dict:
+    if company and not _can_manage_companies(user):
+        for f in _COMPANY_SENSITIVE_FIELDS:
+            company.pop(f, None)
+    return company
+
+
+async def _hydrate_company_bank(company: dict) -> dict:
+    """Overlay the linked bank account details onto a company record."""
+    link_id = (company or {}).get("linked_bank_account_id")
+    if not link_id:
+        return company
+    ba = await db.bank_accounts.find_one({"id": link_id}, {"_id": 0})
+    if ba:
+        company["bank_name"] = ba.get("bank_name", "")
+        company["bank_account_name"] = ba.get("account_holder", "")
+        company["bank_account_holder"] = ba.get("account_holder", "")
+        company["bank_account_no"] = ba.get("account_number_full") or ba.get("account_number_masked", "")
+        company["bank_ifsc"] = ba.get("ifsc", "")
+        company["bank_branch"] = ba.get("branch", "")
+        company["bank_account_type"] = (ba.get("account_type", "current") or "current").capitalize()
+        if ba.get("upi_id"):
+            company["upi_id"] = ba["upi_id"]
+    return company
+
+
 @router.post("/companies")
 async def create_company(
     data: dict,
-    current_user: User = Depends(check_module_permission("quotations", "create")),
+    current_user: User = Depends(require_company_manage),
 ):
     # Issue #6: permission enforced via Depends above (can_create_quotations)
     now = datetime.now(timezone.utc).isoformat()
@@ -1582,52 +1648,81 @@ async def create_company(
 
 @router.get("/companies")
 async def get_companies(
-    current_user: User = Depends(check_module_permission("quotations", "view")),
+    current_user: User = Depends(get_current_user),
 ):
-    query = {} if current_user.role == "admin" else {"created_by": current_user.id}
-    companies = await db.companies.find(query, {"_id": 0}).to_list(500)
+    """
+    Full company master records. Auth-only (org-wide master data) so every
+    module that renders company name/address/GST/bank/logo gets the same data.
+    """
+    companies = await db.companies.find({}, {"_id": 0}).sort("name", 1).to_list(500)
     for c in companies:
-        link_id = c.get("linked_bank_account_id")
-        if link_id:
-            ba = await db.bank_accounts.find_one({"id": link_id})
-            if ba:
-                c["bank_name"] = ba.get("bank_name", "")
-                c["bank_account_name"] = ba.get("account_holder", "")
-                c["bank_account_holder"] = ba.get("account_holder", "")
-                c["bank_account_no"] = ba.get("account_number_full") or ba.get("account_number_masked", "")
-                c["bank_ifsc"] = ba.get("ifsc", "")
-                c["bank_branch"] = ba.get("branch", "")
-                c["bank_account_type"] = (ba.get("account_type", "current") or "current").capitalize()
-                if ba.get("upi_id"):
-                    c["upi_id"] = ba["upi_id"]
+        await _hydrate_company_bank(c)
+        _scrub_company(c, current_user)
     return companies
 
 
 @router.get("/companies/list")
 async def list_companies(current_user: User = Depends(get_current_user)):
     """
-    Lightweight company list for cross-module dropdowns (Users, Attendance,
-    Reports). Requires authentication only — does NOT require the
-    `quotations.view` permission, since non-quotation modules also need it.
-    Returns only the fields needed to render a picker.
+    Company list for cross-module dropdowns and document rendering (Users,
+    Attendance, Reports, Invoicing, Trademark Sphere, Bank Accounts ...).
+
+    Requires authentication only and is NOT scoped by `created_by`, because
+    companies are organization-wide master data managed in Admin → Master Data.
+
+    Returns the display fields pages actually need (previously only
+    id/name/gstin/has_gst, which made some pages show blank
+    address/bank/logo details while others worked).
     """
-    query = {} if current_user.role == "admin" else {"created_by": current_user.id}
-    projection = {"_id": 0, "id": 1, "name": 1, "gstin": 1, "has_gst": 1}
-    companies = await db.companies.find(query, projection).to_list(500)
+    projection = {
+        "_id": 0,
+        "id": 1,
+        "name": 1,
+        "address": 1,
+        "phone": 1,
+        "email": 1,
+        "website": 1,
+        "gstin": 1,
+        "pan": 1,
+        "has_gst": 1,
+        "bank_account_name": 1,
+        "bank_name": 1,
+        "bank_account_no": 1,
+        "bank_ifsc": 1,
+        "bank_branch": 1,
+        "bank_account_type": 1,
+        "upi_id": 1,
+        "upi_qr_image_base64": 1,
+        "linked_bank_account_id": 1,
+        "logo_base64": 1,
+        "tm_logo_base64": 1,
+        "signature_base64": 1,
+    }
+    companies = await db.companies.find({}, projection).sort("name", 1).to_list(500)
+    for c in companies:
+        await _hydrate_company_bank(c)
     return companies
+
+
+@router.get("/companies/{company_id}")
+async def get_company(company_id: str, current_user: User = Depends(get_current_user)):
+    """Single company record — used by pages that only know a company_id."""
+    company = await db.companies.find_one({"id": company_id}, {"_id": 0})
+    if not company:
+        raise HTTPException(404, "Company not found")
+    await _hydrate_company_bank(company)
+    return _scrub_company(company, current_user)
 
 
 @router.put("/companies/{company_id}")
 async def update_company(
     company_id: str,
     data: dict,
-    current_user: User = Depends(check_module_permission("quotations", "edit")),
+    current_user: User = Depends(require_company_manage),
 ):
     existing = await db.companies.find_one({"id": company_id}, {"_id": 0})
     if not existing:
         raise HTTPException(404, "Company not found")
-    if current_user.role != "admin" and existing.get("created_by") != current_user.id:
-        raise HTTPException(403, "Not authorized")
     allowed = [
         "name",
         "address",
@@ -1679,13 +1774,11 @@ async def update_company(
 @router.delete("/companies/{company_id}")
 async def delete_company(
     company_id: str,
-    current_user: User = Depends(check_module_permission("quotations", "delete")),
+    current_user: User = Depends(require_company_manage),
 ):
     existing = await db.companies.find_one({"id": company_id}, {"_id": 0})
     if not existing:
         raise HTTPException(404, "Company not found")
-    if current_user.role != "admin" and existing.get("created_by") != current_user.id:
-        raise HTTPException(403, "Not authorized")
     await db.companies.delete_one({"id": company_id})
     return {"message": "Company deleted"}
 
