@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import api from '@/lib/api';
+import { normalizeCompanies } from "@/lib/companies";
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
 import { GuidanceNote } from '@/components/ui/GuidanceNote.jsx';
@@ -66,8 +67,8 @@ function JournalEntriesInner() {
 
   const fetchCompanies = async () => {
     try {
-      const { data } = await api.get('/companies/list');
-      setCompanies(data || []);
+      const res = await api.get('/companies/list');
+      setCompanies(normalizeCompanies(res));
     } catch { /* non-fatal */ }
   };
 
