@@ -1786,7 +1786,7 @@ export default function PasswordRepository() {
         <motion.div variants={iv} className="space-y-1.5">
           {/* ── Column header — mirrors Tasks list header style ── */}
           <div
-            className={`hidden sm:grid items-center pl-4 pr-3 py-2 text-[10px] font-bold uppercase tracking-widest select-none border-b mb-1
+            className={`hidden sm:grid items-center pl-5 pr-3 py-2 text-[10px] font-bold uppercase tracking-widest select-none border-b mb-1
               ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-100'}`}
             style={{ gridTemplateColumns: isAdmin ? '16px 28px minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr) 120px 120px 96px' : '28px minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr) 120px 120px 96px' }}
           >
