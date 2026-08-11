@@ -10,7 +10,7 @@
 // embed the same list/form without duplicating (and drifting from) the logic.
 import React, { useState, useEffect, useRef } from 'react';
 import api from '@/lib/api';
-import { normalizeCompanies } from "@/lib/companies";
+import { fetchCompanies as fetchCompanyRecords } from "@/lib/companies";
 import { toast } from 'sonner';
 import { mirrorBankToSettings } from '@/lib/bankSync';
 import { Button } from '@/components/ui/button';
@@ -419,8 +419,10 @@ export function CompanyProfilesList({ onRefresh, dense = false, onFormOpenChange
 
   const fetchCompanies = async () => {
     setLoading(true);
-    try { const res = await api.get('/companies'); setCompanies(normalizeCompanies(res)); }
-    catch (err) { toast.error(getErrMsg(err, 'Failed to load companies')); }
+    try {
+      const records = await fetchCompanyRecords({ silent: false });
+      setCompanies(records);
+    } catch (err) { toast.error(getErrMsg(err, 'Failed to load companies')); }
     finally { setLoading(false); }
   };
 
