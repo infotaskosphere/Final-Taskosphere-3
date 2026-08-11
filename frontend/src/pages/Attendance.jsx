@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import api from '@/lib/api';
+import { normalizeCompanies } from "@/lib/companies";
 import { toast } from 'sonner';
 import { getJsPDF } from '@/lib/lazyLibs';
 import {
@@ -2364,7 +2365,7 @@ export default function Attendance() {
       } catch {}
 
       // Process companies for report filter
-      setAllCompanies(Array.isArray(companiesRes.data) ? companiesRes.data : []);
+      setAllCompanies(normalizeCompanies(companiesRes));
 
       const history = historyRes.data || [];
       setAttendanceHistory(Array.isArray(history) ? history : []);
