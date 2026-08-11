@@ -962,7 +962,8 @@ export default function LeadsPage() {
   const fetchLeads = async () => {
     try {
       const r = await api.get('/leads');
-      setLeads(r.data);
+      const raw = r.data;
+      setLeads(Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []));
     } catch {
       toast.error('Failed to fetch leads');
     } finally {
