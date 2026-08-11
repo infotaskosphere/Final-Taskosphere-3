@@ -50,8 +50,18 @@ export const NotificationBell = () => {
   const fetchNotifications = useCallback(async () => {
     try {
       const { data } = await api.get("/notifications");
-      setNotifications(data);
-      setUnreadCount(data.filter((n) => !n.is_read).length);
+      // The API can answer with [] , { items: [] } or — when the endpoint is
+      // briefly unavailable — an error body. Never hand a non-array to state,
+      // otherwise .filter()/.map() below throw and blank the whole header.
+      const list = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.items)
+          ? data.items
+          : Array.isArray(data?.data)
+            ? data.data
+            : [];
+      setNotifications(list);
+      setUnreadCount(list.filter((n) => !n.is_read).length);
     } catch (err) {
       console.error("Failed to fetch notifications:", err);
     }
