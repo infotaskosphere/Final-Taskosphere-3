@@ -110,7 +110,11 @@ const WEEK_NUMBERS = [
 ];
 
 // ─── API helpers ────────────────────────────────────────────────────────────
-const fetchVisits = (p) => api.get("/visits", { params: p }).then(r => r.data);
+const fetchVisits = (p) =>
+  api.get("/visits", { params: p }).then(r => {
+    const raw = r.data;
+    return Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
+  });
 const fetchClients = () => api.get("/clients").then(r => r.data).catch(e => {
   if (e?.response?.status === 403) return [];   // graceful — dropdown stays empty
   throw e;
