@@ -1070,8 +1070,8 @@ export default function DueDates() {
                     <>
                       {/* Column headers */}
                       <div
-                        className="px-4 py-2 border-b border-slate-100 dark:border-slate-700 grid items-center bg-slate-50/80 dark:bg-slate-700/30"
-                        style={{ gridTemplateColumns: 'minmax(0,1fr) 88px 120px 110px 110px 70px 88px', paddingLeft: '1.75rem', paddingRight: '0.75rem' }}
+                        className="py-2 border-b border-slate-100 dark:border-slate-700 grid items-center bg-slate-50/80 dark:bg-slate-700/30"
+                        style={{ gridTemplateColumns: 'minmax(0,1fr) 88px 120px 110px 110px 70px 88px', paddingLeft: '2.25rem', paddingRight: '1.75rem' }}
                       >
                         <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Title</span>
                         <span className="text-center text-[10px] font-semibold uppercase tracking-widest text-slate-400">Status</span>
