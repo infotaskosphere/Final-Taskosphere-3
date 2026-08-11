@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import api from '@/lib/api';
+import { normalizeCompanies } from "@/lib/companies";
 import { useDark } from '@/hooks/useDark';
 import { GuidanceNote } from '@/components/ui/GuidanceNote.jsx';
 
@@ -89,7 +90,7 @@ function Purchase() {
       ]);
       setPurchaseInvoices(purchasesR.status === 'fulfilled' ? (purchasesR.value.data?.purchase_invoices || []) : []);
       setClients(clientsR.status === 'fulfilled' ? (clientsR.value.data?.clients || clientsR.value.data || []) : []);
-      setCompanies(companiesR.status === 'fulfilled' ? (companiesR.value.data || []) : []);
+      setCompanies(companiesR.status === 'fulfilled' ? normalizeCompanies(companiesR.value) : []);
     } catch {
       toast.error('Failed to load purchase data');
     } finally {
