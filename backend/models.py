@@ -656,6 +656,9 @@ class User(BaseModel):
     email: str
     full_name: Optional[str] = None
     role: UserRole = UserRole.staff
+    # Optional custom-role key (see backend/roles_admin.py). `role` always
+    # stays one of admin/manager/staff so every existing role check works.
+    role_key: Optional[str] = None
     password: Optional[str] = None
     consent_given: bool = False
     departments: List[str] = Field(default_factory=list)
