@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDark } from "@/hooks/useDark";
 import api from "@/lib/api";
+import { normalizeCompanies } from "@/lib/companies";
 import {
   generateReport, listHistory, getReport, bulkReports, bulkExport,
   findClasses, pdfDownloadUrl, deleteReport,
@@ -1898,7 +1899,7 @@ export default function TrademarkSphere() {
   // Load companies and auto-apply default if saved
   useEffect(() => {
     api.get("/companies/list").then(res => {
-      const cos = res.data || [];
+      const cos = normalizeCompanies(res);
       setCompanies(cos);
       // Auto-apply default company branding
       const saved = loadSavedBranding();
