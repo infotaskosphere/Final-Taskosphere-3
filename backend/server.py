@@ -14638,3 +14638,72 @@ app.add_api_route("/iclock/cdata", iclock_cdata, methods=["GET", "POST"])
 app.add_api_route("/iclock/getrequest", iclock_getrequest, methods=["GET", "POST"])
 app.add_api_route("/iclock/devicecmd", iclock_devicecmd, methods=["GET", "POST"])
 app.include_router(whatsapp_hub_router, prefix="/api")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ROUTE SAFETY NET — collection endpoints must answer with AND without a
+# trailing slash.
+#
+# The app runs with redirect_slashes=False, so Starlette will NOT redirect
+# "/api/notifications/" -> "/api/notifications" (or vice-versa); a one-character
+# difference produced hard 404s on list endpoints such as /api/notifications,
+# /api/visits and /api/leads while their sibling routes (e.g.
+# /api/notifications/unread-count) kept working.
+#
+# This block runs once, after every router is mounted, and registers the
+# missing slash-variant of each already-registered /api route so the two forms
+# are always equivalent. It never overwrites an existing route.
+# ═══════════════════════════════════════════════════════════════════════════════
+def _register_slash_variants(target_app) -> None:
+    from fastapi.routing import APIRoute
+
+    existing = {
+        (r.path, m)
+        for r in target_app.routes
+        if isinstance(r, APIRoute)
+        for m in r.methods
+    }
+    aliases = []
+    for route in list(target_app.routes):
+        if not isinstance(route, APIRoute):
+            continue
+        if not route.path.startswith("/api"):
+            continue
+        if "{" in route.path:          # never alias parameterised paths
+            continue
+        variant = route.path[:-1] if route.path.endswith("/") else route.path + "/"
+        if variant in ("", "/api"):
+            continue
+        if any((variant, m) in existing for m in route.methods):
+            continue
+        aliases.append((route, variant))
+
+    for route, variant in aliases:
+        target_app.add_api_route(
+            variant,
+            route.endpoint,
+            methods=list(route.methods),
+            response_model=route.response_model,
+            status_code=route.status_code,
+            dependencies=route.dependencies,
+            name=route.name,
+            include_in_schema=False,
+        )
+        for m in route.methods:
+            existing.add((variant, m))
+
+    logger.info(f"[routes] slash-variant aliases registered: {len(aliases)}")
+
+
+_register_slash_variants(app)
+
+
+@app.get("/api/__routes", include_in_schema=False)
+async def _debug_list_routes():
+    """Quick self-check: confirms which /api paths this process actually serves."""
+    from fastapi.routing import APIRoute
+
+    return sorted(
+        {r.path for r in app.routes if isinstance(r, APIRoute) and r.path.startswith("/api")}
+    )
+
