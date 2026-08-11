@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import api from '@/lib/api';
+import { normalizeCompanies } from "@/lib/companies";
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
@@ -235,7 +236,7 @@ function BankAccountsInner() {
 
   useEffect(() => {
     fetchAccounts();
-    api.get('/companies/list').then(r => setCompanies(r.data || [])).catch(() => {});
+    api.get('/companies/list').then(r => setCompanies(normalizeCompanies(r))).catch(() => {});
   }, []);
 
   const stats = useMemo(() => {
