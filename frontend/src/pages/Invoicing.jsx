@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import api from '@/lib/api';
+import { normalizeCompanies } from "@/lib/companies";
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { format, parseISO, differenceInDays, startOfMonth, endOfMonth, subMonths } from 'date-fns';
@@ -6060,7 +6061,7 @@ const fetchAll = useCallback(async () => {
         setInvoices([]);
       }
 
-      if (compR.status === 'fulfilled') setCompanies(compR.value.data || []);
+      if (compR.status === 'fulfilled') setCompanies(normalizeCompanies(compR.value));
       else { console.error('Failed to load companies:', compR.reason); setCompanies([]); }
 
       if (clientR.status === 'fulfilled') {
