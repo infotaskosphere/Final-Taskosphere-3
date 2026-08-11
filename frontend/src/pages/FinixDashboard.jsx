@@ -13,6 +13,7 @@ import {
   PieChart, Pie, Cell, Legend, BarChart, Bar
 } from 'recharts';
 import api from '@/lib/api';
+import { normalizeCompanies } from "@/lib/companies";
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
 import { runVerifyAndFix, describeValidationResult } from '@/lib/verifyAndFixLedger';
@@ -141,8 +142,8 @@ function FinixDashboardInner() {
       setCompanies(cached.data);
     }
     try {
-      const { data } = await api.get('/companies/list');
-      const list = data || [];
+      const res = await api.get('/companies/list');
+      const list = normalizeCompanies(res);
       _companiesCache_finix.data = list;
       _companiesCache_finix.ts = Date.now();
       ssWrite(SS_COMPANIES_KEY, { data: list, ts: _companiesCache_finix.ts });
