@@ -57,14 +57,44 @@ export async function fetchCompanies({ silent = true } = {}) {
 /** Company list for dropdowns & document headers. */
 export async function fetchCompanyList({ silent = true } = {}) {
   try {
+    // Prefer the lightweight endpoint, but support older backend deployments
+    // where only the canonical /companies route was registered.
     const res = await api.get("/companies/list");
     return normalizeCompanies(res);
   } catch (err) {
+    if (err?.response?.status === 404) {
+      try {
+        const fallback = await api.get("/companies");
+        return normalizeCompanies(fallback);
+      } catch (_) {
+        // Fall through to the existing silent/throw behavior below.
+      }
+    }
     if (!silent) throw err;
     // eslint-disable-next-line no-console
     console.warn("[companies] failed to load /companies/list:", err?.response?.status || err?.message);
     return [];
   }
+}
+
+/**
+ * Match a record to a company selection.
+ *
+ * New invoices store company_id. Older imported invoices may only have a
+ * company_name, so filtering by the master-record id must support both shapes.
+ */
+export function recordBelongsToCompany(record, companyId, companies = []) {
+  if (!companyId || companyId === "all") return true;
+  const selected = (Array.isArray(companies) ? companies : []).find(
+    (company) => String(company?.id) === String(companyId),
+  );
+  if (String(record?.company_id || "") === String(companyId)) return true;
+  if (!selected?.name) return false;
+
+  const selectedName = String(selected.name).trim().toLowerCase();
+  return [record?.company_name, record?.company, record?.firm_name]
+    .filter(Boolean)
+    .some((name) => String(name).trim().toLowerCase() === selectedName);
 }
 
 /** One company by id, resolved from the master list (no extra call needed). */
@@ -73,4 +103,10 @@ export function findCompany(companies, id) {
   return (Array.isArray(companies) ? companies : []).find((c) => c?.id === id) || null;
 }
 
-export default { fetchCompanies, fetchCompanyList, normalizeCompanies, findCompany };
+export default {
+  fetchCompanies,
+  fetchCompanyList,
+  normalizeCompanies,
+  recordBelongsToCompany,
+  findCompany,
+};
