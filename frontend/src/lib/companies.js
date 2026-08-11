@@ -35,6 +35,18 @@ export async function fetchCompanies({ silent = true } = {}) {
     const res = await api.get("/companies");
     return normalizeCompanies(res);
   } catch (err) {
+    // Older deployments of the backend exposed the same organization-wide
+    // records through the dropdown endpoint but did not yet register the full
+    // `/companies` route. Keep the Master Data page usable during a rolling
+    // frontend/backend deploy, while the canonical endpoint remains preferred.
+    if (err?.response?.status === 404) {
+      try {
+        const fallback = await api.get("/companies/list");
+        return normalizeCompanies(fallback);
+      } catch (_) {
+        // Fall through to the existing silent/throw behavior below.
+      }
+    }
     if (!silent) throw err;
     // eslint-disable-next-line no-console
     console.warn("[companies] failed to load /companies:", err?.response?.status || err?.message);
