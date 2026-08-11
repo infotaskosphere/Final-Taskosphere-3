@@ -12,6 +12,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import api from '@/lib/api';
+import { normalizeCompanies } from "@/lib/companies";
 import { toast } from 'sonner';
 import {
   Plus, Edit, Trash2, Shield, User as UserIcon, Settings, Eye,
@@ -2822,7 +2823,7 @@ export default function Users() {
     try {
       // Fetches companies created in the Quotations module (db.companies collection)
       const res = await api.get('/companies/list');
-      setCompanies(Array.isArray(res.data) ? res.data : []);
+      setCompanies(normalizeCompanies(res));
     } catch {}
   }, []);
 
