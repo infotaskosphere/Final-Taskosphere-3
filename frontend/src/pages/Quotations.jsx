@@ -4,6 +4,7 @@ import { useDark } from '@/hooks/useDark';
 import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
+import { normalizeCompanies } from "@/lib/companies";
 import axios from 'axios';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -376,7 +377,7 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
           api.get('/companies'), api.get('/leads'),
           api.get('/quotations/services'), api.get('/clients'),
         ]);
-        setCompanies(cRes.data); setLeads(lRes.data);
+        setCompanies(normalizeCompanies(cRes)); setLeads(lRes.data);
         setServices(sRes.data.services); setClients(clRes.data);
         if (editingQuotation) {
           setForm({
@@ -1337,7 +1338,7 @@ export default function Quotations() {
   const fetchMeta = async () => {
     try {
       const [cRes, sRes] = await Promise.all([api.get('/companies'), api.get('/quotations/services')]);
-      setCompanies(cRes.data); setServices(sRes.data.services);
+      setCompanies(normalizeCompanies(cRes)); setServices(sRes.data.services);
     } catch {}
   };
 
