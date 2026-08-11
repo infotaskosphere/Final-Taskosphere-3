@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { getWASettings, saveWASettings } from "@/hooks/useWhatsApp";
 import api from "@/lib/api";
+import { normalizeCompanies } from "@/lib/companies";
 
 // ─── Brand colours ────────────────────────────────────────────────────────────
 const EMERALD   = "#128C7E";
@@ -948,7 +949,7 @@ export default function WhatsAppSettings() {
   const [activeTab,  setActiveTab]  = useState(isAdmin ? "numbers" : "templates");
   const [companies,  setCompanies]  = useState([]);
 
-  useEffect(() => { api.get("/companies").then(r => setCompanies(r.data || [])).catch(() => {}); }, []);
+  useEffect(() => { api.get("/companies").then(r => setCompanies(normalizeCompanies(r))).catch(() => {}); }, []);
   useEffect(() => {
     if (companies.length > 0 && !settings.firmName) {
       const first = companies[0];
