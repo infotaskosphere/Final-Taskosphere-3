@@ -281,6 +281,7 @@ async def create_lead(
 
 
 @router.get("", response_model=List[Lead])
+@router.get("/", response_model=List[Lead], include_in_schema=False)
 async def get_leads(
     status_filter: Optional[Literal[
         "new", "contacted", "meeting", "proposal",
