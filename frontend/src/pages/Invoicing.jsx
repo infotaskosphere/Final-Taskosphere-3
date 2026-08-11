@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import api from '@/lib/api';
-import { normalizeCompanies } from "@/lib/companies";
+import { fetchCompanies, normalizeCompanies, recordBelongsToCompany } from "@/lib/companies";
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { format, parseISO, differenceInDays, startOfMonth, endOfMonth, subMonths } from 'date-fns';
@@ -876,13 +876,13 @@ const GSTReportsModal = ({ open, onClose, invoices = [], companies = [], clients
   // ── Base filtered data ──────────────────────────────────────────────────
   const baseInvoices = useMemo(() => {
     return (invoices || []).filter(inv => {
-      if (companyFilter !== 'all' && inv.company_id !== companyFilter) return false;
+      if (!recordBelongsToCompany(inv, companyFilter, companies)) return false;
       if (!inv.invoice_date?.startsWith(month)) return false;
       if (!['tax_invoice', 'credit_note', 'debit_note'].includes(inv.invoice_type)) return false;
       if (inv.status === 'cancelled') return false;
       return true;
     });
-  }, [invoices, month, companyFilter]);
+  }, [invoices, month, companyFilter, companies]);
 
   // ── GSTR-1 data ─────────────────────────────────────────────────────────
   const gstr1 = useMemo(() => {
@@ -5863,7 +5863,7 @@ function Invoicing() {
     const curMonth = format(now, 'yyyy-MM');
     const fy = fyRange(yearFilter === 'all' ? null : yearFilter);
     const base = (invoices || []).filter(inv => {
-      if (companyFilter !== 'all' && inv.company_id !== companyFilter) return false;
+      if (!recordBelongsToCompany(inv, companyFilter, companies)) return false;
       if (fy && (inv.invoice_date < fy.from || inv.invoice_date > fy.to)) return false;
       return true;
     });
@@ -5925,7 +5925,7 @@ function Invoicing() {
       }
     }
     return { total_revenue, total_outstanding, total_collected, total_gst, total_invoices, month_revenue, month_invoices, overdue_count, paid_count, draft_count, monthly_trend, top_clients };
-  }, [invoices, companyFilter, yearFilter]);
+  }, [invoices, companyFilter, yearFilter, companies]);
 
   // ── E. ALL useMemo: DERIVED DATA ──────────────────────────────────────────
 
@@ -5935,7 +5935,7 @@ function Invoicing() {
   const filtered = useMemo(() => {
     const fy = fyRange(yearFilter === 'all' ? null : yearFilter);
     return (invoices || []).filter(inv => {
-      if (companyFilter !== 'all' && inv.company_id !== companyFilter) return false;
+      if (!recordBelongsToCompany(inv, companyFilter, companies)) return false;
       if (fy && (inv.invoice_date < fy.from || inv.invoice_date > fy.to)) return false;
       if (searchTerm && !inv.invoice_no?.toLowerCase().includes(searchTerm.toLowerCase()) && !inv.client_name?.toLowerCase().includes(searchTerm.toLowerCase())) return false;
       if (statusFilter === 'outstanding') {
@@ -5962,7 +5962,7 @@ function Invoicing() {
       if (gstOnlyFilter && !(Number(inv.total_gst || 0) > 0)) return false;
       return true;
     });
-  }, [invoices, companyFilter, yearFilter, searchTerm, statusFilter, typeFilter, referrerFilter, getInvoiceReferrer, fromDate, toDate, listViewFilter, gstOnlyFilter]);
+  }, [invoices, companyFilter, yearFilter, searchTerm, statusFilter, typeFilter, referrerFilter, getInvoiceReferrer, fromDate, toDate, listViewFilter, gstOnlyFilter, companies]);
 
   // ── F. ALL useMemo: TOTALS / AGGREGATIONS ────────────────────────────────
 
@@ -6044,7 +6044,7 @@ const fetchAll = useCallback(async () => {
     try {
       const [invR, compR, clientR, leadR, statR, otherIncR, accountsR] = await Promise.allSettled([
         api.get('/invoices', { params: { page: 1, page_size: 5000 } }),
-        api.get('/companies'),
+        fetchCompanies({ silent: false }),
         api.get('/clients', { params: { page: 1, page_size: 100 } }),
         api.get('/leads'),
         api.get('/invoices/stats'),
