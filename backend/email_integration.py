@@ -185,6 +185,7 @@ class ManualSaveReminderRequest(BaseModel):
     hearing_attended: Optional[str] = None     # "yes" | "no"
     hearing_decision: Optional[str] = None     # "favourable" | "unfavourable"
     hearing_adjourned: Optional[bool] = None
+    hearing_next_date_disclosed: Optional[bool] = None  # only meaningful when hearing_adjourned is True
     hearing_notes: Optional[str] = None
 
 class ManualSaveVisitRequest(BaseModel):
@@ -1271,6 +1272,7 @@ def _reminder_to_dict(doc: Dict) -> Dict:
         "hearing_attended":  doc.get("hearing_attended"),
         "hearing_decision":  doc.get("hearing_decision"),
         "hearing_adjourned": doc.get("hearing_adjourned"),
+        "hearing_next_date_disclosed": doc.get("hearing_next_date_disclosed"),
         "hearing_notes":     doc.get("hearing_notes"),
     }
 
@@ -2297,6 +2299,8 @@ async def save_as_reminder(body: ManualSaveReminderRequest, current_user=Depends
             doc["hearing_decision"] = body.hearing_decision
         if body.hearing_adjourned is not None:
             doc["hearing_adjourned"] = body.hearing_adjourned
+        if body.hearing_next_date_disclosed is not None:
+            doc["hearing_next_date_disclosed"] = body.hearing_next_date_disclosed
         if body.hearing_notes is not None:
             doc["hearing_notes"] = body.hearing_notes
 
@@ -2447,7 +2451,7 @@ async def update_reminder(
         "urgency", "tm_app_no", "updated_at",
         # Trademark Hearing outcome fields — previously dropped on edit.
         "brand_name", "hearing_attended", "hearing_decision",
-        "hearing_adjourned", "hearing_notes",
+        "hearing_adjourned", "hearing_next_date_disclosed", "hearing_notes",
     }
     updates = {k: v for k, v in body.items() if k in allowed_fields}
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -3097,5 +3101,3 @@ class EmailAttachmentScanner:
         await UsageTracker.track_metric_usage(company_id, "email_attachments_scanned", 1)
         logger.info(f"Email attachment '{file_name}' ({file_size} bytes) successfully processed and metered.")
         return True
-
-
