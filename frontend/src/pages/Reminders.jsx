@@ -71,6 +71,7 @@ const COLORS = {
   mediumBlue: "#1F6FB2",
   emeraldGreen: "#1FAF5A",
   amber: "#F59E0B",
+  yellow: "#EAB308",
   coral: "#FF6B6B",
   purple: "#8B5CF6",
 };
@@ -212,6 +213,30 @@ function CardHeaderRow({ iconBg, icon, title, subtitle, action, badge }) {
   );
 }
 
+// ── Hearing status/colour helper ─────────────────────────────────────────────
+// Determines the colour-coded status of a "Trademark Hearing" reminder:
+//   • favourable            → green   (decision received, in the client's favour)
+//   • unfavourable          → amber   (decision received, against the client)
+//   • adjourned_no_date     → yellow  (hearing attended & adjourned, next date NOT yet declared/disclosed)
+//   • adjourned_dated       → red     (hearing attended & adjourned, next hearing date IS declared/disclosed)
+//   • null                  → no special hearing status (falls back to default styling)
+function getHearingStatus(rem) {
+  if (!rem) return null;
+  if (rem.hearing_adjourned) {
+    return rem.hearing_next_date_disclosed ? "adjourned_dated" : "adjourned_no_date";
+  }
+  if (rem.hearing_decision === "favourable") return "favourable";
+  if (rem.hearing_decision === "unfavourable") return "unfavourable";
+  return null;
+}
+
+const HEARING_STATUS_STYLES = {
+  favourable:        { solid: "#10b981", solidTo: "#059669", tailwindDot: "bg-emerald-500", tailwindPillLight: "bg-emerald-100 text-emerald-700", tailwindPillDark: "bg-emerald-900/40 text-emerald-300" },
+  unfavourable:       { solid: "#f59e0b", solidTo: "#d97706", tailwindDot: "bg-amber-500",   tailwindPillLight: "bg-amber-100 text-amber-700",   tailwindPillDark: "bg-amber-900/40 text-amber-300" },
+  adjourned_no_date:  { solid: "#eab308", solidTo: "#ca8a04", tailwindDot: "bg-yellow-500",  tailwindPillLight: "bg-yellow-100 text-yellow-700", tailwindPillDark: "bg-yellow-900/40 text-yellow-300" },
+  adjourned_dated:    { solid: "#ef4444", solidTo: "#b91c1c", tailwindDot: "bg-red-500",     tailwindPillLight: "bg-red-100 text-red-600",       tailwindPillDark: "bg-red-900/40 text-red-300" },
+};
+
 // ── Shared Reminder Detail Popup ─────────────────────────────────────────────
 function ReminderDetailPopup({ rem, isDark, isViewingOther, onClose, onEdit, onDelete, onDismiss, onReschedule, COLORS }) {
   if (!rem) return null;
@@ -245,9 +270,11 @@ function ReminderDetailPopup({ rem, isDark, isViewingOther, onClose, onEdit, onD
           className="px-8 py-7 relative overflow-hidden"
           style={{
             background: (() => {
-              if (rem.hearing_adjourned) return `linear-gradient(135deg, #ef4444, #b91c1c)`;       // Red — adjourned
-              if (rem.hearing_decision === "unfavourable") return `linear-gradient(135deg, #f59e0b, #d97706)`; // Amber — unfavourable
-              if (rem.hearing_decision === "favourable")   return `linear-gradient(135deg, #10b981, #059669)`; // Green — favourable
+              const status = getHearingStatus(rem);
+              if (status) {
+                const s = HEARING_STATUS_STYLES[status];
+                return `linear-gradient(135deg, ${s.solid}, ${s.solidTo})`;
+              }
               return `linear-gradient(135deg, ${isDue ? COLORS.coral : COLORS.purple}, ${COLORS.mediumBlue})`;
             })(),
           }}
@@ -387,8 +414,12 @@ function ReminderDetailPopup({ rem, isDark, isViewingOther, onClose, onEdit, onD
                 {rem.hearing_adjourned && (
                   <div className="flex items-center justify-between">
                     <span className={`text-xs font-semibold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Adjourned</span>
-                    <span className="text-xs font-bold px-3 py-1 rounded-full bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">
-                      📅 Yes — Adjourned
+                    <span className={`text-xs font-bold px-3 py-1 rounded-full ${
+                      rem.hearing_next_date_disclosed
+                        ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
+                        : "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300"
+                    }`}>
+                      {rem.hearing_next_date_disclosed ? "📅 Adjourned — Next Date Set" : "⏳ Adjourned — Next Date Not Disclosed"}
                     </span>
                   </div>
                 )}
@@ -1033,6 +1064,7 @@ export default function Reminders() {
   const [formAttended, setFormAttended] = useState("");       // "yes" | "no" | ""
   const [formDecision, setFormDecision] = useState("");       // "favourable" | "unfavourable" | ""
   const [formAdjourned, setFormAdjourned] = useState(false);
+  const [formNextDateDisclosed, setFormNextDateDisclosed] = useState(false); // true = next hearing date declared/disclosed
   const [formHearingNotes, setFormHearingNotes] = useState("");
 
   // Layout customizer
@@ -1210,6 +1242,7 @@ export default function Reminders() {
         payload.hearing_attended  = formAttended           || null;
         payload.hearing_decision  = formDecision           || null;
         payload.hearing_adjourned = formAdjourned;
+        payload.hearing_next_date_disclosed = formAdjourned ? formNextDateDisclosed : null;
         payload.hearing_notes     = formHearingNotes.trim() || null;
       }
       await api.post("/email/save-as-reminder", payload);
@@ -1244,6 +1277,7 @@ export default function Reminders() {
         payload.hearing_attended  = formAttended           || null;
         payload.hearing_decision  = formDecision           || null;
         payload.hearing_adjourned = formAdjourned;          // boolean — always send
+        payload.hearing_next_date_disclosed = formAdjourned ? formNextDateDisclosed : null; // only meaningful when adjourned
         payload.hearing_notes     = formHearingNotes.trim() || null;
       }
       const { data: savedReminder } = await api.patch(`/email/reminders/${remId}`, payload);
@@ -1310,6 +1344,7 @@ export default function Reminders() {
     setFormAttended("");
     setFormDecision("");
     setFormAdjourned(false);
+    setFormNextDateDisclosed(false);
     setFormHearingNotes("");
     // Note: activePopupReminder is intentionally NOT cleared here.
     // After a save, handleUpdate sets it to the fresh API response.
@@ -1330,6 +1365,7 @@ export default function Reminders() {
     setFormAttended(rem.hearing_attended || "");
     setFormDecision(rem.hearing_decision || "");
     setFormAdjourned(rem.hearing_adjourned || false);
+    setFormNextDateDisclosed(rem.hearing_next_date_disclosed || false);
     setFormHearingNotes(rem.hearing_notes || "");
     setShowForm(true);
   };
@@ -1706,9 +1742,10 @@ export default function Reminders() {
                         const hasOverdue = dayReminders.some((r) =>
                           isPast(new Date(r.remind_at)),
                         );
-                        const hasAdjourned     = dayReminders.some(r => r.hearing_adjourned);
-                        const hasUnfavourable  = dayReminders.some(r => r.hearing_decision === "unfavourable");
-                        const hasFavourable    = dayReminders.some(r => r.hearing_decision === "favourable");
+                        const hasAdjournedDated   = dayReminders.some(r => r.hearing_adjourned && r.hearing_next_date_disclosed);
+                        const hasAdjournedNoDate  = dayReminders.some(r => r.hearing_adjourned && !r.hearing_next_date_disclosed);
+                        const hasUnfavourable     = dayReminders.some(r => getHearingStatus(r) === "unfavourable");
+                        const hasFavourable       = dayReminders.some(r => getHearingStatus(r) === "favourable");
                         return (
                           <motion.div
                             key={dateKey}
@@ -1746,8 +1783,10 @@ export default function Reminders() {
                               {dayReminders.length > 0 && (
                                 <span
                                   className={`text-[9px] font-bold px-1 py-0.5 rounded-full ${
-                                    hasAdjourned
+                                    hasAdjournedDated
                                       ? "bg-red-500 text-white"
+                                    : hasAdjournedNoDate
+                                      ? "bg-yellow-500 text-white"
                                     : hasUnfavourable
                                       ? "bg-amber-500 text-white"
                                     : hasFavourable
@@ -1771,8 +1810,10 @@ export default function Reminders() {
                                     openDetailPopup(rem);
                                   }}
                                   className={`text-[9px] sm:text-[10px] font-semibold px-1.5 py-0.5 rounded-md truncate cursor-pointer transition-all hover:opacity-80 ${
-                                    rem.hearing_adjourned
+                                    rem.hearing_adjourned && rem.hearing_next_date_disclosed
                                       ? isDark ? "bg-red-900/40 text-red-300" : "bg-red-100 text-red-600"
+                                    : rem.hearing_adjourned && !rem.hearing_next_date_disclosed
+                                      ? isDark ? "bg-yellow-900/40 text-yellow-300" : "bg-yellow-100 text-yellow-700"
                                     : rem.hearing_decision === "unfavourable"
                                       ? isDark ? "bg-amber-900/40 text-amber-300" : "bg-amber-100 text-amber-700"
                                     : rem.hearing_decision === "favourable"
@@ -2227,6 +2268,44 @@ export default function Reminders() {
                         {formAdjourned ? "📅  Yes — Adjourned" : "📅  Mark as Adjourned"}
                       </button>
                     </div>
+
+                    {/* Next Hearing Date Disclosed — only relevant when Adjourned */}
+                    {formAdjourned && (
+                      <div>
+                        <label className={`text-xs font-semibold mb-2 block ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                          Next Hearing Date Declared?
+                        </label>
+                        <div className="flex gap-2">
+                          {[
+                            { val: false, label: "⏳  Not Disclosed Yet" },
+                            { val: true,  label: "📅  Yes — Date Set" },
+                          ].map((opt) => (
+                            <button
+                              key={String(opt.val)}
+                              type="button"
+                              onClick={() => setFormNextDateDisclosed(opt.val)}
+                              className={`flex-1 py-2 rounded-xl text-sm font-semibold border transition-all
+                                ${formNextDateDisclosed === opt.val
+                                  ? opt.val
+                                    ? "bg-red-500 border-red-500 text-white"
+                                    : "bg-yellow-500 border-yellow-500 text-white"
+                                  : isDark
+                                    ? "bg-slate-700 border-slate-600 text-slate-300 hover:border-slate-400"
+                                    : "bg-white border-slate-200 text-slate-600 hover:border-slate-400"
+                                }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                        <p className={`text-[11px] mt-1.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                          If no next date has been declared yet, this reminder shows{" "}
+                          <span className="font-semibold text-yellow-500">yellow</span> on the calendar.
+                          Once a next date is set, it shows{" "}
+                          <span className="font-semibold text-red-500">red</span>.
+                        </p>
+                      </div>
+                    )}
 
                     {/* Hearing Notes */}
                     <div>
