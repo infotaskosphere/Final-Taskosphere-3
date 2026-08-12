@@ -199,9 +199,21 @@ function buildUpiUrl(company, inv) {
 
   // Merchant Category Code: tags this as a merchant (P2M) transaction rather than a
   // generic P2P transfer, matching how a bank-issued merchant QR is classified.
-  // Only included if the company has one on file (set in Invoice/Quotation Settings).
+  //
+  // IMPORTANT: this is not just cosmetic. Many banks (SBI included) reject a plain
+  // P2P-style UPI push into a CURRENT/business account with exactly the error
+  // "Receiver's bank does not allow payments to this bank account" — current accounts
+  // are commonly gated to only accept tagged merchant (P2M) transactions over UPI.
+  // So if the company hasn't set an explicit MCC but their account is a business-type
+  // account (Current / CC / OD), we still tag the transaction with a sensible generic
+  // services MCC (8931 — Accounting/Bookkeeping/Tax) rather than leaving it untagged,
+  // since untagged is the configuration most likely to trigger that exact decline.
   const mcRaw = (company.upi_mcc || '').trim();
-  const mc = mcRaw ? '&mc=' + mcRaw.replace(/[^0-9]/g, '') : '';
+  const isBusinessAccount = ['current', 'cc', 'overdraft', 'od'].includes(
+    (company.bank_account_type || '').trim().toLowerCase()
+  );
+  const effectiveMc = mcRaw || (isBusinessAccount ? '8931' : '');
+  const mc = effectiveMc ? '&mc=' + effectiveMc.replace(/[^0-9]/g, '') : '';
 
   // Return raw UPI link with literal spaces. It will be encoded ONCE when converted to QR image URL,
   // meaning scanning devices will decode it to standard spaces (no %20 or % symbol issues).
