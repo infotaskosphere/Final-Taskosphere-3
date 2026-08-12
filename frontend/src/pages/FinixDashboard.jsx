@@ -72,6 +72,26 @@ function ssWrite(key, value) {
   try { sessionStorage.setItem(key, JSON.stringify(value)); } catch { /* quota / privacy mode — non-fatal */ }
 }
 
+// Synchronously checks whether a still-fresh snapshot for `cid` already
+// exists (in-memory first, then the sessionStorage mirror) WITHOUT ever
+// touching the network. Callers use this to decide up front whether the
+// loading spinner needs to show at all — previously fetchMetrics/
+// fetchAggregateMetrics always flipped `loading` to true and only found
+// out a tick later (once the now-resolved promise came back) that the
+// data was sitting in cache the whole time, so every revisit/company
+// switch flashed a spinner for a frame even though nothing needed to load.
+function peekMetricsCache(cid) {
+  const cached = _metricsCache_finix.get(cid);
+  if (cached && Date.now() - cached.ts < METRICS_CACHE_TTL_MS) return cached.data;
+  const ss = ssRead(SS_METRICS_PREFIX + cid);
+  if (ss && Date.now() - ss.ts < METRICS_CACHE_TTL_MS) {
+    const restored = { ...ss.data, lastVerifiedAt: ss.data.lastVerifiedAt ? new Date(ss.data.lastVerifiedAt) : null };
+    _metricsCache_finix.set(cid, { ts: ss.ts, data: restored });
+    return restored;
+  }
+  return null;
+}
+
 export default function FinixDashboard() {
   return (
     <RequestAccessGate module="accounting_reports" moduleLabel="Finix Dashboard" permissionFlag="can_view_accounting_reports">
@@ -424,13 +444,42 @@ function FinixDashboardInner() {
   };
 
   // ─── Single-company view ──────────────────────────────────────────────
+  const applySingleCompanyMetrics = (data) => {
+    setRevenue(data.revenue);
+    setReceivables(data.receivables);
+    setCashAndBank(data.cashAndBank);
+    setPayables(data.payables);
+    setNetProfit(data.netProfit);
+    setExpenses(data.expenses);
+    setChartData(data.chartData);
+    setExpenseBreakdown(data.expenseBreakdown);
+    setValidation(data.validation);
+    setLastVerifiedAt(data.lastVerifiedAt);
+    setInsights(data.insights);
+  };
+
   const fetchMetrics = async (cid, { force = false } = {}) => {
-    setLoading(true);
-    setVerifying(true);
     // Bumped for this call; if a newer fetchMetrics call starts (fast
     // company switching, or a refresh click) before this one finishes, the
     // stale one recognizes it's been superseded and skips writing state.
     const requestId = ++fetchIdRef.current;
+
+    // Paint instantly from a still-fresh cache — no loading flash — instead
+    // of unconditionally flipping `loading` on and then finding out a tick
+    // later (once the promise below resolves) that the data was already
+    // available. Matches the cache-first pattern used on the main Dashboard.
+    if (!force) {
+      const cached = peekMetricsCache(cid);
+      if (cached) {
+        applySingleCompanyMetrics(cached);
+        setLoading(false);
+        setVerifying(false);
+        return;
+      }
+    }
+
+    setLoading(true);
+    setVerifying(true);
     try {
       const data = await computeMetricsForCompany(cid, {
         force,
@@ -450,17 +499,7 @@ function FinixDashboardInner() {
       // don't let its slower, now-stale response overwrite the newer data.
       if (requestId !== fetchIdRef.current) return;
 
-      setRevenue(data.revenue);
-      setReceivables(data.receivables);
-      setCashAndBank(data.cashAndBank);
-      setPayables(data.payables);
-      setNetProfit(data.netProfit);
-      setExpenses(data.expenses);
-      setChartData(data.chartData);
-      setExpenseBreakdown(data.expenseBreakdown);
-      setValidation(data.validation);
-      setLastVerifiedAt(data.lastVerifiedAt);
-      setInsights(data.insights);
+      applySingleCompanyMetrics(data);
     } catch (err) {
       console.error(err);
       toast.error('Failed to parse financial metrics');
@@ -478,13 +517,113 @@ function FinixDashboardInner() {
   // merges the monthly trend and expense-breakdown charts across
   // companies, and rolls the integrity checks up into a combined picture
   // that still names which company/companies failed which rule.
+  // Pure aggregation over an already-resolved `ok` array (one entry per
+  // successfully-loaded company) — pulled out of fetchAggregateMetrics so
+  // both the instant cache-hit path and the network path can share it.
+  const applyAggregateMetrics = (ok, companyList) => {
+    if (!ok.length) {
+      toast.error('Could not load figures for any company.');
+      setRevenue(0); setReceivables(0); setCashAndBank(0); setPayables(0);
+      setNetProfit(0); setExpenses(0); setChartData([]); setExpenseBreakdown([]);
+      setValidation(null); setLastVerifiedAt(null); setInsights([]);
+      return;
+    }
+
+    const sum = (key) => ok.reduce((s, { data }) => s + (Number(data[key]) || 0), 0);
+    setRevenue(sum('revenue'));
+    setReceivables(sum('receivables'));
+    setCashAndBank(sum('cashAndBank'));
+    setPayables(sum('payables'));
+    setExpenses(sum('expenses'));
+    setNetProfit(sum('netProfit'));
+
+    // Merge monthly trend charts by month label, summing every
+    // company's Revenue/Expenses/Profit for that month.
+    const monthMap = new Map();
+    ok.forEach(({ data }) => {
+      (data.chartData || []).forEach((row) => {
+        const cur = monthMap.get(row.name) || { name: row.name, Revenue: 0, Expenses: 0, Profit: 0 };
+        cur.Revenue += Number(row.Revenue) || 0;
+        cur.Expenses += Number(row.Expenses) || 0;
+        cur.Profit += Number(row.Profit) || 0;
+        monthMap.set(row.name, cur);
+      });
+    });
+    setChartData(Array.from(monthMap.values()).map((r) => ({
+      ...r, Revenue: round2(r.Revenue), Expenses: round2(r.Expenses), Profit: round2(r.Profit),
+    })));
+
+    // Merge expense breakdown by category name across every company.
+    const catMap = new Map();
+    ok.forEach(({ data }) => {
+      (data.expenseBreakdown || []).forEach((row) => {
+        catMap.set(row.name, (catMap.get(row.name) || 0) + (Number(row.value) || 0));
+      });
+    });
+    setExpenseBreakdown(Array.from(catMap.entries()).map(([name, value]) => ({ name, value })));
+
+    // Combined integrity picture — a rule only shows as passing if every
+    // company's own check passed; a failing rule names which and how
+    // many companies are affected instead of just a single generic flag.
+    const combinedMismatches = [];
+    INTEGRITY_CHECKS.forEach(({ rule }) => {
+      const failing = ok.filter(({ data }) => data.validation?.mismatches?.some((m) => m.rule === rule));
+      if (failing.length) {
+        const totalDiff = failing.reduce((s, { data }) => {
+          const m = data.validation.mismatches.find((m2) => m2.rule === rule);
+          return s + Math.abs(m?.diff || 0);
+        }, 0);
+        combinedMismatches.push({
+          rule,
+          diff: totalDiff,
+          note: `${failing.length} of ${ok.length} compan${failing.length === 1 ? 'y' : 'ies'} affected: ${failing.map(({ company }) => company.name).join(', ')}`,
+        });
+      }
+    });
+    const anyVerified = ok.some(({ data }) => !!data.validation);
+    setValidation(anyVerified ? { mismatches: combinedMismatches } : null);
+    setLastVerifiedAt(anyVerified ? new Date() : null);
+
+    // Combined insights: a headline summary plus each company's own top
+    // warning (if any), so nothing important gets buried by aggregation.
+    const combinedInsights = [{
+      type: combinedMismatches.length ? 'warning' : 'success',
+      category: 'Combined View',
+      title: `Combined figures across ${ok.length} of ${companyList.length} companies`,
+      text: combinedMismatches.length
+        ? `${combinedMismatches.length} integrity check${combinedMismatches.length === 1 ? '' : 's'} failed in at least one company — see the Autonomous Integrity Shield below for details.`
+        : 'All companies passed every integrity check for the current financial year.',
+    }];
+    ok.forEach(({ data, company }) => {
+      const warn = (data.insights || []).find((i) => i.type === 'warning');
+      if (warn) combinedInsights.push({ ...warn, title: `${company.name}: ${warn.title}` });
+    });
+    setInsights(combinedInsights);
+  };
+
   const fetchAggregateMetrics = async (companyList, { force = false } = {}) => {
     if (!companyList.length) {
       setLoading(false);
       return;
     }
-    setLoading(true);
     const requestId = ++fetchIdRef.current;
+
+    // If every company in the list already has a fresh cached snapshot,
+    // aggregate and paint instantly — no loading flash, no network calls.
+    // Same cache-first idea as fetchMetrics above, extended to the "All
+    // Companies" view.
+    if (!force) {
+      const cachedEntries = companyList.map((company) => ({ company, data: peekMetricsCache(company.id) }));
+      if (cachedEntries.every((e) => e.data)) {
+        const ok = cachedEntries.map(({ company, data }) => ({ company, data }));
+        applyAggregateMetrics(ok, companyList);
+        setLoading(false);
+        setVerifying(false);
+        return;
+      }
+    }
+
+    setLoading(true);
     try {
       const settled = await Promise.allSettled(
         companyList.map((c) => computeMetricsForCompany(c.id, { force }))
@@ -496,84 +635,7 @@ function FinixDashboardInner() {
         .filter(({ r }) => r.status === 'fulfilled')
         .map(({ r, company }) => ({ data: r.value, company }));
 
-      if (!ok.length) {
-        toast.error('Could not load figures for any company.');
-        setRevenue(0); setReceivables(0); setCashAndBank(0); setPayables(0);
-        setNetProfit(0); setExpenses(0); setChartData([]); setExpenseBreakdown([]);
-        setValidation(null); setLastVerifiedAt(null); setInsights([]);
-        return;
-      }
-
-      const sum = (key) => ok.reduce((s, { data }) => s + (Number(data[key]) || 0), 0);
-      setRevenue(sum('revenue'));
-      setReceivables(sum('receivables'));
-      setCashAndBank(sum('cashAndBank'));
-      setPayables(sum('payables'));
-      setExpenses(sum('expenses'));
-      setNetProfit(sum('netProfit'));
-
-      // Merge monthly trend charts by month label, summing every
-      // company's Revenue/Expenses/Profit for that month.
-      const monthMap = new Map();
-      ok.forEach(({ data }) => {
-        (data.chartData || []).forEach((row) => {
-          const cur = monthMap.get(row.name) || { name: row.name, Revenue: 0, Expenses: 0, Profit: 0 };
-          cur.Revenue += Number(row.Revenue) || 0;
-          cur.Expenses += Number(row.Expenses) || 0;
-          cur.Profit += Number(row.Profit) || 0;
-          monthMap.set(row.name, cur);
-        });
-      });
-      setChartData(Array.from(monthMap.values()).map((r) => ({
-        ...r, Revenue: round2(r.Revenue), Expenses: round2(r.Expenses), Profit: round2(r.Profit),
-      })));
-
-      // Merge expense breakdown by category name across every company.
-      const catMap = new Map();
-      ok.forEach(({ data }) => {
-        (data.expenseBreakdown || []).forEach((row) => {
-          catMap.set(row.name, (catMap.get(row.name) || 0) + (Number(row.value) || 0));
-        });
-      });
-      setExpenseBreakdown(Array.from(catMap.entries()).map(([name, value]) => ({ name, value })));
-
-      // Combined integrity picture — a rule only shows as passing if every
-      // company's own check passed; a failing rule names which and how
-      // many companies are affected instead of just a single generic flag.
-      const combinedMismatches = [];
-      INTEGRITY_CHECKS.forEach(({ rule }) => {
-        const failing = ok.filter(({ data }) => data.validation?.mismatches?.some((m) => m.rule === rule));
-        if (failing.length) {
-          const totalDiff = failing.reduce((s, { data }) => {
-            const m = data.validation.mismatches.find((m2) => m2.rule === rule);
-            return s + Math.abs(m?.diff || 0);
-          }, 0);
-          combinedMismatches.push({
-            rule,
-            diff: totalDiff,
-            note: `${failing.length} of ${ok.length} compan${failing.length === 1 ? 'y' : 'ies'} affected: ${failing.map(({ company }) => company.name).join(', ')}`,
-          });
-        }
-      });
-      const anyVerified = ok.some(({ data }) => !!data.validation);
-      setValidation(anyVerified ? { mismatches: combinedMismatches } : null);
-      setLastVerifiedAt(anyVerified ? new Date() : null);
-
-      // Combined insights: a headline summary plus each company's own top
-      // warning (if any), so nothing important gets buried by aggregation.
-      const combinedInsights = [{
-        type: combinedMismatches.length ? 'warning' : 'success',
-        category: 'Combined View',
-        title: `Combined figures across ${ok.length} of ${companyList.length} companies`,
-        text: combinedMismatches.length
-          ? `${combinedMismatches.length} integrity check${combinedMismatches.length === 1 ? '' : 's'} failed in at least one company — see the Autonomous Integrity Shield below for details.`
-          : 'All companies passed every integrity check for the current financial year.',
-      }];
-      ok.forEach(({ data, company }) => {
-        const warn = (data.insights || []).find((i) => i.type === 'warning');
-        if (warn) combinedInsights.push({ ...warn, title: `${company.name}: ${warn.title}` });
-      });
-      setInsights(combinedInsights);
+      applyAggregateMetrics(ok, companyList);
     } catch (err) {
       console.error(err);
       toast.error('Failed to aggregate financial metrics across companies.');
