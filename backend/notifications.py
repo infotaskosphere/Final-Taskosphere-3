@@ -1,4 +1,4 @@
-""" 
+"""
 notifications.py
 ================
 Full notification router + internal event helpers.
@@ -42,10 +42,8 @@ class NotificationBase(BaseModel):
     title: str = Field(min_length=1)
     message: str = Field(min_length=1)
     type: str = "system"
-    # Task-level popup fields (used by the "raise a popup for this task"
-    # feature on the Tasks page). popup=True tells the frontend to fire an
-    # OS-level Notification() in addition to the normal in-app bell entry,
-    # so it is visible even if the browser window is minimized.
+
+    # Task-level popup fields
     popup: bool = False
     task_id: Optional[str] = None
 
@@ -64,9 +62,10 @@ class AdminNotificationRequest(BaseModel):
     message: str = Field(min_length=1)
     type: str = "system"
     user_id: Optional[str] = None
-    # Bulk targeting: send the same notification to several specific users
-    # at once (e.g. "raise popup" on multiple selected tasks/assignees).
+
+    # Bulk targeting
     user_ids: Optional[List[str]] = None
+
     broadcast: bool = False
     popup: bool = False
     task_id: Optional[str] = None
@@ -77,16 +76,30 @@ class AdminNotificationRequest(BaseModel):
 def normalize_notification(doc: dict) -> dict:
     if not doc:
         return doc
+
     if "_id" in doc and "id" not in doc:
         doc["id"] = str(doc["_id"])
+
     doc.pop("_id", None)
+
     doc["created_at"] = safe_dt(doc.get("created_at"))
+
     return doc
 
 
 # ====================== ROUTER ======================
 
-router = APIRouter(prefix="/notifications", tags=["Notifications"])
+# IMPORTANT:
+# This prefix makes the final API path:
+# /api/notifications
+#
+# because backend/server.py already has:
+# api_router = APIRouter(prefix="/api")
+#
+router = APIRouter(
+    prefix="/notifications",
+    tags=["Notifications"]
+)
 
 
 async def create_notification_indexes():
@@ -108,6 +121,7 @@ async def create_notification(
     popup: bool = False,
     task_id: Optional[str] = None,
 ) -> Optional[Notification]:
+
     try:
         notification = Notification(
             user_id=user_id,
@@ -117,27 +131,43 @@ async def create_notification(
             popup=popup,
             task_id=task_id,
         )
+
         doc = notification.model_dump()
+
         doc["created_at"] = datetime.now(timezone.utc)
+
         result = await db.notifications.insert_one(doc)
+
         if not result.inserted_id:
             raise Exception("Insert failed")
+
         doc.pop("_id", None)
+
         return notification
+
     except Exception as e:
-        logger.error(f"[Notification] Failed to create for user {user_id}: {e}")
+        logger.error(
+            f"[Notification] Failed to create for user {user_id}: {e}"
+        )
         return None
 
 
 async def _get_admin_user_ids() -> List[str]:
+
     admins = await db.users.find(
         {"role": "admin"},
         {"id": 1, "_id": 0},
     ).to_list(length=500)
-    return [u["id"] for u in admins if "id" in u]
+
+    return [
+        u["id"]
+        for u in admins
+        if "id" in u
+    ]
 
 
 async def _get_permitted_user_ids() -> List[str]:
+
     permitted = await db.users.find(
         {
             "role": {"$ne": "admin"},
@@ -146,7 +176,12 @@ async def _get_permitted_user_ids() -> List[str]:
         },
         {"id": 1, "_id": 0},
     ).to_list(length=500)
-    return [u["id"] for u in permitted if "id" in u]
+
+    return [
+        u["id"]
+        for u in permitted
+        if "id" in u
+    ]
 
 
 async def notify_admins_leave(
@@ -154,20 +189,25 @@ async def notify_admins_leave(
     detail: str = "",
     exclude_user_id: Optional[str] = None,
 ) -> None:
-    """Notify all admins when a user applies for / marks leave.
 
-    Uses type="leave" so the frontend can colour-code and count leave
-    notifications separately from regular ones.
-    """
     admin_ids = await _get_admin_user_ids()
-    recipient_ids = list({uid for uid in admin_ids if uid != exclude_user_id})
+
+    recipient_ids = list({
+        uid
+        for uid in admin_ids
+        if uid != exclude_user_id
+    })
+
     if not recipient_ids:
         return
 
     now = datetime.now(timezone.utc)
+
     message = f"{applicant_name} applied for leave."
+
     if detail:
         message = f"{message} {detail}".strip()
+
     docs = [
         {
             "id": str(uuid.uuid4()),
@@ -180,11 +220,18 @@ async def notify_admins_leave(
         }
         for uid in recipient_ids
     ]
+
     try:
         if docs:
-            await db.notifications.insert_many(docs, ordered=False)
+            await db.notifications.insert_many(
+                docs,
+                ordered=False
+            )
+
     except Exception as e:
-        logger.error(f"[Notification] leave insert failed: {e}")
+        logger.error(
+            f"[Notification] leave insert failed: {e}"
+        )
 
 
 async def notify_admins_and_permitted(
@@ -193,17 +240,21 @@ async def notify_admins_and_permitted(
     type: str = "task",
     exclude_user_id: Optional[str] = None,
 ) -> None:
+
     admin_ids = await _get_admin_user_ids()
     permitted_ids = await _get_permitted_user_ids()
 
-    recipient_ids = list(
-        {uid for uid in (admin_ids + permitted_ids) if uid != exclude_user_id}
-    )
+    recipient_ids = list({
+        uid
+        for uid in (admin_ids + permitted_ids)
+        if uid != exclude_user_id
+    })
 
     if not recipient_ids:
         return
 
     now = datetime.now(timezone.utc)
+
     docs = [
         {
             "id": str(uuid.uuid4()),
@@ -219,16 +270,28 @@ async def notify_admins_and_permitted(
 
     try:
         if docs:
-            await db.notifications.insert_many(docs, ordered=False)
+            await db.notifications.insert_many(
+                docs,
+                ordered=False
+            )
+
     except Exception as e:
-        logger.error(f"[Notification] bulk insert failed: {e}")
+        logger.error(
+            f"[Notification] bulk insert failed: {e}"
+        )
 
 
 # ====================== EVENT HELPERS ======================
 
 def _role_value(user: User) -> str:
+
     role = user.role
-    return role.value if hasattr(role, "value") else str(role)
+
+    return (
+        role.value
+        if hasattr(role, "value")
+        else str(role)
+    )
 
 
 async def on_task_status_changed(
@@ -237,12 +300,19 @@ async def on_task_status_changed(
     new_status: str,
     changed_by_user: User,
 ) -> None:
-    exclude = changed_by_user.id if _role_value(changed_by_user) == "admin" else None
+
+    exclude = (
+        changed_by_user.id
+        if _role_value(changed_by_user) == "admin"
+        else None
+    )
+
     await notify_admins_and_permitted(
         title="Task Status Updated",
         message=(
             f'Task "{task_title}" was marked as '
-            f'"{new_status}" by {changed_by_user.full_name or changed_by_user.email}.'
+            f'"{new_status}" by '
+            f'{changed_by_user.full_name or changed_by_user.email}.'
         ),
         type="task",
         exclude_user_id=exclude,
@@ -254,6 +324,7 @@ async def on_task_completed(
     task_title: str,
     completed_by_user: User,
 ) -> None:
+
     await on_task_status_changed(
         task_id=task_id,
         task_title=task_title,
@@ -268,20 +339,25 @@ async def on_task_assigned(
     assigned_to_user_id: str,
     assigned_by_user: User,
 ) -> None:
-    is_admin_assigning = _role_value(assigned_by_user) == "admin"
+
+    is_admin_assigning = (
+        _role_value(assigned_by_user) == "admin"
+    )
 
     if not is_admin_assigning:
+
         await notify_admins_and_permitted(
             title="Task Assigned by Staff/Manager",
             message=(
-                f'{assigned_by_user.full_name or assigned_by_user.email} assigned '
-                f'task "{task_title}" to a team member.'
+                f'{assigned_by_user.full_name or assigned_by_user.email} '
+                f'assigned task "{task_title}" to a team member.'
             ),
             type="task",
             exclude_user_id=assigned_by_user.id,
         )
 
     if assigned_to_user_id != assigned_by_user.id:
+
         await create_notification(
             user_id=assigned_to_user_id,
             title="New Task Assigned",
@@ -297,6 +373,7 @@ async def on_todo_created(
     todo_title: str,
     created_by_user: User,
 ) -> None:
+
     if _role_value(created_by_user) == "admin":
         return
 
@@ -315,6 +392,7 @@ async def on_todo_completed(
     todo_title: str,
     completed_by_user: User,
 ) -> None:
+
     if _role_value(completed_by_user) == "admin":
         return
 
@@ -330,31 +408,37 @@ async def on_todo_completed(
 
 
 # ====================== SEND NOTIFICATION ======================
-# Accessible by any logged-in user (not admin-only)
-# so that todos, tasks etc. can call it from frontend onSuccess.
 
 @router.post("/send")
 async def send_notification(
     payload: AdminNotificationRequest,
     current_user: User = Depends(get_current_user),
 ):
+
     now = datetime.now(timezone.utc)
 
-    # ── BROADCAST — admin only ─────────────────────────────────────────────
+    # ── BROADCAST — admin only ─────────────────────────────────────
+
     if payload.broadcast:
-        # Only admins can broadcast
+
         if _role_value(current_user) != "admin":
+
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only admins can broadcast notifications.",
             )
 
         users = await db.users.find(
-            {"is_active": True}, {"id": 1, "_id": 0}
+            {"is_active": True},
+            {"id": 1, "_id": 0},
         ).to_list(length=5000)
 
         if not users:
-            return {"status": "success", "message": "No active users found"}
+
+            return {
+                "status": "success",
+                "message": "No active users found"
+            }
 
         docs = [
             {
@@ -371,21 +455,37 @@ async def send_notification(
         ]
 
         if docs:
-            await db.notifications.insert_many(docs, ordered=False)
+
+            await db.notifications.insert_many(
+                docs,
+                ordered=False
+            )
 
         return {
             "status": "success",
             "message": f"Broadcasted to {len(docs)} users",
         }
 
-    # ── BULK — several specific users at once (e.g. task popup fan-out) ────
+    # ── BULK — several specific users ─────────────────────────────
+
     if payload.user_ids:
-        target_ids = list({uid for uid in payload.user_ids if uid})
+
+        target_ids = list({
+            uid
+            for uid in payload.user_ids
+            if uid
+        })
+
         if not target_ids:
+
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="user_ids was provided but contained no valid ids",
+                detail=(
+                    "user_ids was provided but contained "
+                    "no valid ids"
+                ),
             )
+
         docs = [
             {
                 "id": str(uuid.uuid4()),
@@ -400,15 +500,26 @@ async def send_notification(
             }
             for uid in target_ids
         ]
+
         if docs:
-            await db.notifications.insert_many(docs, ordered=False)
+
+            await db.notifications.insert_many(
+                docs,
+                ordered=False
+            )
+
         return {
             "status": "success",
-            "message": f"Notification sent to {len(docs)} users",
+            "message": (
+                f"Notification sent to "
+                f"{len(docs)} users"
+            ),
         }
 
-    # ── SINGLE USER ────────────────────────────────────────────────────────
+    # ── SINGLE USER ────────────────────────────────────────────────
+
     if payload.user_id:
+
         result = await create_notification(
             user_id=payload.user_id,
             title=payload.title,
@@ -417,15 +528,21 @@ async def send_notification(
             popup=payload.popup,
             task_id=payload.task_id,
         )
+
         if result:
-            return {"status": "success", "message": "Notification sent"}
+
+            return {
+                "status": "success",
+                "message": "Notification sent"
+            }
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create notification",
         )
 
-    # ── SELF NOTIFICATION (no user_id, no broadcast) ───────────────────────
-    # This handles frontend calls from todos/tasks onSuccess
+    # ── SELF NOTIFICATION ─────────────────────────────────────────
+
     result = await create_notification(
         user_id=current_user.id,
         title=payload.title,
@@ -434,8 +551,14 @@ async def send_notification(
         popup=payload.popup,
         task_id=payload.task_id,
     )
+
     if result:
-        return {"status": "success", "message": "Notification sent"}
+
+        return {
+            "status": "success",
+            "message": "Notification sent"
+        }
+
     raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail="Failed to create notification",
@@ -444,64 +567,120 @@ async def send_notification(
 
 # ====================== GET NOTIFICATIONS ======================
 
-@router.get("", response_model=List[Notification])
-@router.get("/", response_model=List[Notification], include_in_schema=False)
+@router.get(
+    "",
+    response_model=List[Notification]
+)
+@router.get(
+    "/",
+    response_model=List[Notification],
+    include_in_schema=False
+)
 async def get_my_notifications(
     current_user: User = Depends(get_current_user),
     limit: int = 100,
     skip: int = 0,
     unread_only: bool = False,
 ):
-    query: dict = {"user_id": current_user.id}
+
+    query: dict = {
+        "user_id": current_user.id
+    }
+
     if unread_only:
+
         query["is_read"] = False
 
-    raw = await db.notifications.find(query, {"_id": 0}) \
-        .sort("created_at", -1) \
-        .skip(skip) \
-        .limit(limit) \
+    raw = (
+        await db.notifications.find(
+            query,
+            {"_id": 0}
+        )
+        .sort("created_at", -1)
+        .skip(skip)
+        .limit(limit)
         .to_list(length=limit)
+    )
 
-    return [normalize_notification(n) for n in raw]
+    return [
+        normalize_notification(n)
+        for n in raw
+    ]
 
 
-# ── Unread count ──────────────────────────────────────────────────────────────
+# ====================== UNREAD COUNT ======================
 
 @router.get("/unread-count")
 async def get_unread_count(
     current_user: User = Depends(get_current_user),
 ):
+
     try:
+
         count = await db.notifications.count_documents(
-            {"user_id": current_user.id, "is_read": False}
+            {
+                "user_id": current_user.id,
+                "is_read": False
+            }
         )
-        return {"count": int(count or 0)}
+
+        return {
+            "count": int(count or 0)
+        }
+
     except Exception as e:
-        logger.error(f"[Notification] unread-count error: {e}")
-        return {"count": 0}
+
+        logger.error(
+            f"[Notification] unread-count error: {e}"
+        )
+
+        return {
+            "count": 0
+        }
 
 
-# NOTE: /read-all and /clear-all MUST be declared BEFORE /{notification_id}
-# to prevent FastAPI treating them as path parameters.
+# IMPORTANT:
+# /read-all and /clear-all are declared BEFORE
+# /{notification_id} so FastAPI does not treat
+# them as notification IDs.
 
 @router.patch("/read-all")
 @router.put("/read-all")
 async def mark_all_notifications_read(
     current_user: User = Depends(get_current_user),
 ):
+
     await db.notifications.update_many(
-        {"user_id": current_user.id, "is_read": False},
-        {"$set": {"is_read": True}},
+        {
+            "user_id": current_user.id,
+            "is_read": False
+        },
+        {
+            "$set": {
+                "is_read": True
+            }
+        },
     )
-    return {"message": "All notifications marked as read"}
+
+    return {
+        "message": "All notifications marked as read"
+    }
 
 
 @router.delete("/clear-all")
 async def clear_all_notifications(
     current_user: User = Depends(get_current_user),
 ):
-    await db.notifications.delete_many({"user_id": current_user.id})
-    return {"message": "All notifications cleared"}
+
+    await db.notifications.delete_many(
+        {
+            "user_id": current_user.id
+        }
+    )
+
+    return {
+        "message": "All notifications cleared"
+    }
 
 
 @router.patch("/{notification_id}/read")
@@ -510,16 +689,32 @@ async def mark_notification_read(
     notification_id: str,
     current_user: User = Depends(get_current_user),
 ):
+
     result = await db.notifications.update_one(
-        {"id": notification_id, "user_id": current_user.id},
-        {"$set": {"is_read": True}},
+        {
+            "id": notification_id,
+            "user_id": current_user.id
+        },
+        {
+            "$set": {
+                "is_read": True
+            }
+        },
     )
+
     if result.matched_count == 0:
+
         raise HTTPException(
             status_code=404,
-            detail="Notification not found or not authorized",
+            detail=(
+                "Notification not found "
+                "or not authorized"
+            ),
         )
-    return {"message": "Notification marked as read"}
+
+    return {
+        "message": "Notification marked as read"
+    }
 
 
 @router.delete("/{notification_id}")
@@ -527,12 +722,24 @@ async def delete_notification(
     notification_id: str,
     current_user: User = Depends(get_current_user),
 ):
+
     result = await db.notifications.delete_one(
-        {"id": notification_id, "user_id": current_user.id}
+        {
+            "id": notification_id,
+            "user_id": current_user.id
+        }
     )
+
     if result.deleted_count == 0:
+
         raise HTTPException(
             status_code=404,
-            detail="Notification not found or not authorized",
+            detail=(
+                "Notification not found "
+                "or not authorized"
+            ),
         )
-    return {"message": "Notification deleted"}
+
+    return {
+        "message": "Notification deleted"
+    }
