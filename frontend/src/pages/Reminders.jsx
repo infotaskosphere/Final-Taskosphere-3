@@ -116,6 +116,28 @@ function normalizeReminder(r) {
 
 const stripHtml = (str) => (str || "").replace(/<[^>]*>/g, "");
 
+// Converts a Date (or ISO string) into the "YYYY-MM-DDTHH:mm" format a
+// <input type="datetime-local"> expects, using LOCAL wall-clock time.
+//
+// BUG THIS FIXES: code previously did `date.toISOString().slice(0, 16)` to
+// pre-fill these inputs. toISOString() always returns UTC, but a
+// datetime-local input treats whatever string you give it as LOCAL time.
+// So a reminder stored as 2026-08-11T10:00:00Z (= 3:30 PM IST) would show
+// in the edit form as "Aug 11, 10:00 AM" — visually correct-looking but 5.5
+// hours off. Saving that unedited form then re-submitted a *shifted* UTC
+// time, and for reminders scheduled early enough in the local day, that
+// shift silently pushed remind_at back across midnight into the previous
+// calendar day — which is why editing a reminder (e.g. to mark it
+// Adjourned) could make it appear to "vanish" from its original date and
+// resurface a day earlier on the calendar. This helper keeps local wall-clock
+// time consistent between what's stored, what's displayed, and what's re-saved.
+function toDatetimeLocalValue(dateOrIso) {
+  const d = dateOrIso instanceof Date ? dateOrIso : new Date(dateOrIso);
+  if (isNaN(d.getTime())) return "";
+  const tzOffsetMs = d.getTimezoneOffset() * 60000;
+  return new Date(d.getTime() - tzOffsetMs).toISOString().slice(0, 16);
+}
+
 const formatReminderTime = (isoStr) => {
   if (!isoStr) return "—";
   try {
@@ -529,7 +551,7 @@ function RescheduleModal({ rem, isDark, onConfirm, onCancel }) {
     // Default to tomorrow same time
     const d = new Date();
     d.setDate(d.getDate() + 1);
-    return d.toISOString().slice(0, 16);
+    return toDatetimeLocalValue(d);
   });
 
   if (!rem) return null;
@@ -612,7 +634,7 @@ function RescheduleModal({ rem, isDark, onConfirm, onCancel }) {
                     const d = new Date();
                     if (days) d.setDate(d.getDate() + days);
                     else d.setHours(d.getHours() + hours);
-                    setNewDatetime(d.toISOString().slice(0, 16));
+                    setNewDatetime(toDatetimeLocalValue(d));
                   }}
                   className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-all ${
                     isDark
@@ -1356,7 +1378,7 @@ export default function Reminders() {
     setFormTitle(rem.title || "");
     setFormDesc(stripHtml(rem.description || ""));
     try {
-      setFormDatetime(new Date(rem.remind_at).toISOString().slice(0, 16));
+      setFormDatetime(toDatetimeLocalValue(rem.remind_at));
     } catch {
       setFormDatetime("");
     }
