@@ -314,6 +314,27 @@ export function CompanyManager({ onClose, onSaved, editingCompany }) {
               </div>
             ))}
 
+            {/* ── Warning: Current/business accounts commonly reject plain P2P UPI QR pushes ──
+                This is the #1 cause of "Receiver's bank does not allow payments to this bank
+                account" on invoice QR scans. Surface it clearly instead of letting people find
+                out from an angry client screenshot. */}
+            {(form.bank_account_type || 'Current').trim().toLowerCase() === 'current'
+              && !form.upi_qr_image_base64 && !form.upi_mcc && (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 space-y-1">
+                <p className="text-[11px] font-bold text-amber-700 flex items-center gap-1.5">
+                  <Info className="h-3.5 w-3.5 flex-shrink-0" />
+                  Payments on this invoice may get declined
+                </p>
+                <p className="text-[10.5px] text-amber-700 leading-snug">
+                  This is a <strong>Current</strong> account with no bank-issued QR image or Merchant Category
+                  Code set. Many banks reject a plain UPI transfer into a current account with
+                  "Receiver's bank does not allow payments to this bank account" — they only accept
+                  tagged merchant (P2M) payments. Fix it by uploading your bank's QR image below
+                  (best), or at minimum set a Merchant Category Code.
+                </p>
+              </div>
+            )}
+
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold">Bank's UPI QR Code <span className="text-slate-400 font-normal">(recommended)</span></Label>
               <p className="text-[10px] text-slate-400 -mt-0.5">
@@ -334,10 +355,12 @@ export function CompanyManager({ onClose, onSaved, editingCompany }) {
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">Merchant Category Code <span className="text-slate-400 font-normal">(optional)</span></Label>
+              <Label className="text-xs font-semibold">Merchant Category Code <span className="text-slate-400 font-normal">(strongly recommended for Current accounts)</span></Label>
               <p className="text-[10px] text-slate-400 -mt-0.5">
                 Only used for the fallback QR when no bank QR image is uploaded above — tags it as a merchant (business)
-                payment instead of a generic transfer. Your bank can confirm this code if your UPI ID is merchant-registered.
+                payment instead of a generic transfer, which Current accounts typically require to accept UPI at all.
+                Your bank can confirm this code if your UPI ID is merchant-registered. If left blank on a Current
+                account, we'll default to 8931 (Accounting/Bookkeeping/Tax services) so the QR isn't sent untagged.
               </p>
               <Input name="upi_mcc" value={form.upi_mcc} onChange={handleChange} placeholder="e.g. 8931" className="h-9 rounded-xl text-sm" />
             </div>
