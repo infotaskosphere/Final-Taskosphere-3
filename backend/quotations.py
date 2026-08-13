@@ -1693,6 +1693,7 @@ async def list_companies(current_user: User = Depends(get_current_user)):
         "bank_account_type": 1,
         "upi_id": 1,
         "upi_qr_image_base64": 1,
+        "upi_mcc": 1,
         "linked_bank_account_id": 1,
         "logo_base64": 1,
         "tm_logo_base64": 1,
