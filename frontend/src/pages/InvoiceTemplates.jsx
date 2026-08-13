@@ -179,7 +179,9 @@ function getLogoHTML(company, theme, size, shape, variant) {
 
 function buildUpiUrl(company, inv) {
   if (!company || !company.upi_id) return '';
-  const pendingAmount = parseFloat((inv && inv.amount_due != null ? inv.amount_due : (inv && inv.grand_total)) || 0);
+  const hasExplicitDue = inv && inv.amount_due != null;
+  const pendingAmount = parseFloat((hasExplicitDue ? inv.amount_due : (inv && inv.grand_total)) || 0);
+  if (!Number.isFinite(pendingAmount) || pendingAmount <= 0) return '';
   
   // Clean payee name: replace '&' with 'and', allow only letters, numbers, spaces, dots, and hyphens.
   // UPI apps do not URL-decode parameters scanned from QR codes, so having double-encoded or % encoded
@@ -189,35 +191,36 @@ function buildUpiUrl(company, inv) {
   rawName = rawName.replace(/[^a-zA-Z0-9\s.\-]/g, '');
   rawName = rawName.replace(/\s+/g, ' ').trim();
   
-  const pa = company.upi_id.trim();
+  // A malformed VPA produces a QR that can look valid but is rejected by the
+  // receiving bank. Keep the VPA intact (including its case), but reject
+  // whitespace and characters that are not valid in a UPI ID.
+  const pa = String(company.upi_id).trim().replace(/\s+/g, '');
+  if (!/^[a-zA-Z0-9._-]{2,256}@[a-zA-Z0-9.-]{2,64}$/.test(pa)) return '';
   
-  // Clean transaction note (short invoice number, standard alphanumeric/spaces/hyphens)
-  let rawTn = 'Invoice ' + ((inv && inv.invoice_no) || '');
-  rawTn = rawTn.replace(/[^a-zA-Z0-9\s.\-]/g, '').replace(/\s+/g, ' ').trim();
+  // UPI apps and the bank switch use the transaction reference to identify a
+  // merchant collection. Keep it short and deterministic so rescanning the
+  // same invoice does not create a different payment request.
+  let reference = String((inv && inv.invoice_no) || 'Invoice');
+  reference = reference.replace(/[^a-zA-Z0-9.\-]/g, '').slice(0, 35) || 'Invoice';
+  const rawTn = ('Invoice ' + reference).slice(0, 80);
   
   const am = pendingAmount > 0 ? '&am=' + pendingAmount.toFixed(2) : '';
 
   // Merchant Category Code: tags this as a merchant (P2M) transaction rather than a
   // generic P2P transfer, matching how a bank-issued merchant QR is classified.
-  //
-  // IMPORTANT: this is not just cosmetic. Many banks (SBI included) reject a plain
-  // P2P-style UPI push into a CURRENT/business account with exactly the error
-  // "Receiver's bank does not allow payments to this bank account" — current accounts
-  // are commonly gated to only accept tagged merchant (P2M) transactions over UPI.
-  // So if the company hasn't set an explicit MCC but their account is a business-type
-  // account (Current / CC / OD), we still tag the transaction with a sensible generic
-  // services MCC (8931 — Accounting/Bookkeeping/Tax) rather than leaving it untagged,
-  // since untagged is the configuration most likely to trigger that exact decline.
+  // Only included if the company has one on file (set in Invoice/Quotation Settings).
   const mcRaw = (company.upi_mcc || '').trim();
-  const isBusinessAccount = ['current', 'cc', 'overdraft', 'od'].includes(
-    (company.bank_account_type || '').trim().toLowerCase()
-  );
-  const effectiveMc = mcRaw || (isBusinessAccount ? '8931' : '');
-  const mc = effectiveMc ? '&mc=' + effectiveMc.replace(/[^0-9]/g, '') : '';
+  const mc = mcRaw ? '&mc=' + mcRaw.replace(/[^0-9]/g, '') : '';
 
-  // Return raw UPI link with literal spaces. It will be encoded ONCE when converted to QR image URL,
-  // meaning scanning devices will decode it to standard spaces (no %20 or % symbol issues).
-  return 'upi://pay?pa=' + pa + '&pn=' + rawName + am + mc + '&tn=' + rawTn + '&cu=INR';
+  // Keep the values compatible with UPI intent parsers: no percent-encoding
+  // inside the payload (the complete URI is encoded once by getQrHTML).
+  return 'upi://pay?pa=' + pa
+    + '&pn=' + rawName
+    + mc
+    + '&tr=' + reference
+    + '&tn=' + rawTn
+    + am
+    + '&cu=INR';
 }
 
 // Preferred entry point for rendering a payment QR on an invoice. If the company has
@@ -229,6 +232,12 @@ function buildUpiUrl(company, inv) {
 function getPaymentQrHTML(company, inv, size, label) {
   size = size || 90;
   if (!company) return '';
+  const hasExplicitDue = inv && inv.amount_due != null;
+  const pendingAmount = Number(hasExplicitDue ? inv.amount_due : (inv && inv.grand_total));
+  // Never display a payable QR for an already-settled invoice. A QR without
+  // an amount is especially risky because a payer may submit a duplicate
+  // payment and the receiving bank can refund or decline it.
+  if (!Number.isFinite(pendingAmount) || pendingAmount <= 0) return '';
   const bankQrImage = company.upi_qr_image_base64 || company.upi_qr_image_url;
   if (bankQrImage) {
     const lbl = label || 'Scan to Pay via UPI';
