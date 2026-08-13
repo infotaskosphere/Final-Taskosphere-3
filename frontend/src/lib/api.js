@@ -145,6 +145,31 @@ api.interceptors.response.use(
   (error) => {
     if (!error.config?._silent) _setLoading(-1);
 
+    // Older Taskosphere backend deployments registered collection routes with
+    // a trailing slash while the frontend requested the canonical no-slash
+    // form. Retry only these known collection endpoints once so a rolling
+    // frontend/backend deployment does not turn dashboard widgets into 404s.
+    // Resource-specific 404s (for example /tasks/:id) are never rewritten.
+    const requestUrl = error.config?.url || "";
+    const [requestPath, requestQuery = ""] = requestUrl.split("?");
+    const slashCompatibleCollections = new Set([
+      "/notifications",
+      "/visits",
+      "/leads",
+    ]);
+    if (
+      error.response?.status === 404 &&
+      error.config?.method?.toLowerCase() === "get" &&
+      !error.config?._slashRetry &&
+      slashCompatibleCollections.has(requestPath.replace(/\/+$/, ""))
+    ) {
+      return api.request({
+        ...error.config,
+        url: `${requestPath.replace(/\/+$/, "")}/${requestQuery ? `?${requestQuery}` : ""}`,
+        _slashRetry: true,
+      });
+    }
+
     // 🔐 401 → session expired, redirect to login
     if (error.response?.status === 401) {
       clearToken();
