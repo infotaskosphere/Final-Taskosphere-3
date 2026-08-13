@@ -4,7 +4,7 @@ import { useDark } from '@/hooks/useDark';
 import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
-import { fetchCompanies as fetchCompanyRecords } from "@/lib/companies";
+import { fetchCompanies } from "@/lib/companies";
 import axios from 'axios';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -373,11 +373,14 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [companiesData, lRes, sRes, clRes] = await Promise.all([
-          fetchCompanyRecords(), api.get('/leads'),
+        // Companies are ORG-WIDE MASTER DATA (Admin -> Master Data).
+        // Always read them through fetchCompanies() so the /companies/list
+        // fallback kicks in when the canonical route 404s on older backends.
+        const [companyList, lRes, sRes, clRes] = await Promise.all([
+          fetchCompanies(), api.get('/leads'),
           api.get('/quotations/services'), api.get('/clients'),
         ]);
-        setCompanies(companiesData); setLeads(lRes.data);
+        setCompanies(companyList); setLeads(lRes.data);
         setServices(sRes.data.services); setClients(clRes.data);
         if (editingQuotation) {
           setForm({
@@ -403,8 +406,8 @@ function QuotationManager({ onClose, onSaved, editingQuotation }) {
             attach_checklist: editingQuotation.attach_checklist !== false,
             status: editingQuotation.status || 'draft',
           });
-        } else if (cRes.data.length > 0) {
-          setForm(prev => ({ ...prev, company_id: cRes.data[0].id }));
+        } else if (companyList.length > 0) {
+          setForm(prev => ({ ...prev, company_id: companyList[0].id }));
         }
       } catch (err) { toast.error(getErrMsg(err, 'Failed to load data')); }
       finally { setLoading(false); }
@@ -1337,9 +1340,12 @@ export default function Quotations() {
 
   const fetchMeta = async () => {
     try {
-      const [companiesData, sRes] = await Promise.all([fetchCompanyRecords(), api.get('/quotations/services')]);
-      setCompanies(companiesData); setServices(sRes.data.services);
-    } catch {}
+      const [companyList, sRes] = await Promise.all([fetchCompanies(), api.get('/quotations/services')]);
+      setCompanies(companyList); setServices(sRes.data.services);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[quotations] failed to load meta:', err?.response?.status || err?.message);
+    }
   };
 
   useEffect(() => { fetchMeta(); fetchQuotations(); }, []);
