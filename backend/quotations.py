@@ -1886,6 +1886,7 @@ async def create_quotation(
     return doc
 
 
+@router.get("/quotations/list", include_in_schema=False)
 @router.get("/quotations")
 async def list_quotations(
     status: Optional[str] = None,
