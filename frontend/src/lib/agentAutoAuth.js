@@ -17,6 +17,9 @@ import axios from 'axios';
 
 const AGENT_URL = 'http://localhost:7432';
 const AUTH_ENDPOINT = '/api/auth';
+const DEBUG_AGENT_AUTO_AUTH =
+  import.meta.env?.VITE_DEBUG_AGENT_AUTOAUTH === 'true' ||
+  (typeof window !== 'undefined' && window.__TASKOSPHERE_DEBUG_AGENT_AUTOAUTH__ === true);
 
 // Track auth state to avoid duplicate pushes
 let isAuthed = false;
@@ -55,7 +58,11 @@ export async function pushAuthToAgent(token, userId) {
     // Check if agent is running
     const agentRunning = await isAgentRunning();
     if (!agentRunning) {
-      console.log('[AgentAutoAuth] Agent not detected on localhost:7432');
+      // The desktop agent is optional. A missing local agent is normal for
+      // users running the web app and should not pollute the browser console.
+      if (DEBUG_AGENT_AUTO_AUTH) {
+        console.debug('[AgentAutoAuth] Agent not detected on localhost:7432');
+      }
       return false;
     }
 
@@ -72,15 +79,21 @@ export async function pushAuthToAgent(token, userId) {
     if (response.status === 200 && response.data?.success) {
       isAuthed = true;
       lastAuthTime = now;
-      console.log('[AgentAutoAuth] ✓ Agent authenticated successfully');
-      console.log(`[AgentAutoAuth] Agent ID: ${response.data.agent_id}`);
+      if (DEBUG_AGENT_AUTO_AUTH) {
+        console.debug('[AgentAutoAuth] Agent authenticated successfully');
+        console.debug(`[AgentAutoAuth] Agent ID: ${response.data.agent_id}`);
+      }
       return true;
     } else {
-      console.warn('[AgentAutoAuth] Agent auth failed:', response.data);
+      if (DEBUG_AGENT_AUTO_AUTH) {
+        console.warn('[AgentAutoAuth] Agent auth failed:', response.data);
+      }
       return false;
     }
   } catch (error) {
-    console.error('[AgentAutoAuth] Failed to push auth to agent:', error.message);
+    if (DEBUG_AGENT_AUTO_AUTH) {
+      console.warn('[AgentAutoAuth] Failed to push auth to agent:', error.message);
+    }
     return false;
   }
 }
@@ -113,6 +126,8 @@ export async function autoAuthenticateAgent(token, userId) {
     return false;
   }
 
-  console.log('[AgentAutoAuth] Attempting to auto-authenticate agent...');
+  if (DEBUG_AGENT_AUTO_AUTH) {
+    console.debug('[AgentAutoAuth] Attempting to auto-authenticate agent...');
+  }
   return await pushAuthToAgent(token, userId);
 }
