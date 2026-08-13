@@ -14708,4 +14708,3 @@ async def _debug_list_routes():
     return sorted(
         {r.path for r in app.routes if isinstance(r, APIRoute) and r.path.startswith("/api")}
     )
-
