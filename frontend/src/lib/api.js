@@ -23,7 +23,7 @@ const _runtimeOverride =
   typeof window !== "undefined" ? window.__TASKOSPHERE_API_URL__ : undefined;
 
 const _configuredApiUrl = _runtimeOverride || import.meta.env.VITE_API_URL || "";
-const _defaultBackendUrl = "https://final-taskosphere-backend.onrender.com";
+const _defaultBackendUrl = "https://api.taskosphere.com";
 
 // Some older Render builds accidentally injected the frontend URL into
 // VITE_API_URL. That makes every authenticated page request
