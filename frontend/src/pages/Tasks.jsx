@@ -1425,11 +1425,25 @@ export default function Tasks() {
   };
 
   const handleQuickStatusChange = React.useCallback(async (task, newStatus) => {
+    const previousStatus = task.status;
+    // Optimistic update — rolled back below if the server rejects it.
     setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
     try {
-      await fetch(`${API_BASE}/tasks/${task.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...getAuthHeader() }, body: JSON.stringify({ status: newStatus }) });
+      const res = await fetch(`${API_BASE}/tasks/${task.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...getAuthHeader() }, body: JSON.stringify({ status: newStatus }) });
+      if (!res.ok) {
+        // Server rejected the update (e.g. 403 permission denied, 404, 500).
+        // Roll back the optimistic change so the UI doesn't lie about what was saved.
+        setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: previousStatus } : t));
+        let detail = '';
+        try { detail = (await res.json())?.detail || ''; } catch {}
+        toast.error(detail || `Failed to update status (${res.status})`);
+        return;
+      }
       toast.success(`Marked as ${STATUS_STYLES[newStatus]?.label || newStatus}`);
-    } catch { toast.error('Network error'); }
+    } catch {
+      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: previousStatus } : t));
+      toast.error('Network error');
+    }
   }, []);
 
   const handleAddComment = React.useCallback(async () => {
