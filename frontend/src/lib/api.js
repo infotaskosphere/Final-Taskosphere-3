@@ -167,6 +167,8 @@ api.interceptors.response.use(
       "/notifications",
       "/visits",
       "/leads",
+      "/quotations",
+      "/companies",
     ]);
     if (
       error.response?.status === 404 &&
