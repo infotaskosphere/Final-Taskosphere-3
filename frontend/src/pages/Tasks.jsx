@@ -931,7 +931,6 @@ export default function Tasks() {
   const [scanProgress, setScanProgress] = useState(0);   // 0–100 progress while detecting duplicates
   const [scanStatus,   setScanStatus]   = useState('');  // human-readable status (e.g. 'Asking Gemini…')
   const scanAbortRef = useRef(null); // AbortController for in-flight duplicate-detection requests
-  const pendingNewTaskRef = useRef(false); // survives the searchParams re-render that clears ?newTask=1
   const [scanHistory, setScanHistory] = useState([]); // last few finished scans: { id, provider, label, groupCount, taskCount, scannedCount, durationMs, at }
   const [compareTaskIds,      setCompareTaskIds]       = useState([]);
   const [compareMode,         setCompareMode]          = useState(false);
@@ -1206,23 +1205,17 @@ export default function Tasks() {
   }, [searchParams, tasks]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-open new task dialog from URL param (?newTask=1) ─────────────
-  // Two-pass handoff via a ref so the cleanup of the first run cannot
-  // cancel the open:
-  //   Pass 1 – detects ?newTask=1, sets the ref, clears the URL param.
-  //             Clearing the param causes a re-render → effect fires again.
-  //   Pass 2 – ?newTask is gone but the ref is still true → open dialog,
-  //             clear the ref.  No timer involved, no race with cleanup.
+  // Open before clearing the parameter so Dashboard -> Tasks always lands
+  // directly in the create form instead of briefly showing the task list.
   useEffect(() => {
     if (searchParams.get('newTask') === '1') {
-      pendingNewTaskRef.current = true;
-      setSearchParams({}, { replace: true });
-      return; // re-render will fire this effect again for pass 2
-    }
-    if (pendingNewTaskRef.current) {
-      pendingNewTaskRef.current = false;
       setEditingTask(null);
       setFormData({ ...EMPTY_FORM });
       setDialogOpen(true);
+      setSearchParams((current) => {
+        current.delete('newTask');
+        return current;
+      }, { replace: true });
       return;
     }
     const filter = searchParams.get('filter');
