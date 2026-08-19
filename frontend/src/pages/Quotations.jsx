@@ -1332,9 +1332,22 @@ export default function Quotations() {
   const fetchQuotations = async () => {
     setLoading(true);
     try {
+      // api.js waits for the backend to finish waking up (Render cold start)
+      // and degrades a still-unavailable collection to an empty list, so a
+      // transient 404 no longer shows a scary error toast here.
       const res = await api.get('/quotations');
-      setQuotations(res.data);
-    } catch (err) { toast.error(getErrMsg(err, 'Failed to fetch quotations')); }
+      setQuotations(Array.isArray(res.data) ? res.data : (res.data?.quotations || []));
+    } catch (err) {
+      if (err?.response?.status === 404) {
+        try {
+          const fallback = await api.get('/quotations/list');
+          setQuotations(Array.isArray(fallback.data) ? fallback.data : []);
+          return;
+        } catch (_) { /* fall through */ }
+      }
+      setQuotations([]);
+      toast.error(getErrMsg(err, 'Failed to fetch quotations'));
+    }
     finally { setLoading(false); }
   };
 
