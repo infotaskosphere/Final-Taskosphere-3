@@ -6033,7 +6033,15 @@ async def create_document(
         check_module_permission("document_register", "create")
     ),
 ):
-    document = Document(**document_data.model_dump(), created_by=current_user.id)
+    # Document.created_at is optional on the response model, but every new
+    # record must receive a real timestamp before it is serialized for Mongo.
+    # Calling .isoformat() on the old None default caused every POST /documents
+    # request to fail with a 500 even when the user had the correct permission.
+    document = Document(
+        **document_data.model_dump(),
+        created_by=current_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
     doc = document.model_dump()
     doc["created_at"] = doc["created_at"].isoformat()
     if doc.get("issue_date"):
