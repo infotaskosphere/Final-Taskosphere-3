@@ -83,6 +83,7 @@ export default function ROCSpherePage() {
   const [tab, setTab] = useState('master');
   const [showNewCompany, setShowNewCompany] = useState(false);
   const [search, setSearch] = useState('');
+  const [syncing, setSyncing] = useState(false);
 
   const card = isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-white border-slate-200';
   const text = isDark ? 'text-slate-100' : 'text-slate-900';
@@ -160,6 +161,21 @@ export default function ROCSpherePage() {
     }
   };
 
+  const syncFromClients = async () => {
+    setSyncing(true);
+    try {
+      const { data } = await api.post('/roc-sphere/companies/sync-from-clients');
+      const list = await loadCompanies();
+      await loadEligibleClients();
+      if (!selectedId && list.length) setSelectedId(list[0].id);
+      toast.success(data?.created ? `Added ${data.created} compan${data.created === 1 ? 'y' : 'ies'} from Clients` : 'Already up to date with Clients');
+    } catch (e) {
+      toast.error(await parseBlobError(e) || 'Sync failed');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
     <div className={`min-h-screen ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
       <HubBanner
@@ -180,10 +196,17 @@ export default function ROCSpherePage() {
         <div className={`lg:col-span-1 rounded-xl border ${card} p-4 h-fit`}>
           <div className="flex items-center justify-between mb-3">
             <h3 className={`font-semibold text-sm ${text}`}>Companies</h3>
-            <button onClick={() => setShowNewCompany(true)} className="p-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white">
-              <Plus size={14} />
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button onClick={syncFromClients} disabled={syncing} title="Sync from Clients"
+                className={`p-1.5 rounded-lg disabled:opacity-60 ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-slate-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}>
+                {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              </button>
+              <button onClick={() => setShowNewCompany(true)} title="Add company manually" className="p-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white">
+                <Plus size={14} />
+              </button>
+            </div>
           </div>
+          <p className={`text-[11px] ${muted} mb-3 -mt-2`}>Auto-synced from Pvt Ltd / Public Ltd / LLP / OPC / Section 8 clients</p>
           <div className="relative mb-3">
             <Search size={14} className={`absolute left-2.5 top-2.5 ${muted}`} />
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search company / CIN…"
@@ -192,7 +215,10 @@ export default function ROCSpherePage() {
           {loading ? (
             <div className="flex justify-center py-8"><Loader2 className="animate-spin" size={20} /></div>
           ) : filteredCompanies.length === 0 ? (
-            <p className={`text-xs ${muted} py-6 text-center`}>No companies yet. Click + to add one.</p>
+            <p className={`text-xs ${muted} py-6 text-center`}>
+              No registered-entity clients found (Pvt Ltd / Public Ltd / LLP / OPC / Section 8).<br />
+              Add one as a Client, or click <RefreshCw size={11} className="inline" /> to re-sync, or + to add manually.
+            </p>
           ) : (
             <div className="space-y-1 max-h-[60vh] overflow-y-auto">
               {filteredCompanies.map((c) => (
@@ -318,13 +344,14 @@ function NewCompanyModal({ isDark, input, text, muted, eligibleClients, onClose,
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div className={`w-full max-w-lg rounded-xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'} p-5`} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
-          <h3 className={`font-semibold ${text}`}>Add Company</h3>
+          <h3 className={`font-semibold ${text}`}>Add Company Manually</h3>
           <button onClick={onClose}><X size={18} className={muted} /></button>
         </div>
+        <p className={`text-xs ${muted} mb-3`}>Companies from your Clients list sync in automatically — use this only for a company that isn't a Client yet.</p>
 
         {eligibleClients.length > 0 && (
           <div className="mb-3">
-            <label className={`text-xs font-medium ${muted} mb-1 block`}>Prefill from an existing client (optional)</label>
+            <label className={`text-xs font-medium ${muted} mb-1 block`}>Or link it to an unsynced client instead</label>
             <select className={input} onChange={(e) => fromClient(e.target.value)} defaultValue="">
               <option value="">— Start from scratch —</option>
               {eligibleClients.map((c) => (
