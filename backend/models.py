@@ -75,6 +75,8 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_manage_mis_report": True,      # MIS Report — upload / create / delete data
           "can_view_salary_slips": True,        # Salary Slip Generator — admin always has access
           "can_manage_salary_slips": True,
+          "can_view_roc_sphere": True,           # ROC Sphere — admin always has access
+          "can_manage_roc_sphere": True,         # ROC Sphere — create/edit/delete company masters & generate documents
           "can_access_whatsapp_hub": True,    # WhatsApp Hub
           "can_view_all_visits": True,
           "can_edit_attendance": True,
@@ -359,7 +361,7 @@ MODULE_HIERARCHY: Dict[str, Dict[str, Any]] = {
     "compliance": {
         "flag": "can_access_compliance",
         "label": "Compliance",
-        "description": "Compliance Tracker, GST Reconciliation, Trademark Sphere, MIS Report and the Salary Slip Generator.",
+        "description": "Compliance Tracker, GST Reconciliation, Trademark Sphere, MIS Report, Salary Slip Generator and ROC Sphere.",
         "pages": [
             {"flag": "can_view_compliance",          "label": "Compliance Tracker (view)", "actions": ["view", "export", "print"]},
             {"flag": "can_manage_compliance",        "label": "Compliance Tracker (manage)", "actions": ["create", "edit", "delete", "approve"]},
@@ -369,6 +371,8 @@ MODULE_HIERARCHY: Dict[str, Dict[str, Any]] = {
             {"flag": "can_manage_mis_report",        "label": "MIS Report (manage)", "actions": ["create", "edit", "delete", "upload"]},
             {"flag": "can_view_salary_slips",        "label": "Salary Slip Generator (view)", "actions": ["view", "export", "print"]},
             {"flag": "can_manage_salary_slips",      "label": "Salary Slip Generator (manage)", "actions": ["create", "edit", "delete"]},
+            {"flag": "can_view_roc_sphere",          "label": "ROC Sphere (view)", "actions": ["view", "export", "print"]},
+            {"flag": "can_manage_roc_sphere",        "label": "ROC Sphere (manage)", "actions": ["create", "edit", "delete", "upload"]},
         ],
     },
     "records": {
@@ -540,6 +544,17 @@ class UserPermissions(BaseModel):
     # Trademark Sphere — this is admin-granted only by default.
     can_view_salary_slips: bool = False
     can_manage_salary_slips: bool = False
+    # ── ROC Sphere ────────────────────────────────────────────────────────────
+    # Companies Act / ROC compliance module — company master, document
+    # generation (Board Resolution, Notices, Minutes, Shareholder Register)
+    # and the compliance checklist. Like GST Reconciliation, Trademark
+    # Sphere and Salary Slips, this is admin-granted only by default.
+    # can_view_roc_sphere → open the page, view company masters, checklist,
+    #   generate/download documents.
+    # can_manage_roc_sphere → create/edit/delete company masters and upload
+    #   AOC-4/MGT-7 to prefill them.
+    can_view_roc_sphere: bool = False
+    can_manage_roc_sphere: bool = False
     # ── Visit-specific permissions ───────────────────────────────────────────
     can_view_all_visits: bool = False
     can_edit_visits: bool = False
