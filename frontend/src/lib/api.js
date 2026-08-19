@@ -165,15 +165,20 @@ const api = axios.create({
 // ─── Request Interceptor ──────────────────────────────────────
 api.interceptors.request.use(
   (config) => {
-    // The deployed notifications collection is registered with a trailing
-    // slash. Normalize this one collection request before it reaches the
-    // server so the browser console does not log an avoidable 404 first.
+    // Some deployed collection routes are registered with a trailing slash.
+    // Normalize them before the request reaches the server so the browser
+    // does not log an avoidable 404 for the no-slash URL first.
     const [requestPath, requestQuery = ""] = (config.url || "").split("?");
+    const trailingSlashCollections = new Set([
+      "/notifications",
+      "/visits",
+      "/leads",
+    ]);
     if (
       config.method?.toLowerCase() === "get" &&
-      requestPath.replace(/\/+$/, "") === "/notifications"
+      trailingSlashCollections.has(requestPath.replace(/\/+$/, ""))
     ) {
-      config.url = `/notifications/${requestQuery ? `?${requestQuery}` : ""}`;
+      config.url = `${requestPath.replace(/\/+$/, "")}/${requestQuery ? `?${requestQuery}` : ""}`;
     }
 
     const token = getToken();
