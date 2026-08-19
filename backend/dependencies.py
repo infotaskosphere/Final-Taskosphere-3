@@ -1245,6 +1245,13 @@ MODULE_ACTION_MAP: Dict[str, str] = {
     "salary_slips.create":  "can_manage_salary_slips",
     "salary_slips.edit":    "can_manage_salary_slips",
     "salary_slips.delete":  "can_manage_salary_slips",
+    # roc_sphere (Compliance → ROC Sphere) — Companies Act company master
+    # and document generation, same admin-granted-only-by-default pattern
+    # as salary_slips / trademark_sphere / gst_reconciliation above.
+    "roc_sphere.view":      "can_view_roc_sphere",
+    "roc_sphere.create":    "can_manage_roc_sphere",
+    "roc_sphere.edit":      "can_manage_roc_sphere",
+    "roc_sphere.delete":    "can_manage_roc_sphere",
 }
 
 
