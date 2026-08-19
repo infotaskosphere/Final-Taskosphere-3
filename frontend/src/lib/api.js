@@ -223,6 +223,7 @@ api.interceptors.response.use(
       "/quotations",
       "/companies",
       "/compliance",
+      "/passwords",
     ]);
     if (
       error.response?.status === 404 &&
