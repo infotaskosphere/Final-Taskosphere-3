@@ -155,6 +155,60 @@ export function useBackendUnreachable() {
 const _inflight = new Map();
 const DEDUP_WINDOW_MS = 300;
 
+
+// ─── Backend Readiness Gate (fixes cold-start 404 bursts) ─────
+// Render puts free/standby web services to sleep. While the service is
+// waking up (or mid-deploy) its edge answers EVERY /api/* request with a
+// 404/502 even though the route exists. Pages that fetch on mount
+// (Quotations -> /api/quotations + /api/companies) therefore rendered empty
+// with a wall of console 404s.
+//
+// Fix: before the first API GET goes out, wait until the backend answers its
+// unauthenticated /health probe. All requests queue behind one shared probe,
+// so a cold start costs a single wait instead of dozens of failed calls.
+const HEALTH_URL = `${BASE_URL.replace(/\/api$/, "")}/health`;
+let _readyPromise = null;
+let _isReady = false;
+
+const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+export function markBackendNotReady() {
+  _isReady = false;
+  _readyPromise = null;
+}
+
+export function ensureBackendReady() {
+  if (_isReady) return Promise.resolve(true);
+  if (_readyPromise) return _readyPromise;
+
+  _readyPromise = (async () => {
+    // ~75s total: comfortably covers a Render cold start.
+    const backoffs = [0, 1000, 2000, 3000, 5000, 8000, 8000, 12000, 12000, 12000, 12000];
+    for (const wait of backoffs) {
+      if (wait) await _sleep(wait);
+      try {
+        await axios.get(HEALTH_URL, { timeout: 15000 });
+        _isReady = true;
+        _reportNetworkResult(true);
+        return true;
+      } catch (err) {
+        // A 4xx/5xx still proves the host is reachable and serving; only keep
+        // waiting while it is asleep / mid-deploy (404, 502, 503, 504, no response).
+        const status = err?.response?.status;
+        if (status && ![404, 500, 502, 503, 504].includes(status)) {
+          _isReady = true;
+          return true;
+        }
+      }
+    }
+    // Give up waiting — let the normal retry/degrade path handle it.
+    _readyPromise = null;
+    return false;
+  })();
+
+  return _readyPromise;
+}
+
 // ─── Axios Instance ───────────────────────────────────────────
 const api = axios.create({
   baseURL: BASE_URL,
@@ -164,7 +218,12 @@ const api = axios.create({
 
 // ─── Request Interceptor ──────────────────────────────────────
 api.interceptors.request.use(
-  (config) => {
+  async (config) => {
+    // Wait for a cold-started backend before firing the request.
+    if (!config._skipReadyGate) {
+      await ensureBackendReady();
+    }
+
     // Some deployed collection routes are registered with a trailing slash.
     // Normalize them before the request reaches the server so the browser
     // does not log an avoidable 404 for the no-slash URL first.
@@ -249,6 +308,12 @@ api.interceptors.response.use(
       error.response?.status === 502 ||
       error.response?.status === 503 ||
       error.response?.status === 504;
+
+    if (transientStatus) {
+      // The backend went back to sleep / is redeploying — force the next
+      // request to wait on the readiness probe again.
+      markBackendNotReady();
+    }
 
     if (isCollectionGet && transientStatus) {
       const attempt = error.config._coldStartAttempt || 0;
