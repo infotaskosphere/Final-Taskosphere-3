@@ -218,6 +218,7 @@ api.interceptors.response.use(
       "/leads",
       "/quotations",
       "/companies",
+      "/compliance",
     ]);
     if (
       error.response?.status === 404 &&
