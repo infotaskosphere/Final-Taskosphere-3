@@ -103,6 +103,48 @@ export function useLoading() {
   return loading;
 }
 
+// ─── Backend Reachability State ────────────────────────────────
+// Tracks consecutive network-level failures (DNS resolution failure like
+// ERR_NAME_NOT_RESOLVED, connection refused, CORS-blocked, or timeout —
+// i.e. requests that never got an HTTP response at all, as opposed to a
+// normal 4xx/5xx). Used to surface a clear "can't reach the server" banner
+// instead of leaving people staring at silent console errors when
+// VITE_API_URL points at a backend host that is down, renamed, or deleted.
+let _consecutiveNetworkFailures = 0;
+let _backendUnreachable = false;
+const _NETWORK_FAILURE_THRESHOLD = 2; // avoid flapping on a single blip
+const _reachabilitySubscribers = new Set();
+
+function _reportNetworkResult(ok) {
+  if (ok) {
+    _consecutiveNetworkFailures = 0;
+    if (_backendUnreachable) {
+      _backendUnreachable = false;
+      _reachabilitySubscribers.forEach((fn) => fn(false));
+    }
+    return;
+  }
+  _consecutiveNetworkFailures += 1;
+  if (
+    !_backendUnreachable &&
+    _consecutiveNetworkFailures >= _NETWORK_FAILURE_THRESHOLD
+  ) {
+    _backendUnreachable = true;
+    _reachabilitySubscribers.forEach((fn) => fn(true));
+  }
+}
+
+export function useBackendUnreachable() {
+  const [unreachable, setUnreachable] = useState(_backendUnreachable);
+
+  useEffect(() => {
+    _reachabilitySubscribers.add(setUnreachable);
+    return () => _reachabilitySubscribers.delete(setUnreachable);
+  }, []);
+
+  return unreachable;
+}
+
 // ─── Request Deduplication Cache ──────────────────────────────
 // Prevents identical GET requests fired within 300ms from hitting the network twice.
 // Keyed by full URL string; values are in-flight Promise references.
@@ -151,10 +193,17 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => {
     if (!response.config._silent) _setLoading(-1);
+    _reportNetworkResult(true);
     return response;
   },
   (error) => {
     if (!error.config?._silent) _setLoading(-1);
+
+    // No `error.response` means the request never got an HTTP response at
+    // all (DNS failure, connection refused, CORS block, timeout) — a true
+    // "can't reach the backend" condition, distinct from a normal 4xx/5xx
+    // where the server did respond.
+    _reportNetworkResult(Boolean(error.response));
 
     // Older Taskosphere backend deployments registered collection routes with
     // a trailing slash while the frontend requested the canonical no-slash
