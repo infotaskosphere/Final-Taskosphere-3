@@ -221,52 +221,73 @@ api.interceptors.response.use(
     // Resource-specific 404s (for example /tasks/:id) are never rewritten.
     const requestUrl = error.config?.url || "";
     const [requestPath, requestQuery = ""] = requestUrl.split("?");
+    const normalisedPath = requestPath.replace(/\/+$/, "");
     const slashCompatibleCollections = new Set([
       "/notifications",
       "/visits",
       "/leads",
       "/quotations",
+      "/quotations/list",
       "/companies",
+      "/companies/list",
       "/compliance",
       "/passwords",
+      "/client-discussion",
     ]);
-    if (
-      error.response?.status === 404 &&
+    const isCollectionGet =
       error.config?.method?.toLowerCase() === "get" &&
-      !error.config?._slashRetry &&
-      slashCompatibleCollections.has(requestPath.replace(/\/+$/, ""))
-    ) {
-      return api.request({
-        ...error.config,
-        url: `${requestPath.replace(/\/+$/, "")}/${requestQuery ? `?${requestQuery}` : ""}`,
-        _slashRetry: true,
-      });
-    }
+      slashCompatibleCollections.has(normalisedPath);
 
-    // A collection GET that STILL 404s after the trailing-slash retry is
-    // almost always a transient edge/cold-start 404 from the hosting layer
-    // (Render answers /api/* with 404 while the backend service is booting
-    // or mid-deploy), not a genuinely missing route — e.g. the repeated
-    // `GET /api/passwords?limit=500 404` seen on dashboard loads while
-    // /api/passwords is present in the live OpenAPI schema.
-    // Retry once after a short backoff, then degrade to an empty collection
-    // so dashboard widgets render "0" instead of spamming the console and
-    // breaking the whole page render.
-    if (
-      error.response?.status === 404 &&
-      error.config?.method?.toLowerCase() === "get" &&
-      slashCompatibleCollections.has(requestPath.replace(/\/+$/, ""))
-    ) {
-      if (!error.config._coldStartRetry) {
+    // Render's edge answers /api/* with 404 (and sometimes 502/503) while the
+    // backend service is cold-starting or mid-deploy, even though the route
+    // exists in the live OpenAPI schema — this is what produces the bursts of
+    // `GET /api/quotations 404` / `GET /api/companies 404` on Client Proposals
+    // and Quotations. Treat those as transient and retry the SAME url with
+    // backoff before doing anything else.
+    const transientStatus =
+      error.response?.status === 404 ||
+      error.response?.status === 502 ||
+      error.response?.status === 503 ||
+      error.response?.status === 504;
+
+    if (isCollectionGet && transientStatus) {
+      const attempt = error.config._coldStartAttempt || 0;
+      const backoffs = [700, 1800, 4000];
+      if (attempt < backoffs.length) {
         return new Promise((resolve, reject) => {
           setTimeout(() => {
             api
-              .request({ ...error.config, _coldStartRetry: true })
+              .request({ ...error.config, _coldStartAttempt: attempt + 1 })
               .then(resolve)
               .catch(reject);
-          }, 1200);
+          }, backoffs[attempt]);
         });
       }
+
+      // Retries exhausted: try the legacy trailing-slash form once, in case an
+      // older backend build really did register the route with a slash.
+      if (error.response?.status === 404 && !error.config?._slashRetry) {
+        return api
+          .request({
+            ...error.config,
+            url: `${normalisedPath}/${requestQuery ? `?${requestQuery}` : ""}`,
+            _slashRetry: true,
+            _coldStartAttempt: backoffs.length,
+          })
+          .catch(() =>
+            Promise.resolve({
+              data: [],
+              status: 200,
+              statusText: "OK (empty — collection endpoint unavailable)",
+              headers: error.response?.headers || {},
+              config: error.config,
+              _degraded: true,
+            })
+          );
+      }
+
+      // Degrade to an empty collection so dashboard widgets render "0"
+      // instead of breaking the whole page render.
       return Promise.resolve({
         data: [],
         status: 200,
