@@ -237,11 +237,75 @@ async def list_eligible_clients(current_user: User = Depends(VIEW)):
     return out
 
 
+CLIENT_CATEGORY_MAP = {
+    "pvt_ltd": "private", "PVT_LTD": "private",
+    "public_ltd": "public",
+    "section_8": "section_8",
+    "llp": "private", "LLP": "private",
+    "opc": "opc",
+}
+
+
+async def _sync_companies_from_clients() -> int:
+    """Auto-provision a ROC Sphere company master for every Client record
+    that is a registered entity (Pvt/Public Ltd, LLP, OPC, Section 8) and
+    doesn't have one yet, prefilled from that client's CIN/PAN/address/
+    incorporation date. Existing ROC Sphere records (and anything a user
+    has since edited on them) are never touched -- this only fills the gap
+    for clients that have no linked record at all. Returns count created.
+    """
+    cursor = CLIENTS.find({"client_type": {"$in": list(COMPANY_CLIENT_TYPES)}})
+    clients = [c async for c in cursor]
+    if not clients:
+        return 0
+    existing_client_ids = {
+        c["client_id"]
+        async for c in COMPANIES.find({"client_id": {"$ne": None}}, {"client_id": 1})
+        if c.get("client_id")
+    }
+    now = _now()
+    new_docs = []
+    for c in clients:
+        cid = c.get("id")
+        if not cid or cid in existing_client_ids:
+            continue
+        new_docs.append({
+            "id": _uid(),
+            "client_id": cid,
+            "company_name": c.get("company_name") or "Unnamed Company",
+            "cin": c.get("cin"),
+            "category": CLIENT_CATEGORY_MAP.get(c.get("client_type"), "private"),
+            "is_small_company": None,
+            "listed": False,
+            "roc_office": None,
+            "pan": c.get("pan"),
+            "date_of_incorporation": (str(c.get("date_of_incorporation"))[:10] if c.get("date_of_incorporation") else None),
+            "registered_office_address": c.get("address"),
+            "authorized_capital": 0,
+            "paid_up_capital": 0,
+            "last_year_turnover": 0,
+            "financial_year_end": "31-03",
+            "last_agm_date": None,
+            "last_board_meeting_date": None,
+            "directors": [],
+            "shareholders": [],
+            "auditor": None,
+            "notes": None,
+            "created_at": now,
+            "updated_at": now,
+            "created_by": "Auto-synced from Clients",
+        })
+    if new_docs:
+        await COMPANIES.insert_many(new_docs)
+    return len(new_docs)
+
+
 @router.get("/companies")
 async def list_companies(
     q: Optional[str] = Query(None),
     current_user: User = Depends(VIEW),
 ):
+    await _sync_companies_from_clients()
     query: Dict[str, Any] = {}
     if q:
         query["company_name"] = {"$regex": re.escape(q), "$options": "i"}
@@ -250,6 +314,15 @@ async def list_companies(
     for c in items:
         c.pop("_id", None)
     return items
+
+
+@router.post("/companies/sync-from-clients")
+async def sync_from_clients_endpoint(current_user: User = Depends(CREATE)):
+    """Manual re-sync trigger (e.g. a 'Sync from Clients' button) -- same
+    logic as the automatic sync on GET /companies, exposed separately so
+    the UI can show how many were newly added after a bulk client import."""
+    created = await _sync_companies_from_clients()
+    return {"created": created}
 
 
 @router.get("/companies/{company_id}")
