@@ -21,6 +21,7 @@ from collections import Counter
 from backend.quickcompany_trademark_router import router as qc_trademark_router
 from backend.whatsapp_hub import router as whatsapp_hub_router
 from backend.compliance import router as compliance_router, create_compliance_indexes
+from backend.roc_sphere import router as roc_sphere_router  # ROC Sphere: Companies Act document automation
 from backend.salary_slip_router import router as salary_slip_router, create_salary_slip_indexes
 from backend.ai_document_reader import router as ai_document_reader_router
 from backend.gst_reconciliation import router as gst_reconciliation_router
@@ -14282,6 +14283,7 @@ api_router.include_router(trademark_sphere_router)
 app.include_router(trademark_portals_router)  # already has /api/... prefix
 app.include_router(salary_slip_router)        # already has /api/compliance/salary-slips prefix
 api_router.include_router(compliance_router)
+api_router.include_router(roc_sphere_router)  # already has /roc-sphere prefix -> /api/roc-sphere
 api_router.include_router(gst_reconciliation_router)
 api_router.include_router(mis_report_router)
 api_router.include_router(identix_router, prefix="/identix")
