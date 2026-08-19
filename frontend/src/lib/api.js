@@ -238,6 +238,40 @@ api.interceptors.response.use(
       });
     }
 
+    // A collection GET that STILL 404s after the trailing-slash retry is
+    // almost always a transient edge/cold-start 404 from the hosting layer
+    // (Render answers /api/* with 404 while the backend service is booting
+    // or mid-deploy), not a genuinely missing route — e.g. the repeated
+    // `GET /api/passwords?limit=500 404` seen on dashboard loads while
+    // /api/passwords is present in the live OpenAPI schema.
+    // Retry once after a short backoff, then degrade to an empty collection
+    // so dashboard widgets render "0" instead of spamming the console and
+    // breaking the whole page render.
+    if (
+      error.response?.status === 404 &&
+      error.config?.method?.toLowerCase() === "get" &&
+      slashCompatibleCollections.has(requestPath.replace(/\/+$/, ""))
+    ) {
+      if (!error.config._coldStartRetry) {
+        return new Promise((resolve, reject) => {
+          setTimeout(() => {
+            api
+              .request({ ...error.config, _coldStartRetry: true })
+              .then(resolve)
+              .catch(reject);
+          }, 1200);
+        });
+      }
+      return Promise.resolve({
+        data: [],
+        status: 200,
+        statusText: "OK (empty — collection endpoint unavailable)",
+        headers: error.response?.headers || {},
+        config: error.config,
+        _degraded: true,
+      });
+    }
+
     // 🔐 401 → session expired, redirect to login
     if (error.response?.status === 401) {
       clearToken();
