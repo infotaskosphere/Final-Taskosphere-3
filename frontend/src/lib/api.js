@@ -16,8 +16,12 @@ import { useState, useEffect, useRef } from "react";
 const _isDevOrPreviewHost =
   typeof window !== "undefined" &&
   (window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1" ||
     window.location.hostname.includes(".run.app") ||
-    window.location.hostname.includes("emergentagent.com"));
+    window.location.hostname.includes("emergentagent.com") ||
+    window.location.hostname.includes(".replit.dev") ||
+    window.location.hostname.includes(".replit.app") ||
+    window.location.hostname.endsWith(".repl.co"));
 
 const _runtimeOverride =
   typeof window !== "undefined" ? window.__TASKOSPHERE_API_URL__ : undefined;
