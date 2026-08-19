@@ -134,11 +134,27 @@ export default function RecordsDashboard() {
     let cancelled = false;
     (async () => {
       setLoading(true);
+      // Vault credentials count.
+      // The dashboard only needs a NUMBER, so ask the cheap aggregate
+      // endpoint (/passwords/stats -> { total }) first. Older/rolling
+      // backend deployments that do not serve the collection route answered
+      // `GET /api/passwords?limit=500` with a 404, which spammed the console
+      // and left this tile blank. Fall back to the collection (and finally to
+      // a neutral empty payload) so a missing route can never surface as an
+      // uncaught 404 on the Records dashboard.
+      const passwordsCountRequest = api
+        .get('/passwords/stats', { _silent: true })
+        .catch(() =>
+          api
+            .get('/passwords', { params: { limit: 500 }, _silent: true })
+            .catch(() => ({ data: null }))
+        );
+
       const requests = {
         dsc:       api.get('/dsc', { params: { limit: 500 }, _silent: true }),
         documents: api.get('/documents', { _silent: true }),
         clients:   api.get('/clients', { params: { page: 1, page_size: 1 }, _silent: true }),
-        passwords: api.get('/passwords', { params: { limit: 500 }, _silent: true }),
+        passwords: passwordsCountRequest,
         pending:   api.get('/clients/pending', { _silent: true }),
       };
       const keys = Object.keys(requests);
@@ -151,7 +167,10 @@ export default function RecordsDashboard() {
         if (r.status === 'fulfilled') {
           const data = r.value?.data;
           payloads[key] = data;
-          next[key] = extractCount(data, key === 'clients' || key === 'pending' ? 'total' : undefined);
+          next[key] = extractCount(
+            data,
+            key === 'clients' || key === 'pending' || key === 'passwords' ? 'total' : undefined
+          );
         } else {
           next[key] = null;
         }
