@@ -3699,7 +3699,10 @@ export default function CompliancePage(){
       if(catFilter!=='all')params.set('category',catFilter);
       if(fyFilter!=='all')params.set('fy_year',fyFilter);
       const[listRes,dashRes,usersRes]=await Promise.all([
-        api.get(`/compliance?${params}`),
+        // FastAPI deployments may expose collection routes with a trailing
+        // slash. Request the canonical slash form so older deployments do
+        // not return a collection-level 404.
+        api.get(`/compliance/${params.toString() ? `?${params}` : ''}`),
         api.get('/compliance/dashboard/summary'),
         api.get('/users').catch(()=>({data:[]})),
       ]);
