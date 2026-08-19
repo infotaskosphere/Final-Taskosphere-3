@@ -36,6 +36,20 @@ services:
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
+    envVars:
+      # ⚠️ CRITICAL: this MUST be the live backend service URL. It's baked
+      # into the static build at build time (Vite env vars are not readable
+      # at runtime), so every page makes API calls to this exact host.
+      # If this is missing, blank, or pointing at a renamed/deleted Render
+      # service, every /api/* call fails — either as a 404 (an old backend
+      # build answering, but missing the route) or as
+      # net::ERR_NAME_NOT_RESOLVED (the hostname doesn't resolve at all,
+      # e.g. the backend service was deleted/renamed/suspended). Previously
+      # this depended entirely on a Dashboard-only env var that a fresh
+      # Blueprint sync can silently drop — it's now pinned here so it can
+      # never go missing again.
+      - key: VITE_API_URL
+        value: https://final-taskosphere-backend.onrender.com
     headers:
       - path: /assets/*.css
         name: Content-Type
