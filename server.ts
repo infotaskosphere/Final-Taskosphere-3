@@ -702,6 +702,90 @@ apiRouter.delete("/visits/:id", (req, res) => {
   res.json({ success: true });
 });
 
+// Password Vault
+// Keep list responses masked; the reveal endpoint is the only route that
+// returns the stored password value.
+const passwordListItem = (entry: any) => {
+  const { password, ...safeEntry } = entry;
+  return { ...safeEntry, has_password: Boolean(password) };
+};
+
+apiRouter.get("/passwords", (req, res) => {
+  const search = String(req.query.search || "").trim().toLowerCase();
+  const department = String(req.query.department || "").trim().toUpperCase();
+  const portalType = String(req.query.portal_type || "").trim().toUpperCase();
+  const holderType = String(req.query.holder_type || "").trim().toUpperCase();
+  const clientId = String(req.query.client_id || "").trim();
+
+  const filtered = passwords.filter((entry: any) => {
+    const searchable = [entry.portal_name, entry.title, entry.username, entry.client_name]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return (
+      (!search || searchable.includes(search)) &&
+      (!department || String(entry.department || "").toUpperCase() === department) &&
+      (!portalType || String(entry.portal_type || "").toUpperCase() === portalType) &&
+      (!holderType || String(entry.holder_type || "").toUpperCase() === holderType) &&
+      (!clientId || String(entry.client_id || "") === clientId)
+    );
+  });
+
+  res.json(filtered.map(passwordListItem));
+});
+
+apiRouter.get("/passwords/stats", (_req, res) => {
+  const byPortalType = passwords.reduce((counts: Record<string, number>, entry: any) => {
+    const key = entry.portal_type || "OTHER";
+    counts[key] = (counts[key] || 0) + 1;
+    return counts;
+  }, {});
+  res.json({ total: passwords.length, count: passwords.length, by_portal_type: byPortalType });
+});
+
+apiRouter.get("/passwords/:id/reveal", (req, res) => {
+  const entry = passwords.find((item: any) => item.id === req.params.id);
+  if (!entry) return res.status(404).json({ detail: "Password entry not found" });
+  res.json({ password: entry.password || "" });
+});
+
+apiRouter.post("/passwords", (req, res) => {
+  const body = req.body || {};
+  const newPassword = {
+    ...body,
+    id: `pass-${Date.now()}`,
+    portal_name: body.portal_name || body.title || "Untitled Portal",
+    title: body.title || body.portal_name || "Untitled Portal",
+    password: body.password_plain || body.password || "",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+  delete newPassword.password_plain;
+  passwords.unshift(newPassword);
+  res.status(201).json(passwordListItem(newPassword));
+});
+
+apiRouter.put("/passwords/:id", (req, res) => {
+  const index = passwords.findIndex((item: any) => item.id === req.params.id);
+  if (index < 0) return res.status(404).json({ detail: "Password entry not found" });
+
+  const body = { ...req.body };
+  const updated = { ...passwords[index], ...body, updated_at: new Date().toISOString() };
+  if (body.password_plain) updated.password = body.password_plain;
+  delete updated.password_plain;
+  passwords[index] = updated;
+  res.json(passwordListItem(updated));
+});
+
+apiRouter.delete("/passwords/:id", (req, res) => {
+  const previousLength = passwords.length;
+  passwords = passwords.filter((item: any) => item.id !== req.params.id);
+  if (passwords.length === previousLength) {
+    return res.status(404).json({ detail: "Password entry not found" });
+  }
+  res.json({ success: true });
+});
+
 // Holidays
 apiRouter.get("/holidays", (req, res) => {
   res.json(holidays);
