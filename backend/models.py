@@ -1058,6 +1058,7 @@ class DocumentBase(BaseModel):
     model_config = ConfigDict(extra="ignore")
     document_name: Optional[str] = None
     document_type: Optional[str] = None
+    document_password: Optional[str] = None
     holder_name: Optional[str] = None
     associated_with: Optional[str] = None
     entity_type: str = "firm"
