@@ -25,6 +25,166 @@ from backend.models import User
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/whatsapp/hub", tags=["whatsapp-hub"])
 
+
+# ── WhatsApp natural-language lead automation (additive) ────────────────────
+# This feature is intentionally isolated from Telegram and from the existing
+# WhatsApp message/inbox behavior. It runs in a background task after the
+# incoming message has already been stored successfully.
+WHATSAPP_LEAD_AI_MIN_CONFIDENCE = 0.75
+
+
+async def _process_whatsapp_lead_in_background(
+    *,
+    message: str,
+    jid: str,
+    session_id: str,
+    message_id: str,
+    sender_phone: Optional[str],
+    sender_name: Optional[str],
+    group_subject: Optional[str],
+) -> None:
+    """
+    AI-read one WhatsApp group message and create/update an existing Lead.
+
+    This is deliberately best-effort: a failure here must NEVER make the
+    existing WhatsApp webhook fail or affect message storage/SSE.
+    """
+    try:
+        from backend.whatsapp_lead_ai import detect_and_extract_whatsapp_lead
+
+        result = await detect_and_extract_whatsapp_lead(message)
+        if not result.get("is_lead"):
+            return
+
+        confidence = float(result.get("confidence") or 0.0)
+        if confidence < WHATSAPP_LEAD_AI_MIN_CONFIDENCE:
+            logger.info(
+                "WhatsApp lead AI skipped low-confidence message: confidence=%.2f group=%s message_id=%s",
+                confidence, group_subject, message_id,
+            )
+            return
+
+        lead = result.get("lead") or {}
+        db = _db()
+
+        phone = (lead.get("phone") or sender_phone or "").strip() or None
+        contact_name = (lead.get("contact_name") or sender_name or "").strip() or None
+        company_name = (lead.get("company_name") or "").strip() or None
+        trademark_name = (lead.get("trademark_name") or "").strip() or None
+        services = lead.get("services") or []
+        notes = (lead.get("notes") or "").strip() or None
+
+        # Existing LeadCreate historically requires company_name. Until that
+        # field is made optional in a separate additive update, use the most
+        # meaningful available identity rather than inventing a company.
+        if not company_name:
+            company_name = contact_name or trademark_name or "WhatsApp Lead"
+
+        # Prevent duplicate creation when the same WhatsApp lead is received
+        # again. Phone is the strongest match; otherwise use contact/company
+        # + trademark when available.
+        existing = None
+        if phone:
+            digits = "".join(ch for ch in phone if ch.isdigit())
+            if len(digits) >= 7:
+                existing = await db.leads.find_one({
+                    "phone": {"$regex": digits[-10:] + "$"}
+                })
+
+        if not existing and contact_name and trademark_name:
+            existing = await db.leads.find_one({
+                "contact_name": contact_name,
+                "whatsapp_original_message": {"$exists": True},
+                "whatsapp_group_jid": jid,
+                "trademark_name": trademark_name,
+            })
+
+        if existing:
+            lead_id = str(existing.get("_id"))
+            await db.leads.update_one(
+                {"_id": existing["_id"]},
+                {"$set": {
+                    "updated_at": datetime.now(timezone.utc),
+                    "whatsapp_message_id": message_id,
+                    "whatsapp_original_message": message,
+                    "whatsapp_group_name": group_subject,
+                    "whatsapp_group_jid": jid,
+                    "whatsapp_sender_phone": sender_phone,
+                    "whatsapp_sender_name": sender_name,
+                }, "$addToSet": {
+                    "services": {"$each": services},
+                }},
+            )
+            await db.whatsapp_hub_messages.update_one(
+                {"message_id": message_id, "session_id": session_id},
+                {"$set": {
+                    "lead_automation": "duplicate_updated",
+                    "lead_id": lead_id,
+                    "lead_ai_confidence": confidence,
+                }},
+            )
+            logger.info("WhatsApp lead duplicate updated: lead_id=%s group=%s", lead_id, group_subject)
+            return
+
+        # Use an admin account as the system creator so normal Lead Management
+        # ownership/visibility rules remain compatible with existing leads.
+        creator = await db.users.find_one(
+            {"role": {"$in": ["admin", "Admin"]}},
+            {"id": 1},
+        )
+        created_by = (creator or {}).get("id")
+        if not created_by:
+            logger.warning("WhatsApp lead not created: no admin user available for created_by")
+            return
+
+        now = datetime.now(timezone.utc)
+        lead_doc = {
+            "company_name": company_name,
+            "contact_name": contact_name,
+            "email": lead.get("email"),
+            "phone": phone,
+            "services": services,
+            "status": "new",
+            "source": "whatsapp",
+            "notes": notes,
+            "assigned_to": None,
+            "created_by": created_by,
+            "created_at": now,
+            "updated_at": now,
+            "checklist_sent": False,
+            "documents_received": False,
+            "whatsapp_group_jid": jid,
+            "whatsapp_group_name": group_subject,
+            "whatsapp_message_id": message_id,
+            "whatsapp_sender_phone": sender_phone,
+            "whatsapp_sender_name": sender_name,
+            "whatsapp_original_message": message,
+            "lead_ai_confidence": confidence,
+        }
+        if trademark_name:
+            lead_doc["trademark_name"] = trademark_name
+
+        result = await db.leads.insert_one(lead_doc)
+        lead_id = str(result.inserted_id)
+
+        await db.whatsapp_hub_messages.update_one(
+            {"message_id": message_id, "session_id": session_id},
+            {"$set": {
+                "lead_automation": "lead_created",
+                "lead_id": lead_id,
+                "lead_ai_confidence": confidence,
+            }},
+        )
+        logger.info(
+            "WhatsApp lead created: lead_id=%s contact=%s group=%s",
+            lead_id, contact_name, group_subject,
+        )
+    except Exception:
+        logger.exception(
+            "WhatsApp lead automation failed without affecting message webhook: group=%s message_id=%s",
+            group_subject, message_id,
+        )
+
 # ── SSE client registry ──────────────────────────────────────────────────────
 _sse_queues: List[asyncio.Queue] = []
 
@@ -300,6 +460,22 @@ async def hub_incoming_message(request: Request):
         "read":          False,
         "assigned_to":   None,
     })
+
+    # Additive WhatsApp lead automation. The existing message processing above
+    # remains synchronous and unchanged; AI runs in the background so it cannot
+    # slow down or break the WhatsApp webhook. Telegram is not involved.
+    if is_group and body.strip():
+        asyncio.create_task(
+            _process_whatsapp_lead_in_background(
+                message=body,
+                jid=jid,
+                session_id=session_id,
+                message_id=msg_id,
+                sender_phone=sender_phone,
+                sender_name=payload.get("contact_name"),
+                group_subject=group_subj,
+            )
+        )
 
     contact_name = group_subj if is_group else payload.get("contact_name")
     media_type   = payload.get("media_type")
