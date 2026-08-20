@@ -4839,7 +4839,12 @@ async def get_top_performers_data(period: str = "monthly", limit: int = 5, db=No
 @api_router.post("/tasks", response_model=Task)
 async def create_task(
     task_data: TaskCreate,
-    current_user: User = Depends(check_module_permission("tasks", "create")),
+    # GLITCH FIX: previously gated behind check_module_permission("tasks", "create")
+    # which required the universal `can_edit_tasks` flag for EVERYONE, including
+    # a user creating their own task. Per spec, every user can create their own
+    # task by default; only assigning a task to a DIFFERENT user needs extra
+    # permission (checked below via can_assign_tasks OR cross-visibility).
+    current_user: User = Depends(get_current_user),
 ):
     if (
         task_data.assigned_to
@@ -4847,7 +4852,14 @@ async def create_task(
         and current_user.role != "admin"
     ):
         perms = get_user_permissions(current_user)
-        if not perms.get("can_assign_tasks", False):
+        # GLITCH FIX: a user who has been granted cross-visibility to another
+        # user (view_other_tasks) should also be able to create/assign tasks
+        # for that user, not just view them.
+        cross_visible_users = perms.get("view_other_tasks", []) or []
+        if (
+            not perms.get("can_assign_tasks", False)
+            and task_data.assigned_to not in cross_visible_users
+        ):
             raise HTTPException(
                 status_code=403,
                 detail="You do not have permission to assign tasks to other users",
@@ -4904,7 +4916,9 @@ async def get_task_comments(
 @api_router.post("/tasks/bulk")
 async def create_tasks_bulk(
     payload: BulkTaskCreate,
-    current_user: User = Depends(check_module_permission("tasks", "create")),
+    # GLITCH FIX: see create_task above — creating your own task(s) must not
+    # require the universal can_edit_tasks flag.
+    current_user: User = Depends(get_current_user),
 ):
     created_tasks = []
     for task_data in payload.tasks:
@@ -4930,7 +4944,9 @@ async def create_tasks_bulk(
 @api_router.post("/tasks/import")
 async def import_tasks_from_csv(
     file: UploadFile = File(...),
-    current_user: User = Depends(check_module_permission("tasks", "create")),
+    # GLITCH FIX: see create_task above — creating your own task(s) must not
+    # require the universal can_edit_tasks flag.
+    current_user: User = Depends(get_current_user),
 ):
     if file.content_type != "text/csv":
         raise HTTPException(400, "Invalid file type")
@@ -5137,7 +5153,14 @@ async def get_task(
 async def patch_task(
     task_id: str,
     updates: dict,
-    current_user: User = Depends(check_module_permission("tasks", "edit")),
+    # GLITCH FIX: previously gated behind check_module_permission("tasks", "edit"),
+    # which required the universal `can_edit_tasks` flag for EVERYONE before the
+    # request body was even fetched — so a user editing their OWN task (which
+    # the ownership check below already allows) was wrongly 403'd whenever an
+    # admin had turned their personal can_edit_tasks flag off. Per spec, every
+    # user can edit their own task by default; ownership + cross-visibility are
+    # checked below against the actual record instead of a blanket flag.
+    current_user: User = Depends(get_current_user),
 ):
     existing_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not existing_task:
@@ -5145,6 +5168,20 @@ async def patch_task(
     is_authorized = current_user.role.lower() == "admin" or is_own_record(
         current_user, existing_task
     )
+    if not is_authorized:
+        # GLITCH FIX: a user with cross-visibility to another user's tasks
+        # (view_other_tasks) should also be able to edit/update those tasks,
+        # not just view them.
+        perms = get_user_permissions(current_user)
+        allowed_users = perms.get("view_other_tasks", []) or []
+        if current_user.role == "manager":
+            team_ids = await get_team_user_ids(current_user.id)
+            allowed_users = list(set(allowed_users + team_ids))
+        if (
+            existing_task.get("assigned_to") in allowed_users
+            or existing_task.get("created_by") in allowed_users
+        ):
+            is_authorized = True
     if not is_authorized:
         raise HTTPException(status_code=403, detail="Unauthorized to modify this task")
     old_data = existing_task.copy()
