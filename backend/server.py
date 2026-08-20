@@ -5194,6 +5194,47 @@ async def patch_task(
         updates["completed_at"] = datetime.now(IST).isoformat()
     await db.tasks.update_one({"id": task_id}, {"$set": updates})
     updated_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
+
+    # ── DESKTOP-REMINDER HOUSEKEEPING ──────────────────────────────────
+    # Task-o-sphere reminder popups (db.reminders + popup=True db.notifications
+    # docs) are keyed off the task at the moment they were created. If the
+    # task is completed/cancelled or reassigned to someone else afterwards,
+    # any still-pending (not yet fired/read) reminder for it must be
+    # dismissed so it never surfaces a desktop toast — see
+    # ReminderPopupManager.jsx / GET /reminders/due-popups.
+    now_iso_housekeeping = datetime.now(timezone.utc).isoformat()
+    became_completed = (
+        "status" in updates and updates.get("status") in ("completed", "cancelled")
+    )
+    reassigned_to = (
+        updates.get("assigned_to")
+        if "assigned_to" in updates and updates.get("assigned_to") != old_data.get("assigned_to")
+        else None
+    )
+    if became_completed or reassigned_to:
+        await db.reminders.update_many(
+            {
+                "related_task_id": task_id,
+                "is_dismissed": False,
+                "is_fired": False,
+            },
+            {"$set": {"is_dismissed": True, "updated_at": now_iso_housekeeping}},
+        )
+        await db.notifications.update_many(
+            {"task_id": task_id, "popup": True, "is_read": False},
+            {"$set": {"is_read": True}},
+        )
+        # On reassignment (task still active), let the new assignee know —
+        # mirrors the same task-assigned popup used when a task is first
+        # created (see create_task above).
+        if reassigned_to and not became_completed and reassigned_to != current_user.id:
+            await create_notification(
+                user_id=reassigned_to,
+                title="Task Reassigned To You",
+                message=f"Task '{updated_task.get('title', '')}' has been assigned to you.",
+                type="assignment",
+            )
+            await create_task_assigned_popup(reassigned_to, updated_task.get("title", ""))
     action_type = (
         "TASK_STATUS_CHANGED"
         if "status" in updates and old_data.get("status") != updates.get("status")
@@ -12690,17 +12731,6 @@ async def get_due_reminder_popups(current_user: User = Depends(get_current_user)
             {"$set": {"is_fired": True, "updated_at": now_iso}},
         )
 
-    results = [
-        {
-            "id": str(doc.get("_id")),
-            "type": doc.get("reminder_type", "reminder"),
-            "title": doc.get("title", "Reminder"),
-            "message": doc.get("description", ""),
-            "task_id": doc.get("related_task_id"),
-        }
-        for doc in due_docs
-    ]
-
     popup_cursor = db.notifications.find({
         "user_id": str(current_user.id),
         "popup": True,
@@ -12714,16 +12744,57 @@ async def get_due_reminder_popups(current_user: User = Depends(get_current_user)
                 {"id": {"$in": popup_ids}},
                 {"$set": {"is_read": True}},
             )
-        results.extend([
-            {
-                "id": doc.get("id"),
-                "type": doc.get("type") or "task_popup",
-                "title": doc.get("title", "Reminder"),
-                "message": doc.get("message", ""),
-                "task_id": doc.get("task_id"),
-            }
-            for doc in popup_docs
-        ])
+
+    # ── COMPLETED / REASSIGNED TASK GUARD (backend, defense-in-depth) ──
+    # A reminder or popup-notification tied to a task (related_task_id /
+    # task_id) must not fire if, by the time it becomes due, the task has
+    # since been completed/cancelled, or reassigned away from this user.
+    # This is a safety net on top of the proactive dismissal that happens
+    # in patch_task() below when a task is completed/reassigned — it
+    # covers reminders that were already "due" in the same instant a task
+    # changed, or any older docs created before that logic existed.
+    referenced_task_ids = {
+        doc.get("related_task_id") for doc in due_docs if doc.get("related_task_id")
+    } | {
+        doc.get("task_id") for doc in popup_docs if doc.get("task_id")
+    }
+    blocked_task_ids = set()
+    if referenced_task_ids:
+        ref_tasks = await db.tasks.find(
+            {"id": {"$in": list(referenced_task_ids)}},
+            {"_id": 0, "id": 1, "status": 1, "assigned_to": 1},
+        ).to_list(length=len(referenced_task_ids))
+        task_by_id = {t["id"]: t for t in ref_tasks}
+        for tid in referenced_task_ids:
+            t = task_by_id.get(tid)
+            if not t or t.get("status") in ("completed", "cancelled") or (
+                t.get("assigned_to") and t.get("assigned_to") != str(current_user.id)
+            ):
+                blocked_task_ids.add(tid)
+
+    results = [
+        {
+            "id": str(doc.get("_id")),
+            "type": doc.get("reminder_type", "reminder"),
+            "title": doc.get("title", "Reminder"),
+            "message": doc.get("description", ""),
+            "task_id": doc.get("related_task_id"),
+        }
+        for doc in due_docs
+        if not doc.get("related_task_id") or doc.get("related_task_id") not in blocked_task_ids
+    ]
+
+    results.extend([
+        {
+            "id": doc.get("id"),
+            "type": doc.get("type") or "task_popup",
+            "title": doc.get("title", "Reminder"),
+            "message": doc.get("message", ""),
+            "task_id": doc.get("task_id"),
+        }
+        for doc in popup_docs
+        if not doc.get("task_id") or doc.get("task_id") not in blocked_task_ids
+    ])
 
     return results
 
