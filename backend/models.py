@@ -1210,8 +1210,9 @@ class ClientBase(BaseModel):
     gst_state: Optional[str] = None
     gst_pin: Optional[str] = None
     # ── MCA / ROC fields (fetched from MCA portal API or parsed from MCA PDF) ──
-    cin: Optional[str] = None           # Corporate Identity Number (Pvt/Public Ltd)
+    cin: Optional[str] = None           # Corporate Identity Number (Pvt/Public Ltd/Section 8)
     llpin: Optional[str] = None         # LLP Identification Number
+    proprietor_name: Optional[str] = None  # Proprietor's full name (Proprietor client type)
     mca_fetch_date: Optional[str] = None  # ISO date when MCA data was last fetched
     # ── ITR Client fields ──────────────────────────────────────────────────────
     is_itr_client: Optional[bool] = False   # True when this client is an ITR-only client
@@ -1228,7 +1229,7 @@ class ClientBase(BaseModel):
                 "gstin", "pan", "gst_treatment", "place_of_supply",
                 "tally_ledger_name", "tally_group", "website", "msme_number",
                 "gst_address", "gst_city", "gst_state", "gst_pin",
-                "cin", "llpin", "mca_fetch_date",
+                "cin", "llpin", "proprietor_name", "mca_fetch_date",
             ]
             for field in nullable_fields:
                 if field in data and data[field] == "":
