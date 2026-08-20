@@ -1227,7 +1227,7 @@ function UploadTab({ company, isDark, input, text, muted, onApplied }) {
           <p className={`text-xs font-semibold ${muted} mb-2`}>Extracted fields</p>
           {results.length > 0 && <p className={`text-[11px] ${muted} mb-2`}>{results.map((r) => `${r.filename} (${r.source_type})`).join(' · ')}</p>}
           <div className="grid sm:grid-cols-2 gap-2 text-xs">
-            {Object.entries(extracted).filter(([k, v]) => !k.startsWith('_') && !Array.isArray(v)).map(([k, v]) => (
+            {Object.entries(extracted).filter(([k, v]) => !k.startsWith('_') && !Array.isArray(v) && !['financial_data', 'auditor'].includes(k)).map(([k, v]) => (
               <div key={k} className="flex justify-between gap-2">
                 <span className={muted}>{k.replace(/_/g, ' ')}</span>
                 <span className={text}>{String(v)}</span>
@@ -1245,7 +1245,24 @@ function UploadTab({ company, isDark, input, text, muted, onApplied }) {
                 <span className={`${text} block`}>{extracted.shareholders.map((p) => `${p.name} — ${p.shares_held || 0} shares`).join(', ')}</span>
               </div>
             )}
-            {!Object.keys(extracted).filter((k) => !k.startsWith('_') && !['directors', 'shareholders'].includes(k)).length && !extracted.directors && !extracted.shareholders && (
+            {extracted.financial_data && (
+              <div className="sm:col-span-2">
+                <span className={muted}>financial data (from AOC-4)</span>
+                <span className={`${text} block`}>
+                  {Object.entries(extracted.financial_data).map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`).join(' · ')}
+                </span>
+              </div>
+            )}
+            {extracted.auditor && (
+              <div className="sm:col-span-2">
+                <span className={muted}>statutory auditor (from AOC-4)</span>
+                <span className={`${text} block`}>
+                  {Object.entries(extracted.auditor).map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`).join(' · ')}
+                </span>
+              </div>
+            )}
+            {!Object.keys(extracted).filter((k) => !k.startsWith('_') && !['directors', 'shareholders', 'financial_data', 'auditor'].includes(k)).length
+              && !extracted.directors && !extracted.shareholders && !extracted.financial_data && !extracted.auditor && (
               <p className={muted}>No fields could be confidently extracted from this file.</p>
             )}
           </div>
