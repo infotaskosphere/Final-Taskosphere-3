@@ -3956,6 +3956,15 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                     </div>
                   </div>
                 )}
+                {selectedClient.proprietor_name && (
+                  <div className={`rounded-2xl p-4 border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Proprietor Name</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className={`text-xs font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{selectedClient.proprietor_name}</p>
+                      <button onClick={() => copyToClipboard(selectedClient.proprietor_name, 'Proprietor Name')} className="text-slate-300 hover:text-slate-600 flex-shrink-0"><Copy className="h-3 w-3" /></button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Contact info */}
@@ -5404,6 +5413,7 @@ export default function Clients() {
         // MCA / ROC
         cin:             formData.cin?.trim().toUpperCase()   || null,
         llpin:           formData.llpin?.trim().toUpperCase() || null,
+        proprietor_name: formData.proprietor_name?.trim()     || null,
         mca_fetch_date:  formData.mca_fetch_date              || null,
       };
       if (!editingClient) {
@@ -5519,7 +5529,7 @@ export default function Clients() {
 
   const resetForm = useCallback(() => {
     setAddressTab('primary');
-    setFormData({ company_name: '', client_type: 'proprietor', client_type_other: '', contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }], email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [], dsc_details: [], assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '', auditor: '', gstin: '', pan: '', gst_treatment: 'regular', place_of_supply: '', default_payment_terms: 'Due on receipt', credit_limit: '', opening_balance: '', opening_balance_type: 'Dr', tally_ledger_name: '', tally_group: 'Sundry Debtors', website: '', msme_number: '', gst_address: '', gst_city: '', gst_state: '', gst_pin: '', cin: '', llpin: '', mca_fetch_date: '' });
+    setFormData({ company_name: '', client_type: 'proprietor', client_type_other: '', contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }], email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [], dsc_details: [], assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '', auditor: '', gstin: '', pan: '', gst_treatment: 'regular', place_of_supply: '', default_payment_terms: 'Due on receipt', credit_limit: '', opening_balance: '', opening_balance_type: 'Dr', tally_ledger_name: '', tally_group: 'Sundry Debtors', website: '', msme_number: '', gst_address: '', gst_city: '', gst_state: '', gst_pin: '', cin: '', llpin: '', proprietor_name: '', mca_fetch_date: '' });
     setOtherService(''); setEditingClient(null); setFormErrors({}); setContactErrors([]); setReferrerInput(''); setReferrerSelectValue(''); setAuditorInput(''); setAuditorSelectValue('');
     setSmartImportFiles({ gst: null, udyam: null, mca: null });
     setSmartImportError('');
@@ -6511,6 +6521,26 @@ export default function Clients() {
                         </Select>
                         {formData.client_type === 'other' && <Input className={`mt-2 h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} placeholder="Specify client type…" value={formData.client_type_other} onChange={e => setFormData(p => ({ ...p, client_type_other: e.target.value }))} autoFocus />}
                       </div>
+                      {/* ── Client-type-specific identity field ─────────────────────────
+                          Pvt Ltd / Public Ltd / Section 8 → CIN, LLP → LLPIN, Proprietor → Proprietor Name */}
+                      {['pvt_ltd', 'public_ltd', 'section_8'].includes(formData.client_type) && (
+                        <div>
+                          <label className={labelCls}>CIN <span className="text-slate-400 font-normal">(Corporate Identity Number)</span></label>
+                          <Input className={fieldCls(false)} placeholder="21-character CIN" value={formData.cin || ''} onChange={e => setFormData(p => ({ ...p, cin: e.target.value.toUpperCase() }))} />
+                        </div>
+                      )}
+                      {formData.client_type === 'llp' && (
+                        <div>
+                          <label className={labelCls}>LLPIN <span className="text-slate-400 font-normal">(LLP Identification Number)</span></label>
+                          <Input className={fieldCls(false)} placeholder="e.g. AAA-1234" value={formData.llpin || ''} onChange={e => setFormData(p => ({ ...p, llpin: e.target.value.toUpperCase() }))} />
+                        </div>
+                      )}
+                      {formData.client_type === 'proprietor' && (
+                        <div>
+                          <label className={labelCls}>Proprietor Name</label>
+                          <Input className={fieldCls(false)} placeholder="Full name of the proprietor" value={formData.proprietor_name || ''} onChange={e => setFormData(p => ({ ...p, proprietor_name: e.target.value }))} />
+                        </div>
+                      )}
                       <div>
                         <label className={labelCls}>Email Address</label>
                         <Input data-field-error={formErrors.email ? true : undefined} className={fieldCls(formErrors.email)} type="email" value={formData.email} onChange={e => { setFormData(p => ({ ...p, email: e.target.value })); if (formErrors.email) setFormErrors(prev => ({ ...prev, email: undefined })); }} />
