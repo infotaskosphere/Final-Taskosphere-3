@@ -27,6 +27,7 @@ from datetime import datetime, timezone, date, timedelta
 from fastapi import APIRouter, Request
 from backend.dependencies import db
 from backend.notifications import create_notification
+from backend.lead_ai import process_lead_message
 
 # ── Invoice helpers (shared with web app — no duplication) ────────────────────
 from backend.invoicing import (
@@ -889,6 +890,130 @@ async def telegram_webhook(request: Request):  # noqa: C901  (complex but intent
                     return {"status": "not_found"}
             else:
                 return await _cmd_invlist(chat_id, action="email")
+
+        # ═══════════════════════════════════════════════════════════
+        # AI NATURAL-LANGUAGE LEAD CAPTURE (ADDITIVE)
+        # Existing Telegram Q&A/commands/conversation flows remain unchanged.
+        # Only messages that are not an active conversation/known command
+        # reach this detector.
+        # ═══════════════════════════════════════════════════════════
+        try:
+            lead_result = await process_lead_message(
+                text,
+                source="telegram",
+                source_chat_id=str(chat_id),
+                source_sender_id=str(message.get("from", {}).get("id", "")),
+                source_sender_name=(
+                    message.get("from", {}).get("first_name", "")
+                    + (
+                        " " + message.get("from", {}).get("last_name", "")
+                        if message.get("from", {}).get("last_name")
+                        else ""
+                    )
+                ).strip() or None,
+            )
+
+            if lead_result and lead_result.get("is_lead"):
+                user = await db.users.find_one({"telegram_id": chat_id})
+
+                if not (
+                    user
+                    and (
+                        user.get("role") == "admin"
+                        or user.get("permissions", {}).get("can_view_all_leads")
+                    )
+                ):
+                    await send_message(chat_id, "🚫 You do not have permission to add leads.")
+                    return {"status": "lead_unauthorized"}
+
+                lead = lead_result.get("lead", lead_result)
+                lead_id = str(uuid.uuid4())
+                now = datetime.now(timezone.utc)
+
+                contact_name = lead.get("contact_name") or lead.get("lead_from")
+                company_name = lead.get("company_name")
+                phone = lead.get("phone") or lead.get("mobile")
+                email = lead.get("email")
+
+                services = lead.get("services") or lead.get("requirements") or []
+                if isinstance(services, str):
+                    services = [s.strip() for s in services.split(",") if s.strip()]
+
+                duplicate = None
+                if phone:
+                    duplicate = await db.leads.find_one({"phone": phone}, {"_id": 0})
+                if not duplicate and contact_name:
+                    duplicate_query = {
+                        "contact_name": contact_name,
+                        "status": {"$ne": "closed"},
+                    }
+                    if company_name:
+                        duplicate_query["company_name"] = company_name
+                    duplicate = await db.leads.find_one(duplicate_query, {"_id": 0})
+
+                if duplicate:
+                    await send_message(
+                        chat_id,
+                        f"ℹ️ Lead already exists for *{contact_name or company_name or 'this contact'}*."
+                    )
+                    return {"status": "lead_duplicate", "lead_id": duplicate.get("id")}
+
+                new_lead = {
+                    "id": lead_id,
+                    "company_name": company_name,
+                    "contact_name": contact_name,
+                    "email": email,
+                    "phone": phone,
+                    "services": services,
+                    "quotation_amount": lead.get("quotation_amount"),
+                    "status": "new",
+                    "source": "telegram",
+                    "next_follow_up": lead.get("next_follow_up"),
+                    "notes": lead.get("notes"),
+                    "assigned_to": None,
+                    "created_by": user["id"] if user else "telegram_bot",
+                    "created_at": now,
+                    "updated_at": now,
+                    "trademark_name": lead.get("trademark_name"),
+                    "company_name_requested": lead.get("company_name_requested"),
+                    "whatsapp_group_jid": None,
+                    "whatsapp_group_name": None,
+                    "whatsapp_message_id": None,
+                    "whatsapp_sender_phone": None,
+                    "whatsapp_sender_name": None,
+                    "whatsapp_original_message": None,
+                    "telegram_chat_id": str(chat_id),
+                    "telegram_sender_id": str(message.get("from", {}).get("id", "")),
+                    "telegram_sender_name": (
+                        message.get("from", {}).get("first_name", "")
+                        + (
+                            " " + message.get("from", {}).get("last_name", "")
+                            if message.get("from", {}).get("last_name")
+                            else ""
+                        )
+                    ).strip() or None,
+                    "telegram_original_message": text,
+                    "ai_captured": True,
+                    "ai_confidence": lead_result.get("confidence"),
+                }
+
+                await db.leads.insert_one(new_lead)
+
+                await send_message(
+                    chat_id,
+                    "✅ *Lead Added Successfully!*\n\n"
+                    f"👤 *Contact:* {contact_name or '—'}\n"
+                    f"🏢 *Company:* {company_name or '—'}\n"
+                    f"📂 *Requirement:* {', '.join(services) if services else '—'}\n"
+                    f"📞 *Mobile:* {phone or '—'}\n"
+                    f"🏷 *Trademark:* {lead.get('trademark_name') or '—'}\n\n"
+                    "The lead has been added to Taskosphere Lead Management."
+                )
+                return {"status": "lead_created", "lead_id": lead_id}
+
+        except Exception as lead_ai_error:
+            # Lead AI must never break the existing Telegram bot.
+            print(f"[Telegram Lead AI] Error: {lead_ai_error}")
 
         # ── Load existing conversation ────────────────────────────
         convo = await db.telegram_conversations.find_one({"telegram_id": chat_id})
