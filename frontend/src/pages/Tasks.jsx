@@ -884,7 +884,7 @@ const BoardCard = memo(function BoardCard({
 export default function Tasks() {
 
   // ── Auth from AuthContext (single source of truth) ───────────────────
-  const { user: authUser, hasPermission } = useAuth();
+  const { user: authUser, hasPermission, canAccessUser } = useAuth();
   const user = authUser || { id: '', full_name: 'User', role: 'staff', permissions: { view_other_tasks: [], can_view_all_tasks: false } };
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -901,11 +901,21 @@ export default function Tasks() {
   const isAdmin = user?.role === 'admin';
   const isDark  = useDark();
 
+  // GLITCH FIX: this used to be the only ownership check, but it missed the
+  // cross-visibility case — a user granted cross-visibility to another user
+  // (view_other_tasks) can now also edit that user's tasks per the backend
+  // fix, so the row-level Edit button must show for those tasks too.
   const canModifyTask = React.useCallback((task) => {
     if (isAdmin) return true;
-    return task.assigned_to === user?.id || task.sub_assignees?.includes(user?.id) || task.created_by === user?.id;
-  }, [isAdmin, user]);
-  const canAssignTasks = hasPermission('can_assign_tasks');
+    if (task.assigned_to === user?.id || task.sub_assignees?.includes(user?.id) || task.created_by === user?.id) {
+      return true;
+    }
+    return canAccessUser('view_other_tasks', task.assigned_to) || canAccessUser('view_other_tasks', task.created_by);
+  }, [isAdmin, user, canAccessUser]);
+  // GLITCH FIX: cross-visibility to at least one user should also unlock the
+  // Assignee/Co-assignee picker, not just the admin-granted can_assign_tasks flag.
+  const crossVisibleTaskUsers = (user?.permissions?.view_other_tasks) || [];
+  const canAssignTasks = hasPermission('can_assign_tasks') || crossVisibleTaskUsers.length > 0;
   const canEditTasks   = hasPermission('can_edit_tasks');
   const canDeleteTasks = isAdmin || hasPermission('can_delete_tasks');
 
@@ -2255,7 +2265,10 @@ export default function Tasks() {
                   gating the whole <Dialog> made it unmount + remount (form flashed closed
                   then re-opened) when auth permissions resolved after navigation. */}
                 <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
-                  {canEditTasks && (
+                  {/* GLITCH FIX: creating your own task must always be available —
+                      it must not be hidden behind the universal can_edit_tasks flag,
+                      which an admin may have turned off for this user without
+                      intending to block them from their own tasks. */}
                   <DialogTrigger asChild>
                     <Button size="sm" onClick={() => { setEditingTask(null); setFormData({ ...EMPTY_FORM }); }}
                       className="h-8 px-4 text-xs rounded-xl font-semibold gap-1.5"
@@ -2263,7 +2276,6 @@ export default function Tasks() {
                       <Plus className="h-3.5 w-3.5" /> New Task
                     </Button>
                   </DialogTrigger>
-                  )}
 
                   {/* Dialog form — premium redesign */}
                   <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden p-0 gap-0 flex flex-col rounded-2xl shadow-2xl">
